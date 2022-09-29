@@ -14,7 +14,7 @@ The raw data which we receive from the API *[(see FAQ)](#question-faq)* contains
 When you run the script, the following steps are performed automatically:
 1. Scraping data from API
 2. Find biggest and lowest latitude and longitude coordinate value
-3. Make the length of each coordinate the same and remove the coordinate seperation dot
+3. Make the length of each coordinate the same and remove the coordinate separator dot
 4. Normalize data to start from 0 by subtracting the beforehand determined lowest value from each coordinate
 5. Parsing data into uniform structure
 6. Iterate through each element and set the corresponding ID *[(see FAQ)](#question-faq)* at coordinate in array
