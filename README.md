@@ -90,6 +90,7 @@ ID | Name | Note |
 - [ ] Implement elevation
 - [ ] Optimize region file size
 - [ ] Street markings 
+- [ ] Automated Tests
 
 ## :copyright: License
 MIT License[^3]
