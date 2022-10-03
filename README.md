@@ -38,9 +38,10 @@ Notes:
 - Python 3
 - At least 8 Gigabyte RAM memory
 
-```pip install -r requirements.txt```<br>
-or<br>
-```pip install anvil-parser opencv-python requests numpy matplotlib python-polylabel argparse```
+```pip install -r requirements.txt```
+
+- To conform with style guide please format any changes
+```black .``` 
 
 ## :question: FAQ
 - *Why do some cities take so long to generate?*<br>
@@ -90,6 +91,7 @@ ID | Name | Note |
 - [ ] Implement elevation
 - [ ] Optimize region file size
 - [ ] Street markings 
+- [ ] Automated Tests
 
 ## :copyright: License
 MIT License[^3]
