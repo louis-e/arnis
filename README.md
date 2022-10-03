@@ -84,15 +84,17 @@ ID | Name | Note |
 70-79 | House interior | The last digit refers to the building height |
 
 ## :memo: ToDo
-- [ ] Implement multithreading in floodfill algorithm in order to boost performance
-- [ ] Add code comments
 - [ ] Add Dockerfile
+- [ ] Use f-Strings in print statements
+- [ ] Implement multiprocessing in floodfill algorithm in order to boost CPU bound calculation performance
+- [ ] Add code comments
 - [ ] Implement elevation
 - [ ] Improve RAM usage
 - [ ] Add interior to buildings
 - [ ] Optimize region file size
 - [ ] Street markings
 - [x] Automated Tests
+- [x] PEP8
 
 ## :copyright: License
 MIT License[^3]
