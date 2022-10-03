@@ -126,7 +126,7 @@ def getData(city, state, country):
         area[name=""" + '"' + city.replace(" ", "-") + '"' + """]->.city;
         area[name=""" + '"' + state.replace(" ", "-") + '"' + """]->.state;
         area[name=""" + '"' + country.replace(" ", "-") + '"' + """]->.country;
-        way(area.country)(area.state)(area.city)[!power][!place];
+        way(area.country)(area.state)(area.city)[!power][!place][!ferry];
         (._;>;);
         out;
     """
@@ -501,7 +501,7 @@ def processData(data):
                             if (wallHeight > 3): wallHeight = 2
 
                             for i in bresenham(cordX, cordY, previousElement[0], previousElement[1]):
-                                if (str(img[y][x][0])[:1] != 5 and str(img[y][x][0])[:1] != 6 and str(img[y][x][0])[:1] != 7): img[i[1]][i[0]] = int("2" + str((wallHeight + 1)))
+                                if (str(img[i[1]][i[0]][0])[:1] != 5 and str(img[i[1]][i[0]][0])[:1] != 6 and str(img[i[1]][i[0]][0])[:1] != 7): img[i[1]][i[0]] = int("2" + str((wallHeight + 1)))
                         previousElement = (cordX, cordY)
             
             ElementIncr += 1
