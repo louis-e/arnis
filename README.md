@@ -86,9 +86,10 @@ ID | Name | Note |
 ## :memo: ToDo
 - [ ] Implement multithreading in floodfill algorithm in order to boost performance
 - [ ] Add code comments
+- [ ] Add Dockerfile
+- [ ] Implement elevation
 - [ ] Improve RAM usage
 - [ ] Add interior to buildings
-- [ ] Implement elevation
 - [ ] Optimize region file size
 - [ ] Street markings
 - [x] Automated Tests
