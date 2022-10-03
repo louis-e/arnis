@@ -38,9 +38,7 @@ Notes:
 - Python 3
 - At least 8 Gigabyte RAM memory
 
-```pip install -r requirements.txt```<br>
-or<br>
-```pip install anvil-parser opencv-python requests numpy matplotlib python-polylabel argparse```
+```pip install -r requirements.txt```
 
 ## :question: FAQ
 - *Why do some cities take so long to generate?*<br>
