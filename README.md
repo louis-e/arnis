@@ -1,4 +1,4 @@
-# Arnis
+# Arnis [![Testing](https://github.com/louis-e/arnis/actions/workflows/python-app.yml/badge.svg)](https://github.com/louis-e/arnis/actions/workflows/python-app.yml)
 *Arnis - Generate cities from real life in Minecraft using Python*<br>
 Using this Python script, you can generate any city from the real world in Minecraft!<br><br>
 YouTube Devlog: https://www.youtube.com/watch?v=5tOvtZG0_6k
