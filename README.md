@@ -84,6 +84,7 @@ ID | Name | Note |
 
 ## :memo: ToDo
 - [ ] Implement multithreading in floodfill algorithm in order to boost performance
+- [ ] Add code comments
 - [ ] Improve RAM usage
 - [ ] Add interior to buildings
 - [ ] Implement elevation
