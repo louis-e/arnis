@@ -44,8 +44,7 @@ def test_bresenham(x0, y0, x1, y1, result):
     assert tuple(bresenham(x1, y1, x0, y0)) == tuple(reversed(result))
 
 
-def test_min_slope_two_way():
-    """Bresenham Line Algorithm Credit: encukou/bresenham@Github"""
+def test_min_slope_uphill():
     assert tuple(bresenham(0, 0, 10, 1)) == (
         (0, 0),
         (1, 0),
@@ -59,6 +58,9 @@ def test_min_slope_two_way():
         (9, 1),
         (10, 1),
     )
+
+
+def test_min_slope_downhill():
     assert tuple(bresenham(10, 1, 0, 0)) == (
         (10, 1),
         (9, 1),
