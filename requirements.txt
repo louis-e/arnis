@@ -23,6 +23,7 @@ platformdirs==2.5.2
 pycodestyle==2.9.1
 pyflakes==2.5.0
 pyparsing==3.0.9
+pytest==7.1.3
 python-dateutil==2.8.2
 python-polylabel==0.6
 requests==2.27.1

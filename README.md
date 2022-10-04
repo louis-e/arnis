@@ -43,6 +43,9 @@ Notes:
 - To conform with style guide please format any changes
 ```black .``` 
 
+- Functionality should be covered by automated tests. 
+```python -m pytest```
+
 ## :question: FAQ
 - *Why do some cities take so long to generate?*<br>
 There is a known problem with the floodfill algorithm, where big element outlines (e.g. farmlands,...) slow down the entire script for several seconds. When the geo data contains hundreds or even thousands of those big elements, it results in a long delay which can take up to multiple hours. Start with some small cities or towns before you generate bigger cities with the script in order to get a good feeling for how long it takes. I'm already thinking about a way to rewrite the floodfill algorithm as multithreaded to split up the task on multiple CPU cores which should reduce the delay drastically.
