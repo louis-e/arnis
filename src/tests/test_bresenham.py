@@ -39,12 +39,12 @@ from src.bresenham import bresenham
     ),
 )
 def test_bresenham(x1, y1, x2, y2, result):
-    assert tuple(bresenham(x1, y1, x2, y2)) == result
-    assert tuple(bresenham(x2, y2, x1, y1)) == tuple(reversed(result))
+    assert tuple(bresenham(x1=x1, y1=y1, x2=x2, y2=y2)) == result
+    assert tuple(bresenham(x1=x2, y1=y2, x2=x1, y2=y1)) == tuple(reversed(result))
 
 
 def test_min_slope_uphill():
-    assert tuple(bresenham(0, 0, 10, 1)) == (
+    assert tuple(bresenham(x1=0, y1=0, x2=10, y2=1)) == (
         (0, 0),
         (1, 0),
         (2, 0),
@@ -60,7 +60,7 @@ def test_min_slope_uphill():
 
 
 def test_min_slope_downhill():
-    assert tuple(bresenham(10, 1, 0, 0)) == (
+    assert tuple(bresenham(x1=10, y1=1, x2=0, y2=0)) == (
         (10, 1),
         (9, 1),
         (8, 1),
