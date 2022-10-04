@@ -4,7 +4,7 @@ from src.bresenham import bresenham
 
 
 @pytest.mark.parametrize(
-    ("x0", "y0", "x1", "y1", "result"),
+    ("x1", "y1", "x2", "y2", "result"),
     (
         (0, 0, 0, 0, ((0, 0),)),
         (0, 0, 5, 0, ((0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0))),
@@ -38,10 +38,9 @@ from src.bresenham import bresenham
         ),
     ),
 )
-def test_bresenham(x0, y0, x1, y1, result):
-    """Bresenham Line Algorithm Credit: encukou/bresenham@Github"""
-    assert tuple(bresenham(x0, y0, x1, y1)) == result
-    assert tuple(bresenham(x1, y1, x0, y0)) == tuple(reversed(result))
+def test_bresenham(x1, y1, x2, y2, result):
+    assert tuple(bresenham(x1, y1, x2, y2)) == result
+    assert tuple(bresenham(x2, y2, x1, y1)) == tuple(reversed(result))
 
 
 def test_min_slope_uphill():
