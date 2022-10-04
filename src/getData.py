@@ -29,7 +29,7 @@ def getData(city, state, country, debug):
         + """]->.state;
         area[name="""
         + '"'
-        + country.replace(" ", "-")
+        + country
         + '"'
         + """]->.country;
         way(area.country)(area.state)(area.city)[!power][!place][!ferry];
