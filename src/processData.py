@@ -63,7 +63,6 @@ def processData(data, args):
     )
     img.fill(0)
     imgLanduse = img.copy()
-    origImgSize = img.shape[0] * img.shape[1]
 
     orig_posDeterminationCoordX = 0
     orig_posDeterminationCoordY = 0
@@ -100,12 +99,12 @@ def processData(data, args):
         print(f"Lowest element X: {lowestElementX}")
         print(f"Lowest element Y: {lowestElementY}")
         print(
-            f"Original position determination reference coordinates: "
-            + "{orig_posDeterminationCoordX}, {orig_posDeterminationCoordY}"
+            "Original position determination reference coordinates: "
+            + f"{orig_posDeterminationCoordX}, {orig_posDeterminationCoordY}"
         )
         print(
-            f"Map position determination reference coordinates: "
-            + "{map_posDeterminationCoordX}, {map_posDeterminationCoordY}"
+            "Map position determination reference coordinates: "
+            + f"{map_posDeterminationCoordX}, {map_posDeterminationCoordY}"
         )
         with open("arnis-debug-processed_data.json", "w", encoding="utf-8") as f:
             f.write(str(data))
