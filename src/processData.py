@@ -95,21 +95,15 @@ def processData(data, args):
         del data["elements"][i]
 
     if args.debug:
-        print("Biggest element X: " + str(greatestElementX))
-        print("Biggest element Y: " + str(greatestElementY))
-        print("Lowest element X: " + str(lowestElementX))
-        print("Lowest element Y: " + str(lowestElementY))
+        print(f"Biggest element X: {greatestElementX}")
+        print(f"Biggest element Y: {greatestElementY}")
+        print(f"Lowest element X: {lowestElementX}")
+        print(f"Lowest element Y: {lowestElementY}")
         print(
-            "Original position determination reference coordinates: "
-            + str(orig_posDeterminationCoordX)
-            + ", "
-            + str(orig_posDeterminationCoordY)
+            f"Original position determination reference coordinates: {orig_posDeterminationCoordX}, {orig_posDeterminationCoordY}"
         )
         print(
-            "Map position determination reference coordinates: "
-            + str(map_posDeterminationCoordX)
-            + ", "
-            + str(map_posDeterminationCoordY)
+            f"Map position determination reference coordinates: {map_posDeterminationCoordX}, {map_posDeterminationCoordY}"
         )
         with open("arnis-debug-processed_data.json", "w", encoding="utf-8") as f:
             f.write(str(data))
@@ -126,15 +120,7 @@ def processData(data, args):
             progressPercentage % 10 == 0
             and progressPercentage != lastProgressPercentage
         ):
-            print(
-                "Element "
-                + str(ElementIncr + 1)
-                + "/"
-                + str(ElementsLen)
-                + " ("
-                + str(progressPercentage)
-                + "%)"
-            )
+            print(f"Element {ElementIncr + 1}/{ElementsLen} ({progressPercentage}%)")
             lastProgressPercentage = progressPercentage
 
         if element["type"] == "way" and "tags" in element:
@@ -605,11 +591,7 @@ def processData(data, args):
                 img[x][y] = imgLanduse[x][y]
 
     print(
-        "Processing finished in "
-        + str(round(time() - processingStartTime, 2))
-        + " seconds ("
-        + str(round((time() - processingStartTime) / 60, 2))
-        + " minutes)"
+        f"Processing finished in {(time() - processingStartTime):.2f} seconds ({((time() - processingStartTime) / 60):.2f} minutes)"
     )
     if args.debug:
         imwrite("arnis-debug-map.png", img)

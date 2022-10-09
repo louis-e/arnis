@@ -34,6 +34,14 @@ Notes:
 - The city, state and country name should be in the local language of the respective country. Otherwise the city might not be found.
 - You can optionally use the parameter ```--debug``` in order to see the processed values as a text output during runtime.
 
+### Docker image
+If you want to run this project in a container, you can use the Dockerfile provided in this repository. It will automatically scrape the latest source code. After running the container, you have to manually copy the generated region files from the container to the host machine in order to use them. When running the Docker image, set the ```--path``` parameter to ```/home```. An image on Dockerhub will follow soon.
+```
+docker build -t arnis .
+docker run arnis --city "Arnis" --state "Schleswig Holstein" --country "Deutschland" --path "/home"
+docker cp CONTAINER_ID:/home/region DESTINATION_PATH
+```
+
 ## :cd: Requirements
 - Python 3
 - At least 8 Gigabyte RAM memory
@@ -84,17 +92,18 @@ ID | Name | Note |
 70-79 | House interior | The last digit refers to the building height |
 
 ## :memo: ToDo
-- [ ] Add Dockerfile
-- [ ] Use f-Strings in print statements
 - [ ] Implement multiprocessing in floodfill algorithm in order to boost CPU bound calculation performance
 - [ ] Add code comments
 - [ ] Implement elevation
+- [ ] Find alternative for CV2 package
 - [ ] Improve RAM usage
 - [ ] Add interior to buildings
 - [ ] Optimize region file size
 - [ ] Street markings
 - [x] Automated Tests
 - [x] PEP8
+- [x] Use f-Strings in print statements
+- [x] Add Dockerfile
 
 ## :copyright: License
 MIT License[^3]
