@@ -159,11 +159,11 @@ def processData(data, args):
 
                         if (
                             "building:levels" in element["tags"]
-                            and int(element["tags"]["building:levels"]) <= 8
-                            and int(element["tags"]["building:levels"]) >= 1
+                            and int(float(element["tags"]["building:levels"])) <= 8
+                            and int(float(element["tags"]["building:levels"])) >= 1
                         ):
                             buildingHeight = str(
-                                int(element["tags"]["building:levels"]) - 1
+                                int(float(element["tags"]["building:levels"])) - 1
                             )
 
                         for i in bresenham(
