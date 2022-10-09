@@ -309,7 +309,9 @@ def run():
                                                 if j >= 78:
                                                     setBlock(white_concrete, x, 29, z)
                                                     if j >= 78:
-                                                        setBlock(white_concrete, x, 32, z)
+                                                        setBlock(
+                                                            white_concrete, x, 32, z
+                                                        )
 
                 setBlock(glowstone, x, 1, z)
 
