@@ -100,12 +100,12 @@ def processData(data, args):
         print(f"Lowest element X: {lowestElementX}")
         print(f"Lowest element Y: {lowestElementY}")
         print(
-            f"Original position determination reference coordinates: " +
-            "{orig_posDeterminationCoordX}, {orig_posDeterminationCoordY}"
+            f"Original position determination reference coordinates: "
+            + "{orig_posDeterminationCoordX}, {orig_posDeterminationCoordY}"
         )
         print(
             f"Map position determination reference coordinates: " +
-            "{map_posDeterminationCoordX}, {map_posDeterminationCoordY}"
+            + "{map_posDeterminationCoordX}, {map_posDeterminationCoordY}"
         )
         with open("arnis-debug-processed_data.json", "w", encoding="utf-8") as f:
             f.write(str(data))
@@ -583,17 +583,14 @@ def processData(data, args):
     imgLanduse = imgLanduse[
         minBuilding[1] : maxBuilding[1], minBuilding[0] : maxBuilding[0]
     ]
-    print(
-        str(100 - round(100 * (img.shape[0] * img.shape[1]) / origImgSize))
-        + "% size reduction"
-    )
     for x in range(0, img.shape[0]):
         for y in range(0, img.shape[1]):
             if imgLanduse[x][y] != 0 and img[x][y] == 0:
                 img[x][y] = imgLanduse[x][y]
 
     print(
-        f"Processing finished in {(time() - processingStartTime):.2f} seconds ({((time() - processingStartTime) / 60):.2f} minutes)"
+        f"Processing finished in {(time() - processingStartTime):.2f} "
+        + "seconds ({((time() - processingStartTime) / 60):.2f} minutes)"
     )
     if args.debug:
         imwrite("arnis-debug-map.png", img)

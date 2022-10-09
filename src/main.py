@@ -322,6 +322,7 @@ def run():
     print("Saving minecraft world...")
     saveRegion()
     print(
-        f"Done! Finished in {(time.time() - processStartTime):.2f} seconds ({((time.time() - processStartTime) / 60):.2f} minutes)"
+        f"Done! Finished in {(time.time() - processStartTime):.2f} "
+        + "seconds ({((time.time() - processStartTime) / 60):.2f} minutes)"
     )
     os._exit(0)
