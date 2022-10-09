@@ -19,12 +19,12 @@ def getData(city, state, country, debug):
         [out:json];
         area[name="""
         + '"'
-        + city.replace(" ", "-")
+        + city
         + '"'
         + """]->.city;
         area[name="""
         + '"'
-        + state.replace(" ", "-")
+        + state
         + '"'
         + """]->.state;
         area[name="""

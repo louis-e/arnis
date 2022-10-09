@@ -32,6 +32,7 @@ Optional: ```--debug```
 Notes:
 - Manually generate a Minecraft world, preferably a flat world, before running the script.
 - The city, state and country name should be in the local language of the respective country. Otherwise the city might not be found.
+- In some cases you need a dash instead of a space in the parameters. I will look into this problem and try to find an uniform fix for it.
 - You can optionally use the parameter ```--debug``` in order to see the processed values as a text output during runtime.
 
 ### Docker image
