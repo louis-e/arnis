@@ -589,7 +589,7 @@ def processData(data, args):
 
     print(
         f"Processing finished in {(time() - processingStartTime):.2f} "
-        + "seconds ({((time() - processingStartTime) / 60):.2f} minutes)"
+        + f"seconds ({((time() - processingStartTime) / 60):.2f} minutes)"
     )
     if args.debug:
         imwrite("arnis-debug-map.png", img)
