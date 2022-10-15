@@ -26,7 +26,7 @@ When you run the script, the following steps are performed automatically:
 The last step is responsible for generating three dimensional structures like forests, houses or cemetery graves.
 
 ## :keyboard: Usage
-```python3 arnis.py --city "Arnis" --state "Schleswig Holstein" --country "Deutschland" --path "C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
+```python3 arnis.py --city "Arnis" --state "Schleswig-Holstein" --country "Deutschland" --path "C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
 
 Optional: ```--debug```
 Notes:
