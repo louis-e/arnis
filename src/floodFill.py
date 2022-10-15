@@ -4,10 +4,12 @@ import matplotlib.path as mplPath
 from polylabel import polylabel
 
 
-def floodFill(img, px, py, newColor, currentBuilding, elementType="None"):
+def floodFill(
+    img, px, py, newColor, currentBuilding, minMaxDistX, minMaxDistY, elementType="None"
+):
     startTimeFloodfill = time()
     currentBuilding = np.delete(currentBuilding, 0, axis=0)
-    if len(currentBuilding) <= 2:
+    if len(currentBuilding) <= 2 or not (px < minMaxDistY and py < minMaxDistX):
         return img
     if not (mplPath.Path(currentBuilding).contains_point((py, px))):
         centroid = polylabel([currentBuilding.tolist()], with_distance=True)
@@ -95,7 +97,7 @@ def floodFill(img, px, py, newColor, currentBuilding, elementType="None"):
 
             # Timeout (known issue, see Github readme)
             if time() - startTimeFloodfill > 7 or (
-                elementType == "tree_row" and time() - startTimeFloodfill > 0.3
+                elementType == "tree_row" and time() - startTimeFloodfill > 0.2
             ):
                 return img
 

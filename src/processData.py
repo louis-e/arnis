@@ -53,49 +53,87 @@ def processData(data, args):
             element["lon"] -= lowestElementY
             nodesDict[element["id"]] = [element["lat"], element["lon"]]
 
-    img = np.zeros(
-        (
-            round((greatestElementY - lowestElementY) / resDownScaler) + 5,
-            round((greatestElementX - lowestElementX) / resDownScaler) + 5,
-            1,
-        ),
-        np.uint8,
-    )
-    img.fill(0)
-    imgLanduse = img.copy()
-
     orig_posDeterminationCoordX = 0
     orig_posDeterminationCoordY = 0
     map_posDeterminationCoordX = 0
     map_posDeterminationCoordY = 0
+    maxBuilding = (0, 0)
+    minBuilding = (greatestElementX, greatestElementY)
     nodeIndexList = []
     for i, element in enumerate(data["elements"]):
         if element["type"] == "way":
             for j, node in enumerate(element["nodes"]):
                 element["nodes"][j] = nodesDict[node]
 
-            if (
-                "tags" in element
-                and "building" in element["tags"]
-                and orig_posDeterminationCoordX == 0
-            ):
-                orig_posDeterminationCoordX = element["nodes"][0][0]
-                orig_posDeterminationCoordY = element["nodes"][0][1]
-                map_posDeterminationCoordX = round(
-                    element["nodes"][0][0] / resDownScaler
-                )
-                map_posDeterminationCoordY = round(
-                    element["nodes"][0][1] / resDownScaler
-                )
+            if "tags" in element and "building" in element["tags"]:
+                if orig_posDeterminationCoordX == 0:
+                    orig_posDeterminationCoordX = element["nodes"][0][0]
+                    orig_posDeterminationCoordY = element["nodes"][0][1]
+                    map_posDeterminationCoordX = round(
+                        element["nodes"][0][0] / resDownScaler
+                    )
+                    map_posDeterminationCoordY = round(
+                        element["nodes"][0][1] / resDownScaler
+                    )
+
+                for coordinate in element["nodes"]:
+                    cordX = round(coordinate[0] / resDownScaler)
+                    cordY = round(coordinate[1] / resDownScaler)
+
+                    if cordX > maxBuilding[0]:
+                        maxBuilding = (cordX, maxBuilding[1])
+                    elif cordX < minBuilding[0]:
+                        minBuilding = (cordX, minBuilding[1])
+
+                    if cordY > maxBuilding[1]:
+                        maxBuilding = (maxBuilding[0], cordY)
+                    elif cordY < minBuilding[1]:
+                        minBuilding = (minBuilding[0], cordY)
+
         elif element["type"] == "node":
             nodeIndexList.append(i)
 
     for i in reversed(nodeIndexList):
         del data["elements"][i]
 
+    minBuilding = (minBuilding[0] - 50, minBuilding[1] - 50)
+    maxBuilding = (maxBuilding[0] + 50, maxBuilding[1] + 50)
+    minMaxDistX = maxBuilding[0] - minBuilding[0]
+    minMaxDistY = maxBuilding[1] - minBuilding[1]
+
+    for i, element in enumerate(data["elements"]):
+        if element["type"] == "way":
+            for j, node in enumerate(element["nodes"]):
+                subtractedMinX = (
+                    round(element["nodes"][j][0] / resDownScaler) - minBuilding[0]
+                )
+                subtractedMinY = (
+                    round(element["nodes"][j][1] / resDownScaler) - minBuilding[1]
+                )
+
+                if subtractedMinX > 0 and subtractedMinX <= minMaxDistX:
+                    element["nodes"][j][0] = subtractedMinX
+                elif subtractedMinX <= 0 and not (
+                    element["nodes"][j][0] > 0 and element["nodes"][j][0] <= minMaxDistX
+                ):
+                    element["nodes"][j][0] = 0
+                if subtractedMinY > 0 and subtractedMinY <= minMaxDistY:
+                    element["nodes"][j][1] = subtractedMinY
+                elif subtractedMinY <= 0 and not (
+                    element["nodes"][j][1] > 0 and element["nodes"][j][1] <= minMaxDistY
+                ):
+                    element["nodes"][j][1] = 0
+
+                if element["nodes"][j][0] >= minMaxDistX:
+                    element["nodes"][j][0] = minMaxDistX - 1
+                if element["nodes"][j][1] >= minMaxDistY:
+                    element["nodes"][j][1] = minMaxDistY - 1
+
     if args.debug:
-        print(f"Biggest element X: {greatestElementX}")
-        print(f"Biggest element Y: {greatestElementY}")
+        print(f"minMaxDistX: {minMaxDistX}")
+        print(f"minMaxDistY: {minMaxDistY}")
+        print(f"Greatest element X: {greatestElementX}")
+        print(f"Greatest element Y: {greatestElementY}")
         print(f"Lowest element X: {lowestElementX}")
         print(f"Lowest element Y: {lowestElementY}")
         print(
@@ -108,10 +146,21 @@ def processData(data, args):
         )
         with open("arnis-debug-processed_data.json", "w", encoding="utf-8") as f:
             f.write(str(data))
+
+    img = np.zeros(
+        (
+            minMaxDistY,
+            minMaxDistX,
+            1,
+        ),
+        np.uint8,
+    )
+
+    img.fill(0)
+    imgLanduse = img.copy()
+
     print("Processing data...")
 
-    maxBuilding = (0, 0)
-    minBuilding = (greatestElementX, greatestElementY)
     ElementIncr = 0
     ElementsLen = len(data["elements"])
     lastProgressPercentage = 0
@@ -130,19 +179,7 @@ def processData(data, args):
                 cornerAddup = (0, 0, 0)
                 currentBuilding = np.array([[0, 0]])
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
                     buildingHeight = 1
-
-                    if cordX > maxBuilding[0]:
-                        maxBuilding = (cordX, maxBuilding[1])
-                    if cordY > maxBuilding[1]:
-                        maxBuilding = (maxBuilding[0], cordY)
-
-                    if cordX < minBuilding[0]:
-                        minBuilding = (cordX, minBuilding[1])
-                    if cordY < minBuilding[1]:
-                        minBuilding = (minBuilding[0], cordY)
 
                     if previousElement != (0, 0):
                         if "height" in element["tags"]:
@@ -159,15 +196,18 @@ def processData(data, args):
 
                         if (
                             "building:levels" in element["tags"]
-                            and int(element["tags"]["building:levels"]) <= 8
-                            and int(element["tags"]["building:levels"]) >= 1
+                            and int(float(element["tags"]["building:levels"])) <= 8
+                            and int(float(element["tags"]["building:levels"])) >= 1
                         ):
                             buildingHeight = str(
-                                int(element["tags"]["building:levels"]) - 1
+                                int(float(element["tags"]["building:levels"])) - 1
                             )
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             if not (
                                 str(img[i[1]][i[0]][0])[:1] == "6"
@@ -176,13 +216,17 @@ def processData(data, args):
                                 img[i[1]][i[0]] = int("6" + str(buildingHeight))
 
                         currentBuilding = np.append(
-                            currentBuilding, [[cordX, cordY]], axis=0
+                            currentBuilding, [[coordinate[0], coordinate[1]]], axis=0
                         )
+
                         if not (
-                            str(img[cordY][cordX][0])[:1] == "5"
-                            and img[cordY][cordX][0] > int("5" + str(buildingHeight))
+                            str(img[coordinate[1]][coordinate[0]][0])[:1] == "5"
+                            and img[coordinate[1]][coordinate[0]][0]
+                            > int("5" + str(buildingHeight))
                         ):
-                            img[cordY][cordX] = int("5" + str(buildingHeight))
+                            img[coordinate[1]][coordinate[0]] = int(
+                                "5" + str(buildingHeight)
+                            )
 
                         if not (
                             str(img[previousElement[1]][previousElement[0]][0])[:1]
@@ -195,11 +239,11 @@ def processData(data, args):
                             )
 
                         cornerAddup = (
-                            cornerAddup[0] + cordX,
-                            cornerAddup[1] + cordY,
+                            cornerAddup[0] + coordinate[0],
+                            cornerAddup[1] + coordinate[1],
                             cornerAddup[2] + 1,
                         )
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
                 if cornerAddup != (0, 0, 0):
                     img = floodFill(
@@ -208,22 +252,14 @@ def processData(data, args):
                         round(cornerAddup[0] / cornerAddup[2]),
                         int("7" + str(buildingHeight)),
                         currentBuilding,
+                        minMaxDistX,
+                        minMaxDistY,
                         elementType="building",
                     )
 
             elif "highway" in element["tags"]:
                 previousElement = (0, 0)
                 for coordinate in element["nodes"]:
-                    cordX = round(
-                        map_posDeterminationCoordX
-                        * coordinate[0]
-                        / orig_posDeterminationCoordX
-                    )
-                    cordY = round(
-                        map_posDeterminationCoordY
-                        * coordinate[1]
-                        / orig_posDeterminationCoordY
-                    )
                     highwayType = 10
                     if (
                         previousElement != (0, 0)
@@ -254,23 +290,28 @@ def processData(data, args):
                             blockRange = 4
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             for x in range(i[0] - blockRange, i[0] + blockRange + 1):
                                 for y in range(
                                     i[1] - blockRange, i[1] + blockRange + 1
                                 ):
-                                    if img[y][x] == 0:
+                                    if (
+                                        x < minMaxDistX
+                                        and y < minMaxDistY
+                                        and img[y][x] == 0
+                                    ):
                                         img[y][x] = highwayType
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
             elif "landuse" in element["tags"]:
                 previousElement = (0, 0)
                 cornerAddup = (0, 0, 0)
                 currentLanduse = np.array([[0, 0]])
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
                     landuseType = 39
                     if (
                         previousElement != (0, 0)
@@ -293,20 +334,23 @@ def processData(data, args):
                             landuseType = 34
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             if imgLanduse[i[1]][i[0]] == 0:
                                 imgLanduse[i[1]][i[0]] = landuseType
 
                         currentLanduse = np.append(
-                            currentLanduse, [[cordX, cordY]], axis=0
+                            currentLanduse, [[coordinate[0], coordinate[1]]], axis=0
                         )
                         cornerAddup = (
-                            cornerAddup[0] + cordX,
-                            cornerAddup[1] + cordY,
+                            cornerAddup[0] + coordinate[0],
+                            cornerAddup[1] + coordinate[1],
                             cornerAddup[2] + 1,
                         )
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
                 if cornerAddup != (0, 0, 0):
                     imgLanduse = floodFill(
@@ -315,6 +359,8 @@ def processData(data, args):
                         round(cornerAddup[0] / cornerAddup[2]),
                         landuseType,
                         currentLanduse,
+                        minMaxDistX,
+                        minMaxDistY,
                     )
 
             elif "natural" in element["tags"]:
@@ -322,8 +368,6 @@ def processData(data, args):
                 cornerAddup = (0, 0, 0)
                 currentNatural = np.array([[0, 0]])
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
                     naturalType = 39
                     if previousElement != (0, 0):
                         if (
@@ -347,20 +391,23 @@ def processData(data, args):
                             naturalType = 38
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             if imgLanduse[i[1]][i[0]] == 0:
                                 imgLanduse[i[1]][i[0]] = naturalType
 
                         currentNatural = np.append(
-                            currentNatural, [[cordX, cordY]], axis=0
+                            currentNatural, [[coordinate[0], coordinate[1]]], axis=0
                         )
                         cornerAddup = (
-                            cornerAddup[0] + cordX,
-                            cornerAddup[1] + cordY,
+                            cornerAddup[0] + coordinate[0],
+                            cornerAddup[1] + coordinate[1],
                             cornerAddup[2] + 1,
                         )
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
                 if cornerAddup != (0, 0, 0):
                     if naturalType != 32:
@@ -370,6 +417,8 @@ def processData(data, args):
                             round(cornerAddup[0] / cornerAddup[2]),
                             naturalType,
                             currentNatural,
+                            minMaxDistX,
+                            minMaxDistY,
                         )
                     else:
                         imgLanduse = floodFill(
@@ -378,6 +427,8 @@ def processData(data, args):
                             round(cornerAddup[0] / cornerAddup[2]),
                             naturalType,
                             currentNatural,
+                            minMaxDistX,
+                            minMaxDistY,
                             elementType="tree_row",
                         )
 
@@ -386,8 +437,6 @@ def processData(data, args):
                 cornerAddup = (0, 0, 0)
                 currentLeisure = np.array([[0, 0]])
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
                     leisureType = 39
                     if (
                         previousElement != (0, 0)
@@ -405,20 +454,23 @@ def processData(data, args):
                             leisureType = 37
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             if imgLanduse[i[1]][i[0]] == 0:
                                 imgLanduse[i[1]][i[0]] = leisureType
 
                         currentLeisure = np.append(
-                            currentLeisure, [[cordX, cordY]], axis=0
+                            currentLeisure, [[coordinate[0], coordinate[1]]], axis=0
                         )
                         cornerAddup = (
-                            cornerAddup[0] + cordX,
-                            cornerAddup[1] + cordY,
+                            cornerAddup[0] + coordinate[0],
+                            cornerAddup[1] + coordinate[1],
                             cornerAddup[2] + 1,
                         )
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
                 if cornerAddup != (0, 0, 0):
                     imgLanduse = floodFill(
@@ -427,14 +479,13 @@ def processData(data, args):
                         round(cornerAddup[0] / cornerAddup[2]),
                         leisureType,
                         currentLeisure,
+                        minMaxDistX,
+                        minMaxDistY,
                     )
 
             elif "waterway" in element["tags"]:
                 previousElement = (0, 0)
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
-
                     if previousElement != (0, 0) and not (
                         "layer" in element["tags"]
                         and (
@@ -451,7 +502,10 @@ def processData(data, args):
                                 waterwayWidth = int(float(element["tags"]["width"]))
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             for x in range(
                                 round(i[0] - waterwayWidth / 2),
@@ -461,9 +515,13 @@ def processData(data, args):
                                     round(i[1] - waterwayWidth / 2),
                                     round(i[1] + waterwayWidth + 1 / 2),
                                 ):
-                                    if img[y][x] != 13:
+                                    if (
+                                        x < minMaxDistX
+                                        and y < minMaxDistY
+                                        and img[y][x] != 13
+                                    ):
                                         img[y][x] = 38
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
             elif "amenity" in element["tags"]:
                 previousElement = (0, 0)
@@ -471,8 +529,6 @@ def processData(data, args):
                 currentAmenity = np.array([[0, 0]])
                 amenityType = 20
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
                     if previousElement != (0, 0) and (
                         element["tags"]["amenity"] == "parking"
                         or element["tags"]["amenity"] == "fountain"
@@ -483,20 +539,23 @@ def processData(data, args):
                             amenityType = 21
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             if imgLanduse[i[1]][i[0]] == 0:
                                 imgLanduse[i[1]][i[0]] = amenityType
 
                         currentAmenity = np.append(
-                            currentAmenity, [[cordX, cordY]], axis=0
+                            currentAmenity, [[coordinate[0], coordinate[1]]], axis=0
                         )
                         cornerAddup = (
-                            cornerAddup[0] + cordX,
-                            cornerAddup[1] + cordY,
+                            cornerAddup[0] + coordinate[0],
+                            cornerAddup[1] + coordinate[1],
                             cornerAddup[2] + 1,
                         )
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
                 if amenityType == 21:
                     amenityType = 37
@@ -507,53 +566,51 @@ def processData(data, args):
                         round(cornerAddup[0] / cornerAddup[2]),
                         amenityType,
                         currentAmenity,
+                        minMaxDistX,
+                        minMaxDistY,
                     )
 
             elif "bridge" in element["tags"]:
                 previousElement = (0, 0)
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
-
                     if previousElement != (0, 0):
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             img[i[1]][i[0]] = 13
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
             elif "railway" in element["tags"]:
                 previousElement = (0, 0)
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
-
                     if (
                         previousElement != (0, 0)
                         and element["tags"]["railway"] != "proposed"
                     ):
                         for i in bresenham(
-                            cordX - 2,
-                            cordY - 2,
+                            coordinate[0] - 2,
+                            coordinate[1] - 2,
                             previousElement[0] - 2,
                             previousElement[1] - 2,
                         ):
-                            img[i[1]][i[0]] = 14
+                            if i[0] < minMaxDistX and i[1] < minMaxDistY:
+                                img[i[1]][i[0]] = 14
                         for i in bresenham(
-                            cordX + 1,
-                            cordY + 1,
+                            coordinate[0] + 1,
+                            coordinate[1] + 1,
                             previousElement[0] + 1,
                             previousElement[1] + 1,
                         ):
-                            img[i[1]][i[0]] = 14
-                    previousElement = (cordX, cordY)
+                            if i[0] < minMaxDistX and i[1] < minMaxDistY:
+                                img[i[1]][i[0]] = 14
+                    previousElement = (coordinate[0], coordinate[1])
 
             elif "barrier" in element["tags"]:
                 previousElement = (0, 0)
                 for coordinate in element["nodes"]:
-                    cordX = round(coordinate[0] / resDownScaler)
-                    cordY = round(coordinate[1] / resDownScaler)
-
                     if previousElement != (0, 0):
                         wallHeight = 1
                         if "height" in element["tags"]:
@@ -562,7 +619,10 @@ def processData(data, args):
                             wallHeight = 2
 
                         for i in bresenham(
-                            cordX, cordY, previousElement[0], previousElement[1]
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             if (
                                 str(img[i[1]][i[0]][0])[:1] != 5
@@ -570,26 +630,19 @@ def processData(data, args):
                                 and str(img[i[1]][i[0]][0])[:1] != 7
                             ):
                                 img[i[1]][i[0]] = int("2" + str((wallHeight + 1)))
-                    previousElement = (cordX, cordY)
+                    previousElement = (coordinate[0], coordinate[1])
 
             ElementIncr += 1
 
-    print("Optimizing data...")
-
-    minBuilding = (minBuilding[0] - 50, minBuilding[1] - 50)
-    maxBuilding = (maxBuilding[0] + 50, maxBuilding[1] + 50)
-    img = img[minBuilding[1] : maxBuilding[1], minBuilding[0] : maxBuilding[0]]
-    imgLanduse = imgLanduse[
-        minBuilding[1] : maxBuilding[1], minBuilding[0] : maxBuilding[0]
-    ]
+    print("Calculating layers...")
     for x in range(0, img.shape[0]):
         for y in range(0, img.shape[1]):
             if imgLanduse[x][y] != 0 and img[x][y] == 0:
                 img[x][y] = imgLanduse[x][y]
 
     print(
-        f"Processing finished in {(time() - processingStartTime):.2f} "
-        + f"seconds ({((time() - processingStartTime) / 60):.2f} minutes)"
+        f"Processing finished in {(time() - processingStartTime):.2f} seconds"
+        + f"({((time() - processingStartTime) / 60):.2f} minutes)"
     )
     if args.debug:
         imwrite("arnis-debug-map.png", img)

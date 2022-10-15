@@ -93,11 +93,11 @@ ID | Name | Note |
 70-79 | House interior | The last digit refers to the building height |
 
 ## :memo: ToDo
+- [ ] Floodfill timeout parameters
 - [ ] Implement multiprocessing in floodfill algorithm in order to boost CPU bound calculation performance
 - [ ] Add code comments
 - [ ] Implement elevation
 - [ ] Find alternative for CV2 package
-- [ ] Improve RAM usage
 - [ ] Add interior to buildings
 - [ ] Optimize region file size
 - [ ] Street markings
@@ -105,6 +105,15 @@ ID | Name | Note |
 - [x] PEP8
 - [x] Use f-Strings in print statements
 - [x] Add Dockerfile
+- [x] Added path check
+- [x] Improve RAM usage
+
+## :bug: Known Bugs
+- [ ] 'Noer' bug (occurs when several different digits appear in coordinates before the decimal point)
+- [ ] 'Nortorf' bug (occurs when there are several elements with a big distance to each other, e.g. the API returns several different cities with the exact same name)
+- [ ] Saving step memory overflow
+- [ ] Docker image size
+- [ ] Non uniform OSM naming standards (dashes) (See name tags at https://overpass-turbo.eu/s/1mMj)
 
 ## :copyright: License
 MIT License[^3]

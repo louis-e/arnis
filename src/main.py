@@ -115,6 +115,10 @@ def saveRegion(region="all"):
 
 
 def run():
+    if not (os.path.exists(mcWorldPath + "/region")):
+        print("Error! No Minecraft world found at given path")
+        os._exit(1)
+
     rawdata = getData(args.city, args.state, args.country, args.debug)
     imgarray = processData(rawdata, args)
 
@@ -162,7 +166,7 @@ def run():
                 setBlock(light_gray_concrete, x, 2, z)
                 setBlock(white_concrete, x, 1, z)
             elif j >= 22 and j <= 24:  # Fence
-                if str(j)[-1] == "2":
+                if str(j)[-1] == "2" or int(str(j[0])[-1]) == 2:
                     setBlock(cobblestone_wall, x, 2, z)
                 else:
                     fillBlocks(cobblestone, x, 2, z, x, int(str(j[0])[-1]), z)
@@ -323,6 +327,6 @@ def run():
     saveRegion()
     print(
         f"Done! Finished in {(time.time() - processStartTime):.2f} "
-        + "seconds ({((time.time() - processStartTime) / 60):.2f} minutes)"
+        + f"seconds ({((time.time() - processStartTime) / 60):.2f} minutes)"
     )
     os._exit(0)
