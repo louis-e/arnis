@@ -19,12 +19,12 @@ def getData(city, state, country, debug):
         [out:json];
         area[name="""
         + '"'
-        + city.replace(" ", "-")
+        + city
         + '"'
         + """]->.city;
         area[name="""
         + '"'
-        + state.replace(" ", "-")
+        + state
         + '"'
         + """]->.state;
         area[name="""
@@ -38,7 +38,7 @@ def getData(city, state, country, debug):
     """
     )
 
-    print("Chosen server: " + url)
+    print(f"Chosen server: {url}")
     try:
         data = requests.get(url, params={"data": query1}).json()
 
@@ -51,7 +51,7 @@ def getData(city, state, country, debug):
         elif "Dispatcher_Client::request_read_and_idx::rate_limited" in str(e):
             print("Error! IP rate limited")
         else:
-            print("Error! " + str(e))
+            print(f"Error! {e}")
         os._exit(1)
 
     if debug:

@@ -26,13 +26,22 @@ When you run the script, the following steps are performed automatically:
 The last step is responsible for generating three dimensional structures like forests, houses or cemetery graves.
 
 ## :keyboard: Usage
-```python3 arnis.py --city "Arnis" --state "Schleswig Holstein" --country "Deutschland" --path "C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
+```python3 arnis.py --city "Arnis" --state "Schleswig-Holstein" --country "Deutschland" --path "C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
 
 Optional: ```--debug```
 Notes:
 - Manually generate a Minecraft world, preferably a flat world, before running the script.
 - The city, state and country name should be in the local language of the respective country. Otherwise the city might not be found.
+- In some cases you need a dash instead of a space in the parameters. I will look into this problem and try to find an uniform fix for it.
 - You can optionally use the parameter ```--debug``` in order to see the processed values as a text output during runtime.
+
+### Docker image
+If you want to run this project in a container, you can use the Dockerfile provided in this repository. It will automatically scrape the latest source code. After running the container, you have to manually copy the generated region files from the container to the host machine in order to use them. When running the Docker image, set the ```--path``` parameter to ```/home```. An image on Dockerhub will follow soon.
+```
+docker build -t arnis .
+docker run arnis --city "Arnis" --state "Schleswig Holstein" --country "Deutschland" --path "/home"
+docker cp CONTAINER_ID:/home/region DESTINATION_PATH
+```
 
 ## :cd: Requirements
 - Python 3
@@ -87,17 +96,27 @@ ID | Name | Note |
 70-79 | House interior | The last digit refers to the building height |
 
 ## :memo: ToDo
-- [ ] Add Dockerfile
-- [ ] Use f-Strings in print statements
+- [ ] Floodfill timeout parameters
 - [ ] Implement multiprocessing in floodfill algorithm in order to boost CPU bound calculation performance
 - [ ] Add code comments
 - [ ] Implement elevation
-- [ ] Improve RAM usage
+- [ ] Find alternative for CV2 package
 - [ ] Add interior to buildings
 - [ ] Optimize region file size
 - [ ] Street markings
 - [x] Automated Tests
 - [x] PEP8
+- [x] Use f-Strings in print statements
+- [x] Add Dockerfile
+- [x] Added path check
+- [x] Improve RAM usage
+
+## :bug: Known Bugs
+- [ ] 'Noer' bug (occurs when several different digits appear in coordinates before the decimal point)
+- [ ] 'Nortorf' bug (occurs when there are several elements with a big distance to each other, e.g. the API returns several different cities with the exact same name)
+- [ ] Saving step memory overflow
+- [ ] Docker image size
+- [ ] Non uniform OSM naming standards (dashes) (See name tags at https://overpass-turbo.eu/s/1mMj)
 
 ## :copyright: License
 MIT License[^3]
