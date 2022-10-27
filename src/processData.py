@@ -196,6 +196,7 @@ def processData(data, args):
 
                         if (
                             "building:levels" in element["tags"]
+                            and element["tags"]["building:levels"].isnumeric()
                             and int(float(element["tags"]["building:levels"])) <= 8
                             and int(float(element["tags"]["building:levels"])) >= 1
                         ):
