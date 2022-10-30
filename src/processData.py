@@ -614,7 +614,12 @@ def processData(data, args):
                 for coordinate in element["nodes"]:
                     if previousElement != (0, 0):
                         wallHeight = 1
-                        if "height" in element["tags"]:
+                        if (
+                            "height" in element["tags"]
+                            and str(element["tags"]["height"])
+                            .replace(".", "")
+                            .isnumeric()
+                        ):
                             wallHeight = round(int(float(element["tags"]["height"])))
                         if wallHeight > 3:
                             wallHeight = 2
