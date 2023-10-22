@@ -96,8 +96,11 @@ ID | Name | Note |
 70-79 | House interior | The last digit refers to the building height |
 
 ## :memo: ToDo
+Pick an item from the ToDo / Known Bugs list or implement an own idea. Everyone is welcome to contribute to this project.
+- [ ] Alternative reliable city input options[^3]
 - [ ] Floodfill timeout parameters
 - [ ] Implement multiprocessing in floodfill algorithm in order to boost CPU bound calculation performance
+- [ ] Generate a few big cities using high performance hardware and make them available to download[^3]
 - [ ] Add code comments
 - [ ] Implement elevation
 - [ ] Find alternative for CV2 package
@@ -119,7 +122,7 @@ ID | Name | Note |
 - [ ] Non uniform OSM naming standards (dashes) (See name tags at https://overpass-turbo.eu/s/1mMj)
 
 ## :copyright: License
-MIT License[^3]
+MIT License[^4]
 
 Copyright (c) 2022 louis-e
 
@@ -127,7 +130,9 @@ Copyright (c) 2022 louis-e
 
 [^2]: https://en.wikipedia.org/wiki/Arnis,_Germany
 
-[^3]:
+[^3]: This might require a complete redesign of the algorithm since the current version is based on the city / state / country input. This will be investigated further soon.
+
+[^4]:
     Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
     
     The above copyright notice, the author ("louis-e") and this permission notice shall be included in all copies or substantial portions of the Software.
