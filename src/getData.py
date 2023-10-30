@@ -9,34 +9,29 @@ def getData(city, state, country, debug):
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
-        "https://overpass.openstreetmap.ru/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
     ]
     url = choice(api_servers)
-    query1 = (
-        """
-        [out:json];
-        area[name="""
-        + '"'
-        + city
-        + '"'
-        + """]->.city;
-        area[name="""
-        + '"'
-        + state
-        + '"'
-        + """]->.state;
-        area[name="""
-        + '"'
-        + country
-        + '"'
-        + """]->.country;
-        way(area.country)(area.state)(area.city)[!power][!place][!ferry];
-        (._;>;);
-        out;
+    query1 = f"""
+    [out:json];
+    area[name="{city}"]->.city;
+    area[name="{state}"]->.state;
+    area[name="{country}"]->.country;
+    (
+        way(area.country)(area.state)(area.city)[building];
+        way(area.country)(area.state)(area.city)[highway];
+        way(area.country)(area.state)(area.city)[landuse];
+        way(area.country)(area.state)(area.city)[natural];
+        way(area.country)(area.state)(area.city)[leisure];
+        way(area.country)(area.state)(area.city)[waterway]["waterway"!="fairway"];
+        way(area.country)(area.state)(area.city)[amenity];
+        way(area.country)(area.state)(area.city)[bridge];
+        way(area.country)(area.state)(area.city)[railway];
+        way(area.country)(area.state)(area.city)[barrier];
+    );
+    (._;>;);
+    out;
     """
-    )
 
     print(f"Chosen server: {url}")
     try:
