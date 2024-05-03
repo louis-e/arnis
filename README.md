@@ -122,6 +122,10 @@ Pick an item from the ToDo / Known Bugs list or implement an own idea. Everyone 
 - [ ] Docker image size
 - [ ] Non uniform OSM naming standards (dashes) (See name tags at https://overpass-turbo.eu/s/1mMj)
 
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=louis-e/arnis&type=Date)](https://star-history.com/#louis-e/arnis&Date)
+
 ## :copyright: License
 MIT License[^5]
 
