@@ -96,14 +96,15 @@ def getData(city, state, country, debug, download_method='requests'):
             file_path = download_with_requests(url, {"data": query1}, filename)
 
         if file_path is None:
-            return None
+            os._exit(1)
 
         with open(file_path, 'r') as file:
             data = json.load(file)
 
         if len(data["elements"]) == 0:
             print("Error! No data available")
-            return None
+            os._exit(1)
+
     except Exception as e:
         if "The server is probably too busy to handle your request." in str(e):
             print("Error! OSM server overloaded")
@@ -111,6 +112,6 @@ def getData(city, state, country, debug, download_method='requests'):
             print("Error! IP rate limited")
         else:
             print(f"Error! {e}")
-        return None
+        os._exit(1)
 
     return data
