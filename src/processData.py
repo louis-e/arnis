@@ -1,9 +1,26 @@
 from time import time
 from cv2 import imwrite
 import numpy as np
+import mmap
 
 from .bresenham import bresenham
 from .floodFill import floodFill
+
+
+def create_memory_mapped_array(filename, shape, dtype):
+    # Open a file in binary read-write mode
+    with open(filename, 'w+b') as f:
+        # Seek to the end of the file to ensure it's the desired size
+        f.seek((np.prod(shape) * np.dtype(dtype).itemsize) - 1)
+        f.write(b'\0')
+
+    # Memory-map the file
+    with open(filename, 'r+b') as f:
+        # Memory-map the file, size 0 means the whole file
+        mmapped_array = mmap.mmap(f.fileno(), 0)
+
+        # Create a memory-mapped array from the memory-mapped file
+        return np.ndarray(shape=shape, dtype=dtype, buffer=mmapped_array)
 
 
 def processData(data, args):
@@ -147,14 +164,8 @@ def processData(data, args):
         with open("arnis-debug-processed_data.json", "w", encoding="utf-8") as f:
             f.write(str(data))
 
-    img = np.zeros(
-        (
-            minMaxDistY,
-            minMaxDistX,
-            1,
-        ),
-        np.uint8,
-    )
+    # Create a memory-mapped array for the image 
+    img = create_memory_mapped_array("image.img", (minMaxDistY, minMaxDistX, 1), np.uint8)
 
     img.fill(0)
     imgLanduse = img.copy()
