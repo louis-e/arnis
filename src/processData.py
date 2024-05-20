@@ -641,10 +641,17 @@ def processData(data, args):
             ElementIncr += 1
 
     print("Calculating layers...")
+    total_pixels = img.shape[0] * img.shape[1]
+    processed_pixels = 0
+
     for x in range(0, img.shape[0]):
         for y in range(0, img.shape[1]):
             if imgLanduse[x][y] != 0 and img[x][y] == 0:
                 img[x][y] = imgLanduse[x][y]
+            processed_pixels += 1
+            percentage = (processed_pixels / total_pixels) * 100
+            print(f"Progress: {percentage:.2f}% completed", end='\r')
+    print("Progress: 100.00% completed")
 
     print(
         f"Processing finished in {(time() - processingStartTime):.2f} seconds"
