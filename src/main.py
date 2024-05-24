@@ -24,8 +24,13 @@ parser.add_argument("--city", dest="city", help="Name of the city")
 parser.add_argument("--state", dest="state", help="Name of the state")
 parser.add_argument("--country", dest="country", help="Name of the country")
 parser.add_argument("--path", dest="path", help="Path to the minecraft world")
-parser.add_argument("--downloader", dest="downloader", choices=['requests', 'curl', 'wget'], default='requests',
-                    help="Downloader method (requests/curl/wget)")
+parser.add_argument(
+    "--downloader",
+    dest="downloader",
+    choices=["requests", "curl", "wget"],
+    default="requests",
+    help="Downloader method (requests/curl/wget)",
+)
 parser.add_argument(
     "--debug",
     dest="debug",
