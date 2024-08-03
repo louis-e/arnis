@@ -23,6 +23,8 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--city", dest="city", help="Name of the city")
 parser.add_argument("--state", dest="state", help="Name of the state")
 parser.add_argument("--country", dest="country", help="Name of the country")
+parser.add_argument("--bbox", dest="bbox", help="Bounding box of the city")
+parser.add_argument("--file", dest="file", help="JSON file containing OSM data")
 parser.add_argument("--path", dest="path", help="Path to the minecraft world")
 parser.add_argument(
     "--downloader",
@@ -39,9 +41,10 @@ parser.add_argument(
     help="Enable debug mode",
 )
 args = parser.parse_args()
-if args.city is None or args.country is None or args.path is None:
-    print("Error! Missing arguments")
-    os._exit(1)
+if args.city is None or args.state is None or args.country is None or args.path is None:
+    if args.bbox is None and args.file is None:
+        print("Error! Missing arguments")
+        os._exit(1)
 
 gc.collect()
 np.seterr(all="raise")
@@ -49,8 +52,12 @@ np.set_printoptions(threshold=sys.maxsize)
 
 processStartTime = time.time()
 air = anvil.Block("minecraft", "air")
+glass = anvil.Block("minecraft", "glass_pane")
+brick = anvil.Block("minecraft", "bricks")
 stone = anvil.Block("minecraft", "stone")
 grass_block = anvil.Block("minecraft", "grass_block")
+spruce_log = anvil.Block("minecraft", "spruce_log")
+birch_leaves = anvil.Block("minecraft", "birch_leaves")
 dirt = anvil.Block("minecraft", "dirt")
 sand = anvil.Block("minecraft", "sand")
 podzol = anvil.Block.from_numeric_id(3, 2)
@@ -62,8 +69,9 @@ carrots = anvil.Block("minecraft", "carrots")
 potatoes = anvil.Block("minecraft", "potatoes")
 cobblestone = anvil.Block("minecraft", "cobblestone")
 iron_block = anvil.Block("minecraft", "iron_block")
-log = anvil.Block.from_numeric_id(17)
-leaves = anvil.Block.from_numeric_id(18)
+oak_log = anvil.Block.from_numeric_id(17)
+oak_leaves = anvil.Block.from_numeric_id(18)
+birch_log = anvil.Block("minecraft", "birch_log")
 white_stained_glass = anvil.Block("minecraft", "white_stained_glass")
 dark_oak_door_lower = anvil.Block(
     "minecraft", "dark_oak_door", properties={"half": "lower"}
@@ -73,7 +81,12 @@ dark_oak_door_upper = anvil.Block(
 )
 cobblestone_wall = anvil.Block("minecraft", "cobblestone_wall")
 stone_brick_slab = anvil.Block.from_numeric_id(44, 5)
+
 red_flower = anvil.Block.from_numeric_id(38)
+yellow_flower = anvil.Block("minecraft","dandelion")
+blue_flower = anvil.Block("minecraft", "blue_orchid")
+white_flower = anvil.Block("minecraft", "azure_bluet")
+
 white_concrete = anvil.Block("minecraft", "white_concrete")
 black_concrete = anvil.Block("minecraft", "black_concrete")
 gray_concrete = anvil.Block("minecraft", "gray_concrete")
@@ -120,13 +133,13 @@ def saveRegion(region="all"):
         regions[region].save(mcWorldPath + "/region/" + region + ".mca")
         print(f"Saved {region}")
 
-
+from .tree import createTree
 def run():
     if not (os.path.exists(mcWorldPath + "/region")):
         print("Error! No Minecraft world found at given path")
         os._exit(1)
 
-    rawdata = getData(args.city, args.state, args.country, args.debug, args.downloader)
+    rawdata = getData(args.city, args.state, args.country, args.bbox, args.file, args.debug, args.downloader)
     imgarray = processData(rawdata, args)
 
     print("Generating minecraft world...")
@@ -150,7 +163,7 @@ def run():
         for j in i:
             setBlock(dirt, x, 0, z)
             if j == 0:  # Ground
-                setBlock(light_gray_concrete, x, 1, z)
+                setBlock(grass_block, x, 1, z)
             elif j == 10:  # Street
                 setBlock(black_concrete, x, 1, z)
                 setBlock(air, x, 2, z)
@@ -185,35 +198,41 @@ def run():
                 if randomChoice == 0 or randomChoice == 1:
                     setBlock(grass, x, 2, z)
             elif j == 31:  # Farmland
-                randomChoice = randint(0, 16)
-                if randomChoice == 0:
-                    setBlock(water, x, 1, z)
-                else:
-                    setBlock(farmland, x, 1, z)
-                    randomChoice = randint(0, 2)
-                    if randomChoice == 0:
-                        setBlock(wheat, x, 2, z)
-                    elif randomChoice == 1:
-                        setBlock(carrots, x, 2, z)
+                setBlock(grass_block, x, 1, z)
+                randomChoice = randint(0, 20)
+                randomTree = randint(1, 3)
+                randomFlower = randint(1, 4)
+                if randomChoice == 20:
+                    createTree(x, z, randomTree)
+                elif randomChoice == 2:
+                    if randomFlower == 1:
+                        setBlock(red_flower, x, 2, z)
+                    elif randomFlower == 2:
+                        setBlock(blue_flower, x, 2, z)
+                    elif randomFlower == 3:
+                        setBlock(yellow_flower, x, 2, z)
                     else:
-                        setBlock(potatoes, x, 2, z)
+                        setBlock(white_flower, x, 2, z)
+                elif randomChoice == 0 or randomChoice == 1:
+                    setBlock(grass, x, 2, z)
             elif j == 32:  # Forest
                 setBlock(grass_block, x, 1, z)
-                randomChoice = randint(0, 8)
-                if randomChoice >= 0 and randomChoice <= 5:
+                randomChoice = randint(0, 20)
+                randomTree = randint(1, 3)
+                randomFlower = randint(1, 4)
+                if randomChoice == 20:
+                    createTree(x, z, randomTree)
+                elif randomChoice == 2:
+                    if randomFlower == 1:
+                        setBlock(red_flower, x, 2, z)
+                    elif randomFlower == 2:
+                        setBlock(blue_flower, x, 2, z)
+                    elif randomFlower == 3:
+                        setBlock(yellow_flower, x, 2, z)
+                    else:
+                        setBlock(white_flower, x, 2, z)
+                elif randomChoice == 0 or randomChoice == 1:
                     setBlock(grass, x, 2, z)
-                elif randomChoice == 6:
-                    fillBlocks(log, x, 2, z, x, 8, z)
-                    fillBlocks(leaves, x - 2, 5, z - 2, x + 2, 6, z + 2)
-                    setBlock(air, x - 2, 6, z - 2)
-                    setBlock(air, x - 2, 6, z + 2)
-                    setBlock(air, x + 2, 6, z - 2)
-                    setBlock(air, x + 2, 6, z + 2)
-                    fillBlocks(leaves, x - 1, 7, z - 1, x + 1, 8, z + 1)
-                    setBlock(air, x - 1, 8, z - 1)
-                    setBlock(air, x - 1, 8, z + 1)
-                    setBlock(air, x + 1, 8, z - 1)
-                    setBlock(air, x + 1, 8, z + 1)
             elif j == 33:  # Cemetery
                 setBlock(podzol, x, 1, z)
                 randomChoice = randint(0, 100)
@@ -324,7 +343,7 @@ def run():
                                                             white_concrete, x, 32, z
                                                         )
 
-                setBlock(glowstone, x, 1, z)
+                setBlock(white_concrete, x, 1, z)
 
             z += 1
         x += 1
