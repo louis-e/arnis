@@ -8,3 +8,4 @@ requests==2.32.2
 argparse==1.4.0
 black==24.4.2
 flake8==7.0.0
+tqdm==4.66.5

@@ -39,8 +39,8 @@ def round3(material, x, y, z):
     setBlock(material, x-1, y, z-3)
 
 
-def createTree(x, z, typetree=1): #3 hours
-    if typetree == 1: #oak
+def createTree(x, z, typetree=1):
+    if typetree == 1: # Oak tree
         fillBlocks(oak_log, x, 2, z, x, 10, z)
         fillBlocks(oak_leaves, x-1, 5, z, x-1, 11, z)
         fillBlocks(oak_leaves, x+1, 5, z, x+1, 11, z)
@@ -60,7 +60,7 @@ def createTree(x, z, typetree=1): #3 hours
         round3(oak_leaves, x, 8, z)
         round3(oak_leaves, x, 7, z)
 
-    elif typetree == 2: #spruce
+    elif typetree == 2: # Spruce tree
         fillBlocks(spruce_log, x, 2, z, x, 11, z)
         fillBlocks(birch_leaves, x-1, 5, z, x-1, 12, z)
         fillBlocks(birch_leaves, x+1, 5, z, x+1, 12, z)
@@ -75,7 +75,7 @@ def createTree(x, z, typetree=1): #3 hours
         round2(birch_leaves, x, 8, z)
         round2(birch_leaves, x, 5, z)
 
-    elif typetree == 3: #birch
+    elif typetree == 3: # Birch tree
         fillBlocks(birch_log, x, 2, z, x, 8, z)
         fillBlocks(birch_leaves, x-1, 4, z, x-1, 9, z)
         fillBlocks(birch_leaves, x+1, 4, z, x+1, 9, z)
