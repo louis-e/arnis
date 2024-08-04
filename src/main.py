@@ -50,7 +50,8 @@ args = parser.parse_args()
 # Ensure either bbox or city/state/country is provided
 if not args.bbox and not (args.city and args.state and args.country):
     print(
-        "Error! You must provide either a bounding box (bbox) or city/state/country (experimental) information."
+        """Error! You must provide either a bounding box (bbox) or city/state/country \
+(experimental) information."""
     )
     os._exit(1)
 
@@ -150,22 +151,22 @@ def saveRegion(region="all"):
         print(f"Saved {region}")
 
 
-from .tree import createTree
+from .tree import createTree  # noqa: E402
 
 
 def run():
     print(
         """\n
-        ▄████████    ▄████████ ███▄▄▄▄    ▄█     ▄████████ 
-        ███    ███   ███    ███ ███▀▀▀██▄ ███    ███    ███ 
-        ███    ███   ███    ███ ███   ███ ███▌   ███    █▀  
-        ███    ███  ▄███▄▄▄▄██▀ ███   ███ ███▌   ███        
-      ▀███████████ ▀▀███▀▀▀▀▀   ███   ███ ███▌ ▀███████████ 
-        ███    ███ ▀███████████ ███   ███ ███           ███ 
-        ███    ███   ███    ███ ███   ███ ███     ▄█    ███ 
-        ███    █▀    ███    ███  ▀█   █▀  █▀    ▄████████▀  
-                     ███    ███                             
-          
+        ▄████████    ▄████████ ███▄▄▄▄    ▄█     ▄████████
+        ███    ███   ███    ███ ███▀▀▀██▄ ███    ███    ███
+        ███    ███   ███    ███ ███   ███ ███▌   ███    █▀
+        ███    ███  ▄███▄▄▄▄██▀ ███   ███ ███▌   ███
+      ▀███████████ ▀▀███▀▀▀▀▀   ███   ███ ███▌ ▀███████████
+        ███    ███ ▀███████████ ███   ███ ███           ███
+        ███    ███   ███    ███ ███   ███ ███     ▄█    ███
+        ███    █▀    ███    ███  ▀█   █▀  █▀    ▄████████▀
+                     ███    ███
+
                 https://github.com/louis-e/arnis
           """
     )

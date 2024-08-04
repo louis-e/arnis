@@ -80,7 +80,7 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
 
         query1 = f"""
         [out:json][bbox:{bbox[1]},{bbox[0]},{bbox[3]},{bbox[2]}];
-        ( 
+        (
             nwr["building"];
             nwr["highway"];
             nwr["landuse"];

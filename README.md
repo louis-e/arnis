@@ -53,8 +53,9 @@ docker cp CONTAINER_ID:/home/region DESTINATION_PATH
 - Python 3
 - ```pip install -r requirements.txt```
 
-- To conform with style guide please format any changes
+- To conform with style guide please format any changes and check the code quality
 ```black .``` 
+```flake8 src/```
 
 - Functionality should be covered by automated tests. 
 ```python -m pytest```

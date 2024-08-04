@@ -164,3 +164,4 @@ cython_debug/
 arnis-debug-raw_data.json
 arnis-debug-processed_data.json
 arnis-debug-map.png
+image.img
