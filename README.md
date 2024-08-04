@@ -1,6 +1,9 @@
+<p align="center">
+  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gitassets/logo.png?raw=true">
+</p>
+
 # Arnis [![Testing](https://github.com/louis-e/arnis/actions/workflows/python-app.yml/badge.svg)](https://github.com/louis-e/arnis/actions/workflows/python-app.yml)
-*Arnis - Generate cities from real life in Minecraft using Python*<br>
-This open source project generates cities in Minecraft based on real-life locations, allowing users to explore and build in a virtual world that mirrors the real one.
+This open source project generates any chosen location from the real world in Minecraft, allowing users to explore and build in a virtual world that mirrors the real one.
 <br>
 
 ## :desktop_computer: Example
@@ -10,64 +13,64 @@ This open source project generates cities in Minecraft based on real-life locati
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli-generation.gif?raw=true)
 
-The raw data which we receive from the API *[(see FAQ)](#question-faq)* contains each element (buildings, walls, fountains, farmlands,...) with its respective corner coordinates as well as tags which describe the element.
+The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each element (buildings, walls, fountains, farmlands, etc.) with its respective corner coordinates (nodes) and descriptive tags. When you run the script, the following steps are performed automatically to generate a Minecraft world:
 
-When you run the script, the following steps are performed automatically:
-1. Scraping data from API
-2. Find biggest and lowest latitude and longitude coordinate value
-3. Make the length of each coordinate the same and remove the coordinate separator dot
-4. Normalize data to start from 0 by subtracting the beforehand determined lowest value from each coordinate
-5. Parsing data into uniform structure
-6. Iterate through each element and set the corresponding ID *[(see FAQ)](#question-faq)* at coordinate in array
-7. Reduce array size by focusing on the outer buildings
-8. Add up landuse layer and the other generated data
-9. Iterate through array to generate Minecraft world
-
-The last step is responsible for generating three dimensional structures like forests, houses or cemetery graves.
+1. Scraping Data from API: The script fetches geospatial data from the Overpass Turbo API.
+2. Determine Coordinate Extremes: Identifies the highest and lowest latitude and longitude values from the dataset.
+3. Standardize Coordinate Lengths: Ensures all coordinates are of uniform length and removes the decimal separator.
+4. Normalize Data: Adjusts all coordinates to start from zero by subtracting the previously determined lowest values.
+5. Parse Data: Transforms the raw data into a standardized structure.
+6. Assign IDs to Elements: Iterates through each element and assigns a corresponding ID *[(see FAQ)](#question-faq)* at each coordinate in an array.
+7. Optimize Array Size: Focuses on the outermost buildings to reduce array size.
+8. Integrate Landuse and Additional Data: Combines the landuse layer with other generated data.
+9. Generate Minecraft World: Iterates through the array to create the Minecraft world, including 3D structures like forests, houses, and cemetery graves.
 
 ## :keyboard: Usage
-```python3 arnis.py --city "Arnis" --state "Schleswig-Holstein" --country "Deutschland" --path "C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
+```python3 arnis.py --bbox="min_lng,min_lat,max_lng,max_lat" --path="C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
 
-Optional: ```--debug```
-Notes:
-- Manually generate a Minecraft world, preferably a flat world, before running the script.
-- The city, state and country name should be in the local language of the respective country. Otherwise the city might not be found.
-- In some cases you need a dash instead of a space in the parameters. I will look into this problem and try to find an uniform fix for it.
-- You can optionally use the parameter ```--debug``` in order to see the processed values as a text output during runtime.
+Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter. 
+![How to find area](https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true)
 
-### Docker image
-If you want to run this project in a container, you can use the Dockerfile provided in this repository. It will automatically scrape the latest source code. After running the container, you have to manually copy the generated region files from the container to the host machine in order to use them. When running the Docker image, set the ```--path``` parameter to ```/home```. An image on Dockerhub will follow soon.
+Manually generate a new Minecraft world (preferably a flat world) before running the script.
+The --bbox parameter specifies the bounding box coordinates in the format: min_lng,min_lat,max_lng,max_lat.
+Use --path to specify the location of the Minecraft world.
+You can optionally use the parameter --debug to see processed value outputs during runtime.
+
+#### Experimental City/State/Country Input Method
+The following method is experimental and may not perform as expected:
+
+```python3 arnis.py --city="CityName" --state="StateName" --country="CountryName" --path="C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
+
+### Docker image (experimental)
+If you want to run this project containerized, you can use the Dockerfile provided in this repository. It will automatically scrape the latest source code from the repository. After running the container, you have to manually copy the generated region files from the container to the host machine in order to use them. When running the Docker image, set the ```--path``` parameter to ```/home```.
 ```
 docker build -t arnis .
-docker run arnis --city "Arnis" --state "Schleswig Holstein" --country "Deutschland" --path "/home"
+docker run arnis --city="Arnis" --state="Schleswig Holstein" --country="Deutschland" --path="/home"
 docker cp CONTAINER_ID:/home/region DESTINATION_PATH
 ```
 
 ## :cd: Requirements
 - Python 3
-- At least 8 Gigabyte RAM memory
+- ```pip install -r requirements.txt```
 
-```pip install -r requirements.txt```
-
-- To conform with style guide please format any changes
+- To conform with style guide please format any changes and check the code quality
 ```black .``` 
+```flake8 src/```
 
 - Functionality should be covered by automated tests. 
 ```python -m pytest```
 
 ## :question: FAQ
 - *Why do some cities take so long to generate?*<br>
-There is a known problem with the floodfill algorithm, where big element outlines (e.g. farmlands,...) slow down the entire script for several seconds. When the geo data contains hundreds or even thousands of those big elements, it results in a long delay which can take up to multiple hours. Start with some small cities or towns before you generate bigger cities with the script in order to get a good feeling for how long it takes. I'm already thinking about a way to rewrite the floodfill algorithm as multithreaded to split up the task on multiple CPU cores which should reduce the delay drastically.
+The script's performance can be significantly affected by large elements, such as extensive farmlands. The current floodfill algorithm can slow down considerably when dealing with such elements, leading to long processing times that can stretch to hours for large cities. Thus there is also a timeout restriction in place. It is recommended to start with smaller towns to get a sense of the script's performance. Future improvements will focus on making the floodfill algorithm multi-threaded to utilize multiple CPU cores and reduce processing times drastically.
 - *Where does the data come from?*<br>
-In order to get the raw geo data, Arnis contacts a random Overpass Turbo API server. This API gets its data from the free collaborative geographic project OpenStreetMap (OSM)[^1]. OSM is an online community databse founded in 2004 which basically provides an open source Google Maps alternative.
-- *Why can't my city be found?*<br>
-Due to it being limited by the amount of user contribution, some areas might not be covered yet. See question above.
+The geographic data is sourced from OpenStreetMap (OSM)[^1], a free, collaborative mapping project that serves as an open-source alternative to commercial mapping services. The data is accessed via the Overpass API, which queries OSM's database.
 - *How does the Minecraft world generation work?*<br>
-For this purpose I am using the [anvil-parser](https://github.com/matcool/anvil-parser) package.
+The script uses the [anvil-parser](https://github.com/matcool/anvil-parser) library to interact with Minecraft's world format. This library allows the script to create and manipulate Minecraft region files, enabling the generation of real-world locations within the game.
 - *Where does the name come from?*<br>
-Arnis is the name of the smallest city in Germany[^2] and due to its size, I used it during development to debug the algorithm fast and efficiently. :shipit:
+The project is named after Arnis[^2], the smallest city in Germany. The city's small size made it an ideal test case for developing and debugging the script efficiently.
 - *What are the corresponding IDs?*<br>
-In step 6 *[(see How it works)](#floppy_disk-how-it-works)*, the script assigns an ID to each array element which is later translated and processed into a Minecraft world. These seperate steps are required to implement a layer system (e.g. farmlands should never overwrite buildings).
+During the processing stage (*[(see How it works)](#floppy_disk-how-it-works)*), each element is assigned an ID that determines how it will be represented in Minecraft. This system ensures that different layers (e.g., buildings, roads, landuse) are rendered correctly without conflicts.
 
 ID | Name | Note |
 --- | --- | --- |
@@ -96,8 +99,8 @@ ID | Name | Note |
 70-79 | House interior | The last digit refers to the building height |
 
 ## :memo: ToDo
-Pick an item from the ToDo / Known Bugs list or implement an own idea. Everyone is welcome to contribute to this project.
-- [ ] Alternative reliable city input options[^3]
+Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Contributions from everyone are welcome and encouraged to help improve this project.
+- [x] Alternative reliable city input options[^3]
 - [ ] Split up processData array into several smaller ones for big cities[^4]
 - [ ] Floodfill timeout parameters
 - [ ] Implement multiprocessing in floodfill algorithm in order to boost CPU bound calculation performance
@@ -117,12 +120,21 @@ Pick an item from the ToDo / Known Bugs list or implement an own idea. Everyone 
 
 ## :bug: Known Bugs
 - [ ] 'Noer' bug (occurs when several different digits appear in coordinates before the decimal point)
-- [ ] 'Nortorf' bug (occurs when there are several elements with a big distance to each other, e.g. the API returns several different cities with the exact same name)
+- [x] 'Nortorf' bug (occurs when there are several elements with a big distance to each other, e.g. the API returns several different cities with the exact same name)
 - [ ] Saving step memory overflow
 - [ ] Docker image size
-- [ ] Non uniform OSM naming standards (dashes) (See name tags at https://overpass-turbo.eu/s/1mMj)
+- [x] Non uniform OSM naming standards (dashes) (See name tags at https://overpass-turbo.eu/s/1mMj)
 
-## Star History
+## :trophy: Hall of Fame Contributors
+This section is dedicated to recognizing and celebrating the outstanding contributions of individuals who have significantly enhanced this project. Your work and dedication are deeply appreciated!
+
+#### Contributors:
+- callumfrance
+- amir16yp
+- EdwardWeir13579
+- daniil2327
+
+## :star: Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=louis-e/arnis&type=Date)](https://star-history.com/#louis-e/arnis&Date)
 

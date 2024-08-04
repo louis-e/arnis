@@ -1,10 +1,14 @@
-from time import time
 from cv2 import imwrite
-import numpy as np
+from time import time
+from tqdm import tqdm
 import mmap
+import numpy as np
 
 from .bresenham import bresenham
 from .floodFill import floodFill
+
+OFFSET = 1000000000  # Fixed offset to ensure all coordinates are positive
+SCALE_FACTOR = 1000000  # Consistent scaling factor
 
 
 def create_memory_mapped_array(filename, shape, dtype):
@@ -23,51 +27,40 @@ def create_memory_mapped_array(filename, shape, dtype):
         return np.ndarray(shape=shape, dtype=dtype, buffer=mmapped_array)
 
 
+# Parsing data
 def processData(data, args):
-    print("Parsing data...")
-    resDownScaler = 100
+    resDownScaler = 10
     processingStartTime = time()
 
-    greatestElementX = 0
-    greatestElementY = 0
+    greatestElementX = -OFFSET
+    greatestElementY = -OFFSET
+    lowestElementX = OFFSET
+    lowestElementY = OFFSET
+
+    # Convert all coordinates and determine bounds
     for element in data["elements"]:
         if element["type"] == "node":
-            element["lat"] = int(str(element["lat"]).replace(".", ""))
-            element["lon"] = int(str(element["lon"]).replace(".", ""))
+            element["lat"] = int((element["lat"] + OFFSET) * SCALE_FACTOR)
+            element["lon"] = int((element["lon"] + OFFSET) * SCALE_FACTOR)
 
             if element["lat"] > greatestElementX:
                 greatestElementX = element["lat"]
             if element["lon"] > greatestElementY:
                 greatestElementY = element["lon"]
-
-    for element in data["elements"]:
-        if element["type"] == "node":
-            if len(str(element["lat"])) != len(str(greatestElementX)):
-                for i in range(
-                    0, len(str(greatestElementX)) - len(str(element["lat"]))
-                ):
-                    element["lat"] *= 10
-
-            if len(str(element["lon"])) != len(str(greatestElementY)):
-                for i in range(
-                    0, len(str(greatestElementY)) - len(str(element["lon"]))
-                ):
-                    element["lon"] *= 10
-
-    lowestElementX = greatestElementX
-    lowestElementY = greatestElementY
-    for element in data["elements"]:
-        if element["type"] == "node":
             if element["lat"] < lowestElementX:
                 lowestElementX = element["lat"]
             if element["lon"] < lowestElementY:
                 lowestElementY = element["lon"]
 
+    if args.debug:
+        print(
+            f"greatestElementX: {greatestElementX}, greatestElementY: {greatestElementY}"
+        )
+        print(f"lowestElementX: {lowestElementX}, lowestElementY: {lowestElementY}")
+
     nodesDict = {}
     for element in data["elements"]:
         if element["type"] == "node":
-            element["lat"] -= lowestElementX
-            element["lon"] -= lowestElementY
             nodesDict[element["id"]] = [element["lat"], element["lon"]]
 
     orig_posDeterminationCoordX = 0
@@ -172,20 +165,16 @@ def processData(data, args):
     img.fill(0)
     imgLanduse = img.copy()
 
-    print("Processing data...")
-
+    # Processing data
     ElementIncr = 0
     ElementsLen = len(data["elements"])
-    lastProgressPercentage = 0
-    for element in reversed(data["elements"]):
-        progressPercentage = round(100 * (ElementIncr + 1) / ElementsLen)
-        if (
-            progressPercentage % 10 == 0
-            and progressPercentage != lastProgressPercentage
-        ):
-            print(f"Element {ElementIncr + 1}/{ElementsLen} ({progressPercentage}%)")
-            lastProgressPercentage = progressPercentage
-
+    for element in tqdm(
+        reversed(data["elements"]),
+        desc="Processing elements",
+        unit=" elements",
+        total=ElementsLen,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    ):
         if element["type"] == "way" and "tags" in element:
             if "building" in element["tags"]:
                 previousElement = (0, 0)
@@ -216,6 +205,12 @@ def processData(data, args):
                             buildingHeight = str(
                                 int(float(element["tags"]["building:levels"])) - 1
                             )
+
+                        if (
+                            "building" in element["tags"]
+                            and element["tags"]["building"] == "garage"
+                        ):
+                            buildingHeight = 0
 
                         for i in bresenham(
                             coordinate[0],
@@ -281,6 +276,7 @@ def processData(data, args):
                         and previousElement != (0, 0)
                         and element["tags"]["highway"] != "steps"
                         and element["tags"]["highway"] != "bridge"
+                        and element["tags"]["highway"] != "proposed"
                     ):
                         blockRange = 2
                         highwayType = 10
@@ -461,7 +457,7 @@ def processData(data, args):
                             or element["tags"]["leisure"] == "playground"
                             or element["tags"]["leisure"] == "garden"
                         ):
-                            leisureType = 30
+                            leisureType = 32
                         elif element["tags"]["leisure"] == "pitch":
                             leisureType = 36
                         elif element["tags"]["leisure"] == "swimming_pool":
@@ -505,7 +501,7 @@ def processData(data, args):
                         and (
                             element["tags"]["layer"] == "-1"
                             or element["tags"]["layer"] == "-2"
-                            or element["tags"]["layer"] != "-3"
+                            or element["tags"]["layer"] == "-3"
                         )
                     ):
                         waterwayWidth = 4
@@ -603,20 +599,13 @@ def processData(data, args):
                     if (
                         previousElement != (0, 0)
                         and element["tags"]["railway"] != "proposed"
+                        and element["tags"]["railway"] != "abandoned"
                     ):
                         for i in bresenham(
-                            coordinate[0] - 2,
-                            coordinate[1] - 2,
-                            previousElement[0] - 2,
-                            previousElement[1] - 2,
-                        ):
-                            if i[0] < minMaxDistX and i[1] < minMaxDistY:
-                                img[i[1]][i[0]] = 14
-                        for i in bresenham(
-                            coordinate[0] + 1,
-                            coordinate[1] + 1,
-                            previousElement[0] + 1,
-                            previousElement[1] + 1,
+                            coordinate[0],
+                            coordinate[1],
+                            previousElement[0],
+                            previousElement[1],
                         ):
                             if i[0] < minMaxDistX and i[1] < minMaxDistY:
                                 img[i[1]][i[0]] = 14
@@ -653,22 +642,13 @@ def processData(data, args):
 
             ElementIncr += 1
 
-    print("Calculating layers...")
-    total_pixels = img.shape[0] * img.shape[1]
-    processed_pixels = 0
-
-    for x in range(0, img.shape[0]):
-        for y in range(0, img.shape[1]):
-            if imgLanduse[x][y] != 0 and img[x][y] == 0:
-                img[x][y] = imgLanduse[x][y]
-            processed_pixels += 1
-            percentage = (processed_pixels / total_pixels) * 100
-            print(f"Progress: {percentage:.2f}% completed", end="\r")
-    print("Progress: 100.00% completed")
+    # Calculating layers
+    mask = (imgLanduse != 0) & (img == 0)
+    img[mask] = imgLanduse[mask]
 
     print(
         f"Processing finished in {(time() - processingStartTime):.2f} seconds"
-        + f"({((time() - processingStartTime) / 60):.2f} minutes)"
+        + f" ({((time() - processingStartTime) / 60):.2f} minutes)"
     )
     if args.debug:
         imwrite("arnis-debug-map.png", img)

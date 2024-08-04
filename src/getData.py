@@ -1,8 +1,8 @@
-import os
-import subprocess
-import requests
-import json
 from random import choice
+import json
+import os
+import requests
+import subprocess
 
 
 def download_with_requests(url, params, filename):
@@ -47,6 +47,7 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
     ]
     url = choice(api_servers)
 
@@ -74,11 +75,12 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
     elif bbox:
         bbox = bbox.split(",")
         bbox = [float(i) for i in bbox]
-        print(bbox)
-        
+        if debug:
+            print(f"Bbox input: {bbox}")
+
         query1 = f"""
-        [out:json][bbox:{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}];
-        ( 
+        [out:json][bbox:{bbox[1]},{bbox[0]},{bbox[3]},{bbox[2]}];
+        (
             nwr["building"];
             nwr["highway"];
             nwr["landuse"];
@@ -89,9 +91,12 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
             nwr["bridge"];
             nwr["railway"];
             nwr["barrier"];
-        );
-        (._;>;);
-        out;
+        )->.waysinbbox;
+        (
+            node(w.waysinbbox);
+        )->.nodesinbbox;
+        .waysinbbox out body;
+        .nodesinbbox out skel qt;
         """
     elif file:
         print("Loading data from file")
@@ -115,12 +120,17 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
         (._;>;);
         out;
         """
+
+    if debug:
+        print(f"OSM Query: {query1}")
+
     try:
         if file:
-            with open("data.json") as dataset:
+            with open("data.json", encoding="utf8") as dataset:
                 data = json.load(dataset)
         else:
-            print(f"Chosen server: {url}")
+            if debug:
+                print(f"Chosen server: {url}")
             filename = "arnis-debug-raw_data.json"
             if download_method == "requests":
                 file_path = download_with_requests(url, {"data": query1}, filename)
@@ -146,7 +156,7 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
         if "The server is probably too busy to handle your request." in str(e):
             print("Error! OSM server overloaded")
         elif "Dispatcher_Client::request_read_and_idx::rate_limited" in str(e):
-            print("Error! IP rate limited")
+            print("Error! IP rate limited, wait before trying again")
         else:
             print(f"Error! {e}")
         os._exit(1)

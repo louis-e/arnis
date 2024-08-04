@@ -4,28 +4,33 @@
 # MIT License
 # Please see the LICENSE file that should have been included as part of this package.
 
+from math import floor
+from random import randint
+from tqdm import tqdm
+import anvil
+import argparse
+import gc
+import numpy as np
 import os
 import sys
 import time
-import gc
-import argparse
-import anvil
-from random import randint
-from math import floor
-import numpy as np
 
 from .getData import getData
 from .processData import processData
 
 parser = argparse.ArgumentParser(
-    description="Arnis - Generate cities from real life in Minecraft using Python"
+    description="Arnis - Generate cities from real life in Minecraft"
 )
-parser.add_argument("--city", dest="city", help="Name of the city")
-parser.add_argument("--state", dest="state", help="Name of the state")
-parser.add_argument("--country", dest="country", help="Name of the country")
-parser.add_argument("--bbox", dest="bbox", help="Bounding box of the city")
+parser.add_argument("--bbox", dest="bbox", help="Bounding box of the area")
+parser.add_argument("--city", dest="city", help="Name of the city (Experimental)")
+parser.add_argument("--state", dest="state", help="Name of the state (Experimental)")
+parser.add_argument(
+    "--country", dest="country", help="Name of the country (Experimental)"
+)
 parser.add_argument("--file", dest="file", help="JSON file containing OSM data")
-parser.add_argument("--path", dest="path", help="Path to the minecraft world")
+parser.add_argument(
+    "--path", dest="path", required=True, help="Path to the minecraft world"
+)
 parser.add_argument(
     "--downloader",
     dest="downloader",
@@ -41,10 +46,19 @@ parser.add_argument(
     help="Enable debug mode",
 )
 args = parser.parse_args()
-if args.city is None or args.state is None or args.country is None or args.path is None:
-    if args.bbox is None and args.file is None:
-        print("Error! Missing arguments")
-        os._exit(1)
+
+# Ensure either bbox or city/state/country is provided
+if not args.bbox and not (args.city and args.state and args.country):
+    print(
+        """Error! You must provide either a bounding box (bbox) or city/state/country \
+(experimental) information."""
+    )
+    os._exit(1)
+
+# Ensure file argument is handled correctly
+if args.file and args.bbox:
+    print("Error! You cannot provide both a bounding box (bbox) and a file.")
+    os._exit(1)
 
 gc.collect()
 np.seterr(all="raise")
@@ -64,26 +78,23 @@ podzol = anvil.Block.from_numeric_id(3, 2)
 grass = anvil.Block.from_numeric_id(175, 2)
 farmland = anvil.Block("minecraft", "farmland")
 water = anvil.Block("minecraft", "water")
-wheat = anvil.Block("minecraft", "wheat")
-carrots = anvil.Block("minecraft", "carrots")
-potatoes = anvil.Block("minecraft", "potatoes")
+wheat = anvil.Block("minecraft", "wheat", {"age": 7})
+carrots = anvil.Block("minecraft", "carrots", {"age": 7})
+potatoes = anvil.Block("minecraft", "potatoes", {"age": 7})
 cobblestone = anvil.Block("minecraft", "cobblestone")
 iron_block = anvil.Block("minecraft", "iron_block")
 oak_log = anvil.Block.from_numeric_id(17)
-oak_leaves = anvil.Block.from_numeric_id(18)
+oak_leaves = anvil.Block("minecraft", "oak_leaves")
 birch_log = anvil.Block("minecraft", "birch_log")
 white_stained_glass = anvil.Block("minecraft", "white_stained_glass")
-dark_oak_door_lower = anvil.Block(
-    "minecraft", "dark_oak_door", properties={"half": "lower"}
-)
-dark_oak_door_upper = anvil.Block(
-    "minecraft", "dark_oak_door", properties={"half": "upper"}
-)
+dark_oak_door_lower = anvil.Block("minecraft", "dark_oak_door", {"half": "lower"})
+dark_oak_door_upper = anvil.Block("minecraft", "dark_oak_door", {"half": "upper"})
 cobblestone_wall = anvil.Block("minecraft", "cobblestone_wall")
 stone_brick_slab = anvil.Block.from_numeric_id(44, 5)
+rail = anvil.Block("minecraft", "rail")
 
 red_flower = anvil.Block.from_numeric_id(38)
-yellow_flower = anvil.Block("minecraft","dandelion")
+yellow_flower = anvil.Block("minecraft", "dandelion")
 blue_flower = anvil.Block("minecraft", "blue_orchid")
 white_flower = anvil.Block("minecraft", "azure_bluet")
 
@@ -95,6 +106,7 @@ green_stained_hardened_clay = anvil.Block.from_numeric_id(159, 5)
 dirt = anvil.Block("minecraft", "dirt")
 glowstone = anvil.Block("minecraft", "glowstone")
 sponge = anvil.Block("minecraft", "sponge")
+hay_bale = anvil.Block("minecraft", "hay_block")
 
 regions = {}
 for x in range(0, 3):
@@ -126,39 +138,67 @@ if mcWorldPath[-1] == "/":
 
 def saveRegion(region="all"):
     if region == "all":
-        for key in regions:
+        region_keys = list(regions.keys())
+        for key in tqdm(
+            region_keys,
+            desc="Saving minecraft world",
+            unit="region",
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
+        ):
             regions[key].save(mcWorldPath + "/region/" + key + ".mca")
-            print(f"Saved {key}")
     else:
         regions[region].save(mcWorldPath + "/region/" + region + ".mca")
         print(f"Saved {region}")
 
-from .tree import createTree
+
+from .tree import createTree  # noqa: E402
+
+
 def run():
+    print(
+        """\n
+        ▄████████    ▄████████ ███▄▄▄▄    ▄█     ▄████████
+        ███    ███   ███    ███ ███▀▀▀██▄ ███    ███    ███
+        ███    ███   ███    ███ ███   ███ ███▌   ███    █▀
+        ███    ███  ▄███▄▄▄▄██▀ ███   ███ ███▌   ███
+      ▀███████████ ▀▀███▀▀▀▀▀   ███   ███ ███▌ ▀███████████
+        ███    ███ ▀███████████ ███   ███ ███           ███
+        ███    ███   ███    ███ ███   ███ ███     ▄█    ███
+        ███    █▀    ███    ███  ▀█   █▀  █▀    ▄████████▀
+                     ███    ███
+
+                https://github.com/louis-e/arnis
+          """
+    )
+
     if not (os.path.exists(mcWorldPath + "/region")):
         print("Error! No Minecraft world found at given path")
         os._exit(1)
 
-    rawdata = getData(args.city, args.state, args.country, args.bbox, args.file, args.debug, args.downloader)
+    rawdata = getData(
+        args.city,
+        args.state,
+        args.country,
+        args.bbox,
+        args.file,
+        args.debug,
+        args.downloader,
+    )
     imgarray = processData(rawdata, args)
 
-    print("Generating minecraft world...")
-
+    # Generate Minecraft world
     x = 0
     z = 0
     doorIncrement = 0
     ElementIncr = 0
     ElementsLen = len(imgarray)
-    lastProgressPercentage = 0
-    for i in imgarray:
-        progressPercentage = round(100 * (ElementIncr + 1) / ElementsLen)
-        if (
-            progressPercentage % 10 == 0
-            and progressPercentage != lastProgressPercentage
-        ):
-            print(f"Pixel {ElementIncr + 1}/{ElementsLen} ({progressPercentage}%)")
-            lastProgressPercentage = progressPercentage
-
+    for i in tqdm(
+        imgarray,
+        desc="Generating pixels",
+        unit=" pixels",
+        total=ElementsLen,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    ):
         z = 0
         for j in i:
             setBlock(dirt, x, 0, z)
@@ -179,7 +219,8 @@ def run():
                 setBlock(light_gray_concrete, x + 1, 2, z + 1)
                 setBlock(light_gray_concrete, x - 1, 2, z + 1)
             elif j == 14:  # Railway
-                setBlock(iron_block, x, 2, z)
+                setBlock(iron_block, x, 1, z)
+                setBlock(rail, x, 2, z)
             elif j == 20:  # Parking
                 setBlock(gray_concrete, x, 1, z)
             elif j == 21:  # Fountain border
@@ -198,23 +239,32 @@ def run():
                 if randomChoice == 0 or randomChoice == 1:
                     setBlock(grass, x, 2, z)
             elif j == 31:  # Farmland
-                setBlock(grass_block, x, 1, z)
-                randomChoice = randint(0, 20)
-                randomTree = randint(1, 3)
-                randomFlower = randint(1, 4)
-                if randomChoice == 20:
-                    createTree(x, z, randomTree)
-                elif randomChoice == 2:
-                    if randomFlower == 1:
-                        setBlock(red_flower, x, 2, z)
-                    elif randomFlower == 2:
-                        setBlock(blue_flower, x, 2, z)
-                    elif randomFlower == 3:
-                        setBlock(yellow_flower, x, 2, z)
+                if x % 15 == 0 or z % 15 == 0:  # Place water every 8 blocks
+                    setBlock(water, x, 1, z)
+                else:
+                    setBlock(farmland, x, 1, z)
+                    if (
+                        randint(0, 75) == 0
+                    ):  # Rarely place trees, hay bales, or leaf blocks
+                        special_choice = randint(1, 10)
+                        if special_choice <= 1:  # 20% chance
+                            createTree(x, z, randint(1, 3))
+                        elif special_choice <= 6:  # 40% chance
+                            setBlock(hay_bale, x, 2, z)
+                            if randint(0, 2) == 0:
+                                setBlock(hay_bale, x, 3, z)
+                                setBlock(hay_bale, x - 1, 2, z)
+                                setBlock(hay_bale, x, 2, z - 1)
+                            else:
+                                setBlock(hay_bale, x, 3, z)
+                                setBlock(hay_bale, x + 1, 2, z)
+                                setBlock(hay_bale, x, 2, z + 1)
+                        else:  # Remaining 40% chance
+                            setBlock(oak_leaves, x, 2, z)
                     else:
-                        setBlock(white_flower, x, 2, z)
-                elif randomChoice == 0 or randomChoice == 1:
-                    setBlock(grass, x, 2, z)
+                        crop_choice = randint(0, 2)
+                        crops = [wheat, carrots, potatoes]
+                        setBlock(crops[crop_choice], x, 2, z)
             elif j == 32:  # Forest
                 setBlock(grass_block, x, 1, z)
                 randomChoice = randint(0, 20)
@@ -234,20 +284,29 @@ def run():
                 elif randomChoice == 0 or randomChoice == 1:
                     setBlock(grass, x, 2, z)
             elif j == 33:  # Cemetery
+                # Spawn chances
+                grave_chance = 25
+                flower_chance = 15
+                tree_chance = 5
+
                 setBlock(podzol, x, 1, z)
-                randomChoice = randint(0, 100)
-                if randomChoice == 0:
-                    setBlock(cobblestone, x - 1, 2, z)
-                    setBlock(stone_brick_slab, x - 1, 3, z)
-                    setBlock(stone_brick_slab, x, 2, z)
-                    setBlock(stone_brick_slab, x + 1, 2, z)
-                elif randomChoice == 1:
-                    setBlock(cobblestone, x, 2, z - 1)
-                    setBlock(stone_brick_slab, x, 3, z - 1)
-                    setBlock(stone_brick_slab, x, 2, z)
-                    setBlock(stone_brick_slab, x, 2, z + 1)
-                elif randomChoice == 2 or randomChoice == 3:
-                    setBlock(red_flower, x, 2, z)
+                if (x % 3 == 0) and (z % 3 == 0):
+                    randomChoice = randint(0, 100)
+                    if randomChoice < grave_chance:
+                        if randint(0, 1) == 0:
+                            setBlock(cobblestone, x - 1, 2, z)
+                            setBlock(stone_brick_slab, x - 1, 3, z)
+                            setBlock(stone_brick_slab, x, 2, z)
+                            setBlock(stone_brick_slab, x + 1, 2, z)
+                        else:
+                            setBlock(cobblestone, x, 2, z - 1)
+                            setBlock(stone_brick_slab, x, 3, z - 1)
+                            setBlock(stone_brick_slab, x, 2, z)
+                            setBlock(stone_brick_slab, x, 2, z + 1)
+                    elif randomChoice < grave_chance + flower_chance:
+                        setBlock(red_flower, x, 2, z)
+                    elif randomChoice < grave_chance + flower_chance + tree_chance:
+                        createTree(x, z, randint(1, 3))
             elif j == 34:  # Beach
                 setBlock(sand, x, 1, z)
             elif j == 35:  # Wetland
@@ -349,7 +408,11 @@ def run():
         x += 1
         ElementIncr += 1
 
-    print("Saving minecraft world...")
+    print(
+        f"Generation finished in {(time.time() - processStartTime):.2f} "
+        + f"seconds ({((time.time() - processStartTime) / 60):.2f} minutes)"
+    )
+    # Saving minecraft world
     saveRegion()
     print(
         f"Done! Finished in {(time.time() - processStartTime):.2f} "

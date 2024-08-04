@@ -95,7 +95,11 @@ def floodFill(
             ):
                 nxt.append((x, y + 1))
 
-            # Timeout ei dirst
+            # Timeout (known issue, see Github readme)
+            if time() - startTimeFloodfill > 7 or (
+                elementType == "tree_row" and time() - startTimeFloodfill > 0.2
+            ):
+                return img
 
         queue = nxt
         if len(nxt) > queueLen:
