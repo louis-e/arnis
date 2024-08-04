@@ -47,7 +47,7 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter"
+        "https://overpass.private.coffee/api/interpreter",
     ]
     url = choice(api_servers)
 
@@ -77,7 +77,7 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
         bbox = [float(i) for i in bbox]
         if debug:
             print(f"Bbox input: {bbox}")
-        
+
         query1 = f"""
         [out:json][bbox:{bbox[1]},{bbox[0]},{bbox[3]},{bbox[2]}];
         ( 

@@ -7,8 +7,9 @@ import numpy as np
 from .bresenham import bresenham
 from .floodFill import floodFill
 
-OFFSET = 1000000000 # Fixed offset to ensure all coordinates are positive
+OFFSET = 1000000000  # Fixed offset to ensure all coordinates are positive
 SCALE_FACTOR = 1000000  # Consistent scaling factor
+
 
 def create_memory_mapped_array(filename, shape, dtype):
     # Open a file in binary read-write mode
@@ -24,6 +25,7 @@ def create_memory_mapped_array(filename, shape, dtype):
 
         # Create a memory-mapped array from the memory-mapped file
         return np.ndarray(shape=shape, dtype=dtype, buffer=mmapped_array)
+
 
 # Parsing data
 def processData(data, args):
@@ -51,7 +53,9 @@ def processData(data, args):
                 lowestElementY = element["lon"]
 
     if args.debug:
-        print(f"greatestElementX: {greatestElementX}, greatestElementY: {greatestElementY}")
+        print(
+            f"greatestElementX: {greatestElementX}, greatestElementY: {greatestElementY}"
+        )
         print(f"lowestElementX: {lowestElementX}, lowestElementY: {lowestElementY}")
 
     nodesDict = {}
@@ -164,7 +168,13 @@ def processData(data, args):
     # Processing data
     ElementIncr = 0
     ElementsLen = len(data["elements"])
-    for element in tqdm(reversed(data["elements"]), desc="Processing elements", unit=" elements", total=ElementsLen, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'):
+    for element in tqdm(
+        reversed(data["elements"]),
+        desc="Processing elements",
+        unit=" elements",
+        total=ElementsLen,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    ):
         if element["type"] == "way" and "tags" in element:
             if "building" in element["tags"]:
                 previousElement = (0, 0)
@@ -195,7 +205,7 @@ def processData(data, args):
                             buildingHeight = str(
                                 int(float(element["tags"]["building:levels"])) - 1
                             )
-                        
+
                         if (
                             "building" in element["tags"]
                             and element["tags"]["building"] == "garage"

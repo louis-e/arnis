@@ -24,9 +24,13 @@ parser = argparse.ArgumentParser(
 parser.add_argument("--bbox", dest="bbox", help="Bounding box of the area")
 parser.add_argument("--city", dest="city", help="Name of the city (Experimental)")
 parser.add_argument("--state", dest="state", help="Name of the state (Experimental)")
-parser.add_argument("--country", dest="country", help="Name of the country (Experimental)")
+parser.add_argument(
+    "--country", dest="country", help="Name of the country (Experimental)"
+)
 parser.add_argument("--file", dest="file", help="JSON file containing OSM data")
-parser.add_argument("--path", dest="path", required=True, help="Path to the minecraft world")
+parser.add_argument(
+    "--path", dest="path", required=True, help="Path to the minecraft world"
+)
 parser.add_argument(
     "--downloader",
     dest="downloader",
@@ -45,7 +49,9 @@ args = parser.parse_args()
 
 # Ensure either bbox or city/state/country is provided
 if not args.bbox and not (args.city and args.state and args.country):
-    print("Error! You must provide either a bounding box (bbox) or city/state/country (experimental) information.")
+    print(
+        "Error! You must provide either a bounding box (bbox) or city/state/country (experimental) information."
+    )
     os._exit(1)
 
 # Ensure file argument is handled correctly
@@ -80,18 +86,14 @@ oak_log = anvil.Block.from_numeric_id(17)
 oak_leaves = anvil.Block("minecraft", "oak_leaves")
 birch_log = anvil.Block("minecraft", "birch_log")
 white_stained_glass = anvil.Block("minecraft", "white_stained_glass")
-dark_oak_door_lower = anvil.Block(
-    "minecraft", "dark_oak_door", {"half": "lower"}
-)
-dark_oak_door_upper = anvil.Block(
-    "minecraft", "dark_oak_door", {"half": "upper"}
-)
+dark_oak_door_lower = anvil.Block("minecraft", "dark_oak_door", {"half": "lower"})
+dark_oak_door_upper = anvil.Block("minecraft", "dark_oak_door", {"half": "upper"})
 cobblestone_wall = anvil.Block("minecraft", "cobblestone_wall")
 stone_brick_slab = anvil.Block.from_numeric_id(44, 5)
 rail = anvil.Block("minecraft", "rail")
 
 red_flower = anvil.Block.from_numeric_id(38)
-yellow_flower = anvil.Block("minecraft","dandelion")
+yellow_flower = anvil.Block("minecraft", "dandelion")
 blue_flower = anvil.Block("minecraft", "blue_orchid")
 white_flower = anvil.Block("minecraft", "azure_bluet")
 
@@ -136,15 +138,24 @@ if mcWorldPath[-1] == "/":
 def saveRegion(region="all"):
     if region == "all":
         region_keys = list(regions.keys())
-        for key in tqdm(region_keys, desc="Saving minecraft world", unit="region", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}'):
+        for key in tqdm(
+            region_keys,
+            desc="Saving minecraft world",
+            unit="region",
+            bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
+        ):
             regions[key].save(mcWorldPath + "/region/" + key + ".mca")
     else:
         regions[region].save(mcWorldPath + "/region/" + region + ".mca")
         print(f"Saved {region}")
 
+
 from .tree import createTree
+
+
 def run():
-    print("""\n
+    print(
+        """\n
         ▄████████    ▄████████ ███▄▄▄▄    ▄█     ▄████████ 
         ███    ███   ███    ███ ███▀▀▀██▄ ███    ███    ███ 
         ███    ███   ███    ███ ███   ███ ███▌   ███    █▀  
@@ -156,13 +167,22 @@ def run():
                      ███    ███                             
           
                 https://github.com/louis-e/arnis
-          """)
+          """
+    )
 
     if not (os.path.exists(mcWorldPath + "/region")):
         print("Error! No Minecraft world found at given path")
         os._exit(1)
 
-    rawdata = getData(args.city, args.state, args.country, args.bbox, args.file, args.debug, args.downloader)
+    rawdata = getData(
+        args.city,
+        args.state,
+        args.country,
+        args.bbox,
+        args.file,
+        args.debug,
+        args.downloader,
+    )
     imgarray = processData(rawdata, args)
 
     # Generate Minecraft world
@@ -171,56 +191,64 @@ def run():
     doorIncrement = 0
     ElementIncr = 0
     ElementsLen = len(imgarray)
-    for i in tqdm(imgarray, desc="Generating pixels", unit=" pixels", total=ElementsLen, bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'):
+    for i in tqdm(
+        imgarray,
+        desc="Generating pixels",
+        unit=" pixels",
+        total=ElementsLen,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]",
+    ):
         z = 0
         for j in i:
             setBlock(dirt, x, 0, z)
-            if j == 0: # Ground
+            if j == 0:  # Ground
                 setBlock(grass_block, x, 1, z)
-            elif j == 10: # Street
+            elif j == 10:  # Street
                 setBlock(black_concrete, x, 1, z)
                 setBlock(air, x, 2, z)
-            elif j == 11: # Footway
+            elif j == 11:  # Footway
                 setBlock(gray_concrete, x, 1, z)
                 setBlock(air, x, 2, z)
-            elif j == 12: # Natural path
+            elif j == 12:  # Natural path
                 setBlock(cobblestone, x, 1, z)
-            elif j == 13: # Bridge
+            elif j == 13:  # Bridge
                 setBlock(light_gray_concrete, x, 2, z)
                 setBlock(light_gray_concrete, x - 1, 2, z - 1)
                 setBlock(light_gray_concrete, x + 1, 2, z - 1)
                 setBlock(light_gray_concrete, x + 1, 2, z + 1)
                 setBlock(light_gray_concrete, x - 1, 2, z + 1)
-            elif j == 14: # Railway
+            elif j == 14:  # Railway
                 setBlock(iron_block, x, 1, z)
                 setBlock(rail, x, 2, z)
-            elif j == 20: # Parking
+            elif j == 20:  # Parking
                 setBlock(gray_concrete, x, 1, z)
-            elif j == 21: # Fountain border
+            elif j == 21:  # Fountain border
                 setBlock(light_gray_concrete, x, 2, z)
                 setBlock(white_concrete, x, 1, z)
-            elif j >= 22 and j <= 24: # Fence
+            elif j >= 22 and j <= 24:  # Fence
                 if str(j)[-1] == "2" or int(str(j[0])[-1]) == 2:
                     setBlock(cobblestone_wall, x, 2, z)
                 else:
                     fillBlocks(cobblestone, x, 2, z, x, int(str(j[0])[-1]), z)
 
                 setBlock(grass_block, x, 1, z)
-            elif j == 30: # Meadow
+            elif j == 30:  # Meadow
                 setBlock(grass_block, x, 1, z)
                 randomChoice = randint(0, 2)
                 if randomChoice == 0 or randomChoice == 1:
                     setBlock(grass, x, 2, z)
-            elif j == 31: # Farmland
-                if x % 15 == 0 or z % 15 == 0: # Place water every 8 blocks
+            elif j == 31:  # Farmland
+                if x % 15 == 0 or z % 15 == 0:  # Place water every 8 blocks
                     setBlock(water, x, 1, z)
                 else:
                     setBlock(farmland, x, 1, z)
-                    if randint(0, 75) == 0: # Rarely place trees, hay bales, or leaf blocks
+                    if (
+                        randint(0, 75) == 0
+                    ):  # Rarely place trees, hay bales, or leaf blocks
                         special_choice = randint(1, 10)
-                        if special_choice <= 1: # 20% chance
+                        if special_choice <= 1:  # 20% chance
                             createTree(x, z, randint(1, 3))
-                        elif special_choice <= 6: # 40% chance
+                        elif special_choice <= 6:  # 40% chance
                             setBlock(hay_bale, x, 2, z)
                             if randint(0, 2) == 0:
                                 setBlock(hay_bale, x, 3, z)
@@ -236,7 +264,7 @@ def run():
                         crop_choice = randint(0, 2)
                         crops = [wheat, carrots, potatoes]
                         setBlock(crops[crop_choice], x, 2, z)
-            elif j == 32: # Forest
+            elif j == 32:  # Forest
                 setBlock(grass_block, x, 1, z)
                 randomChoice = randint(0, 20)
                 randomTree = randint(1, 3)
@@ -254,12 +282,12 @@ def run():
                         setBlock(white_flower, x, 2, z)
                 elif randomChoice == 0 or randomChoice == 1:
                     setBlock(grass, x, 2, z)
-            elif j == 33: # Cemetery
+            elif j == 33:  # Cemetery
                 # Spawn chances
                 grave_chance = 25
                 flower_chance = 15
                 tree_chance = 5
-    
+
                 setBlock(podzol, x, 1, z)
                 if (x % 3 == 0) and (z % 3 == 0):
                     randomChoice = randint(0, 100)
@@ -278,24 +306,24 @@ def run():
                         setBlock(red_flower, x, 2, z)
                     elif randomChoice < grave_chance + flower_chance + tree_chance:
                         createTree(x, z, randint(1, 3))
-            elif j == 34: # Beach
+            elif j == 34:  # Beach
                 setBlock(sand, x, 1, z)
-            elif j == 35: # Wetland
+            elif j == 35:  # Wetland
                 randomChoice = randint(0, 2)
                 if randomChoice == 0:
                     setBlock(grass_block, x, 1, z)
                 else:
                     setBlock(water, x, 1, z)
-            elif j == 36: # Pitch
+            elif j == 36:  # Pitch
                 setBlock(green_stained_hardened_clay, x, 1, z)
-            elif j == 37: # Swimming pool
+            elif j == 37:  # Swimming pool
                 setBlock(water, x, 1, z)
                 setBlock(white_concrete, x, 0, z)
-            elif j == 38: # Water
+            elif j == 38:  # Water
                 setBlock(water, x, 1, z)
-            elif j == 39: # Raw grass
+            elif j == 39:  # Raw grass
                 setBlock(grass_block, x, 1, z)
-            elif j >= 50 and j <= 59: # House corner
+            elif j >= 50 and j <= 59:  # House corner
                 building_height = 5
                 if j == 51:
                     building_height = 8
@@ -317,7 +345,7 @@ def run():
                     building_height = 32
 
                 fillBlocks(white_concrete, x, 1, z, x, building_height, z)
-            elif j >= 60 and j <= 69: # House wall
+            elif j >= 60 and j <= 69:  # House wall
                 building_height = 4
                 if j == 61:
                     building_height = 7
@@ -349,7 +377,7 @@ def run():
                     fillBlocks(white_stained_glass, x, 3, z, x, building_height, z)
                 doorIncrement += 1
                 setBlock(white_concrete, x, building_height + 1, z)
-            elif j >= 70 and j <= 79: # House interior
+            elif j >= 70 and j <= 79:  # House interior
                 if j >= 70:
                     setBlock(white_concrete, x, 5, z)
                     if j >= 71:
