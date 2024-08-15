@@ -51,7 +51,7 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
     ]
     url = choice(api_servers)
 
-    if state:
+    if city:
         query1 = f"""
         [out:json];
         area[name="{city}"]->.city;
@@ -91,6 +91,8 @@ def getData(city, state, country, bbox, file, debug, download_method="requests")
             nwr["bridge"];
             nwr["railway"];
             nwr["barrier"];
+            nwr["entrance"];
+            nwr["door"];
         )->.waysinbbox;
         (
             node(w.waysinbbox);
