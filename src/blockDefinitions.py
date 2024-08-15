@@ -58,7 +58,6 @@ building_corner_variations = [
     anvil.Block("minecraft", "smooth_quartz"),
     anvil.Block("minecraft", "chiseled_stone_bricks"),
     anvil.Block("minecraft", "polished_basalt"),
-    # anvil.Block("minecraft", "cracked_stone_bricks"), # TODO
     anvil.Block("minecraft", "cut_sandstone"),
     anvil.Block("minecraft", "polished_blackstone_bricks"),
 ]
