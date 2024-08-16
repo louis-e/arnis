@@ -120,18 +120,15 @@ This section is dedicated to recognizing and celebrating the outstanding contrib
 
 [![Star History Chart](https://api.star-history.com/svg?repos=louis-e/arnis&type=Date)](https://star-history.com/#louis-e/arnis&Date)
 
-## :copyright: License
-MIT License[^3]
+## :copyright: License Information
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0).[^3]
 
-Copyright (c) 2022 louis-e
+Copyright (c) 2022-2024 louis-e
 
 [^1]: https://en.wikipedia.org/wiki/OpenStreetMap
 
 [^2]: https://en.wikipedia.org/wiki/Arnis,_Germany
 
 [^3]:
-    Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-    
-    The above copyright notice, the author ("louis-e") and this permission notice shall be included in all copies or substantial portions of the Software.
-    
-    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+    This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+    For the full license text, see the LICENSE file.
