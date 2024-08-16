@@ -1,0 +1,45 @@
+name: Build and Release for Windows
+
+on:
+  release:
+    types: [created] # Triggers only when a release is created
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Create Executable
+        uses: Martin005/pyinstaller-action@v1.2.0
+        with:
+          python_ver: '3.10'
+          spec: 'pyinst-compile.spec'
+          requirements: 'requirements.txt'
+          upload_exe_with_name: 'arnis.exe'
+          options: '--onefile --name arnis'
+
+      - name: Build
+        run: make build
+
+      - name: Upload Release Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ github.event.release.upload_url }}
+          asset_path: ./dist/arnis.exe
+          asset_name: arnis.exe
+          asset_content_type: application/octet-stream
