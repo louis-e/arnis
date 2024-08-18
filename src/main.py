@@ -70,9 +70,11 @@ mcWorldPath = args.path
 if mcWorldPath[-1] == "/":
     mcWorldPath = mcWorldPath[:-1]
 
+
 def validate_bounding_box(bbox):
     """
-    Validates a bounding box represented as a string in the format "min_lng,min_lat,max_lng,max_lat".
+    Validates a bounding box represented as a string in
+    the format "min_lng,min_lat,max_lng,max_lat".
 
     Parameters:
         bbox (str): The bounding box string.
@@ -82,7 +84,7 @@ def validate_bounding_box(bbox):
     """
     try:
         # Split the input string into components
-        parts = bbox.split(',')
+        parts = bbox.split(",")
         if len(parts) != 4:
             return False
 
@@ -130,7 +132,7 @@ def run():
         os._exit(1)
 
     if args.bbox:
-        if validate_bounding_box(args.bbox) == False:
+        if validate_bounding_box(args.bbox) is False:
             print("Error! Invalid bbox input")
             os._exit(1)
 
