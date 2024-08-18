@@ -71,6 +71,45 @@ if mcWorldPath[-1] == "/":
     mcWorldPath = mcWorldPath[:-1]
 
 
+def validate_bounding_box(bbox):
+    """
+    Validates a bounding box represented as a string in
+    the format "min_lng,min_lat,max_lng,max_lat".
+
+    Parameters:
+        bbox (str): The bounding box string.
+
+    Returns:
+        bool: True if the bounding box is valid, False otherwise.
+    """
+    try:
+        # Split the input string into components
+        parts = bbox.split(",")
+        if len(parts) != 4:
+            return False
+
+        # Convert the components to float
+        min_lng, min_lat, max_lng, max_lat = map(float, parts)
+
+        # Validate the longitude range (-180 to 180)
+        if not (-180 <= min_lng <= 180 and -180 <= max_lng <= 180):
+            return False
+
+        # Validate the latitude range (-90 to 90)
+        if not (-90 <= min_lat <= 90 and -90 <= max_lat <= 90):
+            return False
+
+        # Ensure that min_lng is less than max_lng and min_lat is less than max_lat
+        if min_lng >= max_lng or min_lat >= max_lat:
+            return False
+
+        return True
+
+    except ValueError:
+        # In case of conversion error, input was not a valid float
+        return False
+
+
 def run():
     print(
         """\n
@@ -91,6 +130,11 @@ def run():
     if not (os.path.exists(mcWorldPath + "/region")):
         print("Error! No Minecraft world found at given path")
         os._exit(1)
+
+    if args.bbox:
+        if validate_bounding_box(args.bbox) is False:
+            print("Error! Invalid bbox input")
+            os._exit(1)
 
     rawdata = getData(
         args.city,
