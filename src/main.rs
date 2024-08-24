@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fs::File};
+use std::collections::HashMap;
+use std::fs::File;
 use fastanvil::Region;
 use fastnbt::{Value, LongArray};
 use serde::{Deserialize, Serialize};
@@ -33,48 +34,85 @@ struct PaletteItem {
 }
 
 struct WorldEditor {
-    region: Region<File>,
-    new_region: Region<File>,
-    chunks_to_modify: HashMap<(usize, usize), Vec<(String, i32, i32, i32)>>,
+    region_template_path: String,
+    region_dir: String,
+    regions: HashMap<(i32, i32), Region<File>>,
+    chunks_to_modify: HashMap<(i32, i32, i32, i32), Vec<(String, i32, i32, i32)>>,
 }
 
 impl WorldEditor {
-    /// Initializes the WorldEditor with the input region path and output region path.
-    fn new(region_path: &str, out_path: &str) -> Self {
-        let region_file = File::open(region_path).unwrap();
-        let region = Region::from_stream(region_file).unwrap();
-
-        let out_file = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(out_path)
-            .unwrap();
-
-        let new_region = Region::new(out_file).unwrap();
-
+    /// Initializes the WorldEditor with the region directory and template region path.
+    fn new(region_template_path: &str, region_dir: &str) -> Self {
         Self {
-            region,
-            new_region,
+            region_template_path: region_template_path.to_string(),
+            region_dir: region_dir.to_string(),
+            regions: HashMap::new(),
             chunks_to_modify: HashMap::new(),
         }
     }
 
+    /// Loads or creates a region for the given region coordinates.
+    fn load_region(&mut self, region_x: i32, region_z: i32) -> &mut Region<File> {
+        self.regions.entry((region_x, region_z)).or_insert_with(|| {
+            let out_path = format!(
+                "{}/r.{}.{}.mca",
+                self.region_dir, region_x, region_z
+            );
+            // Always start with a fresh copy of the template
+            let _ = std::fs::copy(&self.region_template_path, &out_path)
+                .expect("Failed to copy region template");
+            let region_file = File::options().read(true).write(true).open(&out_path)
+                .expect(&format!("Failed to open region file {}", out_path));
+            Region::from_stream(region_file).expect("Failed to load region")
+        })
+    }
+
     /// Sets a block of the specified type at the given coordinates.
     fn set_block(&mut self, block_type: &str, x: i32, y: i32, z: i32) {
-        let chunk_x = (x >> 4) as usize;
-        let chunk_z = (z >> 4) as usize;
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let chunk_x_within_region = (chunk_x & 31) as usize;
+        let chunk_z_within_region = (chunk_z & 31) as usize;
+
         self.chunks_to_modify
-            .entry((chunk_x, chunk_z))
+            .entry((region_x, region_z, chunk_x_within_region as i32, chunk_z_within_region as i32))
             .or_default()
             .push((block_type.to_string(), x, y, z));
     }
 
-    /// Saves all changes made to the world by writing modified chunks to the output region file.
+    /// Fills a cuboid area with the specified block between two coordinates.
+    ///
+    /// # Arguments
+    ///
+    /// * `block_type` - The type of the block to be placed, specified as a string (e.g., "minecraft:bedrock").
+    /// * `x1`, `y1`, `z1` - The first set of coordinates defining one corner of the cuboid.
+    /// * `x2`, `y2`, `z2` - The second set of coordinates defining the opposite corner of the cuboid.
+    fn fill_blocks(&mut self, block_type: &str, x1: i32, y1: i32, z1: i32, x2: i32, y2: i32, z2: i32) {
+        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
+        let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
+        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
+
+        for x in min_x..=max_x {
+            for y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    self.set_block(block_type, x, y, z);
+                }
+            }
+        }
+    }
+
+    /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     fn save(&mut self) {
-        for ((chunk_x, chunk_z), block_list) in self.chunks_to_modify.drain() {
-            if let Ok(Some(data)) = self.region.read_chunk(chunk_x, chunk_z) {
+        let chunks_to_process: Vec<_> = self.chunks_to_modify.drain().collect();
+
+        for ((region_x, region_z, chunk_x, chunk_z), block_list) in chunks_to_process {
+            // Ensure the region is loaded (insert if missing)
+            let region = self.load_region(region_x, region_z);
+            
+            if let Ok(Some(data)) = region.read_chunk(chunk_x as usize, chunk_z as usize) {
                 let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
 
                 for (block_type, x, y, z) in block_list {
@@ -82,7 +120,7 @@ impl WorldEditor {
                 }
 
                 let ser = fastnbt::to_bytes(&chunk).unwrap();
-                self.new_region.write_chunk(chunk_x, chunk_z, &ser).unwrap();
+                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser).unwrap();
             }
         }
     }
@@ -90,15 +128,21 @@ impl WorldEditor {
 
 fn main() {
     let region_path = "r.0.0.mca.template";
-    let out_path = "%MC_WORLD_PATH_HERE%/region/r.0.0.mca";
+    let region_dir: &str = "%MC_WORLD_PATH_HERE%/region";
+    let ground_level: i32 = -61;
 
     // Initialize the WorldEditor
-    let mut editor = WorldEditor::new(region_path, out_path);
+    let mut editor = WorldEditor::new(region_template_path, region_dir);
 
-    // Set multiple blocks
-    editor.set_block("minecraft:bedrock", 8, -59, 5);
-    editor.set_block("minecraft:bedrock", 8, -60, 5);
-    editor.set_block("minecraft:bedrock", 6, -60, 3);
+    // Set multiple blocks across different regions
+    editor.set_block("minecraft:bedrock", 1, -60, 1);
+    editor.set_block("minecraft:bedrock", 2, -60, 2);
+    editor.set_block("minecraft:bedrock", 0, -60, 0);
+    editor.set_block("minecraft:bedrock", -1, -60, -1);
+    editor.set_block("minecraft:bedrock", -2, -60, -2);
+
+
+    editor.fill_blocks("minecraft:bedrock", -15, ground_level + 1, -9, 16, ground_level + 50, 123);
 
     // Save the changes to the world
     editor.save();
@@ -106,11 +150,13 @@ fn main() {
 
 /// Modifies a chunk to set a block of the given type at the specified coordinates.
 ///
-/// # Arguments
+/// This function modifies the block state at the specified position within the given chunk.
 ///
-/// * `chunk` - Mutable reference to the chunk to be modified.
-/// * `block_type` - The block type to set.
-/// * `x`, `y`, `z` - The global coordinates of the block.
+/// # Arguments
+/// 
+/// * `chunk` - Mutable reference to the chunk being modified.
+/// * `block_type` - The type of the block to be placed, specified as a string (e.g., "minecraft:bedrock").
+/// * `x`, `y`, `z` - The global coordinates where the block should be set.
 fn set_block_in_chunk(chunk: &mut Chunk, block_type: &str, x: i32, y: i32, z: i32) {
     let local_x = (x & 15) as usize;
     let local_y = y as usize;
