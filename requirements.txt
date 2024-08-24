@@ -1,4 +1,4 @@
-anvil-parser==0.9.0
+anvil-new==1.0.1
 matplotlib==3.9.0
 numpy==1.26.4
 pytest==8.2.1
