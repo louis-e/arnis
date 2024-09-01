@@ -1,1 +1,4 @@
 /target
+Cargo.lock
+export.json
+parsed_osm_data.txt
