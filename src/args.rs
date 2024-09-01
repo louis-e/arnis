@@ -1,4 +1,3 @@
-use crate::data_processing::{process_raw_data, generate_world};
 use clap::{ArgGroup, Parser};
 use std::path::Path;
 use std::process::exit;
@@ -40,7 +39,7 @@ pub struct Args {
 impl Args {
     pub fn run(&self) {
         // Validating the world path
-        let mc_world_path = Path::new(&self.path);
+        let mc_world_path: &Path = Path::new(&self.path);
         if !mc_world_path.join("region").exists() {
             eprintln!("Error! No Minecraft world found at the given path");
             exit(1);
@@ -53,11 +52,6 @@ impl Args {
                 exit(1);
             }
         }
-
-        // TODO Placeholder for getting data and processing it
-        let raw_data = get_data();
-        let processed_data = process_raw_data(raw_data, self);
-        generate_world(processed_data, self);
     }
 }
 
@@ -82,9 +76,4 @@ fn validate_bounding_box(bbox: &str) -> bool {
     }
 
     min_lng < max_lng && min_lat < max_lat
-}
-
-/// Placeholder function for data fetching
-fn get_data() -> String {
-    "raw_data".to_string()
 }
