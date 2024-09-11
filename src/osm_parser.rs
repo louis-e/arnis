@@ -38,7 +38,8 @@ fn lat_lon_to_minecraft_coords(
     lat: f64,
     lon: f64,
     bbox: (f64, f64, f64, f64), // (min_lon, min_lat, max_lon, max_lat)
-    scale_factor: f64,
+    scale_factor_x: f64,
+    scale_factor_z: f64,
 ) -> (i32, i32) {
     let (min_lon, min_lat, max_lon, max_lat) = bbox;
 
@@ -46,11 +47,11 @@ fn lat_lon_to_minecraft_coords(
     let rel_x: f64 = (lon - min_lon) / (max_lon - min_lon);
     let rel_z: f64 = (lat - min_lat) / (max_lat - min_lat);
 
-    // Apply scaling factor and convert to Minecraft coordinates
-    let x: i32 = (rel_x * scale_factor) as i32;
-    let z: i32 = (rel_z * scale_factor) as i32;
+    // Apply scaling factors for each dimension and convert to Minecraft coordinates
+    let x: i32 = (rel_x * scale_factor_x) as i32;
+    let z: i32 = (rel_z * scale_factor_z) as i32;
 
-    (z, x) // Swap x and z coord to avoid a mirrored projection on the Minecraft map
+    (z, x) // Swap x and z coords to avoid a mirrored projection on the Minecraft map
 }
 
 /// Function to determine the number of decimal places in a float as a string
@@ -72,8 +73,9 @@ fn convert_to_scaled_int(value: f64, max_decimal_places: usize) -> i64 {
 pub fn parse_osm_data(
     json_data: &Value,
     bbox: (f64, f64, f64, f64),
-) -> Vec<ProcessedElement> {
+) -> (Vec<ProcessedElement>, f64, f64) {
     println!("Parsing data...");
+    
     // Deserialize the JSON data into the OSMData structure
     let data: OSMData = serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
 
@@ -96,8 +98,23 @@ pub fn parse_osm_data(
         convert_to_scaled_int(bbox.3, max_decimal_places),
     );
 
-    let scale_factor: f64 = ((bbox_scaled.2 - bbox_scaled.0) * 10 / 100) as f64;
-    println!("Scale factor: {}", scale_factor);
+    // Determine which dimension is larger and assign scale factors accordingly
+    let (scale_factor_x, scale_factor_z) = if (bbox_scaled.2 - bbox_scaled.0) > (bbox_scaled.3 - bbox_scaled.1) {
+        // Longitude difference is greater than latitude difference
+        (
+            ((bbox_scaled.2 - bbox_scaled.0) * 10 / 100) as f64, // Scale for width (x) is based on longitude difference
+            ((bbox_scaled.3 - bbox_scaled.1) * 14 / 100) as f64, // Scale for length (z) is based on latitude difference
+        )
+    } else {
+        // Latitude difference is greater than or equal to longitude difference
+        (
+            ((bbox_scaled.3 - bbox_scaled.1) * 10 / 100) as f64, // Scale for width (x) is based on latitude difference
+            ((bbox_scaled.2 - bbox_scaled.0) * 14 / 100) as f64, // Scale for length (z) is based on longitude difference
+        )
+    };
+
+    println!("Scale factor X: {}", scale_factor_x); // Only if debug
+    println!("Scale factor Z: {}", scale_factor_z); // Only if debug
 
     let mut nodes_map: HashMap<u64, (i32, i32)> = HashMap::new();
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
@@ -106,7 +123,7 @@ pub fn parse_osm_data(
     for element in &data.elements {
         if element.r#type == "node" {
             if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
-                let mc_coords: (i32, i32) = lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor);
+                let mc_coords: (i32, i32) = lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_x, scale_factor_z);
                 nodes_map.insert(element.id, mc_coords);
 
                 // Process nodes with tags
@@ -150,10 +167,10 @@ pub fn parse_osm_data(
         }
     }
 
-    processed_elements
+    (processed_elements, scale_factor_z, scale_factor_x)
 }
 
-const PRIORITY_ORDER: [&str; 4] = ["building", "highway", "waterway", "barrier"];
+const PRIORITY_ORDER: [&str; 5] = ["entrance", "building", "highway", "waterway", "barrier"];
 
 // Function to determine the priority of each element
 pub fn get_priority(element: &ProcessedElement) -> usize {

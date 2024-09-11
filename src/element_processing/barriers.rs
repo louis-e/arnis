@@ -7,7 +7,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
     if let Some(barrier_type) = element.tags.get("barrier") {
         if barrier_type == "bollard" {
             if let Some(&(x, z)) = element.nodes.first() {
-                editor.set_block(&COBBLESTONE_WALL, x, ground_level + 1, z); // Place bollard
+                editor.set_block(&COBBLESTONE_WALL, x, ground_level + 1, z, None, None); // Place bollard
             }
         } else {
             // Determine wall height
@@ -29,7 +29,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
                 for (bx, _, bz) in bresenham_points {
                     // Build the barrier wall to the specified height
                     for y in (ground_level + 1)..=(ground_level + wall_height) {
-                        editor.set_block(&COBBLESTONE_WALL, bx, y, bz); // Barrier wall
+                        editor.set_block(&COBBLESTONE_WALL, bx, y, bz, None, None); // Barrier wall
                     }
 
                     // Add an optional top to the barrier if the height is more than 1
@@ -39,6 +39,8 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
                             bx,
                             ground_level + wall_height + 1,
                             bz,
+                            None,
+                            None,
                         ); // Top of the barrier
                     }
                 }

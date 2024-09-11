@@ -36,7 +36,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, gr
                     // Generate the line of coordinates between the two nodes
                     let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
                     for (bx, _, bz) in bresenham_points {
-                        editor.set_block(block_type, bx, ground_level, bz);
+                        editor.set_block(block_type, bx, ground_level, bz, None, None);
                     }
 
                     current_natural.push((x, z));
@@ -54,7 +54,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, gr
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
                 for (x, z) in filled_area {
-                    editor.set_block(block_type, x, ground_level, z);
+                    editor.set_block(block_type, x, ground_level, z, None, None);
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
@@ -72,9 +72,9 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, gr
                                 3 => &YELLOW_FLOWER,
                                 _ => &WHITE_FLOWER,
                             };
-                            editor.set_block(flower_block, x, ground_level + 1, z);
+                            editor.set_block(flower_block, x, ground_level + 1, z, None, None);
                         } else if random_choice <= 1 {
-                            editor.set_block(&GRASS, x, ground_level + 1, z);
+                            editor.set_block(&GRASS, x, ground_level + 1, z, None, None);
                         }
                     }
                 }

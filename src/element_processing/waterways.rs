@@ -32,7 +32,8 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedElement, 
                     for (bx, _, bz) in bresenham_points {
                         for x in (bx - waterway_width / 2)..=(bx + waterway_width / 2) {
                             for z in (bz - waterway_width / 2)..=(bz + waterway_width / 2) {
-                                editor.set_block(&WATER, x, ground_level, z); // Set water block
+                                editor.set_block(&WATER, x, ground_level, z, None, None); // Set water block
+                                editor.set_block(&AIR, x, ground_level, z, None, Some(&[&SPONGE]));
                             }
                         }
                     }
