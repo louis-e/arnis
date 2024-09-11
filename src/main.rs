@@ -61,18 +61,18 @@ fn main() {
     ).expect("Failed to fetch data");
 
     // Parse raw data
-    let mut parsed_data: Vec<osm_parser::ProcessedElement> = osm_parser::parse_osm_data(&raw_data, bbox_tuple);
-    //parsed_data.sort_by_key(|element| osm_parser::get_priority(element)); // Some elements disappear when I sort the elements?
+    let (mut parsed_elements, scale_factor_x, scale_factor_z) = osm_parser::parse_osm_data(&raw_data, bbox_tuple);
+    parsed_elements.sort_by_key(|element| osm_parser::get_priority(element)); // Some elements disappear when I sort the elements?
 
     // Write the parsed OSM data to a file for inspection
     if (args.debug) {
         let mut output_file: File = File::create("parsed_osm_data.txt").expect("Failed to create output file");
-        for element in &parsed_data {
+        for element in &parsed_elements {
             writeln!(output_file, "Element ID: {}, Type: {}, Tags: {:?}, Nodes: {:?}", element.id, element.r#type, element.tags, element.nodes)
                 .expect("Failed to write to output file");
         }
     }
     
     // Generate world
-    data_processing::generate_world(parsed_data, &args);
+    data_processing::generate_world(parsed_elements, &args, scale_factor_x, scale_factor_z);
 }

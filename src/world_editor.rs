@@ -39,19 +39,21 @@ pub struct WorldEditor {
     region_template_path: String,
     region_dir: String,
     regions: HashMap<(i32, i32), Region<File>>,
-    chunks_to_modify: HashMap<(i32, i32, i32, i32), Vec<(Block, i32, i32, i32)>>,
-    modified_positions: HashSet<(i32, i32, i32)>,  // New HashSet to track modified positions
+    chunks_to_modify: HashMap<(i32, i32, i32, i32), HashMap<(i32, i32, i32), Block>>,
+    scale_factor_x: f64,
+    scale_factor_z: f64,
 }
 
 impl WorldEditor {
     /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_template_path: &str, region_dir: &str) -> Self {
+    pub fn new(region_template_path: &str, region_dir: &str, scale_factor_x: f64, scale_factor_z: f64) -> Self {
         Self {
             region_template_path: region_template_path.to_string(),
             region_dir: region_dir.to_string(),
             regions: HashMap::new(),
             chunks_to_modify: HashMap::new(),
-            modified_positions: HashSet::new(),  // Initialize the HashSet
+            scale_factor_x: scale_factor_x,
+            scale_factor_z: scale_factor_z,
         }
     }
 
@@ -68,36 +70,62 @@ impl WorldEditor {
     }
 
     /// Sets a block of the specified type at the given coordinates.
-    pub fn set_block(&mut self, block: &'static Lazy<Block>, x: i32, y: i32, z: i32) {
+    pub fn set_block(
+        &mut self,
+        block: &'static Lazy<Block>,
+        x: i32,
+        y: i32,
+        z: i32,
+        override_whitelist: Option<&[&'static Lazy<Block>]>,
+        override_blacklist: Option<&[&'static Lazy<Block>]>,
+    ) {
         let position = (x, y, z);
 
-        // Check if the position has already been modified
-        /*if self.modified_positions.contains(&position) {
-            if (x >= 128 && x <= 143 && z >= 32 && z <= 47) {
-                println!("skip {} {} {}", x, y, z);
-            }
-            return; // Block at this position has already been set, so do nothing
-        }*/
-
-        // Track the position as modified
-        self.modified_positions.insert(position);
+        // Check if coordinates are within bounds
+        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+            return;
+        }
 
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
-
-        let chunk_x_within_region: usize = (chunk_x & 31) as usize;
-        let chunk_z_within_region: usize = (chunk_z & 31) as usize;
-
-        self.chunks_to_modify
-            .entry((region_x, region_z, chunk_x_within_region as i32, chunk_z_within_region as i32))
-            .or_default()
-            .push(((*block).clone(), x, y, z));
-    }
+    
+        let chunk_x_within_region: i32 = chunk_x & 31;
+        let chunk_z_within_region: i32 = chunk_z & 31;
+    
+        let chunk_key = (region_x, region_z, chunk_x_within_region, chunk_z_within_region);
+        let chunk_blocks = self.chunks_to_modify.entry(chunk_key).or_default();
+    
+        if let Some(existing_block) = chunk_blocks.get(&position) {
+            // Check against whitelist and blacklist
+            if let Some(whitelist) = override_whitelist {
+                if whitelist.iter().any(|&whitelisted_block| whitelisted_block.name == existing_block.name) {
+                    chunk_blocks.insert(position, (*block).clone());
+                }
+            } else if let Some(blacklist) = override_blacklist {
+                if !blacklist.iter().any(|&blacklisted_block| blacklisted_block.name == existing_block.name) {
+                    chunk_blocks.insert(position, (*block).clone());
+                }
+            }
+        } else {
+            chunk_blocks.insert(position, (*block).clone());
+        }
+    }    
 
     /// Fills a cuboid area with the specified block between two coordinates.
-    pub fn fill_blocks(&mut self, block: &'static Lazy<Block>, x1: i32, y1: i32, z1: i32, x2: i32, y2: i32, z2: i32) {
+    pub fn fill_blocks(
+        &mut self,
+        block: &'static Lazy<Block>,
+        x1: i32,
+        y1: i32,
+        z1: i32,
+        x2: i32,
+        y2: i32,
+        z2: i32,
+        override_whitelist: Option<&[&'static Lazy<Block>]>,
+        override_blacklist: Option<&[&'static Lazy<Block>]>,
+    ) {
         let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
         let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
         let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
@@ -105,7 +133,7 @@ impl WorldEditor {
         for x in min_x..=max_x {
             for y in min_y..=max_y {
                 for z in min_z..=max_z {
-                    self.set_block(block, x, y, z);
+                    self.set_block(block, x, y, z, override_whitelist, override_blacklist);
                 }
             }
         }
@@ -120,71 +148,23 @@ impl WorldEditor {
             let region: &mut Region<File> = self.load_region(region_x, region_z);
             
             if let Ok(Some(data)) = region.read_chunk(chunk_x as usize, chunk_z as usize) {
-                let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap(); // TODO: called `Result::unwrap()` on an `Err` value: Error("missing field `block_states`")
+                let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
 
-                for (block, x, y, z) in block_list {
+                for ((x, y, z), block) in block_list {
                     set_block_in_chunk(&mut chunk, block, x, y, z);
                 }
 
                 let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
-                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser).unwrap(); // NOTE chunk 8 2 is indeed being written
+                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser).unwrap();
             }
         }
     }
 }
 
-/*fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
-    let local_x = (x & 15) as usize;
-    let local_y = y as usize;
-    let local_z = (z & 15) as usize;
-
-    /*if (x >= 128 && x <= 143 && z >= 32 && z <= 47)
-    {
-        println!("{} {} {} {}", block.name, x, y, z);
-    }*/
-
-    for section in chunk.sections.iter_mut() {
-        if let Some(Value::Byte(y_byte)) = section.other.get("Y") {
-            if *y_byte == (local_y >> 4) as i8 {
-                let palette = &mut section.block_states.palette;
-                let block_index = (local_y % 16 * 256 + local_z * 16 + local_x) as usize;
-
-                let palette_index = if let Some(index) = palette.iter().position(|item| item.name == block.name) {
-                    index as u32
-                } else {
-                    palette.push(PaletteItem {
-                        name: block.name.clone(),
-                        properties: block.properties.clone(),
-                    });
-                    (palette.len() - 1) as u32
-                };
-
-                if let Some(Value::LongArray(ref mut data)) = section.block_states.other.get_mut("data") {
-                    /*if (x >= 128 && x <= 143 && z >= 32 && z <= 47) {
-                        println!("T1 {} {}", block_index, palette_index);
-                    } else {
-                        println!("D1 {} {}", block_index, palette_index);
-                    }*/
-                    set_block_in_section(data, block_index, palette_index);
-                } else {
-                    /*if (x >= 128 && x <= 143 && z >= 32 && z <= 47) {
-                        println!("T2 {} {}", block_index, palette_index);
-                    } else {
-                        println!("D2 {} {}", block_index, palette_index);
-                    }*/
-                    let mut new_data = vec![0; 256];
-                    set_block_in_section(&mut new_data, block_index, palette_index);
-                    section.block_states.other.insert("data".to_string(), Value::LongArray(LongArray::new(new_data)));
-                }
-
-                break;
-            }
-        }
-    }
-}*/
 fn bits_per_block(palette_size: u32) -> u32 {
     (palette_size as f32).log2().ceil().max(4.0).min(8.0) as u32
 }
+
 fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
     let local_x: usize = (x & 15) as usize;
     let local_y: usize = y as usize;
@@ -267,7 +247,6 @@ fn set_block_in_section(data: &mut Vec<i64>, block_index: usize, palette_index: 
             let new_next_value: u64 = (next_value & !(mask >> overflow_bits)) | ((palette_index as u64 & mask) >> overflow_bits);
             data[next_long_index] = new_next_value as i64;
         } else {
-            // If we reach here, something went wrong with our data resizing logic
             panic!("Data slice is too small even after resizing. This should never happen.");
         }
     }

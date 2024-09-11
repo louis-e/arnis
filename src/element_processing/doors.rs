@@ -18,9 +18,9 @@ pub fn generate_doors(editor: &mut WorldEditor, element: &ProcessedElement, grou
         if let Some(&(x, z)) = element.nodes.first() {
             // TODO println!("DOOR {} {} {}", x, ground_level, z);
             // Set the ground block and the door blocks
-            editor.set_block(&GRAY_CONCRETE, x, ground_level, z);
-            editor.set_block(&DARK_OAK_DOOR_LOWER, x, ground_level + 1, z);
-            editor.set_block(&DARK_OAK_DOOR_UPPER, x, ground_level + 2, z);
+            editor.set_block(&GRAY_CONCRETE, x, ground_level, z, None, None);
+            editor.set_block(&DARK_OAK_DOOR_LOWER, x, ground_level + 1, z, None, None);
+            editor.set_block(&DARK_OAK_DOOR_UPPER, x, ground_level + 2, z, None, None);
         }
     }
 }
