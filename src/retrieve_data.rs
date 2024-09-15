@@ -1,3 +1,4 @@
+use colored::Colorize;
 use reqwest::blocking::Client;
 use serde_json::Value;
 use std::fs::File;
@@ -47,7 +48,7 @@ pub fn fetch_data(
     debug: bool,
     download_method: &str,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("Fetching data...");
+    println!("{} {}", "[1/5]".bold(), "Fetching data...");
 
     // List of Overpass API servers
     let api_servers: Vec<&str> = vec![
@@ -75,6 +76,7 @@ pub fn fetch_data(
         nwr["barrier"];
         nwr["entrance"];
         nwr["door"];
+        way;
     )->.waysinbbox;
     (
         node(w.waysinbbox);
@@ -83,10 +85,6 @@ pub fn fetch_data(
     .nodesinbbox out skel qt;"#,
         bbox.1, bbox.0, bbox.3, bbox.2
     );
-
-    if debug {
-        println!("OSM Query: {}", query);
-    }
 
     if let Some(file) = file {
         // Load data from file

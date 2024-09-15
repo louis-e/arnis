@@ -5,13 +5,19 @@ use crate::bresenham::bresenham_line;
 
 pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
     if let Some(railway_type) = element.tags.get("railway") {
-        if ["proposed", "abandoned", "subway"].contains(&railway_type.as_str()) {
-            return; // Skip these types of railways
+        if ["proposed", "abandoned", "subway", "construction"].contains(&railway_type.as_str()) {
+            return;
         }
 
         if let Some(subway) = element.tags.get("subway") {
             if subway == "yes" {
-                return; // Skip if it's a subway
+                return;
+            }
+        }
+
+        if let Some(tunnel) = element.tags.get("tunnel") {
+            if tunnel == "yes" {
+                return;
             }
         }
 
