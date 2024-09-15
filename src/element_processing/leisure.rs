@@ -101,8 +101,8 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedElement, gr
                             editor.set_block(&OAK_PLANKS, x + 2, ground_level + 2, z, None, None);
                             editor.set_block(&OAK_PLANKS, x + 2, ground_level + 1, z, None, None);
 
-                            editor.set_block(&LADDER, x + 2, ground_level + 2, z + 1, None, None);
-                            editor.set_block(&LADDER, x + 2, ground_level + 1, z + 1, None, None);
+                            editor.set_block(&LADDER, x + 2, ground_level + 2, z - 1, None, None);
+                            editor.set_block(&LADDER, x + 2, ground_level + 1, z - 1, None, None);
                         }
                         21..=30 => { // Sandpit
                             editor.fill_blocks(&SAND, x - 3, ground_level, z - 3, x + 3, ground_level, z + 3, Some(&[&GREEN_STAINED_HARDENED_CLAY]), None);

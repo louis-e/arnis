@@ -5,6 +5,19 @@ use crate::bresenham::bresenham_line;
 use crate::floodfill::flood_fill_area;
 
 pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+    // Skip if 'layer' or 'level' is negative in the tags
+    if let Some(layer) = element.tags.get("layer") {
+        if layer.parse::<i32>().unwrap_or(0) < 0 {
+            return;
+        }
+    }
+    
+    if let Some(level) = element.tags.get("level") {
+        if level.parse::<i32>().unwrap_or(0) < 0 {
+            return;
+        }
+    }
+
     if let Some(amenity_type) = element.tags.get("amenity") {
         let first_node: Option<&(i32, i32)> = element.nodes.first();
         match amenity_type.as_str() {
@@ -12,6 +25,13 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                 // Place a cauldron for waste disposal or waste basket
                 if let Some(&(x, z)) = first_node {
                     editor.set_block(&CAULDRON, x, ground_level + 1, z, None, None);
+                }
+                return;
+            }
+            "vending_machine" | "atm" => {
+                if let Some(&(x, z)) = first_node {
+                    editor.set_block(&IRON_BLOCK, x, ground_level + 1, z, None, None);
+                    editor.set_block(&IRON_BLOCK, x, ground_level + 2, z, None, None);
                 }
                 return;
             }
@@ -59,14 +79,14 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
             }
             "parking" | "fountain" => {
                 // Process parking or fountain areas
-                let mut previous_node: Option<(i32, i32)> = None;  // Explicitly annotated type
+                let mut previous_node: Option<(i32, i32)> = None;
                 let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
                 let mut current_amenity: Vec<(i32, i32)> = vec![];
 
                 let block_type: &once_cell::sync::Lazy<Block> = match amenity_type.as_str() {
                     "fountain" => &WATER,
                     "parking" => &GRAY_CONCRETE,
-                    _ => &GRAY_CONCRETE, // Default type if needed
+                    _ => &GRAY_CONCRETE,
                 };
 
                 for &node in &element.nodes {

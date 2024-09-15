@@ -1,9 +1,12 @@
+use colored::Colorize;
+use crate::args::Args;
 use crate::block_definitions::*;
 use fastanvil::Region;
 use fastnbt::{Value, LongArray};
+use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 
 #[derive(Serialize, Deserialize)]
@@ -35,25 +38,33 @@ struct PaletteItem {
     properties: Option<Value>,
 }
 
-pub struct WorldEditor {
+pub struct WorldEditor<'a> {
     region_template_path: String,
     region_dir: String,
     regions: HashMap<(i32, i32), Region<File>>,
     chunks_to_modify: HashMap<(i32, i32, i32, i32), HashMap<(i32, i32, i32), Block>>,
     scale_factor_x: f64,
     scale_factor_z: f64,
+    args: &'a Args,
 }
 
-impl WorldEditor {
+impl<'a> WorldEditor<'a> {
     /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_template_path: &str, region_dir: &str, scale_factor_x: f64, scale_factor_z: f64) -> Self {
+    pub fn new(
+        region_template_path: &str,
+        region_dir: &str,
+        scale_factor_x: f64,
+        scale_factor_z: f64,
+        args: &'a Args,
+    ) -> Self {
         Self {
             region_template_path: region_template_path.to_string(),
             region_dir: region_dir.to_string(),
             regions: HashMap::new(),
             chunks_to_modify: HashMap::new(),
-            scale_factor_x: scale_factor_x,
-            scale_factor_z: scale_factor_z,
+            scale_factor_x,
+            scale_factor_z,
+            args,
         }
     }
 
@@ -79,7 +90,7 @@ impl WorldEditor {
         override_whitelist: Option<&[&'static Lazy<Block>]>,
         override_blacklist: Option<&[&'static Lazy<Block>]>,
     ) {
-        let position = (x, y, z);
+        let position: (i32, i32, i32) = (x, y, z);
 
         // Check if coordinates are within bounds
         if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
@@ -94,8 +105,8 @@ impl WorldEditor {
         let chunk_x_within_region: i32 = chunk_x & 31;
         let chunk_z_within_region: i32 = chunk_z & 31;
     
-        let chunk_key = (region_x, region_z, chunk_x_within_region, chunk_z_within_region);
-        let chunk_blocks = self.chunks_to_modify.entry(chunk_key).or_default();
+        let chunk_key: (i32, i32, i32, i32) = (region_x, region_z, chunk_x_within_region, chunk_z_within_region);
+        let chunk_blocks: &mut HashMap<(i32, i32, i32), Block> = self.chunks_to_modify.entry(chunk_key).or_default();
     
         if let Some(existing_block) = chunk_blocks.get(&position) {
             // Check against whitelist and blacklist
@@ -141,23 +152,39 @@ impl WorldEditor {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("Saving world...");
+        println!("{} {}", "[5/5]".bold(), "Saving world...");
+    
+        let debug: bool = self.args.debug;
         let chunks_to_process: Vec<_> = self.chunks_to_modify.drain().collect();
-
+        let total_chunks: u64 = chunks_to_process.len() as u64;
+    
+        let save_pb: ProgressBar = ProgressBar::new(total_chunks);
+        save_pb.set_style(ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} chunks ({eta})")
+            .unwrap()
+            .progress_chars("█▓░"));
+    
         for ((region_x, region_z, chunk_x, chunk_z), block_list) in chunks_to_process {
             let region: &mut Region<File> = self.load_region(region_x, region_z);
             
             if let Ok(Some(data)) = region.read_chunk(chunk_x as usize, chunk_z as usize) {
                 let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
-
+    
                 for ((x, y, z), block) in block_list {
-                    set_block_in_chunk(&mut chunk, block, x, y, z);
+                    set_block_in_chunk(&mut chunk, block, x, y, z, region_x, region_z, chunk_x, chunk_z, debug);
                 }
-
+    
                 let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
-                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser).unwrap();
+                
+                // Write chunk data back to the correct location, ensuring correct chunk coordinates
+                let expected_chunk_location: (usize, usize) = ((chunk_x as usize) & 31, (chunk_z as usize) & 31);
+                region.write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser).unwrap();
             }
+    
+            save_pb.inc(1);
         }
+        
+        save_pb.finish();
     }
 }
 
@@ -165,7 +192,18 @@ fn bits_per_block(palette_size: u32) -> u32 {
     (palette_size as f32).log2().ceil().max(4.0).min(8.0) as u32
 }
 
-fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
+fn set_block_in_chunk(
+    chunk: &mut Chunk, 
+    block: Block, 
+    x: i32, 
+    y: i32, 
+    z: i32, 
+    region_x: i32, 
+    region_z: i32, 
+    chunk_x: i32, 
+    chunk_z: i32, 
+    debug: bool
+) {
     let local_x: usize = (x & 15) as usize;
     let local_y: usize = y as usize;
     let local_z: usize = (z & 15) as usize;
@@ -176,21 +214,35 @@ fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
                 let palette: &mut Vec<PaletteItem> = &mut section.block_states.palette;
                 let block_index: usize = (local_y % 16 * 256 + local_z * 16 + local_x) as usize;
 
-                let palette_index = if let Some(index) = palette.iter().position(|item: &PaletteItem| item.name == block.name) {
-                    index as u32
-                } else {
-                    palette.push(PaletteItem {
-                        name: block.name.clone(),
-                        properties: block.properties.clone(),
-                    });
-                    (palette.len() - 1) as u32
-                };
+                // Check if the block is already in the palette
+                let mut palette_index: Option<usize> = palette.iter().position(|item: &PaletteItem| item.name == block.name);
 
-                let bits_per_block = bits_per_block(palette.len() as u32);
+                // If the block is not in the palette and adding it would exceed a reasonable size, skip or replace
+                // This workaround prevents this major issue: https://github.com/owengage/fastnbt/issues/120
+                if palette_index.is_none() {
+                    if palette.len() >= 16 {
+                        if debug {
+                            println!("Skipping block placement to avoid excessive palette size in region ({}, {}), chunk ({}, {})", region_x, region_z, chunk_x, chunk_z);
+                        }
+                        palette_index = Some(0);
+                    } else {
+                        // Otherwise, add the new block type to the palette
+                        palette.push(PaletteItem {
+                            name: block.name.clone(),
+                            properties: block.properties.clone(),
+                        });
+                        palette_index = Some(palette.len() - 1);
+                    }
+                }
+
+                // Unwrap because we are sure palette_index is Some after this point
+                let palette_index: u32 = palette_index.unwrap() as u32;
+                
+                let bits_per_block: u32 = bits_per_block(palette.len() as u32);
                 if let Some(Value::LongArray(ref mut data)) = section.block_states.other.get_mut("data") {
                     // Convert LongArray to Vec<i64>
                     let mut vec_data: Vec<i64> = data.as_mut().to_vec();
-                    ensure_data_array_size(&mut vec_data, bits_per_block);
+                    ensure_data_array_size(&mut vec_data, bits_per_block, region_x, region_z, chunk_x, chunk_z);
                     set_block_in_section(&mut vec_data, block_index, palette_index, bits_per_block);
                     // Update LongArray with modified Vec<i64>
                     *data = LongArray::new(vec_data);
@@ -208,19 +260,40 @@ fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
     }
 }
 
+
 /// Ensure data array is correctly sized based on bits per block
-fn ensure_data_array_size(data: &mut Vec<i64>, bits_per_block: u32) {
+fn ensure_data_array_size(
+    data: &mut Vec<i64>,
+    bits_per_block: u32,
+    region_x: i32,
+    region_z: i32,
+    chunk_x: i32,
+    chunk_z: i32
+) {
     let blocks_per_long: u32 = 64 / bits_per_block;
     let required_longs: usize = ((4096 + blocks_per_long - 1) / blocks_per_long) as usize;
 
     if data.len() != required_longs {
-        println!("Resizing data from {} to {}", data.len(), required_longs);
+        println!(
+            "Resizing data from {} to {} in region ({}, {}), chunk ({}, {})",
+            data.len(),
+            required_longs,
+            region_x,
+            region_z,
+            chunk_x,
+            chunk_z
+        );
         data.resize(required_longs, 0);
     }
     assert_eq!(data.len(), required_longs, "Data length mismatch after resizing.");
 }
 
-fn set_block_in_section(data: &mut Vec<i64>, block_index: usize, palette_index: u32, bits_per_block: u32) {
+fn set_block_in_section(
+    data: &mut Vec<i64>,
+    block_index: usize,
+    palette_index: u32,
+    bits_per_block: u32
+) {
     let blocks_per_long: u32 = 64 / bits_per_block;
     let required_longs: usize = ((4096 + blocks_per_long - 1) / blocks_per_long) as usize;
 

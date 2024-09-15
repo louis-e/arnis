@@ -72,7 +72,6 @@ The project is named after the smallest city in Germany, Arnis[^2]. The city's s
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Design and implement a GUI
-- [ ] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120))
 - [ ] Evaluate and implement multithreaded region saving
 - [ ] Better code documentation
 - [ ] Refactor railway implementation
@@ -80,6 +79,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Refactor fountain structure implementation
 - [ ] Tool for mapping real coordinates to Minecraft coordinates
 - [ ] Setup fork of [https://github.com/aaronr/bboxfinder.com](https://github.com/aaronr/bboxfinder.com) for easy bbox picking
+- [ ] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
 - [ ] Add interior to buildings
 - [ ] Evaluate and implement elevation
 - [ ] Generate a few big cities using high performance hardware and make them available to download

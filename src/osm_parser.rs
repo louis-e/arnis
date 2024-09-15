@@ -1,3 +1,5 @@
+use crate::args::Args;
+use colored::Colorize;
 use serde_json::Value;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -9,16 +11,7 @@ pub struct OSMElement {
     pub lat: Option<f64>,
     pub lon: Option<f64>,
     pub nodes: Option<Vec<u64>>,
-    pub members: Option<Vec<Member>>, // For relations
     pub tags: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Member {
-    pub r#type: String,
-    #[serde(rename = "ref")]
-    pub ref_id: u64,
-    pub role: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,8 +66,9 @@ fn convert_to_scaled_int(value: f64, max_decimal_places: usize) -> i64 {
 pub fn parse_osm_data(
     json_data: &Value,
     bbox: (f64, f64, f64, f64),
+    args: &Args,
 ) -> (Vec<ProcessedElement>, f64, f64) {
-    println!("Parsing data...");
+    println!("{} {}", "[2/5]".bold(), "Parsing data...");
     
     // Deserialize the JSON data into the OSMData structure
     let data: OSMData = serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
@@ -113,8 +107,10 @@ pub fn parse_osm_data(
         )
     };
 
-    println!("Scale factor X: {}", scale_factor_x); // Only if debug
-    println!("Scale factor Z: {}", scale_factor_z); // Only if debug
+    if args.debug {
+        println!("Scale factor X: {}", scale_factor_x);
+        println!("Scale factor Z: {}", scale_factor_z);
+    }
 
     let mut nodes_map: HashMap<u64, (i32, i32)> = HashMap::new();
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();

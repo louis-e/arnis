@@ -58,9 +58,12 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
         for (x, z) in floor_area {
-            editor.set_block(block_type, x, ground_level, z, None, None);
             if landuse_tag == "traffic_island" {
                 editor.set_block(block_type, x, ground_level + 1, z, None, None);
+            } else if landuse_tag == "construction" || landuse_tag == "railway" {
+                editor.set_block(block_type, x, ground_level, z, None, Some(&[&SPONGE]));
+            } else {
+                editor.set_block(block_type, x, ground_level, z, None, None);
             }
 
             // Add specific features for different landuse types
@@ -109,7 +112,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                     if !check_for_water(x, z) {
                         if x % 15 == 0 || z % 15 == 0 {
                             editor.set_block(&WATER, x, ground_level, z, Some(&[&FARMLAND]), None);
-                            editor.set_block(&AIR, x, ground_level, z, None, Some(&[&SPONGE]));
+                            editor.set_block(&AIR, x, ground_level + 1, z, None, Some(&[&SPONGE]));
                         } else {
                             editor.set_block(&FARMLAND, x, ground_level, z, None, None);
                             if rng.gen_range(0..76) == 0 {
@@ -148,14 +151,14 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                             editor.set_block(&SCAFFOLDING, x - 1, ground_level + 1, z, None, None);
                             editor.set_block(&SCAFFOLDING, x + 1, ground_level + 1, z - 1, None, None);
                         }
-                    } else if random_choice < 20 {
+                    } else if random_choice < 30 {
                         let construction_items: [&once_cell::sync::Lazy<Block>; 11] = [
                             &OAK_LOG, &COBBLESTONE, &GRAVEL, &GLOWSTONE, &STONE,
                             &COBBLESTONE_WALL, &BLACK_CONCRETE, &SAND, &OAK_PLANKS, &DIRT, &BRICK,
                         ];
                         editor.set_block(construction_items[rng.gen_range(0..construction_items.len())], x, ground_level + 1, z, None, None);
-                    } else if random_choice < 25 {
-                        if random_choice < 20 {
+                    } else if random_choice < 35 {
+                        if random_choice < 30 {
                             editor.set_block(&DIRT, x, ground_level + 1, z, None, None);
                             editor.set_block(&DIRT, x, ground_level + 2, z, None, None);
                             editor.set_block(&DIRT, x + 1, ground_level + 1, z, None, None);
@@ -166,8 +169,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                             editor.set_block(&DIRT, x - 1, ground_level + 1, z, None, None);
                             editor.set_block(&DIRT, x, ground_level + 1, z - 1, None, None);
                         }
-                    } else if random_choice < 140 {
-                        editor.set_block(&AIR, x, ground_level, z, None, None);
+                    } else if random_choice < 150 {
+                        editor.set_block(&AIR, x, ground_level, z, None, Some(&[&SPONGE]));
                     }
                 }
                 "grass" => {
@@ -191,7 +194,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
     }
 }
 
-// Placeholder function for checking water presence
+// Placeholder function for checking water presence TODO
 fn check_for_water(_x: i32, _z: i32) -> bool {
     false // Replace with your actual logic
 }

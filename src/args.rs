@@ -1,4 +1,5 @@
 use clap::{ArgGroup, Parser};
+use colored::Colorize;
 use std::path::Path;
 use std::process::exit;
 
@@ -31,7 +32,7 @@ pub struct Args {
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
     pub debug: bool,
 
-    /// Set floodfill timeout (seconds) (optional)
+    /// Set floodfill timeout (seconds) (optional) // TODO
     #[arg(long, default_value_t = 2)]
     pub timeout: u64,
 }
@@ -41,14 +42,14 @@ impl Args {
         // Validating the world path
         let mc_world_path: &Path = Path::new(&self.path);
         if !mc_world_path.join("region").exists() {
-            eprintln!("Error! No Minecraft world found at the given path");
+            eprintln!("{}", "Error! No Minecraft world found at the given path".red().bold());
             exit(1);
         }
 
         // Validating bbox if provided
         if let Some(bbox) = &self.bbox {
             if !validate_bounding_box(bbox) {
-                eprintln!("Error! Invalid bbox input");
+                eprintln!("{}", "Error! Invalid bbox input".red().bold());
                 exit(1);
             }
         }

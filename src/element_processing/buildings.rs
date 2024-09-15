@@ -13,16 +13,31 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
 
     // Randomly select block variations for corners, walls, and floors
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-    let variation_index: usize = rng.gen_range(0..building_corner_variations().len());
+    let variation_index_corner: usize = rng.gen_range(0..building_corner_variations().len());
+    let variation_index_wall: usize = rng.gen_range(0..building_wall_variations().len());
+    let variation_index_floor: usize = rng.gen_range(0..building_floor_variations().len());
 
-    let corner_block: &&once_cell::sync::Lazy<Block> = &building_corner_variations()[variation_index];
-    let wall_block: &&once_cell::sync::Lazy<Block> = &building_wall_variations()[variation_index];
-    let floor_block: &&once_cell::sync::Lazy<Block> = &building_floor_variations()[variation_index];
-    let window_block: &once_cell::sync::Lazy<Block> = &WHITE_STAINED_GLASS; // Window block
+    let corner_block: &&once_cell::sync::Lazy<Block> = &building_corner_variations()[variation_index_corner];
+    let wall_block: &&once_cell::sync::Lazy<Block> = &building_wall_variations()[variation_index_wall];
+    let floor_block: &&once_cell::sync::Lazy<Block> = &building_floor_variations()[variation_index_floor];
+    let window_block: &once_cell::sync::Lazy<Block> = &WHITE_STAINED_GLASS;
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let mut building_height: i32 = 4; // Default building height
+
+    // Skip if 'layer' or 'level' is negative in the tags
+    if let Some(layer) = element.tags.get("layer") {
+        if layer.parse::<i32>().unwrap_or(0) < 0 {
+            return;
+        }
+    }
+    
+    if let Some(level) = element.tags.get("level") {
+        if level.parse::<i32>().unwrap_or(0) < 0 {
+            return;
+        }
+    }
 
     // Determine building height from tags
     if let Some(height_str) = element.tags.get("height") {
@@ -38,6 +53,7 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
             }
         }
     }
+    // TODO: doesn't work for e.g. https://www.openstreetmap.org/way/278093219
 
     if let Some(building_type) = element.tags.get("building") {
         if building_type == "garage" {
@@ -141,9 +157,6 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
     if corner_addup != (0, 0, 0) {
         let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
         let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, 2);
-        if element.id == 905796139 {
-            println!("CHECKPOINT START");
-        }
 
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
@@ -166,9 +179,5 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
                 editor.set_block(floor_block, x, ground_level + building_height + 1, z, None, None);
             }
         }
-    }
-
-    if element.id == 905796139 {
-        println!("CHECKPOINT REACHED");
     }
 }

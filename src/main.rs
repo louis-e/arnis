@@ -6,10 +6,12 @@ mod element_processing;
 mod floodfill;
 mod osm_parser;
 mod retrieve_data;
+mod version_check;
 mod world_editor;
 
 use args::Args;
 use clap::Parser;
+use colored::*;
 use std::fs::File;
 use std::io::Write;
 
@@ -32,12 +34,17 @@ fn print_banner() {
                 {}
         "#,
         version,
-        repository
+        repository.bright_white().bold()
     );
 }
 
 fn main() {
     print_banner();
+
+    // Check for updates
+    if let Err(e) = version_check::check_for_updates() {
+        eprintln!("{}: {}", "Error checking for version updates".red().bold(), e);
+    }
 
     // Parse input arguments
     let args: Args = Args::parse();
@@ -61,11 +68,11 @@ fn main() {
     ).expect("Failed to fetch data");
 
     // Parse raw data
-    let (mut parsed_elements, scale_factor_x, scale_factor_z) = osm_parser::parse_osm_data(&raw_data, bbox_tuple);
-    parsed_elements.sort_by_key(|element| osm_parser::get_priority(element)); // Some elements disappear when I sort the elements?
+    let (mut parsed_elements, scale_factor_x, scale_factor_z) = osm_parser::parse_osm_data(&raw_data, bbox_tuple, &args);
+    parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
 
     // Write the parsed OSM data to a file for inspection
-    if (args.debug) {
+    if args.debug {
         let mut output_file: File = File::create("parsed_osm_data.txt").expect("Failed to create output file");
         for element in &parsed_elements {
             writeln!(output_file, "Element ID: {}, Type: {}, Tags: {:?}, Nodes: {:?}", element.id, element.r#type, element.tags, element.nodes)

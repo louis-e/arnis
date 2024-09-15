@@ -97,7 +97,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, g
                     if let Some(lanes) = element.tags.get("lanes") {
                         if lanes == "2" {
                             block_range = 3;
-                            add_stripe = true; // Add stripes for roads with 2 lanes
+                            add_stripe = true;
                         } else if lanes != "1" {
                             block_range = 4;
                             add_stripe = true;
