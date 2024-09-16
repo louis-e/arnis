@@ -1,57 +1,38 @@
 <p align="center">
-  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gitassets/logo.png?raw=true">
+  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/experimental-rust-dev/gitassets/logo.png?raw=true">
 </p>
 
 # Arnis - Rust Edition (Development Branch)
-This open source project generates any chosen location from the real world in Minecraft with a high level of detail.
+**This open source project generates any chosen location from the real world in Minecraft with a high level of detail.**
+
+By leveraging geospatial data from OpenStreetMap and utilizing the powerful capabilities of Rust, Arnis provides an efficient and robust solution for creating complex and accurate Minecraft worlds that reflect real-world geography and architecture.
+
+Arnis is designed to handle large-scale data and generate rich, immersive environments that bring real-world cities, landmarks, and natural features into the Minecraft universe. Whether you're looking to replicate your hometown, explore urban environments, or simply build something unique and realistic, Arnis offers a comprehensive toolset to achieve your vision.
 
 ⇒ [Where did you find this project?](https://6okq6xh5jt4.typeform.com/to/rSjZaB41)
 
----
-
-This branch is dedicated to the ongoing effort to port the Arnis project from Python to Rust.
-
-Run with the following arguments: ```cargo run --release -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="11.885287,48.292645,11.892861,48.295757"```
-
-Key objectives of this port:
-- **Modularity**: Ensure that all components (e.g., data fetching, processing, and world generation) are cleanly separated into distinct modules for better maintainability and scalability.
-- **Cross-Platform Support**: Ensure the project runs smoothly on Windows, macOS, and Linux.
-- **Comprehensive Documentation**: Detailed in-code documentation for a clear structure and logic.
-- **User-Friendly Experience**: Focus on making the project easy to use for end users, with the potential to develop a graphical user interface (GUI) in the future. Suggestions and discussions on UI/UX are welcome.
-- **Performance Optimization**: Utilize Rust’s memory safety and concurrency features to optimize the performance of the world generation process.
-
-
-As of right now, pretty much all core features from the main Python branch are already ported to Rust. Please feel free to implement & fix, propose improvements, or suggest UI/UX enhancements. Contributions, discussions and suggestions are more than welcome.
-
-Let's work together to build a high-performance, cross-platform, and user-friendly Rust version of Arnis!
-<br>
-
 ## :desktop_computer: Example
-<!---![Minecraft World Demo](https://github.com/louis-e/arnis/blob/main/gitassets/demo-comp.png?raw=true)
-![Minecraft World Demo Before After](https://github.com/louis-e/arnis/blob/main/gitassets/before-after.gif?raw=true)--->
-*To be updated*
+<img width="700" height="400" src="https://github.com/louis-e/arnis/blob/experimental-rust-dev/gitassets/mc.gif?raw=true">
 
 ## :floppy_disk: How it works
-<!---![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli-generation.gif?raw=true)--->
+![CLI Generation](https://github.com/louis-e/arnis/blob/experimental-rust-dev/gitassets/cli.gif?raw=true)
 
 The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each element (buildings, walls, fountains, farmlands, etc.) with its respective corner coordinates (nodes) and descriptive tags. When you run Arnis, the following steps are performed automatically to generate a Minecraft world:
 
 #### Processing Pipeline
-<!---1. Scraping Data from API: The script fetches geospatial data from the Overpass Turbo API.
-2. Determine Coordinate Extremes: Identifies the highest and lowest latitude and longitude values from the dataset.
-3. Standardize Coordinate Lengths: Ensures all coordinates are of uniform length and removes the decimal separator.
-4. Normalize Data: Adjusts all coordinates to start from zero by subtracting the previously determined lowest values.
-5. Parse Data: Transforms the raw data into a standardized structure.
-6. Sort elements by priority: Enables a layering system with prioritized elements.
-7. Optimize Array Size: Focuses on the outermost buildings to reduce array size.
-8. Generate Minecraft World: Iterates through the array to create the Minecraft world, including 3D structures like forests, houses, and rivers.--->
-*To be updated*
+1. Fetch Data from Overpass API: The script retrieves geospatial data for the desired bounding box from the Overpass API. You can specify the bounding box coordinates using the --bbox parameter.
+2. Parse Raw Data: The raw data is parsed to extract essential information like nodes, ways, and relations. Nodes are converted into Minecraft coordinates, and relations are handled similarly to ways, ensuring all relevant elements are processed correctly.
+3. Prioritize and Sort Elements: The elements (nodes, ways, relations) are sorted by priority to establish a layering system, which ensures that certain types of elements (e.g., entrances and buildings) are generated in the correct order to avoid conflicts and overlapping structures.
+4. Generate Minecraft World: The Minecraft world is generated using a series of element processors (generate_buildings, generate_highways, generate_landuse, etc.) that interpret the tags and nodes of each element to place the appropriate blocks in the Minecraft world. These processors handle the logic for creating 3D structures, roads, natural formations, and more, as specified by the processed data.
+5. Generate Ground Layer: A ground layer is generated based on the provided scale factors to provide a base for the entire Minecraft world. This step ensures all areas have an appropriate foundation (e.g., grass and dirt layers).
+6. Save the Minecraft World: All the modified chunks are saved back to the Minecraft region files.
 
 ## :keyboard: Usage
-```cargo run --release -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```
+```cargo run --release -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```<br>
+```arnis.exe --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```
 
 Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter.
-![How to find area](https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true)
+![How to find area](https://github.com/louis-e/arnis/blob/experimental-rust-dev/gitassets/bbox-finder.png?raw=true)
 The world will always be generated starting from the coordinates 0 0 0.
 
 Manually generate a new Minecraft world (preferably a flat world) before running the script.
@@ -84,10 +65,16 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Evaluate and implement elevation
 - [ ] Generate a few big cities using high performance hardware and make them available to download
 
-## :trophy: Hall of Fame Contributors
-This section is dedicated to recognizing and celebrating the outstanding contributions of individuals who have significantly enhanced this project. Your work and dedication are deeply appreciated!
+## :trophy: Open Source
+##### Key objectives of this project:
+- **Modularity**: Ensure that all components (e.g., data fetching, processing, and world generation) are cleanly separated into distinct modules for better maintainability and scalability.
+- **Performance Optimization**: Utilize Rust’s memory safety and concurrency features to optimize the performance of the world generation process.
+- **Comprehensive Documentation**: Detailed in-code documentation for a clear structure and logic.
+- **User-Friendly Experience**: Focus on making the project easy to use for end users, with the potential to develop a graphical user interface (GUI) in the future. Suggestions and discussions on UI/UX are welcome.
+- **Cross-Platform Support**: Ensure the project runs smoothly on Windows, macOS, and Linux.
 
 #### Contributors:
+This section is dedicated to recognizing and celebrating the outstanding contributions of individuals who have significantly enhanced this project. Your work and dedication are deeply appreciated!
 - louis-e
 - callumfrance
 - amir16yp
