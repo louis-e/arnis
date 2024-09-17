@@ -122,7 +122,7 @@ impl<'a> WorldEditor<'a> {
         } else {
             chunk_blocks.insert(position, (*block).clone());
         }
-    }    
+    }
 
     /// Fills a cuboid area with the specified block between two coordinates.
     pub fn fill_blocks(
@@ -193,16 +193,16 @@ fn bits_per_block(palette_size: u32) -> u32 {
 }
 
 fn set_block_in_chunk(
-    chunk: &mut Chunk, 
-    block: Block, 
-    x: i32, 
-    y: i32, 
-    z: i32, 
-    region_x: i32, 
-    region_z: i32, 
-    chunk_x: i32, 
-    chunk_z: i32, 
-    debug: bool
+    chunk: &mut Chunk,
+    block: Block,
+    x: i32,
+    y: i32,
+    z: i32,
+    region_x: i32,
+    region_z: i32,
+    chunk_x: i32,
+    chunk_z: i32,
+    debug: bool,
 ) {
     let local_x: usize = (x & 15) as usize;
     let local_y: usize = y as usize;
@@ -214,19 +214,23 @@ fn set_block_in_chunk(
                 let palette: &mut Vec<PaletteItem> = &mut section.block_states.palette;
                 let block_index: usize = (local_y % 16 * 256 + local_z * 16 + local_x) as usize;
 
-                // Check if the block is already in the palette
-                let mut palette_index: Option<usize> = palette.iter().position(|item: &PaletteItem| item.name == block.name);
+                // Check if the block is already in the palette with matching properties
+                let mut palette_index: Option<usize> = palette.iter().position(|item: &PaletteItem| {
+                    item.name == block.name && item.properties == block.properties
+                });
 
                 // If the block is not in the palette and adding it would exceed a reasonable size, skip or replace
-                // This workaround prevents this major issue: https://github.com/owengage/fastnbt/issues/120
                 if palette_index.is_none() {
                     if palette.len() >= 16 {
                         if debug {
-                            println!("Skipping block placement to avoid excessive palette size in region ({}, {}), chunk ({}, {})", region_x, region_z, chunk_x, chunk_z);
+                            println!(
+                                "Skipping block placement to avoid excessive palette size in region ({}, {}), chunk ({}, {})",
+                                region_x, region_z, chunk_x, chunk_z
+                            );
                         }
                         palette_index = Some(0);
                     } else {
-                        // Otherwise, add the new block type to the palette
+                        // Otherwise, add the new block type to the palette with its properties
                         palette.push(PaletteItem {
                             name: block.name.clone(),
                             properties: block.properties.clone(),
@@ -237,7 +241,7 @@ fn set_block_in_chunk(
 
                 // Unwrap because we are sure palette_index is Some after this point
                 let palette_index: u32 = palette_index.unwrap() as u32;
-                
+
                 let bits_per_block: u32 = bits_per_block(palette.len() as u32);
                 if let Some(Value::LongArray(ref mut data)) = section.block_states.other.get_mut("data") {
                     // Convert LongArray to Vec<i64>
@@ -259,6 +263,7 @@ fn set_block_in_chunk(
         }
     }
 }
+
 
 
 /// Ensure data array is correctly sized based on bits per block

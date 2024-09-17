@@ -126,7 +126,7 @@ pub static CARROTS: Lazy<Block> = Lazy::new(|| {
         "carrots",
         Some(Value::Compound({
             let mut map = HashMap::new();
-            map.insert("age".to_string(), Value::Int(7));
+            map.insert("age".to_string(), Value::String("7".to_string()));
             map
         })),
     )
@@ -159,7 +159,7 @@ pub static POTATOES: Lazy<Block> = Lazy::new(|| {
         "potatoes",
         Some(Value::Compound({
             let mut map = HashMap::new();
-            map.insert("age".to_string(), Value::Int(7));
+            map.insert("age".to_string(), Value::String("7".to_string()));
             map
         })),
     )
@@ -170,7 +170,7 @@ pub static WHEAT: Lazy<Block> = Lazy::new(|| {
         "wheat",
         Some(Value::Compound({
             let mut map = HashMap::new();
-            map.insert("age".to_string(), Value::Int(7));
+            map.insert("age".to_string(), Value::String("7".to_string()));
             map
         })),
     )
