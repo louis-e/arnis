@@ -50,6 +50,8 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
                     bridges::generate_bridges(&mut editor, element, ground_level);
                 } else if element.tags.contains_key("railway") {
                     railways::generate_railways(&mut editor, element, ground_level);
+                } else if element.tags.get("service") == Some(&"siding".to_string()) {
+                    highways::generate_siding(&mut editor, element, ground_level);
                 }
             }
             "node" => {

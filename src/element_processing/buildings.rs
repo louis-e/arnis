@@ -24,7 +24,7 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
-    let mut building_height: i32 = 4; // Default building height
+    let mut building_height: i32 = 6; // Default building height
 
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
@@ -120,6 +120,19 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
             }
         
             return;
+        } else if building_type == "apartments" {
+            // If building has no height attribute, assign a defined height
+            if building_height == 6 {
+                building_height = 15
+            }
+        } else if building_type == "hospital" {
+            // If building has no height attribute, assign a defined height
+            if building_height == 6 {
+                building_height = 23
+            }
+        } else if building_type == "bridge" {
+            generate_bridge(editor, element, ground_level);
+            return;
         }
     }
 
@@ -178,5 +191,42 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
                 editor.set_block(floor_block, x, ground_level + building_height + 1, z, None, None);
             }
         }
+    }
+}
+
+/// Generates a bridge structure, paying attention to the "level" tag.
+fn generate_bridge(editor: &mut WorldEditor, element: &ProcessedElement, base_level: i32) {
+    // Calculate the bridge level
+    let mut bridge_level = base_level;
+    if let Some(level_str) = element.tags.get("level") {
+        if let Ok(level) = level_str.parse::<i32>() {
+            bridge_level += (level * 3) + 1; // Adjust height by levels
+        }
+    }
+
+    let floor_block: &once_cell::sync::Lazy<Block> = &STONE;
+    let railing_block: &once_cell::sync::Lazy<Block> = &STONE_BRICKS;
+
+    // Process the nodes to create bridge pathways and railings
+    let mut previous_node: Option<(i32, i32)> = None;
+    for &node in &element.nodes {
+        let (x, z) = node;
+
+        // Create bridge path using Bresenham's line
+        if let Some(prev) = previous_node {
+            let bridge_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, bridge_level, prev.1, x, bridge_level, z);
+            for (bx, by, bz) in bridge_points {
+                editor.set_block(railing_block, bx, by + 1, bz, None, None);
+                editor.set_block(railing_block, bx, by, bz, None, None);
+            }
+        }
+        previous_node = Some(node);
+    }
+
+    // Flood fill the area between the bridge path nodes
+    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+    let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, 2);
+    for (x, z) in bridge_area {
+        editor.set_block(floor_block, x, bridge_level, z, None, None);
     }
 }

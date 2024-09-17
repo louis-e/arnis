@@ -150,6 +150,45 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    /// Checks for a block at the given coordinates.
+    pub fn check_for_block(
+        &self,
+        x: i32,
+        y: i32,
+        z: i32,
+        whitelist: Option<&[&'static Lazy<Block>]>,
+        blacklist: Option<&[&'static Lazy<Block>]>,
+    ) -> bool {
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let chunk_x_within_region: i32 = chunk_x & 31;
+        let chunk_z_within_region: i32 = chunk_z & 31;
+
+        let chunk_key: (i32, i32, i32, i32) = (region_x, region_z, chunk_x_within_region, chunk_z_within_region);
+
+        // Retrieve the chunk modification map
+        if let Some(chunk_blocks) = self.chunks_to_modify.get(&chunk_key) {
+            if let Some(existing_block) = chunk_blocks.get(&(x, y, z)) {
+                // Check against whitelist and blacklist
+                if let Some(whitelist) = whitelist {
+                    if whitelist.iter().any(|&whitelisted_block| whitelisted_block.name == existing_block.name) {
+                        return true; // Block is in whitelist
+                    }
+                }
+                if let Some(blacklist) = blacklist {
+                    if blacklist.iter().any(|&blacklisted_block| blacklisted_block.name == existing_block.name) {
+                        return true; // Block is in blacklist
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
         println!("{} {}", "[5/5]".bold(), "Saving world...");

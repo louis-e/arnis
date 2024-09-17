@@ -48,6 +48,16 @@ fn round3(editor: &mut WorldEditor, material: &'static Lazy<Block>, x: i32, y: i
 
 /// Function to create different types of trees.
 pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u8) {
+    let mut blacklist: Vec<&'static Lazy<Block>> = Vec::new();
+    blacklist.extend(building_corner_variations());
+    blacklist.extend(building_wall_variations());
+    blacklist.extend(building_floor_variations());
+    blacklist.push(&WATER);
+
+    if editor.check_for_block(x, y - 1, z, None, Some(&blacklist)) {
+        return;
+    }
+
     match typetree {
         1 => { // Oak tree
             editor.fill_blocks(&OAK_LOG, x, y, z, x, y + 8, z, None, None);

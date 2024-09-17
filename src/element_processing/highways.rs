@@ -93,6 +93,10 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, g
                 "track" => {
                     block_range = 1;
                 }
+                "service" => {
+                    block_type = &GRAY_CONCRETE;
+                    block_range = 2;
+                }
                 _ => {
                     if let Some(lanes) = element.tags.get("lanes") {
                         if lanes == "2" {
@@ -213,5 +217,27 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, g
                 previous_node = Some(node);
             }
         }
+    }
+}
+
+/// Generates a siding using stone brick slabs
+pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+    let mut previous_node: Option<(i32, i32)> = None;
+    let siding_block: &once_cell::sync::Lazy<Block> = &STONE_BRICK_SLAB;
+
+    for &node in &element.nodes {
+        let (x, z) = node;
+
+        // Draw the siding using Bresenham's line algorithm between nodes
+        if let Some(prev) = previous_node {
+            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, ground_level + 1, prev.1, x, ground_level + 1, z);
+            for (bx, by, bz) in bresenham_points {
+                if !editor.check_for_block(bx, by - 1, bz, None, Some(&[&BLACK_CONCRETE, &WHITE_CONCRETE])) {
+                    editor.set_block(siding_block, bx, by, bz, None, None);
+                }
+            }
+        }
+
+        previous_node = Some(node);
     }
 }
