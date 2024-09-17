@@ -122,11 +122,11 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                     let flood_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, 2);
 
                     for (x, z) in flood_area {
-                        editor.set_block(block_type, x, ground_level, z, Some(&[&BLACK_CONCRETE]), None);
+                        editor.set_block(block_type, x, ground_level, z, Some(&[&BLACK_CONCRETE, &GRAY_CONCRETE]), None);
 
                         // Add parking spot markings
                         if amenity_type == "parking" && (x + z) % 8 == 0 && (x * z) % 32 != 0 {
-                            editor.set_block(&LIGHT_GRAY_CONCRETE, x, ground_level, z, Some(&[&BLACK_CONCRETE]), None);
+                            editor.set_block(&LIGHT_GRAY_CONCRETE, x, ground_level, z, Some(&[&BLACK_CONCRETE, &GRAY_CONCRETE]), None);
                         }
                     }
                 }

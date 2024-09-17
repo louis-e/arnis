@@ -58,7 +58,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, gr
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
-                        if check_for_water(x, z) {
+                        if editor.check_for_block(x, ground_level, z, None, Some(&[&WATER])) {
                             continue;
                         }
 
@@ -81,9 +81,4 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, gr
             }
         }
     }
-}
-
-// Placeholder function for checking water presence
-fn check_for_water(_x: i32, _z: i32) -> bool {
-    false // Replace with your actual logic
 }
