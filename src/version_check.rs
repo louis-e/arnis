@@ -71,11 +71,7 @@ fn handle_http_error(status: StatusCode) {
 fn handle_request_error(err: ReqwestError) {
     if err.is_timeout() {
         eprintln!("Request timed out. Please check your network connection.");
-    } else if err.is_connect() {
-        eprintln!("Failed to connect to the server. Please check your internet connection.");
     } else if let Some(status) = err.status() {
         handle_http_error(status);
-    } else {
-        eprintln!("Error fetching remote Cargo.toml: {}", err);
     }
 }

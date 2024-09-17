@@ -112,7 +112,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                     if !check_for_water(x, z) {
                         if x % 15 == 0 || z % 15 == 0 {
                             editor.set_block(&WATER, x, ground_level, z, Some(&[&FARMLAND]), None);
-                            editor.set_block(&AIR, x, ground_level + 1, z, None, Some(&[&SPONGE]));
+                            editor.set_block(&AIR, x, ground_level + 1, z, Some(&[&GRASS, &WHEAT, &CARROTS, &POTATOES]), None);
                         } else {
                             editor.set_block(&FARMLAND, x, ground_level, z, None, None);
                             if rng.gen_range(0..76) == 0 {
