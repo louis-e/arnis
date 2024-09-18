@@ -2,7 +2,7 @@ use colored::Colorize;
 use crate::args::Args;
 use crate::block_definitions::*;
 use fastanvil::Region;
-use fastnbt::{Value, LongArray};
+use fastnbt::{ByteArray, LongArray, Value};
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -193,7 +193,7 @@ impl<'a> WorldEditor<'a> {
     pub fn save(&mut self) {
         println!("{} {}", "[5/5]".bold(), "Saving world...");
     
-        let debug: bool = self.args.debug;
+        let _debug: bool = self.args.debug;
         let chunks_to_process: Vec<_> = self.chunks_to_modify.drain().collect();
         let total_chunks: u64 = chunks_to_process.len() as u64;
     
@@ -210,19 +210,27 @@ impl<'a> WorldEditor<'a> {
                 let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
     
                 for ((x, y, z), block) in block_list {
-                    set_block_in_chunk(&mut chunk, block, x, y, z, region_x, region_z, chunk_x, chunk_z, debug);
+                    set_block_in_chunk(&mut chunk, block, x, y, z);
                 }
     
                 let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
+
+                // Add SkyLight with 2048 bytes of value 0xFF
+                for section in chunk.sections.iter_mut() {
+                    if let Some(Value::Byte(_y_byte)) = section.other.get("Y") {
+                        let skylight_data = vec![0xFFu8 as i8; 2048];
+                        section.other.insert("SkyLight".to_string(), Value::ByteArray(ByteArray::new(skylight_data)));
+                    }
+                }
                 
                 // Write chunk data back to the correct location, ensuring correct chunk coordinates
                 let expected_chunk_location: (usize, usize) = ((chunk_x as usize) & 31, (chunk_z as usize) & 31);
                 region.write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser).unwrap();
             }
-    
+
             save_pb.inc(1);
         }
-        
+
         save_pb.finish();
     }
 }
@@ -237,11 +245,6 @@ fn set_block_in_chunk(
     x: i32,
     y: i32,
     z: i32,
-    region_x: i32,
-    region_z: i32,
-    chunk_x: i32,
-    chunk_z: i32,
-    debug: bool,
 ) {
     let local_x: usize = (x & 15) as usize;
     let local_y: usize = y as usize;
@@ -261,15 +264,9 @@ fn set_block_in_chunk(
                 // If the block is not in the palette and adding it would exceed a reasonable size, skip or replace
                 if palette_index.is_none() {
                     if palette.len() >= 16 {
-                        if debug {
-                            println!(
-                                "Skipping block placement to avoid excessive palette size in region ({}, {}), chunk ({}, {})",
-                                region_x, region_z, chunk_x, chunk_z
-                            );
-                        }
                         palette_index = Some(0);
                     } else {
-                        // Otherwise, add the new block type to the palette with its properties
+                        // Add the new block type to the palette with its properties
                         palette.push(PaletteItem {
                             name: block.name.clone(),
                             properties: block.properties.clone(),
@@ -285,7 +282,6 @@ fn set_block_in_chunk(
                 if let Some(Value::LongArray(ref mut data)) = section.block_states.other.get_mut("data") {
                     // Convert LongArray to Vec<i64>
                     let mut vec_data: Vec<i64> = data.as_mut().to_vec();
-                    ensure_data_array_size(&mut vec_data, bits_per_block, region_x, region_z, chunk_x, chunk_z);
                     set_block_in_section(&mut vec_data, block_index, palette_index, bits_per_block);
                     // Update LongArray with modified Vec<i64>
                     *data = LongArray::new(vec_data);
@@ -301,35 +297,6 @@ fn set_block_in_chunk(
             }
         }
     }
-}
-
-
-
-/// Ensure data array is correctly sized based on bits per block
-fn ensure_data_array_size(
-    data: &mut Vec<i64>,
-    bits_per_block: u32,
-    region_x: i32,
-    region_z: i32,
-    chunk_x: i32,
-    chunk_z: i32
-) {
-    let blocks_per_long: u32 = 64 / bits_per_block;
-    let required_longs: usize = ((4096 + blocks_per_long - 1) / blocks_per_long) as usize;
-
-    if data.len() != required_longs {
-        println!(
-            "Resizing data from {} to {} in region ({}, {}), chunk ({}, {})",
-            data.len(),
-            required_longs,
-            region_x,
-            region_z,
-            chunk_x,
-            chunk_z
-        );
-        data.resize(required_longs, 0);
-    }
-    assert_eq!(data.len(), required_longs, "Data length mismatch after resizing.");
 }
 
 fn set_block_in_section(
