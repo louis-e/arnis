@@ -194,8 +194,7 @@ impl<'a> WorldEditor<'a> {
         println!("{} {}", "[5/5]".bold(), "Saving world...");
     
         let _debug: bool = self.args.debug;
-        let chunks_to_process: Vec<_> = self.chunks_to_modify.drain().collect();
-        let total_chunks: u64 = chunks_to_process.len() as u64;
+        let total_chunks: u64 = self.chunks_to_modify.len() as u64;
     
         let save_pb: ProgressBar = ProgressBar::new(total_chunks);
         save_pb.set_style(ProgressStyle::default_bar()
@@ -203,34 +202,31 @@ impl<'a> WorldEditor<'a> {
             .unwrap()
             .progress_chars("█▓░"));
     
-        for ((region_x, region_z, chunk_x, chunk_z), block_list) in chunks_to_process {
-            let region: &mut Region<File> = self.load_region(region_x, region_z);
-            
-            if let Ok(Some(data)) = region.read_chunk(chunk_x as usize, chunk_z as usize) {
+        let mut chunks_to_process = self.chunks_to_modify.clone();  // Clone to prevent modifying while iterating
+    
+        for ((region_x, region_z, chunk_x, chunk_z), block_list) in &mut chunks_to_process {
+            let region: &mut Region<File> = self.load_region(*region_x, *region_z);
+    
+            if let Ok(Some(data)) = region.read_chunk(*chunk_x as usize, *chunk_z as usize) {
                 let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
     
                 for ((x, y, z), block) in block_list {
-                    set_block_in_chunk(&mut chunk, block, x, y, z);
+                    set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
                 }
     
                 let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
-
-                // Add SkyLight with 2048 bytes of value 0xFF
-                for section in chunk.sections.iter_mut() {
-                    if let Some(Value::Byte(_y_byte)) = section.other.get("Y") {
-                        let skylight_data = vec![0xFFu8 as i8; 2048];
-                        section.other.insert("SkyLight".to_string(), Value::ByteArray(ByteArray::new(skylight_data)));
-                    }
-                }
-                
+    
                 // Write chunk data back to the correct location, ensuring correct chunk coordinates
-                let expected_chunk_location: (usize, usize) = ((chunk_x as usize) & 31, (chunk_z as usize) & 31);
+                let expected_chunk_location: (usize, usize) = ((*chunk_x as usize) & 31, (*chunk_z as usize) & 31);
                 region.write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser).unwrap();
             }
-
+    
+            // Remove chunk from the modification map after processing it
+            self.chunks_to_modify.remove(&(*region_x, *region_z, *chunk_x, *chunk_z));
+    
             save_pb.inc(1);
         }
-
+    
         save_pb.finish();
     }
 }
@@ -255,6 +251,10 @@ fn set_block_in_chunk(
             if *y_byte == (local_y >> 4) as i8 {
                 let palette: &mut Vec<PaletteItem> = &mut section.block_states.palette;
                 let block_index: usize = (local_y % 16 * 256 + local_z * 16 + local_x) as usize;
+
+                // Add SkyLight with 2048 bytes of value 0xFF
+                let skylight_data = vec![0xFFu8 as i8; 2048];
+                section.other.insert("SkyLight".to_string(), Value::ByteArray(ByteArray::new(skylight_data)));
 
                 // Check if the block is already in the palette with matching properties
                 let mut palette_index: Option<usize> = palette.iter().position(|item: &PaletteItem| {

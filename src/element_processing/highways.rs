@@ -76,6 +76,19 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, g
             let mut block_range: i32 = 2;
             let mut add_stripe = false; // Flag for adding stripes
 
+            // Skip if 'layer' or 'level' is negative in the tags
+            if let Some(layer) = element.tags.get("layer") {
+                if layer.parse::<i32>().unwrap_or(0) < 0 {
+                    return;
+                }
+            }
+            
+            if let Some(level) = element.tags.get("level") {
+                if level.parse::<i32>().unwrap_or(0) < 0 {
+                    return;
+                }
+            }
+
             // Determine block type and range based on highway type
             match highway_type.as_str() {
                 "footway" | "pedestrian" => {

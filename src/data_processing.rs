@@ -74,8 +74,13 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
     process_pb.finish();
 
     // Generate ground layer
-    println!("{} {}", "[4/5]".bold(), "Generating ground layer...");
     let total_blocks: u64 = (scale_factor_x as i32 + 1) as u64 * (scale_factor_z as i32 + 1) as u64;
+    let desired_updates: u64 = 1500;
+    let batch_size: u64 = (total_blocks / desired_updates).max(1);
+
+    let mut block_counter: u64 = 0;
+
+    println!("{} {}", "[4/5]".bold(), "Generating ground layer...");
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
     ground_pb.set_style(ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} blocks ({eta})")
@@ -86,9 +91,15 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
         for z in 0..=(scale_factor_z as i32) {
             editor.set_block(&crate::block_definitions::GRASS_BLOCK, x, ground_level, z, None, None);
             editor.set_block(&crate::block_definitions::DIRT, x, ground_level - 1, z, None, None);
-            ground_pb.inc(1);
+
+            block_counter += 1;
+            if block_counter % batch_size == 0 {
+                ground_pb.inc(batch_size);
+            }
         }
     }
+
+    ground_pb.inc(block_counter % batch_size);
     ground_pb.finish();
 
     // Save world
