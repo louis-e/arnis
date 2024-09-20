@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -27,11 +27,26 @@ jobs:
     - name: Build
       run: cargo build --release
 
-    - name: Upload artifact
+    - name: Upload artifact (Windows)
+      if: matrix.os == 'windows-latest'
       uses: actions/upload-artifact@v3
       with:
-        name: ${{ runner.os }}-build
-        path: target/release/
+        name: windows-latest-build
+        path: target/release/arnis.exe
+
+    - name: Upload artifact (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      uses: actions/upload-artifact@v3
+      with:
+        name: ubuntu-latest-build
+        path: target/release/arnis
+
+    - name: Upload artifact (MacOS)
+      if: matrix.os == 'macos-latest'
+      uses: actions/upload-artifact@v3
+      with:
+        name: macos-latest-build
+        path: target/release/arnis
 
   release:
     runs-on: ubuntu-latest
@@ -40,7 +55,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Download build artifacts
+    - name: Download build artifacts (Ubuntu)
       uses: actions/download-artifact@v3
       with:
         name: ubuntu-latest-build
