@@ -1,18 +1,19 @@
 <p align="center">
-  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gitassets/logo.png?raw=true">
+  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/python-legacy/gitassets/logo.png?raw=true">
 </p>
 
-# Arnis [![Testing](https://github.com/louis-e/arnis/actions/workflows/python-app.yml/badge.svg)](https://github.com/louis-e/arnis/actions/workflows/python-app.yml)
-This open source project generates any chosen location from the real world in Minecraft, allowing users to explore and build in a virtual world that mirrors the real one.
+# Arnis - Python Legacy Branch
+This open source project generates any chosen location from the real world in Minecraft, allowing users to explore and build in a virtual world that mirrors the real one.<br><br>
+This branch stores the old Python legacy version (v1.x), which was now replaced by the [Rust port](https://github.com/louis-e/arnis).
 <br><br>
 ⇒ [Where did you find this project?](https://6okq6xh5jt4.typeform.com/to/rSjZaB41)
 <br>
 ## :desktop_computer: Example
-![Minecraft World Demo](https://github.com/louis-e/arnis/blob/main/gitassets/demo-comp.png?raw=true)
-![Minecraft World Demo Before After](https://github.com/louis-e/arnis/blob/main/gitassets/before-after.gif?raw=true)
+![Minecraft World Demo](https://github.com/louis-e/arnis/blob/python-legacy/gitassets/demo-comp.png?raw=true)
+![Minecraft World Demo Before After](https://github.com/louis-e/arnis/blob/python-legacy/gitassets/before-after.gif?raw=true)
 
 ## :floppy_disk: How it works
-![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli-generation.gif?raw=true)
+![CLI Generation](https://github.com/louis-e/arnis/blob/python-legacy/gitassets/cli-generation.gif?raw=true)
 
 The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each element (buildings, walls, fountains, farmlands, etc.) with its respective corner coordinates (nodes) and descriptive tags. When you run the script, the following steps are performed automatically to generate a Minecraft world:
 
@@ -30,7 +31,7 @@ The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each el
 ```python3 arnis.py --bbox="min_lng,min_lat,max_lng,max_lat" --path="C:/Users/username/AppData/Roaming/.minecraft/saves/worldname"```
 
 Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter.
-![How to find area](https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true)
+![How to find area](https://github.com/louis-e/arnis/blob/python-legacy/gitassets/bbox-finder.png?raw=true)
 The world will always be generated starting from the coordinates 0 0 0.
 
 Manually generate a new Minecraft world (preferably a flat world) before running the script.
