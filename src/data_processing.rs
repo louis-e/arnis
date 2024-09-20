@@ -1,15 +1,26 @@
+use colored::Colorize;
 use crate::args::Args;
 use crate::element_processing::{*};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
-use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::blocking::get;
+use std::fs;
+use std::io::Write;
+use std::path::Path;
 
 pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor_x: f64, scale_factor_z: f64) {
     println!("{} {}", "[3/5]".bold(), "Processing data...");
+    
     let region_template_path: &str = "region.template";
     let region_dir: String = format!("{}/region", args.path);
     let ground_level: i32 = -62;
+
+    // Check if the region.template file exists, and download if necessary
+    if !Path::new(region_template_path).exists() {
+        let _ = download_region_template(region_template_path);
+    }
+
     let mut editor: WorldEditor = WorldEditor::new(region_template_path, &region_dir, scale_factor_x, scale_factor_z, &args);
 
     // Process data
@@ -106,4 +117,21 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
     editor.save();
 
     println!("{}", "Done! World generation complete.".green().bold());
+}
+
+/// Downloads the region template file from a remote URL and saves it locally.
+fn download_region_template(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let url = "https://github.com/louis-e/arnis/raw/refs/heads/experimental-rust-dev/region.template";
+
+    // Download the file
+    let response = get(url)?;
+    if !response.status().is_success() {
+        return Err(format!("Failed to download file: HTTP {}", response.status()).into());
+    }
+
+    // Write the file to the specified path
+    let mut file = fs::File::create(file_path)?;
+    file.write_all(&response.bytes()?)?;
+
+    Ok(())
 }
