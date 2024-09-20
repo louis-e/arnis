@@ -77,6 +77,8 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          builds/**/*
+          builds/ubuntu/arnis
+          builds/windows/arnis.exe
+          builds/macos/arnis
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
