@@ -121,7 +121,7 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
 
 /// Downloads the region template file from a remote URL and saves it locally.
 fn download_region_template(file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let url = "https://github.com/louis-e/arnis/raw/refs/heads/experimental-rust-dev/region.template";
+    let url = "https://github.com/louis-e/arnis/raw/refs/heads/main/region.template";
 
     // Download the file
     let response = get(url)?;
