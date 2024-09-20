@@ -5,7 +5,7 @@ use semver::Version;
 use std::error::Error;
 
 /// URL to the remote Cargo.toml file to check for the latest version
-const REMOTE_CARGO_TOML_URL: &str = "https://raw.githubusercontent.com/louis-e/arnis/experimental-rust-dev/Cargo.toml";
+const REMOTE_CARGO_TOML_URL: &str = "https://raw.githubusercontent.com/louis-e/arnis/main/Cargo.toml";
 
 /// Fetches the latest version from the remote Cargo.toml file and compares it with the local version.
 /// If a newer version is available, prints a message.
