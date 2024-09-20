@@ -30,7 +30,7 @@ fn print_banner() {
         ███    █▀    ███    ███  ▀█   █▀  █▀    ▄████████▀
                      ███    ███
 
-                        version {}
+                          version {}
                 {}
         "#,
         version,
