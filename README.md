@@ -29,6 +29,7 @@ The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each el
 6. Save the Minecraft World: All the modified chunks are saved back to the Minecraft region files.
 
 ## :keyboard: Usage
+Get the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
 #### Run: ```arnis.exe --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```
 
 ### How to find your bbox coordinates
