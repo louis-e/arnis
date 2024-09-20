@@ -1,5 +1,0 @@
-[flake8]
-ignore = E203, W503, F405, F403
-# line length is intentionally set to 80 here because black uses Bugbear
-# See https://black.readthedocs.io/en/stable/the_black_code_style/current_style.html#line-length for more details
-max-line-length = 100
