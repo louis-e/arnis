@@ -4,10 +4,10 @@
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions)
 
-This open source project written in Rust generates any chosen location from the real world in Minecraft with a high level of detail.
+This open source project written in Rust generates any chosen location from the real world in Minecraft Java Edition with a high level of detail.
 
 ## :desktop_computer: Example
-<img width="700" height="400" src="https://github.com/louis-e/arnis/blob/main/gitassets/mc.gif?raw=true">
+![Minecraft Preview](https://github.com/louis-e/arnis/blob/main/gitassets/mc.gif?raw=true)
 
 By leveraging geospatial data from OpenStreetMap and utilizing the powerful capabilities of Rust, Arnis provides an efficient and robust solution for creating complex and accurate Minecraft worlds that reflect real-world geography and architecture.
 
@@ -33,7 +33,7 @@ Get the [latest release](https://github.com/louis-e/arnis/releases/) or [compile
 ### How to find your bbox coordinates
 Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter.
 ![How to find area](https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true)
-The world will always be generated starting from the coordinates 0 0 0.
+The world will always be generated starting from the coordinates 0 0 0. Try starting with a small area since large areas take a lot of computing power and time to process.
 
 Manually generate a new Minecraft world (preferably a flat world) before running the script.
 The --bbox parameter specifies the bounding box coordinates in the format: min_lng,min_lat,max_lng,max_lat.
@@ -52,6 +52,8 @@ The project is named after the smallest city in Germany, Arnis[^2]. The city's s
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Design and implement a GUI
+- [ ] Memory optimization
+- [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
 - [ ] Evaluate and implement multithreaded region saving
 - [ ] Better code documentation
 - [ ] Implement house roof types
@@ -64,6 +66,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Add interior to buildings
 - [ ] Evaluate and implement elevation
 - [ ] Generate a few big cities using high performance hardware and make them available to download
+- [ ] Implement memory mapped storing of chunks to reduce memory usage
 - [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
 
 ## :trophy: Open Source
