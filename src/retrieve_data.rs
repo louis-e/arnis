@@ -1,16 +1,40 @@
 use colored::Colorize;
+use rand::seq::SliceRandom;
 use reqwest::blocking::Client;
+use reqwest::blocking::ClientBuilder;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{self, BufReader, Write};
 use std::process::Command;
-use rand::seq::SliceRandom;
+use std::time::Duration;
 
-/// Function to download data using the `reqwest` crate
+/// Function to download data using reqwest
 fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let client: Client = Client::new();
-    let response: String = client.get(url).query(&[("data", query)]).send()?.text()?;
-    Ok(response)
+    let client: Client = ClientBuilder::new()
+        .timeout(Duration::from_secs(1800))
+        .build()?;
+
+    let response = client.get(url)
+        .query(&[("data", query)])
+        .send();
+
+    match response {
+        Ok(resp) => {
+            if resp.status().is_success() {
+                Ok(resp.text()?)
+            } else {
+                Err(format!("Error! Received response code: {}", resp.status()).into())
+            }
+        },
+        Err(e) => {
+            if e.is_timeout() {
+                eprintln!("{}", "Error! Request timed out. Try selecting a smaller area.".red().bold());
+            } else {
+                eprintln!("{}", format!("Error! {}", e).red().bold());
+            }
+            std::process::exit(1);
+        }
+    }
 }
 
 /// Function to download data using `curl`
@@ -19,7 +43,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
         .arg("-s")  // Add silent mode to suppress output
         .arg(format!("{}?data={}", url, query))
         .output()?;
-    
+
     if !output.status.success() {
         Err(io::Error::new(io::ErrorKind::Other, "Curl command failed"))
     } else {
@@ -33,7 +57,7 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
         .arg("-qO-")  // Use `-qO-` to output the result directly to stdout
         .arg(format!("{}?data={}", url, query))
         .output()?;
-    
+
     if !output.status.success() {
         Err(io::Error::new(io::ErrorKind::Other, "Wget command failed"))
     } else {
@@ -62,7 +86,7 @@ pub fn fetch_data(
 
     // Generate Overpass API query for bounding box
     let query: String = format!(
-        r#"[out:json][bbox:{},{},{},{}];
+        r#"[out:json][timeout:1800][bbox:{},{},{},{}];
     (
         nwr["building"];
         nwr["highway"];
@@ -104,7 +128,22 @@ pub fn fetch_data(
         let data: Value = serde_json::from_str(&response)?;
 
         if data["elements"].as_array().map_or(0, |elements: &Vec<Value>| elements.len()) == 0 {
-            println!("Error! No data available");
+            if let Some(remark) = data["remark"].as_str() {
+                // Check if the remark mentions memory or other runtime errors
+                if remark.contains("runtime error") && remark.contains("out of memory") {
+                    eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
+                } else {
+                    // Handle other Overpass API errors if present in the remark field
+                    eprintln!("{}", format!("Error! API returned: {}", remark).red().bold());
+                }
+            } else {
+                // General case for when there are no elements and no specific remark
+                eprintln!("{}", "Error! No data available.".red().bold());
+            }
+            
+            if debug {
+                println!("Additional debug information: {}", data);
+            }
             std::process::exit(1);
         }
 
