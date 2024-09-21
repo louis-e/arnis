@@ -6,8 +6,6 @@
 
 This open source project written in Rust generates any chosen location from the real world in Minecraft with a high level of detail.
 
-⇒ [Where did you find this project?](https://6okq6xh5jt4.typeform.com/to/rSjZaB41)
-
 ## :desktop_computer: Example
 <img width="700" height="400" src="https://github.com/louis-e/arnis/blob/main/gitassets/mc.gif?raw=true">
 
