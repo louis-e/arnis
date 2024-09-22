@@ -1,6 +1,6 @@
-use colored::Colorize;
 use crate::args::Args;
 use crate::block_definitions::*;
+use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{ByteArray, LongArray, Value};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -74,7 +74,10 @@ impl<'a> WorldEditor<'a> {
             let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
             std::fs::copy(&self.region_template_path, &out_path)
                 .expect("Failed to copy region template");
-            let region_file = File::options().read(true).write(true).open(&out_path)
+            let region_file = File::options()
+                .read(true)
+                .write(true)
+                .open(&out_path)
                 .expect("Failed to open region file");
             Region::from_stream(region_file).expect("Failed to load region")
         })
@@ -101,21 +104,33 @@ impl<'a> WorldEditor<'a> {
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
-    
+
         let chunk_x_within_region: i32 = chunk_x & 31;
         let chunk_z_within_region: i32 = chunk_z & 31;
-    
-        let chunk_key: (i32, i32, i32, i32) = (region_x, region_z, chunk_x_within_region, chunk_z_within_region);
-        let chunk_blocks: &mut HashMap<(i32, i32, i32), Block> = self.chunks_to_modify.entry(chunk_key).or_default();
-    
+
+        let chunk_key: (i32, i32, i32, i32) = (
+            region_x,
+            region_z,
+            chunk_x_within_region,
+            chunk_z_within_region,
+        );
+        let chunk_blocks: &mut HashMap<(i32, i32, i32), Block> =
+            self.chunks_to_modify.entry(chunk_key).or_default();
+
         if let Some(existing_block) = chunk_blocks.get(&position) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                if whitelist.iter().any(|&whitelisted_block| whitelisted_block.name == existing_block.name) {
+                if whitelist
+                    .iter()
+                    .any(|&whitelisted_block| whitelisted_block.name == existing_block.name)
+                {
                     chunk_blocks.insert(position, (*block).clone());
                 }
             } else if let Some(blacklist) = override_blacklist {
-                if !blacklist.iter().any(|&blacklisted_block| blacklisted_block.name == existing_block.name) {
+                if !blacklist
+                    .iter()
+                    .any(|&blacklisted_block| blacklisted_block.name == existing_block.name)
+                {
                     chunk_blocks.insert(position, (*block).clone());
                 }
             }
@@ -167,19 +182,30 @@ impl<'a> WorldEditor<'a> {
         let chunk_x_within_region: i32 = chunk_x & 31;
         let chunk_z_within_region: i32 = chunk_z & 31;
 
-        let chunk_key: (i32, i32, i32, i32) = (region_x, region_z, chunk_x_within_region, chunk_z_within_region);
+        let chunk_key: (i32, i32, i32, i32) = (
+            region_x,
+            region_z,
+            chunk_x_within_region,
+            chunk_z_within_region,
+        );
 
         // Retrieve the chunk modification map
         if let Some(chunk_blocks) = self.chunks_to_modify.get(&chunk_key) {
             if let Some(existing_block) = chunk_blocks.get(&(x, y, z)) {
                 // Check against whitelist and blacklist
                 if let Some(whitelist) = whitelist {
-                    if whitelist.iter().any(|&whitelisted_block| whitelisted_block.name == existing_block.name) {
+                    if whitelist
+                        .iter()
+                        .any(|&whitelisted_block| whitelisted_block.name == existing_block.name)
+                    {
                         return true; // Block is in whitelist
                     }
                 }
                 if let Some(blacklist) = blacklist {
-                    if blacklist.iter().any(|&blacklisted_block| blacklisted_block.name == existing_block.name) {
+                    if blacklist
+                        .iter()
+                        .any(|&blacklisted_block| blacklisted_block.name == existing_block.name)
+                    {
                         return true; // Block is in blacklist
                     }
                 }
@@ -192,41 +218,49 @@ impl<'a> WorldEditor<'a> {
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
         println!("{} {}", "[5/5]".bold(), "Saving world...");
-    
+
         let _debug: bool = self.args.debug;
         let total_chunks: u64 = self.chunks_to_modify.len() as u64;
-    
+
         let save_pb: ProgressBar = ProgressBar::new(total_chunks);
-        save_pb.set_style(ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} chunks ({eta})")
-            .unwrap()
-            .progress_chars("█▓░"));
-    
-        let mut chunks_to_process = self.chunks_to_modify.clone();  // Clone to prevent modifying while iterating
-    
+        save_pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} chunks ({eta})",
+                )
+                .unwrap()
+                .progress_chars("█▓░"),
+        );
+
+        let mut chunks_to_process = self.chunks_to_modify.clone(); // Clone to prevent modifying while iterating
+
         for ((region_x, region_z, chunk_x, chunk_z), block_list) in &mut chunks_to_process {
             let region: &mut Region<File> = self.load_region(*region_x, *region_z);
-    
+
             if let Ok(Some(data)) = region.read_chunk(*chunk_x as usize, *chunk_z as usize) {
                 let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
-    
+
                 for ((x, y, z), block) in block_list {
                     set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
                 }
-    
+
                 let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
-    
+
                 // Write chunk data back to the correct location, ensuring correct chunk coordinates
-                let expected_chunk_location: (usize, usize) = ((*chunk_x as usize) & 31, (*chunk_z as usize) & 31);
-                region.write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser).unwrap();
+                let expected_chunk_location: (usize, usize) =
+                    ((*chunk_x as usize) & 31, (*chunk_z as usize) & 31);
+                region
+                    .write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser)
+                    .unwrap();
             }
-    
+
             // Remove chunk from the modification map after processing it
-            self.chunks_to_modify.remove(&(*region_x, *region_z, *chunk_x, *chunk_z));
-    
+            self.chunks_to_modify
+                .remove(&(*region_x, *region_z, *chunk_x, *chunk_z));
+
             save_pb.inc(1);
         }
-    
+
         save_pb.finish();
     }
 }
@@ -235,13 +269,7 @@ fn bits_per_block(palette_size: u32) -> u32 {
     (palette_size as f32).log2().ceil().max(4.0).min(8.0) as u32
 }
 
-fn set_block_in_chunk(
-    chunk: &mut Chunk,
-    block: Block,
-    x: i32,
-    y: i32,
-    z: i32,
-) {
+fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
     let local_x: usize = (x & 15) as usize;
     let local_y: usize = y as usize;
     let local_z: usize = (z & 15) as usize;
@@ -254,12 +282,16 @@ fn set_block_in_chunk(
 
                 // Add SkyLight with 2048 bytes of value 0xFF
                 let skylight_data = vec![0xFFu8 as i8; 2048];
-                section.other.insert("SkyLight".to_string(), Value::ByteArray(ByteArray::new(skylight_data)));
+                section.other.insert(
+                    "SkyLight".to_string(),
+                    Value::ByteArray(ByteArray::new(skylight_data)),
+                );
 
                 // Check if the block is already in the palette with matching properties
-                let mut palette_index: Option<usize> = palette.iter().position(|item: &PaletteItem| {
-                    item.name == block.name && item.properties == block.properties
-                });
+                let mut palette_index: Option<usize> =
+                    palette.iter().position(|item: &PaletteItem| {
+                        item.name == block.name && item.properties == block.properties
+                    });
 
                 // If the block is not in the palette and adding it would exceed a reasonable size, skip or replace
                 if palette_index.is_none() {
@@ -279,7 +311,9 @@ fn set_block_in_chunk(
                 let palette_index: u32 = palette_index.unwrap() as u32;
 
                 let bits_per_block: u32 = bits_per_block(palette.len() as u32);
-                if let Some(Value::LongArray(ref mut data)) = section.block_states.other.get_mut("data") {
+                if let Some(Value::LongArray(ref mut data)) =
+                    section.block_states.other.get_mut("data")
+                {
                     // Convert LongArray to Vec<i64>
                     let mut vec_data: Vec<i64> = data.as_mut().to_vec();
                     set_block_in_section(&mut vec_data, block_index, palette_index, bits_per_block);
@@ -287,10 +321,14 @@ fn set_block_in_chunk(
                     *data = LongArray::new(vec_data);
                 } else {
                     // Properly initialize new data array with correct length
-                    let required_longs: usize = ((4096 + (64 / bits_per_block) - 1) / (64 / bits_per_block)) as usize;
+                    let required_longs: usize =
+                        ((4096 + (64 / bits_per_block) - 1) / (64 / bits_per_block)) as usize;
                     let mut new_data: Vec<i64> = vec![0i64; required_longs];
                     set_block_in_section(&mut new_data, block_index, palette_index, bits_per_block);
-                    section.block_states.other.insert("data".to_string(), Value::LongArray(LongArray::new(new_data)));
+                    section.block_states.other.insert(
+                        "data".to_string(),
+                        Value::LongArray(LongArray::new(new_data)),
+                    );
                 }
 
                 break;
@@ -303,7 +341,7 @@ fn set_block_in_section(
     data: &mut Vec<i64>,
     block_index: usize,
     palette_index: u32,
-    bits_per_block: u32
+    bits_per_block: u32,
 ) {
     let blocks_per_long: u32 = 64 / bits_per_block;
     let required_longs: usize = ((4096 + blocks_per_long - 1) / blocks_per_long) as usize;
@@ -316,7 +354,8 @@ fn set_block_in_section(
     let start_bit: usize = (block_index % blocks_per_long as usize) * bits_per_block as usize;
 
     let current_value: u64 = data[long_index] as u64;
-    let new_value: u64 = (current_value & !(mask << start_bit)) | ((palette_index as u64 & mask) << start_bit);
+    let new_value: u64 =
+        (current_value & !(mask << start_bit)) | ((palette_index as u64 & mask) << start_bit);
 
     // Update data
     data[long_index] = new_value as i64;
@@ -328,7 +367,8 @@ fn set_block_in_section(
 
         if next_long_index < data.len() {
             let next_value: u64 = data[next_long_index] as u64;
-            let new_next_value: u64 = (next_value & !(mask >> overflow_bits)) | ((palette_index as u64 & mask) >> overflow_bits);
+            let new_next_value: u64 = (next_value & !(mask >> overflow_bits))
+                | ((palette_index as u64 & mask) >> overflow_bits);
             data[next_long_index] = new_next_value as i64;
         } else {
             panic!("Data slice is too small even after resizing. This should never happen.");
