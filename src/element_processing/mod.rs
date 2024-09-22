@@ -8,5 +8,6 @@ pub mod landuse;
 pub mod leisure;
 pub mod natural;
 pub mod railways;
+pub mod tourisms;
 pub mod tree;
 pub mod waterways;

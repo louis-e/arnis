@@ -51,8 +51,8 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
     // Determine building height from tags
     if let Some(levels_str) = element.tags.get("building:levels") {
         if let Ok(levels) = levels_str.parse::<i32>() {
-            if levels >= 1 && (levels * 4) > building_height {
-                building_height = levels * 4;
+            if levels >= 1 && (levels * 4 + 2) > building_height {
+                building_height = levels * 4 + 2;
             }
         }
     }
@@ -198,7 +198,7 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
-                    for h in (ground_level + 4..ground_level + building_height).step_by(4) {
+                    for h in (ground_level + 2 + 4..ground_level + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
                             editor.set_block(&GLOWSTONE, x, h, z, None, None); // Light fixtures
                         } else {

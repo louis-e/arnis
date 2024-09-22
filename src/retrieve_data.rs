@@ -14,9 +14,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
         .timeout(Duration::from_secs(1800))
         .build()?;
 
-    let response = client.get(url)
-        .query(&[("data", query)])
-        .send();
+    let response = client.get(url).query(&[("data", query)]).send();
 
     match response {
         Ok(resp) => {
@@ -25,10 +23,15 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
             } else {
                 Err(format!("Error! Received response code: {}", resp.status()).into())
             }
-        },
+        }
         Err(e) => {
             if e.is_timeout() {
-                eprintln!("{}", "Error! Request timed out. Try selecting a smaller area.".red().bold());
+                eprintln!(
+                    "{}",
+                    "Error! Request timed out. Try selecting a smaller area."
+                        .red()
+                        .bold()
+                );
             } else {
                 eprintln!("{}", format!("Error! {}", e).red().bold());
             }
@@ -40,7 +43,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
 /// Function to download data using `curl`
 fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("curl")
-        .arg("-s")  // Add silent mode to suppress output
+        .arg("-s") // Add silent mode to suppress output
         .arg(format!("{}?data={}", url, query))
         .output()?;
 
@@ -54,7 +57,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
 /// Function to download data using `wget`
 fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("wget")
-        .arg("-qO-")  // Use `-qO-` to output the result directly to stdout
+        .arg("-qO-") // Use `-qO-` to output the result directly to stdout
         .arg(format!("{}?data={}", url, query))
         .output()?;
 
@@ -95,6 +98,7 @@ pub fn fetch_data(
         nwr["leisure"];
         nwr["waterway"];
         nwr["amenity"];
+        nwr["tourism"];
         nwr["bridge"];
         nwr["railway"];
         nwr["barrier"];
@@ -127,20 +131,27 @@ pub fn fetch_data(
 
         let data: Value = serde_json::from_str(&response)?;
 
-        if data["elements"].as_array().map_or(0, |elements: &Vec<Value>| elements.len()) == 0 {
+        if data["elements"]
+            .as_array()
+            .map_or(0, |elements: &Vec<Value>| elements.len())
+            == 0
+        {
             if let Some(remark) = data["remark"].as_str() {
                 // Check if the remark mentions memory or other runtime errors
                 if remark.contains("runtime error") && remark.contains("out of memory") {
                     eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
                 } else {
                     // Handle other Overpass API errors if present in the remark field
-                    eprintln!("{}", format!("Error! API returned: {}", remark).red().bold());
+                    eprintln!(
+                        "{}",
+                        format!("Error! API returned: {}", remark).red().bold()
+                    );
                 }
             } else {
                 // General case for when there are no elements and no specific remark
                 eprintln!("{}", "Error! No data available.".red().bold());
             }
-            
+
             if debug {
                 println!("Additional debug information: {}", data);
             }

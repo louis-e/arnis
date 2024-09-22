@@ -86,7 +86,7 @@ impl<'a> WorldEditor<'a> {
     /// Sets a block of the specified type at the given coordinates.
     pub fn set_block(
         &mut self,
-        block: &'static Lazy<Block>,
+        block: &Lazy<Block>,
         x: i32,
         y: i32,
         z: i32,
