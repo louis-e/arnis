@@ -1,17 +1,22 @@
-use colored::Colorize;
 use crate::args::Args;
-use crate::element_processing::{*};
+use crate::element_processing::*;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
+use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::blocking::get;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor_x: f64, scale_factor_z: f64) {
+pub fn generate_world(
+    elements: Vec<ProcessedElement>,
+    args: &Args,
+    scale_factor_x: f64,
+    scale_factor_z: f64,
+) {
     println!("{} {}", "[3/5]".bold(), "Processing data...");
-    
+
     let region_template_path: &str = "region.template";
     let region_dir: String = format!("{}/region", args.path);
     let ground_level: i32 = -62;
@@ -21,7 +26,13 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
         let _ = download_region_template(region_template_path);
     }
 
-    let mut editor: WorldEditor = WorldEditor::new(region_template_path, &region_dir, scale_factor_x, scale_factor_z, &args);
+    let mut editor: WorldEditor = WorldEditor::new(
+        region_template_path,
+        &region_dir,
+        scale_factor_x,
+        scale_factor_z,
+        &args,
+    );
 
     // Process data
     let process_pb: ProgressBar = ProgressBar::new(elements.len() as u64);
@@ -34,14 +45,19 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
         process_pb.inc(1);
 
         if args.debug {
-            process_pb.set_message(format!("(Element ID: {} / Type: {})", element.id, element.r#type));
+            process_pb.set_message(format!(
+                "(Element ID: {} / Type: {})",
+                element.id, element.r#type
+            ));
         } else {
             process_pb.set_message("");
         }
-        
+
         match element.r#type.as_str() {
             "way" => {
-                if element.tags.contains_key("building") || element.tags.contains_key("building:part") {
+                if element.tags.contains_key("building")
+                    || element.tags.contains_key("building:part")
+                {
                     buildings::generate_buildings(&mut editor, element, ground_level);
                 } else if element.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, ground_level);
@@ -68,7 +84,9 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
             "node" => {
                 if element.tags.contains_key("door") || element.tags.contains_key("entrance") {
                     doors::generate_doors(&mut editor, element, ground_level);
-                } else if element.tags.contains_key("natural") && element.tags.get("natural") == Some(&"tree".to_string()) {
+                } else if element.tags.contains_key("natural")
+                    && element.tags.get("natural") == Some(&"tree".to_string())
+                {
                     natural::generate_natural(&mut editor, element, ground_level);
                 } else if element.tags.contains_key("amenity") {
                     amenities::generate_amenities(&mut editor, element, ground_level);
@@ -76,6 +94,8 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
                     barriers::generate_barriers(&mut editor, element, ground_level);
                 } else if element.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, ground_level);
+                } else if element.tags.contains_key("tourism") {
+                    tourisms::generate_tourisms(&mut editor, element, ground_level);
                 }
             }
             _ => {}
@@ -93,15 +113,31 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
 
     println!("{} {}", "[4/5]".bold(), "Generating ground layer...");
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
-    ground_pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} blocks ({eta})")
-        .unwrap()
-        .progress_chars("█▓░"));
+    ground_pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} blocks ({eta})")
+            .unwrap()
+            .progress_chars("█▓░"),
+    );
 
     for x in 0..=(scale_factor_x as i32) {
         for z in 0..=(scale_factor_z as i32) {
-            editor.set_block(&crate::block_definitions::GRASS_BLOCK, x, ground_level, z, None, None);
-            editor.set_block(&crate::block_definitions::DIRT, x, ground_level - 1, z, None, None);
+            editor.set_block(
+                &crate::block_definitions::GRASS_BLOCK,
+                x,
+                ground_level,
+                z,
+                None,
+                None,
+            );
+            editor.set_block(
+                &crate::block_definitions::DIRT,
+                x,
+                ground_level - 1,
+                z,
+                None,
+                None,
+            );
 
             block_counter += 1;
             if block_counter % batch_size == 0 {
