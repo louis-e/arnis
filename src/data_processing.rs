@@ -41,7 +41,7 @@ pub fn generate_world(elements: Vec<ProcessedElement>, args: &Args, scale_factor
         
         match element.r#type.as_str() {
             "way" => {
-                if element.tags.contains_key("building") || element.tags.contains_key("building:part") || element.tags.contains_key("area:highway") {
+                if element.tags.contains_key("building") || element.tags.contains_key("building:part") {
                     buildings::generate_buildings(&mut editor, element, ground_level);
                 } else if element.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, ground_level);
