@@ -51,14 +51,14 @@ pub fn generate_buildings(editor: &mut WorldEditor, element: &ProcessedElement, 
     // Determine building height from tags
     if let Some(levels_str) = element.tags.get("building:levels") {
         if let Ok(levels) = levels_str.parse::<i32>() {
-            if levels >= 1 && (levels * 3) > building_height {
-                building_height = levels * 3;
+            if levels >= 1 && (levels * 4) > building_height {
+                building_height = levels * 4;
             }
         }
     }
 
     if let Some(height_str) = element.tags.get("height") {
-        if let Ok(height) = height_str.parse::<f64>() {
+        if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
             building_height = height.round() as i32;
         }
     }
