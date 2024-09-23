@@ -26,6 +26,8 @@ pub fn generate_leisure(
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
                         "clay" => &TERRACOTTA,
+                        "sand" => &SAND,
+                        "tartan" => &RED_TERRACOTTA,
                         _ => &GREEN_STAINED_HARDENED_CLAY,
                     }
                 } else {
