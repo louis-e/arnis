@@ -2,6 +2,7 @@ use clap::{ArgGroup, Parser};
 use colored::Colorize;
 use std::path::Path;
 use std::process::exit;
+use std::time::Duration;
 
 /// Command-line arguments parser
 #[derive(Parser, Debug)]
@@ -33,8 +34,8 @@ pub struct Args {
     pub debug: bool,
 
     /// Set floodfill timeout (seconds) (optional) // TODO
-    #[arg(long, default_value_t = 2)]
-    pub timeout: u64,
+    #[arg(long, value_parser = parse_duration)]
+    pub timeout: Option<Duration>,
 }
 
 impl Args {
@@ -42,7 +43,12 @@ impl Args {
         // Validating the world path
         let mc_world_path: &Path = Path::new(&self.path);
         if !mc_world_path.join("region").exists() {
-            eprintln!("{}", "Error! No Minecraft world found at the given path".red().bold());
+            eprintln!(
+                "{}",
+                "Error! No Minecraft world found at the given path"
+                    .red()
+                    .bold()
+            );
             exit(1);
         }
 
@@ -77,4 +83,9 @@ fn validate_bounding_box(bbox: &str) -> bool {
     }
 
     min_lng < max_lng && min_lat < max_lat
+}
+
+fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+    let seconds = arg.parse()?;
+    Ok(std::time::Duration::from_secs(seconds))
 }
