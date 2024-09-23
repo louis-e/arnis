@@ -179,6 +179,8 @@ pub static MAGENTA_CONCRETE: Lazy<Block> =
 pub static BROWN_WOOL: Lazy<Block> = Lazy::new(|| Block::new("minecraft", "brown_wool", None));
 pub static OXIDIZED_COPPER: Lazy<Block> =
     Lazy::new(|| Block::new("minecraft", "oxidized_copper", None));
+pub static YELLOW_TERRACOTTA: Lazy<Block> =
+    Lazy::new(|| Block::new("minecraft", "yellow_terracotta", None));
 
 pub static CARROTS: Lazy<Block> = Lazy::new(|| {
     Block::new(
@@ -274,31 +276,27 @@ pub fn building_wall_variations() -> Vec<&'static Lazy<Block>> {
 pub fn building_wall_color_map() -> Vec<(RGBTuple, &'static Lazy<Block>)> {
     vec![
         ((233, 107, 57), &BRICK),
+        ((18, 12, 13), &CRACKED_POLISHED_BLACKSTONE_BRICKS),
+        ((76, 127, 153), &CYAN_CONCRETE),
         ((0, 0, 0), &DEEPSLATE_BRICKS),
+        ((186, 195, 142), &END_STONE_BRICKS),
+        ((57, 41, 35), &GRAY_TERRACOTTA),
+        ((112, 108, 138), &LIGHT_BLUE_TERRACOTTA),
+        ((122, 92, 66), &MUD_BRICKS),
+        ((24, 13, 14), &NETHER_BRICKS),
+        ((159, 82, 36), &ORANGE_TERRACOTTA),
         ((128, 128, 128), &POLISHED_ANDESITE),
+        ((174, 173, 174), &POLISHED_DIORITE),
+        ((141, 101, 142), &PURPUR_PILLAR),
+        ((142, 60, 46), &RED_TERRACOTTA),
+        ((153, 83, 28), &SMOOTH_RED_SANDSTONE),
+        ((224, 216, 175), &SMOOTH_SANDSTONE),
+        ((188, 182, 179), &SMOOTH_STONE),
+        ((35, 86, 85), &WARPED_PLANKS),
         ((255, 255, 255), &WHITE_CONCRETE),
+        ((209, 177, 161), &WHITE_TERRACOTTA),
+        ((191, 147, 42), &YELLOW_TERRACOTTA),
     ]
-
-    // TODO convert
-    // vec![
-    //     &WHITE_TERRACOTTA,
-    //     &GRAY_TERRACOTTA,
-    //     &SMOOTH_SANDSTONE,
-    //     &RED_TERRACOTTA,
-    //     &POLISHED_DIORITE,
-    //     &SMOOTH_STONE,
-    //     &WARPED_PLANKS,
-    //     &END_STONE_BRICKS,
-    //     &SMOOTH_RED_SANDSTONE,
-    //     &NETHER_BRICKS,
-    //     &YELLOW_CONCRETE,
-    //     &ORANGE_TERRACOTTA,
-    //     &LIGHT_BLUE_TERRACOTTA,
-    //     &CYAN_CONCRETE,
-    //     &PURPUR_PILLAR,
-    //     &CRACKED_POLISHED_BLACKSTONE_BRICKS,
-    //     &MUD_BRICKS,
-    // ]
 }
 
 // Variations for building floors
@@ -311,29 +309,25 @@ pub fn building_floor_variations() -> Vec<&'static Lazy<Block>> {
 
 pub fn building_floor_color_map() -> Vec<(RGBTuple, &'static Lazy<Block>)> {
     vec![
+        ((181, 101, 59), &ACACIA_PLANKS),
+        ((22, 15, 16), &BLACKSTONE),
+        ((104, 51, 74), &CRIMSON_PLANKS),
+        ((82, 55, 26), &DARK_OAK_PLANKS),
+        ((182, 133, 99), &JUNGLE_PLANKS),
+        ((33, 128, 185), &LIGHT_BLUE_CONCRETE),
+        ((78, 103, 43), &MOSS_BLOCK),
+        ((171, 138, 88), &OAK_PLANKS),
         ((0, 128, 0), &OXIDIZED_COPPER),
-        ((128, 0, 0), &RED_NETHER_BRICKS),
-        ((128, 128, 128), &STONE_BRICKS),
+        ((18, 12, 13), &POLISHED_BLACKSTONE),
+        ((64, 64, 64), &POLISHED_DEEPSLATE),
         ((255, 255, 255), &POLISHED_DIORITE),
+        ((143, 96, 79), &POLISHED_GRANITE),
+        ((141, 101, 142), &PURPUR_BLOCK),
+        ((128, 0, 0), &RED_NETHER_BRICKS),
+        ((153, 83, 28), &SMOOTH_RED_SANDSTONE),
+        ((128, 96, 57), &SPRUCE_PLANKS),
+        ((128, 128, 128), &STONE_BRICKS),
+        ((150, 93, 68), &TERRACOTTA),
+        ((35, 86, 85), &WARPED_PLANKS),
     ]
-
-    // TODO convert
-    // vec![
-    //     &OAK_PLANKS,
-    //     &SPRUCE_PLANKS,
-    //     &DARK_OAK_PLANKS,
-    //     &POLISHED_GRANITE,
-    //     &ACACIA_PLANKS,
-    //     &JUNGLE_PLANKS,
-    //     &WARPED_PLANKS,
-    //     &PURPUR_BLOCK,
-    //     &SMOOTH_RED_SANDSTONE,
-    //     &POLISHED_BLACKSTONE,
-    //     &CRIMSON_PLANKS,
-    //     &LIGHT_BLUE_CONCRETE,
-    //     &MOSS_BLOCK,
-    //     &TERRACOTTA,
-    //     &BLACKSTONE,
-    //     &POLISHED_DEEPSLATE,
-    // ]
 }
