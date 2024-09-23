@@ -8,6 +8,9 @@ repository = "https://github.com/louis-e/arnis"
 license = "GPL-3.0"
 readme = "README.md"
 
+[profile.release]
+lto = true
+
 [dependencies]
 clap = { version = "4.1", features = ["derive"] }
 colored = "2.1.0"
