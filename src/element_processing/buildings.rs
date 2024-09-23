@@ -1,8 +1,10 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
+use once_cell::sync::Lazy;
 use rand::Rng;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -25,16 +27,26 @@ pub fn generate_buildings(
 
     let corner_block: &&once_cell::sync::Lazy<Block> =
         &building_corner_variations()[variation_index_corner];
-    let wall_block: &once_cell::sync::Lazy<Block> = match element.tags.get("building:colour") {
-        Some(building_colour) => get_block_for_color(building_colour)
-            .unwrap_or_else(|| building_wall_variations()[variation_index_wall]),
-        None => building_wall_variations()[variation_index_wall],
-    };
-    let floor_block: &once_cell::sync::Lazy<Block> = match element.tags.get("roof:colour") {
-        Some(building_colour) => get_block_for_color(building_colour)
-            .unwrap_or_else(|| building_wall_variations()[variation_index_floor]),
-        None => building_wall_variations()[variation_index_floor],
-    };
+    let wall_block: &once_cell::sync::Lazy<Block> = element
+        .tags
+        .get("building:colour")
+        .map(|building_colour| {
+            color_text_to_rgb_tuple(building_colour)
+                .map(|rgb| find_nearest_block_in_color_map(&rgb, building_wall_color_map()))
+        })
+        .flatten()
+        .flatten()
+        .unwrap_or_else(|| building_wall_variations()[variation_index_wall]);
+    let floor_block: &once_cell::sync::Lazy<Block> = element
+        .tags
+        .get("roof:colour")
+        .map(|roof_colour| {
+            color_text_to_rgb_tuple(roof_colour)
+                .map(|rgb| find_nearest_block_in_color_map(&rgb, building_floor_color_map()))
+        })
+        .flatten()
+        .flatten()
+        .unwrap_or_else(|| building_floor_variations()[variation_index_floor]);
     let window_block: &once_cell::sync::Lazy<Block> = &WHITE_STAINED_GLASS;
 
     // Set to store processed flood fill points
@@ -231,30 +243,14 @@ pub fn generate_buildings(
     }
 }
 
-fn get_block_for_color(color: &str) -> Option<&'static once_cell::sync::Lazy<Block>> {
-    match color.to_lowercase().as_str() {
-        "#000000" | "#000" | "black" => Some(&POLISHED_BLACKSTONE),
-        "#808080" | "gray" | "grey" => Some(&STONE),
-        "#800000" | "maroon" => Some(&RED_NETHER_BRICKS),
-        "#808000" | "olive" => Some(&YELLOW_CONCRETE),
-        "#008000" | "green" => Some(&LIME_CONCRETE),
-        "#008080" | "teal" => Some(&CYAN_WOOL),
-        "#000080" | "navy" => Some(&BLUE_CONCRETE),
-        "#800080" | "purple" => Some(&PURPLE_CONCRETE),
-
-        "#ffffff" | "#fff" | "white" => Some(&WHITE_WOOL),
-        "#c0c0c0" | "silver" => Some(&WHITE_CONCRETE),
-        "#ff0000" | "#f00" | "red" => Some(&RED_CONCRETE),
-        "#ffff00" | "#ff0" | "yellow" => Some(&YELLOW_CONCRETE),
-        "#00ff00" | "#0f0" | "lime" => Some(&LIME_CONCRETE),
-        "#00ffff" | "#0ff" | "aqua" | "cyan" => Some(&CYAN_CONCRETE),
-        "#0000ff" | "#00f" | "blue" => Some(&BLUE_CONCRETE),
-        "#ff00ff" | "#f0f" | "fuchsia" | "magenta" => Some(&MAGENTA_CONCRETE),
-
-        "#804000" | "brown" => Some(&BROWN_WOOL),
-        "#FF8000" | "orange" => Some(&BRICK),
-        _ => None,
-    }
+fn find_nearest_block_in_color_map(
+    rgb: &RGBTuple,
+    color_map: Vec<(RGBTuple, &'static Lazy<Block>)>,
+) -> Option<&'static once_cell::sync::Lazy<Block>> {
+    color_map
+        .into_iter()
+        .min_by_key(|(entry_rgb, _)| rgb_distance(entry_rgb, rgb))
+        .map(|(_, block)| block)
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.

@@ -22,7 +22,16 @@ pub fn generate_leisure(
         // Determine block type based on leisure type
         let block_type: &once_cell::sync::Lazy<Block> = match leisure_type.as_str() {
             "park" => &GRASS_BLOCK,
-            "playground" | "recreation_ground" | "pitch" => &GREEN_STAINED_HARDENED_CLAY,
+            "playground" | "recreation_ground" | "pitch" => {
+                if let Some(surface) = element.tags.get("surface") {
+                    match surface.as_str() {
+                        "clay" => &TERRACOTTA,
+                        _ => &GREEN_STAINED_HARDENED_CLAY,
+                    }
+                } else {
+                    &GREEN_STAINED_HARDENED_CLAY
+                }
+            }
             "garden" => &GRASS_BLOCK,
             "swimming_pool" => &WATER,
             _ => &GRASS_BLOCK,

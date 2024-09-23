@@ -5,6 +5,8 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::colors::RGBTuple;
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct Block {
     pub namespace: String,
@@ -175,6 +177,8 @@ pub static RED_CONCRETE: Lazy<Block> = Lazy::new(|| Block::new("minecraft", "red
 pub static MAGENTA_CONCRETE: Lazy<Block> =
     Lazy::new(|| Block::new("minecraft", "magenta_concrete", None));
 pub static BROWN_WOOL: Lazy<Block> = Lazy::new(|| Block::new("minecraft", "brown_wool", None));
+pub static OXIDIZED_COPPER: Lazy<Block> =
+    Lazy::new(|| Block::new("minecraft", "oxidized_copper", None));
 
 pub static CARROTS: Lazy<Block> = Lazy::new(|| {
     Block::new(
@@ -260,50 +264,76 @@ pub fn building_corner_variations() -> Vec<&'static Lazy<Block>> {
 
 // Variations for building walls
 pub fn building_wall_variations() -> Vec<&'static Lazy<Block>> {
+    building_wall_color_map()
+        .into_iter()
+        .map(|(_, block)| block)
+        .collect()
+}
+
+// https://wiki.openstreetmap.org/wiki/Key:building:colour
+pub fn building_wall_color_map() -> Vec<(RGBTuple, &'static Lazy<Block>)> {
     vec![
-        &WHITE_TERRACOTTA,
-        &GRAY_TERRACOTTA,
-        &BRICK,
-        &SMOOTH_SANDSTONE,
-        &RED_TERRACOTTA,
-        &POLISHED_DIORITE,
-        &SMOOTH_STONE,
-        &POLISHED_ANDESITE,
-        &WARPED_PLANKS,
-        &END_STONE_BRICKS,
-        &SMOOTH_RED_SANDSTONE,
-        &NETHER_BRICKS,
-        &YELLOW_CONCRETE,
-        &ORANGE_TERRACOTTA,
-        &LIGHT_BLUE_TERRACOTTA,
-        &CYAN_CONCRETE,
-        &PURPUR_PILLAR,
-        &CRACKED_POLISHED_BLACKSTONE_BRICKS,
-        &DEEPSLATE_BRICKS,
-        &MUD_BRICKS,
+        ((233, 107, 57), &BRICK),
+        ((0, 0, 0), &DEEPSLATE_BRICKS),
+        ((128, 128, 128), &POLISHED_ANDESITE),
+        ((255, 255, 255), &WHITE_CONCRETE),
     ]
+
+    // TODO convert
+    // vec![
+    //     &WHITE_TERRACOTTA,
+    //     &GRAY_TERRACOTTA,
+    //     &SMOOTH_SANDSTONE,
+    //     &RED_TERRACOTTA,
+    //     &POLISHED_DIORITE,
+    //     &SMOOTH_STONE,
+    //     &WARPED_PLANKS,
+    //     &END_STONE_BRICKS,
+    //     &SMOOTH_RED_SANDSTONE,
+    //     &NETHER_BRICKS,
+    //     &YELLOW_CONCRETE,
+    //     &ORANGE_TERRACOTTA,
+    //     &LIGHT_BLUE_TERRACOTTA,
+    //     &CYAN_CONCRETE,
+    //     &PURPUR_PILLAR,
+    //     &CRACKED_POLISHED_BLACKSTONE_BRICKS,
+    //     &MUD_BRICKS,
+    // ]
 }
 
 // Variations for building floors
 pub fn building_floor_variations() -> Vec<&'static Lazy<Block>> {
+    building_wall_color_map()
+        .into_iter()
+        .map(|(_, block)| block)
+        .collect()
+}
+
+pub fn building_floor_color_map() -> Vec<(RGBTuple, &'static Lazy<Block>)> {
     vec![
-        &OAK_PLANKS,
-        &SPRUCE_PLANKS,
-        &DARK_OAK_PLANKS,
-        &STONE_BRICKS,
-        &POLISHED_GRANITE,
-        &POLISHED_DIORITE,
-        &ACACIA_PLANKS,
-        &JUNGLE_PLANKS,
-        &WARPED_PLANKS,
-        &PURPUR_BLOCK,
-        &SMOOTH_RED_SANDSTONE,
-        &POLISHED_BLACKSTONE,
-        &CRIMSON_PLANKS,
-        &LIGHT_BLUE_CONCRETE,
-        &MOSS_BLOCK,
-        &TERRACOTTA,
-        &BLACKSTONE,
-        &POLISHED_DEEPSLATE,
+        ((0, 128, 0), &OXIDIZED_COPPER),
+        ((128, 0, 0), &RED_NETHER_BRICKS),
+        ((128, 128, 128), &STONE_BRICKS),
+        ((255, 255, 255), &POLISHED_DIORITE),
     ]
+
+    // TODO convert
+    // vec![
+    //     &OAK_PLANKS,
+    //     &SPRUCE_PLANKS,
+    //     &DARK_OAK_PLANKS,
+    //     &POLISHED_GRANITE,
+    //     &ACACIA_PLANKS,
+    //     &JUNGLE_PLANKS,
+    //     &WARPED_PLANKS,
+    //     &PURPUR_BLOCK,
+    //     &SMOOTH_RED_SANDSTONE,
+    //     &POLISHED_BLACKSTONE,
+    //     &CRIMSON_PLANKS,
+    //     &LIGHT_BLUE_CONCRETE,
+    //     &MOSS_BLOCK,
+    //     &TERRACOTTA,
+    //     &BLACKSTONE,
+    //     &POLISHED_DEEPSLATE,
+    // ]
 }
