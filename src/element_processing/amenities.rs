@@ -1,17 +1,24 @@
-use crate::world_editor::WorldEditor;
-use crate::osm_parser::ProcessedElement;
+use std::time::Duration;
+
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::floodfill::flood_fill_area;
+use crate::osm_parser::ProcessedElement;
+use crate::world_editor::WorldEditor;
 
-pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_amenities(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    ground_level: i32,
+    floodfill_timeout: Option<&Duration>,
+) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
             return;
         }
     }
-    
+
     if let Some(level) = element.tags.get("level") {
         if level.parse::<i32>().unwrap_or(0) < 0 {
             return;
@@ -38,15 +45,16 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
             "bicycle_parking" => {
                 let ground_block: &once_cell::sync::Lazy<Block> = &OAK_PLANKS;
                 let roof_block: &once_cell::sync::Lazy<Block> = &STONE_BLOCK_SLAB;
-        
+
                 let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
-                let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, 2);
-        
+                let floor_area: Vec<(i32, i32)> =
+                    flood_fill_area(&polygon_coords, floodfill_timeout);
+
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
                     editor.set_block(ground_block, *x, ground_level, *z, None, None);
                 }
-        
+
                 // Place fences and roof slabs at each corner node directly
                 for &(x, z) in &element.nodes {
                     for y in 1..=4 {
@@ -55,7 +63,7 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                     }
                     editor.set_block(roof_block, x, ground_level + 5, z, None, None);
                 }
-        
+
                 // Flood fill the roof area
                 let roof_height: i32 = ground_level + 5;
                 for (x, z) in floor_area.iter() {
@@ -92,16 +100,37 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                 for &node in &element.nodes {
                     if let Some(prev) = previous_node {
                         // Create borders for fountain or parking area
-                        let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, ground_level, prev.1, node.0, ground_level, node.1);
+                        let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(
+                            prev.0,
+                            ground_level,
+                            prev.1,
+                            node.0,
+                            ground_level,
+                            node.1,
+                        );
                         for (bx, _, bz) in bresenham_points {
-                            editor.set_block(block_type, bx, ground_level, bz, Some(&[&BLACK_CONCRETE]), None);
+                            editor.set_block(
+                                block_type,
+                                bx,
+                                ground_level,
+                                bz,
+                                Some(&[&BLACK_CONCRETE]),
+                                None,
+                            );
 
                             // Decorative border around fountains
                             if amenity_type == "fountain" {
                                 for dx in [-1, 0, 1].iter() {
                                     for dz in [-1, 0, 1].iter() {
                                         if (*dx, *dz) != (0, 0) {
-                                            editor.set_block(&LIGHT_GRAY_CONCRETE, bx + dx, ground_level, bz + dz, None, None);
+                                            editor.set_block(
+                                                &LIGHT_GRAY_CONCRETE,
+                                                bx + dx,
+                                                ground_level,
+                                                bz + dz,
+                                                None,
+                                                None,
+                                            );
                                         }
                                     }
                                 }
@@ -119,14 +148,29 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                 // Flood-fill the interior area for parking or fountains
                 if corner_addup.2 > 0 {
                     let polygon_coords: Vec<(i32, i32)> = current_amenity.iter().copied().collect();
-                    let flood_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, 2);
+                    let flood_area: Vec<(i32, i32)> =
+                        flood_fill_area(&polygon_coords, floodfill_timeout);
 
                     for (x, z) in flood_area {
-                        editor.set_block(block_type, x, ground_level, z, Some(&[&BLACK_CONCRETE, &GRAY_CONCRETE]), None);
+                        editor.set_block(
+                            block_type,
+                            x,
+                            ground_level,
+                            z,
+                            Some(&[&BLACK_CONCRETE, &GRAY_CONCRETE]),
+                            None,
+                        );
 
                         // Add parking spot markings
                         if amenity_type == "parking" && (x + z) % 8 == 0 && (x * z) % 32 != 0 {
-                            editor.set_block(&LIGHT_GRAY_CONCRETE, x, ground_level, z, Some(&[&BLACK_CONCRETE, &GRAY_CONCRETE]), None);
+                            editor.set_block(
+                                &LIGHT_GRAY_CONCRETE,
+                                x,
+                                ground_level,
+                                z,
+                                Some(&[&BLACK_CONCRETE, &GRAY_CONCRETE]),
+                                None,
+                            );
                         }
                     }
                 }

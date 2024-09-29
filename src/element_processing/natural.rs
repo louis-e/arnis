@@ -1,12 +1,19 @@
-use crate::world_editor::WorldEditor;
-use crate::osm_parser::ProcessedElement;
+use std::time::Duration;
+
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::floodfill::flood_fill_area;
 use crate::element_processing::tree::create_tree;
+use crate::floodfill::flood_fill_area;
+use crate::osm_parser::ProcessedElement;
+use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_natural(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    ground_level: i32,
+    floodfill_timeout: Option<&Duration>,
+) {
     if let Some(natural_type) = element.tags.get("natural") {
         if natural_type == "tree" {
             if let Some(first_node) = element.nodes.first() {
@@ -34,7 +41,8 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, gr
 
                 if let Some(prev) = previous_node {
                     // Generate the line of coordinates between the two nodes
-                    let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
+                    let bresenham_points: Vec<(i32, i32, i32)> =
+                        bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
                     for (bx, _, bz) in bresenham_points {
                         editor.set_block(block_type, bx, ground_level, bz, None, None);
                     }
@@ -49,7 +57,8 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, gr
             // If there are natural nodes, flood-fill the area
             if corner_addup != (0, 0, 0) {
                 let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
-                let filled_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, 2);
+                let filled_area: Vec<(i32, i32)> =
+                    flood_fill_area(&polygon_coords, floodfill_timeout);
 
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 

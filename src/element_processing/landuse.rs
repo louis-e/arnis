@@ -1,12 +1,19 @@
-use crate::world_editor::WorldEditor;
-use crate::osm_parser::ProcessedElement;
+use std::time::Duration;
+
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::floodfill::flood_fill_area;
 use crate::element_processing::tree::create_tree;
+use crate::floodfill::flood_fill_area;
+use crate::osm_parser::ProcessedElement;
+use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_landuse(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    ground_level: i32,
+    floodfill_timeout: Option<&Duration>,
+) {
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
     let mut current_landuse: Vec<(i32, i32)> = vec![];
@@ -38,7 +45,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
 
         if let Some(prev) = previous_node {
             // Generate the line of coordinates between the two nodes
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
+            let bresenham_points: Vec<(i32, i32, i32)> =
+                bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
             for (bx, _, bz) in bresenham_points {
                 editor.set_block(&GRASS_BLOCK, bx, ground_level, bz, None, None);
             }
@@ -53,7 +61,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
     // If there are landuse nodes, flood-fill the area
     if !current_landuse.is_empty() {
         let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
-        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, 2);
+        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
@@ -75,15 +83,71 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                             // Place graves
                             if editor.check_for_block(x, ground_level, z, Some(&[&PODZOL]), None) {
                                 if rng.gen_bool(0.5) {
-                                    editor.set_block(&COBBLESTONE, x - 1, ground_level + 1, z, None, None);
-                                    editor.set_block(&STONE_BRICK_SLAB, x - 1, ground_level + 2, z, None, None);
-                                    editor.set_block(&STONE_BRICK_SLAB, x, ground_level + 1, z, None, None);
-                                    editor.set_block(&STONE_BRICK_SLAB, x + 1, ground_level + 1, z, None, None);
+                                    editor.set_block(
+                                        &COBBLESTONE,
+                                        x - 1,
+                                        ground_level + 1,
+                                        z,
+                                        None,
+                                        None,
+                                    );
+                                    editor.set_block(
+                                        &STONE_BRICK_SLAB,
+                                        x - 1,
+                                        ground_level + 2,
+                                        z,
+                                        None,
+                                        None,
+                                    );
+                                    editor.set_block(
+                                        &STONE_BRICK_SLAB,
+                                        x,
+                                        ground_level + 1,
+                                        z,
+                                        None,
+                                        None,
+                                    );
+                                    editor.set_block(
+                                        &STONE_BRICK_SLAB,
+                                        x + 1,
+                                        ground_level + 1,
+                                        z,
+                                        None,
+                                        None,
+                                    );
                                 } else {
-                                    editor.set_block(&COBBLESTONE, x, ground_level + 1, z - 1, None, None);
-                                    editor.set_block(&STONE_BRICK_SLAB, x, ground_level + 2, z - 1, None, None);
-                                    editor.set_block(&STONE_BRICK_SLAB, x, ground_level + 1, z, None, None);
-                                    editor.set_block(&STONE_BRICK_SLAB, x, ground_level + 1, z + 1, None, None);
+                                    editor.set_block(
+                                        &COBBLESTONE,
+                                        x,
+                                        ground_level + 1,
+                                        z - 1,
+                                        None,
+                                        None,
+                                    );
+                                    editor.set_block(
+                                        &STONE_BRICK_SLAB,
+                                        x,
+                                        ground_level + 2,
+                                        z - 1,
+                                        None,
+                                        None,
+                                    );
+                                    editor.set_block(
+                                        &STONE_BRICK_SLAB,
+                                        x,
+                                        ground_level + 1,
+                                        z,
+                                        None,
+                                        None,
+                                    );
+                                    editor.set_block(
+                                        &STONE_BRICK_SLAB,
+                                        x,
+                                        ground_level + 1,
+                                        z + 1,
+                                        None,
+                                        None,
+                                    );
                                 }
                             }
                         } else if random_choice < 30 {
@@ -101,12 +165,13 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                         if random_choice == 20 {
                             create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
                         } else if random_choice == 2 {
-                            let flower_block: &once_cell::sync::Lazy<Block> = match rng.gen_range(1..=4) {
-                                1 => &RED_FLOWER,
-                                2 => &BLUE_FLOWER,
-                                3 => &YELLOW_FLOWER,
-                                _ => &WHITE_FLOWER,
-                            };
+                            let flower_block: &once_cell::sync::Lazy<Block> =
+                                match rng.gen_range(1..=4) {
+                                    1 => &RED_FLOWER,
+                                    2 => &BLUE_FLOWER,
+                                    3 => &YELLOW_FLOWER,
+                                    _ => &WHITE_FLOWER,
+                                };
                             editor.set_block(flower_block, x, ground_level + 1, z, None, None);
                         } else if random_choice <= 1 {
                             editor.set_block(&GRASS, x, ground_level + 1, z, None, None);
@@ -119,26 +184,60 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                         if x % 15 == 0 || z % 15 == 0 {
                             // Place water on the edges
                             editor.set_block(&WATER, x, ground_level, z, Some(&[&FARMLAND]), None);
-                            editor.set_block(&AIR, x, ground_level + 1, z, Some(&[&GRASS, &WHEAT, &CARROTS, &POTATOES]), None);
+                            editor.set_block(
+                                &AIR,
+                                x,
+                                ground_level + 1,
+                                z,
+                                Some(&[&GRASS, &WHEAT, &CARROTS, &POTATOES]),
+                                None,
+                            );
                         } else {
                             // Set the block below as farmland
                             editor.set_block(&FARMLAND, x, ground_level, z, None, None);
-                            
+
                             // If a random condition is met, place a special object
                             if rng.gen_range(0..76) == 0 {
                                 let special_choice = rng.gen_range(1..=10);
                                 if special_choice <= 2 {
-                                    create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
+                                    create_tree(
+                                        editor,
+                                        x,
+                                        ground_level + 1,
+                                        z,
+                                        rng.gen_range(1..=3),
+                                    );
                                 } else if special_choice <= 6 {
                                     editor.set_block(&HAY_BALE, x, ground_level + 1, z, None, None);
                                 } else {
-                                    editor.set_block(&OAK_LEAVES, x, ground_level + 1, z, None, None);
+                                    editor.set_block(
+                                        &OAK_LEAVES,
+                                        x,
+                                        ground_level + 1,
+                                        z,
+                                        None,
+                                        None,
+                                    );
                                 }
                             } else {
                                 // Set crops only if the block below is farmland
-                                if editor.check_for_block(x, ground_level, z, Some(&[&FARMLAND]), None) {
-                                    let crop_choice = [&WHEAT, &CARROTS, &POTATOES][rng.gen_range(0..3)];
-                                    editor.set_block(crop_choice, x, ground_level + 1, z, None, None);
+                                if editor.check_for_block(
+                                    x,
+                                    ground_level,
+                                    z,
+                                    Some(&[&FARMLAND]),
+                                    None,
+                                ) {
+                                    let crop_choice =
+                                        [&WHEAT, &CARROTS, &POTATOES][rng.gen_range(0..3)];
+                                    editor.set_block(
+                                        crop_choice,
+                                        x,
+                                        ground_level + 1,
+                                        z,
+                                        None,
+                                        None,
+                                    );
                                 }
                             }
                         }
@@ -162,14 +261,37 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                             editor.set_block(&SCAFFOLDING, x, ground_level + 4, z, None, None);
                             editor.set_block(&SCAFFOLDING, x, ground_level + 5, z, None, None);
                             editor.set_block(&SCAFFOLDING, x - 1, ground_level + 1, z, None, None);
-                            editor.set_block(&SCAFFOLDING, x + 1, ground_level + 1, z - 1, None, None);
+                            editor.set_block(
+                                &SCAFFOLDING,
+                                x + 1,
+                                ground_level + 1,
+                                z - 1,
+                                None,
+                                None,
+                            );
                         }
                     } else if random_choice < 30 {
                         let construction_items: [&once_cell::sync::Lazy<Block>; 11] = [
-                            &OAK_LOG, &COBBLESTONE, &GRAVEL, &GLOWSTONE, &STONE,
-                            &COBBLESTONE_WALL, &BLACK_CONCRETE, &SAND, &OAK_PLANKS, &DIRT, &BRICK,
+                            &OAK_LOG,
+                            &COBBLESTONE,
+                            &GRAVEL,
+                            &GLOWSTONE,
+                            &STONE,
+                            &COBBLESTONE_WALL,
+                            &BLACK_CONCRETE,
+                            &SAND,
+                            &OAK_PLANKS,
+                            &DIRT,
+                            &BRICK,
                         ];
-                        editor.set_block(construction_items[rng.gen_range(0..construction_items.len())], x, ground_level + 1, z, None, None);
+                        editor.set_block(
+                            construction_items[rng.gen_range(0..construction_items.len())],
+                            x,
+                            ground_level + 1,
+                            z,
+                            None,
+                            None,
+                        );
                     } else if random_choice < 35 {
                         if random_choice < 30 {
                             editor.set_block(&DIRT, x, ground_level + 1, z, None, None);
@@ -187,7 +309,9 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedElement, gr
                     }
                 }
                 "grass" => {
-                    if rng.gen_range(1..=7) != 1 && !editor.check_for_block(x, ground_level, z, None, Some(&[&WATER])) {
+                    if rng.gen_range(1..=7) != 1
+                        && !editor.check_for_block(x, ground_level, z, None, Some(&[&WATER]))
+                    {
                         editor.set_block(&GRASS, x, ground_level + 1, z, None, None);
                     }
                 }

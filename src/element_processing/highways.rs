@@ -1,10 +1,17 @@
-use crate::world_editor::WorldEditor;
-use crate::osm_parser::ProcessedElement;
+use std::time::Duration;
+
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::floodfill::flood_fill_area; // Assuming you have a flood fill function for area filling
+use crate::floodfill::flood_fill_area;
+use crate::osm_parser::ProcessedElement;
+use crate::world_editor::WorldEditor; // Assuming you have a flood fill function for area filling
 
-pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_highways(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    ground_level: i32,
+    floodfill_timeout: Option<&Duration>,
+) {
     if let Some(highway_type) = element.tags.get("highway") {
         if highway_type == "street_lamp" {
             // Handle street lamps
@@ -64,12 +71,11 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, g
 
             // Fill the area using flood fill or by iterating through the nodes
             let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
-            let filled_area = flood_fill_area(&polygon_coords, 2);
+            let filled_area = flood_fill_area(&polygon_coords, floodfill_timeout);
 
             for (x, z) in filled_area {
                 editor.set_block(surface_block, x, ground_level, z, None, None);
             }
-
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
             let mut block_type: &once_cell::sync::Lazy<Block> = &BLACK_CONCRETE;
@@ -82,7 +88,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, g
                     return;
                 }
             }
-            
+
             if let Some(level) = element.tags.get("level") {
                 if level.parse::<i32>().unwrap_or(0) < 0 {
                     return;
@@ -135,8 +141,8 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, g
 
                     // Variables to manage dashed line pattern
                     let mut stripe_length = 0;
-                    let dash_length = 5;  // Length of the solid part of the stripe
-                    let gap_length = 5;   // Length of the gap part of the stripe
+                    let dash_length = 5; // Length of the solid part of the stripe
+                    let gap_length = 5; // Length of the gap part of the stripe
 
                     for (x, _, z) in bresenham_points {
                         // Draw the road surface for the entire width
@@ -243,9 +249,16 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedElement, gro
 
         // Draw the siding using Bresenham's line algorithm between nodes
         if let Some(prev) = previous_node {
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, ground_level + 1, prev.1, x, ground_level + 1, z);
+            let bresenham_points: Vec<(i32, i32, i32)> =
+                bresenham_line(prev.0, ground_level + 1, prev.1, x, ground_level + 1, z);
             for (bx, by, bz) in bresenham_points {
-                if !editor.check_for_block(bx, by - 1, bz, None, Some(&[&BLACK_CONCRETE, &WHITE_CONCRETE])) {
+                if !editor.check_for_block(
+                    bx,
+                    by - 1,
+                    bz,
+                    None,
+                    Some(&[&BLACK_CONCRETE, &WHITE_CONCRETE]),
+                ) {
                     editor.set_block(siding_block, bx, by, bz, None, None);
                 }
             }
