@@ -6,7 +6,7 @@ use fastnbt::{ByteArray, LongArray, Value};
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs::File;
 
 #[derive(Serialize, Deserialize)]
@@ -41,11 +41,79 @@ struct PaletteItem {
     properties: Option<Value>,
 }
 
+#[derive(Default)]
+struct ChunkToModify {
+    blocks: HashMap<(i32, i32, i32), Block>,
+}
+
+impl ChunkToModify {
+    fn get_block(&self, x: i32, y: i32, z: i32) -> Option<&Block> {
+        self.blocks.get(&(x, y, z))
+    }
+
+    fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        self.blocks.insert((x, y, z), block);
+    }
+}
+
+#[derive(Default)]
+struct RegionToModify {
+    chunks: HashMap<(i32, i32), ChunkToModify>,
+}
+
+impl RegionToModify {
+    fn get_or_create_chunk(&mut self, x: i32, z: i32) -> &mut ChunkToModify {
+        self.chunks.entry((x, z)).or_default()
+    }
+
+    fn get_chunk(&self, x: i32, z: i32) -> Option<&ChunkToModify> {
+        self.chunks.get(&(x, z))
+    }
+}
+
+#[derive(Default)]
+struct WorldToModify {
+    regions: HashMap<(i32, i32), RegionToModify>,
+}
+
+impl WorldToModify {
+    fn get_or_create_region(&mut self, x: i32, z: i32) -> &mut RegionToModify {
+        self.regions.entry((x, z)).or_default()
+    }
+
+    fn get_region(&self, x: i32, z: i32) -> Option<&RegionToModify> {
+        self.regions.get(&(x, z))
+    }
+
+    fn get_block(&self, x: i32, y: i32, z: i32) -> Option<&Block> {
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let region = self.get_region(region_x, region_z)?;
+        let chunk = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
+
+        chunk.get_block(x & 15, y, z & 15)
+    }
+
+    fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let region = self.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        chunk.set_block(x & 15, y, z & 15, block);
+    }
+}
+
 pub struct WorldEditor<'a> {
     region_template_path: String,
     region_dir: String,
-    regions: HashMap<(i32, i32), Region<File>>,
-    chunks_to_modify: HashMap<(i32, i32, i32, i32), HashMap<(i32, i32, i32), Block>>,
+    world: WorldToModify,
     scale_factor_x: f64,
     scale_factor_z: f64,
     args: &'a Args,
@@ -63,27 +131,25 @@ impl<'a> WorldEditor<'a> {
         Self {
             region_template_path: region_template_path.to_string(),
             region_dir: region_dir.to_string(),
-            regions: HashMap::new(),
-            chunks_to_modify: HashMap::new(),
+            world: WorldToModify::default(),
             scale_factor_x,
             scale_factor_z,
             args,
         }
     }
 
-    /// Loads or creates a region for the given region coordinates.
-    fn load_region(&mut self, region_x: i32, region_z: i32) -> &mut Region<File> {
-        self.regions.entry((region_x, region_z)).or_insert_with(|| {
-            let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
-            std::fs::copy(&self.region_template_path, &out_path)
-                .expect("Failed to copy region template");
-            let region_file = File::options()
-                .read(true)
-                .write(true)
-                .open(&out_path)
-                .expect("Failed to open region file");
-            Region::from_stream(region_file).expect("Failed to load region")
-        })
+    /// Creates a region for the given region coordinates.
+    fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
+        let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
+        std::fs::copy(&self.region_template_path, &out_path)
+            .expect("Failed to copy region template");
+        let region_file = File::options()
+            .read(true)
+            .write(true)
+            .open(&out_path)
+            .expect("Failed to open region file");
+
+        Region::from_stream(region_file).expect("Failed to load region")
     }
 
     /// Sets a block of the specified type at the given coordinates.
@@ -96,49 +162,30 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[&'static Lazy<Block>]>,
         override_blacklist: Option<&[&'static Lazy<Block>]>,
     ) {
-        let position: (i32, i32, i32) = (x, y, z);
-
         // Check if coordinates are within bounds
         if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
             return;
         }
 
-        let chunk_x: i32 = x >> 4;
-        let chunk_z: i32 = z >> 4;
-        let region_x: i32 = chunk_x >> 5;
-        let region_z: i32 = chunk_z >> 5;
-
-        let chunk_x_within_region: i32 = chunk_x & 31;
-        let chunk_z_within_region: i32 = chunk_z & 31;
-
-        let chunk_key: (i32, i32, i32, i32) = (
-            region_x,
-            region_z,
-            chunk_x_within_region,
-            chunk_z_within_region,
-        );
-        let chunk_blocks: &mut HashMap<(i32, i32, i32), Block> =
-            self.chunks_to_modify.entry(chunk_key).or_default();
-
-        if let Some(existing_block) = chunk_blocks.get(&position) {
+        let should_insert = if let Some(existing_block) = self.world.get_block(x, y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                if whitelist
+                whitelist
                     .iter()
                     .any(|&whitelisted_block| whitelisted_block.name == existing_block.name)
-                {
-                    chunk_blocks.insert(position, (*block).clone());
-                }
             } else if let Some(blacklist) = override_blacklist {
-                if !blacklist
+                !blacklist
                     .iter()
                     .any(|&blacklisted_block| blacklisted_block.name == existing_block.name)
-                {
-                    chunk_blocks.insert(position, (*block).clone());
-                }
+            } else {
+                false
             }
         } else {
-            chunk_blocks.insert(position, (*block).clone());
+            true
+        };
+
+        if should_insert {
+            self.world.set_block(x, y, z, (*block).clone());
         }
     }
 
@@ -177,40 +224,23 @@ impl<'a> WorldEditor<'a> {
         whitelist: Option<&[&'static Lazy<Block>]>,
         blacklist: Option<&[&'static Lazy<Block>]>,
     ) -> bool {
-        let chunk_x: i32 = x >> 4;
-        let chunk_z: i32 = z >> 4;
-        let region_x: i32 = chunk_x >> 5;
-        let region_z: i32 = chunk_z >> 5;
-
-        let chunk_x_within_region: i32 = chunk_x & 31;
-        let chunk_z_within_region: i32 = chunk_z & 31;
-
-        let chunk_key: (i32, i32, i32, i32) = (
-            region_x,
-            region_z,
-            chunk_x_within_region,
-            chunk_z_within_region,
-        );
-
         // Retrieve the chunk modification map
-        if let Some(chunk_blocks) = self.chunks_to_modify.get(&chunk_key) {
-            if let Some(existing_block) = chunk_blocks.get(&(x, y, z)) {
-                // Check against whitelist and blacklist
-                if let Some(whitelist) = whitelist {
-                    if whitelist
-                        .iter()
-                        .any(|&whitelisted_block| whitelisted_block.name == existing_block.name)
-                    {
-                        return true; // Block is in whitelist
-                    }
+        if let Some(existing_block) = self.world.get_block(x, y, z) {
+            // Check against whitelist and blacklist
+            if let Some(whitelist) = whitelist {
+                if whitelist
+                    .iter()
+                    .any(|&whitelisted_block| whitelisted_block.name == existing_block.name)
+                {
+                    return true; // Block is in whitelist
                 }
-                if let Some(blacklist) = blacklist {
-                    if blacklist
-                        .iter()
-                        .any(|&blacklisted_block| blacklisted_block.name == existing_block.name)
-                    {
-                        return true; // Block is in blacklist
-                    }
+            }
+            if let Some(blacklist) = blacklist {
+                if blacklist
+                    .iter()
+                    .any(|&blacklisted_block| blacklisted_block.name == existing_block.name)
+                {
+                    return true; // Block is in blacklist
                 }
             }
         }
@@ -223,69 +253,51 @@ impl<'a> WorldEditor<'a> {
         println!("{} {}", "[5/5]".bold(), "Saving world...");
 
         let _debug: bool = self.args.debug;
-        let total_chunks: u64 = self.chunks_to_modify.len() as u64;
+        let total_regions: u64 = self.world.regions.len() as u64;
 
-        let save_pb: ProgressBar = ProgressBar::new(total_chunks);
+        let save_pb: ProgressBar = ProgressBar::new(total_regions);
         save_pb.set_style(
             ProgressStyle::default_bar()
                 .template(
-                    "{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} chunks ({eta})",
+                    "{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} regions ({eta})",
                 )
                 .unwrap()
                 .progress_chars("█▓░"),
         );
 
-        let chunks_to_process = self.chunks_to_modify.clone(); // Clone to prevent modifying while iterating
-
-        let mut processed_regions = HashSet::new();
-
-        for ((region_x, region_z, _chunk_x, _chunk_z), _block_list) in &chunks_to_process {
-            if processed_regions.contains(&(region_x, region_z)) {
-                continue;
-            }
-
-            processed_regions.insert((region_x, region_z));
-
-            let region: &mut Region<File> = self.load_region(*region_x, *region_z);
+        for ((region_x, region_z), region_to_modify) in &self.world.regions {
+            let mut region = self.create_region(*region_x, *region_z);
 
             for chunk_x in 0..32 {
                 for chunk_z in 0..32 {
-                    // TODO - why the if let here?
-                    if let Ok(Some(data)) = region.read_chunk(chunk_x as usize, chunk_z as usize) {
-                        let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
+                    let data = region
+                        .read_chunk(chunk_x as usize, chunk_z as usize)
+                        .unwrap()
+                        .unwrap();
 
-                        if let Some(block_list) =
-                            chunks_to_process.get(&(*region_x, *region_z, chunk_x, chunk_z))
-                        {
-                            for ((x, y, z), block) in block_list {
-                                set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
-                            }
+                    let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
+
+                    if let Some(block_list) = region_to_modify.get_chunk(chunk_x, chunk_z) {
+                        for ((x, y, z), block) in &block_list.blocks {
+                            set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
                         }
 
-                        chunk.x_pos = chunk_x + region_x * 32;
-                        chunk.z_pos = chunk_z + region_z * 32;
-
-                        let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
-
-                        // Write chunk data back to the correct location, ensuring correct chunk coordinates
-                        let expected_chunk_location: (usize, usize) =
-                            ((chunk_x as usize) & 31, (chunk_z as usize) & 31);
-                        region
-                            .write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser)
-                            .unwrap();
+                        save_pb.inc(1);
                     }
+
+                    chunk.x_pos = chunk_x + region_x * 32;
+                    chunk.z_pos = chunk_z + region_z * 32;
+
+                    let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
+
+                    // Write chunk data back to the correct location, ensuring correct chunk coordinates
+                    let expected_chunk_location: (usize, usize) =
+                        ((chunk_x as usize) & 31, (chunk_z as usize) & 31);
+                    region
+                        .write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser)
+                        .unwrap();
                 }
             }
-
-            // Remove chunks from the modification map after processing it
-            for chunk_x in 0..32 {
-                for chunk_z in 0..32 {
-                    self.chunks_to_modify
-                        .remove(&(*region_x, *region_z, chunk_x, chunk_z));
-                }
-            }
-
-            save_pb.inc(1);
         }
 
         save_pb.finish();
@@ -297,9 +309,9 @@ fn bits_per_block(palette_size: u32) -> u32 {
 }
 
 fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
-    let local_x: usize = (x & 15) as usize;
-    let local_y: usize = y as usize;
-    let local_z: usize = (z & 15) as usize;
+    let local_x = x as usize;
+    let local_y = y as usize;
+    let local_z = z as usize;
 
     for section in chunk.sections.iter_mut() {
         if let Some(Value::Byte(y_byte)) = section.other.get("Y") {
