@@ -262,8 +262,8 @@ impl<'a> WorldEditor<'a> {
                             }
                         }
 
-                        chunk.x_pos = chunk_x;
-                        chunk.z_pos = chunk_z;
+                        chunk.x_pos = chunk_x + region_x * 32;
+                        chunk.z_pos = chunk_z + region_z * 32;
 
                         let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
 
