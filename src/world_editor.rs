@@ -281,8 +281,6 @@ impl<'a> WorldEditor<'a> {
                         for ((x, y, z), block) in &block_list.blocks {
                             set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
                         }
-
-                        save_pb.inc(1);
                     }
 
                     chunk.x_pos = chunk_x + region_x * 32;
@@ -298,6 +296,8 @@ impl<'a> WorldEditor<'a> {
                         .unwrap();
                 }
             }
+
+            save_pb.inc(1);
         }
 
         save_pb.finish();
