@@ -6,12 +6,15 @@ use fastnbt::{ByteArray, LongArray, Value};
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Chunk {
     sections: Vec<Section>,
+    x_pos: i32,
+    z_pos: i32,
     #[serde(flatten)]
     other: HashMap<String, Value>,
 }
@@ -232,31 +235,55 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
 
-        let mut chunks_to_process = self.chunks_to_modify.clone(); // Clone to prevent modifying while iterating
+        let chunks_to_process = self.chunks_to_modify.clone(); // Clone to prevent modifying while iterating
 
-        for ((region_x, region_z, chunk_x, chunk_z), block_list) in &mut chunks_to_process {
-            let region: &mut Region<File> = self.load_region(*region_x, *region_z);
+        let mut processed_regions = HashSet::new();
 
-            if let Ok(Some(data)) = region.read_chunk(*chunk_x as usize, *chunk_z as usize) {
-                let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
-
-                for ((x, y, z), block) in block_list {
-                    set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
-                }
-
-                let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
-
-                // Write chunk data back to the correct location, ensuring correct chunk coordinates
-                let expected_chunk_location: (usize, usize) =
-                    ((*chunk_x as usize) & 31, (*chunk_z as usize) & 31);
-                region
-                    .write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser)
-                    .unwrap();
+        for ((region_x, region_z, _chunk_x, _chunk_z), _block_list) in &chunks_to_process {
+            if processed_regions.contains(&(region_x, region_z)) {
+                continue;
             }
 
-            // Remove chunk from the modification map after processing it
-            self.chunks_to_modify
-                .remove(&(*region_x, *region_z, *chunk_x, *chunk_z));
+            processed_regions.insert((region_x, region_z));
+
+            let region: &mut Region<File> = self.load_region(*region_x, *region_z);
+
+            for chunk_x in 0..32 {
+                for chunk_z in 0..32 {
+                    // TODO - why the if let here?
+                    if let Ok(Some(data)) = region.read_chunk(chunk_x as usize, chunk_z as usize) {
+                        let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
+
+                        if let Some(block_list) =
+                            chunks_to_process.get(&(*region_x, *region_z, chunk_x, chunk_z))
+                        {
+                            for ((x, y, z), block) in block_list {
+                                set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
+                            }
+                        }
+
+                        chunk.x_pos = chunk_x;
+                        chunk.z_pos = chunk_z;
+
+                        let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
+
+                        // Write chunk data back to the correct location, ensuring correct chunk coordinates
+                        let expected_chunk_location: (usize, usize) =
+                            ((chunk_x as usize) & 31, (chunk_z as usize) & 31);
+                        region
+                            .write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser)
+                            .unwrap();
+                    }
+                }
+            }
+
+            // Remove chunks from the modification map after processing it
+            for chunk_x in 0..32 {
+                for chunk_z in 0..32 {
+                    self.chunks_to_modify
+                        .remove(&(*region_x, *region_z, chunk_x, chunk_z));
+                }
+            }
 
             save_pb.inc(1);
         }
