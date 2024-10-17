@@ -1,7 +1,7 @@
 use crate::args::Args;
 use colored::Colorize;
-use serde_json::Value;
 use serde::Deserialize;
+use serde_json::Value;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
@@ -37,8 +37,8 @@ fn lat_lon_to_minecraft_coords(
     let (min_lon, min_lat, max_lon, max_lat) = bbox;
 
     // Calculate the relative position within the bounding box
-    let rel_x: f64 = (lon - min_lon) / (max_lon - min_lon);
-    let rel_z: f64 = (lat - min_lat) / (max_lat - min_lat);
+    let rel_x: f64 = 1.0 - (lat - min_lat) / (max_lat - min_lat);
+    let rel_z: f64 = (lon - min_lon) / (max_lon - min_lon);
 
     // Apply scaling factors for each dimension and convert to Minecraft coordinates
     let x: i32 = (rel_x * scale_factor_x) as i32;
@@ -69,9 +69,10 @@ pub fn parse_osm_data(
     args: &Args,
 ) -> (Vec<ProcessedElement>, f64, f64) {
     println!("{} {}", "[2/5]".bold(), "Parsing data...");
-    
+
     // Deserialize the JSON data into the OSMData structure
-    let data: OSMData = serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
+    let data: OSMData =
+        serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
 
     // Calculate the maximum number of decimal places in bbox elements
     let max_decimal_places: usize = [
@@ -93,19 +94,20 @@ pub fn parse_osm_data(
     );
 
     // Determine which dimension is larger and assign scale factors accordingly
-    let (scale_factor_x, scale_factor_z) = if (bbox_scaled.2 - bbox_scaled.0) > (bbox_scaled.3 - bbox_scaled.1) {
-        // Longitude difference is greater than latitude difference
-        (
-            ((bbox_scaled.2 - bbox_scaled.0) * 10 / 100) as f64, // Scale for width (x) is based on longitude difference
-            ((bbox_scaled.3 - bbox_scaled.1) * 14 / 100) as f64, // Scale for length (z) is based on latitude difference
-        )
-    } else {
-        // Latitude difference is greater than or equal to longitude difference
-        (
-            ((bbox_scaled.3 - bbox_scaled.1) * 10 / 100) as f64, // Scale for width (x) is based on latitude difference
-            ((bbox_scaled.2 - bbox_scaled.0) * 14 / 100) as f64, // Scale for length (z) is based on longitude difference
-        )
-    };
+    let (scale_factor_x, scale_factor_z) =
+        if (bbox_scaled.2 - bbox_scaled.0) > (bbox_scaled.3 - bbox_scaled.1) {
+            // Longitude difference is greater than latitude difference
+            (
+                ((bbox_scaled.3 - bbox_scaled.1) * 14 / 100) as f64, // Scale for width (x) is based on latitude difference
+                ((bbox_scaled.2 - bbox_scaled.0) * 10 / 100) as f64, // Scale for length (z) is based on longitude difference
+            )
+        } else {
+            // Latitude difference is greater than or equal to longitude difference
+            (
+                ((bbox_scaled.2 - bbox_scaled.0) * 14 / 100) as f64, // Scale for width (x) is based on longitude difference
+                ((bbox_scaled.3 - bbox_scaled.1) * 10 / 100) as f64, // Scale for length (z) is based on latitude difference
+            )
+        };
 
     if args.debug {
         println!("Scale factor X: {}", scale_factor_x);
@@ -119,7 +121,8 @@ pub fn parse_osm_data(
     for element in &data.elements {
         if element.r#type == "node" {
             if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
-                let mc_coords: (i32, i32) = lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_x, scale_factor_z);
+                let mc_coords: (i32, i32) =
+                    lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_x, scale_factor_z);
                 nodes_map.insert(element.id, mc_coords);
 
                 // Process nodes with tags
