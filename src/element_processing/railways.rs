@@ -1,9 +1,9 @@
-use crate::world_editor::WorldEditor;
-use crate::osm_parser::ProcessedElement;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::osm_parser::ProcessedWay;
+use crate::world_editor::WorldEditor;
 
-pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
     if let Some(railway_type) = element.tags.get("railway") {
         if ["proposed", "abandoned", "subway", "construction"].contains(&railway_type.as_str()) {
             return;
@@ -22,11 +22,17 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedElement, g
         }
 
         for i in 1..element.nodes.len() {
-            let (x1, z1) = element.nodes[i - 1];
-            let (x2, z2) = element.nodes[i];
+            let prev = &element.nodes[i - 1];
+            let x1 = prev.x;
+            let z1 = prev.z;
+
+            let cur = &element.nodes[i];
+            let x2 = cur.x;
+            let z2 = cur.z;
 
             // Generate the line of coordinates between the two nodes
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
+            let bresenham_points: Vec<(i32, i32, i32)> =
+                bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
 
             for (bx, _, bz) in bresenham_points {
                 // TODO: Set direction of rail

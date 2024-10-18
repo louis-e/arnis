@@ -1,9 +1,9 @@
-use crate::world_editor::WorldEditor;
-use crate::osm_parser::ProcessedElement;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::osm_parser::ProcessedWay;
+use crate::world_editor::WorldEditor;
 
-pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
     if let Some(_bridge_type) = element.tags.get("bridge") {
         let bridge_height: i32 = element
             .tags
@@ -15,9 +15,12 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedElement, gr
         let total_steps: usize = element
             .nodes
             .windows(2)
-            .map(|nodes: &[(i32, i32)]| {
-                let (x1, z1) = nodes[0];
-                let (x2, z2) = nodes[1];
+            .map(|nodes| {
+                let x1 = nodes[0].x;
+                let z1 = nodes[0].z;
+                let x2 = nodes[1].x;
+                let z2 = nodes[1].z;
+
                 bresenham_line(x1, ground_level, z1, x2, ground_level, z2).len()
             })
             .sum();
@@ -26,20 +29,24 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedElement, gr
         let mut current_step = 0;
 
         for i in 1..element.nodes.len() {
-            let (x1, z1) = element.nodes[i - 1];
-            let (x2, z2) = element.nodes[i];
+            let prev = &element.nodes[i - 1];
+            let x1 = prev.x;
+            let z1 = prev.z;
+
+            let cur = &element.nodes[i];
+            let x2 = cur.x;
+            let z2 = cur.z;
 
             // Generate the line of coordinates between the two nodes
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
+            let bresenham_points: Vec<(i32, i32, i32)> =
+                bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
 
             for (bx, _, bz) in bresenham_points {
                 // Calculate the current height of the bridge
                 let current_height: i32 = if current_step <= half_steps {
                     ground_level + bridge_height + current_step as i32 / 5 // Rise for the first half
                 } else {
-                    ground_level
-                        + bridge_height
-                        + (half_steps as i32 / 5)
+                    ground_level + bridge_height + (half_steps as i32 / 5)
                         - ((current_step - half_steps) as i32 / 5) // Descend for the second half
                 };
 

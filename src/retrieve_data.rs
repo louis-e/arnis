@@ -96,6 +96,7 @@ pub fn fetch_data(
         nwr["landuse"];
         nwr["natural"];
         nwr["leisure"];
+        nwr["water"];
         nwr["waterway"];
         nwr["amenity"];
         nwr["tourism"];
@@ -105,14 +106,21 @@ pub fn fetch_data(
         nwr["entrance"];
         nwr["door"];
         way;
+    )->.relsinbbox;
+    (
+        way(r.relsinbbox);
     )->.waysinbbox;
     (
         node(w.waysinbbox);
+        node(w.relsinbbox);
     )->.nodesinbbox;
+    .relsinbbox out body;
     .waysinbbox out body;
     .nodesinbbox out skel qt;"#,
         bbox.1, bbox.0, bbox.3, bbox.2
     );
+
+    println!("{}", query);
 
     if let Some(file) = file {
         // Load data from file

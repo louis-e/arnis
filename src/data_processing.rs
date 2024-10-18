@@ -47,75 +47,74 @@ pub fn generate_world(
         if args.debug {
             process_pb.set_message(format!(
                 "(Element ID: {} / Type: {})",
-                element.id, element.r#type
+                element.id(),
+                element.kind()
             ));
         } else {
             process_pb.set_message("");
         }
 
-        match element.r#type.as_str() {
-            "way" => {
-                if element.tags.contains_key("building")
-                    || element.tags.contains_key("building:part")
-                {
+        match element {
+            ProcessedElement::Way(way) => {
+                if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                     buildings::generate_buildings(
                         &mut editor,
-                        element,
+                        way,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("highway") {
+                } else if way.tags.contains_key("highway") {
                     highways::generate_highways(
                         &mut editor,
                         element,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("landuse") {
+                } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(
                         &mut editor,
-                        element,
+                        way,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("natural") {
+                } else if way.tags.contains_key("natural") {
                     natural::generate_natural(
                         &mut editor,
                         element,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("amenity") {
+                } else if way.tags.contains_key("amenity") {
                     amenities::generate_amenities(
                         &mut editor,
                         element,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("leisure") {
+                } else if way.tags.contains_key("leisure") {
                     leisure::generate_leisure(
                         &mut editor,
-                        element,
+                        way,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("barrier") {
+                } else if way.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element, ground_level);
-                } else if element.tags.contains_key("waterway") {
-                    waterways::generate_waterways(&mut editor, element, ground_level);
-                } else if element.tags.contains_key("bridge") {
-                    bridges::generate_bridges(&mut editor, element, ground_level);
-                } else if element.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, element, ground_level);
-                } else if element.tags.get("service") == Some(&"siding".to_string()) {
-                    highways::generate_siding(&mut editor, element, ground_level);
+                } else if way.tags.contains_key("waterway") {
+                    waterways::generate_waterways(&mut editor, way, ground_level);
+                } else if way.tags.contains_key("bridge") {
+                    bridges::generate_bridges(&mut editor, way, ground_level);
+                } else if way.tags.contains_key("railway") {
+                    railways::generate_railways(&mut editor, way, ground_level);
+                } else if way.tags.get("service") == Some(&"siding".to_string()) {
+                    highways::generate_siding(&mut editor, way, ground_level);
                 }
             }
-            "node" => {
-                if element.tags.contains_key("door") || element.tags.contains_key("entrance") {
-                    doors::generate_doors(&mut editor, element, ground_level);
-                } else if element.tags.contains_key("natural")
-                    && element.tags.get("natural") == Some(&"tree".to_string())
+            ProcessedElement::Node(node) => {
+                if node.tags.contains_key("door") || node.tags.contains_key("entrance") {
+                    doors::generate_doors(&mut editor, node, ground_level);
+                } else if node.tags.contains_key("natural")
+                    && node.tags.get("natural") == Some(&"tree".to_string())
                 {
                     natural::generate_natural(
                         &mut editor,
@@ -123,27 +122,31 @@ pub fn generate_world(
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("amenity") {
+                } else if node.tags.contains_key("amenity") {
                     amenities::generate_amenities(
                         &mut editor,
                         element,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("barrier") {
+                } else if node.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element, ground_level);
-                } else if element.tags.contains_key("highway") {
+                } else if node.tags.contains_key("highway") {
                     highways::generate_highways(
                         &mut editor,
                         element,
                         ground_level,
                         args.timeout.as_ref(),
                     );
-                } else if element.tags.contains_key("tourism") {
-                    tourisms::generate_tourisms(&mut editor, element, ground_level);
+                } else if node.tags.contains_key("tourism") {
+                    tourisms::generate_tourisms(&mut editor, node, ground_level);
                 }
             }
-            _ => {}
+            ProcessedElement::Relation(rel) => {
+                if rel.tags.contains_key("water") {
+                    water_areas::generate_water_areas(&mut editor, rel, ground_level);
+                }
+            }
         }
     }
 

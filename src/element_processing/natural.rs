@@ -14,10 +14,12 @@ pub fn generate_natural(
     ground_level: i32,
     floodfill_timeout: Option<&Duration>,
 ) {
-    if let Some(natural_type) = element.tags.get("natural") {
+    if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
-            if let Some(first_node) = element.nodes.first() {
-                let (x, z) = *first_node;
+            if let ProcessedElement::Node(node) = element {
+                let x = node.x;
+                let z = node.z;
+
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                 create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
             }
@@ -35,9 +37,14 @@ pub fn generate_natural(
                 _ => &GRASS_BLOCK,
             };
 
+            let ProcessedElement::Way(way) = element else {
+                return;
+            };
+
             // Process natural nodes to fill the area
-            for &node in &element.nodes {
-                let (x, z) = node;
+            for node in &way.nodes {
+                let x = node.x;
+                let z = node.z;
 
                 if let Some(prev) = previous_node {
                     // Generate the line of coordinates between the two nodes
@@ -51,12 +58,13 @@ pub fn generate_natural(
                     corner_addup = (corner_addup.0 + x, corner_addup.1 + z, corner_addup.2 + 1);
                 }
 
-                previous_node = Some(node);
+                previous_node = Some((x, z));
             }
 
             // If there are natural nodes, flood-fill the area
             if corner_addup != (0, 0, 0) {
-                let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+                let polygon_coords: Vec<(i32, i32)> =
+                    way.nodes.iter().map(|n| (n.x, n.z)).collect();
                 let filled_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, floodfill_timeout);
 
