@@ -90,7 +90,6 @@ This section is dedicated to recognizing and celebrating the outstanding contrib
 - scd31
 - vfosnar
 
-*(Including original Python implementation)*
 
 ## :star: Star History
 
