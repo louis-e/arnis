@@ -152,6 +152,10 @@ impl<'a> WorldEditor<'a> {
         Region::from_stream(region_file).expect("Failed to load region")
     }
 
+    pub fn get_max_coords(&self) -> (i32, i32) {
+        (self.scale_factor_x as i32, self.scale_factor_x as i32)
+    }
+
     /// Sets a block of the specified type at the given coordinates.
     pub fn set_block(
         &mut self,

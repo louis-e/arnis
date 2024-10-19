@@ -36,7 +36,7 @@ struct OsmData {
 
 #[derive(Debug, Clone)]
 pub struct ProcessedNode {
-    id: u64,
+    pub id: u64,
     pub tags: HashMap<String, String>,
 
     // minecraft coords
@@ -46,7 +46,7 @@ pub struct ProcessedNode {
 
 #[derive(Debug, Clone)]
 pub struct ProcessedWay {
-    id: u64,
+    pub id: u64,
     pub nodes: Vec<ProcessedNode>,
     pub tags: HashMap<String, String>,
 }
@@ -59,8 +59,8 @@ pub enum ProcessedMemberRole {
 
 #[derive(Debug)]
 pub struct ProcessedMember {
-    role: ProcessedMemberRole,
-    way: ProcessedWay,
+    pub role: ProcessedMemberRole,
+    pub way: ProcessedWay,
 }
 
 #[derive(Debug)]
