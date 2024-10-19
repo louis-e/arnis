@@ -4,13 +4,13 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::tree::create_tree;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::ProcessedElement;
+use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
 pub fn generate_landuse(
     editor: &mut WorldEditor,
-    element: &ProcessedElement,
+    element: &ProcessedWay,
     ground_level: i32,
     floodfill_timeout: Option<&Duration>,
 ) {
@@ -40,8 +40,9 @@ pub fn generate_landuse(
     };
 
     // Process landuse nodes to fill the area
-    for &node in &element.nodes {
-        let (x, z) = node;
+    for node in &element.nodes {
+        let x = node.x;
+        let z = node.z;
 
         if let Some(prev) = previous_node {
             // Generate the line of coordinates between the two nodes
@@ -55,12 +56,12 @@ pub fn generate_landuse(
             corner_addup = (corner_addup.0 + x, corner_addup.1 + z, corner_addup.2 + 1);
         }
 
-        previous_node = Some(node);
+        previous_node = Some((x, z));
     }
 
     // If there are landuse nodes, flood-fill the area
     if !current_landuse.is_empty() {
-        let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+        let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
         let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();

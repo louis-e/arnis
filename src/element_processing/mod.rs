@@ -10,4 +10,5 @@ pub mod natural;
 pub mod railways;
 pub mod tourisms;
 pub mod tree;
+pub mod water_areas;
 pub mod waterways;

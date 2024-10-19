@@ -83,8 +83,10 @@ fn main() {
         for element in &parsed_elements {
             writeln!(
                 output_file,
-                "Element ID: {}, Type: {}, Tags: {:?}, Nodes: {:?}",
-                element.id, element.r#type, element.tags, element.nodes
+                "Element ID: {}, Type: {}, Tags: {:?}",
+                element.id(),
+                element.kind(),
+                element.tags(),
             )
             .expect("Failed to write to output file");
         }

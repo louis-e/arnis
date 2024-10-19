@@ -2,7 +2,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::ProcessedElement;
+use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 use once_cell::sync::Lazy;
 use rand::Rng;
@@ -11,7 +11,7 @@ use std::time::Duration;
 
 pub fn generate_buildings(
     editor: &mut WorldEditor,
-    element: &ProcessedElement,
+    element: &ProcessedWay,
     ground_level: i32,
     floodfill_timeout: Option<&Duration>,
 ) {
@@ -91,7 +91,8 @@ pub fn generate_buildings(
                 let ground_block: &once_cell::sync::Lazy<Block> = &OAK_PLANKS;
                 let roof_block: &once_cell::sync::Lazy<Block> = &STONE_BLOCK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+                let polygon_coords: Vec<(i32, i32)> =
+                    element.nodes.iter().map(|n| (n.x, n.z)).collect();
                 let floor_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, floodfill_timeout);
 
@@ -101,7 +102,10 @@ pub fn generate_buildings(
                 }
 
                 // Place fences and roof slabs at each corner node directly
-                for &(x, z) in &element.nodes {
+                for node in &element.nodes {
+                    let x = node.x;
+                    let z = node.z;
+
                     for y in 1..=4 {
                         editor.set_block(ground_block, x, ground_level, z, None, None);
                         editor.set_block(&OAK_FENCE, x, ground_level + y, z, None, None);
@@ -121,8 +125,9 @@ pub fn generate_buildings(
             let roof_height = ground_level + 5;
 
             // Iterate through the nodes to create the roof edges using Bresenham's line algorithm
-            for &node in &element.nodes {
-                let (x, z) = node;
+            for node in &element.nodes {
+                let x = node.x;
+                let z = node.z;
 
                 if let Some(prev) = previous_node {
                     let bresenham_points: Vec<(i32, i32, i32)> =
@@ -137,11 +142,12 @@ pub fn generate_buildings(
                     editor.set_block(&COBBLESTONE_WALL, x, y, z, None, None);
                 }
 
-                previous_node = Some(node);
+                previous_node = Some((x, z));
             }
 
             // Use flood-fill to fill the interior of the roof
-            let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+            let polygon_coords: Vec<(i32, i32)> =
+                element.nodes.iter().map(|node| (node.x, node.z)).collect();
             let roof_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout); // Use flood-fill to determine the area
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
@@ -168,8 +174,9 @@ pub fn generate_buildings(
     }
 
     // Process nodes to create walls and corners
-    for &node in &element.nodes {
-        let (x, z) = node;
+    for node in &element.nodes {
+        let x = node.x;
+        let z = node.z;
 
         if let Some(prev) = previous_node {
             // Calculate walls and corners using Bresenham line
@@ -177,7 +184,7 @@ pub fn generate_buildings(
                 bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
             for (bx, _, bz) in bresenham_points {
                 for h in (ground_level + 1)..=(ground_level + building_height) {
-                    if (bx, bz) == element.nodes[0] {
+                    if element.nodes[0].x == bx && element.nodes[0].x == bz {
                         editor.set_block(corner_block, bx, h, bz, None, None); // Corner block
                     } else {
                         // Add windows to the walls at intervals
@@ -203,12 +210,12 @@ pub fn generate_buildings(
             }
         }
 
-        previous_node = Some(node);
+        previous_node = Some((x, z));
     }
 
     // Flood-fill interior with floor variation
     if corner_addup != (0, 0, 0) {
-        let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+        let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
         let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
         for (x, z) in floor_area {
@@ -256,7 +263,7 @@ fn find_nearest_block_in_color_map(
 /// Generates a bridge structure, paying attention to the "level" tag.
 fn generate_bridge(
     editor: &mut WorldEditor,
-    element: &ProcessedElement,
+    element: &ProcessedWay,
     base_level: i32,
     floodfill_timeout: Option<&Duration>,
 ) {
@@ -273,8 +280,9 @@ fn generate_bridge(
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
-    for &node in &element.nodes {
-        let (x, z) = node;
+    for node in &element.nodes {
+        let x = node.x;
+        let z = node.z;
 
         // Create bridge path using Bresenham's line
         if let Some(prev) = previous_node {
@@ -285,11 +293,11 @@ fn generate_bridge(
                 editor.set_block(railing_block, bx, by, bz, None, None);
             }
         }
-        previous_node = Some(node);
+        previous_node = Some((x, z));
     }
 
     // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
     let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
     for (x, z) in bridge_area {
         editor.set_block(floor_block, x, bridge_level, z, None, None);

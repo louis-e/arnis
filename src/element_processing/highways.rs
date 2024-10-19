@@ -3,7 +3,7 @@ use std::time::Duration;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::ProcessedElement;
+use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor; // Assuming you have a flood fill function for area filling
 
 pub fn generate_highways(
@@ -12,11 +12,12 @@ pub fn generate_highways(
     ground_level: i32,
     floodfill_timeout: Option<&Duration>,
 ) {
-    if let Some(highway_type) = element.tags.get("highway") {
+    if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
             // Handle street lamps
-            if let Some(first_node) = element.nodes.first() {
-                let (x, z) = *first_node;
+            if let ProcessedElement::Node(first_node) = element {
+                let x = first_node.x;
+                let z = first_node.z;
                 for y in 1..=4 {
                     editor.set_block(&OAK_FENCE, x, ground_level + y, z, None, None);
                 }
@@ -24,10 +25,11 @@ pub fn generate_highways(
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
-            if let Some(crossing_type) = element.tags.get("crossing") {
+            if let Some(crossing_type) = element.tags().get("crossing") {
                 if crossing_type == "traffic_signals" {
-                    if let Some(first_node) = element.nodes.first() {
-                        let (x, z) = *first_node;
+                    if let ProcessedElement::Node(node) = element {
+                        let x = node.x;
+                        let z = node.z;
                         for y in 1..=3 {
                             editor.set_block(&COBBLESTONE_WALL, x, ground_level + y, z, None, None);
                         }
@@ -40,8 +42,9 @@ pub fn generate_highways(
             }
         } else if highway_type == "bus_stop" {
             // Handle bus stops
-            if let Some(first_node) = element.nodes.first() {
-                let (x, z) = *first_node;
+            if let ProcessedElement::Node(node) = element {
+                let x = node.x;
+                let z = node.z;
                 for y in 1..=3 {
                     editor.set_block(&COBBLESTONE_WALL, x, ground_level + y, z, None, None);
                 }
@@ -49,12 +52,16 @@ pub fn generate_highways(
                 editor.set_block(&WHITE_WOOL, x, ground_level + 4, z, None, None);
                 editor.set_block(&WHITE_WOOL, x + 1, ground_level + 4, z, None, None);
             }
-        } else if element.tags.get("area").map_or(false, |v| v == "yes") {
+        } else if element.tags().get("area").map_or(false, |v| v == "yes") {
+            let ProcessedElement::Way(way) = element else {
+                return;
+            };
+
             // Handle areas like pedestrian plazas
             let mut surface_block: &once_cell::sync::Lazy<Block> = &STONE; // Default block
 
             // Determine the block type based on the 'surface' tag
-            if let Some(surface) = element.tags.get("surface") {
+            if let Some(surface) = element.tags().get("surface") {
                 surface_block = match surface.as_str() {
                     "paving_stones" | "sett" => &STONE_BRICKS,
                     "bricks" => &BRICK,
@@ -70,7 +77,7 @@ pub fn generate_highways(
             }
 
             // Fill the area using flood fill or by iterating through the nodes
-            let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+            let polygon_coords: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
             let filled_area = flood_fill_area(&polygon_coords, floodfill_timeout);
 
             for (x, z) in filled_area {
@@ -83,13 +90,13 @@ pub fn generate_highways(
             let mut add_stripe = false; // Flag for adding stripes
 
             // Skip if 'layer' or 'level' is negative in the tags
-            if let Some(layer) = element.tags.get("layer") {
+            if let Some(layer) = element.tags().get("layer") {
                 if layer.parse::<i32>().unwrap_or(0) < 0 {
                     return;
                 }
             }
 
-            if let Some(level) = element.tags.get("level") {
+            if let Some(level) = element.tags().get("level") {
                 if level.parse::<i32>().unwrap_or(0) < 0 {
                     return;
                 }
@@ -117,7 +124,7 @@ pub fn generate_highways(
                     block_range = 2;
                 }
                 _ => {
-                    if let Some(lanes) = element.tags.get("lanes") {
+                    if let Some(lanes) = element.tags().get("lanes") {
                         if lanes == "2" {
                             block_range = 3;
                             add_stripe = true;
@@ -129,11 +136,16 @@ pub fn generate_highways(
                 }
             }
 
+            let ProcessedElement::Way(way) = element else {
+                return;
+            };
+
             // Iterate over nodes to create the highway
-            for &node in &element.nodes {
+            for node in &way.nodes {
                 if let Some(prev) = previous_node {
                     let (x1, z1) = prev;
-                    let (x2, z2) = node;
+                    let x2 = node.x;
+                    let z2 = node.z;
 
                     // Generate the line of coordinates between the two nodes
                     let bresenham_points: Vec<(i32, i32, i32)> =
@@ -153,7 +165,8 @@ pub fn generate_highways(
 
                                 // Zebra crossing logic
                                 if highway_type == "footway"
-                                    && element.tags.get("footway") == Some(&"crossing".to_string())
+                                    && element.tags().get("footway")
+                                        == Some(&"crossing".to_string())
                                 {
                                     let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
                                     if is_horizontal {
@@ -176,26 +189,24 @@ pub fn generate_highways(
                                                 None,
                                             );
                                         }
+                                    } else if set_z % 2 < 1 {
+                                        editor.set_block(
+                                            &WHITE_CONCRETE,
+                                            set_x,
+                                            ground_level,
+                                            set_z,
+                                            Some(&[&BLACK_CONCRETE]),
+                                            None,
+                                        );
                                     } else {
-                                        if set_z % 2 < 1 {
-                                            editor.set_block(
-                                                &WHITE_CONCRETE,
-                                                set_x,
-                                                ground_level,
-                                                set_z,
-                                                Some(&[&BLACK_CONCRETE]),
-                                                None,
-                                            );
-                                        } else {
-                                            editor.set_block(
-                                                &BLACK_CONCRETE,
-                                                set_x,
-                                                ground_level,
-                                                set_z,
-                                                None,
-                                                None,
-                                            );
-                                        }
+                                        editor.set_block(
+                                            &BLACK_CONCRETE,
+                                            set_x,
+                                            ground_level,
+                                            set_z,
+                                            None,
+                                            None,
+                                        );
                                     }
                                 } else {
                                     editor.set_block(
@@ -233,19 +244,20 @@ pub fn generate_highways(
                         }
                     }
                 }
-                previous_node = Some(node);
+                previous_node = Some((node.x, node.z));
             }
         }
     }
 }
 
 /// Generates a siding using stone brick slabs
-pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
     let mut previous_node: Option<(i32, i32)> = None;
     let siding_block: &once_cell::sync::Lazy<Block> = &STONE_BRICK_SLAB;
 
-    for &node in &element.nodes {
-        let (x, z) = node;
+    for node in &element.nodes {
+        let x = node.x;
+        let z = node.z;
 
         // Draw the siding using Bresenham's line algorithm between nodes
         if let Some(prev) = previous_node {
@@ -264,6 +276,6 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedElement, gro
             }
         }
 
-        previous_node = Some(node);
+        previous_node = Some((x, z));
     }
 }

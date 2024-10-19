@@ -13,30 +13,30 @@ pub fn generate_amenities(
     floodfill_timeout: Option<&Duration>,
 ) {
     // Skip if 'layer' or 'level' is negative in the tags
-    if let Some(layer) = element.tags.get("layer") {
+    if let Some(layer) = element.tags().get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
             return;
         }
     }
 
-    if let Some(level) = element.tags.get("level") {
+    if let Some(level) = element.tags().get("level") {
         if level.parse::<i32>().unwrap_or(0) < 0 {
             return;
         }
     }
 
-    if let Some(amenity_type) = element.tags.get("amenity") {
-        let first_node: Option<&(i32, i32)> = element.nodes.first();
+    if let Some(amenity_type) = element.tags().get("amenity") {
+        let first_node = element.nodes().map(|n| (n.x, n.z)).next();
         match amenity_type.as_str() {
             "waste_disposal" | "waste_basket" => {
                 // Place a cauldron for waste disposal or waste basket
-                if let Some(&(x, z)) = first_node {
+                if let Some((x, z)) = first_node {
                     editor.set_block(&CAULDRON, x, ground_level + 1, z, None, None);
                 }
                 return;
             }
             "vending_machine" | "atm" => {
-                if let Some(&(x, z)) = first_node {
+                if let Some((x, z)) = first_node {
                     editor.set_block(&IRON_BLOCK, x, ground_level + 1, z, None, None);
                     editor.set_block(&IRON_BLOCK, x, ground_level + 2, z, None, None);
                 }
@@ -46,7 +46,7 @@ pub fn generate_amenities(
                 let ground_block: &once_cell::sync::Lazy<Block> = &OAK_PLANKS;
                 let roof_block: &once_cell::sync::Lazy<Block> = &STONE_BLOCK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().copied().collect();
+                let polygon_coords: Vec<(i32, i32)> = element.nodes().map(|n| (n.x, n.z)).collect();
                 let floor_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, floodfill_timeout);
 
@@ -56,7 +56,10 @@ pub fn generate_amenities(
                 }
 
                 // Place fences and roof slabs at each corner node directly
-                for &(x, z) in &element.nodes {
+                for node in element.nodes() {
+                    let x = node.x;
+                    let z = node.z;
+
                     for y in 1..=4 {
                         editor.set_block(ground_block, x, ground_level, z, None, None);
                         editor.set_block(&OAK_FENCE, x, ground_level + y, z, None, None);
@@ -72,7 +75,7 @@ pub fn generate_amenities(
             }
             "bench" => {
                 // Place a bench
-                if let Some(&(x, z)) = first_node {
+                if let Some((x, z)) = first_node {
                     editor.set_block(&SMOOTH_STONE, x, ground_level + 1, z, None, None);
                     editor.set_block(&OAK_LOG, x + 1, ground_level + 1, z, None, None);
                     editor.set_block(&OAK_LOG, x - 1, ground_level + 1, z, None, None);
@@ -80,7 +83,7 @@ pub fn generate_amenities(
             }
             "vending" => {
                 // Place vending machine blocks
-                if let Some(&(x, z)) = first_node {
+                if let Some((x, z)) = first_node {
                     editor.set_block(&IRON_BLOCK, x, ground_level + 1, z, None, None);
                     editor.set_block(&IRON_BLOCK, x, ground_level + 2, z, None, None);
                 }
@@ -96,18 +99,14 @@ pub fn generate_amenities(
                     "parking" => &GRAY_CONCRETE,
                     _ => &GRAY_CONCRETE,
                 };
+                for node in element.nodes() {
+                    let x = node.x;
+                    let z = node.z;
 
-                for &node in &element.nodes {
                     if let Some(prev) = previous_node {
                         // Create borders for fountain or parking area
-                        let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(
-                            prev.0,
-                            ground_level,
-                            prev.1,
-                            node.0,
-                            ground_level,
-                            node.1,
-                        );
+                        let bresenham_points: Vec<(i32, i32, i32)> =
+                            bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
                         for (bx, _, bz) in bresenham_points {
                             editor.set_block(
                                 block_type,
@@ -136,13 +135,13 @@ pub fn generate_amenities(
                                 }
                             }
 
-                            current_amenity.push((node.0, node.1));
-                            corner_addup.0 += node.0;
-                            corner_addup.1 += node.1;
+                            current_amenity.push((node.x, node.z));
+                            corner_addup.0 += node.x;
+                            corner_addup.1 += node.z;
                             corner_addup.2 += 1;
                         }
                     }
-                    previous_node = Some(node);
+                    previous_node = Some((x, z));
                 }
 
                 // Flood-fill the interior area for parking or fountains
