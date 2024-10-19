@@ -87,10 +87,8 @@ After your pull request was merged, I will take care of regularly creating updat
 #### Contributors:
 This section is dedicated to recognizing and celebrating the outstanding contributions of individuals who have significantly enhanced this project. Your work and dedication are deeply appreciated!
 - louis-e
-- callumfrance
-- amir16yp
-- EdwardWeir13579
-- daniil2327
+- scd31
+- vfosnar
 
 *(Including original Python implementation)*
 
