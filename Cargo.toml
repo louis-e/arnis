@@ -16,6 +16,7 @@ clap = { version = "4.1", features = ["derive"] }
 colored = "2.1.0"
 fastanvil = "0.31.0"
 fastnbt = "2.5.0"
+fnv = "1.0.7"
 geo = "0.28.0"
 indicatif = "0.17.8"
 itertools = "0.13.0"

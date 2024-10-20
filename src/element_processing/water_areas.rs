@@ -1,10 +1,7 @@
-use std::time::Duration;
-
-use geo::{Contains, LineString, MultiPolygon, Point, Polygon};
+use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 
 use crate::{
     block_definitions::WATER,
-    floodfill::flood_fill_area,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
     world_editor::WorldEditor,
 };
@@ -13,7 +10,6 @@ pub fn generate_water_areas(
     editor: &mut WorldEditor,
     element: &ProcessedRelation,
     ground_level: i32,
-    floodfill_timeout: Option<&Duration>,
 ) {
     if !element.tags.contains_key("water") {
         return;
@@ -59,6 +55,7 @@ pub fn generate_water_areas(
     inverse_floodfill(max_x, max_z, outers, inners, editor, ground_level);
 }
 
+// Merges ways that share nodes into full loops
 fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
     let mut removed = vec![];
     let mut merged = vec![];
@@ -156,23 +153,153 @@ fn inverse_floodfill(
     let min_x = 0;
     let min_z = 0;
 
-    let inners: Vec<_> = inners.into_iter().map(|x| LineString::from(x)).collect();
-
-    let polygons = outers
+    let inners: Vec<_> = inners
         .into_iter()
-        .map(|o| Polygon::new(LineString::from(o), inners.clone()));
+        .map(|x| Polygon::new(LineString::from(x), vec![]))
+        .collect();
 
-    let multipolygon = MultiPolygon::from_iter(polygons);
+    let outers: Vec<_> = outers
+        .into_iter()
+        .map(|x| Polygon::new(LineString::from(x), vec![]))
+        .collect();
 
-    println!("inverse floodfill start");
+    inverse_floodfill_recursive(
+        min_x,
+        max_x,
+        min_z,
+        max_z,
+        ground_level,
+        &outers,
+        &inners,
+        editor,
+    );
+}
 
+fn inverse_floodfill_recursive(
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    ground_level: i32,
+    outers: &[Polygon],
+    inners: &[Polygon],
+    editor: &mut WorldEditor,
+) {
+    const ITERATIVE_THRES: i32 = 10_000;
+
+    if min_x > max_x || min_z > max_z {
+        return;
+    }
+
+    if (max_x - min_x) * (max_z - min_z) < ITERATIVE_THRES {
+        inverse_floodfill_iterative(
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+            ground_level,
+            outers,
+            inners,
+            editor,
+        );
+
+        return;
+    }
+
+    let center_x = (min_x + max_x) / 2;
+    let center_z = (min_z + max_z) / 2;
+    let quadrants = [
+        (min_x, center_x, min_z, center_z),
+        (center_x, max_x, min_z, center_z),
+        (min_x, center_x, center_z, max_z),
+        (center_x, max_x, center_z, max_z),
+    ];
+
+    for (min_x, max_x, min_z, max_z) in quadrants {
+        let rect = Rect::new(
+            Point::new(min_x as f64, min_z as f64),
+            Point::new(max_x as f64, max_z as f64),
+        );
+
+        if outers.iter().any(|outer| outer.contains(&rect))
+            && !inners.iter().any(|inner| inner.intersects(&rect))
+        {
+            // every block in rect is water
+            // so we can safely just set the whole thing to water
+
+            rect_fill(min_x, max_x, min_z, max_z, ground_level, editor);
+
+            continue;
+        }
+
+        // When we recurse, we only really need the polygons we potentially intersect with
+        // This saves on processing time
+        let outers_intersects: Vec<_> = outers
+            .iter()
+            .cloned()
+            .filter(|poly| poly.intersects(&rect))
+            .collect();
+
+        // Moving this inside the below `if` statement makes it slower for some reason.
+        // I assume it changes how the compiler is able to optimize it
+        let inners_intersects: Vec<_> = inners
+            .iter()
+            .cloned()
+            .filter(|poly| poly.intersects(&rect))
+            .collect();
+
+        if !outers_intersects.is_empty() {
+            // recurse
+
+            inverse_floodfill_recursive(
+                min_x,
+                max_x,
+                min_z,
+                max_z,
+                ground_level,
+                &outers_intersects,
+                &inners_intersects,
+                editor,
+            );
+        }
+    }
+}
+
+// once we "zoom in" enough, it's more efficient to switch to iteration
+fn inverse_floodfill_iterative(
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    ground_level: i32,
+    outers: &[Polygon],
+    inners: &[Polygon],
+    editor: &mut WorldEditor,
+) {
     for x in min_x..max_x {
         for z in min_z..max_z {
-            if multipolygon.contains(&Point::new(x as f64, z as f64)) {
+            let p = Point::new(x as f64, z as f64);
+
+            if outers.iter().any(|poly| poly.contains(&p))
+                && inners.iter().all(|poly| !poly.contains(&p))
+            {
                 editor.set_block(&WATER, x, ground_level, z, None, None);
             }
         }
     }
+}
 
-    println!("inverse floodfill end");
+fn rect_fill(
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    ground_level: i32,
+    editor: &mut WorldEditor,
+) {
+    for x in min_x..max_x {
+        for z in min_z..max_z {
+            editor.set_block(&WATER, x, ground_level, z, None, None);
+        }
+    }
 }
