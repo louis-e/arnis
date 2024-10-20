@@ -5,7 +5,6 @@ use fastanvil::Region;
 use fastnbt::{ByteArray, LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 
@@ -159,12 +158,12 @@ impl<'a> WorldEditor<'a> {
     /// Sets a block of the specified type at the given coordinates.
     pub fn set_block(
         &mut self,
-        block: &Lazy<Block>,
+        block: Block,
         x: i32,
         y: i32,
         z: i32,
-        override_whitelist: Option<&[&'static Lazy<Block>]>,
-        override_blacklist: Option<&[&'static Lazy<Block>]>,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
         if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
@@ -176,11 +175,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|&whitelisted_block| whitelisted_block.name == existing_block.name)
+                    .any(|whitelisted_block| whitelisted_block.id() == existing_block.id())
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|&blacklisted_block| blacklisted_block.name == existing_block.name)
+                    .any(|blacklisted_block| blacklisted_block.id() == existing_block.id())
             } else {
                 false
             }
@@ -189,22 +188,22 @@ impl<'a> WorldEditor<'a> {
         };
 
         if should_insert {
-            self.world.set_block(x, y, z, (*block).clone());
+            self.world.set_block(x, y, z, block);
         }
     }
 
     /// Fills a cuboid area with the specified block between two coordinates.
     pub fn fill_blocks(
         &mut self,
-        block: &'static Lazy<Block>,
+        block: Block,
         x1: i32,
         y1: i32,
         z1: i32,
         x2: i32,
         y2: i32,
         z2: i32,
-        override_whitelist: Option<&[&'static Lazy<Block>]>,
-        override_blacklist: Option<&[&'static Lazy<Block>]>,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
     ) {
         let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
         let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
@@ -225,8 +224,8 @@ impl<'a> WorldEditor<'a> {
         x: i32,
         y: i32,
         z: i32,
-        whitelist: Option<&[&'static Lazy<Block>]>,
-        blacklist: Option<&[&'static Lazy<Block>]>,
+        whitelist: Option<&[Block]>,
+        blacklist: Option<&[Block]>,
     ) -> bool {
         // Retrieve the chunk modification map
         if let Some(existing_block) = self.world.get_block(x, y, z) {
@@ -234,7 +233,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|&whitelisted_block| whitelisted_block.name == existing_block.name)
+                    .any(|whitelisted_block| whitelisted_block.id() == existing_block.id())
                 {
                     return true; // Block is in whitelist
                 }
@@ -242,7 +241,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(blacklist) = blacklist {
                 if blacklist
                     .iter()
-                    .any(|&blacklisted_block| blacklisted_block.name == existing_block.name)
+                    .any(|blacklisted_block| blacklisted_block.id() == existing_block.id())
                 {
                     return true; // Block is in blacklist
                 }
@@ -333,7 +332,7 @@ fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
                 // Check if the block is already in the palette with matching properties
                 let mut palette_index: Option<usize> =
                     palette.iter().position(|item: &PaletteItem| {
-                        item.name == block.name && item.properties == block.properties
+                        item.name == block.name() && item.properties == block.properties()
                     });
 
                 // If the block is not in the palette and adding it would exceed a reasonable size, skip or replace
@@ -343,8 +342,8 @@ fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
                     } else {
                         // Add the new block type to the palette with its properties
                         palette.push(PaletteItem {
-                            name: block.name.clone(),
-                            properties: block.properties.clone(),
+                            name: block.name().to_string(),
+                            properties: block.properties(),
                         });
                         palette_index = Some(palette.len() - 1);
                     }
