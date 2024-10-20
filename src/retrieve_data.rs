@@ -120,8 +120,6 @@ pub fn fetch_data(
         bbox.1, bbox.0, bbox.3, bbox.2
     );
 
-    println!("{}", query);
-
     if let Some(file) = file {
         // Load data from file
         let file: File = File::open(file)?;

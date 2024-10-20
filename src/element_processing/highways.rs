@@ -19,9 +19,9 @@ pub fn generate_highways(
                 let x = first_node.x;
                 let z = first_node.z;
                 for y in 1..=4 {
-                    editor.set_block(&OAK_FENCE, x, ground_level + y, z, None, None);
+                    editor.set_block(OAK_FENCE, x, ground_level + y, z, None, None);
                 }
-                editor.set_block(&GLOWSTONE, x, ground_level + 5, z, None, None);
+                editor.set_block(GLOWSTONE, x, ground_level + 5, z, None, None);
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -31,12 +31,12 @@ pub fn generate_highways(
                         let x = node.x;
                         let z = node.z;
                         for y in 1..=3 {
-                            editor.set_block(&COBBLESTONE_WALL, x, ground_level + y, z, None, None);
+                            editor.set_block(COBBLESTONE_WALL, x, ground_level + y, z, None, None);
                         }
 
-                        editor.set_block(&GREEN_WOOL, x, ground_level + 4, z, None, None);
-                        editor.set_block(&YELLOW_WOOL, x, ground_level + 5, z, None, None);
-                        editor.set_block(&RED_WOOL, x, ground_level + 6, z, None, None);
+                        editor.set_block(GREEN_WOOL, x, ground_level + 4, z, None, None);
+                        editor.set_block(YELLOW_WOOL, x, ground_level + 5, z, None, None);
+                        editor.set_block(RED_WOOL, x, ground_level + 6, z, None, None);
                     }
                 }
             }
@@ -46,11 +46,11 @@ pub fn generate_highways(
                 let x = node.x;
                 let z = node.z;
                 for y in 1..=3 {
-                    editor.set_block(&COBBLESTONE_WALL, x, ground_level + y, z, None, None);
+                    editor.set_block(COBBLESTONE_WALL, x, ground_level + y, z, None, None);
                 }
 
-                editor.set_block(&WHITE_WOOL, x, ground_level + 4, z, None, None);
-                editor.set_block(&WHITE_WOOL, x + 1, ground_level + 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x, ground_level + 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x + 1, ground_level + 4, z, None, None);
             }
         } else if element.tags().get("area").map_or(false, |v| v == "yes") {
             let ProcessedElement::Way(way) = element else {
@@ -58,21 +58,21 @@ pub fn generate_highways(
             };
 
             // Handle areas like pedestrian plazas
-            let mut surface_block: &once_cell::sync::Lazy<Block> = &STONE; // Default block
+            let mut surface_block = STONE; // Default block
 
             // Determine the block type based on the 'surface' tag
             if let Some(surface) = element.tags().get("surface") {
                 surface_block = match surface.as_str() {
-                    "paving_stones" | "sett" => &STONE_BRICKS,
-                    "bricks" => &BRICK,
-                    "wood" => &OAK_PLANKS,
-                    "asphalt" => &BLACK_CONCRETE,
-                    "gravel" | "fine_gravel" => &GRAVEL,
-                    "grass" => &GRASS_BLOCK,
-                    "dirt" => &DIRT,
-                    "sand" => &SAND,
-                    "concrete" => &LIGHT_GRAY_CONCRETE,
-                    _ => &STONE, // Default to stone for unknown surfaces
+                    "paving_stones" | "sett" => STONE_BRICKS,
+                    "bricks" => BRICK,
+                    "wood" => OAK_PLANKS,
+                    "asphalt" => BLACK_CONCRETE,
+                    "gravel" | "fine_gravel" => GRAVEL,
+                    "grass" => GRASS_BLOCK,
+                    "dirt" => DIRT,
+                    "sand" => SAND,
+                    "concrete" => LIGHT_GRAY_CONCRETE,
+                    _ => STONE, // Default to stone for unknown surfaces
                 };
             }
 
@@ -85,7 +85,7 @@ pub fn generate_highways(
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
-            let mut block_type: &once_cell::sync::Lazy<Block> = &BLACK_CONCRETE;
+            let mut block_type = BLACK_CONCRETE;
             let mut block_range: i32 = 2;
             let mut add_stripe = false; // Flag for adding stripes
 
@@ -105,11 +105,11 @@ pub fn generate_highways(
             // Determine block type and range based on highway type
             match highway_type.as_str() {
                 "footway" | "pedestrian" => {
-                    block_type = &GRAY_CONCRETE;
+                    block_type = GRAY_CONCRETE;
                     block_range = 1;
                 }
                 "path" => {
-                    block_type = &LIGHT_GRAY_CONCRETE;
+                    block_type = LIGHT_GRAY_CONCRETE;
                     block_range = 1;
                 }
                 "motorway" | "primary" => {
@@ -120,7 +120,7 @@ pub fn generate_highways(
                     block_range = 1;
                 }
                 "service" => {
-                    block_type = &GRAY_CONCRETE;
+                    block_type = GRAY_CONCRETE;
                     block_range = 2;
                 }
                 _ => {
@@ -172,16 +172,16 @@ pub fn generate_highways(
                                     if is_horizontal {
                                         if set_x % 2 < 1 {
                                             editor.set_block(
-                                                &WHITE_CONCRETE,
+                                                WHITE_CONCRETE,
                                                 set_x,
                                                 ground_level,
                                                 set_z,
-                                                Some(&[&BLACK_CONCRETE]),
+                                                Some(&[BLACK_CONCRETE]),
                                                 None,
                                             );
                                         } else {
                                             editor.set_block(
-                                                &BLACK_CONCRETE,
+                                                BLACK_CONCRETE,
                                                 set_x,
                                                 ground_level,
                                                 set_z,
@@ -191,16 +191,16 @@ pub fn generate_highways(
                                         }
                                     } else if set_z % 2 < 1 {
                                         editor.set_block(
-                                            &WHITE_CONCRETE,
+                                            WHITE_CONCRETE,
                                             set_x,
                                             ground_level,
                                             set_z,
-                                            Some(&[&BLACK_CONCRETE]),
+                                            Some(&[BLACK_CONCRETE]),
                                             None,
                                         );
                                     } else {
                                         editor.set_block(
-                                            &BLACK_CONCRETE,
+                                            BLACK_CONCRETE,
                                             set_x,
                                             ground_level,
                                             set_z,
@@ -215,7 +215,7 @@ pub fn generate_highways(
                                         ground_level,
                                         set_z,
                                         None,
-                                        Some(&[&BLACK_CONCRETE, &WHITE_CONCRETE]),
+                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
                                     );
                                 }
                             }
@@ -227,11 +227,11 @@ pub fn generate_highways(
                                 let stripe_x: i32 = x;
                                 let stripe_z: i32 = z;
                                 editor.set_block(
-                                    &WHITE_CONCRETE,
+                                    WHITE_CONCRETE,
                                     stripe_x,
                                     ground_level,
                                     stripe_z,
-                                    Some(&[&BLACK_CONCRETE]),
+                                    Some(&[BLACK_CONCRETE]),
                                     None,
                                 );
                             }
@@ -253,7 +253,7 @@ pub fn generate_highways(
 /// Generates a siding using stone brick slabs
 pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
     let mut previous_node: Option<(i32, i32)> = None;
-    let siding_block: &once_cell::sync::Lazy<Block> = &STONE_BRICK_SLAB;
+    let siding_block = STONE_BRICK_SLAB;
 
     for node in &element.nodes {
         let x = node.x;
@@ -269,7 +269,7 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_
                     by - 1,
                     bz,
                     None,
-                    Some(&[&BLACK_CONCRETE, &WHITE_CONCRETE]),
+                    Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
                 ) {
                     editor.set_block(siding_block, bx, by, bz, None, None);
                 }

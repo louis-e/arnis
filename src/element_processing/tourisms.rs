@@ -26,7 +26,7 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
                     match information_type.as_str() {
                         "board" => {
                             // TODO draw a sign
-                            editor.set_block(&OAK_PLANKS, x, ground_level + 1, z, None, None);
+                            editor.set_block(OAK_PLANKS, x, ground_level + 1, z, None, None);
                         }
                         _ => {}
                     }

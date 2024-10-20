@@ -51,10 +51,10 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground
                 };
 
                 // Set bridge blocks
-                editor.set_block(&LIGHT_GRAY_CONCRETE, bx, current_height, bz, None, None);
+                editor.set_block(LIGHT_GRAY_CONCRETE, bx, current_height, bz, None, None);
                 for (offset_x, offset_z) in &[(-1, -1), (1, -1), (1, 1), (-1, 1)] {
                     editor.set_block(
-                        &LIGHT_GRAY_CONCRETE,
+                        LIGHT_GRAY_CONCRETE,
                         bx + offset_x,
                         current_height,
                         bz + offset_z,
