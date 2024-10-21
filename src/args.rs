@@ -29,6 +29,10 @@ pub struct Args {
     #[arg(long, default_value = "requests")]
     pub downloader: String,
 
+    /// World scale to use, in blocks per meter
+    #[arg(long, default_value = "1.0")]
+    pub scale: f64,
+
     /// Enable debug mode (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
     pub debug: bool,
