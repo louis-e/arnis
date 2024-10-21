@@ -75,7 +75,7 @@ pub fn fetch_data(
     debug: bool,
     download_method: &str,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} {}", "[1/5]".bold(), "Fetching data...");
+    println!("{} Fetching data...", "[1/5]".bold());
 
     // List of Overpass API servers
     let api_servers: Vec<&str> = vec![
