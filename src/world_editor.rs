@@ -194,6 +194,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Fills a cuboid area with the specified block between two coordinates.
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_blocks(
         &mut self,
         block: &'static Lazy<Block>,
@@ -254,7 +255,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("{} {}", "[5/5]".bold(), "Saving world...");
+        println!("{} Saving world...", "[5/5]".bold());
 
         let _debug: bool = self.args.debug;
         let total_regions: u64 = self.world.regions.len() as u64;
@@ -309,7 +310,7 @@ impl<'a> WorldEditor<'a> {
 }
 
 fn bits_per_block(palette_size: u32) -> u32 {
-    (palette_size as f32).log2().ceil().max(4.0).min(8.0) as u32
+    (palette_size as f32).log2().ceil().clamp(4.0, 8.0) as u32
 }
 
 fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
@@ -321,7 +322,7 @@ fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
         if let Some(Value::Byte(y_byte)) = section.other.get("Y") {
             if *y_byte == (local_y >> 4) as i8 {
                 let palette: &mut Vec<PaletteItem> = &mut section.block_states.palette;
-                let block_index: usize = (local_y % 16 * 256 + local_z * 16 + local_x) as usize;
+                let block_index: usize = local_y % 16 * 256 + local_z * 16 + local_x;
 
                 // Add SkyLight with 2048 bytes of value 0xFF
                 let skylight_data = vec![0xFFu8 as i8; 2048];
@@ -381,7 +382,7 @@ fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
 }
 
 fn set_block_in_section(
-    data: &mut Vec<i64>,
+    data: &mut [i64],
     block_index: usize,
     palette_index: u32,
     bits_per_block: u32,

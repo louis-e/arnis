@@ -156,7 +156,7 @@ fn inverse_floodfill(
     let min_x = 0;
     let min_z = 0;
 
-    let inners: Vec<_> = inners.into_iter().map(|x| LineString::from(x)).collect();
+    let inners: Vec<_> = inners.into_iter().map(LineString::from).collect();
 
     let polygons = outers
         .into_iter()

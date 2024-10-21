@@ -74,11 +74,11 @@ fn validate_bounding_box(bbox: &str) -> bool {
     let max_lng: f64 = parts[2].parse().ok().unwrap_or(0.0);
     let max_lat: f64 = parts[3].parse().ok().unwrap_or(0.0);
 
-    if !(min_lng >= -180.0 && min_lng <= 180.0) || !(max_lng >= -180.0 && max_lng <= 180.0) {
+    if !(-180.0..=180.0).contains(&min_lng) || !(-180.0..=180.0).contains(&max_lng) {
         return false;
     }
 
-    if !(min_lat >= -90.0 && min_lat <= 90.0) || !(max_lat >= -90.0 && max_lat <= 90.0) {
+    if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
         return false;
     }
 

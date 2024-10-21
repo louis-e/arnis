@@ -2,14 +2,18 @@ pub type RGBTuple = (u8, u8, u8);
 
 pub fn color_text_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
     if let Some(rgb) = full_hex_color_to_rgb_tuple(text) {
-        Some(rgb)
-    } else if let Some(rgb) = short_hex_color_to_rgb_tuple(text) {
-        Some(rgb)
-    } else if let Some(rgb) = color_name_to_rgb_tuple(text) {
-        Some(rgb)
-    } else {
-        None
+        return Some(rgb);
     }
+
+    if let Some(rgb) = short_hex_color_to_rgb_tuple(text) {
+        return Some(rgb);
+    }
+
+    if let Some(rgb) = color_name_to_rgb_tuple(text) {
+        return Some(rgb);
+    }
+
+    None
 }
 
 fn full_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {

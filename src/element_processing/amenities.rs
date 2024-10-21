@@ -33,14 +33,12 @@ pub fn generate_amenities(
                 if let Some((x, z)) = first_node {
                     editor.set_block(&CAULDRON, x, ground_level + 1, z, None, None);
                 }
-                return;
             }
             "vending_machine" | "atm" => {
                 if let Some((x, z)) = first_node {
                     editor.set_block(&IRON_BLOCK, x, ground_level + 1, z, None, None);
                     editor.set_block(&IRON_BLOCK, x, ground_level + 2, z, None, None);
                 }
-                return;
             }
             "bicycle_parking" => {
                 let ground_block: &once_cell::sync::Lazy<Block> = &OAK_PLANKS;
@@ -146,7 +144,7 @@ pub fn generate_amenities(
 
                 // Flood-fill the interior area for parking or fountains
                 if corner_addup.2 > 0 {
-                    let polygon_coords: Vec<(i32, i32)> = current_amenity.iter().copied().collect();
+                    let polygon_coords: Vec<(i32, i32)> = current_amenity.to_vec();
                     let flood_area: Vec<(i32, i32)> =
                         flood_fill_area(&polygon_coords, floodfill_timeout);
 

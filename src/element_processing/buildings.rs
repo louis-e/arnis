@@ -30,21 +30,19 @@ pub fn generate_buildings(
     let wall_block: &once_cell::sync::Lazy<Block> = element
         .tags
         .get("building:colour")
-        .map(|building_colour| {
+        .and_then(|building_colour| {
             color_text_to_rgb_tuple(building_colour)
                 .map(|rgb| find_nearest_block_in_color_map(&rgb, building_wall_color_map()))
         })
-        .flatten()
         .flatten()
         .unwrap_or_else(|| building_wall_variations()[variation_index_wall]);
     let floor_block: &once_cell::sync::Lazy<Block> = element
         .tags
         .get("roof:colour")
-        .map(|roof_colour| {
+        .and_then(|roof_colour| {
             color_text_to_rgb_tuple(roof_colour)
                 .map(|rgb| find_nearest_block_in_color_map(&rgb, building_floor_color_map()))
         })
-        .flatten()
         .flatten()
         .unwrap_or_else(|| building_floor_variations()[variation_index_floor]);
     let window_block: &once_cell::sync::Lazy<Block> = &WHITE_STAINED_GLASS;
@@ -192,7 +190,7 @@ pub fn generate_buildings(
                             editor.set_block(window_block, bx, h, bz, None, None);
                         // Window block
                         } else {
-                            editor.set_block(&wall_block, bx, h, bz, None, None);
+                            editor.set_block(wall_block, bx, h, bz, None, None);
                             // Wall block
                         }
                     }

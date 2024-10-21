@@ -59,7 +59,8 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
     }
 
     match typetree {
-        1 => { // Oak tree
+        1 => {
+            // Oak tree
             editor.fill_blocks(&OAK_LOG, x, y, z, x, y + 8, z, None, None);
             editor.fill_blocks(&OAK_LEAVES, x - 1, y + 3, z, x - 1, y + 9, z, None, None);
             editor.fill_blocks(&OAK_LEAVES, x + 1, y + 3, z, x + 1, y + 9, z, None, None);
@@ -79,7 +80,8 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             round3(editor, &OAK_LEAVES, x, y + 6, z);
             round3(editor, &OAK_LEAVES, x, y + 5, z);
         }
-        2 => { // Spruce tree
+        2 => {
+            // Spruce tree
             editor.fill_blocks(&SPRUCE_LOG, x, y, z, x, y + 9, z, None, None);
             editor.fill_blocks(&BIRCH_LEAVES, x - 1, y + 3, z, x - 1, y + 10, z, None, None);
             editor.fill_blocks(&BIRCH_LEAVES, x + 1, y + 3, z, x + 1, y + 10, z, None, None);
@@ -94,7 +96,8 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             round2(editor, &BIRCH_LEAVES, x, y + 6, z);
             round2(editor, &BIRCH_LEAVES, x, y + 3, z);
         }
-        3 => { // Birch tree
+        3 => {
+            // Birch tree
             editor.fill_blocks(&BIRCH_LOG, x, y, z, x, y + 6, z, None, None);
             editor.fill_blocks(&BIRCH_LEAVES, x - 1, y + 2, z, x - 1, y + 7, z, None, None);
             editor.fill_blocks(&BIRCH_LEAVES, x + 1, y + 2, z, x + 1, y + 7, z, None, None);

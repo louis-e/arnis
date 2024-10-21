@@ -153,7 +153,7 @@ pub fn parse_osm_data(
     bbox: (f64, f64, f64, f64),
     args: &Args,
 ) -> (Vec<ProcessedElement>, f64, f64) {
-    println!("{} {}", "[2/5]".bold(), "Parsing data...");
+    println!("{} Parsing data...", "[2/5]".bold());
 
     // Deserialize the JSON data into the OSMData structure
     let data: OsmData =
@@ -213,7 +213,7 @@ pub fn parse_osm_data(
 
                 let processed = ProcessedNode {
                     id: element.id,
-                    tags: element.tags.as_ref().map(|x| x.clone()).unwrap_or_default(),
+                    tags: element.tags.clone().unwrap_or_default(),
                     x,
                     z,
                 };
