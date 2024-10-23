@@ -127,7 +127,7 @@ pub fn generate_world(
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("water") {
-                    water_areas::generate_water_areas(&mut editor, rel, ground_level);
+                    water_areas::generate_water_areas(&mut editor, rel, &ground);
                 }
             }
         }

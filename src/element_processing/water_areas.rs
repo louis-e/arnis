@@ -2,6 +2,8 @@ use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 
 use crate::{
     block_definitions::WATER,
+    cartesian::XZPoint,
+    ground::Ground,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
     world_editor::WorldEditor,
 };
@@ -9,7 +11,7 @@ use crate::{
 pub fn generate_water_areas(
     editor: &mut WorldEditor,
     element: &ProcessedRelation,
-    ground_level: i32,
+    ground: &Ground,
 ) {
     if !element.tags.contains_key("water") {
         return;
@@ -52,7 +54,14 @@ pub fn generate_water_areas(
         .map(|x| x.iter().map(|y| (y.x as f64, y.z as f64)).collect())
         .collect();
 
-    inverse_floodfill(max_x, max_z, outers, inners, editor, ground_level);
+    let pts = inverse_floodfill(max_x, max_z, outers, inners);
+    let Some(min_y) = ground.min_level(pts.iter().cloned()) else {
+        return; // no points
+    };
+
+    for pt in pts {
+        editor.set_block(WATER, pt.x, min_y, pt.z, None, None);
+    }
 }
 
 // Merges ways that share nodes into full loops
@@ -147,9 +156,7 @@ fn inverse_floodfill(
     max_z: i32,
     outers: Vec<Vec<(f64, f64)>>,
     inners: Vec<Vec<(f64, f64)>>,
-    editor: &mut WorldEditor,
-    ground_level: i32,
-) {
+) -> Vec<XZPoint> {
     let min_x = 0;
     let min_z = 0;
 
@@ -163,16 +170,10 @@ fn inverse_floodfill(
         .map(|x| Polygon::new(LineString::from(x), vec![]))
         .collect();
 
-    inverse_floodfill_recursive(
-        min_x,
-        max_x,
-        min_z,
-        max_z,
-        ground_level,
-        &outers,
-        &inners,
-        editor,
-    );
+    let mut out = vec![];
+    inverse_floodfill_recursive(min_x, max_x, min_z, max_z, &outers, &inners, &mut out);
+
+    out
 }
 
 fn inverse_floodfill_recursive(
@@ -180,10 +181,9 @@ fn inverse_floodfill_recursive(
     max_x: i32,
     min_z: i32,
     max_z: i32,
-    ground_level: i32,
     outers: &[Polygon],
     inners: &[Polygon],
-    editor: &mut WorldEditor,
+    out: &mut Vec<XZPoint>,
 ) {
     const ITERATIVE_THRES: i32 = 10_000;
 
@@ -192,16 +192,7 @@ fn inverse_floodfill_recursive(
     }
 
     if (max_x - min_x) * (max_z - min_z) < ITERATIVE_THRES {
-        inverse_floodfill_iterative(
-            min_x,
-            max_x,
-            min_z,
-            max_z,
-            ground_level,
-            outers,
-            inners,
-            editor,
-        );
+        inverse_floodfill_iterative(min_x, max_x, min_z, max_z, outers, inners, out);
 
         return;
     }
@@ -227,7 +218,7 @@ fn inverse_floodfill_recursive(
             // every block in rect is water
             // so we can safely just set the whole thing to water
 
-            rect_fill(min_x, max_x, min_z, max_z, ground_level, editor);
+            rect_fill(min_x, max_x, min_z, max_z, out);
 
             continue;
         }
@@ -256,10 +247,9 @@ fn inverse_floodfill_recursive(
                 max_x,
                 min_z,
                 max_z,
-                ground_level,
                 &outers_intersects,
                 &inners_intersects,
-                editor,
+                out,
             );
         }
     }
@@ -271,10 +261,9 @@ fn inverse_floodfill_iterative(
     max_x: i32,
     min_z: i32,
     max_z: i32,
-    ground_level: i32,
     outers: &[Polygon],
     inners: &[Polygon],
-    editor: &mut WorldEditor,
+    out: &mut Vec<XZPoint>,
 ) {
     for x in min_x..max_x {
         for z in min_z..max_z {
@@ -283,23 +272,16 @@ fn inverse_floodfill_iterative(
             if outers.iter().any(|poly| poly.contains(&p))
                 && inners.iter().all(|poly| !poly.contains(&p))
             {
-                editor.set_block(WATER, x, ground_level, z, None, None);
+                out.push(XZPoint::new(x, z));
             }
         }
     }
 }
 
-fn rect_fill(
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    ground_level: i32,
-    editor: &mut WorldEditor,
-) {
+fn rect_fill(min_x: i32, max_x: i32, min_z: i32, max_z: i32, out: &mut Vec<XZPoint>) {
     for x in min_x..max_x {
         for z in min_z..max_z {
-            editor.set_block(WATER, x, ground_level, z, None, None);
+            out.push(XZPoint::new(x, z));
         }
     }
 }
