@@ -2,8 +2,10 @@ use std::time::Duration;
 
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
 use crate::element_processing::tree::create_tree;
 use crate::floodfill::flood_fill_area;
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -11,7 +13,7 @@ use rand::Rng;
 pub fn generate_landuse(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    ground_level: i32,
+    ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
     let mut previous_node: Option<(i32, i32)> = None;
@@ -43,6 +45,7 @@ pub fn generate_landuse(
     for node in &element.nodes {
         let x = node.x;
         let z = node.z;
+        let ground_level = ground.level(XZPoint::new(x, z));
 
         if let Some(prev) = previous_node {
             // Generate the line of coordinates between the two nodes
@@ -67,6 +70,7 @@ pub fn generate_landuse(
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
         for (x, z) in floor_area {
+            let ground_level = ground.level(XZPoint::new(x, z));
             if landuse_tag == "traffic_island" {
                 editor.set_block(block_type, x, ground_level + 1, z, None, None);
             } else if landuse_tag == "construction" || landuse_tag == "railway" {

@@ -1,16 +1,18 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, ground_level: i32) {
+pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, ground: &Ground) {
     if let Some(barrier_type) = element.tags().get("barrier") {
         if barrier_type == "bollard" {
             if let ProcessedElement::Node(node) = element {
                 editor.set_block(
                     COBBLESTONE_WALL,
                     node.x,
-                    ground_level + 1,
+                    ground.level(node.xz()) + 1,
                     node.z,
                     None,
                     None,
@@ -37,11 +39,11 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
                 let z2 = cur.z;
 
                 // Generate the line of coordinates between the two nodes
-                let bresenham_points: Vec<(i32, i32, i32)> =
-                    bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
+                let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2);
 
                 for (bx, _, bz) in bresenham_points {
                     // Build the barrier wall to the specified height
+                    let ground_level = ground.level(XZPoint::new(bx, bz));
                     for y in (ground_level + 1)..=(ground_level + wall_height) {
                         editor.set_block(COBBLESTONE_WALL, bx, y, bz, None, None);
                         // Barrier wall

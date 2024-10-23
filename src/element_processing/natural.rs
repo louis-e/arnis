@@ -2,8 +2,10 @@ use std::time::Duration;
 
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
 use crate::element_processing::tree::create_tree;
 use crate::floodfill::flood_fill_area;
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -11,7 +13,7 @@ use rand::Rng;
 pub fn generate_natural(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
-    ground_level: i32,
+    ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
@@ -21,7 +23,13 @@ pub fn generate_natural(
                 let z = node.z;
 
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
+                create_tree(
+                    editor,
+                    x,
+                    ground.level(node.xz()) + 1,
+                    z,
+                    rng.gen_range(1..=3),
+                );
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -49,9 +57,16 @@ pub fn generate_natural(
                 if let Some(prev) = previous_node {
                     // Generate the line of coordinates between the two nodes
                     let bresenham_points: Vec<(i32, i32, i32)> =
-                        bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
+                        bresenham_line(prev.0, 0, prev.1, x, 0, z);
                     for (bx, _, bz) in bresenham_points {
-                        editor.set_block(block_type, bx, ground_level, bz, None, None);
+                        editor.set_block(
+                            block_type,
+                            bx,
+                            ground.level(XZPoint::new(bx, bz)),
+                            bz,
+                            None,
+                            None,
+                        );
                     }
 
                     current_natural.push((x, z));
@@ -71,17 +86,19 @@ pub fn generate_natural(
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
                 for (x, z) in filled_area {
-                    editor.set_block(block_type, x, ground_level, z, None, None);
+                    let y = ground.level(XZPoint::new(x, z));
+
+                    editor.set_block(block_type, x, y, z, None, None);
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
-                        if editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
+                        if editor.check_for_block(x, y, z, None, Some(&[WATER])) {
                             continue;
                         }
 
                         let random_choice: i32 = rng.gen_range(0..26);
                         if random_choice == 25 {
-                            create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
+                            create_tree(editor, x, y + 1, z, rng.gen_range(1..=3));
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,
@@ -89,9 +106,9 @@ pub fn generate_natural(
                                 3 => YELLOW_FLOWER,
                                 _ => WHITE_FLOWER,
                             };
-                            editor.set_block(flower_block, x, ground_level + 1, z, None, None);
+                            editor.set_block(flower_block, x, y + 1, z, None, None);
                         } else if random_choice <= 1 {
-                            editor.set_block(GRASS, x, ground_level + 1, z, None, None);
+                            editor.set_block(GRASS, x, y + 1, z, None, None);
                         }
                     }
                 }

@@ -2,8 +2,10 @@ use std::time::Duration;
 
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
 use crate::element_processing::tree::create_tree;
 use crate::floodfill::flood_fill_area;
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -11,7 +13,7 @@ use rand::Rng;
 pub fn generate_leisure(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    ground_level: i32,
+    ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
@@ -44,12 +46,12 @@ pub fn generate_leisure(
             if let Some(prev) = previous_node {
                 // Draw a line between the current and previous node
                 let bresenham_points: Vec<(i32, i32, i32)> =
-                    bresenham_line(prev.0, ground_level, prev.1, node.x, ground_level, node.z);
+                    bresenham_line(prev.0, 0, prev.1, node.x, 0, node.z);
                 for (bx, _, bz) in bresenham_points {
                     editor.set_block(
                         block_type,
                         bx,
-                        ground_level,
+                        ground.level(XZPoint::new(bx, bz)),
                         bz,
                         Some(&[
                             GRASS_BLOCK,
@@ -78,6 +80,7 @@ pub fn generate_leisure(
             let filled_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
             for (x, z) in filled_area {
+                let ground_level = ground.level(XZPoint::new(x, z));
                 editor.set_block(block_type, x, ground_level, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens

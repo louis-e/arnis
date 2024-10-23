@@ -1,9 +1,10 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
+pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground: &Ground) {
     if let Some(_bridge_type) = element.tags.get("bridge") {
         let bridge_height: i32 = element
             .tags
@@ -21,7 +22,7 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground
                 let x2 = nodes[1].x;
                 let z2 = nodes[1].z;
 
-                bresenham_line(x1, ground_level, z1, x2, ground_level, z2).len()
+                bresenham_line(x1, 0, z1, x2, 0, z2).len()
             })
             .sum();
 
@@ -31,15 +32,18 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground
         for i in 1..element.nodes.len() {
             let prev = &element.nodes[i - 1];
             let x1 = prev.x;
+            let y1 = ground.level(prev.xz());
             let z1 = prev.z;
 
             let cur = &element.nodes[i];
             let x2 = cur.x;
+            let y2 = ground.level(cur.xz());
             let z2 = cur.z;
 
+            let ground_level = 60; // FIXME TODO
+
             // Generate the line of coordinates between the two nodes
-            let bresenham_points: Vec<(i32, i32, i32)> =
-                bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
+            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2);
 
             for (bx, _, bz) in bresenham_points {
                 // Calculate the current height of the bridge

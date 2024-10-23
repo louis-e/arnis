@@ -1,4 +1,4 @@
-use crate::args::Args;
+use crate::{args::Args, cartesian::XZPoint};
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;
@@ -42,6 +42,15 @@ pub struct ProcessedNode {
     // minecraft coords
     pub x: i32,
     pub z: i32,
+}
+
+impl ProcessedNode {
+    pub fn xz(&self) -> XZPoint {
+        XZPoint {
+            x: self.x,
+            z: self.z,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
