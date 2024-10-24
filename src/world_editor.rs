@@ -21,6 +21,10 @@ struct Chunk {
 #[derive(Serialize, Deserialize)]
 struct Section {
     block_states: Blockstates,
+    #[serde(rename = "Y")]
+    y: i8,
+    #[serde(rename = "SkyLight")]
+    sky_light: Option<ByteArray>,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -28,6 +32,7 @@ struct Section {
 #[derive(Serialize, Deserialize)]
 struct Blockstates {
     palette: Vec<PaletteItem>,
+    data: Option<LongArray>,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -40,18 +45,124 @@ struct PaletteItem {
     properties: Option<Value>,
 }
 
+struct SectionToModify {
+    blocks: [Block; 4096],
+}
+
+impl SectionToModify {
+    fn get_block(&self, x: u8, y: u8, z: u8) -> Option<Block> {
+        let b = self.blocks[Self::index(x, y, z)];
+        if b == AIR {
+            return None;
+        }
+
+        Some(b)
+    }
+
+    fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block) {
+        self.blocks[Self::index(x, y, z)] = block;
+    }
+
+    fn index(x: u8, y: u8, z: u8) -> usize {
+        usize::from(y) % 16 * 256 + usize::from(z) * 16 + usize::from(x)
+    }
+
+    fn to_section(&self, y: i8) -> Section {
+        let mut palette = self.blocks.to_vec();
+        palette.sort();
+        palette.dedup();
+
+        let data = if palette.len() == 1 {
+            vec![]
+        } else {
+            let palette_lookup: FnvHashMap<_, _> = palette
+                .iter()
+                .enumerate()
+                .map(|(k, v)| (v, i64::try_from(k).unwrap()))
+                .collect();
+
+            let mut bits_per_block = 4; // minimum allowed
+            while (1 << bits_per_block) < palette.len() {
+                bits_per_block += 1;
+            }
+
+            let mut data = vec![];
+
+            let mut cur = 0;
+            let mut cur_idx = 0;
+            for block in &self.blocks {
+                let p = palette_lookup[block];
+
+                if cur_idx + bits_per_block > 64 {
+                    data.push(cur);
+                    cur = 0;
+                    cur_idx = 0;
+                }
+
+                cur |= p << cur_idx;
+                cur_idx += bits_per_block;
+            }
+
+            if cur_idx > 0 {
+                data.push(cur);
+            }
+
+            data
+        };
+
+        let palette = palette
+            .iter()
+            .map(|x| PaletteItem {
+                name: x.name().to_string(),
+                properties: x.properties(),
+            })
+            .collect();
+
+        Section {
+            block_states: Blockstates {
+                palette,
+                data: Some(LongArray::new(data)),
+                other: FnvHashMap::default(),
+            },
+            y,
+            sky_light: Some(ByteArray::new(vec![0xFFu8 as i8; 2048])),
+            other: FnvHashMap::default(),
+        }
+    }
+}
+
+impl Default for SectionToModify {
+    fn default() -> Self {
+        Self {
+            blocks: [AIR; 4096],
+        }
+    }
+}
+
 #[derive(Default)]
 struct ChunkToModify {
-    blocks: FnvHashMap<(i32, i32, i32), Block>,
+    sections: FnvHashMap<i8, SectionToModify>,
 }
 
 impl ChunkToModify {
-    fn get_block(&self, x: i32, y: i32, z: i32) -> Option<&Block> {
-        self.blocks.get(&(x, y, z))
+    fn get_block(&self, x: u8, y: i32, z: u8) -> Option<Block> {
+        let section_idx: i8 = (y >> 4).try_into().unwrap();
+
+        let section = self.sections.get(&section_idx)?;
+
+        section.get_block(x, (y & 15).try_into().unwrap(), z)
     }
 
-    fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
-        self.blocks.insert((x, y, z), block);
+    fn set_block(&mut self, x: u8, y: i32, z: u8, block: Block) {
+        let section_idx: i8 = (y >> 4).try_into().unwrap();
+
+        let section = self.sections.entry(section_idx).or_default();
+
+        section.set_block(x, (y & 15).try_into().unwrap(), z, block);
+    }
+
+    fn sections(&self) -> impl Iterator<Item = Section> + use<'_> {
+        self.sections.iter().map(|(y, s)| s.to_section(*y))
     }
 }
 
@@ -84,7 +195,7 @@ impl WorldToModify {
         self.regions.get(&(x, z))
     }
 
-    fn get_block(&self, x: i32, y: i32, z: i32) -> Option<&Block> {
+    fn get_block(&self, x: i32, y: i32, z: i32) -> Option<Block> {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
         let region_x = chunk_x >> 5;
@@ -93,7 +204,11 @@ impl WorldToModify {
         let region = self.get_region(region_x, region_z)?;
         let chunk = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
 
-        chunk.get_block(x & 15, y, z & 15)
+        chunk.get_block(
+            (x & 15).try_into().unwrap(),
+            y,
+            (z & 15).try_into().unwrap(),
+        )
     }
 
     fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
@@ -105,7 +220,12 @@ impl WorldToModify {
         let region = self.get_or_create_region(region_x, region_z);
         let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
 
-        chunk.set_block(x & 15, y, z & 15, block);
+        chunk.set_block(
+            (x & 15).try_into().unwrap(),
+            y,
+            (z & 15).try_into().unwrap(),
+            block,
+        );
     }
 }
 
@@ -280,10 +400,8 @@ impl<'a> WorldEditor<'a> {
 
                     let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
 
-                    if let Some(block_list) = region_to_modify.get_chunk(chunk_x, chunk_z) {
-                        for ((x, y, z), block) in &block_list.blocks {
-                            set_block_in_chunk(&mut chunk, block.clone(), *x, *y, *z);
-                        }
+                    if let Some(chunk_to_modify) = region_to_modify.get_chunk(chunk_x, chunk_z) {
+                        chunk.sections = chunk_to_modify.sections().collect();
                     }
 
                     chunk.x_pos = chunk_x + region_x * 32;
@@ -304,116 +422,5 @@ impl<'a> WorldEditor<'a> {
         }
 
         save_pb.finish();
-    }
-}
-
-fn bits_per_block(palette_size: u32) -> u32 {
-    (palette_size as f32).log2().ceil().max(4.0).min(8.0) as u32
-}
-
-fn set_block_in_chunk(chunk: &mut Chunk, block: Block, x: i32, y: i32, z: i32) {
-    let local_x = x as usize;
-    let local_y = y as usize;
-    let local_z = z as usize;
-
-    for section in chunk.sections.iter_mut() {
-        if let Some(Value::Byte(y_byte)) = section.other.get("Y") {
-            if *y_byte == (local_y >> 4) as i8 {
-                let palette: &mut Vec<PaletteItem> = &mut section.block_states.palette;
-                let block_index: usize = (local_y % 16 * 256 + local_z * 16 + local_x) as usize;
-
-                // Add SkyLight with 2048 bytes of value 0xFF
-                let skylight_data = vec![0xFFu8 as i8; 2048];
-                section.other.insert(
-                    "SkyLight".to_string(),
-                    Value::ByteArray(ByteArray::new(skylight_data)),
-                );
-
-                // Check if the block is already in the palette with matching properties
-                let mut palette_index: Option<usize> =
-                    palette.iter().position(|item: &PaletteItem| {
-                        item.name == block.name() && item.properties == block.properties()
-                    });
-
-                // If the block is not in the palette and adding it would exceed a reasonable size, skip or replace
-                if palette_index.is_none() {
-                    if palette.len() >= 16 {
-                        palette_index = Some(0);
-                    } else {
-                        // Add the new block type to the palette with its properties
-                        palette.push(PaletteItem {
-                            name: block.name().to_string(),
-                            properties: block.properties(),
-                        });
-                        palette_index = Some(palette.len() - 1);
-                    }
-                }
-
-                // Unwrap because we are sure palette_index is Some after this point
-                let palette_index: u32 = palette_index.unwrap() as u32;
-
-                let bits_per_block: u32 = bits_per_block(palette.len() as u32);
-                if let Some(Value::LongArray(ref mut data)) =
-                    section.block_states.other.get_mut("data")
-                {
-                    // Convert LongArray to Vec<i64>
-                    let mut vec_data: Vec<i64> = data.as_mut().to_vec();
-                    set_block_in_section(&mut vec_data, block_index, palette_index, bits_per_block);
-                    // Update LongArray with modified Vec<i64>
-                    *data = LongArray::new(vec_data);
-                } else {
-                    // Properly initialize new data array with correct length
-                    let required_longs: usize =
-                        ((4096 + (64 / bits_per_block) - 1) / (64 / bits_per_block)) as usize;
-                    let mut new_data: Vec<i64> = vec![0i64; required_longs];
-                    set_block_in_section(&mut new_data, block_index, palette_index, bits_per_block);
-                    section.block_states.other.insert(
-                        "data".to_string(),
-                        Value::LongArray(LongArray::new(new_data)),
-                    );
-                }
-
-                break;
-            }
-        }
-    }
-}
-
-fn set_block_in_section(
-    data: &mut Vec<i64>,
-    block_index: usize,
-    palette_index: u32,
-    bits_per_block: u32,
-) {
-    let blocks_per_long: u32 = 64 / bits_per_block;
-    let required_longs: usize = ((4096 + blocks_per_long - 1) / blocks_per_long) as usize;
-
-    // Ensure data vector is large enough
-    assert!(data.len() >= required_longs, "Data slice is too small");
-
-    let mask: u64 = (1u64 << bits_per_block) - 1;
-    let long_index: usize = block_index / blocks_per_long as usize;
-    let start_bit: usize = (block_index % blocks_per_long as usize) * bits_per_block as usize;
-
-    let current_value: u64 = data[long_index] as u64;
-    let new_value: u64 =
-        (current_value & !(mask << start_bit)) | ((palette_index as u64 & mask) << start_bit);
-
-    // Update data
-    data[long_index] = new_value as i64;
-
-    // Handle cases where bits spill over into the next long
-    if start_bit + bits_per_block as usize > 64 {
-        let overflow_bits: usize = (start_bit + bits_per_block as usize) - 64;
-        let next_long_index: usize = long_index + 1;
-
-        if next_long_index < data.len() {
-            let next_value: u64 = data[next_long_index] as u64;
-            let new_next_value: u64 = (next_value & !(mask >> overflow_bits))
-                | ((palette_index as u64 & mask) >> overflow_bits);
-            data[next_long_index] = new_next_value as i64;
-        } else {
-            panic!("Data slice is too small even after resizing. This should never happen.");
-        }
     }
 }

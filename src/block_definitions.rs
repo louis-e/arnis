@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use crate::colors::RGBTuple;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
     id: u8,
 }
