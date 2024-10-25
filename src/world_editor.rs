@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{ByteArray, LongArray, Value};
+use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
@@ -14,6 +14,8 @@ struct Chunk {
     sections: Vec<Section>,
     x_pos: i32,
     z_pos: i32,
+    #[serde(default)]
+    is_light_on: u8,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -23,8 +25,6 @@ struct Section {
     block_states: Blockstates,
     #[serde(rename = "Y")]
     y: i8,
-    #[serde(rename = "SkyLight")]
-    sky_light: Option<ByteArray>,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -125,7 +125,6 @@ impl SectionToModify {
                 other: FnvHashMap::default(),
             },
             y,
-            sky_light: Some(ByteArray::new(vec![0xFFu8 as i8; 2048])),
             other: FnvHashMap::default(),
         }
     }
@@ -406,6 +405,7 @@ impl<'a> WorldEditor<'a> {
 
                     chunk.x_pos = chunk_x + region_x * 32;
                     chunk.z_pos = chunk_z + region_z * 32;
+                    chunk.is_light_on = 0; // Force minecraft to recompute
 
                     let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
 
