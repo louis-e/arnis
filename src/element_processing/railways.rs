@@ -36,11 +36,11 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
 
             for (bx, _, bz) in bresenham_points {
                 // TODO: Set direction of rail
-                editor.set_block(&IRON_BLOCK, bx, ground_level, bz, None, None);
-                editor.set_block(&RAIL, bx, ground_level + 1, bz, None, None);
+                editor.set_block(IRON_BLOCK, bx, ground_level, bz, None, None);
+                editor.set_block(RAIL, bx, ground_level + 1, bz, None, None);
 
                 if bx % 4 == 0 {
-                    editor.set_block(&OAK_LOG, bx, ground_level, bz, None, None);
+                    editor.set_block(OAK_LOG, bx, ground_level, bz, None, None);
                 }
             }
         }

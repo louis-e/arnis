@@ -1,4 +1,5 @@
 use crate::args::Args;
+use crate::block_definitions::{DIRT, GRASS_BLOCK};
 use crate::element_processing::*;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
@@ -170,22 +171,8 @@ pub fn generate_world(
 
     for x in 0..=(scale_factor_x as i32) {
         for z in 0..=(scale_factor_z as i32) {
-            editor.set_block(
-                &crate::block_definitions::GRASS_BLOCK,
-                x,
-                ground_level,
-                z,
-                None,
-                None,
-            );
-            editor.set_block(
-                &crate::block_definitions::DIRT,
-                x,
-                ground_level - 1,
-                z,
-                None,
-                None,
-            );
+            editor.set_block(GRASS_BLOCK, x, ground_level, z, None, None);
+            editor.set_block(DIRT, x, ground_level - 1, z, None, None);
 
             block_counter += 1;
             if block_counter % batch_size == 0 {
