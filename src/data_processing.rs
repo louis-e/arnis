@@ -176,8 +176,7 @@ pub fn generate_world(
         for z in 0..=(scale_factor_z as i32) {
             // Use the smaller of [current block y, ground level y]
             let max_y = (MIN_Y..MAX_Y)
-                .filter(|y| editor.block_at(x, *y, z))
-                .next()
+                .find(|y| editor.block_at(x, *y, z))
                 .unwrap_or(MAX_Y)
                 .min(GROUND_LEVEL);
 

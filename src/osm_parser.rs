@@ -295,7 +295,7 @@ fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
 // Haversine but optimized for a latitude delta of 0
 // returns meters
 fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
-    const R: f64 = 6371_000.0;
+    const R: f64 = 6_371_000.0;
     let d_lon = (lon2 - lon1).to_radians();
     let a =
         lat.to_radians().cos() * lat.to_radians().cos() * (d_lon / 2.0).sin() * (d_lon / 2.0).sin();
@@ -307,7 +307,7 @@ fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
 // Haversine but optimized for a longitude delta of 0
 // returns meters
 fn lat_distance(lat1: f64, lat2: f64) -> f64 {
-    const R: f64 = 6371_000.0;
+    const R: f64 = 6_371_000.0;
     let d_lat = (lat2 - lat1).to_radians();
     let a = (d_lat / 2.0).sin() * (d_lat / 2.0).sin();
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());

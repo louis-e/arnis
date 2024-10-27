@@ -23,7 +23,7 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
         if tourism_type == "information" {
             if let Some("board") = element.tags.get("information").map(|x| x.as_str()) {
                 // TODO draw a sign
-                editor.set_block(&OAK_PLANKS, x, ground_level + 1, z, None, None);
+                editor.set_block(OAK_PLANKS, x, ground_level + 1, z, None, None);
             }
         }
     }
