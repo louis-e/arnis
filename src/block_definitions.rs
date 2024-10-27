@@ -137,6 +137,7 @@ impl Block {
             107 => "dark_oak_door",
             108 => "potatoes",
             109 => "wheat",
+            110 => "bedrock",
             _ => panic!("Invalid id"),
         }
     }
@@ -290,6 +291,8 @@ pub const DARK_OAK_DOOR_LOWER: Block = Block::new(106);
 pub const DARK_OAK_DOOR_UPPER: Block = Block::new(107);
 pub const POTATOES: Block = Block::new(108);
 pub const WHEAT: Block = Block::new(109);
+
+pub const BEDROCK: Block = Block::new(110);
 
 // Variations for building corners
 pub fn building_corner_variations() -> Vec<Block> {

@@ -274,6 +274,10 @@ impl<'a> WorldEditor<'a> {
         (self.scale_factor_x as i32, self.scale_factor_x as i32)
     }
 
+    pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
+        self.world.get_block(x, y, z).is_some()
+    }
+
     /// Sets a block of the specified type at the given coordinates.
     pub fn set_block(
         &mut self,
