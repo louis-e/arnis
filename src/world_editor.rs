@@ -3,10 +3,10 @@ use crate::block_definitions::*;
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{ByteArray, LongArray, Value};
+use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs::File;
 
 #[derive(Serialize, Deserialize)]
@@ -16,21 +16,21 @@ struct Chunk {
     x_pos: i32,
     z_pos: i32,
     #[serde(flatten)]
-    other: HashMap<String, Value>,
+    other: FnvHashMap<String, Value>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Section {
     block_states: Blockstates,
     #[serde(flatten)]
-    other: HashMap<String, Value>,
+    other: FnvHashMap<String, Value>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct Blockstates {
     palette: Vec<PaletteItem>,
     #[serde(flatten)]
-    other: HashMap<String, Value>,
+    other: FnvHashMap<String, Value>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -43,7 +43,7 @@ struct PaletteItem {
 
 #[derive(Default)]
 struct ChunkToModify {
-    blocks: HashMap<(i32, i32, i32), Block>,
+    blocks: FnvHashMap<(i32, i32, i32), Block>,
 }
 
 impl ChunkToModify {
@@ -58,7 +58,7 @@ impl ChunkToModify {
 
 #[derive(Default)]
 struct RegionToModify {
-    chunks: HashMap<(i32, i32), ChunkToModify>,
+    chunks: FnvHashMap<(i32, i32), ChunkToModify>,
 }
 
 impl RegionToModify {
@@ -73,7 +73,7 @@ impl RegionToModify {
 
 #[derive(Default)]
 struct WorldToModify {
-    regions: HashMap<(i32, i32), RegionToModify>,
+    regions: FnvHashMap<(i32, i32), RegionToModify>,
 }
 
 impl WorldToModify {
