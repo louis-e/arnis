@@ -72,43 +72,37 @@ impl SectionToModify {
         palette.sort();
         palette.dedup();
 
-        let data = if palette.len() == 1 {
-            vec![]
-        } else {
-            let palette_lookup: FnvHashMap<_, _> = palette
-                .iter()
-                .enumerate()
-                .map(|(k, v)| (v, i64::try_from(k).unwrap()))
-                .collect();
+        let palette_lookup: FnvHashMap<_, _> = palette
+            .iter()
+            .enumerate()
+            .map(|(k, v)| (v, i64::try_from(k).unwrap()))
+            .collect();
 
-            let mut bits_per_block = 4; // minimum allowed
-            while (1 << bits_per_block) < palette.len() {
-                bits_per_block += 1;
-            }
+        let mut bits_per_block = 4; // minimum allowed
+        while (1 << bits_per_block) < palette.len() {
+            bits_per_block += 1;
+        }
 
-            let mut data = vec![];
+        let mut data = vec![];
 
-            let mut cur = 0;
-            let mut cur_idx = 0;
-            for block in &self.blocks {
-                let p = palette_lookup[block];
+        let mut cur = 0;
+        let mut cur_idx = 0;
+        for block in &self.blocks {
+            let p = palette_lookup[block];
 
-                if cur_idx + bits_per_block > 64 {
-                    data.push(cur);
-                    cur = 0;
-                    cur_idx = 0;
-                }
-
-                cur |= p << cur_idx;
-                cur_idx += bits_per_block;
-            }
-
-            if cur_idx > 0 {
+            if cur_idx + bits_per_block > 64 {
                 data.push(cur);
+                cur = 0;
+                cur_idx = 0;
             }
 
-            data
-        };
+            cur |= p << cur_idx;
+            cur_idx += bits_per_block;
+        }
+
+        if cur_idx > 0 {
+            data.push(cur);
+        }
 
         let palette = palette
             .iter()
