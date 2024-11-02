@@ -253,6 +253,7 @@ impl<'a> WorldEditor<'a> {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&out_path)
             .expect("Failed to open region file");
 
