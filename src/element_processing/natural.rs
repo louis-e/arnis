@@ -29,12 +29,12 @@ pub fn generate_natural(
             let mut current_natural: Vec<(i32, i32)> = vec![];
 
             // Determine block type based on natural tag
-            let block_type: &once_cell::sync::Lazy<Block> = match natural_type.as_str() {
-                "scrub" | "grassland" | "wood" => &GRASS_BLOCK,
-                "beach" | "sand" => &SAND,
-                "tree_row" => &GRASS_BLOCK,
-                "wetland" | "water" => &WATER,
-                _ => &GRASS_BLOCK,
+            let block_type = match natural_type.as_str() {
+                "scrub" | "grassland" | "wood" => GRASS_BLOCK,
+                "beach" | "sand" => SAND,
+                "tree_row" => GRASS_BLOCK,
+                "wetland" | "water" => WATER,
+                _ => GRASS_BLOCK,
             };
 
             let ProcessedElement::Way(way) = element else {
@@ -75,7 +75,7 @@ pub fn generate_natural(
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
-                        if editor.check_for_block(x, ground_level, z, None, Some(&[&WATER])) {
+                        if editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
                             continue;
                         }
 
@@ -84,14 +84,14 @@ pub fn generate_natural(
                             create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
-                                1 => &RED_FLOWER,
-                                2 => &BLUE_FLOWER,
-                                3 => &YELLOW_FLOWER,
-                                _ => &WHITE_FLOWER,
+                                1 => RED_FLOWER,
+                                2 => BLUE_FLOWER,
+                                3 => YELLOW_FLOWER,
+                                _ => WHITE_FLOWER,
                             };
                             editor.set_block(flower_block, x, ground_level + 1, z, None, None);
                         } else if random_choice <= 1 {
-                            editor.set_block(&GRASS, x, ground_level + 1, z, None, None);
+                            editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                         }
                     }
                 }

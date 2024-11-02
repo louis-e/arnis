@@ -75,7 +75,7 @@ pub fn fetch_data(
     debug: bool,
     download_method: &str,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} {}", "[1/5]".bold(), "Fetching data...");
+    println!("{} Fetching data...", "[1/5]".bold());
 
     // List of Overpass API servers
     let api_servers: Vec<&str> = vec![
@@ -119,8 +119,6 @@ pub fn fetch_data(
     .nodesinbbox out skel qt;"#,
         bbox.1, bbox.0, bbox.3, bbox.2
     );
-
-    println!("{}", query);
 
     if let Some(file) = file {
         // Load data from file

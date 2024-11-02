@@ -4,7 +4,6 @@ use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
-use once_cell::sync::Lazy;
 use rand::Rng;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -25,29 +24,26 @@ pub fn generate_buildings(
     let variation_index_wall: usize = rng.gen_range(0..building_wall_variations().len());
     let variation_index_floor: usize = rng.gen_range(0..building_floor_variations().len());
 
-    let corner_block: &&once_cell::sync::Lazy<Block> =
-        &building_corner_variations()[variation_index_corner];
-    let wall_block: &once_cell::sync::Lazy<Block> = element
+    let corner_block = building_corner_variations()[variation_index_corner];
+    let wall_block = element
         .tags
         .get("building:colour")
-        .map(|building_colour| {
+        .and_then(|building_colour| {
             color_text_to_rgb_tuple(building_colour)
                 .map(|rgb| find_nearest_block_in_color_map(&rgb, building_wall_color_map()))
         })
         .flatten()
-        .flatten()
         .unwrap_or_else(|| building_wall_variations()[variation_index_wall]);
-    let floor_block: &once_cell::sync::Lazy<Block> = element
+    let floor_block = element
         .tags
         .get("roof:colour")
-        .map(|roof_colour| {
+        .and_then(|roof_colour| {
             color_text_to_rgb_tuple(roof_colour)
                 .map(|rgb| find_nearest_block_in_color_map(&rgb, building_floor_color_map()))
         })
         .flatten()
-        .flatten()
         .unwrap_or_else(|| building_floor_variations()[variation_index_floor]);
-    let window_block: &once_cell::sync::Lazy<Block> = &WHITE_STAINED_GLASS;
+    let window_block = WHITE_STAINED_GLASS;
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
@@ -88,8 +84,8 @@ pub fn generate_buildings(
             building_height = 2;
 
             if element.tags.contains_key("bicycle_parking") {
-                let ground_block: &once_cell::sync::Lazy<Block> = &OAK_PLANKS;
-                let roof_block: &once_cell::sync::Lazy<Block> = &STONE_BLOCK_SLAB;
+                let ground_block = OAK_PLANKS;
+                let roof_block = STONE_BLOCK_SLAB;
 
                 let polygon_coords: Vec<(i32, i32)> =
                     element.nodes.iter().map(|n| (n.x, n.z)).collect();
@@ -108,7 +104,7 @@ pub fn generate_buildings(
 
                     for y in 1..=4 {
                         editor.set_block(ground_block, x, ground_level, z, None, None);
-                        editor.set_block(&OAK_FENCE, x, ground_level + y, z, None, None);
+                        editor.set_block(OAK_FENCE, x, ground_level + y, z, None, None);
                     }
                     editor.set_block(roof_block, x, ground_level + 5, z, None, None);
                 }
@@ -133,13 +129,13 @@ pub fn generate_buildings(
                     let bresenham_points: Vec<(i32, i32, i32)> =
                         bresenham_line(prev.0, roof_height, prev.1, x, roof_height, z);
                     for (bx, _, bz) in bresenham_points {
-                        editor.set_block(&STONE_BRICK_SLAB, bx, roof_height, bz, None, None);
+                        editor.set_block(STONE_BRICK_SLAB, bx, roof_height, bz, None, None);
                         // Set roof block at edge
                     }
                 }
 
                 for y in (ground_level + 1)..=(roof_height - 1) {
-                    editor.set_block(&COBBLESTONE_WALL, x, y, z, None, None);
+                    editor.set_block(COBBLESTONE_WALL, x, y, z, None, None);
                 }
 
                 previous_node = Some((x, z));
@@ -152,7 +148,7 @@ pub fn generate_buildings(
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
             for (x, z) in roof_area.iter() {
-                editor.set_block(&STONE_BRICK_SLAB, *x, roof_height, *z, None, None);
+                editor.set_block(STONE_BRICK_SLAB, *x, roof_height, *z, None, None);
                 // Set roof block
             }
 
@@ -192,13 +188,13 @@ pub fn generate_buildings(
                             editor.set_block(window_block, bx, h, bz, None, None);
                         // Window block
                         } else {
-                            editor.set_block(&wall_block, bx, h, bz, None, None);
+                            editor.set_block(wall_block, bx, h, bz, None, None);
                             // Wall block
                         }
                     }
                 }
                 editor.set_block(
-                    &COBBLESTONE,
+                    COBBLESTONE,
                     bx,
                     ground_level + building_height + 1,
                     bz,
@@ -226,13 +222,13 @@ pub fn generate_buildings(
                 if building_height > 4 {
                     for h in (ground_level + 2 + 4..ground_level + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
-                            editor.set_block(&GLOWSTONE, x, h, z, None, None); // Light fixtures
+                            editor.set_block(GLOWSTONE, x, h, z, None, None); // Light fixtures
                         } else {
                             editor.set_block(floor_block, x, h, z, None, None);
                         }
                     }
                 } else if x % 6 == 0 && z % 6 == 0 {
-                    editor.set_block(&GLOWSTONE, x, ground_level + building_height, z, None, None);
+                    editor.set_block(GLOWSTONE, x, ground_level + building_height, z, None, None);
                     // Light fixtures
                 }
 
@@ -252,8 +248,8 @@ pub fn generate_buildings(
 
 fn find_nearest_block_in_color_map(
     rgb: &RGBTuple,
-    color_map: Vec<(RGBTuple, &'static Lazy<Block>)>,
-) -> Option<&'static once_cell::sync::Lazy<Block>> {
+    color_map: Vec<(RGBTuple, Block)>,
+) -> Option<Block> {
     color_map
         .into_iter()
         .min_by_key(|(entry_rgb, _)| rgb_distance(entry_rgb, rgb))
@@ -275,8 +271,8 @@ fn generate_bridge(
         }
     }
 
-    let floor_block: &once_cell::sync::Lazy<Block> = &STONE;
-    let railing_block: &once_cell::sync::Lazy<Block> = &STONE_BRICKS;
+    let floor_block = STONE;
+    let railing_block = STONE_BRICKS;
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
