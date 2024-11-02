@@ -20,7 +20,7 @@ pub fn generate_world(
     scale_factor_x: f64,
     scale_factor_z: f64,
 ) {
-    println!("{} {}", "[3/5]".bold(), "Processing data...");
+    println!("{} Processing data...", "[3/5]".bold());
 
     let region_template_path: &str = "region.template";
     let region_dir: String = format!("{}/region", args.path);
@@ -35,7 +35,7 @@ pub fn generate_world(
         &region_dir,
         scale_factor_x,
         scale_factor_z,
-        &args,
+        args,
     );
 
     // Process data
@@ -163,7 +163,7 @@ pub fn generate_world(
 
     let mut block_counter: u64 = 0;
 
-    println!("{} {}", "[4/5]".bold(), "Generating ground layer...");
+    println!("Generating ground layer... {}", "[4/5]".bold());
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
     ground_pb.set_style(
         ProgressStyle::default_bar()
@@ -176,8 +176,7 @@ pub fn generate_world(
         for z in 0..=(scale_factor_z as i32) {
             // Use the smaller of [current block y, ground level y]
             let max_y = (MIN_Y..MAX_Y)
-                .filter(|y| editor.block_at(x, *y, z))
-                .next()
+                .find(|y| editor.block_at(x, *y, z))
                 .unwrap_or(MAX_Y)
                 .min(GROUND_LEVEL);
 

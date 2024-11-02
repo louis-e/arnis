@@ -60,6 +60,7 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
     match typetree {
         1 => {
             // Oak tree
+
             editor.fill_blocks(OAK_LOG, x, y, z, x, y + 8, z, None, None);
             editor.fill_blocks(OAK_LEAVES, x - 1, y + 3, z, x - 1, y + 9, z, None, None);
             editor.fill_blocks(OAK_LEAVES, x + 1, y + 3, z, x + 1, y + 9, z, None, None);

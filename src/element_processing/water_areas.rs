@@ -164,10 +164,8 @@ fn inverse_floodfill(
         .collect();
 
     inverse_floodfill_recursive(
-        min_x,
-        max_x,
-        min_z,
-        max_z,
+        (min_x, min_z),
+        (max_x, max_z),
         ground_level,
         &outers,
         &inners,
@@ -176,10 +174,8 @@ fn inverse_floodfill(
 }
 
 fn inverse_floodfill_recursive(
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
+    min: (i32, i32),
+    max: (i32, i32),
     ground_level: i32,
     outers: &[Polygon],
     inners: &[Polygon],
@@ -187,32 +183,23 @@ fn inverse_floodfill_recursive(
 ) {
     const ITERATIVE_THRES: i32 = 10_000;
 
-    if min_x > max_x || min_z > max_z {
+    if min.0 > max.0 || min.1 > max.1 {
         return;
     }
 
-    if (max_x - min_x) * (max_z - min_z) < ITERATIVE_THRES {
-        inverse_floodfill_iterative(
-            min_x,
-            max_x,
-            min_z,
-            max_z,
-            ground_level,
-            outers,
-            inners,
-            editor,
-        );
+    if (max.0 - min.0) * (max.1 - min.1) < ITERATIVE_THRES {
+        inverse_floodfill_iterative(min, max, ground_level, outers, inners, editor);
 
         return;
     }
 
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
+    let center_x = (min.0 + max.0) / 2;
+    let center_z = (min.1 + max.1) / 2;
     let quadrants = [
-        (min_x, center_x, min_z, center_z),
-        (center_x, max_x, min_z, center_z),
-        (min_x, center_x, center_z, max_z),
-        (center_x, max_x, center_z, max_z),
+        (min.0, center_x, min.1, center_z),
+        (center_x, max.0, min.1, center_z),
+        (min.0, center_x, center_z, max.1),
+        (center_x, max.0, center_z, max.1),
     ];
 
     for (min_x, max_x, min_z, max_z) in quadrants {
@@ -236,26 +223,24 @@ fn inverse_floodfill_recursive(
         // This saves on processing time
         let outers_intersects: Vec<_> = outers
             .iter()
-            .cloned()
             .filter(|poly| poly.intersects(&rect))
+            .cloned()
             .collect();
 
         // Moving this inside the below `if` statement makes it slower for some reason.
         // I assume it changes how the compiler is able to optimize it
         let inners_intersects: Vec<_> = inners
             .iter()
-            .cloned()
             .filter(|poly| poly.intersects(&rect))
+            .cloned()
             .collect();
 
         if !outers_intersects.is_empty() {
             // recurse
 
             inverse_floodfill_recursive(
-                min_x,
-                max_x,
-                min_z,
-                max_z,
+                (min_x, min_z),
+                (max_x, max_z),
                 ground_level,
                 &outers_intersects,
                 &inners_intersects,
@@ -267,17 +252,15 @@ fn inverse_floodfill_recursive(
 
 // once we "zoom in" enough, it's more efficient to switch to iteration
 fn inverse_floodfill_iterative(
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
+    min: (i32, i32),
+    max: (i32, i32),
     ground_level: i32,
     outers: &[Polygon],
     inners: &[Polygon],
     editor: &mut WorldEditor,
 ) {
-    for x in min_x..max_x {
-        for z in min_z..max_z {
+    for x in min.0..max.0 {
+        for z in min.1..max.1 {
             let p = Point::new(x as f64, z as f64);
 
             if outers.iter().any(|poly| poly.contains(&p))

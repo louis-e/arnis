@@ -310,6 +310,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Fills a cuboid area with the specified block between two coordinates.
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_blocks(
         &mut self,
         block: Block,
@@ -370,7 +371,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("{} {}", "[5/5]".bold(), "Saving world...");
+        println!("{} Saving world...", "[5/5]".bold());
 
         let _debug: bool = self.args.debug;
         let total_regions: u64 = self.world.regions.len() as u64;
