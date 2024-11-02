@@ -13,7 +13,7 @@ pub fn flood_fill_area(
         return vec![]; // Not a valid polygon
     }
 
-    let start_time = Instant::now();
+    let start_time: Instant = Instant::now();
 
     // Calculate bounding box of the polygon using itertools
     let (min_x, max_x) = polygon_coords
@@ -41,8 +41,8 @@ pub fn flood_fill_area(
     let polygon: Polygon<f64> = Polygon::new(exterior, vec![]); // Create Polygon using LineString
 
     // Determine safe step sizes for grid sampling
-    let step_x = ((max_x - min_x) / 10).max(1); // Ensure step is at least 1
-    let step_z = ((max_z - min_z) / 10).max(1); // Ensure step is at least 1
+    let step_x: i32 = ((max_x - min_x) / 10).max(1); // Ensure step is at least 1
+    let step_z: i32 = ((max_z - min_z) / 10).max(1); // Ensure step is at least 1
 
     // Sample multiple starting points within the bounding box
     let mut candidate_points: VecDeque<(i32, i32)> = VecDeque::new();

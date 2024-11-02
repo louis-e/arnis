@@ -22,13 +22,13 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
         }
 
         for i in 1..element.nodes.len() {
-            let prev = &element.nodes[i - 1];
-            let x1 = prev.x;
-            let z1 = prev.z;
+            let prev: &crate::osm_parser::ProcessedNode = &element.nodes[i - 1];
+            let x1: i32 = prev.x;
+            let z1: i32 = prev.z;
 
-            let cur = &element.nodes[i];
-            let x2 = cur.x;
-            let z2 = cur.z;
+            let cur: &crate::osm_parser::ProcessedNode = &element.nodes[i];
+            let x2: i32 = cur.x;
+            let z2: i32 = cur.z;
 
             // Generate the line of coordinates between the two nodes
             let bresenham_points: Vec<(i32, i32, i32)> =
