@@ -21,7 +21,7 @@ pub fn generate_world(
     let region_dir: String = format!("{}/region", args.path);
 
     let mut editor: WorldEditor =
-        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, &args);
+        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, args);
 
     // Process data
     let process_pb: ProgressBar = ProgressBar::new(elements.len() as u64);
