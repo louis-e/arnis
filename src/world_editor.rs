@@ -155,7 +155,7 @@ impl ChunkToModify {
         section.set_block(x, (y & 15).try_into().unwrap(), z, block);
     }
 
-    fn sections(&self) -> impl Iterator<Item = Section> + use<'_> {
+    fn sections(&self) -> impl Iterator<Item = Section> + '_ {
         self.sections.iter().map(|(y, s)| s.to_section(*y))
     }
 }
@@ -252,6 +252,8 @@ impl<'a> WorldEditor<'a> {
         let mut region_file = File::options()
             .read(true)
             .write(true)
+            .create(true)
+            .truncate(true)
             .open(&out_path)
             .expect("Failed to open region file");
 
