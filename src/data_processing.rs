@@ -148,7 +148,7 @@ pub fn generate_world(
 
     let mut block_counter: u64 = 0;
 
-    println!("Generating ground layer... {}", "[4/5]".bold());
+    println!("{} Generating ground layer...", "[4/5]".bold());
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
     ground_pb.set_style(
         ProgressStyle::default_bar()
