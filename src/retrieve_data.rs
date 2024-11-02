@@ -14,7 +14,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
         .timeout(Duration::from_secs(1800))
         .build()?;
 
-    let response = client.get(url).query(&[("data", query)]).send();
+    let response: Result<reqwest::blocking::Response, reqwest::Error> = client.get(url).query(&[("data", query)]).send();
 
     match response {
         Ok(resp) => {

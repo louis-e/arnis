@@ -145,31 +145,31 @@ impl Block {
     pub fn properties(&self) -> Option<Value> {
         match self.id {
             105 => Some(Value::Compound({
-                let mut map = HashMap::new();
+                let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
             })),
 
             106 => Some(Value::Compound({
-                let mut map = HashMap::new();
+                let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("half".to_string(), Value::String("lower".to_string()));
                 map
             })),
 
             107 => Some(Value::Compound({
-                let mut map = HashMap::new();
+                let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
 
             108 => Some(Value::Compound({
-                let mut map = HashMap::new();
+                let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
             })),
 
             109 => Some(Value::Compound({
-                let mut map = HashMap::new();
+                let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
             })),

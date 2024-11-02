@@ -14,8 +14,8 @@ pub fn generate_doors(editor: &mut WorldEditor, element: &ProcessedNode, ground_
             }
         }
 
-        let x = element.x;
-        let z = element.z;
+        let x: i32 = element.x;
+        let z: i32 = element.z;
 
         // Set the ground block and the door blocks
         editor.set_block(GRAY_CONCRETE, x, ground_level, z, None, None);

@@ -26,7 +26,7 @@ pub fn generate_amenities(
     }
 
     if let Some(amenity_type) = element.tags().get("amenity") {
-        let first_node = element.nodes().map(|n| (n.x, n.z)).next();
+        let first_node: Option<(i32, i32)> = element.nodes().map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z)).next();
         match amenity_type.as_str() {
             "waste_disposal" | "waste_basket" => {
                 // Place a cauldron for waste disposal or waste basket
@@ -41,10 +41,10 @@ pub fn generate_amenities(
                 }
             }
             "bicycle_parking" => {
-                let ground_block = OAK_PLANKS;
-                let roof_block = STONE_BLOCK_SLAB;
+                let ground_block: Block = OAK_PLANKS;
+                let roof_block: Block = STONE_BLOCK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> = element.nodes().map(|n| (n.x, n.z)).collect();
+                let polygon_coords: Vec<(i32, i32)> = element.nodes().map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z)).collect();
                 let floor_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, floodfill_timeout);
 
@@ -55,8 +55,8 @@ pub fn generate_amenities(
 
                 // Place fences and roof slabs at each corner node directly
                 for node in element.nodes() {
-                    let x = node.x;
-                    let z = node.z;
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
 
                     for y in 1..=4 {
                         editor.set_block(ground_block, x, ground_level, z, None, None);
@@ -98,8 +98,8 @@ pub fn generate_amenities(
                     _ => GRAY_CONCRETE,
                 };
                 for node in element.nodes() {
-                    let x = node.x;
-                    let z = node.z;
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
 
                     if let Some(prev) = previous_node {
                         // Create borders for fountain or parking area

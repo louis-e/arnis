@@ -39,7 +39,7 @@ pub struct ProcessedNode {
     pub id: u64,
     pub tags: HashMap<String, String>,
 
-    // minecraft coords
+    // Minecraft coordinates
     pub x: i32,
     pub z: i32,
 }
@@ -145,16 +145,16 @@ pub fn parse_osm_data(
 
     // Determine which dimension is larger and assign scale factors accordingly
     let (scale_factor_z, scale_factor_x) = geo_distance(bbox.1, bbox.3, bbox.0, bbox.2);
-    let scale_factor_z = scale_factor_z.floor() * args.scale;
-    let scale_factor_x = scale_factor_x.floor() * args.scale;
+    let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
+    let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
 
     if args.debug {
         println!("Scale factor X: {}", scale_factor_x);
         println!("Scale factor Z: {}", scale_factor_z);
     }
 
-    let mut nodes_map = HashMap::new();
-    let mut ways_map = HashMap::new();
+    let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
+    let mut ways_map: HashMap<u64, ProcessedWay> = HashMap::new();
 
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
@@ -165,7 +165,7 @@ pub fn parse_osm_data(
                 let (x, z) =
                     lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_z, scale_factor_x);
 
-                let processed = ProcessedNode {
+                let processed: ProcessedNode = ProcessedNode {
                     id: element.id,
                     tags: element.tags.clone().unwrap_or_default(),
                     x,
@@ -190,7 +190,7 @@ pub fn parse_osm_data(
             continue;
         }
 
-        let mut nodes = vec![];
+        let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
             for &node_id in node_ids {
                 if let Some(node) = nodes_map.get(&node_id) {
@@ -199,7 +199,7 @@ pub fn parse_osm_data(
             }
         }
 
-        let processed = ProcessedWay {
+        let processed: ProcessedWay = ProcessedWay {
             id: element.id,
             tags: element.tags.clone().unwrap_or_default(),
             nodes,
@@ -223,14 +223,14 @@ pub fn parse_osm_data(
         };
 
         // Only process multipolygons for now
-        if tags.get("type").map(|x| x.as_str()) != Some("multipolygon") {
+        if tags.get("type").map(|x: &String| x.as_str()) != Some("multipolygon") {
             continue;
         };
 
-        let members = element
+        let members: Vec<ProcessedMember> = element
             .members
             .iter()
-            .filter_map(|mem| {
+            .filter_map(|mem: &OsmMember| {
                 if mem.r#type != "way" {
                     eprintln!("WARN: Unknown relation type {}", mem.r#type);
                     return None;
@@ -247,7 +247,7 @@ pub fn parse_osm_data(
                     }
                 };
 
-                let way = ways_map
+                let way: ProcessedWay = ways_map
                     .get(&mem.r#ref)
                     .expect("Missing a way referenced by a rel")
                     .clone();
@@ -284,10 +284,10 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
 
 // (lat meters, lon meters)
 fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
-    let z = lat_distance(lat1, lat2);
+    let z: f64 = lat_distance(lat1, lat2);
 
     // distance between two lons depends on their latitude. In this case we'll just average them
-    let x = lon_distance((lat1 + lat2) / 2.0, lon1, lon2);
+    let x: f64 = lon_distance((lat1 + lat2) / 2.0, lon1, lon2);
 
     (z, x)
 }
@@ -296,10 +296,10 @@ fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
 // returns meters
 fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
     const R: f64 = 6_371_000.0;
-    let d_lon = (lon2 - lon1).to_radians();
-    let a =
+    let d_lon: f64 = (lon2 - lon1).to_radians();
+    let a: f64 =
         lat.to_radians().cos() * lat.to_radians().cos() * (d_lon / 2.0).sin() * (d_lon / 2.0).sin();
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
     R * c
 }
@@ -308,9 +308,9 @@ fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
 // returns meters
 fn lat_distance(lat1: f64, lat2: f64) -> f64 {
     const R: f64 = 6_371_000.0;
-    let d_lat = (lat2 - lat1).to_radians();
-    let a = (d_lat / 2.0).sin() * (d_lat / 2.0).sin();
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+    let d_lat: f64 = (lat2 - lat1).to_radians();
+    let a: f64 = (d_lat / 2.0).sin() * (d_lat / 2.0).sin();
+    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
 
     R * c
 }
