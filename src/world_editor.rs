@@ -7,6 +7,7 @@ use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
+use std::io::Write;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -223,7 +224,6 @@ impl WorldToModify {
 }
 
 pub struct WorldEditor<'a> {
-    region_template_path: String,
     region_dir: String,
     world: WorldToModify,
     scale_factor_x: f64,
@@ -233,15 +233,8 @@ pub struct WorldEditor<'a> {
 
 impl<'a> WorldEditor<'a> {
     /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(
-        region_template_path: &str,
-        region_dir: &str,
-        scale_factor_x: f64,
-        scale_factor_z: f64,
-        args: &'a Args,
-    ) -> Self {
+    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64, args: &'a Args) -> Self {
         Self {
-            region_template_path: region_template_path.to_string(),
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
             scale_factor_x,
@@ -253,13 +246,18 @@ impl<'a> WorldEditor<'a> {
     /// Creates a region for the given region coordinates.
     fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
         let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
-        std::fs::copy(&self.region_template_path, &out_path)
-            .expect("Failed to copy region template");
-        let region_file = File::options()
+
+        const REGION_TEMPLATE: &[u8] = include_bytes!("region.template");
+
+        let mut region_file = File::options()
             .read(true)
             .write(true)
             .open(&out_path)
             .expect("Failed to open region file");
+
+        region_file
+            .write_all(REGION_TEMPLATE)
+            .expect("Could not write region template");
 
         Region::from_stream(region_file).expect("Failed to load region")
     }
