@@ -1,0 +1,241 @@
+:root {
+  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 400;
+  color: #0f0f0f;
+  background-color: #f6f6f6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+}
+
+p {
+  color: #ececec;
+}
+
+.container {
+  margin: 0;
+  padding-top: 1vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+}
+
+.logo {
+  height: 6em;
+  padding: 1.5em;
+  will-change: filter;
+  transition: 0.75s;
+}
+
+.logo.arnis:hover {
+  filter: drop-shadow(0 0 2em #b3b3b3);
+}
+
+.row {
+  display: flex;
+  justify-content: center;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+
+a:hover {
+  color: #535bf2;
+}
+
+.flex-container {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  align-items: stretch; /* Ensures both sections take full height */
+  margin-top: 5px;
+}
+
+.section {
+  background: #575757;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.map-box,
+.controls-box {
+  width: 45%;
+  background: #575757;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  /* No display: flex here, so buttons and content aren't stretched */
+}
+
+.controls-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.controls-box .progress-section {
+  margin-top: auto; /* Keeps the progress section at the bottom */
+}
+
+.map-container {
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.section h2 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+p {
+  color: #d6d6d6;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  color: #0f0f0f;
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: border-color 0.25s;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  margin-top: 10px;
+  width: auto; /* Ensures buttons don’t stretch */
+}
+
+button:hover {
+  border-color: #396cd8;
+}
+
+#selected-directory {
+  font-size: 1em;
+  margin-top: 6px;
+}
+
+.progress-section {
+  margin-top: auto;
+}
+
+.progress-section h2 {
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 20px;
+  background-color: #e0e0e0;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.progress-bar {
+  height: 100%;
+  width: 0%;
+  background-color: #4caf50;
+  transition: width 0.4s;
+}
+
+/* Left and right alignment for "Saving world..." text */
+.progress-status {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9em;
+  margin-top: 8px;
+  color: #fff;
+}
+
+.footer {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 0.9em;
+}
+
+.footer-link {
+  color: #ffffff;
+  text-decoration: none;
+}
+
+.footer-link:hover {
+  color: #b3b3b3;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color: #f6f6f6;
+    background-color: #2f2f2f;
+  }
+
+  p {
+    color: #ececec;
+  }
+
+  input,
+  button {
+    color: #ffffff;
+    background-color: #0f0f0f98;
+  }
+  button:active {
+    background-color: #0f0f0f69;
+  }
+}
+
+.tooltip {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.tooltip button {
+  width: 100%;
+}
+
+.tooltip .tooltiptext {
+  visibility: hidden;
+  width: 90%;
+  background-color: #808080;
+  color: #fff;
+  text-align: center;
+  padding: 5px 0;
+  border-radius: 6px;
+
+  position: absolute;
+  z-index: 1;
+  bottom: -100%;
+  left: 5%;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.tooltip .tooltiptext::after {
+  content: "";
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  margin-left: -5px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: transparent transparent #808080 transparent;
+}
+
+.tooltip:hover .tooltiptext {
+  visibility: visible;
+  opacity: 1;
+}
+
+.controls-box button {
+  width: 100%;
+}

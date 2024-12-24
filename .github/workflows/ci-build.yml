@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
 
     steps:
     - name: Checkout code
@@ -33,7 +33,7 @@ jobs:
     - name: Check clippy lints
       run: cargo clippy --all-targets --all-features -- -D warnings
 
-    - name: Install dependencies
+    - name: Install Rust dependencies
       run: cargo fetch
 
     - name: Build

@@ -9,8 +9,8 @@ const REMOTE_CARGO_TOML_URL: &str =
     "https://raw.githubusercontent.com/louis-e/arnis/main/Cargo.toml";
 
 /// Fetches the latest version from the remote Cargo.toml file and compares it with the local version.
-/// If a newer version is available, prints a message.
-pub fn check_for_updates() -> Result<(), Box<dyn Error>> {
+/// Returns `true` if a newer version is available, `false` otherwise.
+pub fn check_for_updates() -> Result<bool, Box<dyn Error>> {
     let client: Client = Client::new();
 
     // Fetch the remote Cargo.toml file with a User-Agent header
@@ -24,7 +24,7 @@ pub fn check_for_updates() -> Result<(), Box<dyn Error>> {
             // If the response status is not 200 OK, handle it as an HTTP error
             if !res.status().is_success() {
                 handle_http_error(res.status());
-                return Ok(());
+                return Ok(false);
             }
 
             let response_text: String = res.text()?;
@@ -40,12 +40,16 @@ pub fn check_for_updates() -> Result<(), Box<dyn Error>> {
                     local_version,
                     remote_version
                 );
+                return Ok(true); // Newer version is available
             }
-        }
-        Err(err) => handle_request_error(err),
-    }
 
-    Ok(())
+            Ok(false) // Local version is up-to-date
+        }
+        Err(err) => {
+            handle_request_error(err);
+            Ok(false) // Treat request failures as no new version available
+        }
+    }
 }
 
 /// Extracts the version from the contents of a Cargo.toml file.

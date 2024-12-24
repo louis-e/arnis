@@ -17,8 +17,8 @@ pub fn generate_natural(
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
-                let x = node.x;
-                let z = node.z;
+                let x: i32 = node.x;
+                let z: i32 = node.z;
 
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                 create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
@@ -29,7 +29,7 @@ pub fn generate_natural(
             let mut current_natural: Vec<(i32, i32)> = vec![];
 
             // Determine block type based on natural tag
-            let block_type = match natural_type.as_str() {
+            let block_type: Block = match natural_type.as_str() {
                 "scrub" | "grassland" | "wood" => GRASS_BLOCK,
                 "beach" | "sand" => SAND,
                 "tree_row" => GRASS_BLOCK,
@@ -43,8 +43,8 @@ pub fn generate_natural(
 
             // Process natural nodes to fill the area
             for node in &way.nodes {
-                let x = node.x;
-                let z = node.z;
+                let x: i32 = node.x;
+                let z: i32 = node.z;
 
                 if let Some(prev) = previous_node {
                     // Generate the line of coordinates between the two nodes
@@ -63,8 +63,11 @@ pub fn generate_natural(
 
             // If there are natural nodes, flood-fill the area
             if corner_addup != (0, 0, 0) {
-                let polygon_coords: Vec<(i32, i32)> =
-                    way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                let polygon_coords: Vec<(i32, i32)> = way
+                    .nodes
+                    .iter()
+                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                    .collect();
                 let filled_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, floodfill_timeout);
 

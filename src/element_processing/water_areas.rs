@@ -22,8 +22,8 @@ pub fn generate_water_areas(
         }
     }
 
-    let mut outers = vec![];
-    let mut inners = vec![];
+    let mut outers: Vec<Vec<ProcessedNode>> = vec![];
+    let mut inners: Vec<Vec<ProcessedNode>> = vec![];
 
     for mem in &element.members {
         match mem.role {
@@ -43,13 +43,21 @@ pub fn generate_water_areas(
     }
 
     let (max_x, max_z) = editor.get_max_coords();
-    let outers = outers
+    let outers: Vec<Vec<(f64, f64)>> = outers
         .iter()
-        .map(|x| x.iter().map(|y| (y.x as f64, y.z as f64)).collect())
+        .map(|x: &Vec<ProcessedNode>| {
+            x.iter()
+                .map(|y: &ProcessedNode| (y.x as f64, y.z as f64))
+                .collect()
+        })
         .collect();
-    let inners = inners
+    let inners: Vec<Vec<(f64, f64)>> = inners
         .iter()
-        .map(|x| x.iter().map(|y| (y.x as f64, y.z as f64)).collect())
+        .map(|x: &Vec<ProcessedNode>| {
+            x.iter()
+                .map(|y: &ProcessedNode| (y.x as f64, y.z as f64))
+                .collect()
+        })
         .collect();
 
     inverse_floodfill(max_x, max_z, outers, inners, editor, ground_level);
@@ -57,8 +65,8 @@ pub fn generate_water_areas(
 
 // Merges ways that share nodes into full loops
 fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
-    let mut removed = vec![];
-    let mut merged = vec![];
+    let mut removed: Vec<usize> = vec![];
+    let mut merged: Vec<Vec<ProcessedNode>> = vec![];
 
     for i in 0..loops.len() {
         for j in 0..loops.len() {
@@ -70,8 +78,8 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
                 continue;
             }
 
-            let x = &loops[i];
-            let y = &loops[j];
+            let x: &Vec<ProcessedNode> = &loops[i];
+            let y: &Vec<ProcessedNode> = &loops[j];
 
             // it's looped already
             if x[0].id == x.last().unwrap().id {
@@ -87,7 +95,7 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
                 removed.push(i);
                 removed.push(j);
 
-                let mut x = x.clone();
+                let mut x: Vec<ProcessedNode> = x.clone();
                 x.reverse();
                 x.extend(y.iter().skip(1).cloned());
                 merged.push(x);
@@ -95,7 +103,7 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
                 removed.push(i);
                 removed.push(j);
 
-                let mut x = x.clone();
+                let mut x: Vec<ProcessedNode> = x.clone();
                 x.extend(y.iter().rev().skip(1).cloned());
 
                 merged.push(x);
@@ -103,7 +111,7 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
                 removed.push(i);
                 removed.push(j);
 
-                let mut y = y.clone();
+                let mut y: Vec<ProcessedNode> = y.clone();
                 y.extend(x.iter().skip(1).cloned());
 
                 merged.push(y);
@@ -117,7 +125,7 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
         loops.remove(*r);
     }
 
-    let merged_len = merged.len();
+    let merged_len: usize = merged.len();
     for m in merged {
         loops.push(m);
     }
@@ -128,7 +136,7 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
 }
 
 fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
-    let mut valid = true;
+    let mut valid: bool = true;
     for l in loops {
         if l[0].id != l.last().unwrap().id {
             eprintln!("WARN: Disconnected loop");
@@ -150,17 +158,17 @@ fn inverse_floodfill(
     editor: &mut WorldEditor,
     ground_level: i32,
 ) {
-    let min_x = 0;
-    let min_z = 0;
+    let min_x: i32 = 0;
+    let min_z: i32 = 0;
 
     let inners: Vec<_> = inners
         .into_iter()
-        .map(|x| Polygon::new(LineString::from(x), vec![]))
+        .map(|x: Vec<(f64, f64)>| Polygon::new(LineString::from(x), vec![]))
         .collect();
 
     let outers: Vec<_> = outers
         .into_iter()
-        .map(|x| Polygon::new(LineString::from(x), vec![]))
+        .map(|x: Vec<(f64, f64)>| Polygon::new(LineString::from(x), vec![]))
         .collect();
 
     inverse_floodfill_recursive(
@@ -193,9 +201,9 @@ fn inverse_floodfill_recursive(
         return;
     }
 
-    let center_x = (min.0 + max.0) / 2;
-    let center_z = (min.1 + max.1) / 2;
-    let quadrants = [
+    let center_x: i32 = (min.0 + max.0) / 2;
+    let center_z: i32 = (min.1 + max.1) / 2;
+    let quadrants: [(i32, i32, i32, i32); 4] = [
         (min.0, center_x, min.1, center_z),
         (center_x, max.0, min.1, center_z),
         (min.0, center_x, center_z, max.1),
@@ -203,13 +211,13 @@ fn inverse_floodfill_recursive(
     ];
 
     for (min_x, max_x, min_z, max_z) in quadrants {
-        let rect = Rect::new(
+        let rect: Rect = Rect::new(
             Point::new(min_x as f64, min_z as f64),
             Point::new(max_x as f64, max_z as f64),
         );
 
-        if outers.iter().any(|outer| outer.contains(&rect))
-            && !inners.iter().any(|inner| inner.intersects(&rect))
+        if outers.iter().any(|outer: &Polygon| outer.contains(&rect))
+            && !inners.iter().any(|inner: &Polygon| inner.intersects(&rect))
         {
             // every block in rect is water
             // so we can safely just set the whole thing to water
@@ -223,7 +231,7 @@ fn inverse_floodfill_recursive(
         // This saves on processing time
         let outers_intersects: Vec<_> = outers
             .iter()
-            .filter(|poly| poly.intersects(&rect))
+            .filter(|poly: &&Polygon| poly.intersects(&rect))
             .cloned()
             .collect();
 
@@ -231,7 +239,7 @@ fn inverse_floodfill_recursive(
         // I assume it changes how the compiler is able to optimize it
         let inners_intersects: Vec<_> = inners
             .iter()
-            .filter(|poly| poly.intersects(&rect))
+            .filter(|poly: &&Polygon| poly.intersects(&rect))
             .cloned()
             .collect();
 
@@ -261,10 +269,10 @@ fn inverse_floodfill_iterative(
 ) {
     for x in min.0..max.0 {
         for z in min.1..max.1 {
-            let p = Point::new(x as f64, z as f64);
+            let p: Point = Point::new(x as f64, z as f64);
 
-            if outers.iter().any(|poly| poly.contains(&p))
-                && inners.iter().all(|poly| !poly.contains(&p))
+            if outers.iter().any(|poly: &Polygon| poly.contains(&p))
+                && inners.iter().all(|poly: &Polygon| !poly.contains(&p))
             {
                 editor.set_block(WATER, x, ground_level, z, None, None);
             }
