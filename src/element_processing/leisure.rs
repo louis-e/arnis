@@ -20,7 +20,7 @@ pub fn generate_leisure(
         let mut current_leisure: Vec<(i32, i32)> = vec![];
 
         // Determine block type based on leisure type
-        let block_type = match leisure_type.as_str() {
+        let block_type: Block = match leisure_type.as_str() {
             "park" => GRASS_BLOCK,
             "playground" | "recreation_ground" | "pitch" => {
                 if let Some(surface) = element.tags.get("surface") {
@@ -73,8 +73,11 @@ pub fn generate_leisure(
 
         // Flood-fill the interior of the leisure area
         if corner_addup != (0, 0, 0) {
-            let polygon_coords: Vec<(i32, i32)> =
-                element.nodes.iter().map(|n| (n.x, n.z)).collect();
+            let polygon_coords: Vec<(i32, i32)> = element
+                .nodes
+                .iter()
+                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                .collect();
             let filled_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
             for (x, z) in filled_area {

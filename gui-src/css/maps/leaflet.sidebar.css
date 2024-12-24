@@ -1,0 +1,159 @@
+.leaflet-sidebar {
+    position: absolute;
+    height: 100%;
+
+    -webkit-box-sizing: border-box;
+    -moz-box-sizing: border-box;
+    box-sizing: border-box;
+    padding: 10px;
+
+    z-index: 20000;
+}
+
+.leaflet-sidebar.left {
+    left: -700px;
+    transition: left 0.5s, width 0.5s;
+
+    padding-right: 0;
+}
+
+.leaflet-sidebar.right {
+    right: -700px;
+    transition: right 0.5s, width 0.5s;
+
+    padding-left: 0;
+}
+
+.leaflet-sidebar.left.visible {
+    left: 0;
+}
+
+.leaflet-sidebar.right.visible {
+    right: 0;
+}
+
+.leaflet-left {
+    transition: left 0.5s;
+}
+
+.leaflet-right {
+    transition: right 0.5s;
+}
+
+.leaflet-sidebar > .leaflet-control {
+    height: 100%;
+    width: 100%;
+
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+
+    -webkit-box-sizing: border-box;
+    -moz-box-sizing: border-box;
+    box-sizing: border-box;
+    padding: 8px 24px;
+
+    font-size: 1.1em;
+
+    background: white;
+    box-shadow: 0 1px 7px rgba(0,0,0,0.65);
+    -webkit-border-radius: 4px;
+    border-radius: 4px;
+}
+
+@media(max-width:767px){
+    .leaflet-sidebar {
+        width: 100%;
+        padding: 0;
+    }
+
+    .leaflet-sidebar.left {
+        left: -100%;
+    }
+
+    .leaflet-sidebar.right {
+        right: -100%;
+    }
+
+    .leaflet-sidebar.left.visible {
+        left: 0;
+    }
+
+    .leaflet-sidebar.right.visible {
+        right: 0;
+    }
+
+    .leaflet-sidebar > .leaflet-control {
+        box-shadow: none;
+        -webkit-border-radius: 0;
+        border-radius: 0;
+    }
+
+    .leaflet-sidebar.left.visible ~ .leaflet-left {
+        left: 100%;
+    }
+
+    .leaflet-sidebar.right.visible ~ .leaflet-right {
+        right: 100%;
+    }
+}
+
+@media(min-width:768px) and (max-width:991px){
+    .leaflet-sidebar {
+        width: 505px;
+    }
+
+    .leaflet-sidebar.left.visible ~ .leaflet-left {
+        left: 505px;
+    }
+
+    .leaflet-sidebar.right.visible ~ .leaflet-right {
+        right: 505px;
+    }
+}
+
+@media(min-width:992px) and (max-width:1199px){
+    .leaflet-sidebar {
+        width: 590px;
+    }
+
+    .leaflet-sidebar.left.visible ~ .leaflet-left {
+        left: 590px;
+    }
+
+    .leaflet-sidebar.right.visible ~ .leaflet-right {
+        right: 590px;
+    }
+}
+
+@media(min-width:1200px){
+    .leaflet-sidebar {
+        width: 660px;
+    }
+
+    .leaflet-sidebar.left.visible ~ .leaflet-left {
+        left: 660px;
+    }
+
+    .leaflet-sidebar.right.visible ~ .leaflet-right {
+        right: 660px;
+    }
+}
+
+.leaflet-sidebar .close {
+    position: absolute;
+    right: 20px;
+    top: 20px;
+    width: 31px;
+    height: 31px;
+
+    color: #333;
+    font-size: 25pt;
+    line-height: 1em;
+    text-align: center;
+    background: white;
+    -webkit-border-radius: 16px;
+    border-radius: 16px;
+    cursor: pointer;
+
+    z-index: 8;
+}

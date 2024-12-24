@@ -1,5 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::*;
+use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
@@ -192,11 +193,11 @@ impl WorldToModify {
     fn get_block(&self, x: i32, y: i32, z: i32) -> Option<Block> {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
-        let region_x = chunk_x >> 5;
-        let region_z = chunk_z >> 5;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
 
-        let region = self.get_region(region_x, region_z)?;
-        let chunk = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
+        let region: &RegionToModify = self.get_region(region_x, region_z)?;
+        let chunk: &ChunkToModify = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
 
         chunk.get_block(
             (x & 15).try_into().unwrap(),
@@ -208,11 +209,11 @@ impl WorldToModify {
     fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
-        let region_x = chunk_x >> 5;
-        let region_z = chunk_z >> 5;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
 
-        let region = self.get_or_create_region(region_x, region_z);
-        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+        let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
+        let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
 
         chunk.set_block(
             (x & 15).try_into().unwrap(),
@@ -249,7 +250,7 @@ impl<'a> WorldEditor<'a> {
 
         const REGION_TEMPLATE: &[u8] = include_bytes!("region.template");
 
-        let mut region_file = File::options()
+        let mut region_file: File = File::options()
             .read(true)
             .write(true)
             .create(true)
@@ -268,9 +269,10 @@ impl<'a> WorldEditor<'a> {
         (self.scale_factor_x as i32, self.scale_factor_x as i32)
     }
 
-    pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
+    // Unused and not tested
+    /*pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
         self.world.get_block(x, y, z).is_some()
-    }
+    }*/
 
     /// Sets a block of the specified type at the given coordinates.
     pub fn set_block(
@@ -292,11 +294,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
             } else {
                 false
             }
@@ -351,7 +353,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
                 {
                     return true; // Block is in whitelist
                 }
@@ -359,7 +361,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(blacklist) = blacklist {
                 if blacklist
                     .iter()
-                    .any(|blacklisted_block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
                 {
                     return true; // Block is in blacklist
                 }
@@ -372,6 +374,7 @@ impl<'a> WorldEditor<'a> {
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
         println!("{} Saving world...", "[5/5]".bold());
+        emit_gui_progress_update(90.0, "Saving world...");
 
         let _debug: bool = self.args.debug;
         let total_regions: u64 = self.world.regions.len() as u64;
@@ -386,12 +389,17 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
 
+        let total_steps: f64 = 10.0;
+        let progress_increment_save: f64 = total_steps / total_regions as f64;
+        let mut current_progress_save: f64 = 90.0;
+        let mut last_emitted_progress: f64 = current_progress_save;
+
         for ((region_x, region_z), region_to_modify) in &self.world.regions {
-            let mut region = self.create_region(*region_x, *region_z);
+            let mut region: Region<File> = self.create_region(*region_x, *region_z);
 
             for chunk_x in 0..32 {
                 for chunk_z in 0..32 {
-                    let data = region
+                    let data: Vec<u8> = region
                         .read_chunk(chunk_x as usize, chunk_z as usize)
                         .unwrap()
                         .unwrap();
@@ -418,6 +426,12 @@ impl<'a> WorldEditor<'a> {
             }
 
             save_pb.inc(1);
+
+            current_progress_save += progress_increment_save;
+            if (current_progress_save - last_emitted_progress).abs() > 0.25 {
+                emit_gui_progress_update(current_progress_save, "Saving world...");
+                last_emitted_progress = current_progress_save;
+            }
         }
 
         save_pb.finish();

@@ -1,3 +1,4 @@
+use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 use colored::Colorize;
 use rand::seq::SliceRandom;
 use reqwest::blocking::Client;
@@ -14,7 +15,8 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
         .timeout(Duration::from_secs(1800))
         .build()?;
 
-    let response = client.get(url).query(&[("data", query)]).send();
+    let response: Result<reqwest::blocking::Response, reqwest::Error> =
+        client.get(url).query(&[("data", query)]).send();
 
     match response {
         Ok(resp) => {
@@ -32,10 +34,17 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                         .red()
                         .bold()
                 );
+                emit_gui_error("Request timed out. Try selecting a smaller area.");
             } else {
                 eprintln!("{}", format!("Error! {}", e).red().bold());
+                emit_gui_error(&e.to_string());
             }
-            std::process::exit(1);
+
+            if !is_running_with_gui() {
+                std::process::exit(1);
+            } else {
+                Ok("".to_string())
+            }
         }
     }
 }
@@ -76,6 +85,7 @@ pub fn fetch_data(
     download_method: &str,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     println!("{} Fetching data...", "[1/5]".bold());
+    emit_gui_progress_update(1.0, "Fetching data...");
 
     // List of Overpass API servers
     let api_servers: Vec<&str> = vec![
@@ -146,22 +156,33 @@ pub fn fetch_data(
                 // Check if the remark mentions memory or other runtime errors
                 if remark.contains("runtime error") && remark.contains("out of memory") {
                     eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
+                    emit_gui_error("Try using a smaller area.");
                 } else {
                     // Handle other Overpass API errors if present in the remark field
                     eprintln!(
                         "{}",
                         format!("Error! API returned: {}", remark).red().bold()
                     );
+                    emit_gui_error(&format!("API returned: {}", remark));
                 }
             } else {
                 // General case for when there are no elements and no specific remark
-                eprintln!("{}", "Error! No data available.".red().bold());
+                eprintln!(
+                    "{}",
+                    "Error! No data available in this region.".red().bold()
+                );
+                emit_gui_error("No data available in this region.");
             }
 
             if debug {
                 println!("Additional debug information: {}", data);
             }
-            std::process::exit(1);
+
+            if !is_running_with_gui() {
+                std::process::exit(1);
+            } else {
+                return Err("Data fetch failed".into());
+            }
         }
 
         // If debug is enabled, write data to file
@@ -169,6 +190,8 @@ pub fn fetch_data(
             let mut file: File = File::create("export.json")?;
             file.write_all(response.as_bytes())?;
         }
+
+        emit_gui_progress_update(5.0, "");
 
         Ok(data)
     }

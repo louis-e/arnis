@@ -2,7 +2,7 @@
   <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gitassets/logo.png?raw=true">
 </p>
 
-# Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions)
+# Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases)
 
 This open source project written in Rust generates any chosen location from the real world in Minecraft Java Edition with a high level of detail.
 
@@ -12,6 +12,28 @@ This open source project written in Rust generates any chosen location from the 
 By leveraging geospatial data from OpenStreetMap and utilizing the powerful capabilities of Rust, Arnis provides an efficient and robust solution for creating complex and accurate Minecraft worlds that reflect real-world geography and architecture.
 
 Arnis is designed to handle large-scale data and generate rich, immersive environments that bring real-world cities, landmarks, and natural features into the Minecraft universe. Whether you're looking to replicate your hometown, explore urban environments, or simply build something unique and realistic, Arnis offers a comprehensive toolset to achieve your vision.
+
+## :keyboard: Usage
+<img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
+Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
+
+Make sure to generate a new flat world in advance in Minecraft. Then choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
+The world will always be generated starting from the coordinates 0 0 0.
+
+<details>
+
+<summary>Alternatively you can also run Arnis the old fashioned way in the command line.</summary>
+  
+```arnis.exe --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```
+
+The --bbox parameter specifies the bounding box coordinates in the format: min_lng,min_lat,max_lng,max_lat. Use --path to specify the location of the Minecraft world.
+
+<img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true"><br>
+Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter. Try starting with a small area since large areas take a lot of computing power and time to process.<br>
+
+<i>Note: This might not be working right now since the console gets suppressed.</i>
+
+</details>
 
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
@@ -26,19 +48,6 @@ The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each el
 5. Generate Ground Layer: A ground layer is generated based on the provided scale factors to provide a base for the entire Minecraft world. This step ensures all areas have an appropriate foundation (e.g., grass and dirt layers).
 6. Save the Minecraft World: All the modified chunks are saved back to the Minecraft region files.
 
-## :keyboard: Usage
-Get the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
-#### Run: ```arnis.exe --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```
-
-### How to find your bbox coordinates
-Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter.
-![How to find area](https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true)
-The world will always be generated starting from the coordinates 0 0 0. Try starting with a small area since large areas take a lot of computing power and time to process.
-
-Manually generate a new Minecraft world (preferably a flat world) before running the script.
-The --bbox parameter specifies the bounding box coordinates in the format: min_lng,min_lat,max_lng,max_lat.
-Use --path to specify the location of the Minecraft world.
-
 ## :question: FAQ
 - *Wasn't this written in Python before?*<br>
 Yes! Arnis was initially developed in Python, which benefited from Python's open-source friendliness and ease of readability. This is why we strive for clear, well-documented code in the Rust port of this project to find the right balance. I decided to port the project to Rust to learn more about it and push the algorithm's performance further. We were nearing the limits of optimization in Python, and Rust's capabilities allow for even better performance and efficiency. The old Python implementation is still available in the python-legacy branch.
@@ -51,7 +60,6 @@ The project is named after the smallest city in Germany, Arnis[^2]. The city's s
 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
-- [ ] Design and implement a GUI
 - [ ] Memory optimization
 - [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
 - [ ] Evaluate and implement multithreaded region saving
@@ -67,6 +75,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Evaluate and implement elevation
 - [ ] Generate a few big cities using high performance hardware and make them available to download
 - [ ] Implement memory mapped storing of chunks to reduce memory usage
+- [x] Design and implement a GUI
 - [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
 
 ## :trophy: Open Source
@@ -81,6 +90,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. We encourage discussions and suggestions to ensure the project remains modular, optimized, and easy to use for the community. You can use the parameter --debug to get a more detailed output of the processed values, which can be helpful for debugging and development. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
 
 Build and run it using: ```cargo run --release -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```<br>
+For the GUI: ```cargo run --release```<br>
 
 After your pull request was merged, I will take care of regularly creating update releases which will include your changes.
 

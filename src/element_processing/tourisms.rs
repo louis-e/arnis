@@ -17,11 +17,11 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
     }
 
     if let Some(tourism_type) = element.tags.get("tourism") {
-        let x = element.x;
-        let z = element.z;
+        let x: i32 = element.x;
+        let z: i32 = element.z;
 
         if tourism_type == "information" {
-            if let Some("board") = element.tags.get("information").map(|x| x.as_str()) {
+            if let Some("board") = element.tags.get("information").map(|x: &String| x.as_str()) {
                 // TODO draw a sign
                 editor.set_block(OAK_PLANKS, x, ground_level + 1, z, None, None);
             }

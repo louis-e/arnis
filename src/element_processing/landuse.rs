@@ -41,8 +41,8 @@ pub fn generate_landuse(
 
     // Process landuse nodes to fill the area
     for node in &element.nodes {
-        let x = node.x;
-        let z = node.z;
+        let x: i32 = node.x;
+        let z: i32 = node.z;
 
         if let Some(prev) = previous_node {
             // Generate the line of coordinates between the two nodes
@@ -166,7 +166,7 @@ pub fn generate_landuse(
                         if random_choice == 20 {
                             create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
                         } else if random_choice == 2 {
-                            let flower_block = match rng.gen_range(1..=4) {
+                            let flower_block: Block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,
                                 2 => BLUE_FLOWER,
                                 3 => YELLOW_FLOWER,
@@ -198,7 +198,7 @@ pub fn generate_landuse(
 
                             // If a random condition is met, place a special object
                             if rng.gen_range(0..76) == 0 {
-                                let special_choice = rng.gen_range(1..=10);
+                                let special_choice: i32 = rng.gen_range(1..=10);
                                 if special_choice <= 2 {
                                     create_tree(
                                         editor,
@@ -271,7 +271,7 @@ pub fn generate_landuse(
                             );
                         }
                     } else if random_choice < 30 {
-                        let construction_items = [
+                        let construction_items: [Block; 11] = [
                             OAK_LOG,
                             COBBLESTONE,
                             GRAVEL,

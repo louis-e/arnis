@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="./css/styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arnis</title>
+  <script type="module" src="./js/main.js" defer></script>
+</head>
+
+<body>
+  <main class="container">
+    <div class="row">
+      <a href="https://github.com/louis-e/arnis" target="_blank">
+        <img src="./images/logo.png" class="logo arnis" alt="Arnis Logo" />
+      </a>
+    </div>
+
+    <div class="flex-container">
+      <!-- Left Box: Map and BBox Input -->
+      <section class="section map-box" style="margin-bottom: 0; padding-bottom: 0;">
+        <h2>Select Location</h2>
+        <span id="bbox-text" style="font-size: 1.0em; display: block; margin-top: -8px; margin-bottom: 3px;">
+          Zoom in and choose your area using the rectangle tool
+        </span>
+        <iframe src="maps.html" width="100%" height="300" class="map-container" title="Map Picker"></iframe>
+
+        <span id="bbox-info"
+          style="font-size: 0.75em; color: #7bd864; display: block; margin-bottom: 4px; font-weight: bold; min-height: 2em;"></span>
+      </section>
+
+      <!-- Right Box: Directory Selection, Start Button, and Progress Bar -->
+      <section class="section controls-box">
+        <div class="controls-content">
+          <h2>Select World</h2>
+      
+          <!-- Updated Tooltip Structure -->
+          <div class="tooltip" style="width: 100%;">
+            <button type="button" onclick="pickDirectory()" style="padding: 10px; line-height: 1.2; width: 100%;">
+              Choose World
+              <br>
+              <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;">
+                No world selected
+              </span>
+            </button>
+            <span class="tooltiptext" style="font-size: 0.8em; line-height: 1.2;">
+              Please select a Minecraft world that can be overwritten, as the generation process will replace existing structures in the chosen world!
+            </span>
+          </div>
+      
+          <br>
+      
+          <button type="button" onclick="startGeneration()">Start Generation</button>
+          <br><br>
+      
+          <div class="progress-section">
+            <h2>Progress</h2>
+            <div class="progress-bar-container">
+              <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <div class="progress-status">
+              <span id="progress-message"></span>
+              <span id="progress-detail">0%</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <a href="https://github.com/louis-e/arnis" target="_blank" class="footer-link">
+        © <span id="current-year"></span> Arnis v<span id="version-placeholder">x.x.x</span> by louis-e
+      </a>
+    </footer>
+  </main>
+</body>
+
+</html>

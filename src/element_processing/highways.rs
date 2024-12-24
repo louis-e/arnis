@@ -16,8 +16,8 @@ pub fn generate_highways(
         if highway_type == "street_lamp" {
             // Handle street lamps
             if let ProcessedElement::Node(first_node) = element {
-                let x = first_node.x;
-                let z = first_node.z;
+                let x: i32 = first_node.x;
+                let z: i32 = first_node.z;
                 for y in 1..=4 {
                     editor.set_block(OAK_FENCE, x, ground_level + y, z, None, None);
                 }
@@ -28,8 +28,8 @@ pub fn generate_highways(
             if let Some(crossing_type) = element.tags().get("crossing") {
                 if crossing_type == "traffic_signals" {
                     if let ProcessedElement::Node(node) = element {
-                        let x = node.x;
-                        let z = node.z;
+                        let x: i32 = node.x;
+                        let z: i32 = node.z;
                         for y in 1..=3 {
                             editor.set_block(COBBLESTONE_WALL, x, ground_level + y, z, None, None);
                         }
@@ -43,8 +43,8 @@ pub fn generate_highways(
         } else if highway_type == "bus_stop" {
             // Handle bus stops
             if let ProcessedElement::Node(node) = element {
-                let x = node.x;
-                let z = node.z;
+                let x: i32 = node.x;
+                let z: i32 = node.z;
                 for y in 1..=3 {
                     editor.set_block(COBBLESTONE_WALL, x, ground_level + y, z, None, None);
                 }
@@ -52,13 +52,17 @@ pub fn generate_highways(
                 editor.set_block(WHITE_WOOL, x, ground_level + 4, z, None, None);
                 editor.set_block(WHITE_WOOL, x + 1, ground_level + 4, z, None, None);
             }
-        } else if element.tags().get("area").map_or(false, |v| v == "yes") {
+        } else if element
+            .tags()
+            .get("area")
+            .map_or(false, |v: &String| v == "yes")
+        {
             let ProcessedElement::Way(way) = element else {
                 return;
             };
 
             // Handle areas like pedestrian plazas
-            let mut surface_block = STONE; // Default block
+            let mut surface_block: Block = STONE; // Default block
 
             // Determine the block type based on the 'surface' tag
             if let Some(surface) = element.tags().get("surface") {
@@ -77,8 +81,12 @@ pub fn generate_highways(
             }
 
             // Fill the area using flood fill or by iterating through the nodes
-            let polygon_coords: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
-            let filled_area = flood_fill_area(&polygon_coords, floodfill_timeout);
+            let polygon_coords: Vec<(i32, i32)> = way
+                .nodes
+                .iter()
+                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                .collect();
+            let filled_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
             for (x, z) in filled_area {
                 editor.set_block(surface_block, x, ground_level, z, None, None);
@@ -144,17 +152,17 @@ pub fn generate_highways(
             for node in &way.nodes {
                 if let Some(prev) = previous_node {
                     let (x1, z1) = prev;
-                    let x2 = node.x;
-                    let z2 = node.z;
+                    let x2: i32 = node.x;
+                    let z2: i32 = node.z;
 
                     // Generate the line of coordinates between the two nodes
                     let bresenham_points: Vec<(i32, i32, i32)> =
                         bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
 
                     // Variables to manage dashed line pattern
-                    let mut stripe_length = 0;
-                    let dash_length = 5; // Length of the solid part of the stripe
-                    let gap_length = 5; // Length of the gap part of the stripe
+                    let mut stripe_length: i32 = 0;
+                    let dash_length: i32 = 5; // Length of the solid part of the stripe
+                    let gap_length: i32 = 5; // Length of the gap part of the stripe
 
                     for (x, _, z) in bresenham_points {
                         // Draw the road surface for the entire width
@@ -253,11 +261,11 @@ pub fn generate_highways(
 /// Generates a siding using stone brick slabs
 pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
     let mut previous_node: Option<(i32, i32)> = None;
-    let siding_block = STONE_BRICK_SLAB;
+    let siding_block: Block = STONE_BRICK_SLAB;
 
     for node in &element.nodes {
-        let x = node.x;
-        let z = node.z;
+        let x: i32 = node.x;
+        let z: i32 = node.z;
 
         // Draw the siding using Bresenham's line algorithm between nodes
         if let Some(prev) = previous_node {
