@@ -31,7 +31,7 @@ jobs:
       if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt update
-        sudo apt install -y libgtk-3-dev libsoup3-dev build-essential pkg-config libglib2.0-dev
+        sudo apt install -y libgtk-3-dev libsoup3.0-dev build-essential pkg-config libglib2.0-dev
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig/" >> $GITHUB_ENV
 
     - name: Check formatting
