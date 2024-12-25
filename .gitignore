@@ -37,7 +37,6 @@ Thumbs.db
 
 # Tauri specific
 flake/
-capabilities/
 gen/
 
 # Miscellaneous
