@@ -389,7 +389,7 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
 
-        let total_steps: f64 = 10.0;
+        let total_steps: f64 = 9.0;
         let progress_increment_save: f64 = total_steps / total_regions as f64;
         let mut current_progress_save: f64 = 90.0;
         let mut last_emitted_progress: f64 = current_progress_save;

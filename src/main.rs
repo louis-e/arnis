@@ -193,7 +193,11 @@ fn gui_check_for_updates() -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn gui_start_generation(bbox_text: String, selected_world: String) -> Result<(), String> {
+fn gui_start_generation(
+    bbox_text: String,
+    selected_world: String,
+    world_scale: f64,
+) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
             // Utility function to reorder bounding box coordinates
@@ -217,7 +221,7 @@ fn gui_start_generation(bbox_text: String, selected_world: String) -> Result<(),
                 file: None,
                 path: selected_world,
                 downloader: "requests".to_string(),
-                scale: 1.0,
+                scale: world_scale,
                 debug: false,
                 timeout: None,
             };

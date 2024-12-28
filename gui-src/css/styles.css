@@ -55,7 +55,7 @@ a:hover {
   display: flex;
   gap: 20px;
   justify-content: center;
-  align-items: stretch; /* Ensures both sections take full height */
+  align-items: stretch;
   margin-top: 5px;
 }
 
@@ -73,7 +73,6 @@ a:hover {
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  /* No display: flex here, so buttons and content aren't stretched */
 }
 
 .controls-content {
@@ -83,7 +82,7 @@ a:hover {
 }
 
 .controls-box .progress-section {
-  margin-top: auto; /* Keeps the progress section at the bottom */
+  margin-top: auto;
 }
 
 .map-container {
@@ -112,11 +111,11 @@ button {
   transition: border-color 0.25s;
   box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
   margin-top: 10px;
-  width: auto; /* Ensures buttons don’t stretch */
+  width: auto;
 }
 
 button:hover {
-  border-color: #396cd8;
+  border-color: #656565;
 }
 
 #selected-directory {
@@ -238,4 +237,122 @@ button:hover {
 
 .controls-box button {
   width: 100%;
+}
+
+/* Customization Settings */
+.modal {
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-content {
+  background-color: #797979;
+  padding: 20px;
+  border: 1px solid #797979;
+  border-radius: 10px;
+  width: 400px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.close-button {
+  color: #e9e9e9;
+  float: right;
+  font-size: 28px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.close-button:hover {
+  color: #ffffff;
+}
+
+#winter-toggle {
+  accent-color: #fecc44;
+}
+
+.winter-toggle-container, .scale-slider-container {
+  margin: 15px 0;
+}
+
+.scale-slider-container label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+#scale-value-slider {
+  accent-color: #fecc44;
+}
+
+#slider-value {
+  margin-left: 10px;
+  font-weight: bold;
+}
+
+.bbox-input-container {
+  margin-bottom: 20px;
+}
+
+.bbox-input-container label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+#bbox-coords {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+#bbox-coords:focus {
+  outline: none;
+  border-color: #fecc44;
+  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+}
+
+
+.button-container {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+}
+
+.start-button {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background-color 0.3s;
+}
+
+.start-button:hover {
+  background-color: #4caf50;
+}
+
+.settings-button {
+  width: 40px !important;
+  height: 38px;
+  border-radius: 5px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: background-color 0.3s, border-color 0.3s;
+}
+
+.settings-button .gear-icon::before {
+  content: "⚙️";
+  font-size: 18px;
 }

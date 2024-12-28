@@ -34,7 +34,7 @@
       <section class="section controls-box">
         <div class="controls-content">
           <h2>Select World</h2>
-      
+
           <!-- Updated Tooltip Structure -->
           <div class="tooltip" style="width: 100%;">
             <button type="button" onclick="pickDirectory()" style="padding: 10px; line-height: 1.2; width: 100%;">
@@ -48,12 +48,15 @@
               Please select a Minecraft world that can be overwritten, as the generation process will replace existing structures in the chosen world!
             </span>
           </div>
-      
-          <br>
-      
-          <button type="button" onclick="startGeneration()">Start Generation</button>
+          
+          <div class="button-container">
+            <button type="button" id="start-button" class="start-button" onclick="startGeneration()">Start Generation</button>
+            <button type="button" class="settings-button" onclick="openSettings()">
+                <i class="gear-icon"></i>
+            </button>
+          </div>
           <br><br>
-      
+
           <div class="progress-section">
             <h2>Progress</h2>
             <div class="progress-bar-container">
@@ -66,6 +69,33 @@
           </div>
         </div>
       </section>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="closeSettings()">&times;</span>
+        <h2>Customization Settings</h2>
+
+        <!-- Winter Mode Toggle Button -->
+        <!-- <div class="winter-toggle-container">
+          <label for="winter-toggle">Winter:</label>
+          <input type="checkbox" id="winter-toggle" name="winter-toggle">
+        </div> -->
+
+        <!-- World Scale Slider -->
+        <div class="scale-slider-container">
+          <label for="scale-value-slider">World Scale:</label>
+          <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.50" max="2.5" step="0.25" value="1">
+          <span id="slider-value">1.00</span>
+        </div>
+        
+        <!-- Bounding Box Input -->
+        <div class="bbox-input-container">
+          <label for="bbox-coords">Custom Bounding Box:</label>
+          <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" style="width: 280px;" autocomplete="one-time-code" placeholder="Format: lat,lng,lat,lng">
+        </div>
+      </div>
     </div>
 
     <!-- Footer -->

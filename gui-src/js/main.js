@@ -2,10 +2,21 @@ const { invoke } = window.__TAURI__.core;
 
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
+  initFooter();
+  await checkForUpdates();
+  registerMessageEvent();
+  window.pickDirectory = pickDirectory;
+  window.startGeneration = startGeneration;
+  setupProgressListener();
+  initSettings();
+  handleBboxInput();
+});
+
+// Function to initialize the footer with the current year and version
+async function initFooter() {
   const currentYear = new Date().getFullYear();
   document.getElementById("current-year").textContent = currentYear;
 
-  // Update displayed version
   try {
     const version = await invoke('gui_get_version');
     const footerLink = document.querySelector(".footer-link");
@@ -13,8 +24,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   } catch (error) {
     console.error("Failed to fetch version:", error);
   }
+}
 
-  // Check for updates
+// Function to check for updates and display a notification if available
+async function checkForUpdates() {
   try {
     const isUpdateAvailable = await invoke('gui_check_for_updates');
     if (isUpdateAvailable) {
@@ -35,8 +48,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   } catch (error) {
     console.error("Failed to check for updates: ", error);
   }
+}
 
-  // Register bbox update event for iframe map
+// Function to register the event listener for bbox updates from iframe
+function registerMessageEvent() {
   window.addEventListener('message', function (event) {
     const bboxText = event.data.bboxText;
 
@@ -45,15 +60,14 @@ window.addEventListener("DOMContentLoaded", async () => {
       displayBboxInfoText(bboxText);
     }
   });
+}
 
-  window.pickDirectory = pickDirectory;
-  window.startGeneration = startGeneration;
-
+// Function to set up the progress bar listener
+function setupProgressListener() {
   const progressBar = document.getElementById("progress-bar");
   const progressMessage = document.getElementById("progress-message");
   const progressDetail = document.getElementById("progress-detail");
 
-  // Listen for progress-update events
   window.__TAURI__.event.listen("progress-update", (event) => {
     const { progress, message } = event.payload;
 
@@ -64,15 +78,102 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     if (message != "") {
       progressMessage.textContent = message;
-      
+
       if (message.startsWith("Error!")) {
         progressMessage.style.color = "#fa7878";
+        generationButtonEnabled = true;
+      } else if (message.startsWith("Done!")) {
+        progressMessage.style.color = "#7bd864";
+        generationButtonEnabled = true;
       } else {
         progressMessage.style.color = "";
       }
     }
   });
-});
+}
+
+function initSettings() {
+  // Settings
+  const settingsModal = document.getElementById("settings-modal");
+  const slider = document.getElementById("scale-value-slider");
+  const sliderValue = document.getElementById("slider-value");
+  
+  // Open settings modal
+  function openSettings() {
+    settingsModal.style.display = "flex";
+    settingsModal.style.justifyContent = "center";
+    settingsModal.style.alignItems = "center";
+  }
+
+  // Close settings modal
+  function closeSettings() {
+    settingsModal.style.display = "none";
+  }
+  
+  window.openSettings = openSettings;
+  window.closeSettings = closeSettings;
+
+  // Update slider value display
+  slider.addEventListener("input", () => {
+    sliderValue.textContent = parseFloat(slider.value).toFixed(2);
+  });
+}
+
+// Function to validate and handle bbox input
+function handleBboxInput() {
+  const inputBox = document.getElementById("bbox-coords");
+  const bboxInfo = document.getElementById("bbox-info");
+
+  inputBox.addEventListener("input", function () {
+      const input = inputBox.value.trim();
+
+      if (input === "") {
+          bboxInfo.textContent = "";
+          bboxInfo.style.color = "";
+          selectedBBox = "";
+          return;
+      }
+
+      // Regular expression to validate bbox input (supports both comma and space-separated formats)
+      const bboxPattern = /^(-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)$/;
+
+      if (bboxPattern.test(input)) {
+          const matches = input.match(bboxPattern);
+
+          // Extract coordinates (Lat / Lng order expected)
+          const lat1 = parseFloat(matches[1]);
+          const lng1 = parseFloat(matches[3]);
+          const lat2 = parseFloat(matches[5]);
+          const lng2 = parseFloat(matches[7]);
+
+          // Validate latitude and longitude ranges in the expected Lat / Lng order
+          if (
+              lat1 >= -90 && lat1 <= 90 &&
+              lng1 >= -180 && lng1 <= 180 &&
+              lat2 >= -90 && lat2 <= 90 &&
+              lng2 >= -180 && lng2 <= 180
+          ) {
+              // Input is valid; trigger the event
+              const bboxText = `${lat1} ${lng1} ${lat2} ${lng2}`;
+              window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
+
+              // Update the info text
+              bboxInfo.textContent = "Custom selection confirmed!";
+              bboxInfo.style.color = "#7bd864";
+          } else {
+              // Valid numbers but invalid order or range
+              bboxInfo.textContent = "Error: Coordinates are out of range or incorrectly ordered (Lat before Lng required).";
+              bboxInfo.style.color = "#fecc44";
+              selectedBBox = "";
+          }
+      } else {
+          // Input doesn't match the required format
+          bboxInfo.textContent = "Invalid format. Please use 'lat,lng,lat,lng' or 'lat lng lat lng'.";
+          bboxInfo.style.color = "#fecc44";
+          selectedBBox = "";
+      }
+  });
+}
 
 // Function to calculate the bounding box "size" in square meters based on latitude and longitude
 function calculateBBoxSize(lng1, lat1, lng2, lat2) {
@@ -145,26 +246,34 @@ async function pickDirectory() {
   }
 }
 
+let generationButtonEnabled = true;
 async function startGeneration() {
   try {
+    if (generationButtonEnabled === false) {
+      return;
+    }
+
+    if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
+      document.getElementById('bbox-info').textContent = "Select a location first!";
+      document.getElementById('bbox-info').style.color = "#fa7878";
+      return;
+    }
+
     if (worldPath === "No world selected" || worldPath == "Invalid Minecraft world" || worldPath === "") {
       document.getElementById('selected-world').textContent = "Select a Minecraft world first!";
       document.getElementById('selected-world').style.color = "#fa7878";
       return;
     }
 
-    if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
-      document.getElementById('bbox-info').textContent = "Select a location firsta using the rectangle tool!";
-      document.getElementById('bbox-info').style.color = "#fa7878";
-      return;
-    }
+    var scale = parseFloat(document.getElementById("scale-value-slider").value);
 
     // Pass the bounding box and selected world to the Rust backend
-    await invoke("gui_start_generation", { bboxText: selectedBBox, selectedWorld: worldPath });
+    await invoke("gui_start_generation", { bboxText: selectedBBox, selectedWorld: worldPath, worldScale: scale });
     
-    // Update the UI or show a loading/progress message if needed
     console.log("Generation process started.");
+    generationButtonEnabled = false;
   } catch (error) {
     console.error("Error starting generation:", error);
+    generationButtonEnabled = true;
   }
 }
