@@ -70,13 +70,12 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Refactor fountain structure implementation
 - [ ] Automatic new world creation instead of using an existing world
 - [ ] Tool for mapping real coordinates to Minecraft coordinates
-- [ ] Setup fork of [https://github.com/aaronr/bboxfinder.com](https://github.com/aaronr/bboxfinder.com) for easy bbox picking
 - [ ] Add interior to buildings
 - [ ] Evaluate and implement elevation
-- [ ] Generate a few big cities using high performance hardware and make them available to download
 - [ ] Implement memory mapped storing of chunks to reduce memory usage
 - [x] Design and implement a GUI
 - [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
+- [x] Setup fork of [https://github.com/aaronr/bboxfinder.com](https://github.com/aaronr/bboxfinder.com) for easy bbox picking
 
 ## :trophy: Open Source
 #### Key objectives of this project
