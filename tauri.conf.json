@@ -15,7 +15,8 @@
         "height": 650,
         "resizable": false,
         "transparent": true,
-        "center": true
+        "center": true,
+        "theme": "Dark"
       }
     ],
     "security": {
