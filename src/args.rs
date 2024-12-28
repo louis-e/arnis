@@ -41,7 +41,7 @@ pub struct Args {
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
     pub debug: bool,
 
-    /// Set floodfill timeout (seconds) (optional) // TODO
+    /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
 }
