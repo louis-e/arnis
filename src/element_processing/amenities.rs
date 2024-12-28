@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::floodfill::flood_fill_area;
@@ -10,7 +9,7 @@ pub fn generate_amenities(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     ground_level: i32,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
@@ -52,7 +51,7 @@ pub fn generate_amenities(
                     .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
                     .collect();
                 let floor_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, floodfill_timeout);
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
@@ -152,7 +151,7 @@ pub fn generate_amenities(
                 if corner_addup.2 > 0 {
                     let polygon_coords: Vec<(i32, i32)> = current_amenity.to_vec();
                     let flood_area: Vec<(i32, i32)> =
-                        flood_fill_area(&polygon_coords, floodfill_timeout);
+                        flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                     for (x, z) in flood_area {
                         editor.set_block(

@@ -33,6 +33,10 @@ pub struct Args {
     #[arg(long, default_value = "1.0")]
     pub scale: f64,
 
+    /// Enable winter mode (default: false)
+    #[arg(long, default_value_t = false)]
+    pub winter: bool,
+
     /// Enable debug mode (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
     pub debug: bool,

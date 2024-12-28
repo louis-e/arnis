@@ -265,10 +265,11 @@ async function startGeneration() {
       return;
     }
 
+    var winter_mode = document.getElementById("winter-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
 
     // Pass the bounding box and selected world to the Rust backend
-    await invoke("gui_start_generation", { bboxText: selectedBBox, selectedWorld: worldPath, worldScale: scale });
+    await invoke("gui_start_generation", { bboxText: selectedBBox, selectedWorld: worldPath, worldScale: scale, winterMode: winter_mode });
     
     console.log("Generation process started.");
     generationButtonEnabled = false;

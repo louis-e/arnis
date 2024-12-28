@@ -1,3 +1,4 @@
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
@@ -12,7 +13,7 @@ pub fn generate_buildings(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     ground_level: i32,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -95,7 +96,7 @@ pub fn generate_buildings(
                     .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
                     .collect();
                 let floor_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, floodfill_timeout);
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
@@ -152,7 +153,8 @@ pub fn generate_buildings(
                 .iter()
                 .map(|node: &crate::osm_parser::ProcessedNode| (node.x, node.z))
                 .collect();
-            let roof_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout); // Use flood-fill to determine the area
+            let roof_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref()); // Use flood-fill to determine the area
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
             for (x, z) in roof_area.iter() {
@@ -172,7 +174,7 @@ pub fn generate_buildings(
                 building_height = 23
             }
         } else if building_type == "bridge" {
-            generate_bridge(editor, element, ground_level, floodfill_timeout);
+            generate_bridge(editor, element, ground_level, args.timeout.as_ref());
             return;
         }
     }
@@ -201,6 +203,7 @@ pub fn generate_buildings(
                         }
                     }
                 }
+                // Ceiling cobblestone
                 editor.set_block(
                     COBBLESTONE,
                     bx,
@@ -208,7 +211,19 @@ pub fn generate_buildings(
                     bz,
                     None,
                     None,
-                ); // Ceiling cobblestone
+                );
+
+                if args.winter {
+                    editor.set_block(
+                        SNOW_LAYER,
+                        x,
+                        ground_level + building_height + 2,
+                        z,
+                        None,
+                        None,
+                    );
+                }
+
                 current_building.push((bx, bz));
                 corner_addup = (corner_addup.0 + bx, corner_addup.1 + bz, corner_addup.2 + 1);
             }
@@ -224,7 +239,7 @@ pub fn generate_buildings(
             .iter()
             .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
             .collect();
-        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
+        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
@@ -253,6 +268,17 @@ pub fn generate_buildings(
                     None,
                     None,
                 );
+
+                if args.winter {
+                    editor.set_block(
+                        SNOW_LAYER,
+                        x,
+                        ground_level + building_height + 2,
+                        z,
+                        None,
+                        None,
+                    );
+                }
             }
         }
     }

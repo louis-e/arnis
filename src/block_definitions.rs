@@ -138,6 +138,8 @@ impl Block {
             108 => "potatoes",
             109 => "wheat",
             110 => "bedrock",
+            111 => "snow_block",
+            112 => "snow",
             _ => panic!("Invalid id"),
         }
     }
@@ -285,6 +287,8 @@ pub const MAGENTA_CONCRETE: Block = Block::new(101);
 pub const BROWN_WOOL: Block = Block::new(102);
 pub const OXIDIZED_COPPER: Block = Block::new(103);
 pub const YELLOW_TERRACOTTA: Block = Block::new(104);
+pub const SNOW_BLOCK: Block = Block::new(111);
+pub const SNOW_LAYER: Block = Block::new(112);
 
 pub const CARROTS: Block = Block::new(105);
 pub const DARK_OAK_DOOR_LOWER: Block = Block::new(106);
