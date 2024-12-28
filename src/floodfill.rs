@@ -56,7 +56,7 @@ pub fn flood_fill_area(
     while let Some((start_x, start_z)) = candidate_points.pop_front() {
         if let Some(timeout) = timeout {
             if &start_time.elapsed() > timeout {
-                eprintln!("Floodfill timeout"); // TODO only print when debug arg is set?
+                eprintln!("Floodfill timeout");
                 break;
             }
         }
@@ -70,7 +70,7 @@ pub fn flood_fill_area(
             while let Some((x, z)) = queue.pop_front() {
                 if let Some(timeout) = timeout {
                     if &start_time.elapsed() > timeout {
-                        eprintln!("Floodfill timeout"); // TODO only print when debug arg is set?
+                        eprintln!("Floodfill timeout");
                         break;
                     }
                 }

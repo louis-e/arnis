@@ -309,7 +309,7 @@ button:hover {
 #bbox-coords {
   width: 100%;
   padding: 8px;
-  border: 1px solid #ccc;
+  border: 1px solid #fecc44;
   border-radius: 4px;
   font-size: 14px;
 }
@@ -317,7 +317,7 @@ button:hover {
 #bbox-coords:focus {
   outline: none;
   border-color: #fecc44;
-  box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+  box-shadow: 0 0 5px #fecc44;
 }
 
 

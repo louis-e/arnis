@@ -213,6 +213,7 @@ fn gui_start_generation(
     selected_world: String,
     world_scale: f64,
     winter_mode: bool,
+    floodfill_timeout: u64,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -240,7 +241,7 @@ fn gui_start_generation(
                 scale: world_scale,
                 winter: winter_mode,
                 debug: false,
-                timeout: None,
+                timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
             };
 
             // Reorder bounding box coordinates for further processing

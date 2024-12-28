@@ -105,7 +105,7 @@ pub fn generate_highways(
             let mut previous_node: Option<(i32, i32)> = None;
             let mut block_type = BLACK_CONCRETE;
             let mut block_range: i32 = 2;
-            let mut add_stripe = false; // Flag for adding stripes
+            let mut add_stripe = false;
 
             // Skip if 'layer' or 'level' is negative in the tags
             if let Some(layer) = element.tags().get("layer") {

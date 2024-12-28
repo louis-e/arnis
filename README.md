@@ -60,19 +60,18 @@ The project is named after the smallest city in Germany, Arnis[^2]. The city's s
 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
-- [ ] Memory optimization
+- [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
+- [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
-- [ ] Evaluate and implement multithreaded region saving
-- [ ] Better code documentation
-- [ ] Implement house roof types
-- [ ] Refactor railway implementation
-- [ ] Refactor bridges implementation
-- [ ] Refactor fountain structure implementation
+- [ ] Evaluate and implement faster region saving
 - [ ] Automatic new world creation instead of using an existing world
-- [ ] Tool for mapping real coordinates to Minecraft coordinates
+- [ ] Implement house roof types
+- [ ] Refactor bridges implementation
+- [ ] Refactor railway implementation
+- [ ] Better code documentation
+- [ ] Refactor fountain structure implementation
 - [ ] Add interior to buildings
-- [ ] Evaluate and implement elevation
-- [ ] Implement memory mapped storing of chunks to reduce memory usage
+- [x] Memory optimization
 - [x] Design and implement a GUI
 - [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
 - [x] Setup fork of [https://github.com/aaronr/bboxfinder.com](https://github.com/aaronr/bboxfinder.com) for easy bbox picking
