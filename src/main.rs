@@ -16,6 +16,7 @@ mod world_editor;
 use args::Args;
 use clap::Parser;
 use colored::*;
+use fs2::FileExt;
 use rfd::FileDialog;
 use std::fs::File;
 use std::io::Write;
@@ -168,6 +169,20 @@ fn gui_pick_directory() -> Result<String, String> {
 
         // Check if the "region" folder exists within the selected directory
         if path.join("region").exists() {
+            // Check the 'session.lock' file
+            let session_lock_path = path.join("session.lock");
+            if session_lock_path.exists() {
+                // Try to acquire a lock on the session.lock file
+                if let Ok(file) = File::open(&session_lock_path) {
+                    if file.try_lock_shared().is_err() {
+                        return Err("The selected world is currently in use".to_string());
+                    } else {
+                        // Release the lock immediately
+                        let _ = file.unlock();
+                    }
+                }
+            }
+
             return Ok(path.display().to_string());
         } else {
             // Notify the frontend that no valid Minecraft world was found

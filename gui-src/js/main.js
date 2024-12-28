@@ -259,7 +259,7 @@ async function startGeneration() {
       return;
     }
 
-    if (worldPath === "No world selected" || worldPath == "Invalid Minecraft world" || worldPath === "") {
+    if (worldPath === "No world selected" || worldPath == "Invalid Minecraft world" || worldPath == "The selected world is currently in use" || worldPath === "") {
       document.getElementById('selected-world').textContent = "Select a Minecraft world first!";
       document.getElementById('selected-world').style.color = "#fa7878";
       return;
