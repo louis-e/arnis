@@ -1,16 +1,15 @@
-use std::time::Duration;
-
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
-use crate::world_editor::WorldEditor; // Assuming you have a flood fill function for area filling
+use crate::world_editor::WorldEditor;
 
 pub fn generate_highways(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     ground_level: i32,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
@@ -37,6 +36,10 @@ pub fn generate_highways(
                         editor.set_block(GREEN_WOOL, x, ground_level + 4, z, None, None);
                         editor.set_block(YELLOW_WOOL, x, ground_level + 5, z, None, None);
                         editor.set_block(RED_WOOL, x, ground_level + 6, z, None, None);
+
+                        if args.winter {
+                            editor.set_block(SNOW_LAYER, x, ground_level + 7, z, None, None);
+                        }
                     }
                 }
             }
@@ -72,7 +75,13 @@ pub fn generate_highways(
                     "wood" => OAK_PLANKS,
                     "asphalt" => BLACK_CONCRETE,
                     "gravel" | "fine_gravel" => GRAVEL,
-                    "grass" => GRASS_BLOCK,
+                    "grass" => {
+                        if args.winter {
+                            SNOW_BLOCK
+                        } else {
+                            GRASS_BLOCK
+                        }
+                    }
                     "dirt" => DIRT,
                     "sand" => SAND,
                     "concrete" => LIGHT_GRAY_CONCRETE,
@@ -86,7 +95,8 @@ pub fn generate_highways(
                 .iter()
                 .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
                 .collect();
-            let filled_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
+            let filled_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for (x, z) in filled_area {
                 editor.set_block(surface_block, x, ground_level, z, None, None);

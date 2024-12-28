@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::tree::create_tree;
@@ -12,7 +11,7 @@ pub fn generate_landuse(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     ground_level: i32,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -23,9 +22,21 @@ pub fn generate_landuse(
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
 
     let block_type = match landuse_tag.as_str() {
-        "greenfield" | "meadow" | "grass" => GRASS_BLOCK,
+        "greenfield" | "meadow" | "grass" => {
+            if args.winter {
+                SNOW_BLOCK
+            } else {
+                GRASS_BLOCK
+            }
+        }
         "farmland" => FARMLAND,
-        "forest" => GRASS_BLOCK,
+        "forest" => {
+            if args.winter {
+                SNOW_BLOCK
+            } else {
+                GRASS_BLOCK
+            }
+        }
         "cemetery" => PODZOL,
         "beach" => SAND,
         "construction" => DIRT,
@@ -36,8 +47,16 @@ pub fn generate_landuse(
         "industrial" => COBBLESTONE,
         "military" => GRAY_CONCRETE,
         "railway" => GRAVEL,
-        _ => GRASS_BLOCK,
+        _ => {
+            if args.winter {
+                SNOW_BLOCK
+            } else {
+                GRASS_BLOCK
+            }
+        }
     };
+
+    let bresenham_block: Block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
 
     // Process landuse nodes to fill the area
     for node in &element.nodes {
@@ -49,7 +68,7 @@ pub fn generate_landuse(
             let bresenham_points: Vec<(i32, i32, i32)> =
                 bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
             for (bx, _, bz) in bresenham_points {
-                editor.set_block(GRASS_BLOCK, bx, ground_level, bz, None, None);
+                editor.set_block(bresenham_block, bx, ground_level, bz, None, None);
             }
 
             current_landuse.push((x, z));
@@ -62,7 +81,7 @@ pub fn generate_landuse(
     // If there are landuse nodes, flood-fill the area
     if !current_landuse.is_empty() {
         let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
-        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
+        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
         let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
@@ -156,7 +175,14 @@ pub fn generate_landuse(
                                 editor.set_block(RED_FLOWER, x, ground_level + 1, z, None, None);
                             }
                         } else if random_choice < 33 {
-                            create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
+                            create_tree(
+                                editor,
+                                x,
+                                ground_level + 1,
+                                z,
+                                rng.gen_range(1..=3),
+                                args.winter,
+                            );
                         }
                     }
                 }
@@ -164,7 +190,14 @@ pub fn generate_landuse(
                     if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
                         let random_choice: i32 = rng.gen_range(0..21);
                         if random_choice == 20 {
-                            create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
+                            create_tree(
+                                editor,
+                                x,
+                                ground_level + 1,
+                                z,
+                                rng.gen_range(1..=3),
+                                args.winter,
+                            );
                         } else if random_choice == 2 {
                             let flower_block: Block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,
@@ -206,6 +239,7 @@ pub fn generate_landuse(
                                         ground_level + 1,
                                         z,
                                         rng.gen_range(1..=3),
+                                        args.winter,
                                     );
                                 } else if special_choice <= 6 {
                                     editor.set_block(HAY_BALE, x, ground_level + 1, z, None, None);
@@ -319,7 +353,14 @@ pub fn generate_landuse(
                     if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
                         let random_choice: i32 = rng.gen_range(0..1001);
                         if random_choice < 5 {
-                            create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
+                            create_tree(
+                                editor,
+                                x,
+                                ground_level + 1,
+                                z,
+                                rng.gen_range(1..=3),
+                                args.winter,
+                            );
                         } else if random_choice < 800 {
                             editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                         }

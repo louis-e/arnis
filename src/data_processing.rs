@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{DIRT, GRASS_BLOCK};
+use crate::block_definitions::{DIRT, GRASS_BLOCK, SNOW_BLOCK};
 use crate::element_processing::*;
 use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
@@ -54,47 +54,17 @@ pub fn generate_world(
         match element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    buildings::generate_buildings(
-                        &mut editor,
-                        way,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    buildings::generate_buildings(&mut editor, way, GROUND_LEVEL, args);
                 } else if way.tags.contains_key("highway") {
-                    highways::generate_highways(
-                        &mut editor,
-                        element,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    highways::generate_highways(&mut editor, element, GROUND_LEVEL, args);
                 } else if way.tags.contains_key("landuse") {
-                    landuse::generate_landuse(
-                        &mut editor,
-                        way,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    landuse::generate_landuse(&mut editor, way, GROUND_LEVEL, args);
                 } else if way.tags.contains_key("natural") {
-                    natural::generate_natural(
-                        &mut editor,
-                        element,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    natural::generate_natural(&mut editor, element, GROUND_LEVEL, args);
                 } else if way.tags.contains_key("amenity") {
-                    amenities::generate_amenities(
-                        &mut editor,
-                        element,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    amenities::generate_amenities(&mut editor, element, GROUND_LEVEL, args);
                 } else if way.tags.contains_key("leisure") {
-                    leisure::generate_leisure(
-                        &mut editor,
-                        way,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    leisure::generate_leisure(&mut editor, way, GROUND_LEVEL, args);
                 } else if way.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element, GROUND_LEVEL);
                 } else if way.tags.contains_key("waterway") {
@@ -113,28 +83,13 @@ pub fn generate_world(
                 } else if node.tags.contains_key("natural")
                     && node.tags.get("natural") == Some(&"tree".to_string())
                 {
-                    natural::generate_natural(
-                        &mut editor,
-                        element,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    natural::generate_natural(&mut editor, element, GROUND_LEVEL, args);
                 } else if node.tags.contains_key("amenity") {
-                    amenities::generate_amenities(
-                        &mut editor,
-                        element,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    amenities::generate_amenities(&mut editor, element, GROUND_LEVEL, args);
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element, GROUND_LEVEL);
                 } else if node.tags.contains_key("highway") {
-                    highways::generate_highways(
-                        &mut editor,
-                        element,
-                        GROUND_LEVEL,
-                        args.timeout.as_ref(),
-                    );
+                    highways::generate_highways(&mut editor, element, GROUND_LEVEL, args);
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node, GROUND_LEVEL);
                 }
@@ -172,9 +127,11 @@ pub fn generate_world(
     let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
     let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
 
+    let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
+
     for x in 0..=(scale_factor_x as i32) {
         for z in 0..=(scale_factor_z as i32) {
-            editor.set_block(GRASS_BLOCK, x, GROUND_LEVEL, z, None, None);
+            editor.set_block(groundlayer_block, x, GROUND_LEVEL, z, None, None);
             editor.set_block(DIRT, x, GROUND_LEVEL - 1, z, None, None);
 
             block_counter += 1;

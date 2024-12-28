@@ -197,6 +197,7 @@ fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
     world_scale: f64,
+    winter_mode: bool,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -222,6 +223,7 @@ fn gui_start_generation(
                 path: selected_world,
                 downloader: "requests".to_string(),
                 scale: world_scale,
+                winter: winter_mode,
                 debug: false,
                 timeout: None,
             };
