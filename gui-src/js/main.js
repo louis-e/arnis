@@ -5,10 +5,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFooter();
   await checkForUpdates();
   registerMessageEvent();
-  window.pickDirectory = pickDirectory;
+  window.selectWorld = selectWorld;
   window.startGeneration = startGeneration;
   setupProgressListener();
   initSettings();
+  initWorldPicker();
   handleBboxInput();
 });
 
@@ -117,6 +118,26 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+}
+
+function initWorldPicker() {
+  // World Picker
+  const worldPickerModal = document.getElementById("world-modal");
+  
+  // Open world picker modal
+  function openWorldPicker() {
+    worldPickerModal.style.display = "flex";
+    worldPickerModal.style.justifyContent = "center";
+    worldPickerModal.style.alignItems = "center";
+  }
+
+  // Close world picker modal
+  function closeWorldPicker() {
+    worldPickerModal.style.display = "none";
+  }
+  
+  window.openWorldPicker = openWorldPicker;
+  window.closeWorldPicker = closeWorldPicker;
 }
 
 // Function to validate and handle bbox input
@@ -229,10 +250,9 @@ function displayBboxInfoText(bboxText) {
 }
 
 let worldPath = "";
-
-async function pickDirectory() {
+async function selectWorld(generate_new_world) {
   try {
-    const worldName = await invoke('gui_pick_directory');
+    const worldName = await invoke('gui_select_world', { generateNew: generate_new_world } );
     if (worldName) {
       worldPath = worldName;
       const lastSegment = worldName.split(/[\\/]/).pop();
@@ -244,6 +264,8 @@ async function pickDirectory() {
     document.getElementById('selected-world').textContent = error;
     document.getElementById('selected-world').style.color = "#fa7878";
   }
+
+  closeWorldPicker();
 }
 
 let generationButtonEnabled = true;
@@ -259,7 +281,13 @@ async function startGeneration() {
       return;
     }
 
-    if (worldPath === "No world selected" || worldPath == "Invalid Minecraft world" || worldPath == "The selected world is currently in use" || worldPath === "") {
+    if (
+      worldPath === "No world selected" ||
+      worldPath == "Invalid Minecraft world" ||
+      worldPath == "The selected world is currently in use" ||
+      worldPath == "Minecraft directory not found." ||
+      worldPath === ""
+    ) {
       document.getElementById('selected-world').textContent = "Select a Minecraft world first!";
       document.getElementById('selected-world').style.color = "#fa7878";
       return;
