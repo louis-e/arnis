@@ -16,11 +16,11 @@ mod world_editor;
 use args::Args;
 use clap::Parser;
 use colored::*;
+use fastnbt::Value;
+use flate2::read::GzDecoder;
 use fs2::FileExt;
 use rfd::FileDialog;
-use std::fs::File;
-use std::io::Write;
-use std::{env, path::PathBuf};
+use std::{env, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}};
 
 fn print_banner() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -117,7 +117,7 @@ fn main() {
         println!("Launching UI...");
         tauri::Builder::default()
             .invoke_handler(tauri::generate_handler![
-                gui_pick_directory,
+                gui_select_world,
                 gui_start_generation,
                 gui_get_version,
                 gui_check_for_updates
@@ -135,7 +135,7 @@ fn main() {
 }
 
 #[tauri::command]
-fn gui_pick_directory() -> Result<String, String> {
+fn gui_select_world(generate_new: bool) -> Result<String, String> {
     // Determine the default Minecraft 'saves' directory based on the OS
     let default_dir: Option<PathBuf> = if cfg!(target_os = "windows") {
         env::var("APPDATA")
@@ -152,46 +152,131 @@ fn gui_pick_directory() -> Result<String, String> {
         None
     };
 
-    // Check if the default directory exists
-    let starting_directory: Option<PathBuf> = default_dir.filter(|dir: &PathBuf| dir.exists());
+    if generate_new {
+        // Handle new world generation
+        if let Some(default_path) = &default_dir {
+            if default_path.exists() {
+                // Generate a unique world name
+                let mut counter = 1;
+                let unique_name = loop {
+                    let candidate_name = format!("Arnis World {}", counter);
+                    let candidate_path = default_path.join(&candidate_name);
+                    if !candidate_path.exists() {
+                        break candidate_name;
+                    }
+                    counter += 1;
+                };
 
-    // Open the directory picker dialog
-    let dialog: FileDialog = FileDialog::new();
-    let dialog: FileDialog = if let Some(start_dir) = starting_directory {
-        dialog.set_directory(start_dir)
+                let new_world_path = default_path.join(&unique_name);
+
+                // Create the new world structure
+                create_new_world(&new_world_path, &unique_name)?;
+                return Ok(new_world_path.display().to_string());
+            } else {
+                return Err("Minecraft directory not found.".to_string());
+            }
+        } else {
+            return Err("Minecraft directory not found.".to_string());
+        }
     } else {
-        dialog
-    };
+        // Handle existing world selection
+        // Open the directory picker dialog
+        let dialog: FileDialog = FileDialog::new();
+        let dialog: FileDialog = if let Some(start_dir) = default_dir.filter(|dir| dir.exists()) {
+            dialog.set_directory(start_dir)
+        } else {
+            dialog
+        };
 
-    if let Some(path) = dialog.pick_folder() {
-        // Print the full path to the console
-        println!("Selected world path: {}", path.display());
+        if let Some(path) = dialog.pick_folder() {
+            // Print the full path to the console
+            println!("Selected world path: {}", path.display());
 
-        // Check if the "region" folder exists within the selected directory
-        if path.join("region").exists() {
-            // Check the 'session.lock' file
-            let session_lock_path = path.join("session.lock");
-            if session_lock_path.exists() {
-                // Try to acquire a lock on the session.lock file
-                if let Ok(file) = File::open(&session_lock_path) {
-                    if file.try_lock_shared().is_err() {
-                        return Err("The selected world is currently in use".to_string());
-                    } else {
-                        // Release the lock immediately
-                        let _ = file.unlock();
+            // Check if the "region" folder exists within the selected directory
+            if path.join("region").exists() {
+                // Check the 'session.lock' file
+                let session_lock_path = path.join("session.lock");
+                if session_lock_path.exists() {
+                    // Try to acquire a lock on the session.lock file
+                    if let Ok(file) = File::open(&session_lock_path) {
+                        if file.try_lock_shared().is_err() {
+                            return Err("The selected world is currently in use".to_string());
+                        } else {
+                            // Release the lock immediately
+                            let _ = file.unlock();
+                        }
                     }
                 }
-            }
 
-            return Ok(path.display().to_string());
-        } else {
-            // Notify the frontend that no valid Minecraft world was found
-            return Err("Invalid Minecraft world".to_string());
+                return Ok(path.display().to_string());
+            } else {
+                // Notify the frontend that no valid Minecraft world was found
+                return Err("Invalid Minecraft world".to_string());
+            }
+        }
+
+        // If no folder was selected, return an error message
+        Err("No world selected".to_string())
+    }
+}
+
+fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
+    // Create the new world directory structure
+    fs::create_dir_all(world_path.join("region"))
+        .map_err(|e| format!("Failed to create world directory: {}", e))?;
+
+    // Copy the region template file
+    const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
+    let region_path = world_path.join("region").join("r.0.0.mca");
+    fs::write(&region_path, REGION_TEMPLATE)
+        .map_err(|e| format!("Failed to create region file: {}", e))?;
+
+    // Add the level.dat file
+    const LEVEL_TEMPLATE: &[u8] = include_bytes!("../mcassets/level.dat");
+    
+    // Decompress the gzipped level.template
+    let mut decoder = GzDecoder::new(LEVEL_TEMPLATE);
+    let mut decompressed_data = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed_data)
+        .map_err(|e| format!("Failed to decompress level.template: {}", e))?;
+
+    // Parse the decompressed NBT data
+    let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
+        .map_err(|e| format!("Failed to parse level.dat template: {}", e))?;
+    
+    // Modify the LevelName field
+    if let Value::Compound(ref mut root) = level_data {
+        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
+            data.insert(
+                "LevelName".to_string(),
+                Value::String(world_name.to_string()),
+            );
         }
     }
 
-    // If no folder was selected, return an error message
-    Err("No world selected".to_string())
+    // Serialize the updated NBT data back to bytes
+    let serialized_level_data = fastnbt::to_bytes(&level_data)
+        .map_err(|e| format!("Failed to serialize updated level.dat: {}", e))?;
+    
+    // Compress the serialized data back to gzip
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized_level_data)
+        .map_err(|e| format!("Failed to compress updated level.dat: {}", e))?;
+    let compressed_level_data = encoder
+        .finish()
+        .map_err(|e| format!("Failed to finalize compression for level.dat: {}", e))?;
+
+    fs::write(world_path.join("level.dat"), compressed_level_data)
+        .map_err(|e| format!("Failed to create level.dat file: {}", e))?;
+
+    // Add the icon.png file
+    const ICON_TEMPLATE: &[u8] = include_bytes!("../mcassets/icon.png");
+    fs::write(world_path.join("icon.png"), ICON_TEMPLATE)
+        .map_err(|e| format!("Failed to create icon.png file: {}", e))?;
+
+    Ok(())
 }
 
 #[tauri::command]

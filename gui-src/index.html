@@ -37,7 +37,7 @@
 
           <!-- Updated Tooltip Structure -->
           <div class="tooltip" style="width: 100%;">
-            <button type="button" onclick="pickDirectory()" style="padding: 10px; line-height: 1.2; width: 100%;">
+            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;">
               Choose World
               <br>
               <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;">
@@ -69,6 +69,17 @@
           </div>
         </div>
       </section>
+    </div>
+
+    <!-- World Picker Modal -->
+    <div id="world-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="closeWorldPicker()">&times;</span>
+        <h2>Choose World</h2>
+
+        <button type="button" id="select-world-button" class="select-world-button" onclick="selectWorld(false)">Select existing world</button>
+        <button type="button" id="generate-world-button" class="generate-world-button" onclick="selectWorld(true)">Generate new world</button>
+      </div>
     </div>
 
     <!-- Settings Modal -->
