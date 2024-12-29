@@ -61,6 +61,7 @@ The project is named after the smallest city in Germany, Arnis[^2]. The city's s
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
+- [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
 - [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
 - [ ] Evaluate and implement faster region saving
