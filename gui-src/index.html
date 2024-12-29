@@ -90,7 +90,7 @@
 
         <!-- Winter Mode Toggle Button -->
         <div class="winter-toggle-container">
-          <label for="winter-toggle">Winter:</label>
+          <label for="winter-toggle">Winter Mode:</label>
           <input type="checkbox" id="winter-toggle" name="winter-toggle">
         </div>
 
@@ -111,6 +111,12 @@
         <div class="timeout-input-container">
           <label for="floodfill-timeout">Floodfill Timeout (sec):</label>
           <input type="number" id="floodfill-timeout" name="floodfill-timeout" min="0" step="1" value="20" style="width: 100px;" placeholder="Seconds">
+        </div><br>
+
+        <!-- Ground Level Input -->
+        <div class="ground-level-input-container">
+          <label for="ground-level">Ground Level:</label>
+          <input type="number" id="ground-level" name="ground-level" min="-64" max="290" value="-62" style="width: 100px;" placeholder="Ground Level">
         </div>
       </div>
     </div>

@@ -33,6 +33,10 @@ pub struct Args {
     #[arg(long, default_value = "1.0")]
     pub scale: f64,
 
+    /// Ground level to use in the Minecraft world
+    #[arg(long, default_value_t = -62)]
+    pub ground_level: i32,
+
     /// Enable winter mode (default: false)
     #[arg(long, default_value_t = false)]
     pub winter: bool,
