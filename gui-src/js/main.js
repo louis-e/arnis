@@ -296,13 +296,22 @@ async function startGeneration() {
     var winter_mode = document.getElementById("winter-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
+    var ground_level = parseInt(document.getElementById("ground-level").value, 10);
 
-    // Validate the floodfill timeout
+    // Validate floodfill_timeout and ground_level
     floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
+    ground_level = isNaN(ground_level) || ground_level < -62 ? 20 : ground_level;
 
     // Pass the bounding box and selected world to the Rust backend
-    await invoke("gui_start_generation", { bboxText: selectedBBox, selectedWorld: worldPath, worldScale: scale, winterMode: winter_mode, floodfillTimeout: floodfill_timeout });
-    
+    await invoke("gui_start_generation", {
+        bboxText: selectedBBox,
+        selectedWorld: worldPath,
+        worldScale: scale,
+        groundLevel: ground_level,
+        winterMode: winter_mode,
+        floodfillTimeout: floodfill_timeout,
+    });
+
     console.log("Generation process started.");
     generationButtonEnabled = false;
   } catch (error) {

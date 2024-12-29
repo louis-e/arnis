@@ -310,6 +310,7 @@ fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
     world_scale: f64,
+    ground_level: i32,
     winter_mode: bool,
     floodfill_timeout: u64,
 ) -> Result<(), String> {
@@ -337,6 +338,7 @@ fn gui_start_generation(
                 path: selected_world,
                 downloader: "requests".to_string(),
                 scale: world_scale,
+                ground_level: ground_level,
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
