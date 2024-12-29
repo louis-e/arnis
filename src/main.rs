@@ -245,13 +245,21 @@ fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
     let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
         .map_err(|e| format!("Failed to parse level.dat template: {}", e))?;
     
-    // Modify the LevelName field
+    // Modify the LevelName and LastPlayed fields
     if let Value::Compound(ref mut root) = level_data {
         if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
+            // Update LevelName
             data.insert(
                 "LevelName".to_string(),
                 Value::String(world_name.to_string()),
             );
+
+            // Update LastPlayed to the current Unix time in milliseconds
+            let current_time = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| format!("Failed to get current time: {}", e))?;
+            let current_time_millis = current_time.as_millis() as i64;
+            data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
         }
     }
 
