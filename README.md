@@ -115,7 +115,7 @@ This section is dedicated to recognizing and celebrating the outstanding contrib
 ## :copyright: License Information
 This project is licensed under the GNU General Public License v3.0 (GPL-3.0).[^3]
 
-Copyright (c) 2022-2024 louis-e
+Copyright (c) 2022-2025 Louis Erbkamm (louis-e)
 
 [^1]: https://en.wikipedia.org/wiki/OpenStreetMap
 
