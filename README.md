@@ -16,9 +16,11 @@ Arnis is designed to handle large-scale data and generate rich, immersive enviro
 ## :keyboard: Usage
 <img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
-
-Make sure to generate a new flat world in advance in Minecraft. Then choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
+ 
+Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
 The world will always be generated starting from the coordinates 0 0 0.
+
+If you choose to select an own world, make sure to generate a new flat world in advance in Minecraft.
 
 <details>
 
@@ -31,7 +33,7 @@ The --bbox parameter specifies the bounding box coordinates in the format: min_l
 <img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true"><br>
 Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter. Try starting with a small area since large areas take a lot of computing power and time to process.<br>
 
-<i>Note: This might not be working right now since the console gets suppressed.</i>
+<i>Note: This might not be working right now since the console gets suppressed. https://github.com/louis-e/arnis/issues/99</i>
 
 </details>
 
@@ -41,16 +43,16 @@ Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy th
 The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each element (buildings, walls, fountains, farmlands, etc.) with its respective corner coordinates (nodes) and descriptive tags. When you run Arnis, the following steps are performed automatically to generate a Minecraft world:
 
 #### Processing Pipeline
-1. Fetch Data from Overpass API: The script retrieves geospatial data for the desired bounding box from the Overpass API. You can specify the bounding box coordinates using the --bbox parameter.
-2. Parse Raw Data: The raw data is parsed to extract essential information like nodes, ways, and relations. Nodes are converted into Minecraft coordinates, and relations are handled similarly to ways, ensuring all relevant elements are processed correctly.
-3. Prioritize and Sort Elements: The elements (nodes, ways, relations) are sorted by priority to establish a layering system, which ensures that certain types of elements (e.g., entrances and buildings) are generated in the correct order to avoid conflicts and overlapping structures.
-4. Generate Minecraft World: The Minecraft world is generated using a series of element processors (generate_buildings, generate_highways, generate_landuse, etc.) that interpret the tags and nodes of each element to place the appropriate blocks in the Minecraft world. These processors handle the logic for creating 3D structures, roads, natural formations, and more, as specified by the processed data.
-5. Generate Ground Layer: A ground layer is generated based on the provided scale factors to provide a base for the entire Minecraft world. This step ensures all areas have an appropriate foundation (e.g., grass and dirt layers).
-6. Save the Minecraft World: All the modified chunks are saved back to the Minecraft region files.
+1. **Fetching Data from the Overpass API:** The script retrieves geospatial data for the desired bounding box from the Overpass API.
+2. **Parsing Raw Data:** The raw data is parsed to extract essential information like nodes, ways, and relations. Nodes are converted into Minecraft coordinates, and relations are handled similarly to ways, ensuring all relevant elements are processed correctly. Relations and ways cluster several nodes into one specific object.
+3. **Prioritizing and Sorting Elements:** The elements (nodes, ways, relations) are sorted by priority to establish a layering system, which ensures that certain types of elements (e.g., entrances and buildings) are generated in the correct order to avoid conflicts and overlapping structures.
+4. **Generating Minecraft World:** The Minecraft world is generated using a series of element processors (generate_buildings, generate_highways, generate_landuse, etc.) that interpret the tags and nodes of each element to place the appropriate blocks in the Minecraft world. These processors handle the logic for creating 3D structures, roads, natural formations, and more, as specified by the processed data.
+5. **Generating Ground Layer:** A ground layer is generated based on the provided scale factors to provide a base for the entire Minecraft world. This step ensures all areas have an appropriate foundation (e.g., grass and dirt layers).
+6. **Saving the Minecraft World:** All the modified chunks are saved back to the Minecraft region files.
 
 ## :question: FAQ
 - *Wasn't this written in Python before?*<br>
-Yes! Arnis was initially developed in Python, which benefited from Python's open-source friendliness and ease of readability. This is why we strive for clear, well-documented code in the Rust port of this project to find the right balance. I decided to port the project to Rust to learn more about it and push the algorithm's performance further. We were nearing the limits of optimization in Python, and Rust's capabilities allow for even better performance and efficiency. The old Python implementation is still available in the python-legacy branch.
+Yes! Arnis was initially developed in Python, which benefited from Python's open-source friendliness and ease of readability. This is why we strive for clear, well-documented code in the Rust port of this project to find the right balance. I decided to port the project to Rust to learn more about the language and push the algorithm's performance further. We were nearing the limits of optimization in Python, and Rust's capabilities allow for even better performance and efficiency. The old Python implementation is still available in the python-legacy branch.
 - *Where does the data come from?*<br>
 The geographic data is sourced from OpenStreetMap (OSM)[^1], a free, collaborative mapping project that serves as an open-source alternative to commercial mapping services. The data is accessed via the Overpass API, which queries OSM's database.
 - *How does the Minecraft world generation work?*<br>
@@ -61,6 +63,7 @@ The project is named after the smallest city in Germany, Arnis[^2]. The city's s
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
+- [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
 - [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
 - [ ] Evaluate and implement faster region saving
@@ -81,7 +84,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - **Modularity**: Ensure that all components (e.g., data fetching, processing, and world generation) are cleanly separated into distinct modules for better maintainability and scalability.
 - **Performance Optimization**: Utilize Rust’s memory safety and concurrency features to optimize the performance of the world generation process.
 - **Comprehensive Documentation**: Detailed in-code documentation for a clear structure and logic.
-- **User-Friendly Experience**: Focus on making the project easy to use for end users, with the potential to develop a graphical user interface (GUI) in the future. Suggestions and discussions on UI/UX are welcome.
+- **User-Friendly Experience**: Focus on making the project easy to use for end users.
 - **Cross-Platform Support**: Ensure the project runs smoothly on Windows, macOS, and Linux.
 
 #### How to contribute
