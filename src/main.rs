@@ -20,7 +20,12 @@ use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
 use rfd::FileDialog;
-use std::{env, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}};
+use std::{
+    env,
+    fs::{self, File},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
 fn print_banner() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -233,7 +238,7 @@ fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
 
     // Add the level.dat file
     const LEVEL_TEMPLATE: &[u8] = include_bytes!("../mcassets/level.dat");
-    
+
     // Decompress the gzipped level.template
     let mut decoder = GzDecoder::new(LEVEL_TEMPLATE);
     let mut decompressed_data = Vec::new();
@@ -244,7 +249,7 @@ fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
     // Parse the decompressed NBT data
     let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
         .map_err(|e| format!("Failed to parse level.dat template: {}", e))?;
-    
+
     // Modify the LevelName and LastPlayed fields
     if let Value::Compound(ref mut root) = level_data {
         if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
@@ -266,7 +271,7 @@ fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
     // Serialize the updated NBT data back to bytes
     let serialized_level_data = fastnbt::to_bytes(&level_data)
         .map_err(|e| format!("Failed to serialize updated level.dat: {}", e))?;
-    
+
     // Compress the serialized data back to gzip
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
