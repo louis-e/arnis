@@ -176,7 +176,7 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
 
                 // Create the new world structure
                 create_new_world(&new_world_path, &unique_name)?;
-                return Ok(new_world_path.display().to_string());
+                Ok(new_world_path.display().to_string())
             } else {
                 Err("Minecraft directory not found.".to_string())
             }
