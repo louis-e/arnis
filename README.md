@@ -101,7 +101,13 @@ This section is dedicated to recognizing and celebrating the outstanding contrib
 
 ## :star: Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=louis-e/arnis&type=Date)](https://star-history.com/#louis-e/arnis&Date)
+<a href="https://star-history.com/#louis-e/arnis&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=louis-e/arnis&Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=louis-e/arnis&Date&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=louis-e/arnis&Date&type=Date" />
+ </picture>
+</a>
 
 ## :copyright: License Information
 This project is licensed under the GNU General Public License v3.0 (GPL-3.0).[^3]
