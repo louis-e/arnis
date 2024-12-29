@@ -338,7 +338,7 @@ fn gui_start_generation(
                 path: selected_world,
                 downloader: "requests".to_string(),
                 scale: world_scale,
-                ground_level: ground_level,
+                ground_level,
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
