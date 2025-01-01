@@ -313,6 +313,7 @@ fn gui_start_generation(
     ground_level: i32,
     winter_mode: bool,
     floodfill_timeout: u64,
+    add_street_names: bool,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -342,6 +343,7 @@ fn gui_start_generation(
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
+                add_street_names,
             };
 
             // Reorder bounding box coordinates for further processing

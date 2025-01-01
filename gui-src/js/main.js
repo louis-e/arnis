@@ -118,6 +118,13 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+
+  // Add event listener for the street names toggle
+  const streetNamesToggle = document.getElementById("street-names-toggle");
+  streetNamesToggle.addEventListener("change", () => {
+    const isChecked = streetNamesToggle.checked;
+    console.log("Street Names Toggle:", isChecked);
+  });
 }
 
 function initWorldPicker() {
@@ -297,6 +304,7 @@ async function startGeneration() {
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     var ground_level = parseInt(document.getElementById("ground-level").value, 10);
+    var add_street_names = document.getElementById("street-names-toggle").checked;
 
     // Validate floodfill_timeout and ground_level
     floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
@@ -310,6 +318,7 @@ async function startGeneration() {
         groundLevel: ground_level,
         winterMode: winter_mode,
         floodfillTimeout: floodfill_timeout,
+        addStreetNames: add_street_names,
     });
 
     console.log("Generation process started.");

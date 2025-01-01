@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use crate::element_processing::street_signs::generate_street_signs;
 
 pub fn generate_highways(
     editor: &mut WorldEditor,
@@ -263,6 +264,11 @@ pub fn generate_highways(
                     }
                 }
                 previous_node = Some((node.x, node.z));
+            }
+
+            // Generate street signs at intersections if the option is enabled
+            if args.add_street_names {
+                generate_street_signs(editor, way, ground_level);
             }
         }
     }

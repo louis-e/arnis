@@ -12,3 +12,5 @@ pub mod tourisms;
 pub mod tree;
 pub mod water_areas;
 pub mod waterways;
+pub mod street_signs;
+pub mod street_names;
