@@ -264,6 +264,11 @@ pub fn generate_highways(
                 }
                 previous_node = Some((node.x, node.z));
             }
+
+            // Generate block letters for street names
+            if let Some(name) = element.tags().get("name") {
+                generate_block_letters(editor, name, way, ground_level);
+            }
         }
     }
 }
@@ -295,5 +300,254 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_
         }
 
         previous_node = Some((x, z));
+    }
+}
+
+/// Generates block letters for street names
+fn generate_block_letters(
+    editor: &mut WorldEditor,
+    name: &str,
+    way: &ProcessedWay,
+    ground_level: i32,
+) {
+    let block_type = WHITE_CONCRETE;
+    let letter_spacing = 2;
+    let mut current_x = way.nodes[0].x;
+    let mut current_z = way.nodes[0].z;
+
+    for letter in name.chars() {
+        match letter {
+            'A' => {
+                // Draw letter A
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+            }
+            'B' => {
+                // Draw letter B
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+            }
+            'C' => {
+                // Draw letter C
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+            }
+            'D' => {
+                // Draw letter D
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+            }
+            'E' => {
+                // Draw letter E
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+            }
+            'F' => {
+                // Draw letter F
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+            }
+            'G' => {
+                // Draw letter G
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 2, current_z, None, None);
+            }
+            'H' => {
+                // Draw letter H
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+            }
+            'I' => {
+                // Draw letter I
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x + 1, ground_level + i, current_z, None, None);
+                }
+            }
+            'J' => {
+                // Draw letter J
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x + 1, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x, ground_level, current_z, None, None);
+            }
+            'K' => {
+                // Draw letter K
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+            }
+            'L' => {
+                // Draw letter L
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+            }
+            'M' => {
+                // Draw letter M
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 3, current_z, None, None);
+            }
+            'N' => {
+                // Draw letter N
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 3, current_z, None, None);
+            }
+            'O' => {
+                // Draw letter O
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+            }
+            'P' => {
+                // Draw letter P
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+            }
+            'Q' => {
+                // Draw letter Q
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z + 1, None, None);
+            }
+            'R' => {
+                // Draw letter R
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 4, current_z, None, None);
+            }
+            'S' => {
+                // Draw letter S
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 2, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+            }
+            'T' => {
+                // Draw letter T
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x + 1, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x, ground_level + 4, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 4, current_z, None, None);
+            }
+            'U' => {
+                // Draw letter U
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+            }
+            'V' => {
+                // Draw letter V
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+            }
+            'W' => {
+                // Draw letter W
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 3, current_z, None, None);
+            }
+            'X' => {
+                // Draw letter X
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                    editor.set_block(block_type, current_x + 2, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 3, current_z, None, None);
+            }
+            'Y' => {
+                // Draw letter Y
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x + 1, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x, ground_level + 3, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+            }
+            'Z' => {
+                // Draw letter Z
+                for i in 0..5 {
+                    editor.set_block(block_type, current_x, ground_level + i, current_z, None, None);
+                }
+                editor.set_block(block_type, current_x + 1, ground_level, current_z, None, None);
+                editor.set_block(block_type, current_x + 1, ground_level + 4, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 1, current_z, None, None);
+                editor.set_block(block_type, current_x + 2, ground_level + 3, current_z, None, None);
+            }
+            _ => {}
+        }
+
+        // Move to the next position for the next letter
+        current_x += letter_spacing + 3;
     }
 }
