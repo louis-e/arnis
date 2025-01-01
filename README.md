@@ -16,7 +16,9 @@ Arnis is designed to handle large-scale data and generate rich, immersive enviro
 ## :keyboard: Usage
 <img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
- 
+
+There is an [AUR package](https://aur.archlinux.org/packages/arnis) available for Arch Linux users.
+
 Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
 The world will always be generated starting from the coordinates 0 0 0.
 
