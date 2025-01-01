@@ -98,6 +98,7 @@ function initSettings() {
   const settingsModal = document.getElementById("settings-modal");
   const slider = document.getElementById("scale-value-slider");
   const sliderValue = document.getElementById("slider-value");
+  const streetNamesToggle = document.getElementById("street-names-toggle"); // P40d4
   
   // Open settings modal
   function openSettings() {
@@ -117,6 +118,18 @@ function initSettings() {
   // Update slider value display
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
+  });
+
+  // Add event listener for street names toggle
+  streetNamesToggle.addEventListener("change", () => {
+    const isEnabled = streetNamesToggle.checked;
+    console.log("Street names toggle:", isEnabled);
+    // Implement logic to handle enabling/disabling street names as street signs
+    if (isEnabled) {
+      enableStreetNames();
+    } else {
+      disableStreetNames();
+    }
   });
 }
 
@@ -297,6 +310,7 @@ async function startGeneration() {
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     var ground_level = parseInt(document.getElementById("ground-level").value, 10);
+    var street_names = document.getElementById("street-names-toggle").checked; // P40d4
 
     // Validate floodfill_timeout and ground_level
     floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
@@ -310,6 +324,7 @@ async function startGeneration() {
         groundLevel: ground_level,
         winterMode: winter_mode,
         floodfillTimeout: floodfill_timeout,
+        streetNames: street_names, // P40d4
     });
 
     console.log("Generation process started.");
@@ -318,4 +333,16 @@ async function startGeneration() {
     console.error("Error starting generation:", error);
     generationButtonEnabled = true;
   }
+}
+
+// Function to enable street names as street signs
+function enableStreetNames() {
+  console.log("Street names enabled");
+  // Implement logic to add street names as street signs at intersections
+}
+
+// Function to disable street names as street signs
+function disableStreetNames() {
+  console.log("Street names disabled");
+  // Implement logic to remove street names as street signs at intersections
 }
