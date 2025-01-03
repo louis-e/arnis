@@ -17,7 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 clap = { version = "4.1", features = ["derive"] }
 colored = "2.1.0"
-dirs = "4.0.0"
+dirs = "5.0.1"
 fastanvil = "0.31.0"
 fastnbt = "2.5.0"
 flate2 = "1.0"
