@@ -276,6 +276,7 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, y, z).is_some()
     }*/
 
+    #[allow(clippy::too_many_arguments)]
     pub fn set_sign(
         &mut self,
         line1: String,
