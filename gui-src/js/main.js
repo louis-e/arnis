@@ -217,20 +217,30 @@ function calculateBBoxSize(lng1, lat1, lng2, lat2) {
   return Math.abs(width * height);
 }
 
+// Function to normalize longitude to the range [-180, 180]
+function normalizeLongitude(lon) {
+  return ((lon + 180) % 360 + 360) % 360 - 180;
+}
+
 const threshold1 = 12332660.00;
 const threshold2 = 36084700.00;
 let selectedBBox = "";
 
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
-  selectedBBox = bboxText;
+  let [lng1, lat1, lng2, lat2] = bboxText.split(" ").map(Number);
 
-  const [lng1, lat1, lng2, lat2] = bboxText.split(" ").map(Number);
+  // Normalize longitudes
+  lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
+  lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
+  selectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
+
   const bboxInfo = document.getElementById("bbox-info");
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
     bboxInfo.textContent = "";
+    selectedBBox = "";
     return;
   }
 
