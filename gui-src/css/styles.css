@@ -356,3 +356,16 @@ button:hover {
   content: "⚙️";
   font-size: 18px;
 }
+
+/* Street Sign Styles */
+.street-sign {
+  position: absolute;
+  background-color: #ffffff;
+  color: #000000;
+  padding: 2px 5px;
+  border: 1px solid #000000;
+  border-radius: 3px;
+  font-size: 12px;
+  white-space: nowrap;
+  transform: translate(-50%, -50%);
+}

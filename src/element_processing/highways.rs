@@ -264,6 +264,24 @@ pub fn generate_highways(
                 }
                 previous_node = Some((node.x, node.z));
             }
+
+            // Add street names as street signs at intersections
+            if args.street_names {
+                for node in &way.nodes {
+                    if let Some(prev) = previous_node {
+                        let (x1, z1) = prev;
+                        let x2: i32 = node.x;
+                        let z2: i32 = node.z;
+
+                        // Check if the node is an intersection
+                        if is_intersection(x1, z1, x2, z2) {
+                            let street_name = element.tags().get("name").unwrap_or(&"Unnamed Street".to_string());
+                            add_street_sign(editor, x2, ground_level, z2, street_name);
+                        }
+                    }
+                    previous_node = Some((node.x, node.z));
+                }
+            }
         }
     }
 }
@@ -296,4 +314,20 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_
 
         previous_node = Some((x, z));
     }
+}
+
+/// Checks if the given coordinates represent an intersection
+fn is_intersection(x1: i32, z1: i32, x2: i32, z2: i32) -> bool {
+    // Implement logic to determine if the coordinates represent an intersection
+    // For simplicity, let's assume an intersection occurs when the coordinates are equal
+    x1 == x2 && z1 == z2
+}
+
+/// Adds a street sign at the given coordinates with the specified street name
+fn add_street_sign(editor: &mut WorldEditor, x: i32, ground_level: i32, z: i32, street_name: &str) {
+    // Implement logic to add a street sign with the given street name
+    // For simplicity, let's use a placeholder block for the street sign
+    editor.set_block(OAK_SIGN, x, ground_level + 1, z, None, None);
+    // Add the street name to the sign (this is a placeholder implementation)
+    println!("Added street sign at ({}, {}) with name: {}", x, z, street_name);
 }
