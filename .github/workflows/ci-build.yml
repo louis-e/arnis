@@ -38,3 +38,9 @@ jobs:
 
     - name: Build
       run: cargo build --release
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: ${{ matrix.os }}-latest-build
+        path: target/release/arnis.exe
