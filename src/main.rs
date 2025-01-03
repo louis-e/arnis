@@ -275,24 +275,29 @@ fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
             // Update LastPlayed to the current Unix time in milliseconds
             let current_time: std::time::Duration = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e: std::time::SystemTimeError| format!("Failed to get current time: {}", e))?;
+                .map_err(|e: std::time::SystemTimeError| {
+                    format!("Failed to get current time: {}", e)
+                })?;
             let current_time_millis: i64 = current_time.as_millis() as i64;
             data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
         }
     }
 
     // Serialize the updated NBT data back to bytes
-    let serialized_level_data: Vec<u8> = fastnbt::to_bytes(&level_data)
-        .map_err(|e: fastnbt::error::Error| format!("Failed to serialize updated level.dat: {}", e))?;
+    let serialized_level_data: Vec<u8> =
+        fastnbt::to_bytes(&level_data).map_err(|e: fastnbt::error::Error| {
+            format!("Failed to serialize updated level.dat: {}", e)
+        })?;
 
     // Compress the serialized data back to gzip
-    let mut encoder: flate2::write::GzEncoder<Vec<u8>> = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut encoder: flate2::write::GzEncoder<Vec<u8>> =
+        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
         .write_all(&serialized_level_data)
         .map_err(|e: std::io::Error| format!("Failed to compress updated level.dat: {}", e))?;
-    let compressed_level_data: Vec<u8> = encoder
-        .finish()
-        .map_err(|e: std::io::Error| format!("Failed to finalize compression for level.dat: {}", e))?;
+    let compressed_level_data: Vec<u8> = encoder.finish().map_err(|e: std::io::Error| {
+        format!("Failed to finalize compression for level.dat: {}", e)
+    })?;
 
     fs::write(world_path.join("level.dat"), compressed_level_data)
         .map_err(|e: std::io::Error| format!("Failed to create level.dat file: {}", e))?;
