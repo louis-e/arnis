@@ -233,7 +233,6 @@ function displayBboxInfoText(bboxText) {
   // Normalize longitudes
   lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
   lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
-
   selectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
 
   const bboxInfo = document.getElementById("bbox-info");
