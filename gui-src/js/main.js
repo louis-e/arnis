@@ -60,7 +60,29 @@ function registerMessageEvent() {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
     }
+
+    const blockLetterData = event.data.blockLetterData;
+    if (blockLetterData) {
+      console.log("Received Block Letter Data:", blockLetterData);
+      displayBlockLetters(blockLetterData);
+    }
   });
+}
+
+// Function to display block letters for street names on the map
+function displayBlockLetters(blockLetterData) {
+  const mapContainer = document.querySelector(".map-container");
+  const blockLetterContainer = document.createElement("div");
+  blockLetterContainer.className = "block-letter-container";
+
+  blockLetterData.forEach(letter => {
+    const letterElement = document.createElement("div");
+    letterElement.className = "block-letter";
+    letterElement.textContent = letter;
+    blockLetterContainer.appendChild(letterElement);
+  });
+
+  mapContainer.appendChild(blockLetterContainer);
 }
 
 // Function to set up the progress bar listener
