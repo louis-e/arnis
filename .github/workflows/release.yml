@@ -19,10 +19,10 @@ jobs:
         target: x86_64-pc-windows-msvc
 
     - name: Install dependencies
-      run: cargo fetch
+      run: cargo fetch --locked
 
     - name: Build
-      run: cargo build --release
+      run: cargo build --frozen --release
 
     - name: Upload artifact (Windows)
       uses: actions/upload-artifact@v3
