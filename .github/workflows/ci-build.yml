@@ -40,6 +40,7 @@ jobs:
       run: cargo build --release
 
     - name: Upload artifact
+      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       uses: actions/upload-artifact@v3
       with:
         name: ${{ matrix.os }}-latest-build
