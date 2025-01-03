@@ -162,17 +162,17 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
         if let Some(default_path) = &default_dir {
             if default_path.exists() {
                 // Generate a unique world name
-                let mut counter = 1;
-                let unique_name = loop {
-                    let candidate_name = format!("Arnis World {}", counter);
-                    let candidate_path = default_path.join(&candidate_name);
+                let mut counter: i32 = 1;
+                let unique_name: String = loop {
+                    let candidate_name: String = format!("Arnis World {}", counter);
+                    let candidate_path: PathBuf = default_path.join(&candidate_name);
                     if !candidate_path.exists() {
                         break candidate_name;
                     }
                     counter += 1;
                 };
 
-                let new_world_path = default_path.join(&unique_name);
+                let new_world_path: PathBuf = default_path.join(&unique_name);
 
                 // Create the new world structure
                 create_new_world(&new_world_path, &unique_name)?;
@@ -194,9 +194,6 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
         };
 
         if let Some(path) = dialog.pick_folder() {
-            // Print the full path to the console
-            println!("Selected world path: {}", path.display());
-
             // Check if the "region" folder exists within the selected directory
             if path.join("region").exists() {
                 // Check the 'session.lock' file
@@ -215,8 +212,24 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
 
                 return Ok(path.display().to_string());
             } else {
-                // Notify the frontend that no valid Minecraft world was found
-                return Err("Invalid Minecraft world".to_string());
+                // No Minecraft directory found, generating world in custom user selected directory
+
+                // Generate a unique world name
+                let mut counter: i32 = 1;
+                let unique_name: String = loop {
+                    let candidate_name: String = format!("Arnis World {}", counter);
+                    let candidate_path: PathBuf = path.join(&candidate_name);
+                    if !candidate_path.exists() {
+                        break candidate_name;
+                    }
+                    counter += 1;
+                };
+
+                let new_world_path: PathBuf = path.join(&unique_name);
+
+                // Create the new world structure
+                create_new_world(&new_world_path, &unique_name)?;
+                return Ok(new_world_path.display().to_string());
             }
         }
 
@@ -228,27 +241,27 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
 fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
     // Create the new world directory structure
     fs::create_dir_all(world_path.join("region"))
-        .map_err(|e| format!("Failed to create world directory: {}", e))?;
+        .map_err(|e: std::io::Error| format!("Failed to create world directory: {}", e))?;
 
     // Copy the region template file
     const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
     let region_path = world_path.join("region").join("r.0.0.mca");
     fs::write(&region_path, REGION_TEMPLATE)
-        .map_err(|e| format!("Failed to create region file: {}", e))?;
+        .map_err(|e: std::io::Error| format!("Failed to create region file: {}", e))?;
 
     // Add the level.dat file
     const LEVEL_TEMPLATE: &[u8] = include_bytes!("../mcassets/level.dat");
 
     // Decompress the gzipped level.template
-    let mut decoder = GzDecoder::new(LEVEL_TEMPLATE);
-    let mut decompressed_data = Vec::new();
+    let mut decoder: GzDecoder<&[u8]> = GzDecoder::new(LEVEL_TEMPLATE);
+    let mut decompressed_data: Vec<u8> = Vec::new();
     decoder
         .read_to_end(&mut decompressed_data)
-        .map_err(|e| format!("Failed to decompress level.template: {}", e))?;
+        .map_err(|e: std::io::Error| format!("Failed to decompress level.template: {}", e))?;
 
     // Parse the decompressed NBT data
     let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
-        .map_err(|e| format!("Failed to parse level.dat template: {}", e))?;
+        .map_err(|e: fastnbt::error::Error| format!("Failed to parse level.dat template: {}", e))?;
 
     // Modify the LevelName and LastPlayed fields
     if let Value::Compound(ref mut root) = level_data {
@@ -260,34 +273,39 @@ fn create_new_world(world_path: &Path, world_name: &str) -> Result<(), String> {
             );
 
             // Update LastPlayed to the current Unix time in milliseconds
-            let current_time = std::time::SystemTime::now()
+            let current_time: std::time::Duration = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| format!("Failed to get current time: {}", e))?;
-            let current_time_millis = current_time.as_millis() as i64;
+                .map_err(|e: std::time::SystemTimeError| {
+                    format!("Failed to get current time: {}", e)
+                })?;
+            let current_time_millis: i64 = current_time.as_millis() as i64;
             data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
         }
     }
 
     // Serialize the updated NBT data back to bytes
-    let serialized_level_data = fastnbt::to_bytes(&level_data)
-        .map_err(|e| format!("Failed to serialize updated level.dat: {}", e))?;
+    let serialized_level_data: Vec<u8> =
+        fastnbt::to_bytes(&level_data).map_err(|e: fastnbt::error::Error| {
+            format!("Failed to serialize updated level.dat: {}", e)
+        })?;
 
     // Compress the serialized data back to gzip
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    let mut encoder: flate2::write::GzEncoder<Vec<u8>> =
+        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
         .write_all(&serialized_level_data)
-        .map_err(|e| format!("Failed to compress updated level.dat: {}", e))?;
-    let compressed_level_data = encoder
-        .finish()
-        .map_err(|e| format!("Failed to finalize compression for level.dat: {}", e))?;
+        .map_err(|e: std::io::Error| format!("Failed to compress updated level.dat: {}", e))?;
+    let compressed_level_data: Vec<u8> = encoder.finish().map_err(|e: std::io::Error| {
+        format!("Failed to finalize compression for level.dat: {}", e)
+    })?;
 
     fs::write(world_path.join("level.dat"), compressed_level_data)
-        .map_err(|e| format!("Failed to create level.dat file: {}", e))?;
+        .map_err(|e: std::io::Error| format!("Failed to create level.dat file: {}", e))?;
 
     // Add the icon.png file
     const ICON_TEMPLATE: &[u8] = include_bytes!("../mcassets/icon.png");
     fs::write(world_path.join("icon.png"), ICON_TEMPLATE)
-        .map_err(|e| format!("Failed to create icon.png file: {}", e))?;
+        .map_err(|e: std::io::Error| format!("Failed to create icon.png file: {}", e))?;
 
     Ok(())
 }
