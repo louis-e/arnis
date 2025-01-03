@@ -18,24 +18,11 @@ Arnis is designed to handle large-scale data and generate rich, immersive enviro
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
  
 Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
-The world will always be generated starting from the coordinates 0 0 0.
+The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0).
 
 If you choose to select an own world, make sure to generate a new flat world in advance in Minecraft.
 
-<details>
-
-<summary>Alternatively you can also run Arnis the old fashioned way in the command line.</summary>
-  
-```arnis.exe --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```
-
-The --bbox parameter specifies the bounding box coordinates in the format: min_lng,min_lat,max_lng,max_lat. Use --path to specify the location of the Minecraft world.
-
-<img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/bbox-finder.png?raw=true"><br>
-Use http://bboxfinder.com/ to draw a rectangle of your wanted area. Then copy the four box coordinates as shown below and use them as the input for the --bbox parameter. Try starting with a small area since large areas take a lot of computing power and time to process.<br>
-
-<i>Note: This might not be working right now since the console gets suppressed. https://github.com/louis-e/arnis/issues/99</i>
-
-</details>
+Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4.
 
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
@@ -56,12 +43,22 @@ Yes! Arnis was initially developed in Python, which benefited from Python's open
 - *Where does the data come from?*<br>
 The geographic data is sourced from OpenStreetMap (OSM)[^1], a free, collaborative mapping project that serves as an open-source alternative to commercial mapping services. The data is accessed via the Overpass API, which queries OSM's database.
 - *How does the Minecraft world generation work?*<br>
-The script uses the [fastnbt](https://github.com/owengage/fastnbt) cargo package to interact with Minecraft's world format. This library allows Arnis to manipulate Minecraft region files, enabling the generation of real-world locations.
+The script uses the [fastnbt](https://github.com/owengage/fastnbt) cargo package to interact with Minecraft's world format. This library allows Arnis to manipulate Minecraft region files, enabling the generation of real-world locations. The section 'Processing Pipeline' goes a bit further into the details and steps of the generation process itself.
 - *Where does the name come from?*<br>
 The project is named after the smallest city in Germany, Arnis[^2]. The city's small size made it an ideal test case for developing and debugging the algorithm efficiently.
+- *I don't have Minecraft installed but want to generate a world for my kids. How?*<br>
+When selecting a world, click on 'Select existing world' and choose a directory. The world will be generated there.
+- *What Minecraft version should I use?*<br>
+Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16.5 and below is currently not supported, but we are working on it!
+- *The generation did finish, but there's nothing in the world!*<br>
+Make sure to teleport to the generation starting point (/tp 0 0 0). If there is still nothing, you might need to travel a bit further into the positive X and positive Z direction.
 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
+- [ ] Fix compilation for Linux
+- [ ] Support multipolygons
+- [ ] Add street names as signs
+- [ ] Add support for older Minecraft versions (<=1.16.5)
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
 - [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
 - [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
