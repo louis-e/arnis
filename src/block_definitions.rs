@@ -140,6 +140,7 @@ impl Block {
             110 => "bedrock",
             111 => "snow_block",
             112 => "snow",
+            113 => "oak_sign",
             _ => panic!("Invalid id"),
         }
     }
@@ -173,6 +174,16 @@ impl Block {
             109 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
+                map
+            })),
+
+            113 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("rotation".to_string(), Value::String("6".to_string()));
+                map.insert(
+                    "waterlogged".to_string(),
+                    Value::String("false".to_string()),
+                );
                 map
             })),
 
@@ -289,6 +300,7 @@ pub const OXIDIZED_COPPER: Block = Block::new(103);
 pub const YELLOW_TERRACOTTA: Block = Block::new(104);
 pub const SNOW_BLOCK: Block = Block::new(111);
 pub const SNOW_LAYER: Block = Block::new(112);
+pub const SIGN: Block = Block::new(113);
 
 pub const CARROTS: Block = Block::new(105);
 pub const DARK_OAK_DOOR_LOWER: Block = Block::new(106);

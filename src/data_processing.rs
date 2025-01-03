@@ -21,6 +21,17 @@ pub fn generate_world(
     let mut editor: WorldEditor =
         WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, args);
 
+    editor.set_sign(
+        "↑".to_string(),
+        "Generated World".to_string(),
+        "This direction".to_string(),
+        "".to_string(),
+        9,
+        -61,
+        9,
+        6,
+    );
+
     // Process data
     let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);

@@ -7,6 +7,7 @@ use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 
@@ -137,6 +138,7 @@ impl Default for SectionToModify {
 #[derive(Default)]
 struct ChunkToModify {
     sections: FnvHashMap<i8, SectionToModify>,
+    other: FnvHashMap<String, Value>,
 }
 
 impl ChunkToModify {
@@ -274,6 +276,65 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, y, z).is_some()
     }*/
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_sign(
+        &mut self,
+        line1: String,
+        line2: String,
+        line3: String,
+        line4: String,
+        x: i32,
+        y: i32,
+        z: i32,
+        _rotation: i8,
+    ) {
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let mut block_entities = HashMap::new();
+
+        let messages = vec![
+            Value::String(format!("\"{}\"", line1)),
+            Value::String(format!("\"{}\"", line2)),
+            Value::String(format!("\"{}\"", line3)),
+            Value::String(format!("\"{}\"", line4)),
+        ];
+
+        let mut text_data = HashMap::new();
+        text_data.insert("messages".to_string(), Value::List(messages));
+        text_data.insert("color".to_string(), Value::String("black".to_string()));
+        text_data.insert("has_glowing_text".to_string(), Value::Byte(0));
+
+        block_entities.insert("front_text".to_string(), Value::Compound(text_data));
+        block_entities.insert(
+            "id".to_string(),
+            Value::String("minecraft:sign".to_string()),
+        );
+        block_entities.insert("is_waxed".to_string(), Value::Byte(0));
+        block_entities.insert("keepPacked".to_string(), Value::Byte(0));
+        block_entities.insert("x".to_string(), Value::Int(x));
+        block_entities.insert("y".to_string(), Value::Int(y));
+        block_entities.insert("z".to_string(), Value::Int(z));
+
+        let region: &mut RegionToModify = self.world.get_or_create_region(region_x, region_z);
+        let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        if let Some(chunk_data) = chunk.other.get_mut("block_entities") {
+            if let Value::List(entities) = chunk_data {
+                entities.push(Value::Compound(block_entities));
+            }
+        } else {
+            chunk.other.insert(
+                "block_entities".to_string(),
+                Value::List(vec![Value::Compound(block_entities)]),
+            );
+        }
+
+        self.set_block(SIGN, x, y, z, None, None);
+    }
+
     /// Sets a block of the specified type at the given coordinates.
     pub fn set_block(
         &mut self,
@@ -408,6 +469,7 @@ impl<'a> WorldEditor<'a> {
 
                     if let Some(chunk_to_modify) = region_to_modify.get_chunk(chunk_x, chunk_z) {
                         chunk.sections = chunk_to_modify.sections().collect();
+                        chunk.other.extend(chunk_to_modify.other.clone());
                     }
 
                     chunk.x_pos = chunk_x + region_x * 32;
