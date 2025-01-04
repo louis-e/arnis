@@ -51,7 +51,7 @@ pub struct ProcessedWay {
     pub tags: HashMap<String, String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ProcessedMemberRole {
     Outer,
     Inner,

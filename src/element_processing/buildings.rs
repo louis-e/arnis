@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::ProcessedWay;
+use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 use std::collections::HashSet;
@@ -279,6 +279,35 @@ pub fn generate_buildings(
                         None,
                     );
                 }
+            }
+        }
+    }
+}
+
+pub fn generate_building_from_relation(
+    editor: &mut WorldEditor,
+    relation: &ProcessedRelation,
+    ground_level: i32,
+    args: &Args,
+) {
+    // Process the outer way to create the building walls
+    for member in &relation.members {
+        if member.role == ProcessedMemberRole::Outer {
+            generate_buildings(editor, &member.way, ground_level, args);
+        }
+    }
+
+    // Handle inner ways (holes, courtyards, etc.)
+    for member in &relation.members {
+        if member.role == ProcessedMemberRole::Inner {
+            let polygon_coords: Vec<(i32, i32)> =
+                member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
+            let hole_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+            for (x, z) in hole_area {
+                // Remove blocks in the inner area to create a hole
+                editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
             }
         }
     }
