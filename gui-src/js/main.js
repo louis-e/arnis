@@ -270,6 +270,7 @@ async function selectWorld(generate_new_world) {
       document.getElementById('selected-world').style.color = "#fecc44";
     }
   } catch (error) {
+    worldPath = error;
     console.error(error);
     document.getElementById('selected-world').textContent = error;
     document.getElementById('selected-world').style.color = "#fa7878";
@@ -295,7 +296,7 @@ async function startGeneration() {
       worldPath === "No world selected" ||
       worldPath == "Invalid Minecraft world" ||
       worldPath == "The selected world is currently in use" ||
-      worldPath == "Minecraft directory not found." ||
+      worldPath == "Minecraft directory not found" ||
       worldPath === ""
     ) {
       document.getElementById('selected-world').textContent = "Select a Minecraft world first!";
