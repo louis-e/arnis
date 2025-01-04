@@ -11,7 +11,7 @@ assignees: ''
 A clear and concise description of what the bug is and what you expected to happen.
 
 **Used bbox area**
-Please provide your input parameters so we can reproduce the issue.
+Please provide your input parameters so we can reproduce the issue. *(For example: 48.133444 11.569462 48.142609 11.584740)*
 
 **Used Minecraft version**
 Please provide the Minecraft version you used.
