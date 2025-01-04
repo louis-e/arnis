@@ -18,7 +18,7 @@ Arnis is designed to handle large-scale data and generate rich, immersive enviro
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
  
 Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
-The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0).
+The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
 
 If you choose to select an own world, make sure to generate a new flat world in advance in Minecraft.
 
@@ -58,7 +58,6 @@ Make sure to teleport to the generation starting point (/tp 0 0 0). If there is 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Fix compilation for Linux
-- [ ] Support multipolygons (https://github.com/louis-e/arnis/issues/112, https://github.com/louis-e/arnis/issues/114)
 - [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
 - [ ] Add street names as signs
 - [ ] Add support for older Minecraft versions (<=1.16.5) (https://github.com/louis-e/arnis/issues/124, https://github.com/louis-e/arnis/issues/137)
@@ -66,6 +65,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Add interior to buildings
 - [ ] Implement house roof types
 - [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
+- [ ] Add support for inner attribute in multipolygons and multipolygon elements other than buildings
 - [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
 - [ ] Evaluate and implement faster region saving
 - [ ] Refactor bridges implementation
@@ -74,6 +74,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Refactor fountain structure implementation
 - [ ] Luanti Support (https://github.com/louis-e/arnis/issues/120)
 - [ ] Minecraft Bedrock Edition Support (https://github.com/louis-e/arnis/issues/148)
+- [x] Support multipolygons (https://github.com/louis-e/arnis/issues/112, https://github.com/louis-e/arnis/issues/114)
 - [x] Memory optimization
 - [x] Design and implement a GUI
 - [x] Automatic new world creation instead of using an existing world
