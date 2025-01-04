@@ -48,6 +48,10 @@ pub struct Args {
     /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
+
+    /// Add street names as street signs (default: false)
+    #[arg(long, default_value_t = false)]
+    pub add_street_names: bool,
 }
 
 impl Args {
@@ -97,7 +101,7 @@ fn validate_bounding_box(bbox: &str) -> bool {
     min_lng < max_lng && min_lat < max_lat
 }
 
-fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
+fn parse_duration(arg: &str) -> Result<std::.time::Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
     Ok(std::time::Duration::from_secs(seconds))
 }
