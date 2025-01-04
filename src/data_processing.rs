@@ -105,7 +105,14 @@ pub fn generate_world(
                 }
             }
             ProcessedElement::Relation(rel) => {
-                if rel.tags.contains_key("water") {
+                if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                    buildings::generate_building_from_relation(
+                        &mut editor,
+                        rel,
+                        ground_level,
+                        args,
+                    );
+                } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel, ground_level);
                 }
             }
