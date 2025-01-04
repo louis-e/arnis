@@ -18,7 +18,7 @@ Arnis is designed to handle large-scale data and generate rich, immersive enviro
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
  
 Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
-The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0).
+The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
 
 If you choose to select an own world, make sure to generate a new flat world in advance in Minecraft.
 
