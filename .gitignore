@@ -7,9 +7,6 @@
 /target
 **/*.rs.bk
 
-# Lock files
-Cargo.lock
-
 # IDE/editor files
 .idea/
 /.vscode/
