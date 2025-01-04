@@ -105,9 +105,9 @@ pub fn generate_highways(
             let ProcessedElement::Way(way) = element else {
                 return;
             };
-    
+
             // Check if the highway has a name
-            /*if let Some(street_name) = way.tags.get("name") {
+            if let Some(street_name) = way.tags.get("name") {
                 // Place a sign at the start of the way
                 if let Some(first_node) = way.nodes.first() {
                     editor.set_sign(
@@ -121,7 +121,7 @@ pub fn generate_highways(
                         4, // Sign facing south
                     );
                 }
-    
+
                 // Place a sign at the end of the way
                 if let Some(last_node) = way.nodes.last() {
                     editor.set_sign(
@@ -135,7 +135,7 @@ pub fn generate_highways(
                         4, // Sign facing south
                     );
                 }
-            }*/
+            }
 
             let mut previous_node: Option<(i32, i32)> = None;
             let mut block_type = BLACK_CONCRETE;
