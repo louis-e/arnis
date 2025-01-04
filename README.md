@@ -48,6 +48,8 @@ The script uses the [fastnbt](https://github.com/owengage/fastnbt) cargo package
 The project is named after the smallest city in Germany, Arnis[^2]. The city's small size made it an ideal test case for developing and debugging the algorithm efficiently.
 - *I don't have Minecraft installed but want to generate a world for my kids. How?*<br>
 When selecting a world, click on 'Select existing world' and choose a directory. The world will be generated there.
+- *Arnis instantly closes again or the window is empty!*<br>
+If you're on Windows, please install the [Evergreen Bootstrapper from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download).
 - *What Minecraft version should I use?*<br>
 Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16.5 and below is currently not supported, but we are working on it!
 - *The generation did finish, but there's nothing in the world!*<br>
@@ -56,23 +58,25 @@ Make sure to teleport to the generation starting point (/tp 0 0 0). If there is 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Fix compilation for Linux
-- [ ] Support multipolygons
-- [ ] Add street names as signs
-- [ ] Add support for older Minecraft versions (<=1.16.5)
-- [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
+- [ ] Support multipolygons (https://github.com/louis-e/arnis/issues/112, https://github.com/louis-e/arnis/issues/114)
 - [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
+- [ ] Add street names as signs
+- [ ] Add support for older Minecraft versions (<=1.16.5) (https://github.com/louis-e/arnis/issues/124, https://github.com/louis-e/arnis/issues/137)
+- [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
+- [ ] Add interior to buildings
+- [ ] Implement house roof types
 - [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
 - [ ] Evaluate and implement faster region saving
-- [ ] Automatic new world creation instead of using an existing world
-- [ ] Implement house roof types
 - [ ] Refactor bridges implementation
 - [ ] Refactor railway implementation
 - [ ] Better code documentation
 - [ ] Refactor fountain structure implementation
-- [ ] Add interior to buildings
+- [ ] Luanti Support (https://github.com/louis-e/arnis/issues/120)
+- [ ] Minecraft Bedrock Edition Support (https://github.com/louis-e/arnis/issues/148)
 - [x] Memory optimization
 - [x] Design and implement a GUI
+- [x] Automatic new world creation instead of using an existing world
 - [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
 - [x] Setup fork of [https://github.com/aaronr/bboxfinder.com](https://github.com/aaronr/bboxfinder.com) for easy bbox picking
 
