@@ -92,13 +92,6 @@ For the GUI: ```cargo run --release```<br>
 
 After your pull request was merged, I will take care of regularly creating update releases which will include your changes.
 
-#### Contributors:
-This section is dedicated to recognizing and celebrating the outstanding contributions of individuals who have significantly enhanced this project. Your work and dedication are deeply appreciated!
-- louis-e
-- scd31
-- vfosnar
-
-
 ## :star: Star History
 
 <a href="https://star-history.com/#louis-e/arnis&Date">
