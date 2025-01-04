@@ -164,10 +164,10 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
                 // Call create_new_world and return the result
                 create_new_world(default_path)
             } else {
-                Err("Minecraft directory not found.".to_string())
+                Err("Minecraft directory not found".to_string())
             }
         } else {
-            Err("Minecraft directory not found.".to_string())
+            Err("Minecraft directory not found".to_string())
         }
     } else {
         // Handle existing world selection

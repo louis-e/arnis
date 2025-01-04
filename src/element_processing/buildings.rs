@@ -80,6 +80,39 @@ pub fn generate_buildings(
         }
     }
 
+    if let Some(amenity_type) = element.tags.get("amenity") {
+        if amenity_type == "shelter" {
+            let roof_block: Block = STONE_BRICK_SLAB;
+
+            let polygon_coords: Vec<(i32, i32)> = element
+                .nodes
+                .iter()
+                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                .collect();
+            let roof_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+            // Place fences and roof slabs at each corner node directly
+            for node in &element.nodes {
+                let x: i32 = node.x;
+                let z: i32 = node.z;
+
+                for y in 1..=4 {
+                    editor.set_block(OAK_FENCE, x, ground_level + y, z, None, None);
+                }
+                editor.set_block(roof_block, x, ground_level + 5, z, None, None);
+            }
+
+            // Flood fill the roof area
+            let roof_height: i32 = ground_level + 5;
+            for (x, z) in roof_area.iter() {
+                editor.set_block(roof_block, *x, roof_height, *z, None, None);
+            }
+
+            return;
+        }
+    }
+
     if let Some(building_type) = element.tags.get("building") {
         if building_type == "garage" {
             building_height = 2;
