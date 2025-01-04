@@ -102,6 +102,41 @@ pub fn generate_highways(
                 editor.set_block(surface_block, x, ground_level, z, None, None);
             }
         } else {
+            let ProcessedElement::Way(way) = element else {
+                return;
+            };
+    
+            // Check if the highway has a name
+            /*if let Some(street_name) = way.tags.get("name") {
+                // Place a sign at the start of the way
+                if let Some(first_node) = way.nodes.first() {
+                    editor.set_sign(
+                        "".to_string(),
+                        street_name.clone(),
+                        "".to_string(),
+                        "".to_string(),
+                        first_node.x,
+                        ground_level + 1,
+                        first_node.z,
+                        4, // Sign facing south
+                    );
+                }
+    
+                // Place a sign at the end of the way
+                if let Some(last_node) = way.nodes.last() {
+                    editor.set_sign(
+                        "".to_string(),
+                        street_name.clone(),
+                        "".to_string(),
+                        "".to_string(),
+                        last_node.x,
+                        ground_level + 1,
+                        last_node.z,
+                        4, // Sign facing south
+                    );
+                }
+            }*/
+
             let mut previous_node: Option<(i32, i32)> = None;
             let mut block_type = BLACK_CONCRETE;
             let mut block_range: i32 = 2;
@@ -153,10 +188,6 @@ pub fn generate_highways(
                     }
                 }
             }
-
-            let ProcessedElement::Way(way) = element else {
-                return;
-            };
 
             // Iterate over nodes to create the highway
             for node in &way.nodes {
