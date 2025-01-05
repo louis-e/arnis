@@ -156,6 +156,65 @@ pub fn generate_buildings(
 
                 return;
             }
+        } else if building_type == "parking" {
+            // Parking building structure
+
+            let polygon_coords: Vec<(i32, i32)> = element
+                .nodes
+                .iter()
+                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                .collect();
+            let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+            for level in 0..=(building_height / 4) {
+                let current_level = ground_level + level * 4;
+
+                // Build walls
+                for node in &element.nodes {
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
+
+                    // Build walls up to the current level
+                    for y in (current_level + 1)..=(current_level + 4) {
+                        editor.set_block(STONE_BRICKS, x, y, z, None, None);
+                    }
+                }
+
+                // Fill the floor area for each level
+                for (x, z) in &floor_area {
+                    if level == 0 {
+                        editor.set_block(SMOOTH_STONE, *x, current_level, *z, None, None);
+                    } else {
+                        editor.set_block(COBBLESTONE, *x, current_level, *z, None, None);
+                    }
+                }
+            }
+
+            // Outline for each level
+            for level in 0..=(building_height / 4) {
+                let current_level = ground_level + level * 4;
+
+                // Use the nodes to create the outline
+                let mut prev_outline = None;
+                for node in &element.nodes {
+                    let x = node.x;
+                    let z = node.z;
+
+                    if let Some((prev_x, prev_z)) = prev_outline {
+                        let outline_points = bresenham_line(prev_x, current_level, prev_z, x, current_level, z);
+                        for (bx, _, bz) in outline_points {
+                            editor.set_block(SMOOTH_STONE, bx, current_level, bz, Some(&[COBBLESTONE, COBBLESTONE_WALL]), None);
+                            editor.set_block(STONE_BRICK_SLAB, bx, current_level + 2, bz, None, None);
+                            if bx % 2 == 0 {
+                                editor.set_block(COBBLESTONE_WALL, bx, current_level + 1, bz, None, None);
+                            }
+                        }
+                    }
+                    prev_outline = Some((x, z));
+                }
+            }
+
+            return;
         } else if building_type == "roof" {
             let roof_height: i32 = ground_level + 5;
 
