@@ -11,7 +11,7 @@
   "invalid_format": "Неверный формат. Пожалуйста, используйте 'lat,lng,lat,lng' или 'lat lng lat lng'.",
   "select_a_location_first": "Сначала выберите местоположение!",
   "select_a_minecraft_world_first": "Сначала выберите мир Minecraft!",
-  "generation_process_started": "Процесс генерации начат.",
+  "generation_process_started": "Процесс генерации начат",
   "winter_mode": "Зимний режим:",
   "world_scale": "Масштаб мира:",
   "custom_bounding_box": "Пользовательская ограничивающая рамка:",
