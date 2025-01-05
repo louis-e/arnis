@@ -164,7 +164,8 @@ pub fn generate_buildings(
                 .iter()
                 .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
                 .collect();
-            let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+            let floor_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for level in 0..=(building_height / 4) {
                 let current_level = ground_level + level * 4;
@@ -201,12 +202,34 @@ pub fn generate_buildings(
                     let z = node.z;
 
                     if let Some((prev_x, prev_z)) = prev_outline {
-                        let outline_points = bresenham_line(prev_x, current_level, prev_z, x, current_level, z);
+                        let outline_points =
+                            bresenham_line(prev_x, current_level, prev_z, x, current_level, z);
                         for (bx, _, bz) in outline_points {
-                            editor.set_block(SMOOTH_STONE, bx, current_level, bz, Some(&[COBBLESTONE, COBBLESTONE_WALL]), None);
-                            editor.set_block(STONE_BRICK_SLAB, bx, current_level + 2, bz, None, None);
+                            editor.set_block(
+                                SMOOTH_STONE,
+                                bx,
+                                current_level,
+                                bz,
+                                Some(&[COBBLESTONE, COBBLESTONE_WALL]),
+                                None,
+                            );
+                            editor.set_block(
+                                STONE_BRICK_SLAB,
+                                bx,
+                                current_level + 2,
+                                bz,
+                                None,
+                                None,
+                            );
                             if bx % 2 == 0 {
-                                editor.set_block(COBBLESTONE_WALL, bx, current_level + 1, bz, None, None);
+                                editor.set_block(
+                                    COBBLESTONE_WALL,
+                                    bx,
+                                    current_level + 1,
+                                    bz,
+                                    None,
+                                    None,
+                                );
                             }
                         }
                     }
