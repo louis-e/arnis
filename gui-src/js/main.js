@@ -2,8 +2,6 @@ const { invoke } = window.__TAURI__.core;
 
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
-  initFooter();
-  await checkForUpdates();
   registerMessageEvent();
   window.selectWorld = selectWorld;
   window.startGeneration = startGeneration;
@@ -11,7 +9,125 @@ window.addEventListener("DOMContentLoaded", async () => {
   initSettings();
   initWorldPicker();
   handleBboxInput();
+  const language = detectLanguage();
+  const localization = await loadLocalization(language);
+  await applyLocalization(localization);
+  initFooter();
+  await checkForUpdates();
 });
+
+async function loadLocalization(language) {
+  const response = await fetch(`./locales/${language}.json`);
+  const localization = await response.json();
+  return localization;
+}
+
+async function applyLocalization(localization) {
+  const selectLocationElement = document.querySelector("h2[data-localize='select_location']");
+  if (selectLocationElement) {
+    selectLocationElement.textContent = localization.select_location;
+  }
+
+  const bboxTextElement = document.getElementById("bbox-text");
+  if (bboxTextElement) {
+    bboxTextElement.textContent = localization.zoom_in_and_choose;
+  }
+
+  const selectWorldElement = document.querySelector("h2[data-localize='select_world']");
+  if (selectWorldElement) {
+    selectWorldElement.textContent = localization.select_world;
+  }
+
+  const chooseWorldButton = document.querySelector("button[data-localize='choose_world']");
+  if (chooseWorldButton) {
+    chooseWorldButton.firstChild.textContent = localization.choose_world;
+  }
+
+  const selectedWorldElement = document.getElementById("selected-world");
+  if (selectedWorldElement) {
+    selectedWorldElement.textContent = localization.no_world_selected;
+  }
+
+  const startButtonElement = document.getElementById("start-button");
+  if (startButtonElement) {
+    startButtonElement.textContent = localization.start_generation;
+  }
+
+  const progressElement = document.querySelector("h2[data-localize='progress']");
+  if (progressElement) {
+    progressElement.textContent = localization.progress;
+  }
+
+  const chooseWorldModalTitle = document.querySelector("h2[data-localize='choose_world_modal_title']");
+  if (chooseWorldModalTitle) {
+    chooseWorldModalTitle.textContent = localization.choose_world_modal_title;
+  }
+
+  const selectExistingWorldButton = document.querySelector("button[data-localize='select_existing_world']");
+  if (selectExistingWorldButton) {
+    selectExistingWorldButton.textContent = localization.select_existing_world;
+  }
+
+  const generateNewWorldButton = document.querySelector("button[data-localize='generate_new_world']");
+  if (generateNewWorldButton) {
+    generateNewWorldButton.textContent = localization.generate_new_world;
+  }
+
+  const customizationSettingsTitle = document.querySelector("h2[data-localize='customization_settings']");
+  if (customizationSettingsTitle) {
+    customizationSettingsTitle.textContent = localization.customization_settings;
+  }
+
+  const winterModeLabel = document.querySelector("label[data-localize='winter_mode']");
+  if (winterModeLabel) {
+    winterModeLabel.textContent = localization.winter_mode;
+  }
+
+  const worldScaleLabel = document.querySelector("label[data-localize='world_scale']");
+  if (worldScaleLabel) {
+    worldScaleLabel.textContent = localization.world_scale;
+  }
+
+  const customBoundingBoxLabel = document.querySelector("label[data-localize='custom_bounding_box']");
+  if (customBoundingBoxLabel) {
+    customBoundingBoxLabel.textContent = localization.custom_bounding_box;
+  }
+
+  const floodfillTimeoutLabel = document.querySelector("label[data-localize='floodfill_timeout']");
+  if (floodfillTimeoutLabel) {
+    floodfillTimeoutLabel.textContent = localization.floodfill_timeout;
+  }
+
+  const groundLevelLabel = document.querySelector("label[data-localize='ground_level']");
+  if (groundLevelLabel) {
+    groundLevelLabel.textContent = localization.ground_level;
+  }
+
+  const footerLinkElement = document.querySelector(".footer-link");
+  if (footerLinkElement) {
+    footerLinkElement.textContent = localization.footer_text.replace("{year}", new Date().getFullYear()).replace("{version}", await invoke('gui_get_version'));
+  }
+
+  // Update error messages
+  window.localization = localization;
+}
+
+function detectLanguage() {
+  const lang = navigator.language || navigator.userLanguage;
+  const langCode = lang.split('-')[0];
+  switch (langCode) {
+    case 'es':
+      return 'es';
+    case 'ru':
+      return 'ru';
+    case 'de':
+      return 'de';
+    case 'zh':
+      return 'zh';
+    default:
+      return 'en';
+  }
+}
 
 // Function to initialize the footer with the current year and version
 async function initFooter() {
@@ -42,7 +158,7 @@ async function checkForUpdates() {
       updateMessage.style.display = "block";
       updateMessage.style.textDecoration = "none";
 
-      updateMessage.textContent = "There's a new version available! Click here to download it.";
+      updateMessage.textContent = window.localization.new_version_available;
       footer.style.marginTop = "15px";
       footer.appendChild(updateMessage);
     }
@@ -179,17 +295,17 @@ function handleBboxInput() {
               window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
               // Update the info text
-              bboxInfo.textContent = "Custom selection confirmed!";
+              bboxInfo.textContent = window.localization.custom_selection_confirmed;
               bboxInfo.style.color = "#7bd864";
           } else {
               // Valid numbers but invalid order or range
-              bboxInfo.textContent = "Error: Coordinates are out of range or incorrectly ordered (Lat before Lng required).";
+              bboxInfo.textContent = window.localization.error_coordinates_out_of_range;
               bboxInfo.style.color = "#fecc44";
               selectedBBox = "";
           }
       } else {
           // Input doesn't match the required format
-          bboxInfo.textContent = "Invalid format. Please use 'lat,lng,lat,lng' or 'lat lng lat lng'.";
+          bboxInfo.textContent = window.localization.invalid_format;
           bboxInfo.style.color = "#fecc44";
           selectedBBox = "";
       }
@@ -222,8 +338,8 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-const threshold1 = 12332660.00;
-const threshold2 = 36084700.00;
+const threshold1 = 35000000.00;
+const threshold2 = 50000000.00;
 let selectedBBox = "";
 
 // Function to handle incoming bbox data
@@ -248,13 +364,13 @@ function displayBboxInfoText(bboxText) {
   const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
 
   if (selectedSize > threshold2) {
-    bboxInfo.textContent = "This area is very large and could exceed typical computing limits.";
+    bboxInfo.textContent = window.localization.area_too_large;
     bboxInfo.style.color = "#fa7878";
   } else if (selectedSize > threshold1) {
-    bboxInfo.textContent = "The area is quite extensive and may take significant time and resources.";
+    bboxInfo.textContent = window.localization.area_extensive;
     bboxInfo.style.color = "#fecc44";
   } else {
-    bboxInfo.textContent = "Selection confirmed!";
+    bboxInfo.textContent = window.localization.selection_confirmed;
     bboxInfo.style.color = "#7bd864";
   }
 }
@@ -270,13 +386,25 @@ async function selectWorld(generate_new_world) {
       document.getElementById('selected-world').style.color = "#fecc44";
     }
   } catch (error) {
-    worldPath = error;
-    console.error(error);
-    document.getElementById('selected-world').textContent = error;
-    document.getElementById('selected-world').style.color = "#fa7878";
+    handleWorldSelectionError(error);
   }
 
   closeWorldPicker();
+}
+
+function handleWorldSelectionError(errorCode) {
+  const errorMessages = {
+    1: window.localization.minecraft_directory_not_found,
+    2: window.localization.world_in_use,
+    3: window.localization.failed_to_create_world,
+    4: window.localization.no_world_selected_error
+  };
+
+  const errorMessage = errorMessages[errorCode] || "Unknown error";
+  document.getElementById('selected-world').textContent = errorMessage;
+  document.getElementById('selected-world').style.color = "#fa7878";
+  worldPath = "";
+  console.error(error);
 }
 
 let generationButtonEnabled = true;
@@ -287,19 +415,13 @@ async function startGeneration() {
     }
 
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
-      document.getElementById('bbox-info').textContent = "Select a location first!";
+      document.getElementById('bbox-info').textContent = window.localization.select_location_first;
       document.getElementById('bbox-info').style.color = "#fa7878";
       return;
     }
 
-    if (
-      worldPath === "No world selected" ||
-      worldPath == "Invalid Minecraft world" ||
-      worldPath == "The selected world is currently in use" ||
-      worldPath == "Minecraft directory not found" ||
-      worldPath === ""
-    ) {
-      document.getElementById('selected-world').textContent = "Select a Minecraft world first!";
+    if (!worldPath || worldPath === "") {
+      document.getElementById('selected-world').textContent = window.localization.select_minecraft_world_first;
       document.getElementById('selected-world').style.color = "#fa7878";
       return;
     }
