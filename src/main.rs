@@ -140,7 +140,7 @@ fn main() {
 }
 
 #[tauri::command]
-fn gui_select_world(generate_new: bool) -> Result<String, String> {
+fn gui_select_world(generate_new: bool) -> Result<String, i32> {
     // Determine the default Minecraft 'saves' directory based on the OS
     let default_dir: Option<PathBuf> = if cfg!(target_os = "windows") {
         env::var("APPDATA")
@@ -162,12 +162,12 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
         if let Some(default_path) = &default_dir {
             if default_path.exists() {
                 // Call create_new_world and return the result
-                create_new_world(default_path)
+                create_new_world(default_path).map_err(|_| 1) // Error code 1: Minecraft directory not found
             } else {
-                Err("Minecraft directory not found".to_string())
+                Err(1) // Error code 1: Minecraft directory not found
             }
         } else {
-            Err("Minecraft directory not found".to_string())
+            Err(1) // Error code 1: Minecraft directory not found
         }
     } else {
         // Handle existing world selection
@@ -188,7 +188,7 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
                     // Try to acquire a lock on the session.lock file
                     if let Ok(file) = File::open(&session_lock_path) {
                         if file.try_lock_shared().is_err() {
-                            return Err("The selected world is currently in use".to_string());
+                            return Err(2); // Error code 2: The selected world is currently in use
                         } else {
                             // Release the lock immediately
                             let _ = file.unlock();
@@ -199,12 +199,12 @@ fn gui_select_world(generate_new: bool) -> Result<String, String> {
                 return Ok(path.display().to_string());
             } else {
                 // No Minecraft directory found, generating new world in custom user selected directory
-                return create_new_world(&path);
+                return create_new_world(&path).map_err(|_| 3); // Error code 3: Failed to create new world
             }
         }
 
         // If no folder was selected, return an error message
-        Err("No world selected".to_string())
+        Err(4) // Error code 4: No world selected
     }
 }
 
