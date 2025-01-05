@@ -44,9 +44,6 @@ jobs:
     - name: Build
       run: cargo build --release
 
-    - name: Check for build artifacts
-      run: find ./target/release/ | grep arnis
-
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       if: github.event_name == 'release'
