@@ -105,7 +105,7 @@ async function applyLocalization(localization) {
 
   const footerLinkElement = document.querySelector(".footer-link");
   if (footerLinkElement) {
-    footerLinkElement.textContent = localization.footer_text.replace("{year}", new Date().getFullYear()).replace("{version}", await invoke('gui_get_version'));
+    footerLinkElement.innerHTML = localization.footer_text.replace("{year}", '<span id="current-year"></span>').replace("{version}", '<span id="version-placeholder"></span>');
   }
 
   // Update error messages
@@ -132,12 +132,17 @@ function detectLanguage() {
 // Function to initialize the footer with the current year and version
 async function initFooter() {
   const currentYear = new Date().getFullYear();
-  document.getElementById("current-year").textContent = currentYear;
+  const currentYearElement = document.getElementById("current-year");
+  if (currentYearElement) {
+    currentYearElement.textContent = currentYear;
+  }
 
   try {
     const version = await invoke('gui_get_version');
-    const footerLink = document.querySelector(".footer-link");
-    footerLink.textContent = `© ${currentYear} Arnis v${version} by louis-e`;
+    const versionPlaceholder = document.getElementById("version-placeholder");
+    if (versionPlaceholder) {
+      versionPlaceholder.textContent = version;
+    }
   } catch (error) {
     console.error("Failed to fetch version:", error);
   }
