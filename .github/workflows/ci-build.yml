@@ -8,23 +8,28 @@ on:
   push:
     branches:
       - main
+  workflow_call:
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-22.04]
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    - name: Install required Ubuntu packages
+      if: ${{ matrix.os == 'ubuntu-22.04' }}
+      run: sudo apt update && sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev libsoup-3.0-0 -y
+
     - name: Set up Rust
-      uses: actions-rs/toolchain@v1
+      uses: actions-rs/toolchain@v1 
       with:
         toolchain: stable
-        target: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' || 'x86_64-apple-darwin' }}
+        target: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' || 'x86_64-apple-darwin' || 'stable-aarch64-apple-darwin'}}
         components: clippy
 
     - name: Check formatting
@@ -38,3 +43,13 @@ jobs:
 
     - name: Build
       run: cargo build --release
+
+    - name: Check for build artifacts
+      run: find ./target/release/ | grep arnis
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      if: github.event_name == 'release'
+      with:
+        name: ${{ matrix.os }}-build
+        path: target/release/arnis*

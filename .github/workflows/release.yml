@@ -6,30 +6,9 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-
-    - name: Set up Rust for Windows
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        target: x86_64-pc-windows-msvc
-
-    - name: Install dependencies
-      run: cargo fetch
-
-    - name: Build
-      run: cargo build --release
-
-    - name: Upload artifact (Windows)
-      uses: actions/upload-artifact@v3
-      with:
-        name: windows-latest-build
-        path: target/release/arnis.exe
-
+    uses: ./.github/workflows/ci-build.yml
+    secrets: inherit
+    
   release:
     runs-on: windows-latest
     needs: build
