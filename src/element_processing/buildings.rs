@@ -156,7 +156,12 @@ pub fn generate_buildings(
 
                 return;
             }
-        } else if building_type == "parking" {
+        } else if building_type == "parking"
+            || element
+                .tags
+                .get("parking")
+                .map_or(false, |p| p == "multi-storey")
+        {
             // Parking building structure
 
             let polygon_coords: Vec<(i32, i32)> = element
