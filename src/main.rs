@@ -19,7 +19,10 @@ use colored::*;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
+use log::{error, LevelFilter};
 use rfd::FileDialog;
+use std::panic;
+use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 use std::{
     env,
     fs::{self, File},
@@ -120,7 +123,23 @@ fn main() {
     } else {
         // Launch the UI
         println!("Launching UI...");
+
+        // Set a custom panic hook to log panic information
+        panic::set_hook(Box::new(|panic_info| {
+            let message = format!("Application panicked: {:?}", panic_info);
+            error!("{}", message);
+        }));
+
         tauri::Builder::default()
+            .plugin(
+                LogBuilder::default()
+                    .level(LevelFilter::Trace)
+                    .targets([
+                        Target::new(TargetKind::LogDir { file_name: Some("arnis.log".into()) }),
+                        Target::new(TargetKind::Stdout),
+                    ])
+                    .build()
+            )
             .invoke_handler(tauri::generate_handler![
                 gui_select_world,
                 gui_start_generation,
