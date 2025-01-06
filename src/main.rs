@@ -21,11 +21,11 @@ use flate2::read::GzDecoder;
 use fs2::FileExt;
 use log::{error, LevelFilter};
 use rfd::FileDialog;
-use std::panic;
 use std::{
     env,
     fs::{self, File},
     io::{Read, Write},
+    panic,
     path::{Path, PathBuf},
 };
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
@@ -148,11 +148,10 @@ fn main() {
                 gui_get_version,
                 gui_check_for_updates
             ])
-            .setup(|app: &mut tauri::App| {
-                let app_handle: &tauri::AppHandle = app.handle();
-                let main_window: tauri::WebviewWindow =
-                    tauri::Manager::get_webview_window(app_handle, "main")
-                        .expect("Failed to get main window");
+            .setup(|app| {
+                let app_handle = app.handle();
+                let main_window = tauri::Manager::get_webview_window(app_handle, "main")
+                    .expect("Failed to get main window");
                 progress::set_main_window(main_window);
                 Ok(())
             })
