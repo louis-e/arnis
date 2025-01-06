@@ -11,7 +11,7 @@ impl Ground {
 
     #[inline(always)]
     pub fn level(&self, coord: XZPoint) -> i32 {
-        (20.0 * (coord.x as f64 / 200.0).sin() + 20.0 * (coord.z as f64 / 200.0).sin() - 40.0)
+        (20.0 * (coord.x as f64 / 400.0).sin() + 20.0 * (coord.z as f64 / 400.0).sin() - 40.0)
             as i32
     }
 

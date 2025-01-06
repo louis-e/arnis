@@ -432,43 +432,67 @@ fn generate_bridge(
     ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
-    // Calculate the bridge level
-    let mut bridge_level: i32 = 60; // ELEVATION TODO
-    if let Some(level_str) = element.tags.get("level") {
-        if let Ok(level) = level_str.parse::<i32>() {
-            bridge_level += (level * 3) + 1; // Adjust height by levels
-        }
-    }
-
     let floor_block: Block = STONE;
     let railing_block: Block = STONE_BRICKS;
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
+
     for node in &element.nodes {
         let x: i32 = node.x;
         let z: i32 = node.z;
+
+        // Calculate the dynamic bridge level based on the ground level
+        let mut bridge_level = ground.level(XZPoint::new(x, z));
+
+        // Adjust the bridge level based on the "level" tag
+        if let Some(level_str) = element.tags.get("level") {
+            if let Ok(level) = level_str.parse::<i32>() {
+                bridge_level += (level * 3) + 1;
+            }
+        }
 
         // Create bridge path using Bresenham's line
         if let Some(prev) = previous_node {
             let bridge_points: Vec<(i32, i32, i32)> =
                 bresenham_line(prev.0, bridge_level, prev.1, x, bridge_level, z);
+
             for (bx, by, bz) in bridge_points {
+                // Place railing blocks
                 editor.set_block(railing_block, bx, by + 1, bz, None, None);
                 editor.set_block(railing_block, bx, by, bz, None, None);
             }
         }
+
         previous_node = Some((x, z));
     }
 
     // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<(i32, i32)> = element
+    let polygon_coords: Vec<XZPoint> = element
         .nodes
         .iter()
-        .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+        .map(|n| n.xz())
         .collect();
-    let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
-    for (x, z) in bridge_area {
-        editor.set_block(floor_block, x, bridge_level, z, None, None);
+    let bridge_area: Vec<XZPoint> = flood_fill_area(
+        &polygon_coords.iter().map(|pt| (pt.x, pt.z)).collect::<Vec<_>>(),
+        floodfill_timeout,
+    )
+    .into_iter()
+    .map(|(x, z)| XZPoint::new(x, z))
+    .collect();
+
+    for pt in bridge_area {
+        // Calculate the bridge's floor level dynamically
+        let mut bridge_level = ground.level(pt);
+
+        // Adjust the bridge level based on the "level" tag
+        if let Some(level_str) = element.tags.get("level") {
+            if let Ok(level) = level_str.parse::<i32>() {
+                bridge_level += (level * 3) + 1;
+            }
+        }
+
+        // Place floor blocks
+        editor.set_block(floor_block, pt.x, bridge_level, pt.z, None, None);
     }
 }

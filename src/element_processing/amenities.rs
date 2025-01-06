@@ -111,6 +111,41 @@ pub fn generate_amenities(
                     editor.set_block(IRON_BLOCK, pt.x, y + 2, pt.z, None, None);
                 }
             }
+            "shelter" => {
+                let roof_block: Block = STONE_BRICK_SLAB;
+    
+                let polygon_coords: Vec<(i32, i32)> = element
+                    .nodes()
+                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                    .collect();
+                let roof_area: Vec<(i32, i32)> =
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
+    
+                // Place fences and roof slabs at each corner node directly
+                for node in element.nodes() {
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
+    
+                    let Some(y) = ground.min_level(element.nodes().map(|n| n.xz())) else {
+                        return;
+                    };
+    
+                    for fence_height in 1..=4 {
+                        editor.set_block(OAK_FENCE, x, y + fence_height, z, None, None);
+                    }
+                    editor.set_block(roof_block, x, y + 5, z, None, None);
+                }
+    
+                // Flood fill the roof area
+                let Some(y) = ground.min_level(element.nodes().map(|n| n.xz())) else {
+                    return;
+                };
+    
+                let roof_height: i32 = y + 5;
+                for (x, z) in roof_area.iter() {
+                    editor.set_block(roof_block, *x, roof_height, *z, None, None);
+                }
+            }
             "parking" | "fountain" => {
                 // Process parking or fountain areas
                 let mut previous_node: Option<XZPoint> = None;
@@ -123,18 +158,17 @@ pub fn generate_amenities(
                     _ => GRAY_CONCRETE,
                 };
 
-                let y = ground.min_level(element.nodes().map(|node| XZPoint::new(node.x, node.z)));
-
                 for node in element.nodes() {
                     let pt: XZPoint = node.xz();
-                    let y: i32 = y.unwrap();
+                    let y = ground.level(pt);
 
                     if let Some(prev) = previous_node {
                         // Create borders for fountain or parking area
+                        let prev_y = ground.level(prev);
                         let bresenham_points: Vec<(i32, i32, i32)> =
-                            bresenham_line(prev.x, y, prev.z, pt.x, y, pt.z);
-                        for (bx, _, bz) in bresenham_points {
-                            editor.set_block(block_type, bx, y, bz, Some(&[BLACK_CONCRETE]), None);
+                            bresenham_line(prev.x, prev_y, prev.z, pt.x, y, pt.z);
+                        for (bx, by, bz) in bresenham_points {
+                            editor.set_block(block_type, bx, by, bz, Some(&[BLACK_CONCRETE]), None);
 
                             // Decorative border around fountains
                             if amenity_type == "fountain" {
@@ -144,7 +178,7 @@ pub fn generate_amenities(
                                             editor.set_block(
                                                 LIGHT_GRAY_CONCRETE,
                                                 bx + dx,
-                                                y,
+                                                by,
                                                 bz + dz,
                                                 None,
                                                 None,
@@ -170,10 +204,12 @@ pub fn generate_amenities(
                         flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                     for (x, z) in flood_area {
+                        let pt = XZPoint::new(x, z);
+                        let y = ground.level(pt);
                         editor.set_block(
                             block_type,
                             x,
-                            y.unwrap(),
+                            y,
                             z,
                             Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
                             None,
@@ -184,7 +220,7 @@ pub fn generate_amenities(
                             editor.set_block(
                                 LIGHT_GRAY_CONCRETE,
                                 x,
-                                y.unwrap(),
+                                y,
                                 z,
                                 Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
                                 None,

@@ -179,15 +179,16 @@ pub fn generate_world(
             editor.set_block(DIRT, x, max_y - 1, z, None, None);
             editor.set_block(DIRT, x, max_y - 2, z, None, None);
 
+
             block_counter += 1;
             if block_counter % batch_size == 0 {
                 ground_pb.inc(batch_size);
+            }
 
-                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                    emit_gui_progress_update(gui_progress_grnd, "");
-                    last_emitted_progress = gui_progress_grnd;
-                }
-                gui_progress_grnd += progress_increment_grnd;
+            gui_progress_grnd += progress_increment_grnd;
+            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                emit_gui_progress_update(gui_progress_grnd, "");
+                last_emitted_progress = gui_progress_grnd;
             }
         }
     }

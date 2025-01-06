@@ -99,7 +99,7 @@ pub fn fetch_data(
 
     // Generate Overpass API query for bounding box
     let query: String = format!(
-        r#"[out:json][timeout:1800][bbox:{},{},{},{}];
+        r#"[out:json][timeout:350][bbox:{},{},{},{}];
     (
         nwr["building"];
         nwr["highway"];
