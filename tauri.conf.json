@@ -13,7 +13,7 @@
         "title": "Arnis",
         "width": 1000,
         "height": 650,
-        "resizable": false,
+        "resizable": true,
         "transparent": true,
         "center": true,
         "theme": "Dark"
