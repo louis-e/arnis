@@ -9,10 +9,10 @@ license = "GPL-3.0"
 readme = "README.md"
 
 [profile.release]
-lto = true
+lto = "thin"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = "2"
 
 [dependencies]
 clap = { version = "4.1", features = ["derive"] }
@@ -34,7 +34,7 @@ rfd = "0.15.1"
 semver = "1.0.23"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "2", features = [] }
+tauri = "2"
 tauri-plugin-log = { version = "2.2.0" }
 tauri-plugin-shell = "2"
 tokio = { version = "1.42.0", features = ["full"] }
