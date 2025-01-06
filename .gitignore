@@ -1,5 +1,47 @@
+# Environment files
+.env
+.envrc
 /.direnv
+
+# Build artifacts
 /target
-Cargo.lock
-export.json
-parsed_osm_data.txt
+**/*.rs.bk
+
+# IDE/editor files
+.idea/
+/.vscode/
+/*.swp
+*.iml
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.ps1
+
+# System files
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# Generated files
+/export.json
+/parsed_osm_data.txt
+/gen/
+/build/
+*.rmeta
+*.dSYM
+
+# Tauri specific
+flake/
+gen/
+
+# Miscellaneous
+*.bak
+*.old
+*.orig
+
+# Ignore all in flake directory except specific files
+/flake/*
+!/flake/flake.nix
+!/flake/flake.lock

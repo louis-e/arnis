@@ -14,7 +14,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
 
     steps:
     - name: Checkout code
@@ -25,8 +25,15 @@ jobs:
       with:
         toolchain: stable
         target: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' || 'x86_64-apple-darwin' }}
+        components: clippy
 
-    - name: Install dependencies
+    - name: Check formatting
+      run: cargo fmt -- --check
+
+    - name: Check clippy lints
+      run: cargo clippy --all-targets --all-features -- -D warnings
+
+    - name: Install Rust dependencies
       run: cargo fetch
 
     - name: Build

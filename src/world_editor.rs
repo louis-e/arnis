@@ -1,12 +1,15 @@
 use crate::args::Args;
 use crate::block_definitions::*;
+use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{ByteArray, LongArray, Value};
+use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs::File;
+use std::io::Write;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,6 +17,8 @@ struct Chunk {
     sections: Vec<Section>,
     x_pos: i32,
     z_pos: i32,
+    #[serde(default)]
+    is_light_on: u8,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -23,8 +28,6 @@ struct Section {
     block_states: Blockstates,
     #[serde(rename = "Y")]
     y: i8,
-    #[serde(rename = "SkyLight")]
-    sky_light: Option<ByteArray>,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -72,43 +75,37 @@ impl SectionToModify {
         palette.sort();
         palette.dedup();
 
-        let data = if palette.len() == 1 {
-            vec![]
-        } else {
-            let palette_lookup: FnvHashMap<_, _> = palette
-                .iter()
-                .enumerate()
-                .map(|(k, v)| (v, i64::try_from(k).unwrap()))
-                .collect();
+        let palette_lookup: FnvHashMap<_, _> = palette
+            .iter()
+            .enumerate()
+            .map(|(k, v)| (v, i64::try_from(k).unwrap()))
+            .collect();
 
-            let mut bits_per_block = 4; // minimum allowed
-            while (1 << bits_per_block) < palette.len() {
-                bits_per_block += 1;
-            }
+        let mut bits_per_block = 4; // minimum allowed
+        while (1 << bits_per_block) < palette.len() {
+            bits_per_block += 1;
+        }
 
-            let mut data = vec![];
+        let mut data = vec![];
 
-            let mut cur = 0;
-            let mut cur_idx = 0;
-            for block in &self.blocks {
-                let p = palette_lookup[block];
+        let mut cur = 0;
+        let mut cur_idx = 0;
+        for block in &self.blocks {
+            let p = palette_lookup[block];
 
-                if cur_idx + bits_per_block > 64 {
-                    data.push(cur);
-                    cur = 0;
-                    cur_idx = 0;
-                }
-
-                cur |= p << cur_idx;
-                cur_idx += bits_per_block;
-            }
-
-            if cur_idx > 0 {
+            if cur_idx + bits_per_block > 64 {
                 data.push(cur);
+                cur = 0;
+                cur_idx = 0;
             }
 
-            data
-        };
+            cur |= p << cur_idx;
+            cur_idx += bits_per_block;
+        }
+
+        if cur_idx > 0 {
+            data.push(cur);
+        }
 
         let palette = palette
             .iter()
@@ -125,7 +122,6 @@ impl SectionToModify {
                 other: FnvHashMap::default(),
             },
             y,
-            sky_light: Some(ByteArray::new(vec![0xFFu8 as i8; 2048])),
             other: FnvHashMap::default(),
         }
     }
@@ -142,6 +138,7 @@ impl Default for SectionToModify {
 #[derive(Default)]
 struct ChunkToModify {
     sections: FnvHashMap<i8, SectionToModify>,
+    other: FnvHashMap<String, Value>,
 }
 
 impl ChunkToModify {
@@ -161,7 +158,7 @@ impl ChunkToModify {
         section.set_block(x, (y & 15).try_into().unwrap(), z, block);
     }
 
-    fn sections(&self) -> impl Iterator<Item = Section> + use<'_> {
+    fn sections(&self) -> impl Iterator<Item = Section> + '_ {
         self.sections.iter().map(|(y, s)| s.to_section(*y))
     }
 }
@@ -198,11 +195,11 @@ impl WorldToModify {
     fn get_block(&self, x: i32, y: i32, z: i32) -> Option<Block> {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
-        let region_x = chunk_x >> 5;
-        let region_z = chunk_z >> 5;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
 
-        let region = self.get_region(region_x, region_z)?;
-        let chunk = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
+        let region: &RegionToModify = self.get_region(region_x, region_z)?;
+        let chunk: &ChunkToModify = region.get_chunk(chunk_x & 31, chunk_z & 31)?;
 
         chunk.get_block(
             (x & 15).try_into().unwrap(),
@@ -214,11 +211,11 @@ impl WorldToModify {
     fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
-        let region_x = chunk_x >> 5;
-        let region_z = chunk_z >> 5;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
 
-        let region = self.get_or_create_region(region_x, region_z);
-        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+        let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
+        let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
 
         chunk.set_block(
             (x & 15).try_into().unwrap(),
@@ -230,7 +227,6 @@ impl WorldToModify {
 }
 
 pub struct WorldEditor<'a> {
-    region_template_path: String,
     region_dir: String,
     world: WorldToModify,
     scale_factor_x: f64,
@@ -240,15 +236,8 @@ pub struct WorldEditor<'a> {
 
 impl<'a> WorldEditor<'a> {
     /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(
-        region_template_path: &str,
-        region_dir: &str,
-        scale_factor_x: f64,
-        scale_factor_z: f64,
-        args: &'a Args,
-    ) -> Self {
+    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64, args: &'a Args) -> Self {
         Self {
-            region_template_path: region_template_path.to_string(),
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
             scale_factor_x,
@@ -260,13 +249,20 @@ impl<'a> WorldEditor<'a> {
     /// Creates a region for the given region coordinates.
     fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
         let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
-        std::fs::copy(&self.region_template_path, &out_path)
-            .expect("Failed to copy region template");
-        let region_file = File::options()
+
+        const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
+
+        let mut region_file: File = File::options()
             .read(true)
             .write(true)
+            .create(true)
+            .truncate(true)
             .open(&out_path)
             .expect("Failed to open region file");
+
+        region_file
+            .write_all(REGION_TEMPLATE)
+            .expect("Could not write region template");
 
         Region::from_stream(region_file).expect("Failed to load region")
     }
@@ -277,6 +273,65 @@ impl<'a> WorldEditor<'a> {
 
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
         self.world.get_block(x, y, z).is_some()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_sign(
+        &mut self,
+        line1: String,
+        line2: String,
+        line3: String,
+        line4: String,
+        x: i32,
+        y: i32,
+        z: i32,
+        _rotation: i8,
+    ) {
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let mut block_entities = HashMap::new();
+
+        let messages = vec![
+            Value::String(format!("\"{}\"", line1)),
+            Value::String(format!("\"{}\"", line2)),
+            Value::String(format!("\"{}\"", line3)),
+            Value::String(format!("\"{}\"", line4)),
+        ];
+
+        let mut text_data = HashMap::new();
+        text_data.insert("messages".to_string(), Value::List(messages));
+        text_data.insert("color".to_string(), Value::String("black".to_string()));
+        text_data.insert("has_glowing_text".to_string(), Value::Byte(0));
+
+        block_entities.insert("front_text".to_string(), Value::Compound(text_data));
+        block_entities.insert(
+            "id".to_string(),
+            Value::String("minecraft:sign".to_string()),
+        );
+        block_entities.insert("is_waxed".to_string(), Value::Byte(0));
+        block_entities.insert("keepPacked".to_string(), Value::Byte(0));
+        block_entities.insert("x".to_string(), Value::Int(x));
+        block_entities.insert("y".to_string(), Value::Int(y));
+        block_entities.insert("z".to_string(), Value::Int(z));
+
+        let region: &mut RegionToModify = self.world.get_or_create_region(region_x, region_z);
+        let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        if let Some(chunk_data) = chunk.other.get_mut("block_entities") {
+            if let Value::List(entities) = chunk_data {
+                entities.push(Value::Compound(block_entities));
+            }
+        } else {
+            chunk.other.insert(
+                "block_entities".to_string(),
+                Value::List(vec![Value::Compound(block_entities)]),
+            );
+        }
+
+        self.set_block(SIGN, x, y, z, None, None);
     }
 
     /// Sets a block of the specified type at the given coordinates.
@@ -299,11 +354,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
             } else {
                 false
             }
@@ -317,6 +372,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Fills a cuboid area with the specified block between two coordinates.
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_blocks(
         &mut self,
         block: Block,
@@ -357,7 +413,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
                 {
                     return true; // Block is in whitelist
                 }
@@ -365,7 +421,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(blacklist) = blacklist {
                 if blacklist
                     .iter()
-                    .any(|blacklisted_block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
                 {
                     return true; // Block is in blacklist
                 }
@@ -377,7 +433,8 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("{} {}", "[5/5]".bold(), "Saving world...");
+        println!("{} Saving world...", "[5/5]".bold());
+        emit_gui_progress_update(90.0, "Saving world...");
 
         let _debug: bool = self.args.debug;
         let total_regions: u64 = self.world.regions.len() as u64;
@@ -392,12 +449,17 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
 
+        let total_steps: f64 = 9.0;
+        let progress_increment_save: f64 = total_steps / total_regions as f64;
+        let mut current_progress_save: f64 = 90.0;
+        let mut last_emitted_progress: f64 = current_progress_save;
+
         for ((region_x, region_z), region_to_modify) in &self.world.regions {
-            let mut region = self.create_region(*region_x, *region_z);
+            let mut region: Region<File> = self.create_region(*region_x, *region_z);
 
             for chunk_x in 0..32 {
                 for chunk_z in 0..32 {
-                    let data = region
+                    let data: Vec<u8> = region
                         .read_chunk(chunk_x as usize, chunk_z as usize)
                         .unwrap()
                         .unwrap();
@@ -406,10 +468,12 @@ impl<'a> WorldEditor<'a> {
 
                     if let Some(chunk_to_modify) = region_to_modify.get_chunk(chunk_x, chunk_z) {
                         chunk.sections = chunk_to_modify.sections().collect();
+                        chunk.other.extend(chunk_to_modify.other.clone());
                     }
 
                     chunk.x_pos = chunk_x + region_x * 32;
                     chunk.z_pos = chunk_z + region_z * 32;
+                    chunk.is_light_on = 0; // Force minecraft to recompute
 
                     let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
 
@@ -423,6 +487,12 @@ impl<'a> WorldEditor<'a> {
             }
 
             save_pb.inc(1);
+
+            current_progress_save += progress_increment_save;
+            if (current_progress_save - last_emitted_progress).abs() > 0.25 {
+                emit_gui_progress_update(current_progress_save, "Saving world...");
+                last_emitted_progress = current_progress_save;
+            }
         }
 
         save_pb.finish();

@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
@@ -14,7 +13,7 @@ pub fn generate_leisure(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     ground: &Ground,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
@@ -22,8 +21,14 @@ pub fn generate_leisure(
         let mut current_leisure: Vec<(i32, i32)> = vec![];
 
         // Determine block type based on leisure type
-        let block_type = match leisure_type.as_str() {
-            "park" => GRASS_BLOCK,
+        let block_type: Block = match leisure_type.as_str() {
+            "park" => {
+                if args.winter {
+                    SNOW_BLOCK
+                } else {
+                    GRASS_BLOCK
+                }
+            }
             "playground" | "recreation_ground" | "pitch" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
@@ -36,9 +41,21 @@ pub fn generate_leisure(
                     GREEN_STAINED_HARDENED_CLAY
                 }
             }
-            "garden" => GRASS_BLOCK,
+            "garden" => {
+                if args.winter {
+                    SNOW_BLOCK
+                } else {
+                    GRASS_BLOCK
+                }
+            }
             "swimming_pool" => WATER,
-            _ => GRASS_BLOCK,
+            _ => {
+                if args.winter {
+                    SNOW_BLOCK
+                } else {
+                    GRASS_BLOCK
+                }
+            }
         };
 
         // Process leisure area nodes
@@ -75,9 +92,13 @@ pub fn generate_leisure(
 
         // Flood-fill the interior of the leisure area
         if corner_addup != (0, 0, 0) {
-            let polygon_coords: Vec<(i32, i32)> =
-                element.nodes.iter().map(|n| (n.x, n.z)).collect();
-            let filled_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
+            let polygon_coords: Vec<(i32, i32)> = element
+                .nodes
+                .iter()
+                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                .collect();
+            let filled_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for (x, z) in filled_area {
                 let ground_level = ground.level(XZPoint::new(x, z));
@@ -113,7 +134,14 @@ pub fn generate_leisure(
                         }
                         71..=80 => {
                             // Tree
-                            create_tree(editor, x, ground_level + 1, z, rng.gen_range(1..=3));
+                            create_tree(
+                                editor,
+                                x,
+                                ground_level + 1,
+                                z,
+                                rng.gen_range(1..=3),
+                                args.winter,
+                            );
                         }
                         _ => {}
                     }

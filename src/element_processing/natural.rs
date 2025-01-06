@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
@@ -14,13 +13,13 @@ pub fn generate_natural(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     ground: &Ground,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
-                let x = node.x;
-                let z = node.z;
+                let x: i32 = node.x;
+                let z: i32 = node.z;
 
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                 create_tree(
@@ -29,6 +28,7 @@ pub fn generate_natural(
                     ground.level(node.xz()) + 1,
                     z,
                     rng.gen_range(1..=3),
+                    args.winter,
                 );
             }
         } else {
@@ -37,12 +37,30 @@ pub fn generate_natural(
             let mut current_natural: Vec<(i32, i32)> = vec![];
 
             // Determine block type based on natural tag
-            let block_type = match natural_type.as_str() {
-                "scrub" | "grassland" | "wood" => GRASS_BLOCK,
+            let block_type: Block = match natural_type.as_str() {
+                "scrub" | "grassland" | "wood" => {
+                    if args.winter {
+                        SNOW_BLOCK
+                    } else {
+                        GRASS_BLOCK
+                    }
+                }
                 "beach" | "sand" => SAND,
-                "tree_row" => GRASS_BLOCK,
+                "tree_row" => {
+                    if args.winter {
+                        SNOW_BLOCK
+                    } else {
+                        GRASS_BLOCK
+                    }
+                }
                 "wetland" | "water" => WATER,
-                _ => GRASS_BLOCK,
+                _ => {
+                    if args.winter {
+                        SNOW_BLOCK
+                    } else {
+                        GRASS_BLOCK
+                    }
+                }
             };
 
             let ProcessedElement::Way(way) = element else {
@@ -51,8 +69,8 @@ pub fn generate_natural(
 
             // Process natural nodes to fill the area
             for node in &way.nodes {
-                let x = node.x;
-                let z = node.z;
+                let x: i32 = node.x;
+                let z: i32 = node.z;
 
                 if let Some(prev) = previous_node {
                     // Generate the line of coordinates between the two nodes
@@ -78,10 +96,13 @@ pub fn generate_natural(
 
             // If there are natural nodes, flood-fill the area
             if corner_addup != (0, 0, 0) {
-                let polygon_coords: Vec<(i32, i32)> =
-                    way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                let polygon_coords: Vec<(i32, i32)> = way
+                    .nodes
+                    .iter()
+                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                    .collect();
                 let filled_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, floodfill_timeout);
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
@@ -98,7 +119,7 @@ pub fn generate_natural(
 
                         let random_choice: i32 = rng.gen_range(0..26);
                         if random_choice == 25 {
-                            create_tree(editor, x, y + 1, z, rng.gen_range(1..=3));
+                            create_tree(editor, x, y + 1, z, rng.gen_range(1..=3), args.winter);
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,

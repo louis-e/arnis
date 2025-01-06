@@ -1,4 +1,4 @@
-use crate::{args::Args, cartesian::XZPoint};
+use crate::{args::Args, cartesian::XZPoint, progress::emit_gui_progress_update};
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;
@@ -39,7 +39,7 @@ pub struct ProcessedNode {
     pub id: u64,
     pub tags: HashMap<String, String>,
 
-    // minecraft coords
+    // Minecraft coordinates
     pub x: i32,
     pub z: i32,
 }
@@ -60,7 +60,7 @@ pub struct ProcessedWay {
     pub tags: HashMap<String, String>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ProcessedMemberRole {
     Outer,
     Inner,
@@ -125,36 +125,20 @@ fn lat_lon_to_minecraft_coords(
     lat: f64,
     lon: f64,
     bbox: (f64, f64, f64, f64), // (min_lon, min_lat, max_lon, max_lat)
-    scale_factor_x: f64,
     scale_factor_z: f64,
+    scale_factor_x: f64,
 ) -> (i32, i32) {
     let (min_lon, min_lat, max_lon, max_lat) = bbox;
 
     // Calculate the relative position within the bounding box
-    let rel_x: f64 = 1.0 - (lat - min_lat) / (max_lat - min_lat);
-    let rel_z: f64 = (lon - min_lon) / (max_lon - min_lon);
+    let rel_x: f64 = (lon - min_lon) / (max_lon - min_lon);
+    let rel_z: f64 = 1.0 - (lat - min_lat) / (max_lat - min_lat);
 
     // Apply scaling factors for each dimension and convert to Minecraft coordinates
     let x: i32 = (rel_x * scale_factor_x) as i32;
     let z: i32 = (rel_z * scale_factor_z) as i32;
 
-    (z, x) // Swap x and z coords to avoid a mirrored projection on the Minecraft map
-}
-
-/// Function to determine the number of decimal places in a float as a string
-fn count_decimal_places(value: f64) -> usize {
-    let s: String = value.to_string();
-    if let Some(pos) = s.find('.') {
-        s.len() - pos - 1 // Number of digits after the decimal point
-    } else {
-        0
-    }
-}
-
-/// Function to convert f64 to an integer based on the number of decimal places
-fn convert_to_scaled_int(value: f64, max_decimal_places: usize) -> i64 {
-    let multiplier: i64 = 10_i64.pow(max_decimal_places as u32); // Compute multiplier
-    (value * multiplier as f64).round() as i64 // Scale and convert to integer
+    (x, z)
 }
 
 pub fn parse_osm_data(
@@ -162,54 +146,25 @@ pub fn parse_osm_data(
     bbox: (f64, f64, f64, f64),
     args: &Args,
 ) -> (Vec<ProcessedElement>, f64, f64) {
-    println!("{} {}", "[2/5]".bold(), "Parsing data...");
+    println!("{} Parsing data...", "[2/5]".bold());
+    emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
     let data: OsmData =
         serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
 
-    // Calculate the maximum number of decimal places in bbox elements
-    let max_decimal_places: usize = [
-        count_decimal_places(bbox.0),
-        count_decimal_places(bbox.1),
-        count_decimal_places(bbox.2),
-        count_decimal_places(bbox.3),
-    ]
-    .into_iter()
-    .max()
-    .unwrap();
-
-    // Convert each element to a scaled integer
-    let bbox_scaled: (i64, i64, i64, i64) = (
-        convert_to_scaled_int(bbox.0, max_decimal_places),
-        convert_to_scaled_int(bbox.1, max_decimal_places),
-        convert_to_scaled_int(bbox.2, max_decimal_places),
-        convert_to_scaled_int(bbox.3, max_decimal_places),
-    );
-
     // Determine which dimension is larger and assign scale factors accordingly
-    let (scale_factor_x, scale_factor_z) =
-        if (bbox_scaled.2 - bbox_scaled.0) > (bbox_scaled.3 - bbox_scaled.1) {
-            // Longitude difference is greater than latitude difference
-            (
-                ((bbox_scaled.3 - bbox_scaled.1) * 14 / 100) as f64, // Scale for width (x) is based on latitude difference
-                ((bbox_scaled.2 - bbox_scaled.0) * 10 / 100) as f64, // Scale for length (z) is based on longitude difference
-            )
-        } else {
-            // Latitude difference is greater than or equal to longitude difference
-            (
-                ((bbox_scaled.2 - bbox_scaled.0) * 14 / 100) as f64, // Scale for width (x) is based on longitude difference
-                ((bbox_scaled.3 - bbox_scaled.1) * 10 / 100) as f64, // Scale for length (z) is based on latitude difference
-            )
-        };
+    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.1, bbox.3, bbox.0, bbox.2);
+    let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
+    let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
 
     if args.debug {
         println!("Scale factor X: {}", scale_factor_x);
         println!("Scale factor Z: {}", scale_factor_z);
     }
 
-    let mut nodes_map = HashMap::new();
-    let mut ways_map = HashMap::new();
+    let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
+    let mut ways_map: HashMap<u64, ProcessedWay> = HashMap::new();
 
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
@@ -218,11 +173,11 @@ pub fn parse_osm_data(
         if element.r#type == "node" {
             if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
                 let (x, z) =
-                    lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_x, scale_factor_z);
+                    lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_z, scale_factor_x);
 
-                let processed = ProcessedNode {
+                let processed: ProcessedNode = ProcessedNode {
                     id: element.id,
-                    tags: element.tags.as_ref().map(|x| x.clone()).unwrap_or_default(),
+                    tags: element.tags.clone().unwrap_or_default(),
                     x,
                     z,
                 };
@@ -245,7 +200,7 @@ pub fn parse_osm_data(
             continue;
         }
 
-        let mut nodes = vec![];
+        let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
             for &node_id in node_ids {
                 if let Some(node) = nodes_map.get(&node_id) {
@@ -254,7 +209,7 @@ pub fn parse_osm_data(
             }
         }
 
-        let processed = ProcessedWay {
+        let processed: ProcessedWay = ProcessedWay {
             id: element.id,
             tags: element.tags.clone().unwrap_or_default(),
             nodes,
@@ -278,14 +233,14 @@ pub fn parse_osm_data(
         };
 
         // Only process multipolygons for now
-        if tags.get("type").map(|x| x.as_str()) != Some("multipolygon") {
+        if tags.get("type").map(|x: &String| x.as_str()) != Some("multipolygon") {
             continue;
         };
 
-        let members = element
+        let members: Vec<ProcessedMember> = element
             .members
             .iter()
-            .filter_map(|mem| {
+            .filter_map(|mem: &OsmMember| {
                 if mem.r#type != "way" {
                     eprintln!("WARN: Unknown relation type {}", mem.r#type);
                     return None;
@@ -302,7 +257,7 @@ pub fn parse_osm_data(
                     }
                 };
 
-                let way = ways_map
+                let way: ProcessedWay = ways_map
                     .get(&mem.r#ref)
                     .expect("Missing a way referenced by a rel")
                     .clone();
@@ -318,7 +273,9 @@ pub fn parse_osm_data(
         }));
     }
 
-    (processed_elements, scale_factor_z, scale_factor_x)
+    emit_gui_progress_update(10.0, "");
+
+    (processed_elements, scale_factor_x, scale_factor_z)
 }
 
 const PRIORITY_ORDER: [&str; 6] = [
@@ -335,4 +292,37 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     }
     // Return a default priority if none of the tags match
     PRIORITY_ORDER.len()
+}
+
+// (lat meters, lon meters)
+fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
+    let z: f64 = lat_distance(lat1, lat2);
+
+    // distance between two lons depends on their latitude. In this case we'll just average them
+    let x: f64 = lon_distance((lat1 + lat2) / 2.0, lon1, lon2);
+
+    (z, x)
+}
+
+// Haversine but optimized for a latitude delta of 0
+// returns meters
+fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
+    const R: f64 = 6_371_000.0;
+    let d_lon: f64 = (lon2 - lon1).to_radians();
+    let a: f64 =
+        lat.to_radians().cos() * lat.to_radians().cos() * (d_lon / 2.0).sin() * (d_lon / 2.0).sin();
+    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+
+    R * c
+}
+
+// Haversine but optimized for a longitude delta of 0
+// returns meters
+fn lat_distance(lat1: f64, lat2: f64) -> f64 {
+    const R: f64 = 6_371_000.0;
+    let d_lat: f64 = (lat2 - lat1).to_radians();
+    let a: f64 = (d_lat / 2.0).sin() * (d_lat / 2.0).sin();
+    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+
+    R * c
 }

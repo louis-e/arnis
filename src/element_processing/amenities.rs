@@ -1,5 +1,4 @@
-use std::time::Duration;
-
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
@@ -12,7 +11,7 @@ pub fn generate_amenities(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     ground: &Ground,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
@@ -28,14 +27,16 @@ pub fn generate_amenities(
     }
 
     if let Some(amenity_type) = element.tags().get("amenity") {
-        let first_node = element.nodes().map(|n| XZPoint::new(n.x, n.z)).next();
+        let first_node: Option<XZPoint> = element
+            .nodes()
+            .map(|n: &crate::osm_parser::ProcessedNode| XZPoint::new(n.x, n.z))
+            .next();
         match amenity_type.as_str() {
             "waste_disposal" | "waste_basket" => {
                 // Place a cauldron for waste disposal or waste basket
                 if let Some(pt) = first_node {
                     editor.set_block(CAULDRON, pt.x, ground.level(pt) + 1, pt.z, None, None);
                 }
-                return;
             }
             "vending_machine" | "atm" => {
                 if let Some(pt) = first_node {
@@ -44,15 +45,17 @@ pub fn generate_amenities(
                     editor.set_block(IRON_BLOCK, pt.x, y + 1, pt.z, None, None);
                     editor.set_block(IRON_BLOCK, pt.x, y + 2, pt.z, None, None);
                 }
-                return;
             }
             "bicycle_parking" => {
-                let ground_block = OAK_PLANKS;
-                let roof_block = STONE_BLOCK_SLAB;
+                let ground_block: Block = OAK_PLANKS;
+                let roof_block: Block = STONE_BLOCK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> = element.nodes().map(|n| (n.x, n.z)).collect();
+                let polygon_coords: Vec<(i32, i32)> = element
+                    .nodes()
+                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                    .collect();
                 let floor_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, floodfill_timeout);
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 let pts: Vec<_> = floor_area.iter().map(|c| XZPoint::new(c.0, c.1)).collect();
 
@@ -70,8 +73,8 @@ pub fn generate_amenities(
 
                 // Place fences and roof slabs at each corner node directly
                 for node in element.nodes() {
-                    let x = node.x;
-                    let z = node.z;
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
 
                     let pt = XZPoint::new(x, z);
 
@@ -123,8 +126,8 @@ pub fn generate_amenities(
                 let y = ground.min_level(element.nodes().map(|node| XZPoint::new(node.x, node.z)));
 
                 for node in element.nodes() {
-                    let pt = node.xz();
-                    let y = y.unwrap();
+                    let pt: XZPoint = node.xz();
+                    let y: i32 = y.unwrap();
 
                     if let Some(prev) = previous_node {
                         // Create borders for fountain or parking area
@@ -162,9 +165,9 @@ pub fn generate_amenities(
 
                 // Flood-fill the interior area for parking or fountains
                 if corner_addup.2 > 0 {
-                    let polygon_coords: Vec<(i32, i32)> = current_amenity.iter().copied().collect();
+                    let polygon_coords: Vec<(i32, i32)> = current_amenity.to_vec();
                     let flood_area: Vec<(i32, i32)> =
-                        flood_fill_area(&polygon_coords, floodfill_timeout);
+                        flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                     for (x, z) in flood_area {
                         editor.set_block(

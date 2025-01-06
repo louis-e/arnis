@@ -29,11 +29,23 @@ pub struct Args {
     #[arg(long, default_value = "requests")]
     pub downloader: String,
 
+    /// World scale to use, in blocks per meter
+    #[arg(long, default_value = "1.0")]
+    pub scale: f64,
+
+    /// Ground level to use in the Minecraft world
+    #[arg(long, default_value_t = -62)]
+    pub ground_level: i32,
+
+    /// Enable winter mode (default: false)
+    #[arg(long, default_value_t = false)]
+    pub winter: bool,
+
     /// Enable debug mode (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
     pub debug: bool,
 
-    /// Set floodfill timeout (seconds) (optional) // TODO
+    /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
 }
@@ -74,11 +86,11 @@ fn validate_bounding_box(bbox: &str) -> bool {
     let max_lng: f64 = parts[2].parse().ok().unwrap_or(0.0);
     let max_lat: f64 = parts[3].parse().ok().unwrap_or(0.0);
 
-    if !(min_lng >= -180.0 && min_lng <= 180.0) || !(max_lng >= -180.0 && max_lng <= 180.0) {
+    if !(-180.0..=180.0).contains(&min_lng) || !(-180.0..=180.0).contains(&max_lng) {
         return false;
     }
 
-    if !(min_lat >= -90.0 && min_lat <= 90.0) || !(max_lat >= -90.0 && max_lat <= 90.0) {
+    if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
         return false;
     }
 

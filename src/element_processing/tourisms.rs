@@ -17,22 +17,14 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
     }
 
     if let Some(tourism_type) = element.tags.get("tourism") {
-        let x = element.x;
-        let z = element.z;
+        let x: i32 = element.x;
+        let z: i32 = element.z;
 
-        match tourism_type.as_str() {
-            "information" => {
-                if let Some(information_type) = element.tags.get("information") {
-                    match information_type.as_str() {
-                        "board" => {
-                            // TODO draw a sign
-                            editor.set_block(OAK_PLANKS, x, ground_level + 1, z, None, None);
-                        }
-                        _ => {}
-                    }
-                }
+        if tourism_type == "information" {
+            if let Some("board") = element.tags.get("information").map(|x: &String| x.as_str()) {
+                // TODO draw a sign
+                editor.set_block(OAK_PLANKS, x, ground_level + 1, z, None, None);
             }
-            _ => {}
         }
     }
 }

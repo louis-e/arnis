@@ -1,0 +1,347 @@
+html,
+body,
+#map {
+  height: 100%;
+  width: 100%;
+  padding: 0px;
+  margin: 0px;
+  font-family: "Courier New", Courier, monospace;
+}
+
+#info-box {
+  position: absolute;
+  width: 100%;
+  height: auto;
+  bottom: 0;
+  border: 0 0 7px 0;
+  z-index: 10000;
+}
+
+#coord-format {
+  position: absolute;
+  bottom: 0;
+  right: 15;
+}
+
+#coord-format .bboxlabel {
+  width: 100%;
+}
+
+#coord-format form {
+  margin-bottom: 10px;
+}
+
+#info img {
+  vertical-align: middle;
+  height: 16px;
+  width: auto;
+  opacity: 0.6;
+}
+
+#info img:hover {
+  opacity: 1;
+  cursor: pointer;
+}
+
+#info-toggle ul {
+  margin: 0 0 0 20px;
+  padding: 0;
+}
+
+#info-toggle ul li {
+  display: inline-block;
+  padding: 4px 7px 0;
+  background-color: rgba(230, 230, 230, 0.4);
+  border-top-left-radius: 3px;
+  border-top-right-radius: 3px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+#info-toggle ul li.active {
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+#info-toggle-button {
+  background-color: rgba(0, 0, 0, 0.7) !important;
+  color: #fff;
+}
+
+#info-toggle-button:hover {
+  background-color: #f4f4f4;
+}
+
+#projlabel,
+#wgslabel {
+  display: inline-block;
+  color: #333;
+  z-index: 10000;
+}
+
+#projcoords {
+  display: none;
+}
+
+.coords {
+  text-align: left;
+  padding: 7px 0;
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+#bbounds,
+#mbounds,
+#mcenter {
+  font-size: small;
+  display: block;
+  z-index: 10000;
+  padding: 2px 0;
+}
+
+#mouse,
+#tile,
+#zoom {
+  display: inline-block;
+}
+
+.bboxlabel {
+  font-size: small;
+  font-weight: bold;
+  z-index: 10000;
+  background-color: black;
+  color: white;
+  text-align: center;
+  display: inline-block;
+  padding-left: 2px;
+  width: 60px;
+}
+
+.bboxllpos,
+.bboxllpossmall,
+.bboxprojpos,
+.bboxprojpossmall,
+.tilesmall,
+.zoomsmall {
+  font-size: small;
+  font-weight: bold;
+  color: black;
+  display: inline-block;
+  padding-left: 5px;
+}
+
+.bboxllpos {
+  width: 350px;
+}
+
+.bboxllpossmall {
+  width: 200px;
+}
+
+.bboxprojpos {
+  width: 450px;
+}
+
+.bboxprojpossmall {
+  width: 250px;
+}
+
+.tilesmall {
+  width: 60px;
+}
+
+.zoomsmall {
+  width: 20px;
+}
+
+#map-ui-proj {
+  position: absolute;
+  top: 460px;
+  left: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  z-index: 100;
+}
+
+#map-ui-proj a {
+  font: normal 13px/18px 'Helvetica Neue', Helvetica, sans-serif;
+  background: #FFF;
+  color: #3C4E5A;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #BBB;
+  border-bottom-width: 0;
+  min-width: 75px;
+  padding: 2px;
+  text-decoration: none;
+  text-align: center;
+}
+
+#map-ui-proj a:hover {
+  background: #ECF5FA;
+}
+
+#map-ui-proj li:last-child a {
+  border-bottom-width: 1px;
+  -webkit-border-radius: 0 0 3px 3px;
+  border-radius: 0 0 3px 3px;
+}
+
+#map-ui-proj li:first-child a {
+  -webkit-border-radius: 3px 3px 0 0;
+  border-radius: 3px 3px 0 0;
+}
+
+#map-ui-proj a.active {
+  background: #3887BE;
+  border-color: #3887BE;
+  border-top-color: #FFF;
+  color: #FFF;
+}
+
+.epsglabel {
+  font-size: small;
+  font-weight: bold;
+  background-color: black;
+  color: white;
+  z-index: 10000;
+}
+
+#map-ui {
+  position: absolute;
+  top: 330px;
+  left: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  z-index: 100;
+}
+
+#map-ui a {
+  background-color: #fff;
+  border-bottom: 1px solid #ccc;
+  width: 30px;
+  height: 30px;
+  line-height: 30px;
+  display: block;
+  text-align: center;
+  text-decoration: none;
+  color: black;
+  background-image: url('css/maps/images/bbox-sprites.png');
+  background-repeat: no-repeat;
+}
+
+#map-ui a:hover {
+  background-color: #ECF5FA;
+}
+
+#map-ui li:last-child a {
+  border-bottom-width: 1px;
+  -webkit-border-radius: 0 0 3px 3px;
+  border-radius: 0 0 3px 3px;
+  background-position: -33px -2px;
+}
+
+#map-ui li:last-child a.enabled {
+  border-bottom-width: 1px;
+  -webkit-border-radius: 0 0 3px 3px;
+  border-radius: 0 0 3px 3px;
+  background-position: -278px -2px;
+}
+
+#map-ui li:first-child a {
+  -webkit-border-radius: 3px 3px 0 0;
+  border-radius: 3px 3px 0 0;
+}
+
+#create-geojson a.enabled {
+  background-position: -248px -2px;
+}
+
+#create-geojson a {
+  background-position: -2px -2px;
+}
+
+#geolocation a {
+  background-position: -186px -2px;
+}
+
+#geolocation a.active {
+  background-position: -63px -2px;
+}
+
+#help a.enabled {
+  background-position: -342px -2px;
+}
+
+#help a {
+  background-position: -93px -2px;
+}
+
+.zeroclipboard-is-hover {
+  opacity: 1 !important;
+}
+
+.leaflet-sidebar textarea {
+  /* display: none; */
+  height: 95%;
+  width: 100%;
+  border: 1;
+  padding: 2em;
+  resize: none;
+  -webkit-box-sizing: border-box;
+  /* Safari/Chrome, other WebKit */
+  -moz-box-sizing: border-box;
+  /* Firefox, other Gecko */
+  box-sizing: border-box;
+  /* Opera/IE 8+ */
+}
+
+.leaflet-sidebar button {
+  font-size: large;
+}
+
+.leaflet-sidebar .close {
+  z-index: 10001;
+}
+
+.ui-autocomplete {
+  max-height: 180px;
+  overflow-y: auto;
+  /* prevent horizontal scrollbar */
+  overflow-x: hidden;
+}
+
+/* IE 6 doesn't support max-height
+ * we use height instead, but this forces the menu to always be this tall
+ */
+* html .ui-autocomplete {
+  height: 180px;
+}
+
+
+.unblurred.leaflet-tile-loaded {
+
+  -moz-filter: blur(0) sepia(0) invert(0);
+  -webkit-filter: blur(0) sepia(0) invert(0);
+  filter: blur(0) sepia(0) invert(0);
+
+  -moz-transition: all 1s ease;
+  -webkit-transition: all 1s ease;
+  transition: all 1s ease;
+}
+
+
+
+.blurred.leaflet-tile-loaded {
+
+  -moz-filter: blur(1px) sepia(1) invert(1);
+  -moz-transition: all 1s ease;
+
+  -webkit-filter: blur(1px) sepia(1) invert(1);
+  -webkit-transition: all 1s ease;
+
+  filter: blur(1px) sepia(1) invert(1);
+  transition: all 1s ease;
+
+}

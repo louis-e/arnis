@@ -1,9 +1,10 @@
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
-use crate::osm_parser::ProcessedWay;
+use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 use std::collections::HashSet;
@@ -13,7 +14,7 @@ pub fn generate_buildings(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     ground: &Ground,
-    floodfill_timeout: Option<&Duration>,
+    args: &Args,
 ) {
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -25,28 +26,28 @@ pub fn generate_buildings(
     let variation_index_wall: usize = rng.gen_range(0..building_wall_variations().len());
     let variation_index_floor: usize = rng.gen_range(0..building_floor_variations().len());
 
-    let corner_block = building_corner_variations()[variation_index_corner];
-    let wall_block = element
+    let corner_block: Block = building_corner_variations()[variation_index_corner];
+    let wall_block: Block = element
         .tags
         .get("building:colour")
-        .map(|building_colour| {
-            color_text_to_rgb_tuple(building_colour)
-                .map(|rgb| find_nearest_block_in_color_map(&rgb, building_wall_color_map()))
+        .and_then(|building_colour: &String| {
+            color_text_to_rgb_tuple(building_colour).map(|rgb: (u8, u8, u8)| {
+                find_nearest_block_in_color_map(&rgb, building_wall_color_map())
+            })
         })
-        .flatten()
         .flatten()
         .unwrap_or_else(|| building_wall_variations()[variation_index_wall]);
-    let floor_block = element
+    let floor_block: Block = element
         .tags
         .get("roof:colour")
-        .map(|roof_colour| {
-            color_text_to_rgb_tuple(roof_colour)
-                .map(|rgb| find_nearest_block_in_color_map(&rgb, building_floor_color_map()))
+        .and_then(|roof_colour: &String| {
+            color_text_to_rgb_tuple(roof_colour).map(|rgb: (u8, u8, u8)| {
+                find_nearest_block_in_color_map(&rgb, building_floor_color_map())
+            })
         })
         .flatten()
-        .flatten()
         .unwrap_or_else(|| building_floor_variations()[variation_index_floor]);
-    let window_block = WHITE_STAINED_GLASS;
+    let window_block: Block = WHITE_STAINED_GLASS;
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
@@ -80,6 +81,47 @@ pub fn generate_buildings(
         }
     }
 
+    if let Some(amenity_type) = element.tags.get("amenity") {
+        if amenity_type == "shelter" {
+            let roof_block: Block = STONE_BRICK_SLAB;
+
+            let polygon_coords: Vec<(i32, i32)> = element
+                .nodes
+                .iter()
+                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                .collect();
+            let roof_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+            // Place fences and roof slabs at each corner node directly
+            for node in &element.nodes {
+                let x: i32 = node.x;
+                let z: i32 = node.z;
+
+                let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
+                    return;
+                };
+
+                for fence_height in 1..=4 {
+                    editor.set_block(OAK_FENCE, x, y + fence_height, z, None, None);
+                }
+                editor.set_block(roof_block, x, y + 5, z, None, None);
+            }
+
+            // Flood fill the roof area
+            let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
+                return;
+            };
+
+            let roof_height: i32 = y + 5;
+            for (x, z) in roof_area.iter() {
+                editor.set_block(roof_block, *x, roof_height, *z, None, None);
+            }
+
+            return;
+        }
+    }
+
     if let Some(building_type) = element.tags.get("building") {
         if building_type == "garage" {
             building_height = 2;
@@ -87,13 +129,16 @@ pub fn generate_buildings(
             building_height = 2;
 
             if element.tags.contains_key("bicycle_parking") {
-                let ground_block = OAK_PLANKS;
-                let roof_block = STONE_BLOCK_SLAB;
+                let ground_block: Block = OAK_PLANKS;
+                let roof_block: Block = STONE_BLOCK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> =
-                    element.nodes.iter().map(|n| (n.x, n.z)).collect();
+                let polygon_coords: Vec<(i32, i32)> = element
+                    .nodes
+                    .iter()
+                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                    .collect();
                 let floor_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, floodfill_timeout);
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
                     // No blocks
@@ -107,8 +152,8 @@ pub fn generate_buildings(
 
                 // Place fences and roof slabs at each corner node directly
                 for node in &element.nodes {
-                    let x = node.x;
-                    let z = node.z;
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
 
                     for y in 1..=4 {
                         editor.set_block(ground_block, x, y, z, None, None);
@@ -125,16 +170,107 @@ pub fn generate_buildings(
 
                 return;
             }
+        } else if building_type == "parking"
+            || element
+                .tags
+                .get("parking")
+                .map_or(false, |p| p == "multi-storey")
+        {
+            // Parking building structure
+
+            let polygon_coords: Vec<(i32, i32)> = element
+                .nodes
+                .iter()
+                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                .collect();
+            let floor_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+            let Some(ground_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
+                return;
+            };
+
+            for level in 0..=(building_height / 4) {
+                let current_level = ground_level + level * 4;
+
+                // Build walls
+                for node in &element.nodes {
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
+
+                    // Build walls up to the current level
+                    for y in (current_level + 1)..=(current_level + 4) {
+                        editor.set_block(STONE_BRICKS, x, y, z, None, None);
+                    }
+                }
+
+                // Fill the floor area for each level
+                for (x, z) in &floor_area {
+                    if level == 0 {
+                        editor.set_block(SMOOTH_STONE, *x, current_level, *z, None, None);
+                    } else {
+                        editor.set_block(COBBLESTONE, *x, current_level, *z, None, None);
+                    }
+                }
+            }
+
+            // Outline for each level
+            for level in 0..=(building_height / 4) {
+                let current_level = ground_level + level * 4;
+
+                // Use the nodes to create the outline
+                let mut prev_outline = None;
+                for node in &element.nodes {
+                    let x = node.x;
+                    let z = node.z;
+
+                    if let Some((prev_x, prev_z)) = prev_outline {
+                        let outline_points =
+                            bresenham_line(prev_x, current_level, prev_z, x, current_level, z);
+                        for (bx, _, bz) in outline_points {
+                            editor.set_block(
+                                SMOOTH_STONE,
+                                bx,
+                                current_level,
+                                bz,
+                                Some(&[COBBLESTONE, COBBLESTONE_WALL]),
+                                None,
+                            );
+                            editor.set_block(
+                                STONE_BRICK_SLAB,
+                                bx,
+                                current_level + 2,
+                                bz,
+                                None,
+                                None,
+                            );
+                            if bx % 2 == 0 {
+                                editor.set_block(
+                                    COBBLESTONE_WALL,
+                                    bx,
+                                    current_level + 1,
+                                    bz,
+                                    None,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                    prev_outline = Some((x, z));
+                }
+            }
+
+            return;
         } else if building_type == "roof" {
             let Some(ground_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
                 return;
             };
-            let roof_height = ground_level + 5;
+            let roof_height: i32 = ground_level + 5;
 
             // Iterate through the nodes to create the roof edges using Bresenham's line algorithm
             for node in &element.nodes {
-                let x = node.x;
-                let z = node.z;
+                let x: i32 = node.x;
+                let z: i32 = node.z;
 
                 if let Some(prev) = previous_node {
                     let bresenham_points: Vec<(i32, i32, i32)> =
@@ -153,9 +289,13 @@ pub fn generate_buildings(
             }
 
             // Use flood-fill to fill the interior of the roof
-            let polygon_coords: Vec<(i32, i32)> =
-                element.nodes.iter().map(|node| (node.x, node.z)).collect();
-            let roof_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout); // Use flood-fill to determine the area
+            let polygon_coords: Vec<(i32, i32)> = element
+                .nodes
+                .iter()
+                .map(|node: &crate::osm_parser::ProcessedNode| (node.x, node.z))
+                .collect();
+            let roof_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref()); // Use flood-fill to determine the area
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
             for (x, z) in roof_area.iter() {
@@ -175,7 +315,7 @@ pub fn generate_buildings(
                 building_height = 23
             }
         } else if building_type == "bridge" {
-            generate_bridge(editor, element, &ground, floodfill_timeout);
+            generate_bridge(editor, element, &ground, args.timeout.as_ref());
             return;
         }
     }
@@ -187,8 +327,8 @@ pub fn generate_buildings(
 
     // Process nodes to create walls and corners
     for node in &element.nodes {
-        let x = node.x;
-        let z = node.z;
+        let x: i32 = node.x;
+        let z: i32 = node.z;
 
         if let Some(prev) = previous_node {
             // Calculate walls and corners using Bresenham line
@@ -208,7 +348,12 @@ pub fn generate_buildings(
                         }
                     }
                 }
-                editor.set_block(COBBLESTONE, bx, y + building_height + 1, bz, None, None); // Ceiling cobblestone
+                // Ceiling
+                editor.set_block(COBBLESTONE, bx, y + building_height + 1, bz, None, None);
+
+                if args.winter {
+                    editor.set_block(SNOW_LAYER, bx, y + building_height + 2, bz, None, None);
+                }
                 current_building.push((bx, bz));
                 corner_addup = (corner_addup.0 + bx, corner_addup.1 + bz, corner_addup.2 + 1);
             }
@@ -219,8 +364,12 @@ pub fn generate_buildings(
 
     // Flood-fill interior with floor variation
     if corner_addup != (0, 0, 0) {
-        let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
-        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
+        let polygon_coords: Vec<(i32, i32)> = element
+            .nodes
+            .iter()
+            .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+            .collect();
+        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
@@ -242,6 +391,44 @@ pub fn generate_buildings(
 
                 // Set the house ceiling
                 editor.set_block(floor_block, x, y + building_height + 1, z, None, None);
+
+                if args.winter {
+                    editor.set_block(SNOW_LAYER, x, y + building_height + 2, z, None, None);
+                }
+            }
+        }
+    }
+}
+
+pub fn generate_building_from_relation(
+    editor: &mut WorldEditor,
+    relation: &ProcessedRelation,
+    ground: &Ground,
+    args: &Args,
+) {
+    // Process the outer way to create the building walls
+    for member in &relation.members {
+        if member.role == ProcessedMemberRole::Outer {
+            generate_buildings(editor, &member.way, &ground, args);
+        }
+    }
+
+    // Handle inner ways (holes, courtyards, etc.)
+    for member in &relation.members {
+        if member.role == ProcessedMemberRole::Inner {
+            let polygon_coords: Vec<(i32, i32)> =
+                member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
+            let hole_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+            let Some(ground_level) = ground.min_level(member.way.nodes.iter().map(|n| n.xz()))
+            else {
+                return;
+            };
+
+            for (x, z) in hole_area {
+                // Remove blocks in the inner area to create a hole
+                editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
             }
         }
     }
@@ -265,21 +452,21 @@ fn generate_bridge(
     floodfill_timeout: Option<&Duration>,
 ) {
     // Calculate the bridge level
-    let mut bridge_level = 60; // TODO
+    let mut bridge_level: i32 = 60; // TODO
     if let Some(level_str) = element.tags.get("level") {
         if let Ok(level) = level_str.parse::<i32>() {
             bridge_level += (level * 3) + 1; // Adjust height by levels
         }
     }
 
-    let floor_block = STONE;
-    let railing_block = STONE_BRICKS;
+    let floor_block: Block = STONE;
+    let railing_block: Block = STONE_BRICKS;
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
     for node in &element.nodes {
-        let x = node.x;
-        let z = node.z;
+        let x: i32 = node.x;
+        let z: i32 = node.z;
 
         // Create bridge path using Bresenham's line
         if let Some(prev) = previous_node {
@@ -294,7 +481,11 @@ fn generate_bridge(
     }
 
     // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
+    let polygon_coords: Vec<(i32, i32)> = element
+        .nodes
+        .iter()
+        .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+        .collect();
     let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
     for (x, z) in bridge_area {
         editor.set_block(floor_block, x, bridge_level, z, None, None);

@@ -16,29 +16,29 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground
         let total_steps: usize = element
             .nodes
             .windows(2)
-            .map(|nodes| {
-                let x1 = nodes[0].x;
-                let z1 = nodes[0].z;
-                let x2 = nodes[1].x;
-                let z2 = nodes[1].z;
+            .map(|nodes: &[crate::osm_parser::ProcessedNode]| {
+                let x1: i32 = nodes[0].x;
+                let z1: i32 = nodes[0].z;
+                let x2: i32 = nodes[1].x;
+                let z2: i32 = nodes[1].z;
 
                 bresenham_line(x1, 0, z1, x2, 0, z2).len()
             })
             .sum();
 
-        let half_steps = total_steps / 2; // Calculate midpoint for descending after rising
-        let mut current_step = 0;
+        let half_steps: usize = total_steps / 2; // Calculate midpoint for descending after rising
+        let mut current_step: usize = 0;
 
         for i in 1..element.nodes.len() {
-            let prev = &element.nodes[i - 1];
-            let x1 = prev.x;
-            let y1 = ground.level(prev.xz());
-            let z1 = prev.z;
+            let prev: &crate::osm_parser::ProcessedNode = &element.nodes[i - 1];
+            let x1: i32 = prev.x;
+            let y1: i32 = ground.level(prev.xz());
+            let z1: i32 = prev.z;
 
-            let cur = &element.nodes[i];
-            let x2 = cur.x;
-            let y2 = ground.level(cur.xz());
-            let z2 = cur.z;
+            let cur: &crate::osm_parser::ProcessedNode = &element.nodes[i];
+            let x2: i32 = cur.x;
+            let y2: i32 = ground.level(cur.xz());
+            let z2: i32 = cur.z;
 
             let ground_level = 60; // FIXME TODO
 

@@ -46,8 +46,8 @@ fn round3(editor: &mut WorldEditor, material: Block, x: i32, y: i32, z: i32) {
 }
 
 /// Function to create different types of trees.
-pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u8) {
-    let mut blacklist = Vec::new();
+pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u8, snow: bool) {
+    let mut blacklist: Vec<Block> = Vec::new();
     blacklist.extend(building_corner_variations());
     blacklist.extend(building_wall_variations());
     blacklist.extend(building_floor_variations());
@@ -78,6 +78,24 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             round2(editor, OAK_LEAVES, x, y + 4, z);
             round3(editor, OAK_LEAVES, x, y + 6, z);
             round3(editor, OAK_LEAVES, x, y + 5, z);
+
+            if snow {
+                editor.set_block(SNOW_LAYER, x, y + 11, z, None, None);
+                editor.set_block(SNOW_LAYER, x + 1, y + 10, z, None, None);
+                editor.set_block(SNOW_LAYER, x - 1, y + 10, z, None, None);
+                editor.set_block(SNOW_LAYER, x, y + 10, z - 1, None, None);
+                editor.set_block(SNOW_LAYER, x, y + 10, z + 1, None, None);
+                round1(editor, SNOW_LAYER, x, y + 9, z);
+                round1(editor, SNOW_LAYER, x, y + 8, z);
+                round1(editor, SNOW_LAYER, x, y + 7, z);
+                round1(editor, SNOW_LAYER, x, y + 6, z);
+                round2(editor, SNOW_LAYER, x, y + 8, z);
+                round2(editor, SNOW_LAYER, x, y + 7, z);
+                round2(editor, SNOW_LAYER, x, y + 6, z);
+                round2(editor, SNOW_LAYER, x, y + 5, z);
+                round3(editor, SNOW_LAYER, x, y + 7, z);
+                round3(editor, SNOW_LAYER, x, y + 6, z);
+            }
         }
         2 => {
             // Spruce tree
@@ -94,6 +112,21 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             round1(editor, BIRCH_LEAVES, x, y + 3, z);
             round2(editor, BIRCH_LEAVES, x, y + 6, z);
             round2(editor, BIRCH_LEAVES, x, y + 3, z);
+
+            if snow {
+                editor.set_block(SNOW_LAYER, x, y + 11, z, None, None);
+                editor.set_block(SNOW_LAYER, x + 1, y + 11, z, None, None);
+                editor.set_block(SNOW_LAYER, x - 1, y + 11, z, None, None);
+                editor.set_block(SNOW_LAYER, x, y + 11, z - 1, None, None);
+                editor.set_block(SNOW_LAYER, x, y + 11, z + 1, None, None);
+                round1(editor, SNOW_LAYER, x, y + 10, z);
+                round1(editor, SNOW_LAYER, x, y + 8, z);
+                round1(editor, SNOW_LAYER, x, y + 7, z);
+                round1(editor, SNOW_LAYER, x, y + 5, z);
+                round1(editor, SNOW_LAYER, x, y + 4, z);
+                round2(editor, SNOW_LAYER, x, y + 7, z);
+                round2(editor, SNOW_LAYER, x, y + 4, z);
+            }
         }
         3 => {
             // Birch tree
@@ -111,6 +144,22 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             round2(editor, BIRCH_LEAVES, x, y + 2, z);
             round2(editor, BIRCH_LEAVES, x, y + 3, z);
             round2(editor, BIRCH_LEAVES, x, y + 4, z);
+
+            if snow {
+                editor.set_block(SNOW_LAYER, x, y + 9, z, None, None);
+                editor.set_block(SNOW_LAYER, x + 1, y + 8, z, None, None);
+                editor.set_block(SNOW_LAYER, x - 1, y + 8, z, None, None);
+                editor.set_block(SNOW_LAYER, x, y + 8, z - 1, None, None);
+                editor.set_block(SNOW_LAYER, x, y + 8, z + 1, None, None);
+                round1(editor, SNOW_LAYER, x, y + 7, z);
+                round1(editor, SNOW_LAYER, x, y + 6, z);
+                round1(editor, SNOW_LAYER, x, y + 5, z);
+                round1(editor, SNOW_LAYER, x, y + 4, z);
+                round1(editor, SNOW_LAYER, x, y + 3, z);
+                round2(editor, SNOW_LAYER, x, y + 3, z);
+                round2(editor, SNOW_LAYER, x, y + 4, z);
+                round2(editor, SNOW_LAYER, x, y + 5, z);
+            }
         }
         _ => {} // Do nothing if typetree is not recognized
     }
