@@ -284,31 +284,26 @@ pub fn generate_highways(
 }
 
 /// Generates a siding using stone brick slabs
-pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
-    let mut previous_node: Option<(i32, i32)> = None;
+pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground: &Ground) {
+    let mut previous_node: Option<XZPoint> = None;
     let siding_block: Block = STONE_BRICK_SLAB;
 
     for node in &element.nodes {
-        let x: i32 = node.x;
-        let z: i32 = node.z;
+        let current_node = node.xz();
 
         // Draw the siding using Bresenham's line algorithm between nodes
-        if let Some(prev) = previous_node {
-            let bresenham_points: Vec<(i32, i32, i32)> =
-                bresenham_line(prev.0, ground_level + 1, prev.1, x, ground_level + 1, z);
-            for (bx, by, bz) in bresenham_points {
-                if !editor.check_for_block(
-                    bx,
-                    by - 1,
-                    bz,
-                    None,
-                    Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
-                ) {
-                    editor.set_block(siding_block, bx, by, bz, None, None);
+        if let Some(prev_node) = previous_node {
+            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev_node.x, 0, prev_node.z, current_node.x, 0, current_node.z);
+
+            for (bx, _, bz) in bresenham_points {
+                let ground_level = ground.level(XZPoint::new(bx, bz)) + 1;
+
+                if !editor.check_for_block(bx, ground_level - 1, bz, None, Some(&[BLACK_CONCRETE, WHITE_CONCRETE])) {
+                    editor.set_block(siding_block, bx, ground_level, bz, None, None);
                 }
             }
         }
 
-        previous_node = Some((x, z));
+        previous_node = Some(current_node);
     }
 }

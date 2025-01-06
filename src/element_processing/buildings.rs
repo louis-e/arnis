@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
@@ -409,27 +410,7 @@ pub fn generate_building_from_relation(
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(editor, &member.way, &ground, args);
-        }
-    }
-
-    // Handle inner ways (holes, courtyards, etc.)
-    for member in &relation.members {
-        if member.role == ProcessedMemberRole::Inner {
-            let polygon_coords: Vec<(i32, i32)> =
-                member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
-            let hole_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-            let Some(ground_level) = ground.min_level(member.way.nodes.iter().map(|n| n.xz()))
-            else {
-                return;
-            };
-
-            for (x, z) in hole_area {
-                // Remove blocks in the inner area to create a hole
-                editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
-            }
+            generate_buildings(editor, &member.way, ground, args);
         }
     }
 }
@@ -452,7 +433,7 @@ fn generate_bridge(
     floodfill_timeout: Option<&Duration>,
 ) {
     // Calculate the bridge level
-    let mut bridge_level: i32 = 60; // TODO
+    let mut bridge_level: i32 = 60; // ELEVATION TODO
     if let Some(level_str) = element.tags.get("level") {
         if let Ok(level) = level_str.parse::<i32>() {
             bridge_level += (level * 3) + 1; // Adjust height by levels

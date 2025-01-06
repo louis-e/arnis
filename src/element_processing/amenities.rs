@@ -98,8 +98,8 @@ pub fn generate_amenities(
                     let y = ground.level(pt) + 1;
 
                     editor.set_block(SMOOTH_STONE, pt.x, y, pt.z, None, None);
-                    editor.set_block(OAK_LOG, pt.x + 1, y + 1, pt.z, None, None);
-                    editor.set_block(OAK_LOG, pt.x - 1, y + 1, pt.z, None, None);
+                    editor.set_block(OAK_LOG, pt.x + 1, y, pt.z, None, None);
+                    editor.set_block(OAK_LOG, pt.x - 1, y, pt.z, None, None);
                 }
             }
             "vending" => {

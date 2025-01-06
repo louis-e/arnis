@@ -84,18 +84,18 @@ pub fn generate_world(
                 } else if way.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element, &ground);
                 } else if way.tags.contains_key("waterway") {
-                    //waterways::generate_waterways(&mut editor, way, &ground); //TODO
+                    waterways::generate_waterways(&mut editor, way, &ground);
                 } else if way.tags.contains_key("bridge") {
                     bridges::generate_bridges(&mut editor, way, &ground);
                 } else if way.tags.contains_key("railway") {
-                    //railways::generate_railways(&mut editor, way, &ground); //TODO
+                    railways::generate_railways(&mut editor, way, &ground);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
-                    //highways::generate_siding(&mut editor, way, &ground); //TODO
+                    highways::generate_siding(&mut editor, way, &ground);
                 }
             }
             ProcessedElement::Node(node) => {
                 if node.tags.contains_key("door") || node.tags.contains_key("entrance") {
-                    //doors::generate_doors(&mut editor, node, &ground); //TODO
+                    doors::generate_doors(&mut editor, node, &ground);
                 } else if node.tags.contains_key("natural")
                     && node.tags.get("natural") == Some(&"tree".to_string())
                 {
@@ -107,12 +107,19 @@ pub fn generate_world(
                 } else if node.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, &ground, args);
                 } else if node.tags.contains_key("tourism") {
-                    //tourisms::generate_tourisms(&mut editor, node, &ground); //TODO
+                    tourisms::generate_tourisms(&mut editor, node, &ground);
                 }
             }
             ProcessedElement::Relation(rel) => {
-                if rel.tags.contains_key("water") {
-                    //water_areas::generate_water_areas(&mut editor, rel, &ground); //TODO
+                if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                    buildings::generate_building_from_relation(
+                        &mut editor,
+                        rel,
+                        &ground,
+                        args,
+                    );
+                } else if rel.tags.contains_key("water") {
+                    water_areas::generate_water_areas(&mut editor, rel, &ground);
                 }
             }
         }

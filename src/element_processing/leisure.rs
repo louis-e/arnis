@@ -115,8 +115,8 @@ pub fn generate_leisure(
                         0 => {
                             // Benches
                             editor.set_block(OAK_LOG, x, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
+                            editor.set_block(OAK_LOG, x + 1, ground_level, z, None, None);
+                            editor.set_block(OAK_LOG, x - 1, ground_level, z, None, None);
                         }
                         1..=30 => {
                             // Flowers

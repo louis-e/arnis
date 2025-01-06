@@ -40,7 +40,7 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground
             let y2: i32 = ground.level(cur.xz());
             let z2: i32 = cur.z;
 
-            let ground_level = 60; // FIXME TODO
+            let ground_level = 60; // ELEVATION TODO
 
             // Generate the line of coordinates between the two nodes
             let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2);
