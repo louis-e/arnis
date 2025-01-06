@@ -435,6 +435,7 @@ async function startGeneration() {
       return;
     }
 
+    var terrain = document.getElementById("terrain-toggle").checked;
     var winter_mode = document.getElementById("winter-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
@@ -452,6 +453,7 @@ async function startGeneration() {
         groundLevel: ground_level,
         winterMode: winter_mode,
         floodfillTimeout: floodfill_timeout,
+        terrainEnabled: terrain
     });
 
     console.log("Generation process started.");

@@ -24,8 +24,7 @@ pub fn generate_world(
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor =
         WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, args);
-
-    let ground: Ground = Ground::new();
+    let ground: Ground = Ground::new(args.terrain, args.ground_level);
 
     editor.set_sign(
         "↑".to_string(),
@@ -152,43 +151,63 @@ pub fn generate_world(
 
     let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
 
-    // Pre-calculate ground levels for all points
-    let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(scale_factor_x as usize + 1);
-    for x in 0..=(scale_factor_x as i32) {
-        let mut row = Vec::with_capacity(scale_factor_z as usize + 1);
-        for z in 0..=(scale_factor_z as i32) {
-            row.push(ground.level(XZPoint::new(x, z)));
-        }
-        ground_levels.push(row);
-    }
-
-    // Process blocks in larger batches
-    for x in 0..=(scale_factor_x as i32) {
-        for z in 0..=(scale_factor_z as i32) {
-            let ground_level = ground_levels[x as usize][z as usize];
-
-            // Find the highest block in this column
-            let max_y = (MIN_Y..ground_level)
-                .filter(|y: &i32| editor.block_at(x, *y, z))
-                .next()
-                .unwrap_or(ground_level)
-                .min(ground_level);
-
-            // Set blocks in a single batch
-            editor.set_block(groundlayer_block, x, max_y, z, None, None);
-            editor.set_block(DIRT, x, max_y - 1, z, None, None);
-            editor.set_block(DIRT, x, max_y - 2, z, None, None);
-
-
-            block_counter += 1;
-            if block_counter % batch_size == 0 {
-                ground_pb.inc(batch_size);
+    if args.terrain {
+        // Pre-calculate ground levels for all points
+        let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(scale_factor_x as usize + 1);
+        for x in 0..=(scale_factor_x as i32) {
+            let mut row = Vec::with_capacity(scale_factor_z as usize + 1);
+            for z in 0..=(scale_factor_z as i32) {
+                row.push(ground.level(XZPoint::new(x, z)));
             }
+            ground_levels.push(row);
+        }
 
-            gui_progress_grnd += progress_increment_grnd;
-            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                emit_gui_progress_update(gui_progress_grnd, "");
-                last_emitted_progress = gui_progress_grnd;
+        // Process blocks in larger batches
+        for x in 0..=(scale_factor_x as i32) {
+            for z in 0..=(scale_factor_z as i32) {
+                let ground_level = ground_levels[x as usize][z as usize];
+
+                // Find the highest block in this column
+                let max_y = (MIN_Y..ground_level)
+                    .filter(|y: &i32| editor.block_at(x, *y, z))
+                    .next()
+                    .unwrap_or(ground_level)
+                    .min(ground_level);
+
+                // Set blocks in a single batch
+                editor.set_block(groundlayer_block, x, max_y, z, None, None);
+                editor.set_block(DIRT, x, max_y - 1, z, None, None);
+                editor.set_block(DIRT, x, max_y - 2, z, None, None);
+
+                block_counter += 1;
+                if block_counter % batch_size == 0 {
+                    ground_pb.inc(batch_size);
+                }
+
+                gui_progress_grnd += progress_increment_grnd;
+                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                    emit_gui_progress_update(gui_progress_grnd, "");
+                    last_emitted_progress = gui_progress_grnd;
+                }
+            }
+        }
+    } else {
+        for x in 0..=(scale_factor_x as i32) {
+            for z in 0..=(scale_factor_z as i32) {
+                let ground_level = ground.level(XZPoint::new(x, z));
+                editor.set_block(groundlayer_block, x, ground_level, z, None, None);
+                editor.set_block(DIRT, x, ground_level - 1, z, None, None);
+
+                block_counter += 1;
+                if block_counter % batch_size == 0 {
+                    ground_pb.inc(batch_size);
+                }
+
+                gui_progress_grnd += progress_increment_grnd;
+                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                    emit_gui_progress_update(gui_progress_grnd, "");
+                    last_emitted_progress = gui_progress_grnd;
+                }
             }
         }
     }

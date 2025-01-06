@@ -331,6 +331,7 @@ fn gui_start_generation(
     ground_level: i32,
     winter_mode: bool,
     floodfill_timeout: u64,
+    terrain_enabled: bool,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -357,6 +358,7 @@ fn gui_start_generation(
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
+                terrain: terrain_enabled,
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),

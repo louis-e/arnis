@@ -275,6 +275,14 @@ button:hover {
   color: #ffffff;
 }
 
+#terrain-toggle {
+  accent-color: #fecc44;
+}
+
+.terrain-toggle-container, .scale-slider-container {
+  margin: 15px 0;
+}
+
 #winter-toggle {
   accent-color: #fecc44;
 }
