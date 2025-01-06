@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-#![warn(unused_extern_crates)]
+
 mod args;
 mod block_definitions;
 mod bresenham;
