@@ -9,10 +9,10 @@ license = "GPL-3.0"
 readme = "README.md"
 
 [profile.release]
-lto = true
+lto = "thin"
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = "2"
 
 [dependencies]
 clap = { version = "4.1", features = ["derive"] }
@@ -26,16 +26,16 @@ fs2 = "0.4"
 geo = "0.29.3"
 indicatif = "0.17.8"
 itertools = "0.14.0"
-nalgebra = "0.33.0"
+log = "0.4.22"
 once_cell = "1.19.0"
 rand = "0.8.5"
 reqwest = { version = "0.12.7", features = ["blocking", "json"] }
-rfd = { version = "0.15.1", default-features = false, features = ["tokio"] }
+rfd = "0.15.1"
 semver = "1.0.23"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "2", features = [] }
-tauri-plugin-dialog = "2.0.0"
+tauri = "2"
+tauri-plugin-log = { version = "2.2.0" }
 tauri-plugin-shell = "2"
 tokio = { version = "1.42.0", features = ["full"] }
 zip = "2.2.2"
