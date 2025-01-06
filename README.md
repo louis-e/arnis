@@ -13,6 +13,8 @@ By leveraging geospatial data from OpenStreetMap and utilizing the powerful capa
 
 Arnis is designed to handle large-scale data and generate rich, immersive environments that bring real-world cities, landmarks, and natural features into the Minecraft universe. Whether you're looking to replicate your hometown, explore urban environments, or simply build something unique and realistic, Arnis generates your vision.
 
+**This is the official project website. Any other website pretending to be associated with Arnis is fake and should be avoided.**
+
 ## :keyboard: Usage
 <img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
