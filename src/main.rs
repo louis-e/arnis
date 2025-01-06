@@ -1,5 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
+#![warn(unused_extern_crates)]
 mod args;
 mod block_definitions;
 mod bresenham;
@@ -22,13 +22,13 @@ use fs2::FileExt;
 use log::{error, LevelFilter};
 use rfd::FileDialog;
 use std::panic;
-use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 use std::{
     env,
     fs::{self, File},
     io::{Read, Write},
     path::{Path, PathBuf},
 };
+use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
 fn print_banner() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -135,10 +135,12 @@ fn main() {
                 LogBuilder::default()
                     .level(LevelFilter::Trace)
                     .targets([
-                        Target::new(TargetKind::LogDir { file_name: Some("arnis.log".into()) }),
+                        Target::new(TargetKind::LogDir {
+                            file_name: Some("arnis.log".into()),
+                        }),
                         Target::new(TargetKind::Stdout),
                     ])
-                    .build()
+                    .build(),
             )
             .invoke_handler(tauri::generate_handler![
                 gui_select_world,
@@ -146,10 +148,11 @@ fn main() {
                 gui_get_version,
                 gui_check_for_updates
             ])
-            .setup(|app| {
-                let app_handle = app.handle();
-                let main_window = tauri::Manager::get_webview_window(app_handle, "main")
-                    .expect("Failed to get main window");
+            .setup(|app: &mut tauri::App| {
+                let app_handle: &tauri::AppHandle = app.handle();
+                let main_window: tauri::WebviewWindow =
+                    tauri::Manager::get_webview_window(app_handle, "main")
+                        .expect("Failed to get main window");
                 progress::set_main_window(main_window);
                 Ok(())
             })
