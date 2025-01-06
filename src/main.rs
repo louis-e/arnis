@@ -142,6 +142,7 @@ fn main() {
                     ])
                     .build(),
             )
+            .plugin(tauri_plugin_shell::init())
             .invoke_handler(tauri::generate_handler![
                 gui_select_world,
                 gui_start_generation,
