@@ -9,7 +9,7 @@ license = "GPL-3.0"
 readme = "README.md"
 
 [profile.release]
-lto = true
+lto = "thin"
 
 [build-dependencies]
 tauri-build = "2"
