@@ -124,6 +124,8 @@ function detectLanguage() {
       return 'de';
     case 'zh':
       return 'zh';
+    case 'uk':
+      return 'ua';
     default:
       return 'en';
   }
