@@ -31,7 +31,5 @@
   "select_location_first": "请先选择一个位置！",
   "area_too_large": "该区域非常大，可能会超出典型的计算限制。",
   "area_extensive": "该区域相当广泛，可能需要大量时间和资源。",
-  "selection_confirmed": "选择已确认！",
-  "invalid_format_error": "格式无效。请使用 'lat,lng,lat,lng' 或 'lat lng lat lng'。",
-  "coordinates_out_of_range": "错误：坐标超出范围或顺序不正确（需要先纬度后经度）。"
+  "selection_confirmed": "选择已确认！"
 }

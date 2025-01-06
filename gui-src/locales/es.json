@@ -31,7 +31,5 @@
   "select_location_first": "¡Seleccione una ubicación primero!",
   "area_too_large": "Esta área es muy grande y podría exceder los límites típicos de computación.",
   "area_extensive": "El área es bastante extensa y puede requerir mucho tiempo y recursos.",
-  "selection_confirmed": "¡Selección confirmada!",
-  "invalid_format_error": "Formato inválido. Por favor, use 'lat,lng,lat,lng' o 'lat lng lat lng'.",
-  "coordinates_out_of_range": "Error: Las coordenadas están fuera de rango o están ordenadas incorrectamente (Lat antes de Lng requerido)."
+  "selection_confirmed": "¡Selección confirmada!"
 }

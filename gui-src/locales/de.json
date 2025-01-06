@@ -31,7 +31,5 @@
   "select_location_first": "Wähle zuerst einen Standort aus!",
   "area_too_large": "Dieses Gebiet ist sehr groß und könnte das Berechnungslimit überschreiten.",
   "area_extensive": "Diese Gebietsgröße könnte längere Zeit für die Generierung benötigen.",
-  "selection_confirmed": "Auswahl bestätigt!",
-  "invalid_format_error": "Ungültiges Format. Bitte verwende 'lat,lng,lat,lng' oder 'lat lng lat lng'.",
-  "coordinates_out_of_range": "Fehler: Koordinaten sind außerhalb des Bereichs oder falsch geordnet (Lat vor Lng erforderlich)."
+  "selection_confirmed": "Auswahl bestätigt!"
 }
