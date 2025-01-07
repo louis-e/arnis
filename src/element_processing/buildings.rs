@@ -51,7 +51,8 @@ pub fn generate_buildings(
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
-    let mut building_height: i32 = 6; // Default building height
+    let scale_factor = args.scale;
+    let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(4); // Default building height with scale and minimum
 
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
@@ -69,20 +70,23 @@ pub fn generate_buildings(
     // Determine building height from tags
     if let Some(levels_str) = element.tags.get("building:levels") {
         if let Ok(levels) = levels_str.parse::<i32>() {
-            if levels >= 1 && (levels * 4 + 2) > building_height {
-                building_height = levels * 4 + 2;
+            if levels >= 1 {
+                building_height = ((levels * 4 + 2) as f64 * scale_factor) as i32;
+                building_height = building_height.max(4);
             }
         }
     }
 
     if let Some(height_str) = element.tags.get("height") {
         if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
-            building_height = height.round() as i32;
+            building_height = (height * scale_factor) as i32;
+            building_height = building_height.max(4);
         }
     }
 
     if let Some(levels) = relation_levels {
-        building_height = levels * 4 + 2;
+        building_height = ((levels * 4 + 2) as f64 * scale_factor) as i32;
+        building_height = building_height.max(4);
     }
 
     if let Some(amenity_type) = element.tags.get("amenity") {
@@ -120,9 +124,9 @@ pub fn generate_buildings(
 
     if let Some(building_type) = element.tags.get("building") {
         if building_type == "garage" {
-            building_height = 2;
+            building_height = ((2.0 * scale_factor) as i32).max(4);
         } else if building_type == "shed" {
-            building_height = 2;
+            building_height = ((2.0 * scale_factor) as i32).max(4);
 
             if element.tags.contains_key("bicycle_parking") {
                 let ground_block: Block = OAK_PLANKS;
@@ -290,13 +294,13 @@ pub fn generate_buildings(
             return;
         } else if building_type == "apartments" {
             // If building has no height attribute, assign a defined height
-            if building_height == 6 {
-                building_height = 15
+            if building_height == ((6.0 * scale_factor) as i32).max(4) {
+                building_height = ((15.0 * scale_factor) as i32).max(4);
             }
         } else if building_type == "hospital" {
             // If building has no height attribute, assign a defined height
-            if building_height == 6 {
-                building_height = 23
+            if building_height == ((6.0 * scale_factor) as i32).max(4) {
+                building_height = ((23.0 * scale_factor) as i32).max(4);
             }
         } else if building_type == "bridge" {
             generate_bridge(editor, element, ground_level, args.timeout.as_ref());
