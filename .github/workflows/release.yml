@@ -1,4 +1,4 @@
-name: Build and Release Arnis
+name: Build and Release Rust Project
 
 on:
   release:
@@ -12,19 +12,19 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary_name: arnis.exe
-            artifact_name: arnis-windows-x86_64.exe
+            artifact_name: arnis-windows-x64.exe
+          - os: windows-latest
+            target: i686-pc-windows-msvc
+            binary_name: arnis.exe
+            artifact_name: arnis-windows-x86.exe
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             binary_name: arnis
-            artifact_name: arnis-linux-x86_64
-          - os: macos-latest
-            target: x86_64-apple-darwin
+            artifact_name: arnis-linux-x64
+          - os: ubuntu-24.04
+            target: i686-unknown-linux-gnu
             binary_name: arnis
-            artifact_name: arnis-macos-x86_64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            binary_name: arnis
-            artifact_name: arnis-macos-aarch64
+            artifact_name: arnis-linux-x86
 
     runs-on: ${{ matrix.os }}
 
@@ -38,8 +38,8 @@ jobs:
         toolchain: stable
         targets: ${{ matrix.target }}
 
-    - name: Install Linux dependencies
-      if: matrix.os == 'ubuntu-24.04'
+    - name: Install Linux x64 dependencies
+      if: matrix.os == 'ubuntu-24.04' && matrix.target == 'x86_64-unknown-linux-gnu'
       run: |
         sudo apt update
         sudo apt install -y software-properties-common
@@ -48,12 +48,15 @@ jobs:
         sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
-    - name: Install macOS dependencies
-      if: matrix.os == 'macos-latest'
+    - name: Install Linux x86 dependencies
+      if: matrix.os == 'ubuntu-24.04' && matrix.target == 'i686-unknown-linux-gnu'
       run: |
-        brew install gtk+3
-        brew install webkitgtk
-        brew install pkg-config
+        sudo dpkg --add-architecture i386
+        sudo apt update
+        sudo apt install -y gcc-multilib g++-multilib
+        sudo apt install -y libgtk-3-dev:i386 libglib2.0-dev:i386 libsoup-3.0-dev:i386 libwebkit2gtk-4.1-dev:i386
+        echo "PKG_CONFIG_PATH=/usr/lib/i386-linux-gnu/pkgconfig" >> $GITHUB_ENV
+        echo "CARGO_TARGET_I686_UNKNOWN_LINUX_GNU_LINKER=gcc" >> $GITHUB_ENV
 
     - name: Install dependencies
       run: cargo fetch --locked
@@ -99,9 +102,9 @@ jobs:
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          artifacts/arnis-windows-x86_64.exe
-          artifacts/arnis-linux-x86_64
-          artifacts/arnis-macos-x86_64
-          artifacts/arnis-macos-aarch64
+          artifacts/arnis-windows-x64.exe
+          artifacts/arnis-windows-x86.exe
+          artifacts/arnis-linux-x64
+          artifacts/arnis-linux-x86
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
