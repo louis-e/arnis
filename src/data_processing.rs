@@ -83,6 +83,9 @@ pub fn generate_world(
                     bridges::generate_bridges(&mut editor, way, ground_level);
                 } else if way.tags.contains_key("railway") {
                     railways::generate_railways(&mut editor, way, ground_level);
+                } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
+                {
+                    highways::generate_aeroway(&mut editor, way, ground_level);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way, ground_level);
                 }
