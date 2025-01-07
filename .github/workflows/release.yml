@@ -1,4 +1,4 @@
-name: Build and Release Rust Project
+name: Build and Release Arnis
 
 on:
   release:
@@ -6,17 +6,40 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary_name: arnis.exe
+            asset_name: arnis-windows-x64.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary_name: arnis
+            asset_name: arnis-linux-x64
+
+    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
 
-    - name: Set up Rust for Windows
+    - name: Set up Rust
       uses: dtolnay/rust-toolchain@v1
       with:
         toolchain: stable
-        targets: x86_64-pc-windows-msvc
+        targets: ${{ matrix.target }}
+
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt update
+        sudo apt install -y software-properties-common
+        sudo add-apt-repository universe
+        echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc)-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+        sudo apt update
+        sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
+        echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
     - name: Install dependencies
       run: cargo fetch --locked
@@ -24,15 +47,15 @@ jobs:
     - name: Build
       run: cargo build --frozen --release
 
-    - name: Upload artifact (Windows)
+    - name: Upload artifact
       uses: actions/upload-artifact@v3
       with:
-        name: windows-latest-build
-        path: target/release/arnis.exe
+        name: ${{ matrix.os }}-build
+        path: target/release/${{ matrix.binary_name }}
 
   release:
-    runs-on: windows-latest
     needs: build
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -43,10 +66,20 @@ jobs:
         name: windows-latest-build
         path: ./builds/windows
 
+    - name: Download Linux build artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: ubuntu-latest-build
+        path: ./builds/linux
+
+    - name: Make Linux binary executable
+      run: chmod +x ./builds/linux/arnis
+
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
           builds/windows/arnis.exe
+          builds/linux/arnis
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
