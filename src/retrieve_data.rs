@@ -93,8 +93,8 @@ pub fn fetch_data(
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-        "https://overpass.private.coffee/api/interpreter",
+        //"https://overpass.kumi.systems/api/interpreter", // This server is not reliable anymore
+        //"https://overpass.private.coffee/api/interpreter", // This server is not reliable anymore
         "https://overpass.osm.ch/api/interpreter",
     ];
     let url: &&str = api_servers.choose(&mut rand::thread_rng()).unwrap();
