@@ -101,6 +101,22 @@ fn main() {
             osm_parser::get_priority(element)
         });
 
+        // Write the parsed OSM data to a file for inspection
+        if args.debug {
+            let mut output_file: File =
+                File::create("parsed_osm_data.txt").expect("Failed to create output file");
+            for element in &parsed_elements {
+                writeln!(
+                    output_file,
+                    "Element ID: {}, Type: {}, Tags: {:?}",
+                    element.id(),
+                    element.kind(),
+                    element.tags(),
+                )
+                .expect("Failed to write to output file");
+            }
+        }
+
         // Generate world
         let _ =
             data_processing::generate_world(parsed_elements, &args, scale_factor_x, scale_factor_z);
@@ -356,21 +372,6 @@ fn gui_start_generation(
                     parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| {
                         osm_parser::get_priority(element)
                     });
-
-                    if args.debug {
-                        let mut output_file: File = File::create("parsed_osm_data.txt")
-                            .expect("Failed to create output file");
-                        for element in &parsed_elements {
-                            writeln!(
-                                output_file,
-                                "Element ID: {}, Type: {}, Tags: {:?}",
-                                element.id(),
-                                element.kind(),
-                                element.tags(),
-                            )
-                            .expect("Failed to write to output file");
-                        }
-                    }
 
                     let _ = data_processing::generate_world(
                         parsed_elements,
