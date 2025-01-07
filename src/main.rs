@@ -137,7 +137,7 @@ fn main() {
                     .level(LevelFilter::Warn)
                     .targets([
                         Target::new(TargetKind::LogDir {
-                            file_name: Some("arnis.log".into()),
+                            file_name: Some("arnis".into()),
                         }),
                         Target::new(TargetKind::Stdout),
                     ])
