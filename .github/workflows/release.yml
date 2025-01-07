@@ -1,4 +1,4 @@
-name: Build and Release Rust Project
+name: Build and Release Arnis
 
 on:
   release:
