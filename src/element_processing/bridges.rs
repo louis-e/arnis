@@ -3,67 +3,38 @@ use crate::bresenham::bresenham_line;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
+// TODO FIX
+#[allow(dead_code)]
 pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
     if let Some(_bridge_type) = element.tags.get("bridge") {
-        let bridge_height: i32 = element
-            .tags
-            .get("layer")
-            .and_then(|layer: &String| layer.parse::<i32>().ok())
-            .unwrap_or(1); // Default height if not specified
-
-        // Calculate the total length of the bridge
-        let total_steps: usize = element
-            .nodes
-            .windows(2)
-            .map(|nodes: &[crate::osm_parser::ProcessedNode]| {
-                let x1: i32 = nodes[0].x;
-                let z1: i32 = nodes[0].z;
-                let x2: i32 = nodes[1].x;
-                let z2: i32 = nodes[1].z;
-
-                bresenham_line(x1, ground_level, z1, x2, ground_level, z2).len()
-            })
-            .sum();
-
-        let half_steps: usize = total_steps / 2; // Calculate midpoint for descending after rising
-        let mut current_step: usize = 0;
+        let bridge_height = 3; // Fixed height
 
         for i in 1..element.nodes.len() {
-            let prev: &crate::osm_parser::ProcessedNode = &element.nodes[i - 1];
-            let x1: i32 = prev.x;
-            let z1: i32 = prev.z;
+            let prev = &element.nodes[i - 1];
+            let cur = &element.nodes[i];
+            let points = bresenham_line(prev.x, ground_level, prev.z, cur.x, ground_level, cur.z);
 
-            let cur: &crate::osm_parser::ProcessedNode = &element.nodes[i];
-            let x2: i32 = cur.x;
-            let z2: i32 = cur.z;
+            let total_length = points.len();
+            let ramp_length = 6; // Length of ramp at each end
 
-            // Generate the line of coordinates between the two nodes
-            let bresenham_points: Vec<(i32, i32, i32)> =
-                bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
-
-            for (bx, _, bz) in bresenham_points {
-                // Calculate the current height of the bridge
-                let current_height: i32 = if current_step <= half_steps {
-                    ground_level + bridge_height + current_step as i32 / 5 // Rise for the first half
+            for (idx, (x, _, z)) in points.iter().enumerate() {
+                let height = if idx < ramp_length {
+                    // Start ramp (rising)
+                    (idx * bridge_height) / ramp_length
+                } else if idx >= total_length - ramp_length {
+                    // End ramp (descending)
+                    ((total_length - idx) * bridge_height) / ramp_length
                 } else {
-                    ground_level + bridge_height + (half_steps as i32 / 5)
-                        - ((current_step - half_steps) as i32 / 5) // Descend for the second half
+                    // Middle section (constant height)
+                    bridge_height
                 };
 
-                // Set bridge blocks
-                editor.set_block(LIGHT_GRAY_CONCRETE, bx, current_height, bz, None, None);
-                for (offset_x, offset_z) in &[(-1, -1), (1, -1), (1, 1), (-1, 1)] {
-                    editor.set_block(
-                        LIGHT_GRAY_CONCRETE,
-                        bx + offset_x,
-                        current_height,
-                        bz + offset_z,
-                        None,
-                        None,
-                    );
-                }
+                let bridge_y = ground_level + height as i32;
 
-                current_step += 1;
+                // Place bridge blocks
+                for dx in -2..=2 {
+                    editor.set_block(LIGHT_GRAY_CONCRETE, *x + dx, bridge_y, *z, None, None);
+                }
             }
         }
     }

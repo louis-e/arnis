@@ -61,6 +61,7 @@ Make sure to teleport to the generation starting point (/tp 0 0 0). If there is 
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Fix compilation for Linux
 - [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
+- [ ] Fix coastal cities generation duration time (water_areas.rs)
 - [ ] Add street names as signs
 - [ ] Add support for older Minecraft versions (<=1.16.5) (https://github.com/louis-e/arnis/issues/124, https://github.com/louis-e/arnis/issues/137)
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
@@ -68,7 +69,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Implement house roof types
 - [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Add support for inner attribute in multipolygons and multipolygon elements other than buildings
-- [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
+- [ ] Fix Github Action Workflow for releasing MacOS Binary
 - [ ] Evaluate and implement faster region saving
 - [ ] Refactor bridges implementation
 - [ ] Refactor railway implementation
