@@ -1,4 +1,4 @@
-name: Build and Release Rust Project
+name: Build and Release Arnis
 
 on:
   release:
@@ -13,11 +13,11 @@ jobs:
             target: x86_64-pc-windows-msvc
             binary_name: arnis.exe
             artifact_name: arnis-windows-x86_64.exe
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             binary_name: arnis
             artifact_name: arnis-linux-x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             target: aarch64-unknown-linux-gnu
             binary_name: arnis
             artifact_name: arnis-linux-aarch64
@@ -43,18 +43,17 @@ jobs:
         targets: ${{ matrix.target }}
 
     - name: Install Linux x86_64 dependencies
-      if: matrix.os == 'ubuntu-latest' && matrix.target == 'x86_64-unknown-linux-gnu'
+      if: matrix.os == 'ubuntu-24.04' && matrix.target == 'x86_64-unknown-linux-gnu'
       run: |
         sudo apt update
         sudo apt install -y software-properties-common
         sudo add-apt-repository universe
-        echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc)-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
         sudo apt update
         sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
     - name: Install Linux ARM64 dependencies and setup cross-compilation
-      if: matrix.os == 'ubuntu-latest' && matrix.target == 'aarch64-unknown-linux-gnu'
+      if: matrix.os == 'ubuntu-24.04' && matrix.target == 'aarch64-unknown-linux-gnu'
       run: |
         sudo apt update
         sudo apt install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
@@ -68,7 +67,7 @@ jobs:
       if: matrix.os == 'macos-latest'
       run: |
         brew install gtk+3
-        brew install webkit2gtk-4.1
+        brew install webkitgtk
         brew install pkg-config
 
     - name: Install dependencies
