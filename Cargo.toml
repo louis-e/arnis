@@ -5,7 +5,7 @@ edition = "2021"
 description = "Arnis - Generate real life cities in Minecraft"
 homepage = "https://github.com/louis-e/arnis"
 repository = "https://github.com/louis-e/arnis"
-license = "GPL-3.0"
+license = "Apache-2.0"
 readme = "README.md"
 
 [profile.release]
