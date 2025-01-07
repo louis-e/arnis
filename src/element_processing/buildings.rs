@@ -14,6 +14,7 @@ pub fn generate_buildings(
     element: &ProcessedWay,
     ground_level: i32,
     args: &Args,
+    relation_levels: Option<i32>,
 ) {
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -78,6 +79,10 @@ pub fn generate_buildings(
         if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
             building_height = height.round() as i32;
         }
+    }
+
+    if let Some(levels) = relation_levels {
+        building_height = levels * 4 + 2;
     }
 
     if let Some(amenity_type) = element.tags.get("amenity") {
@@ -410,15 +415,28 @@ pub fn generate_building_from_relation(
     ground_level: i32,
     args: &Args,
 ) {
+    // Extract levels from relation tags
+    let relation_levels = relation
+        .tags
+        .get("building:levels")
+        .and_then(|l| l.parse::<i32>().ok())
+        .unwrap_or(2); // Default to 2 levels
+
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(editor, &member.way, ground_level, args);
+            generate_buildings(
+                editor,
+                &member.way,
+                ground_level,
+                args,
+                Some(relation_levels),
+            );
         }
     }
 
     // Handle inner ways (holes, courtyards, etc.)
-    for member in &relation.members {
+    /*for member in &relation.members {
         if member.role == ProcessedMemberRole::Inner {
             let polygon_coords: Vec<(i32, i32)> =
                 member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
@@ -430,7 +448,7 @@ pub fn generate_building_from_relation(
                 editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
             }
         }
-    }
+    }*/
 }
 
 fn find_nearest_block_in_color_map(
