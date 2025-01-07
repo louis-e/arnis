@@ -416,14 +416,22 @@ pub fn generate_building_from_relation(
     args: &Args,
 ) {
     // Extract levels from relation tags
-    let relation_levels = relation.tags.get("building:levels")
+    let relation_levels = relation
+        .tags
+        .get("building:levels")
         .and_then(|l| l.parse::<i32>().ok())
-        .unwrap_or(2);  // Default to 2 levels
+        .unwrap_or(2); // Default to 2 levels
 
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(editor, &member.way, ground_level, args, Some(relation_levels));
+            generate_buildings(
+                editor,
+                &member.way,
+                ground_level,
+                args,
+                Some(relation_levels),
+            );
         }
     }
 

@@ -358,8 +358,8 @@ fn gui_start_generation(
                     });
 
                     if args.debug {
-                        let mut output_file: File =
-                            File::create("parsed_osm_data.txt").expect("Failed to create output file");
+                        let mut output_file: File = File::create("parsed_osm_data.txt")
+                            .expect("Failed to create output file");
                         for element in &parsed_elements {
                             writeln!(
                                 output_file,

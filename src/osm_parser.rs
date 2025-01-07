@@ -67,7 +67,7 @@ pub struct ProcessedMember {
 pub struct ProcessedRelation {
     pub id: u64,
     pub tags: HashMap<String, String>,
-    pub members: Vec<ProcessedMember>
+    pub members: Vec<ProcessedMember>,
 }
 
 #[derive(Debug)]
