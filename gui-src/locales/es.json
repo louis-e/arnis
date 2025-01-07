@@ -15,7 +15,7 @@
   "winter_mode": "Modo invierno:",
   "world_scale": "Escala del mundo:",
   "custom_bounding_box": "Caja delimitadora personalizada:",
-  "floodfill_timeout": "Tiempo de espera de inundación (seg):",
+  "floodfill_timeout": "Tiempo de espera de relleno (seg):",
   "ground_level": "Nivel del suelo:",
   "choose_world_modal_title": "Elegir mundo",
   "select_existing_world": "Seleccionar mundo existente",

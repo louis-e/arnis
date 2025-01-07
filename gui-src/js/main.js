@@ -128,6 +128,10 @@ function detectLanguage() {
       return 'ua';
     case 'pl':
       return 'pl';
+    case 'ko':
+      return 'ko';
+    case 'sv':
+      return 'sv';
     default:
       return 'en';
   }
