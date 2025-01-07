@@ -128,12 +128,13 @@ fn main() {
         panic::set_hook(Box::new(|panic_info| {
             let message = format!("Application panicked: {:?}", panic_info);
             error!("{}", message);
+            std::process::exit(1);
         }));
 
         tauri::Builder::default()
             .plugin(
                 LogBuilder::default()
-                    .level(LevelFilter::Trace)
+                    .level(LevelFilter::Warn)
                     .targets([
                         Target::new(TargetKind::LogDir {
                             file_name: Some("arnis.log".into()),
