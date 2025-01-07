@@ -13,7 +13,7 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay, ground
             let prev = &element.nodes[i - 1];
             let cur = &element.nodes[i];
             let points = bresenham_line(prev.x, ground_level, prev.z, cur.x, ground_level, cur.z);
-            
+
             let total_length = points.len();
             let ramp_length = 6; // Length of ramp at each end
 

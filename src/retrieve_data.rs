@@ -41,8 +41,8 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 );
                 emit_gui_error("Request timed out. Try selecting a smaller area.");
             } else {
-                eprintln!("{}", format!("Error! {:.45}", e).red().bold());
-                emit_gui_error(&format!("{:.45}", e.to_string()));
+                eprintln!("{}", format!("Error! {:.52}", e).red().bold());
+                emit_gui_error(&format!("{:.52}", e.to_string()));
             }
             // Always propagate errors
             Err(e.into())
@@ -95,6 +95,7 @@ pub fn fetch_data(
         "https://z.overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
+        "https://overpass.osm.ch/api/interpreter",
     ];
     let url: &&str = api_servers.choose(&mut rand::thread_rng()).unwrap();
 

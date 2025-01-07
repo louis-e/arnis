@@ -63,7 +63,15 @@ pub fn generate_water_areas(
         })
         .collect();
 
-    inverse_floodfill(max_x, max_z, outers, inners, editor, ground_level, start_time);
+    inverse_floodfill(
+        max_x,
+        max_z,
+        outers,
+        inners,
+        editor,
+        ground_level,
+        start_time,
+    );
 }
 
 // Merges ways that share nodes into full loops
