@@ -12,11 +12,11 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary_name: arnis.exe
-            artifact_name: arnis-windows-x64.exe
-          - os: ubuntu-24.04
+            asset_name: arnis-windows-x64.exe
+          - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary_name: arnis
-            artifact_name: arnis-linux-x64
+            asset_name: arnis-linux-x64
 
     runs-on: ${{ matrix.os }}
 
@@ -31,11 +31,12 @@ jobs:
         targets: ${{ matrix.target }}
 
     - name: Install Linux dependencies
-      if: matrix.os == 'ubuntu-24.04'
+      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt update
         sudo apt install -y software-properties-common
         sudo add-apt-repository universe
+        echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc)-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
         sudo apt update
         sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
@@ -44,47 +45,41 @@ jobs:
       run: cargo fetch --locked
 
     - name: Build
-      run: cargo build --frozen --release --target ${{ matrix.target }}
-
-    - name: Prepare binary
-      run: |
-        mkdir -p artifacts
-        if [ "${{ matrix.os }}" = "windows-latest" ]; then
-          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} artifacts/${{ matrix.artifact_name }}
-        else
-          cp target/${{ matrix.target }}/release/${{ matrix.binary_name }} artifacts/${{ matrix.artifact_name }}
-        fi
+      run: cargo build --frozen --release
 
     - name: Upload artifact
       uses: actions/upload-artifact@v3
       with:
-        name: ${{ matrix.artifact_name }}
-        path: artifacts/${{ matrix.artifact_name }}
+        name: ${{ matrix.os }}-build
+        path: target/release/${{ matrix.binary_name }}
 
   release:
     needs: build
     runs-on: ubuntu-latest
     steps:
-    - name: Create artifact directory
-      run: mkdir -p artifacts
+    - name: Checkout code
+      uses: actions/checkout@v3
 
-    - name: Download all artifacts
+    - name: Download Windows build artifact
       uses: actions/download-artifact@v3
       with:
-        path: artifacts
+        name: windows-latest-build
+        path: ./builds/windows
 
-    - name: Prepare artifacts for release
-      run: |
-        cd artifacts
-        find . -type f -not -name "*.exe" -exec chmod +x {} \;
-        # Move all files to current directory
-        find . -mindepth 2 -type f -exec mv {} . \;
+    - name: Download Linux build artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: ubuntu-latest-build
+        path: ./builds/linux
+
+    - name: Make Linux binary executable
+      run: chmod +x ./builds/linux/arnis
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          artifacts/arnis-windows-x64.exe
-          artifacts/arnis-linux-x64
+          builds/windows/arnis.exe
+          builds/linux/arnis
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
