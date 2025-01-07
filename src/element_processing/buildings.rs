@@ -184,6 +184,9 @@ pub fn generate_buildings(
         {
             // Parking building structure
 
+            // Ensure minimum height
+            building_height = building_height.max(16);
+
             let polygon_coords: Vec<(i32, i32)> = element
                 .nodes
                 .iter()
