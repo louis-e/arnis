@@ -12,7 +12,7 @@ use std::time::Duration;
 /// Function to download data using reqwest
 fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
-        .timeout(Duration::from_secs(1800))
+        .timeout(Duration::from_secs(360))
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -20,8 +20,13 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
 
     match response {
         Ok(resp) => {
+            emit_gui_progress_update(3.0, "Downloading data...");
             if resp.status().is_success() {
-                Ok(resp.text()?)
+                let text = resp.text()?;
+                if text.is_empty() {
+                    return Err("Error! Received invalid from server".into());
+                }
+                Ok(text)
             } else {
                 Err(format!("Error! Received response code: {}", resp.status()).into())
             }
@@ -36,15 +41,11 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 );
                 emit_gui_error("Request timed out. Try selecting a smaller area.");
             } else {
-                eprintln!("{}", format!("Error! {}", e).red().bold());
-                emit_gui_error(&e.to_string());
+                eprintln!("{}", format!("Error! {:.45}", e).red().bold());
+                emit_gui_error(&format!("{:.45}", e.to_string()));
             }
-
-            if !is_running_with_gui() {
-                std::process::exit(1);
-            } else {
-                Ok("".to_string())
-            }
+            // Always propagate errors
+            Err(e.into())
         }
     }
 }
@@ -99,7 +100,7 @@ pub fn fetch_data(
 
     // Generate Overpass API query for bounding box
     let query: String = format!(
-        r#"[out:json][timeout:1800][bbox:{},{},{},{}];
+        r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
         nwr["building"];
         nwr["highway"];

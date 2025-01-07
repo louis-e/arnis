@@ -351,8 +351,8 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-const threshold1 = 35000000.00;
-const threshold2 = 50000000.00;
+const threshold1 = 30000000.00;
+const threshold2 = 45000000.00;
 let selectedBBox = "";
 
 // Function to handle incoming bbox data
