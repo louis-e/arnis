@@ -110,7 +110,8 @@ After your pull request was merged, I will take care of regularly creating updat
 </a>
 
 ## :copyright: License Information
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0).[^3]
+This project is licensed under the Apache 2.0 License.[^3]
+This GitHub repository is the only official source for the Arnis project. Websites or distributions that claim to be official sources or use the Arnis name, logo, or branding without explicit permission are not allowed and violate the terms of the Apache 2.0 License.
 
 Copyright (c) 2022-2025 Louis Erbkamm (louis-e)
 
@@ -118,6 +119,4 @@ Copyright (c) 2022-2025 Louis Erbkamm (louis-e)
 
 [^2]: https://en.wikipedia.org/wiki/Arnis,_Germany
 
-[^3]:
-    This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-    For the full license text, see the LICENSE file.
+[^3]: https://github.com/louis-e/arnis/blob/main/LICENSE
