@@ -16,15 +16,31 @@ window.addEventListener("DOMContentLoaded", async () => {
   initSettings();
   initWorldPicker();
   handleBboxInput();
-  const language = detectLanguage();
-  const localization = await loadLocalization(language);
+  const localization = await getLocalization();
   await applyLocalization(localization);
   initFooter();
   await checkForUpdates();
 });
 
-async function loadLocalization(language) {
-  const response = await fetch(`./locales/${language}.json`);
+function invalidJSON(response) {
+  // Workaround for Tauri always falling back to index.html for asset loading
+  return !response.ok || response.headers.get("Content-Type") === "text/html";
+}
+
+async function getLocalization() {
+  const lang = navigator.language;
+  let response = await fetch(`./locales/${lang}.json`);
+
+  // Try with only first part of language code
+  if (invalidJSON(response)) {
+    response = await fetch(`./locales/${lang.split('-')[0]}.json`);
+
+    // Fallback to default English localization
+    if (invalidJSON(response)) {
+      response = await fetch(`./locales/en.json`);
+    }
+  }
+
   const localization = await response.json();
   return localization;
 }
@@ -117,31 +133,6 @@ async function applyLocalization(localization) {
 
   // Update error messages
   window.localization = localization;
-}
-
-function detectLanguage() {
-  const lang = navigator.language || navigator.userLanguage;
-  const langCode = lang.split('-')[0];
-  switch (langCode) {
-    case 'es':
-      return 'es';
-    case 'ru':
-      return 'ru';
-    case 'de':
-      return 'de';
-    case 'zh':
-      return 'zh';
-    case 'uk':
-      return 'ua';
-    case 'pl':
-      return 'pl';
-    case 'ko':
-      return 'ko';
-    case 'sv':
-      return 'sv';
-    default:
-      return 'en';
-  }
 }
 
 // Function to initialize the footer with the current year and version
