@@ -17,15 +17,17 @@ pub fn generate_buildings(
     relation_levels: Option<i32>,
 ) {
     // Adjust starting height based on building:min_level
-    let start_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
+    let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
         if let Ok(min_level) = min_level_str.parse::<i32>() {
-            ground_level + (min_level * 4) // Each level is 4 blocks high
+            min_level
         } else {
-            ground_level
+            0
         }
     } else {
-        ground_level
+        0
     };
+    
+    let start_level = ground_level + (min_level * 4);
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -81,8 +83,10 @@ pub fn generate_buildings(
     // Determine building height from tags
     if let Some(levels_str) = element.tags.get("building:levels") {
         if let Ok(levels) = levels_str.parse::<i32>() {
-            if levels >= 1 {
-                building_height = ((levels * 4 + 2) as f64 * scale_factor) as i32;
+            let lev = levels - min_level;
+
+            if lev >= 1 {
+                building_height = ((lev * 4 + 2) as f64 * scale_factor) as i32;
                 building_height = building_height.max(3);
             }
         }
