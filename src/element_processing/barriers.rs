@@ -17,6 +17,9 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
                 );
                 // Place bollard
             }
+        } else if barrier_type == "kerb" {
+            // Ignore kerbs
+            return;
         } else if let ProcessedElement::Way(way) = element {
             // Determine wall height
             let wall_height: i32 = element
