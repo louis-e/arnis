@@ -42,10 +42,10 @@ jobs:
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
     - name: Install dependencies
-      run: cargo fetch --locked
+      run: cargo fetch
 
     - name: Build
-      run: cargo build --frozen --release
+      run: cargo build --release
 
     - name: Upload artifact
       uses: actions/upload-artifact@v3
