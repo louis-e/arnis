@@ -307,6 +307,11 @@ function handleBboxInput() {
               const bboxText = `${lat1} ${lng1} ${lat2} ${lng2}`;
               window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
+              // Show custom bbox on the map
+              let map_container = document.querySelector('.map-container');
+              map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
+              map_container.contentWindow.location.reload();
+
               // Update the info text
               bboxInfo.textContent = window.localization.custom_selection_confirmed;
               bboxInfo.style.color = "#7bd864";
