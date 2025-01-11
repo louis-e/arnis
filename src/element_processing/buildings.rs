@@ -58,16 +58,21 @@ pub fn generate_buildings(
         })
         .flatten()
         .unwrap_or_else(|| {
-            if let Some(building_type) = element.tags.get("building").or_else(|| element.tags.get("building:part")){
+            if let Some(building_type) = element
+                .tags
+                .get("building")
+                .or_else(|| element.tags.get("building:part"))
+            {
                 //Random roof color only for single houses
                 match building_type.as_str() {
-                    "yes" | "house" | "detached" | "static_caravan" | "semidetached_house" | "bungalow" | "manor" | "villa" => {
+                    "yes" | "house" | "detached" | "static_caravan" | "semidetached_house"
+                    | "bungalow" | "manor" | "villa" => {
                         return building_floor_variations()[variation_index_floor];
                     }
-                    _ => return LIGHT_GRAY_CONCRETE
+                    _ => return LIGHT_GRAY_CONCRETE,
                 }
             }
-            return LIGHT_GRAY_CONCRETE;
+            LIGHT_GRAY_CONCRETE
         });
     let window_block: Block = WHITE_STAINED_GLASS;
 

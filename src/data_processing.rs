@@ -124,8 +124,7 @@ pub fn generate_world(
             }
         }
     }
-    
-    for element in &landuse_elements{
+    for element in &landuse_elements {
         landuse::generate_landuse(&mut editor, element, ground_level, args);
     }
 
