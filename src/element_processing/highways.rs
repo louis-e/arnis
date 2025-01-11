@@ -58,7 +58,7 @@ pub fn generate_highways(
         } else if element
             .tags()
             .get("area")
-            .map_or(false, |v: &String| v == "yes")
+            .is_some_and(|v: &String| v == "yes")
         {
             let ProcessedElement::Way(way) = element else {
                 return;

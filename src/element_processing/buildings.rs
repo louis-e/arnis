@@ -196,7 +196,7 @@ pub fn generate_buildings(
             || element
                 .tags
                 .get("parking")
-                .map_or(false, |p| p == "multi-storey")
+                .is_some_and(|p| p == "multi-storey")
         {
             // Parking building structure
 
