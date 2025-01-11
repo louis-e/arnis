@@ -1,7 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::{DIRT, GRASS_BLOCK, SNOW_BLOCK};
 use crate::element_processing::*;
-use crate::osm_parser::{ProcessedElement, ProcessedWay};
+use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
@@ -43,7 +43,6 @@ pub fn generate_world(
     let progress_increment_prcs: f64 = 50.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 10.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
-    let mut landuse_elements: Vec<&ProcessedWay> = Vec::new();
 
     for element in &elements {
         process_pb.inc(1);
@@ -70,8 +69,7 @@ pub fn generate_world(
                 } else if way.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, ground_level, args);
                 } else if way.tags.contains_key("landuse") {
-                    //Moving landuse elements to a separate array to process them last (so tall grass won't appear on non-grass_blocks)
-                    landuse_elements.push(way);
+                    landuse::generate_landuse(&mut editor, way, ground_level, args);
                 } else if way.tags.contains_key("natural") {
                     natural::generate_natural(&mut editor, element, ground_level, args);
                 } else if way.tags.contains_key("amenity") {
@@ -123,9 +121,6 @@ pub fn generate_world(
                 }
             }
         }
-    }
-    for element in &landuse_elements {
-        landuse::generate_landuse(&mut editor, element, ground_level, args);
     }
 
     process_pb.finish();

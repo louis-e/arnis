@@ -344,13 +344,25 @@ pub fn generate_landuse(
                 }
                 "grass" => {
                     if rng.gen_range(1..=7) != 1
-                        && editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]), None)
+                        && editor.check_for_block(
+                            x,
+                            ground_level,
+                            z,
+                            Some(&[GRASS_BLOCK, SNOW_BLOCK]),
+                            None,
+                        )
                     {
                         editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                     }
                 }
                 "meadow" => {
-                    if editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]), None) {
+                    if editor.check_for_block(
+                        x,
+                        ground_level,
+                        z,
+                        Some(&[GRASS_BLOCK, SNOW_BLOCK]),
+                        None,
+                    ) {
                         let random_choice: i32 = rng.gen_range(0..1001);
                         if random_choice < 5 {
                             create_tree(
