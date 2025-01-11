@@ -174,7 +174,14 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 .join("saves")
         })
     } else if cfg!(target_os = "linux") {
-        dirs::home_dir().map(|home: PathBuf| home.join(".minecraft").join("saves"))
+        dirs::home_dir().map(|home| {
+            let flatpak_path = home.join(".var/app/com.mojang.Minecraft/.minecraft/saves");
+            if flatpak_path.exists() {
+                flatpak_path
+            } else {
+                home.join(".minecraft/saves")
+            }
+        })
     } else {
         None
     };
