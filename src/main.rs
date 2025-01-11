@@ -8,7 +8,17 @@ mod data_processing;
 mod element_processing;
 mod floodfill;
 mod osm_parser;
+#[cfg(feature = "gui")]
 mod progress;
+// If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
+#[cfg(not(feature = "gui"))]
+mod progress {
+    pub fn emit_gui_error(_message: &str) {}
+    pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
+    pub fn is_running_with_gui() -> bool {
+        false
+    }
+}
 mod retrieve_data;
 mod version_check;
 mod world_editor;
@@ -28,6 +38,7 @@ use std::{
     panic,
     path::{Path, PathBuf},
 };
+#[cfg(feature = "gui")]
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
 fn print_banner() {
@@ -121,47 +132,56 @@ fn main() {
         let _ =
             data_processing::generate_world(parsed_elements, &args, scale_factor_x, scale_factor_z);
     } else {
-        // Launch the UI
-        println!("Launching UI...");
+        #[cfg(not(feature = "gui"))]
+        {
+            panic!("This version of arnis was not built with GUI enabled");
+        }
 
-        // Set a custom panic hook to log panic information
-        panic::set_hook(Box::new(|panic_info| {
-            let message = format!("Application panicked: {:?}", panic_info);
-            error!("{}", message);
-            std::process::exit(1);
-        }));
+        #[cfg(feature = "gui")]
+        {
+            // Launch the UI
+            println!("Launching UI...");
 
-        tauri::Builder::default()
-            .plugin(
-                LogBuilder::default()
-                    .level(LevelFilter::Warn)
-                    .targets([
-                        Target::new(TargetKind::LogDir {
-                            file_name: Some("arnis".into()),
-                        }),
-                        Target::new(TargetKind::Stdout),
-                    ])
-                    .build(),
-            )
-            .plugin(tauri_plugin_shell::init())
-            .invoke_handler(tauri::generate_handler![
-                gui_select_world,
-                gui_start_generation,
-                gui_get_version,
-                gui_check_for_updates
-            ])
-            .setup(|app| {
-                let app_handle = app.handle();
-                let main_window = tauri::Manager::get_webview_window(app_handle, "main")
-                    .expect("Failed to get main window");
-                progress::set_main_window(main_window);
-                Ok(())
-            })
-            .run(tauri::generate_context!())
-            .expect("Error while starting the application UI (Tauri)");
+            // Set a custom panic hook to log panic information
+            panic::set_hook(Box::new(|panic_info| {
+                let message = format!("Application panicked: {:?}", panic_info);
+                error!("{}", message);
+                std::process::exit(1);
+            }));
+
+            tauri::Builder::default()
+                .plugin(
+                    LogBuilder::default()
+                        .level(LevelFilter::Warn)
+                        .targets([
+                            Target::new(TargetKind::LogDir {
+                                file_name: Some("arnis".into()),
+                            }),
+                            Target::new(TargetKind::Stdout),
+                        ])
+                        .build(),
+                )
+                .plugin(tauri_plugin_shell::init())
+                .invoke_handler(tauri::generate_handler![
+                    gui_select_world,
+                    gui_start_generation,
+                    gui_get_version,
+                    gui_check_for_updates
+                ])
+                .setup(|app| {
+                    let app_handle = app.handle();
+                    let main_window = tauri::Manager::get_webview_window(app_handle, "main")
+                        .expect("Failed to get main window");
+                    progress::set_main_window(main_window);
+                    Ok(())
+                })
+                .run(tauri::generate_context!())
+                .expect("Error while starting the application UI (Tauri)");
+        }
     }
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn gui_select_world(generate_new: bool) -> Result<String, i32> {
     // Determine the default Minecraft 'saves' directory based on the OS
@@ -309,11 +329,13 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
     Ok(new_world_path.display().to_string())
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn gui_get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn gui_check_for_updates() -> Result<bool, String> {
     match version_check::check_for_updates() {
@@ -322,6 +344,7 @@ fn gui_check_for_updates() -> Result<bool, String> {
     }
 }
 
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn gui_start_generation(
     bbox_text: String,
