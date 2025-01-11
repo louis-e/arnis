@@ -18,15 +18,10 @@ pub fn generate_buildings(
 ) {
     // Adjust starting height based on building:min_level
     let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
-        if let Ok(min_level) = min_level_str.parse::<i32>() {
-            min_level
-        } else {
-            0
-        }
+        min_level_str.parse::<i32>().unwrap_or(0)
     } else {
         0
     };
-    
     let start_level = ground_level + (min_level * 4);
 
     let mut previous_node: Option<(i32, i32)> = None;
