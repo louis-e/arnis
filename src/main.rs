@@ -28,7 +28,6 @@ use clap::Parser;
 use colored::*;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
-use fs2::FileExt;
 use log::{error, LevelFilter};
 use rfd::FileDialog;
 use std::{
@@ -230,11 +229,11 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 if session_lock_path.exists() {
                     // Try to acquire a lock on the session.lock file
                     if let Ok(file) = File::open(&session_lock_path) {
-                        if file.try_lock_shared().is_err() {
+                        if fs2::FileExt::try_lock_shared(&file).is_err() {
                             return Err(2); // Error code 2: The selected world is currently in use
                         } else {
                             // Release the lock immediately
-                            let _ = file.unlock();
+                            let _ = fs2::FileExt::unlock(&file);
                         }
                     }
                 }
