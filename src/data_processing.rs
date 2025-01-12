@@ -18,8 +18,7 @@ pub fn generate_world(
 
     let ground_level: i32 = args.ground_level;
     let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor =
-        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
+    let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
 
     editor.set_sign(
         "↑".to_string(),

@@ -171,7 +171,9 @@ pub fn fetch_data(
                 // General case for when there are no elements and no specific remark
                 eprintln!(
                     "{}",
-                    "Error! API returned no data. Please try again!".red().bold()
+                    "Error! API returned no data. Please try again!"
+                        .red()
+                        .bold()
                 );
                 emit_gui_error("API returned no data. Please try again!");
             }

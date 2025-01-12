@@ -206,7 +206,7 @@ pub fn generate_leisure_from_relation(
                 generate_leisure(editor, &member.way, ground_level, args);
             }
         }
-        
+
         // Then combine all outer ways into one
         let mut combined_nodes = Vec::new();
         for member in &rel.members {
@@ -214,14 +214,14 @@ pub fn generate_leisure_from_relation(
                 combined_nodes.extend(member.way.nodes.clone());
             }
         }
-        
+
         // Create combined way with relation tags
         let combined_way = ProcessedWay {
             id: rel.id,
             nodes: combined_nodes,
             tags: rel.tags.clone(),
         };
-        
+
         // Generate leisure area from combined way
         generate_leisure(editor, &combined_way, ground_level, args);
     }

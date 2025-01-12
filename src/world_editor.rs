@@ -1,6 +1,6 @@
-use colored::Colorize;
 use crate::block_definitions::*;
 use crate::progress::emit_gui_progress_update;
+use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
@@ -435,30 +435,33 @@ impl WorldEditor {
     pub fn save(&mut self) {
         println!("{} Saving world...", "[5/5]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
-    
+
         let total_regions = self.world.regions.len() as u64;
         let save_pb = ProgressBar::new(total_regions);
         save_pb.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} regions ({eta})")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} regions ({eta})",
+                )
                 .unwrap()
                 .progress_chars("█▓░"),
         );
-    
+
         let total_steps: f64 = 9.0;
         let progress_increment_save: f64 = total_steps / total_regions as f64;
         let current_progress = AtomicU64::new(900);
         let regions_processed = AtomicU64::new(0);
-    
-        self.world.regions
+
+        self.world
+            .regions
             .par_iter()
             .for_each(|((region_x, region_z), region_to_modify)| {
                 // Create region and handle Result properly
                 let mut region = self.create_region(*region_x, *region_z);
-                
+
                 // Reusable serialization buffer
                 let mut ser_buffer = Vec::with_capacity(8192);
-                
+
                 // Process modified chunks
                 for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
                     if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
@@ -466,14 +469,14 @@ impl WorldEditor {
                             .read_chunk(chunk_x as usize, chunk_z as usize)
                             .unwrap()
                             .unwrap_or_default();
-    
+
                         let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
                         chunk.sections = chunk_to_modify.sections().collect();
                         chunk.other.extend(chunk_to_modify.other.clone());
                         chunk.x_pos = chunk_x + region_x * 32;
                         chunk.z_pos = chunk_z + region_z * 32;
                         chunk.is_light_on = 0;
-    
+
                         ser_buffer.clear();
                         fastnbt::to_writer(&mut ser_buffer, &chunk).unwrap();
                         region
@@ -481,19 +484,20 @@ impl WorldEditor {
                             .unwrap();
                     }
                 }
-                
+
                 // Update progress
                 let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst);
                 let new_progress = (90.0 + (regions_done as f64 * progress_increment_save)) * 10.0;
-                let prev_progress = current_progress.fetch_max(new_progress as u64, Ordering::SeqCst);
-                
+                let prev_progress =
+                    current_progress.fetch_max(new_progress as u64, Ordering::SeqCst);
+
                 if new_progress as u64 - prev_progress > 1 {
                     emit_gui_progress_update(new_progress as f64 / 10.0, "Saving world...");
                 }
-                
+
                 save_pb.inc(1);
             });
-    
+
         save_pb.finish();
     }
 }
