@@ -43,6 +43,7 @@ pub fn generate_world(
     let progress_increment_prcs: f64 = 50.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 10.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
+
     for element in &elements {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
