@@ -1,3 +1,4 @@
+use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 use std::time::Instant;
 
 use crate::{

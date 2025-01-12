@@ -199,14 +199,14 @@ pub fn generate_leisure(
 pub fn generate_leisure_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
-    ground_level: i32,
+    ground: &Ground,
     args: &Args,
 ) {
     if rel.tags.get("leisure") == Some(&"park".to_string()) {
         // First generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_leisure(editor, &member.way, ground_level, args);
+                generate_leisure(editor, &member.way, ground, args);
             }
         }
 
@@ -226,6 +226,6 @@ pub fn generate_leisure_from_relation(
         };
 
         // Generate leisure area from combined way
-        generate_leisure(editor, &combined_way, ground_level, args);
+        generate_leisure(editor, &combined_way, ground, args);
     }
 }

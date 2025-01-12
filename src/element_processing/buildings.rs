@@ -24,6 +24,11 @@ pub fn generate_buildings(
     } else {
         0
     };
+    
+    let Some(ground_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
+        return;
+    };
+
     let start_level = ground_level + (min_level * 4);
 
     let mut previous_node: Option<(i32, i32)> = None;

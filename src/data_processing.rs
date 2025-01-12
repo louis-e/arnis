@@ -87,10 +87,10 @@ pub fn generate_world(
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way, ground_level);
+                    railways::generate_railways(&mut editor, way, &ground);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
-                    highways::generate_aeroway(&mut editor, way, ground_level);
+                    highways::generate_aeroway(&mut editor, way, -61); // TODO FIX
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way, &ground);
                 }
@@ -123,7 +123,7 @@ pub fn generate_world(
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel, &ground);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
-                    leisure::generate_leisure_from_relation(&mut editor, rel, ground_level, args);
+                    leisure::generate_leisure_from_relation(&mut editor, rel, &ground, args);
                 }
             }
         }
