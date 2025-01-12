@@ -174,7 +174,14 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 .join("saves")
         })
     } else if cfg!(target_os = "linux") {
-        dirs::home_dir().map(|home: PathBuf| home.join(".minecraft").join("saves"))
+        dirs::home_dir().map(|home| {
+            let flatpak_path = home.join(".var/app/com.mojang.Minecraft/.minecraft/saves");
+            if flatpak_path.exists() {
+                flatpak_path
+            } else {
+                home.join(".minecraft/saves")
+            }
+        })
     } else {
         None
     };
@@ -368,8 +375,17 @@ fn gui_start_generation(
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
                         osm_parser::parse_osm_data(&raw_data, reordered_bbox, &args);
-                    parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| {
-                        osm_parser::get_priority(element)
+                    parsed_elements.sort_by(|el1, el2| {
+                        let (el1_priority, el2_priority) =
+                            (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
+                        match (
+                            el1.tags().contains_key("landuse"),
+                            el2.tags().contains_key("landuse"),
+                        ) {
+                            (true, false) => std::cmp::Ordering::Greater,
+                            (false, true) => std::cmp::Ordering::Less,
+                            _ => el1_priority.cmp(&el2_priority),
+                        }
                     });
 
                     let _ = data_processing::generate_world(
