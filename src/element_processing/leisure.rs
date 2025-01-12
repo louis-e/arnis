@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::element_processing::tree::create_tree;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::ProcessedWay;
+use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
@@ -13,6 +13,9 @@ pub fn generate_leisure(
     ground_level: i32,
     args: &Args,
 ) {
+    if element.id == 14531592 {
+        println!("{:?}", element);
+    }
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
         let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -190,5 +193,39 @@ pub fn generate_leisure(
                 }
             }
         }
+    }
+}
+
+pub fn generate_leisure_from_relation(
+    editor: &mut WorldEditor,
+    rel: &ProcessedRelation,
+    ground_level: i32,
+    args: &Args,
+) {
+    if rel.tags.get("leisure") == Some(&"park".to_string()) {
+        // First generate individual ways with their original tags
+        for member in &rel.members {
+            if member.role == ProcessedMemberRole::Outer {
+                generate_leisure(editor, &member.way, ground_level, args);
+            }
+        }
+        
+        // Then combine all outer ways into one
+        let mut combined_nodes = Vec::new();
+        for member in &rel.members {
+            if member.role == ProcessedMemberRole::Outer {
+                combined_nodes.extend(member.way.nodes.clone());
+            }
+        }
+        
+        // Create combined way with relation tags
+        let combined_way = ProcessedWay {
+            id: rel.id,
+            nodes: combined_nodes,
+            tags: rel.tags.clone(),
+        };
+        
+        // Generate leisure area from combined way
+        generate_leisure(editor, &combined_way, ground_level, args);
     }
 }

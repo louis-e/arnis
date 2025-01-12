@@ -1,7 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::{DIRT, GRASS_BLOCK, SNOW_BLOCK};
 use crate::element_processing::*;
-use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
+use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
@@ -117,6 +117,8 @@ pub fn generate_world(
                     );
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel, ground_level);
+                } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
+                    leisure::generate_leisure_from_relation(&mut editor, rel, ground_level, args);
                 }
             }
         }
