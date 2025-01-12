@@ -80,8 +80,8 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           tag: "dev-build-${{ github.run_number }}"
-          name: "Dev Build #${{ github.run_number }}"
-          body: "Automated pre-release for testing purposes. This build may contain experimental features. For the latest official version, please download the latest stable release."
+          name: "Experimental Development Build #${{ github.run_number }}"
+          body: "Automated pre-release built from the main branch for testing purposes. This build may contain experimental features. For the latest official version, please download the latest stable release."
           draft: false
           prerelease: true
           makeLatest: false
