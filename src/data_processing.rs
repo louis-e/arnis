@@ -1,7 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::{DIRT, GRASS_BLOCK, SNOW_BLOCK};
 use crate::element_processing::*;
-use crate::osm_parser::ProcessedElement;
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
@@ -19,7 +19,7 @@ pub fn generate_world(
     let ground_level: i32 = args.ground_level;
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor =
-        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, args);
+        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
 
     editor.set_sign(
         "↑".to_string(),

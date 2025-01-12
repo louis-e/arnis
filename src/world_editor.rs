@@ -1,5 +1,4 @@
 use colored::Colorize;
-use crate::args::Args;
 use crate::block_definitions::*;
 use crate::progress::emit_gui_progress_update;
 use fastanvil::Region;
@@ -228,23 +227,21 @@ impl WorldToModify {
     }
 }
 
-pub struct WorldEditor<'a> {
+pub struct WorldEditor {
     region_dir: String,
     world: WorldToModify,
     scale_factor_x: f64,
     scale_factor_z: f64,
-    args: &'a Args,
 }
 
-impl<'a> WorldEditor<'a> {
+impl WorldEditor {
     /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64, args: &'a Args) -> Self {
+    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64) -> Self {
         Self {
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
             scale_factor_x,
             scale_factor_z,
-            args,
         }
     }
 
