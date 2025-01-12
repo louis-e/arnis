@@ -13,9 +13,6 @@ pub fn generate_leisure(
     ground_level: i32,
     args: &Args,
 ) {
-    if element.id == 14531592 {
-        println!("{:?}", element);
-    }
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
         let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
