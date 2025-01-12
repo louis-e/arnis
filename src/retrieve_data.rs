@@ -171,9 +171,11 @@ pub fn fetch_data(
                 // General case for when there are no elements and no specific remark
                 eprintln!(
                     "{}",
-                    "Error! No data available in this region.".red().bold()
+                    "Error! API returned no data. Please try again!"
+                        .red()
+                        .bold()
                 );
-                emit_gui_error("No data available in this region.");
+                emit_gui_error("API returned no data. Please try again!");
             }
 
             if debug {

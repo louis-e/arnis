@@ -1,4 +1,4 @@
-name: Pre-release Dev Build
+name: [DISABLED] Pre-release Dev Build
 
 on:
   push:

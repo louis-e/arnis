@@ -1,4 +1,3 @@
-use crate::args::Args;
 use crate::block_definitions::*;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
@@ -6,10 +5,12 @@ use fastanvil::Region;
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -226,23 +227,21 @@ impl WorldToModify {
     }
 }
 
-pub struct WorldEditor<'a> {
+pub struct WorldEditor {
     region_dir: String,
     world: WorldToModify,
     scale_factor_x: f64,
     scale_factor_z: f64,
-    args: &'a Args,
 }
 
-impl<'a> WorldEditor<'a> {
+impl WorldEditor {
     /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64, args: &'a Args) -> Self {
+    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64) -> Self {
         Self {
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
             scale_factor_x,
             scale_factor_z,
-            args,
         }
     }
 
@@ -437,10 +436,8 @@ impl<'a> WorldEditor<'a> {
         println!("{} Saving world...", "[5/5]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
-        let _debug: bool = self.args.debug;
-        let total_regions: u64 = self.world.regions.len() as u64;
-
-        let save_pb: ProgressBar = ProgressBar::new(total_regions);
+        let total_regions = self.world.regions.len() as u64;
+        let save_pb = ProgressBar::new(total_regions);
         save_pb.set_style(
             ProgressStyle::default_bar()
                 .template(
@@ -452,49 +449,54 @@ impl<'a> WorldEditor<'a> {
 
         let total_steps: f64 = 9.0;
         let progress_increment_save: f64 = total_steps / total_regions as f64;
-        let mut current_progress_save: f64 = 90.0;
-        let mut last_emitted_progress: f64 = current_progress_save;
+        let current_progress = AtomicU64::new(900);
+        let regions_processed = AtomicU64::new(0);
 
-        for ((region_x, region_z), region_to_modify) in &self.world.regions {
-            let mut region: Region<File> = self.create_region(*region_x, *region_z);
+        self.world
+            .regions
+            .par_iter()
+            .for_each(|((region_x, region_z), region_to_modify)| {
+                // Create region and handle Result properly
+                let mut region = self.create_region(*region_x, *region_z);
 
-            for chunk_x in 0..32 {
-                for chunk_z in 0..32 {
-                    let data: Vec<u8> = region
-                        .read_chunk(chunk_x as usize, chunk_z as usize)
-                        .unwrap()
-                        .unwrap();
+                // Reusable serialization buffer
+                let mut ser_buffer = Vec::with_capacity(8192);
 
-                    let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
+                // Process modified chunks
+                for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
+                    if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
+                        let data = region
+                            .read_chunk(chunk_x as usize, chunk_z as usize)
+                            .unwrap()
+                            .unwrap_or_default();
 
-                    if let Some(chunk_to_modify) = region_to_modify.get_chunk(chunk_x, chunk_z) {
+                        let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
                         chunk.sections = chunk_to_modify.sections().collect();
                         chunk.other.extend(chunk_to_modify.other.clone());
+                        chunk.x_pos = chunk_x + region_x * 32;
+                        chunk.z_pos = chunk_z + region_z * 32;
+                        chunk.is_light_on = 0;
+
+                        ser_buffer.clear();
+                        fastnbt::to_writer(&mut ser_buffer, &chunk).unwrap();
+                        region
+                            .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                            .unwrap();
                     }
-
-                    chunk.x_pos = chunk_x + region_x * 32;
-                    chunk.z_pos = chunk_z + region_z * 32;
-                    chunk.is_light_on = 0; // Force minecraft to recompute
-
-                    let ser: Vec<u8> = fastnbt::to_bytes(&chunk).unwrap();
-
-                    // Write chunk data back to the correct location, ensuring correct chunk coordinates
-                    let expected_chunk_location: (usize, usize) =
-                        ((chunk_x as usize) & 31, (chunk_z as usize) & 31);
-                    region
-                        .write_chunk(expected_chunk_location.0, expected_chunk_location.1, &ser)
-                        .unwrap();
                 }
-            }
 
-            save_pb.inc(1);
+                // Update progress
+                let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst);
+                let new_progress = (90.0 + (regions_done as f64 * progress_increment_save)) * 10.0;
+                let prev_progress =
+                    current_progress.fetch_max(new_progress as u64, Ordering::SeqCst);
 
-            current_progress_save += progress_increment_save;
-            if (current_progress_save - last_emitted_progress).abs() > 0.25 {
-                emit_gui_progress_update(current_progress_save, "Saving world...");
-                last_emitted_progress = current_progress_save;
-            }
-        }
+                if new_progress as u64 - prev_progress > 1 {
+                    emit_gui_progress_update(new_progress / 10.0, "Saving world...");
+                }
+
+                save_pb.inc(1);
+            });
 
         save_pb.finish();
     }

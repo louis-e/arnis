@@ -18,8 +18,7 @@ pub fn generate_world(
 
     let ground_level: i32 = args.ground_level;
     let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor =
-        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, args);
+    let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
 
     editor.set_sign(
         "↑".to_string(),
@@ -118,6 +117,8 @@ pub fn generate_world(
                     );
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel, ground_level);
+                } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
+                    leisure::generate_leisure_from_relation(&mut editor, rel, ground_level, args);
                 }
             }
         }
