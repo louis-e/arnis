@@ -356,3 +356,24 @@ button:hover {
   content: "⚙️";
   font-size: 18px;
 }
+
+/* Logo Animation */
+#arnis-logo {
+  width: 35%;
+  height: auto;
+  opacity: 0;
+  transform: scale(0);
+  animation: zoomInLogo 1s ease-out forwards;
+}
+
+/* Keyframe Animation */
+@keyframes zoomInLogo {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
