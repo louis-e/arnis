@@ -7,13 +7,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
   <script type="module" src="./js/main.js" defer></script>
+  <script type="module" src="./js/license.js" defer></script>
 </head>
 
 <body>
   <main class="container">
     <div class="row">
       <a href="https://github.com/louis-e/arnis" target="_blank">
-        <img src="./images/logo.png" class="logo arnis" alt="Arnis Logo" />
+        <img src="./images/logo.png" id="arnis-logo" class="logo arnis" alt="Arnis Logo" style="width: 35%; height: auto;" />
       </a>
     </div>
 
@@ -117,6 +118,20 @@
         <div class="ground-level-input-container">
           <label for="ground-level" data-localize="ground_level">Ground Level:</label>
           <input type="number" id="ground-level" name="ground-level" min="-64" max="290" value="-62" style="width: 100px;" placeholder="Ground Level">
+        </div>
+
+        <!-- License and Credits Button -->
+        <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
+      </div>
+    </div>
+
+    <!-- License Modal -->
+    <div id="license-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="closeLicense()">&times;</span>
+        <h2 data-localize="license_and_credits">License and Credits</h2>
+        <div id="license-content" style="overflow-y: auto; max-height: 300px; font-size: 0.85em; line-height: 1.3; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+          Loading...
         </div>
       </div>
     </div>

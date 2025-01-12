@@ -1,3 +1,5 @@
+import { licenseText } from './license.js';
+
 const { invoke } = window.__TAURI__.core;
 
 // Initialize elements and start the demo progress
@@ -247,6 +249,29 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+
+
+  /// License and Credits
+  function openLicense() {
+    const licenseModal = document.getElementById("license-modal");
+    const licenseContent = document.getElementById("license-content");
+
+    // Render the license text as HTML
+    licenseContent.innerHTML = licenseText;
+
+    // Show the modal
+    licenseModal.style.display = "flex";
+    licenseModal.style.justifyContent = "center";
+    licenseModal.style.alignItems = "center";
+  }
+
+  function closeLicense() {
+    const licenseModal = document.getElementById("license-modal");
+    licenseModal.style.display = "none";
+  }
+
+  window.openLicense = openLicense;
+  window.closeLicense = closeLicense;
 }
 
 function initWorldPicker() {
