@@ -188,7 +188,7 @@ dependencies = [
 
 [[package]]
 name = "arnis"
-version = "2.1.2"
+version = "2.1.3"
 dependencies = [
  "clap",
  "colored",
@@ -204,6 +204,7 @@ dependencies = [
  "log",
  "once_cell",
  "rand 0.8.5",
+ "rayon",
  "reqwest",
  "rfd",
  "semver",

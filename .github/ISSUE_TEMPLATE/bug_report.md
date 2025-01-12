@@ -20,4 +20,4 @@ Please tell us what version of Arnis and Minecraft you used.
 If applicable, add screenshots to help explain your problem.
 
 **Additional context**
-Add any other context about the problem here. If you used any more custom settings, please provide them here too.
+Add any other context about the problem here. If you used any more custom settings, please provide them here too. If you experienced any issue with the application itself like a crash, please provide the log file which can be found at C:\Users\USERNAME\AppData\Local\com.louisdev.arnis\logs

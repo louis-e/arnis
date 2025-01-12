@@ -20,7 +20,6 @@ use clap::Parser;
 use colored::*;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
-use fs2::FileExt;
 use log::{error, LevelFilter};
 use rfd::FileDialog;
 use std::{
@@ -130,15 +129,16 @@ fn main() {
         panic::set_hook(Box::new(|panic_info| {
             let message = format!("Application panicked: {:?}", panic_info);
             error!("{}", message);
+            std::process::exit(1);
         }));
 
         tauri::Builder::default()
             .plugin(
                 LogBuilder::default()
-                    .level(LevelFilter::Trace)
+                    .level(LevelFilter::Warn)
                     .targets([
                         Target::new(TargetKind::LogDir {
-                            file_name: Some("arnis.log".into()),
+                            file_name: Some("arnis".into()),
                         }),
                         Target::new(TargetKind::Stdout),
                     ])
@@ -176,7 +176,14 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 .join("saves")
         })
     } else if cfg!(target_os = "linux") {
-        dirs::home_dir().map(|home: PathBuf| home.join(".minecraft").join("saves"))
+        dirs::home_dir().map(|home| {
+            let flatpak_path = home.join(".var/app/com.mojang.Minecraft/.minecraft/saves");
+            if flatpak_path.exists() {
+                flatpak_path
+            } else {
+                home.join(".minecraft/saves")
+            }
+        })
     } else {
         None
     };
@@ -211,11 +218,11 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 if session_lock_path.exists() {
                     // Try to acquire a lock on the session.lock file
                     if let Ok(file) = File::open(&session_lock_path) {
-                        if file.try_lock_shared().is_err() {
+                        if fs2::FileExt::try_lock_shared(&file).is_err() {
                             return Err(2); // Error code 2: The selected world is currently in use
                         } else {
                             // Release the lock immediately
-                            let _ = file.unlock();
+                            let _ = fs2::FileExt::unlock(&file);
                         }
                     }
                 }
@@ -372,8 +379,17 @@ fn gui_start_generation(
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
                         osm_parser::parse_osm_data(&raw_data, reordered_bbox, &args);
-                    parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| {
-                        osm_parser::get_priority(element)
+                    parsed_elements.sort_by(|el1, el2| {
+                        let (el1_priority, el2_priority) =
+                            (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
+                        match (
+                            el1.tags().contains_key("landuse"),
+                            el2.tags().contains_key("landuse"),
+                        ) {
+                            (true, false) => std::cmp::Ordering::Greater,
+                            (false, true) => std::cmp::Ordering::Less,
+                            _ => el1_priority.cmp(&el2_priority),
+                        }
                     });
 
                     let _ = data_processing::generate_world(

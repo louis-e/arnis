@@ -74,9 +74,9 @@ pub struct ProcessedMember {
 
 #[derive(Debug)]
 pub struct ProcessedRelation {
-    id: u64,
-    pub members: Vec<ProcessedMember>,
+    pub id: u64,
     pub tags: HashMap<String, String>,
+    pub members: Vec<ProcessedMember>,
 }
 
 #[derive(Debug)]
@@ -249,12 +249,7 @@ pub fn parse_osm_data(
                 let role = match mem.role.as_str() {
                     "outer" => ProcessedMemberRole::Outer,
                     "inner" => ProcessedMemberRole::Inner,
-                    _ => {
-                        // We only care about outer/inner because
-                        // we just want multipolygons at the current time
-
-                        return None;
-                    }
+                    _ => return None,
                 };
 
                 let way: ProcessedWay = ways_map

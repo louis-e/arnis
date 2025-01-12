@@ -1,10 +1,12 @@
 <p align="center">
-  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gitassets/logo.png?raw=true">
+  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gui-src/images/logo.png?raw=true">
 </p>
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases)
 
 This open source project written in Rust generates any chosen location from the real world in Minecraft Java Edition with a high level of detail.
+
+###### ⚠️ This Github page is the official project website. Do not download Arnis from any other website.
 
 ## :desktop_computer: Example
 ![Minecraft Preview](https://github.com/louis-e/arnis/blob/main/gitassets/mc.gif?raw=true)
@@ -12,8 +14,6 @@ This open source project written in Rust generates any chosen location from the 
 By leveraging geospatial data from OpenStreetMap and utilizing the powerful capabilities of Rust, Arnis provides an efficient and robust solution for creating complex and accurate Minecraft worlds that reflect real-world geography and architecture.
 
 Arnis is designed to handle large-scale data and generate rich, immersive environments that bring real-world cities, landmarks, and natural features into the Minecraft universe. Whether you're looking to replicate your hometown, explore urban environments, or simply build something unique and realistic, Arnis generates your vision.
-
-**This is the official project website. Any other website pretending to be associated with Arnis is fake and should be avoided.**
 
 ## :keyboard: Usage
 <img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
@@ -56,11 +56,18 @@ If you're on Windows, please install the [Evergreen Bootstrapper from Microsoft]
 Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16.5 and below is currently not supported, but we are working on it!
 - *The generation did finish, but there's nothing in the world!*<br>
 Make sure to teleport to the generation starting point (/tp 0 0 0). If there is still nothing, you might need to travel a bit further into the positive X and positive Z direction.
+- *What features are in the world generation settings?*<br>
+**Winter Mode:** This setting changes the generation style to a snowy theme and adds snow layers to the ground.<br>
+**Scale Factor:** The scale factor determines the size of the generated world.<br>
+**Custom BBOX Input:** This setting allows you to manually input the bounding box coordinates for the area you want to generate.<br>
+**Floodfill-Timeout (Sec):** This setting determines the maximum time the floodfill algorithm is allowed to run before being terminated. Increasing this value may improve the generation of large water areas but may also increase processing time.<br>
+**Ground Height:** This setting determines the base height of the generated world and can be adjusted to create different terrain types.
 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
 - [ ] Fix compilation for Linux
 - [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
+- [ ] Fix coastal cities generation duration time (water_areas.rs)
 - [ ] Add street names as signs
 - [ ] Add support for older Minecraft versions (<=1.16.5) (https://github.com/louis-e/arnis/issues/124, https://github.com/louis-e/arnis/issues/137)
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
@@ -68,7 +75,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Implement house roof types
 - [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Add support for inner attribute in multipolygons and multipolygon elements other than buildings
-- [ ] Fix Github Action Workflow for releasing Linux & MacOS Binary
+- [ ] Fix Github Action Workflow for releasing MacOS Binary
 - [ ] Evaluate and implement faster region saving
 - [ ] Refactor bridges implementation
 - [ ] Refactor railway implementation
@@ -110,14 +117,27 @@ After your pull request was merged, I will take care of regularly creating updat
 </a>
 
 ## :copyright: License Information
-This project is licensed under the GNU General Public License v3.0 (GPL-3.0).[^3]
-
 Copyright (c) 2022-2025 Louis Erbkamm (louis-e)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.[^3]
+
+Download Arnis only from the official source (https://github.com/louis-e/arnis/). Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.
+
+The logo was made by @nxfx21.
+
 
 [^1]: https://en.wikipedia.org/wiki/OpenStreetMap
 
 [^2]: https://en.wikipedia.org/wiki/Arnis,_Germany
 
-[^3]:
-    This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-    For the full license text, see the LICENSE file.
+[^3]: https://github.com/louis-e/arnis/blob/main/LICENSE

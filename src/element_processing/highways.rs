@@ -64,7 +64,7 @@ pub fn generate_highways(
         } else if element
             .tags()
             .get("area")
-            .map_or(false, |v: &String| v == "yes")
+            .is_some_and(|v: &String| v == "yes")
         {
             let ProcessedElement::Way(way) = element else {
                 return;
@@ -305,5 +305,26 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground:
         }
 
         previous_node = Some(current_node);
+    }
+}
+
+/// Generates an aeroway
+pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, ground_level: i32) {
+    let mut previous_node: Option<(i32, i32)> = None;
+    let surface_block = LIGHT_GRAY_CONCRETE;
+
+    for node in &way.nodes {
+        if let Some(prev) = previous_node {
+            let points = bresenham_line(prev.0, ground_level, prev.1, node.x, ground_level, node.z);
+
+            for (x, y, z) in points {
+                for dx in -12..=1 {
+                    for dz in -12..=1 {
+                        editor.set_block(surface_block, x + dx, y, z + dz, None, None);
+                    }
+                }
+            }
+        }
+        previous_node = Some((node.x, node.z));
     }
 }

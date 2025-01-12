@@ -1,4 +1,5 @@
-use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
+use std::time::Instant;
+
 use crate::{
     block_definitions::WATER,
     cartesian::XZPoint,
@@ -12,6 +13,8 @@ pub fn generate_water_areas(
     element: &ProcessedRelation,
     ground: &Ground,
 ) {
+    let start_time = Instant::now();
+
     if !element.tags.contains_key("water") {
         return;
     }
@@ -53,7 +56,15 @@ pub fn generate_water_areas(
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>()) // Added type annotation
         .collect();
 
-    inverse_floodfill(max_x, max_z, outers, inners, editor, ground);
+    inverse_floodfill(
+        max_x,
+        max_z,
+        outers,
+        inners,
+        editor,
+        ground,
+        start_time,
+    );
 }
 
 // Merges ways that share nodes into full loops
@@ -150,6 +161,7 @@ fn inverse_floodfill(
     inners: Vec<Vec<XZPoint>>,
     editor: &mut WorldEditor,
     ground: &Ground,
+    start_time: Instant,
 ) {
     let min_x: i32 = 0;
     let min_z: i32 = 0;
@@ -171,6 +183,7 @@ fn inverse_floodfill(
         &inners,
         editor,
         ground,
+        start_time,
     );
 }
 
@@ -181,7 +194,13 @@ fn inverse_floodfill_recursive(
     inners: &[Polygon],
     editor: &mut WorldEditor,
     ground: &Ground,
+    start_time: Instant,
 ) {
+    // Check if we've exceeded 25 seconds
+    if start_time.elapsed().as_secs() > 25 {
+        println!("Water area generation exceeded 25 seconds, continuing anyway");
+    }
+
     const ITERATIVE_THRES: i32 = 10_000;
 
     if min.0 > max.0 || min.1 > max.1 {
@@ -228,6 +247,7 @@ fn inverse_floodfill_recursive(
                 &inners_intersects,
                 editor,
                 ground,
+                start_time,
             );
         }
     }

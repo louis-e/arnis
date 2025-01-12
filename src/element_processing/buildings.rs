@@ -16,7 +16,16 @@ pub fn generate_buildings(
     element: &ProcessedWay,
     ground: &Ground,
     args: &Args,
+    relation_levels: Option<i32>,
 ) {
+    // Adjust starting height based on building:min_level
+    let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
+        min_level_str.parse::<i32>().unwrap_or(0)
+    } else {
+        0
+    };
+    let start_level = ground_level + (min_level * 4);
+
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
     let mut current_building: Vec<(i32, i32)> = vec![];
@@ -47,12 +56,29 @@ pub fn generate_buildings(
             })
         })
         .flatten()
-        .unwrap_or_else(|| building_floor_variations()[variation_index_floor]);
+        .unwrap_or_else(|| {
+            if let Some(building_type) = element
+                .tags
+                .get("building")
+                .or_else(|| element.tags.get("building:part"))
+            {
+                //Random roof color only for single houses
+                match building_type.as_str() {
+                    "yes" | "house" | "detached" | "static_caravan" | "semidetached_house"
+                    | "bungalow" | "manor" | "villa" => {
+                        return building_floor_variations()[variation_index_floor];
+                    }
+                    _ => return LIGHT_GRAY_CONCRETE,
+                }
+            }
+            LIGHT_GRAY_CONCRETE
+        });
     let window_block: Block = WHITE_STAINED_GLASS;
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
-    let mut building_height: i32 = 6; // Default building height
+    let scale_factor = args.scale;
+    let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
 
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
@@ -70,16 +96,25 @@ pub fn generate_buildings(
     // Determine building height from tags
     if let Some(levels_str) = element.tags.get("building:levels") {
         if let Ok(levels) = levels_str.parse::<i32>() {
-            if levels >= 1 && (levels * 4 + 2) > building_height {
-                building_height = levels * 4 + 2;
+            let lev = levels - min_level;
+
+            if lev >= 1 {
+                building_height = ((lev * 4 + 2) as f64 * scale_factor) as i32;
+                building_height = building_height.max(3);
             }
         }
     }
 
     if let Some(height_str) = element.tags.get("height") {
         if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
-            building_height = height.round() as i32;
+            building_height = (height * scale_factor) as i32;
+            building_height = building_height.max(3);
         }
+    }
+
+    if let Some(levels) = relation_levels {
+        building_height = ((levels * 4 + 2) as f64 * scale_factor) as i32;
+        building_height = building_height.max(3);
     }
 
     if let Some(amenity_type) = element.tags.get("amenity") {
@@ -125,9 +160,9 @@ pub fn generate_buildings(
 
     if let Some(building_type) = element.tags.get("building") {
         if building_type == "garage" {
-            building_height = 2;
+            building_height = ((2.0 * scale_factor) as i32).max(3);
         } else if building_type == "shed" {
-            building_height = 2;
+            building_height = ((2.0 * scale_factor) as i32).max(3);
 
             if element.tags.contains_key("bicycle_parking") {
                 let ground_block: Block = OAK_PLANKS;
@@ -175,9 +210,12 @@ pub fn generate_buildings(
             || element
                 .tags
                 .get("parking")
-                .map_or(false, |p| p == "multi-storey")
+                .is_some_and(|p| p == "multi-storey")
         {
             // Parking building structure
+
+            // Ensure minimum height
+            building_height = building_height.max(16);
 
             let polygon_coords: Vec<(i32, i32)> = element
                 .nodes
@@ -307,13 +345,13 @@ pub fn generate_buildings(
             return;
         } else if building_type == "apartments" {
             // If building has no height attribute, assign a defined height
-            if building_height == 6 {
-                building_height = 15
+            if building_height == ((6.0 * scale_factor) as i32).max(3) {
+                building_height = ((15.0 * scale_factor) as i32).max(3);
             }
         } else if building_type == "hospital" {
             // If building has no height attribute, assign a defined height
-            if building_height == 6 {
-                building_height = 23
+            if building_height == ((6.0 * scale_factor) as i32).max(3) {
+                building_height = ((23.0 * scale_factor) as i32).max(3);
             }
         } else if building_type == "bridge" {
             generate_bridge(editor, element, &ground, args.timeout.as_ref());
@@ -333,14 +371,15 @@ pub fn generate_buildings(
 
         if let Some(prev) = previous_node {
             // Calculate walls and corners using Bresenham line
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, 0, prev.1, x, 0, z);
+            let bresenham_points: Vec<(i32, i32, i32)> =
+                bresenham_line(prev.0, start_level + y, prev.1, x, start_level + y, z);
             for (bx, _, bz) in bresenham_points {
-                for h in (y + 1)..=(y + building_height) {
+                for h in (start_level + y + 1)..=(start_level + y + building_height) {
                     if element.nodes[0].x == bx && element.nodes[0].x == bz {
                         editor.set_block(corner_block, bx, h, bz, None, None); // Corner block
                     } else {
                         // Add windows to the walls at intervals
-                        if h > y + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
+                        if h > start_level + y + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
                             editor.set_block(window_block, bx, h, bz, None, None);
                         // Window block
                         } else {
@@ -349,11 +388,25 @@ pub fn generate_buildings(
                         }
                     }
                 }
-                // Ceiling
-                editor.set_block(COBBLESTONE, bx, y + building_height + 1, bz, None, None);
+                // Ceiling cobblestone
+                editor.set_block(
+                    COBBLESTONE,
+                    bx,
+                    start_level + y + building_height + 1,
+                    bz,
+                    None,
+                    None,
+                );
 
                 if args.winter {
-                    editor.set_block(SNOW_LAYER, bx, y + building_height + 2, bz, None, None);
+                    editor.set_block(
+                        SNOW_LAYER,
+                        x,
+                        start_level + y + building_height + 2,
+                        z,
+                        None,
+                        None,
+                    );
                 }
                 current_building.push((bx, bz));
                 corner_addup = (corner_addup.0 + bx, corner_addup.1 + bz, corner_addup.2 + 1);
@@ -374,11 +427,11 @@ pub fn generate_buildings(
 
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
-                editor.set_block(floor_block, x, y, z, None, None); // Set floor
+                editor.set_block(floor_block, x, start_level + y, z, None, None); // Set floor
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
-                    for h in (y + 2 + 4..y + building_height).step_by(4) {
+                    for h in (start_level + y + 2 + 4..start_level + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
                             editor.set_block(GLOWSTONE, x, h, z, None, None); // Light fixtures
                         } else {
@@ -386,15 +439,29 @@ pub fn generate_buildings(
                         }
                     }
                 } else if x % 6 == 0 && z % 6 == 0 {
-                    editor.set_block(GLOWSTONE, x, y + building_height, z, None, None);
+                    editor.set_block(GLOWSTONE, x, start_level + y + building_height, z, None, None);
                     // Light fixtures
                 }
 
                 // Set the house ceiling
-                editor.set_block(floor_block, x, y + building_height + 1, z, None, None);
+                editor.set_block(
+                    floor_block,
+                    x,
+                    start_level + y + building_height + 1,
+                    z,
+                    None,
+                    None,
+                );
 
                 if args.winter {
-                    editor.set_block(SNOW_LAYER, x, y + building_height + 2, z, None, None);
+                    editor.set_block(
+                        SNOW_LAYER,
+                        x,
+                        start_level + y + building_height + 2,
+                        z,
+                        None,
+                        None,
+                    );
                 }
             }
         }
@@ -407,12 +474,40 @@ pub fn generate_building_from_relation(
     ground: &Ground,
     args: &Args,
 ) {
+    // Extract levels from relation tags
+    let relation_levels = relation
+        .tags
+        .get("building:levels")
+        .and_then(|l| l.parse::<i32>().ok())
+        .unwrap_or(2); // Default to 2 levels
+
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(editor, &member.way, ground, args);
+            generate_buildings(
+                editor,
+                &member.way,
+                ground,
+                args,
+                Some(relation_levels),
+            );
         }
     }
+
+    // Handle inner ways (holes, courtyards, etc.)
+    /*for member in &relation.members {
+        if member.role == ProcessedMemberRole::Inner {
+            let polygon_coords: Vec<(i32, i32)> =
+                member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
+            let hole_area: Vec<(i32, i32)> =
+                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+            for (x, z) in hole_area {
+                // Remove blocks in the inner area to create a hole
+                editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
+            }
+        }
+    }*/
 }
 
 fn find_nearest_block_in_color_map(

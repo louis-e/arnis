@@ -22,8 +22,7 @@ pub fn generate_world(
     emit_gui_progress_update(10.0, "Processing data...");
 
     let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor =
-        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, args);
+    let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
     let ground: Ground = Ground::new(args.terrain, args.ground_level);
 
     editor.set_sign(
@@ -48,6 +47,7 @@ pub fn generate_world(
     let progress_increment_prcs: f64 = 50.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 10.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
+
     for element in &elements {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
@@ -69,7 +69,7 @@ pub fn generate_world(
         match element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    buildings::generate_buildings(&mut editor, way, &ground, args);
+                    buildings::generate_buildings(&mut editor, way, &ground, args, None);
                 } else if way.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, &ground, args);
                 } else if way.tags.contains_key("landuse") {
@@ -85,9 +85,12 @@ pub fn generate_world(
                 } else if way.tags.contains_key("waterway") {
                     waterways::generate_waterways(&mut editor, way, &ground);
                 } else if way.tags.contains_key("bridge") {
-                    bridges::generate_bridges(&mut editor, way, &ground);
+                    //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way, &ground);
+                    railways::generate_railways(&mut editor, way, ground_level);
+                } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
+                {
+                    highways::generate_aeroway(&mut editor, way, ground_level);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way, &ground);
                 }
@@ -119,6 +122,8 @@ pub fn generate_world(
                     );
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel, &ground);
+                } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
+                    leisure::generate_leisure_from_relation(&mut editor, rel, ground_level, args);
                 }
             }
         }
