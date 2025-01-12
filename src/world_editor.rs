@@ -448,7 +448,6 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
     
-        // Keep existing progress tracking logic
         let total_steps: f64 = 9.0;
         let progress_increment_save: f64 = total_steps / total_regions as f64;
         let current_progress = AtomicU64::new(900);
@@ -491,7 +490,7 @@ impl<'a> WorldEditor<'a> {
                 let new_progress = (90.0 + (regions_done as f64 * progress_increment_save)) * 10.0;
                 let prev_progress = current_progress.fetch_max(new_progress as u64, Ordering::SeqCst);
                 
-                if new_progress as u64 - prev_progress > 2 {
+                if new_progress as u64 - prev_progress > 1 {
                     emit_gui_progress_update(new_progress as f64 / 10.0, "Saving world...");
                 }
                 
