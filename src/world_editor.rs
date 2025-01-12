@@ -492,7 +492,7 @@ impl WorldEditor {
                     current_progress.fetch_max(new_progress as u64, Ordering::SeqCst);
 
                 if new_progress as u64 - prev_progress > 1 {
-                    emit_gui_progress_update(new_progress as f64 / 10.0, "Saving world...");
+                    emit_gui_progress_update(new_progress / 10.0, "Saving world...");
                 }
 
                 save_pb.inc(1);
