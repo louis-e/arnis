@@ -38,8 +38,8 @@
 
           <!-- Updated Tooltip Structure -->
           <div class="tooltip" style="width: 100%;">
-            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;" data-localize="choose_world">
-              Choose World
+            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;">
+              <span id="choose_world">Choose World</span>
               <br>
               <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
                 No world selected
@@ -136,7 +136,7 @@
     <!-- Footer -->
     <footer class="footer">
       <a href="https://github.com/louis-e/arnis" target="_blank" class="footer-link" data-localize="footer_text">
-        © <span id="current-year"></span> Arnis v<span id="version-placeholder">x.x.x</span> by louis-e
+        © {year} Arnis v{version} by louis-e
       </a>
     </footer>
   </main>

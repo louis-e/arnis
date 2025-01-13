@@ -7,6 +7,8 @@ if (window.__TAURI__) {
   window.__TAURI__ = { event: { listen: dummyFunc } };
 }
 
+const DEFAULT_LOCALE_PATH = `./locales/en.json`;
+
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
   registerMessageEvent();
@@ -37,7 +39,7 @@ async function getLocalization() {
 
     // Fallback to default English localization
     if (invalidJSON(response)) {
-      response = await fetch(`./locales/en.json`);
+      response = await fetch(DEFAULT_LOCALE_PATH);
     }
   }
 
@@ -45,90 +47,44 @@ async function getLocalization() {
   return localization;
 }
 
+async function localizeElement(json, selector, localizedStringKey) {
+  const element = document.querySelector(selector);
+
+  if (element) {
+    if (localizedStringKey in json) {
+      element.textContent = json[localizedStringKey];
+    } else {
+      // Fallback to default (English) string
+      const response = await fetch(DEFAULT_LOCALE_PATH);
+      const defaultJson = await response.json();
+      element.textContent = defaultJson[localizedStringKey];
+    }
+  }
+}
+
 async function applyLocalization(localization) {
-  const selectLocationElement = document.querySelector("h2[data-localize='select_location']");
-  if (selectLocationElement) {
-    selectLocationElement.textContent = localization.select_location;
-  }
+  const localizationElements = {
+    "h2[data-localize='select_location']": "select_location",
+    "#bbox-text": "zoom_in_and_choose",
+    "h2[data-localize='select_world']": "select_world",
+    "span[id='choose_world']": "choose_world",
+    "#selected-world": "no_world_selected",
+    "#start-button": "start_generation",
+    "h2[data-localize='progress']": "progress",
+    "h2[data-localize='choose_world_modal_title']": "choose_world_modal_title",
+    "button[data-localize='select_existing_world']": "select_existing_world",
+    "button[data-localize='generate_new_world']": "generate_new_world",
+    "h2[data-localize='customization_settings']": "customization_settings",
+    "label[data-localize='winter_mode']": "winter_mode",
+    "label[data-localize='world_scale']": "world_scale",
+    "label[data-localize='custom_bounding_box']": "custom_bounding_box",
+    "label[data-localize='floodfill_timeout']": "floodfill_timeout",
+    "label[data-localize='ground_level']": "ground_level",
+    ".footer-link": "footer_text"
+  };
 
-  const bboxTextElement = document.getElementById("bbox-text");
-  if (bboxTextElement) {
-    bboxTextElement.textContent = localization.zoom_in_and_choose;
-  }
-
-  const selectWorldElement = document.querySelector("h2[data-localize='select_world']");
-  if (selectWorldElement) {
-    selectWorldElement.textContent = localization.select_world;
-  }
-
-  const chooseWorldButton = document.querySelector("button[data-localize='choose_world']");
-  if (chooseWorldButton) {
-    chooseWorldButton.firstChild.textContent = localization.choose_world;
-  }
-
-  const selectedWorldElement = document.getElementById("selected-world");
-  if (selectedWorldElement) {
-    selectedWorldElement.textContent = localization.no_world_selected;
-  }
-
-  const startButtonElement = document.getElementById("start-button");
-  if (startButtonElement) {
-    startButtonElement.textContent = localization.start_generation;
-  }
-
-  const progressElement = document.querySelector("h2[data-localize='progress']");
-  if (progressElement) {
-    progressElement.textContent = localization.progress;
-  }
-
-  const chooseWorldModalTitle = document.querySelector("h2[data-localize='choose_world_modal_title']");
-  if (chooseWorldModalTitle) {
-    chooseWorldModalTitle.textContent = localization.choose_world_modal_title;
-  }
-
-  const selectExistingWorldButton = document.querySelector("button[data-localize='select_existing_world']");
-  if (selectExistingWorldButton) {
-    selectExistingWorldButton.textContent = localization.select_existing_world;
-  }
-
-  const generateNewWorldButton = document.querySelector("button[data-localize='generate_new_world']");
-  if (generateNewWorldButton) {
-    generateNewWorldButton.textContent = localization.generate_new_world;
-  }
-
-  const customizationSettingsTitle = document.querySelector("h2[data-localize='customization_settings']");
-  if (customizationSettingsTitle) {
-    customizationSettingsTitle.textContent = localization.customization_settings;
-  }
-
-  const winterModeLabel = document.querySelector("label[data-localize='winter_mode']");
-  if (winterModeLabel) {
-    winterModeLabel.textContent = localization.winter_mode;
-  }
-
-  const worldScaleLabel = document.querySelector("label[data-localize='world_scale']");
-  if (worldScaleLabel) {
-    worldScaleLabel.textContent = localization.world_scale;
-  }
-
-  const customBoundingBoxLabel = document.querySelector("label[data-localize='custom_bounding_box']");
-  if (customBoundingBoxLabel) {
-    customBoundingBoxLabel.textContent = localization.custom_bounding_box;
-  }
-
-  const floodfillTimeoutLabel = document.querySelector("label[data-localize='floodfill_timeout']");
-  if (floodfillTimeoutLabel) {
-    floodfillTimeoutLabel.textContent = localization.floodfill_timeout;
-  }
-
-  const groundLevelLabel = document.querySelector("label[data-localize='ground_level']");
-  if (groundLevelLabel) {
-    groundLevelLabel.textContent = localization.ground_level;
-  }
-
-  const footerLinkElement = document.querySelector(".footer-link");
-  if (footerLinkElement) {
-    footerLinkElement.innerHTML = localization.footer_text.replace("{year}", '<span id="current-year"></span>').replace("{version}", '<span id="version-placeholder"></span>');
+  for (const selector in localizationElements) {
+    localizeElement(localization, selector, localizationElements[selector]);
   }
 
   // Update error messages
@@ -138,19 +94,20 @@ async function applyLocalization(localization) {
 // Function to initialize the footer with the current year and version
 async function initFooter() {
   const currentYear = new Date().getFullYear();
-  const currentYearElement = document.getElementById("current-year");
-  if (currentYearElement) {
-    currentYearElement.textContent = currentYear;
-  }
+  let version = "x.x.x";
 
   try {
-    const version = await invoke('gui_get_version');
-    const versionPlaceholder = document.getElementById("version-placeholder");
-    if (versionPlaceholder) {
-      versionPlaceholder.textContent = version;
-    }
+    version = await invoke('gui_get_version');
   } catch (error) {
     console.error("Failed to fetch version:", error);
+  }
+
+  const footerElement = document.querySelector(".footer-link");
+  if (footerElement) {
+    footerElement.textContent =
+      footerElement.textContent
+        .replace("{year}", currentYear)
+        .replace("{version}", version);
   }
 }
 
