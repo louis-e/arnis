@@ -29,5 +29,6 @@
   "select_location_first": "Select a location first!",
   "area_too_large": "This area is very large and could exceed typical computing limits.",
   "area_extensive": "The area is quite extensive and may take significant time and resources.",
-  "selection_confirmed": "Selection confirmed!"
+  "selection_confirmed": "Selection confirmed!",
+  "unknown_error": "Unknown error"
 }

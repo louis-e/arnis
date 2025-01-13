@@ -47,8 +47,10 @@ async function getLocalization() {
   return localization;
 }
 
-async function localizeElement(json, selector, localizedStringKey) {
-  const element = document.querySelector(selector);
+async function localizeElement(json, elementObject, localizedStringKey) {
+  const element =
+    (!elementObject.element || elementObject.element === "")
+    ? document.querySelector(elementObject.selector) : elementObject.element;
 
   if (element) {
     if (localizedStringKey in json) {
@@ -84,7 +86,7 @@ async function applyLocalization(localization) {
   };
 
   for (const selector in localizationElements) {
-    localizeElement(localization, selector, localizationElements[selector]);
+    localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
 
   // Update error messages
@@ -126,7 +128,7 @@ async function checkForUpdates() {
       updateMessage.style.display = "block";
       updateMessage.style.textDecoration = "none";
 
-      updateMessage.textContent = window.localization.new_version_available;
+      localizeElement(window.localization, { element: updateMessage }, "new_version_available");
       footer.style.marginTop = "15px";
       footer.appendChild(updateMessage);
     }
@@ -291,17 +293,17 @@ function handleBboxInput() {
               map_container.contentWindow.location.reload();
 
               // Update the info text
-              bboxInfo.textContent = window.localization.custom_selection_confirmed;
+              localizeElement(window.localization, { element: bboxInfo }, "custom_selection_confirmed");
               bboxInfo.style.color = "#7bd864";
           } else {
               // Valid numbers but invalid order or range
-              bboxInfo.textContent = window.localization.error_coordinates_out_of_range;
+              localizeElement(window.localization, { element: bboxInfo }, "error_coordinates_out_of_range");
               bboxInfo.style.color = "#fecc44";
               selectedBBox = "";
           }
       } else {
           // Input doesn't match the required format
-          bboxInfo.textContent = window.localization.invalid_format;
+          localizeElement(window.localization, { element: bboxInfo }, "invalid_format");
           bboxInfo.style.color = "#fecc44";
           selectedBBox = "";
       }
@@ -360,13 +362,13 @@ function displayBboxInfoText(bboxText) {
   const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
 
   if (selectedSize > threshold2) {
-    bboxInfo.textContent = window.localization.area_too_large;
+    localizeElement(window.localization, { element: bboxInfo }, "area_too_large");
     bboxInfo.style.color = "#fa7878";
   } else if (selectedSize > threshold1) {
-    bboxInfo.textContent = window.localization.area_extensive;
+    localizeElement(window.localization, { element: bboxInfo }, "area_extensive");
     bboxInfo.style.color = "#fecc44";
   } else {
-    bboxInfo.textContent = window.localization.selection_confirmed;
+    localizeElement(window.localization, { element: bboxInfo }, "selection_confirmed");
     bboxInfo.style.color = "#7bd864";
   }
 }
@@ -389,16 +391,17 @@ async function selectWorld(generate_new_world) {
 }
 
 function handleWorldSelectionError(errorCode) {
-  const errorMessages = {
-    1: window.localization.minecraft_directory_not_found,
-    2: window.localization.world_in_use,
-    3: window.localization.failed_to_create_world,
-    4: window.localization.no_world_selected_error
+  const errorKeys = {
+    1: "minecraft_directory_not_found",
+    2: "world_in_use",
+    3: "failed_to_create_world",
+    4: "no_world_selected_error"
   };
 
-  const errorMessage = errorMessages[errorCode] || "Unknown error";
-  document.getElementById('selected-world').textContent = errorMessage;
-  document.getElementById('selected-world').style.color = "#fa7878";
+  const errorKey = errorKeys[errorCode] || "unknown_error";
+  const selectedWorld = document.getElementById('selected-world');
+  localizeElement(window.localization, { element: selectedWorld }, errorKey);
+  selectedWorld.style.color = "#fa7878";
   worldPath = "";
   console.error(errorCode);
 }
@@ -411,14 +414,16 @@ async function startGeneration() {
     }
 
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
-      document.getElementById('bbox-info').textContent = window.localization.select_location_first;
-      document.getElementById('bbox-info').style.color = "#fa7878";
+      const bboxInfo = document.getElementById('bbox-info');
+      localizeElement(window.localization, { element: bboxInfo }, "select_location_first");
+      bboxInfo.style.color = "#fa7878";
       return;
     }
 
     if (!worldPath || worldPath === "") {
-      document.getElementById('selected-world').textContent = window.localization.select_minecraft_world_first;
-      document.getElementById('selected-world').style.color = "#fa7878";
+      const selectedWorld = document.getElementById('selected-world');
+      localizeElement(window.localization, { element: selectedWorld }, "select_minecraft_world_first");
+      selectedWorld.style.color = "#fa7878";
       return;
     }
 
