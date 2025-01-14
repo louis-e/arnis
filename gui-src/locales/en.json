@@ -9,8 +9,6 @@
   "custom_selection_confirmed": "Custom selection confirmed!",
   "error_coordinates_out_of_range": "Error: Coordinates are out of range or incorrectly ordered (Lat before Lng required).",
   "invalid_format": "Invalid format. Please use 'lat,lng,lat,lng' or 'lat lng lat lng'.",
-  "select_a_location_first": "Select a location first!",
-  "select_a_minecraft_world_first": "Select a Minecraft world first!",
   "generation_process_started": "Generation process started.",
   "winter_mode": "Winter Mode:",
   "world_scale": "World Scale:",

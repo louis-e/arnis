@@ -9,8 +9,6 @@
 "custom_selection_confirmed": "사용자 지정 선택이 확인되었습니다!",
 "error_coordinates_out_of_range": "오류: 좌표가 범위를 벗어나거나 잘못된 순서입니다 (Lat이 Lng보다 먼저 필요합니다).",
 "invalid_format": "잘못된 형식입니다. 'lat,lng,lat,lng' 또는 'lat lng lat lng' 형식을 사용하세요.",
-"select_a_location_first": "먼저 위치를 선택하세요!",
-"select_a_minecraft_world_first": "먼저 마인크래프트 세계를 선택하세요!",
 "generation_process_started": "생성 프로세스가 시작되었습니다.",
 "winter_mode": "겨울 모드:",
 "world_scale": "세계 규모:",
