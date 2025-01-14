@@ -452,7 +452,7 @@ function handleWorldSelectionError(errorCode) {
   document.getElementById('selected-world').textContent = errorMessage;
   document.getElementById('selected-world').style.color = "#fa7878";
   worldPath = "";
-  console.error(error);
+  console.error(errorCode);
 }
 
 let generationButtonEnabled = true;
