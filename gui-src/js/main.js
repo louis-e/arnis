@@ -51,15 +51,16 @@ async function localizeElement(json, elementObject, localizedStringKey) {
   const element =
     (!elementObject.element || elementObject.element === "")
     ? document.querySelector(elementObject.selector) : elementObject.element;
+  const attribute = localizedStringKey.startsWith("placeholder_") ? "placeholder" : "textContent";
 
   if (element) {
     if (localizedStringKey in json) {
-      element.textContent = json[localizedStringKey];
+      element[attribute] = json[localizedStringKey];
     } else {
       // Fallback to default (English) string
       const response = await fetch(DEFAULT_LOCALE_PATH);
       const defaultJson = await response.json();
-      element.textContent = defaultJson[localizedStringKey];
+      element[attribute] = defaultJson[localizedStringKey];
     }
   }
 }
@@ -82,7 +83,14 @@ async function applyLocalization(localization) {
     "label[data-localize='custom_bounding_box']": "custom_bounding_box",
     "label[data-localize='floodfill_timeout']": "floodfill_timeout",
     "label[data-localize='ground_level']": "ground_level",
-    ".footer-link": "footer_text"
+    ".footer-link": "footer_text",
+    "button[data-localize='license_and_credits']": "license_and_credits",
+    "h2[data-localize='license_and_credits']": "license_and_credits",
+
+    // Placeholder strings
+    "input[id='bbox-coords']": "placeholder_bbox",
+    "input[id='floodfill-timeout']": "placeholder_floodfill",
+    "input[id='ground-level']": "placeholder_ground"
   };
 
   for (const selector in localizationElements) {

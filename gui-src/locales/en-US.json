@@ -30,5 +30,9 @@
   "area_too_large": "This area is very large and could exceed typical computing limits.",
   "area_extensive": "The area is quite extensive and may take significant time and resources.",
   "selection_confirmed": "Selection confirmed!",
-  "unknown_error": "Unknown error"
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Seconds",
+  "placeholder_ground": "Ground Level"
 }
