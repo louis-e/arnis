@@ -118,6 +118,8 @@ function detectLanguage() {
   const lang = navigator.language || navigator.userLanguage;
   const langCode = lang.split('-')[0];
   switch (langCode) {
+    case 'ar':
+      return 'ar';
     case 'es':
       return 'es';
     case 'ru':
