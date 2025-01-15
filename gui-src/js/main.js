@@ -1,6 +1,11 @@
 import { licenseText } from './license.js';
 
-const { invoke } = window.__TAURI__.core;
+if (window.__TAURI__) {
+  const { invoke } = window.__TAURI__.core;
+} else {
+  function dummyFunc() {}
+  window.__TAURI__ = { event: { listen: dummyFunc } };
+}
 
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
@@ -447,7 +452,7 @@ function handleWorldSelectionError(errorCode) {
   document.getElementById('selected-world').textContent = errorMessage;
   document.getElementById('selected-world').style.color = "#fa7878";
   worldPath = "";
-  console.error(error);
+  console.error(errorCode);
 }
 
 let generationButtonEnabled = true;
