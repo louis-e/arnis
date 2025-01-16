@@ -1,7 +1,7 @@
 import { licenseText } from './license.js';
 
 if (window.__TAURI__) {
-  const { invoke } = window.__TAURI__.core;
+  var { invoke } = window.__TAURI__.core;
 } else {
   function dummyFunc() {}
   window.__TAURI__ = { event: { listen: dummyFunc } };
