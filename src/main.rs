@@ -66,14 +66,12 @@ fn print_banner() {
 }
 
 fn main() {
-    {
-        // If on Windows, free and reattach to the parent console when using as a CLI tool
-        // Either of these can fail, but if they do it is not an issue, so the return value is ignored
-        #[cfg(target_os = "windows")]
-        unsafe {
-            let _ = FreeConsole();
-            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
-        }
+    // If on Windows, free and reattach to the parent console when using as a CLI tool
+    // Either of these can fail, but if they do it is not an issue, so the return value is ignored
+    #[cfg(target_os = "windows")]
+    unsafe {
+        let _ = FreeConsole();
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
 
     // Parse arguments to decide whether to launch the UI or CLI
