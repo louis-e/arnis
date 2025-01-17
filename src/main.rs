@@ -39,6 +39,8 @@ use std::{
 };
 #[cfg(feature = "gui")]
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
 fn print_banner() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -64,6 +66,16 @@ fn print_banner() {
 }
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    {
+        // If on Windows, free and reattach to the parent console when using as a CLI tool
+        // Either of these can fail, but if they do it is not an issue, so the return value is ignored
+        unsafe {
+            let _ = FreeConsole();
+            let _ = AttachConsole(ATTACH_PARENT_PROCESS);
+        }
+    }
+
     // Parse arguments to decide whether to launch the UI or CLI
     let raw_args: Vec<String> = std::env::args().collect();
 
