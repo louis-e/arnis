@@ -1,5 +1,5 @@
 <p align="center">
-  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gitassets/logo.png?raw=true">
+  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gui-src/images/logo.png?raw=true">
 </p>
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases)
@@ -56,6 +56,12 @@ If you're on Windows, please install the [Evergreen Bootstrapper from Microsoft]
 Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16.5 and below is currently not supported, but we are working on it!
 - *The generation did finish, but there's nothing in the world!*<br>
 Make sure to teleport to the generation starting point (/tp 0 0 0). If there is still nothing, you might need to travel a bit further into the positive X and positive Z direction.
+- *What features are in the world generation settings?*<br>
+**Winter Mode:** This setting changes the generation style to a snowy theme and adds snow layers to the ground.<br>
+**Scale Factor:** The scale factor determines the size of the generated world.<br>
+**Custom BBOX Input:** This setting allows you to manually input the bounding box coordinates for the area you want to generate.<br>
+**Floodfill-Timeout (Sec):** This setting determines the maximum time the floodfill algorithm is allowed to run before being terminated. Increasing this value may improve the generation of large water areas but may also increase processing time.<br>
+**Ground Height:** This setting determines the base height of the generated world and can be adjusted to create different terrain types.
 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
@@ -111,10 +117,24 @@ After your pull request was merged, I will take care of regularly creating updat
 </a>
 
 ## :copyright: License Information
-This project is licensed under the Apache 2.0 License.[^3]
-This GitHub repository is the only official source for the Arnis project. Websites or distributions that claim to be official sources or use the Arnis name, logo, or branding without explicit permission are not allowed and violate the terms of the Apache 2.0 License.
-
 Copyright (c) 2022-2025 Louis Erbkamm (louis-e)
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.[^3]
+
+Download Arnis only from the official source (https://github.com/louis-e/arnis/). Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.
+
+The logo was made by @nxfx21.
+
 
 [^1]: https://en.wikipedia.org/wiki/OpenStreetMap
 

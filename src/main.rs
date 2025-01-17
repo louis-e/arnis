@@ -66,10 +66,10 @@ fn print_banner() {
 }
 
 fn main() {
-    #[cfg(target_os = "windows")]
     {
         // If on Windows, free and reattach to the parent console when using as a CLI tool
         // Either of these can fail, but if they do it is not an issue, so the return value is ignored
+        #[cfg(target_os = "windows")]
         unsafe {
             let _ = FreeConsole();
             let _ = AttachConsole(ATTACH_PARENT_PROCESS);
@@ -160,6 +160,13 @@ fn main() {
                 std::process::exit(1);
             }));
 
+            // Workaround WebKit2GTK issue with NVIDIA drivers (likely explicit sync related?)
+            // Source: https://github.com/tauri-apps/tauri/issues/10702 (TODO: Remove this later)
+            #[cfg(target_os = "linux")]
+            unsafe {
+                env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            }
+
             tauri::Builder::default()
                 .plugin(
                     LogBuilder::default()
@@ -206,7 +213,14 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 .join("saves")
         })
     } else if cfg!(target_os = "linux") {
-        dirs::home_dir().map(|home: PathBuf| home.join(".minecraft").join("saves"))
+        dirs::home_dir().map(|home| {
+            let flatpak_path = home.join(".var/app/com.mojang.Minecraft/.minecraft/saves");
+            if flatpak_path.exists() {
+                flatpak_path
+            } else {
+                home.join(".minecraft/saves")
+            }
+        })
     } else {
         None
     };
@@ -403,8 +417,17 @@ fn gui_start_generation(
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
                         osm_parser::parse_osm_data(&raw_data, reordered_bbox, &args);
-                    parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| {
-                        osm_parser::get_priority(element)
+                    parsed_elements.sort_by(|el1, el2| {
+                        let (el1_priority, el2_priority) =
+                            (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
+                        match (
+                            el1.tags().contains_key("landuse"),
+                            el2.tags().contains_key("landuse"),
+                        ) {
+                            (true, false) => std::cmp::Ordering::Greater,
+                            (false, true) => std::cmp::Ordering::Less,
+                            _ => el1_priority.cmp(&el2_priority),
+                        }
                     });
 
                     let _ = data_processing::generate_world(

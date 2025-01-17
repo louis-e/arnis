@@ -1,4 +1,11 @@
-const { invoke } = window.__TAURI__.core;
+import { licenseText } from './license.js';
+
+if (window.__TAURI__) {
+  const { invoke } = window.__TAURI__.core;
+} else {
+  function dummyFunc() {}
+  window.__TAURI__ = { event: { listen: dummyFunc } };
+}
 
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
@@ -247,6 +254,29 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+
+
+  /// License and Credits
+  function openLicense() {
+    const licenseModal = document.getElementById("license-modal");
+    const licenseContent = document.getElementById("license-content");
+
+    // Render the license text as HTML
+    licenseContent.innerHTML = licenseText;
+
+    // Show the modal
+    licenseModal.style.display = "flex";
+    licenseModal.style.justifyContent = "center";
+    licenseModal.style.alignItems = "center";
+  }
+
+  function closeLicense() {
+    const licenseModal = document.getElementById("license-modal");
+    licenseModal.style.display = "none";
+  }
+
+  window.openLicense = openLicense;
+  window.closeLicense = closeLicense;
 }
 
 function initWorldPicker() {
@@ -306,6 +336,11 @@ function handleBboxInput() {
               // Input is valid; trigger the event
               const bboxText = `${lat1} ${lng1} ${lat2} ${lng2}`;
               window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
+
+              // Show custom bbox on the map
+              let map_container = document.querySelector('.map-container');
+              map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
+              map_container.contentWindow.location.reload();
 
               // Update the info text
               bboxInfo.textContent = window.localization.custom_selection_confirmed;
@@ -417,7 +452,7 @@ function handleWorldSelectionError(errorCode) {
   document.getElementById('selected-world').textContent = errorMessage;
   document.getElementById('selected-world').style.color = "#fa7878";
   worldPath = "";
-  console.error(error);
+  console.error(errorCode);
 }
 
 let generationButtonEnabled = true;

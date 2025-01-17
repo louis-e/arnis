@@ -18,8 +18,7 @@ pub fn generate_world(
 
     let ground_level: i32 = args.ground_level;
     let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor =
-        WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z, args);
+    let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
 
     editor.set_sign(
         "↑".to_string(),
@@ -43,6 +42,7 @@ pub fn generate_world(
     let progress_increment_prcs: f64 = 50.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 10.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
+
     for element in &elements {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
@@ -117,6 +117,8 @@ pub fn generate_world(
                     );
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel, ground_level);
+                } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
+                    leisure::generate_leisure_from_relation(&mut editor, rel, ground_level, args);
                 }
             }
         }

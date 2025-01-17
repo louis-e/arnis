@@ -95,9 +95,10 @@ pub fn fetch_data(
         "https://z.overpass-api.de/api/interpreter",
         //"https://overpass.kumi.systems/api/interpreter", // This server is not reliable anymore
         //"https://overpass.private.coffee/api/interpreter", // This server is not reliable anymore
-        "https://overpass.osm.ch/api/interpreter",
     ];
-    let url: &&str = api_servers.choose(&mut rand::thread_rng()).unwrap();
+    let fallback_api_servers: Vec<&str> =
+        vec!["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+    let mut url: &&str = api_servers.choose(&mut rand::thread_rng()).unwrap();
 
     // Generate Overpass API query for bounding box
     let query: String = format!(
@@ -140,11 +141,30 @@ pub fn fetch_data(
         Ok(data)
     } else {
         // Fetch data from Overpass API
-        let response: String = match download_method {
-            "requests" => download_with_reqwest(url, &query)?,
-            "curl" => download_with_curl(url, &query)?,
-            "wget" => download_with_wget(url, &query)?,
-            _ => download_with_reqwest(url, &query)?, // Default to requests
+        let mut attempt = 0;
+        let max_attempts = 1;
+        let response: String = loop {
+            let result = match download_method {
+                "requests" => download_with_reqwest(url, &query),
+                "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
+                "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
+                _ => download_with_reqwest(url, &query), // Default to requests
+            };
+
+            match result {
+                Ok(response) => break response,
+                Err(error) => {
+                    if attempt >= max_attempts {
+                        return Err(error);
+                    }
+
+                    println!("Request failed. Switching to fallback url...");
+                    url = fallback_api_servers
+                        .choose(&mut rand::thread_rng())
+                        .unwrap();
+                    attempt += 1;
+                }
+            }
         };
 
         let data: Value = serde_json::from_str(&response)?;
@@ -171,9 +191,11 @@ pub fn fetch_data(
                 // General case for when there are no elements and no specific remark
                 eprintln!(
                     "{}",
-                    "Error! No data available in this region.".red().bold()
+                    "Error! API returned no data. Please try again!"
+                        .red()
+                        .bold()
                 );
-                emit_gui_error("No data available in this region.");
+                emit_gui_error("API returned no data. Please try again!");
             }
 
             if debug {
