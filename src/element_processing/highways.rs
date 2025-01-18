@@ -293,12 +293,25 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground:
 
         // Draw the siding using Bresenham's line algorithm between nodes
         if let Some(prev_node) = previous_node {
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev_node.x, 0, prev_node.z, current_node.x, 0, current_node.z);
+            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(
+                prev_node.x,
+                0,
+                prev_node.z,
+                current_node.x,
+                0,
+                current_node.z,
+            );
 
             for (bx, _, bz) in bresenham_points {
                 let ground_level = ground.level(XZPoint::new(bx, bz)) + 1;
 
-                if !editor.check_for_block(bx, ground_level - 1, bz, None, Some(&[BLACK_CONCRETE, WHITE_CONCRETE])) {
+                if !editor.check_for_block(
+                    bx,
+                    ground_level - 1,
+                    bz,
+                    None,
+                    Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                ) {
                     editor.set_block(siding_block, bx, ground_level, bz, None, None);
                 }
             }

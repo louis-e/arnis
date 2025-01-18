@@ -4,8 +4,8 @@ use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::element_processing::tree::create_tree;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::ground::Ground;
+use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
@@ -115,8 +115,8 @@ pub fn generate_leisure(
                         0 => {
                             // Benches
                             editor.set_block(OAK_LOG, x, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x + 1, ground_level, z, None, None);
-                            editor.set_block(OAK_LOG, x - 1, ground_level, z, None, None);
+                            editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
+                            editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
                         }
                         1..=30 => {
                             // Flowers

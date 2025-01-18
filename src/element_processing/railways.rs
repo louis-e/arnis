@@ -28,7 +28,8 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
             let cur_node = element.nodes[i].xz();
 
             // Generate the line of coordinates between the two nodes
-            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
+            let bresenham_points: Vec<(i32, i32, i32)> =
+                bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
 
             for (bx, _, bz) in bresenham_points {
                 let ground_level = ground.level(XZPoint::new(bx, bz));

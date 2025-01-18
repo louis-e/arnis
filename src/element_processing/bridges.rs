@@ -1,6 +1,6 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::ground::Ground;
+//use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 

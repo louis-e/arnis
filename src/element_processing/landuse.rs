@@ -71,7 +71,7 @@ pub fn generate_landuse(
             let bresenham_points: Vec<(i32, i32, i32)> =
                 bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
             for (bx, _, bz) in bresenham_points {
-                editor.set_block(bresenham_block, bx, ground_level - 2, bz, None, None);
+                editor.set_block(bresenham_block, bx, ground_level, bz, None, None);
             }
 
             current_landuse.push((x, z));

@@ -10,7 +10,6 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
 const MIN_Y: i32 = -64;
-const MAX_Y: i32 = 256;
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
@@ -114,12 +113,7 @@ pub fn generate_world(
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
-                    buildings::generate_building_from_relation(
-                        &mut editor,
-                        rel,
-                        &ground,
-                        args,
-                    );
+                    buildings::generate_building_from_relation(&mut editor, rel, &ground, args);
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel, &ground);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
@@ -181,8 +175,7 @@ pub fn generate_world(
 
                 // Find the highest block in this column
                 let max_y = (MIN_Y..ground_level)
-                    .filter(|y: &i32| editor.block_at(x, *y, z))
-                    .next()
+                    .find(|y: &i32| editor.block_at(x, *y, z))
                     .unwrap_or(ground_level)
                     .min(ground_level);
 

@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
 use crate::cartesian::XZPoint;
-use crate::osm_parser::ProcessedNode;
 use crate::ground::Ground;
+use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
 
 pub fn generate_doors(editor: &mut WorldEditor, element: &ProcessedNode, ground: &Ground) {

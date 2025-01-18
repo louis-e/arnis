@@ -24,11 +24,6 @@ pub fn bresenham_line(
     let mut y = y1;
     let mut z = z1;
 
-    // Cache common multiplications
-    let dx2 = dx * 2;
-    let dy2 = dy * 2;
-    let dz2 = dz * 2;
-
     // Determine dominant axis once, outside the loop
     if dx >= dy && dx >= dz {
         let mut p1 = 2 * dy - dx;

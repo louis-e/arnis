@@ -144,7 +144,7 @@ pub fn generate_buildings(
                     return;
                 };
 
-				for shelter_y in 1..=4 {
+                for shelter_y in 1..=4 {
                     editor.set_block(OAK_FENCE, x, shelter_y + y, z, None, None);
                 }
                 editor.set_block(roof_block, x, y + 5, z, None, None);
@@ -359,7 +359,7 @@ pub fn generate_buildings(
                 building_height = ((23.0 * scale_factor) as i32).max(3);
             }
         } else if building_type == "bridge" {
-            generate_bridge(editor, element, &ground, args.timeout.as_ref());
+            generate_bridge(editor, element, ground, args.timeout.as_ref());
             return;
         }
     }
@@ -375,8 +375,10 @@ pub fn generate_buildings(
             for (bx, _, bz) in bresenham_points {
                 for h in (start_level + 1)..=(start_level + building_height) {
                     if element.nodes[0].x == bx && element.nodes[0].x == bz {
-                        editor.set_block(corner_block, bx, h, bz, None, None); 
+                        // Corner Block
+                        editor.set_block(corner_block, bx, h, bz, None, None);
                     } else {
+                        // Add windows to the walls at intervals
                         if h > start_level + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
                             editor.set_block(window_block, bx, h, bz, None, None);
                         } else {
@@ -384,7 +386,7 @@ pub fn generate_buildings(
                         }
                     }
                 }
-                
+
                 editor.set_block(
                     COBBLESTONE,
                     bx,
@@ -431,6 +433,7 @@ pub fn generate_buildings(
                 if building_height > 4 {
                     for h in (start_level + 2 + 4..start_level + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
+                            // Light fixtures
                             editor.set_block(GLOWSTONE, x, h, z, None, None);
                         } else {
                             editor.set_block(floor_block, x, h, z, None, None);
@@ -481,13 +484,7 @@ pub fn generate_building_from_relation(
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(
-                editor,
-                &member.way,
-                ground,
-                args,
-                Some(relation_levels),
-            );
+            generate_buildings(editor, &member.way, ground, args, Some(relation_levels));
         }
     }
 
@@ -524,17 +521,6 @@ fn generate_bridge(
     ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
-    // Calculate the bridge level
-    let Some(mut bridge_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-        return;
-    };
-    
-    if let Some(level_str) = element.tags.get("level") {
-        if let Ok(level) = level_str.parse::<i32>() {
-            bridge_level += (level * 3) + 1; // Adjust height by levels
-        }
-    }
-
     let floor_block: Block = STONE;
     let railing_block: Block = STONE_BRICKS;
 
@@ -570,13 +556,12 @@ fn generate_bridge(
     }
 
     // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<XZPoint> = element
-        .nodes
-        .iter()
-        .map(|n| n.xz())
-        .collect();
+    let polygon_coords: Vec<XZPoint> = element.nodes.iter().map(|n| n.xz()).collect();
     let bridge_area: Vec<XZPoint> = flood_fill_area(
-        &polygon_coords.iter().map(|pt| (pt.x, pt.z)).collect::<Vec<_>>(),
+        &polygon_coords
+            .iter()
+            .map(|pt| (pt.x, pt.z))
+            .collect::<Vec<_>>(),
         floodfill_timeout,
     )
     .into_iter()

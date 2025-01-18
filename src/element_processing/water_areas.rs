@@ -50,22 +50,14 @@ pub fn generate_water_areas(
     let (max_x, max_z) = editor.get_max_coords();
     let outers: Vec<Vec<XZPoint>> = outers
         .iter()
-        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>()) // Added type annotation
+        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
     let inners: Vec<Vec<XZPoint>> = inners
         .iter()
-        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>()) // Added type annotation
+        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    inverse_floodfill(
-        max_x,
-        max_z,
-        outers,
-        inners,
-        editor,
-        ground,
-        start_time,
-    );
+    inverse_floodfill(max_x, max_z, outers, inners, editor, ground, start_time);
 }
 
 // Merges ways that share nodes into full loops
@@ -169,12 +161,30 @@ fn inverse_floodfill(
 
     let inners: Vec<_> = inners
         .into_iter()
-        .map(|x| Polygon::new(LineString::from(x.iter().map(|pt| (pt.x as f64, pt.z as f64)).collect::<Vec<_>>()), vec![]))
+        .map(|x| {
+            Polygon::new(
+                LineString::from(
+                    x.iter()
+                        .map(|pt| (pt.x as f64, pt.z as f64))
+                        .collect::<Vec<_>>(),
+                ),
+                vec![],
+            )
+        })
         .collect();
 
     let outers: Vec<_> = outers
         .into_iter()
-        .map(|x| Polygon::new(LineString::from(x.iter().map(|pt| (pt.x as f64, pt.z as f64)).collect::<Vec<_>>()), vec![]))
+        .map(|x| {
+            Polygon::new(
+                LineString::from(
+                    x.iter()
+                        .map(|pt| (pt.x as f64, pt.z as f64))
+                        .collect::<Vec<_>>(),
+                ),
+                vec![],
+            )
+        })
         .collect();
 
     inverse_floodfill_recursive(
@@ -237,8 +247,16 @@ fn inverse_floodfill_recursive(
             continue;
         }
 
-        let outers_intersects: Vec<_> = outers.iter().filter(|poly| poly.intersects(&rect)).cloned().collect();
-        let inners_intersects: Vec<_> = inners.iter().filter(|poly| poly.intersects(&rect)).cloned().collect();
+        let outers_intersects: Vec<_> = outers
+            .iter()
+            .filter(|poly| poly.intersects(&rect))
+            .cloned()
+            .collect();
+        let inners_intersects: Vec<_> = inners
+            .iter()
+            .filter(|poly| poly.intersects(&rect))
+            .cloned()
+            .collect();
 
         if !outers_intersects.is_empty() {
             inverse_floodfill_recursive(
@@ -290,4 +308,3 @@ fn rect_fill(
         }
     }
 }
-

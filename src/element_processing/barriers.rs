@@ -92,8 +92,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
             let z2: i32 = cur.z;
 
             // Generate the line of coordinates between the two nodes
-            let bresenham_points: Vec<(i32, i32, i32)> =
-                bresenham_line(x1, 0, z1, x2, 0, z2);
+            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2);
 
             for (bx, _, bz) in bresenham_points {
                 // Build the barrier wall to the specified height
@@ -104,7 +103,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
                 }
 
                 // Add an optional top to the barrier if the height is more than 1
-                /*if wall_height > 1 {
+                if wall_height > 1 {
                     editor.set_block(
                         STONE_BRICK_SLAB,
                         bx,
@@ -113,7 +112,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
                         None,
                         None,
                     ); // Top of the barrier
-                }*/ // TODO reimplement?
+                }
             }
         }
     }

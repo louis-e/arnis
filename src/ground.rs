@@ -1,6 +1,5 @@
 use crate::cartesian::XZPoint;
-use image::{RgbImage, Rgb};
-use reqwest;
+use image::{Rgb, RgbImage};
 
 /// Minimum Y coordinate in Minecraft (bedrock level)
 const MIN_Y: i32 = -62;
@@ -9,7 +8,8 @@ const MAX_Y: i32 = 256;
 /// Scale factor for converting real elevation to Minecraft heights
 const DEFAULT_HEIGHT_SCALE: f64 = 0.6; //0.3
 /// Mapbox API access token for terrain data
-const MAPBOX_PUBKEY: &str = "";
+const MAPBOX_PUBKEY: &str =
+    "pk.eyJ1IjoiY3Vnb3MiLCJhIjoiY2p4Nm43MzA3MDFmZDQwcGxsMjB4Z3hnNiJ9.SQbnMASwdqZe6G4n6OMvVw";
 /// Minimum zoom level for terrain tiles
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
@@ -19,7 +19,7 @@ const MAX_ZOOM: u8 = 15;
 pub struct Ground {
     elevation_enabled: bool,
     ground_level: i32,
-    elevation_data: Option<ElevationData>
+    elevation_data: Option<ElevationData>,
 }
 
 /// Holds processed elevation data and metadata
@@ -27,10 +27,6 @@ pub struct Ground {
 struct ElevationData {
     /// Height values in Minecraft Y coordinates
     heights: Vec<Vec<i32>>,
-    /// Geographic bounds (min_lat, min_lng, max_lat, max_lng)
-    bounds: (f64, f64, f64, f64),
-    /// Tile bounds (min_lat, min_lng, max_lat, max_lng)
-    tile_bounds: (f64, f64, f64, f64),
     /// Width of the elevation grid
     width: usize,
     /// Height of the elevation grid
@@ -42,7 +38,7 @@ impl Ground {
         let elevation_data = if elevation_enabled && bbox.is_some() {
             match Self::fetch_elevation_data(bbox.unwrap()) {
                 Ok(data) => {
-                    Self::save_debug_image(&data.heights, "elevation_debug", data.bounds);
+                    Self::save_debug_image(&data.heights, "elevation_debug");
                     Some(data)
                 }
                 Err(e) => {
@@ -90,6 +86,7 @@ impl Ground {
     }
 
     /// Converts game coordinates to elevation data coordinates
+    #[inline(always)]
     fn get_data_coordinates(&self, coord: XZPoint, data: &ElevationData) -> (f64, f64) {
         let x_ratio = coord.x as f64 / data.width as f64;
         let z_ratio = coord.z as f64 / data.height as f64;
@@ -97,6 +94,7 @@ impl Ground {
     }
 
     /// Interpolates height value from the elevation grid
+    #[inline(always)]
     fn interpolate_height(&self, x_ratio: f64, z_ratio: f64, data: &ElevationData) -> i32 {
         let x = ((x_ratio * (data.width - 1) as f64).round() as usize).min(data.width - 1);
         let z = ((z_ratio * (data.height - 1) as f64).round() as usize).min(data.height - 1);
@@ -120,13 +118,6 @@ impl Ground {
         (x, y)
     }
 
-    fn tile_to_lat_lng(x: u32, y: u32, zoom: u8) -> (f64, f64) {
-        let n = 2.0_f64.powi(zoom as i32);
-        let lon_deg = x as f64 / n * 360.0 - 180.0;
-        let lat_rad = (std::f64::consts::PI * (1.0 - 2.0 * y as f64 / n)).sinh().atan();
-        (lat_rad.to_degrees(), lon_deg)
-    }
-
     fn fetch_elevation_data(bbox_str: &str) -> Result<ElevationData, Box<dyn std::error::Error>> {
         let coords: Vec<f64> = bbox_str
             .split_whitespace()
@@ -134,11 +125,10 @@ impl Ground {
             .collect::<Result<Vec<f64>, _>>()?;
 
         let (min_lat, min_lng, max_lat, max_lng) = (coords[0], coords[1], coords[2], coords[3]);
-        
+
         // Use OSM parser's scale calculation
-        let (scale_factor_z, scale_factor_x) = crate::osm_parser::geo_distance(
-            min_lat, max_lat, min_lng, max_lng
-        );
+        let (scale_factor_z, scale_factor_x) =
+            crate::osm_parser::geo_distance(min_lat, max_lat, min_lng, max_lng);
 
         // Calculate zoom and tiles
         let zoom = Self::calculate_zoom_level((min_lat, min_lng, max_lat, max_lng));
@@ -149,14 +139,11 @@ impl Ground {
         let x_max = tiles.iter().map(|(x, _)| x).max().unwrap();
         let y_min = tiles.iter().map(|(_, y)| y).min().unwrap();
         let y_max = tiles.iter().map(|(_, y)| y).max().unwrap();
-        
-        let (tile_min_lat, tile_min_lng) = Self::tile_to_lat_lng(*x_min, *y_max, zoom);
-        let (tile_max_lat, tile_max_lng) = Self::tile_to_lat_lng(*x_max + 1, *y_min, zoom);
 
         // Match grid dimensions with Minecraft world size
         let grid_width = scale_factor_x.round() as usize;
         let grid_height = scale_factor_z.round() as usize;
-        
+
         // Calculate total tile dimensions
         let total_tile_width = (x_max - x_min + 1) * 256;
         let total_tile_height = (y_max - y_min + 1) * 256;
@@ -164,7 +151,7 @@ impl Ground {
         // Calculate scaling factors to match the desired grid dimensions
         let x_scale = grid_width as f64 / total_tile_width as f64;
         let y_scale = grid_height as f64 / total_tile_height as f64;
-        
+
         // Initialize height grid with proper dimensions
         let mut height_grid = vec![vec![f64::NAN; grid_width]; grid_height];
 
@@ -196,10 +183,12 @@ impl Ground {
                         continue;
                     }
 
-                    let height = -10000.0 + ((pixel[0] as f64 * 256.0 * 256.0 
-                        + pixel[1] as f64 * 256.0 
-                        + pixel[2] as f64) * 0.1);
-                    
+                    let height = -10000.0
+                        + ((pixel[0] as f64 * 256.0 * 256.0
+                            + pixel[1] as f64 * 256.0
+                            + pixel[2] as f64)
+                            * 0.1);
+
                     height_grid[scaled_y][scaled_x] = height;
                 }
             }
@@ -212,7 +201,7 @@ impl Ground {
         let blurred_heights = Self::apply_gaussian_blur(&height_grid, 1.0);
 
         let mut mc_heights = Vec::with_capacity(blurred_heights.len());
-        
+
         // Find min/max in raw data
         let mut min_height = f64::MAX;
         let mut max_height = f64::MIN;
@@ -228,7 +217,8 @@ impl Ground {
 
         // Convert to scaled Minecraft Y coordinates
         for row in blurred_heights {
-            let mc_row: Vec<i32> = row.iter()
+            let mc_row: Vec<i32> = row
+                .iter()
                 .map(|&h| {
                     // Scale the height differences
                     let relative_height = (h - min_height) / height_range;
@@ -241,15 +231,18 @@ impl Ground {
 
         Ok(ElevationData {
             heights: mc_heights,
-            bounds: (min_lat, min_lng, max_lat, max_lng),
-            tile_bounds: (tile_min_lat, tile_min_lng, tile_max_lat, tile_max_lng),
             width: grid_width,
             height: grid_height,
         })
     }
 
-    fn get_tile_coordinates(min_lat: f64, min_lng: f64, max_lat: f64, max_lng: f64, zoom: u8) 
-        -> Vec<(u32, u32)> {
+    fn get_tile_coordinates(
+        min_lat: f64,
+        min_lng: f64,
+        max_lat: f64,
+        max_lng: f64,
+        zoom: u8,
+    ) -> Vec<(u32, u32)> {
         // Convert lat/lng to tile coordinates
         let (x1, y1) = Self::lat_lng_to_tile(min_lat, min_lng, zoom);
         let (x2, y2) = Self::lat_lng_to_tile(max_lat, max_lng, zoom);
@@ -263,17 +256,17 @@ impl Ground {
         tiles
     }
 
-    fn apply_gaussian_blur(heights: &Vec<Vec<f64>>, sigma: f64) -> Vec<Vec<f64>> {
+    fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
         let kernel_size = (sigma * 3.0).ceil() as usize * 2 + 1;
         let kernel = Self::create_gaussian_kernel(kernel_size, sigma);
 
         // Apply blur
-        let mut blurred = heights.clone();
-        
+        let mut blurred = heights.to_owned();
+
         // Horizontal pass
         for row in blurred.iter_mut() {
             let mut temp = row.clone();
-            for i in 0..row.len() {
+            for (i, val) in temp.iter_mut().enumerate() {
                 let mut sum = 0.0;
                 let mut weight_sum = 0.0;
                 for (j, k) in kernel.iter().enumerate() {
@@ -283,7 +276,7 @@ impl Ground {
                         weight_sum += k;
                     }
                 }
-                temp[i] = sum / weight_sum;
+                *val = sum / weight_sum;
             }
             *row = temp;
         }
@@ -292,12 +285,9 @@ impl Ground {
         let height = blurred.len();
         let width = blurred[0].len();
         for x in 0..width {
-            let mut temp = Vec::new();
-            for y in 0..height {
-                temp.push(blurred[y][x]);
-            }
-            
-            for y in 0..height {
+            let temp: Vec<_> = blurred.iter().take(height).map(|row| row[x]).collect();
+
+            for (y, row) in blurred.iter_mut().enumerate().take(height) {
                 let mut sum = 0.0;
                 let mut weight_sum = 0.0;
                 for (j, k) in kernel.iter().enumerate() {
@@ -307,7 +297,7 @@ impl Ground {
                         weight_sum += k;
                     }
                 }
-                blurred[y][x] = sum / weight_sum;
+                row[x] = sum / weight_sum;
             }
         }
 
@@ -317,42 +307,41 @@ impl Ground {
     fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
         let mut kernel = vec![0.0; size];
         let center = size as f64 / 2.0;
-        
-        for i in 0..size {
+
+        for (i, value) in kernel.iter_mut().enumerate() {
             let x = i as f64 - center;
-            kernel[i] = (-x * x / (2.0 * sigma * sigma)).exp();
+            *value = (-x * x / (2.0 * sigma * sigma)).exp();
         }
-        
+
         let sum: f64 = kernel.iter().sum();
         for k in kernel.iter_mut() {
             *k /= sum;
         }
-        
+
         kernel
     }
 
-    fn fill_nan_values(height_grid: &mut Vec<Vec<f64>>) {
+    fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
         let height = height_grid.len();
         let width = height_grid[0].len();
-        
+
         let mut changes_made = true;
         while changes_made {
             changes_made = false;
-            
+
             for y in 0..height {
                 for x in 0..width {
                     if height_grid[y][x].is_nan() {
                         let mut sum = 0.0;
                         let mut count = 0;
-                        
+
                         // Check neighboring cells
                         for dy in -1..=1 {
                             for dx in -1..=1 {
                                 let ny = y as i32 + dy;
                                 let nx = x as i32 + dx;
-                                
-                                if ny >= 0 && ny < height as i32 && 
-                                   nx >= 0 && nx < width as i32 {
+
+                                if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
                                     let val = height_grid[ny as usize][nx as usize];
                                     if !val.is_nan() {
                                         sum += val;
@@ -361,7 +350,7 @@ impl Ground {
                                 }
                             }
                         }
-                        
+
                         if count > 0 {
                             height_grid[y][x] = sum / count as f64;
                             changes_made = true;
@@ -372,7 +361,7 @@ impl Ground {
         }
     }
 
-    fn save_debug_image(heights: &Vec<Vec<i32>>, filename: &str, bounds: (f64, f64, f64, f64)) {
+    fn save_debug_image(heights: &Vec<Vec<i32>>, filename: &str) {
         if heights.is_empty() || heights[0].is_empty() {
             return;
         }
@@ -380,10 +369,10 @@ impl Ground {
         let height = heights.len();
         let width = heights[0].len();
         let mut img = RgbImage::new(width as u32, height as u32);
-        
+
         let mut min_height = i32::MAX;
         let mut max_height = i32::MIN;
-        
+
         for row in heights {
             for &h in row {
                 min_height = min_height.min(h);
@@ -393,9 +382,13 @@ impl Ground {
 
         for (y, row) in heights.iter().enumerate() {
             for (x, &h) in row.iter().enumerate() {
-                let normalized = (((h - min_height) as f64 
-                    / (max_height - min_height) as f64) * 255.0) as u8;
-                img.put_pixel(x as u32, y as u32, Rgb([normalized, normalized, normalized]));
+                let normalized =
+                    (((h - min_height) as f64 / (max_height - min_height) as f64) * 255.0) as u8;
+                img.put_pixel(
+                    x as u32,
+                    y as u32,
+                    Rgb([normalized, normalized, normalized]),
+                );
             }
         }
 

@@ -113,34 +113,34 @@ pub fn generate_amenities(
             }
             "shelter" => {
                 let roof_block: Block = STONE_BRICK_SLAB;
-    
+
                 let polygon_coords: Vec<(i32, i32)> = element
                     .nodes()
                     .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
                     .collect();
                 let roof_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, args.timeout.as_ref());
-    
+
                 // Place fences and roof slabs at each corner node directly
                 for node in element.nodes() {
                     let x: i32 = node.x;
                     let z: i32 = node.z;
-    
+
                     let Some(y) = ground.min_level(element.nodes().map(|n| n.xz())) else {
                         return;
                     };
-    
+
                     for fence_height in 1..=4 {
                         editor.set_block(OAK_FENCE, x, y + fence_height, z, None, None);
                     }
                     editor.set_block(roof_block, x, y + 5, z, None, None);
                 }
-    
+
                 // Flood fill the roof area
                 let Some(y) = ground.min_level(element.nodes().map(|n| n.xz())) else {
                     return;
                 };
-    
+
                 let roof_height: i32 = y + 5;
                 for (x, z) in roof_area.iter() {
                     editor.set_block(roof_block, *x, roof_height, *z, None, None);

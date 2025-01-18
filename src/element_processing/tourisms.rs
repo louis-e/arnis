@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
 use crate::cartesian::XZPoint;
-use crate::osm_parser::ProcessedNode;
 use crate::ground::Ground;
+use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
 
 pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, ground: &Ground) {
@@ -28,7 +28,9 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
         if tourism_type == "information" {
             if let Some("board") = element.tags.get("information").map(|x: &String| x.as_str()) {
                 // Draw an information board
-                editor.set_block(OAK_PLANKS, x, ground_level + 1, z, None, None);
+                // TODO draw a sign with text
+                editor.set_block(COBBLESTONE_WALL, x, ground_level + 1, z, None, None);
+                editor.set_block(OAK_PLANKS, x, ground_level + 2, z, None, None);
             }
         }
     }
