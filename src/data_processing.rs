@@ -23,7 +23,7 @@ pub fn generate_world(
 
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
-    let ground: Ground = Ground::new(args.terrain, args.ground_level);
+    let ground: Ground = Ground::new(args.terrain, args.ground_level, args.bbox.as_deref());
 
     editor.set_sign(
         "↑".to_string(),
@@ -165,6 +165,13 @@ pub fn generate_world(
                 row.push(ground.level(XZPoint::new(x, z)));
             }
             ground_levels.push(row);
+        }
+
+        // Set blocks at spawn location
+        for x in 0..=20 {
+            for z in 0..=20 {
+                editor.set_block(groundlayer_block, x, -62, z, None, None);
+            }
         }
 
         // Process blocks in larger batches

@@ -1,10 +1,12 @@
 import { licenseText } from './license.js';
 
+let invoke;
 if (window.__TAURI__) {
-  const { invoke } = window.__TAURI__.core;
+  invoke = window.__TAURI__.core.invoke;
 } else {
   function dummyFunc() {}
   window.__TAURI__ = { event: { listen: dummyFunc } };
+  invoke = dummyFunc;
 }
 
 // Initialize elements and start the demo progress

@@ -129,7 +129,6 @@ fn main() {
         panic::set_hook(Box::new(|panic_info| {
             let message = format!("Application panicked: {:?}", panic_info);
             error!("{}", message);
-            std::process::exit(1);
         }));
 
         // Workaround WebKit2GTK issue with NVIDIA drivers (likely explicit sync related?)

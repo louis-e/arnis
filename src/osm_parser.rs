@@ -290,7 +290,8 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
 }
 
 // (lat meters, lon meters)
-fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
+#[inline]
+pub fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
     let z: f64 = lat_distance(lat1, lat2);
 
     // distance between two lons depends on their latitude. In this case we'll just average them
