@@ -18,18 +18,19 @@ pub fn generate_buildings(
     args: &Args,
     relation_levels: Option<i32>,
 ) {
-    // Adjust starting height based on building:min_level
+    let Some(base_y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
+        return;
+    };
+
+    // Get min_level first so we can use it both for start_level and building height calculations
     let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
         min_level_str.parse::<i32>().unwrap_or(0)
     } else {
         0
     };
-    
-    let Some(ground_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-        return;
-    };
 
-    let start_level = ground_level + (min_level * 4);
+    // Calculate starting level using base_y and min_level
+    let start_level = base_y + (min_level * 4);
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -143,8 +144,8 @@ pub fn generate_buildings(
                     return;
                 };
 
-                for fence_height in 1..=4 {
-                    editor.set_block(OAK_FENCE, x, y + fence_height, z, None, None);
+				for shelter_y in 1..=4 {
+                    editor.set_block(OAK_FENCE, x, shelter_y + y, z, None, None);
                 }
                 editor.set_block(roof_block, x, y + 5, z, None, None);
             }
@@ -182,7 +183,6 @@ pub fn generate_buildings(
                     flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-                    // No blocks
                     return;
                 };
 
@@ -364,11 +364,6 @@ pub fn generate_buildings(
         }
     }
 
-    let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-        // No blocks
-        return;
-    };
-
     // Process nodes to create walls and corners
     for node in &element.nodes {
         let x: i32 = node.x;
@@ -376,28 +371,24 @@ pub fn generate_buildings(
 
         if let Some(prev) = previous_node {
             // Calculate walls and corners using Bresenham line
-            let bresenham_points: Vec<(i32, i32, i32)> =
-                bresenham_line(prev.0, start_level + y, prev.1, x, start_level + y, z);
+            let bresenham_points = bresenham_line(prev.0, start_level, prev.1, x, start_level, z);
             for (bx, _, bz) in bresenham_points {
-                for h in (start_level + y + 1)..=(start_level + y + building_height) {
+                for h in (start_level + 1)..=(start_level + building_height) {
                     if element.nodes[0].x == bx && element.nodes[0].x == bz {
-                        editor.set_block(corner_block, bx, h, bz, None, None); // Corner block
+                        editor.set_block(corner_block, bx, h, bz, None, None); 
                     } else {
-                        // Add windows to the walls at intervals
-                        if h > start_level + y + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
+                        if h > start_level + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
                             editor.set_block(window_block, bx, h, bz, None, None);
-                        // Window block
                         } else {
                             editor.set_block(wall_block, bx, h, bz, None, None);
-                            // Wall block
                         }
                     }
                 }
-                // Ceiling cobblestone
+                
                 editor.set_block(
                     COBBLESTONE,
                     bx,
-                    start_level + y + building_height + 1,
+                    start_level + building_height + 1,
                     bz,
                     None,
                     None,
@@ -406,13 +397,14 @@ pub fn generate_buildings(
                 if args.winter {
                     editor.set_block(
                         SNOW_LAYER,
-                        x,
-                        start_level + y + building_height + 2,
-                        z,
+                        bx,
+                        start_level + building_height + 2,
+                        bz,
                         None,
                         None,
                     );
                 }
+
                 current_building.push((bx, bz));
                 corner_addup = (corner_addup.0 + bx, corner_addup.1 + bz, corner_addup.2 + 1);
             }
@@ -432,27 +424,27 @@ pub fn generate_buildings(
 
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
-                editor.set_block(floor_block, x, start_level + y, z, None, None); // Set floor
+                // Set floor at start_level
+                editor.set_block(floor_block, x, start_level, z, None, None);
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
-                    for h in (start_level + y + 2 + 4..start_level + building_height).step_by(4) {
+                    for h in (start_level + 2 + 4..start_level + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
-                            editor.set_block(GLOWSTONE, x, h, z, None, None); // Light fixtures
+                            editor.set_block(GLOWSTONE, x, h, z, None, None);
                         } else {
                             editor.set_block(floor_block, x, h, z, None, None);
                         }
                     }
                 } else if x % 6 == 0 && z % 6 == 0 {
-                    editor.set_block(GLOWSTONE, x, start_level + y + building_height, z, None, None);
-                    // Light fixtures
+                    editor.set_block(GLOWSTONE, x, start_level + building_height, z, None, None);
                 }
 
-                // Set the house ceiling
+                // Set ceiling at proper height
                 editor.set_block(
                     floor_block,
                     x,
-                    start_level + y + building_height + 1,
+                    start_level + building_height + 1,
                     z,
                     None,
                     None,
@@ -462,7 +454,7 @@ pub fn generate_buildings(
                     editor.set_block(
                         SNOW_LAYER,
                         x,
-                        start_level + y + building_height + 2,
+                        start_level + building_height + 2,
                         z,
                         None,
                         None,
@@ -532,12 +524,22 @@ fn generate_bridge(
     ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
+    // Calculate the bridge level
+    let Some(mut bridge_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
+        return;
+    };
+    
+    if let Some(level_str) = element.tags.get("level") {
+        if let Ok(level) = level_str.parse::<i32>() {
+            bridge_level += (level * 3) + 1; // Adjust height by levels
+        }
+    }
+
     let floor_block: Block = STONE;
     let railing_block: Block = STONE_BRICKS;
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
-
     for node in &element.nodes {
         let x: i32 = node.x;
         let z: i32 = node.z;

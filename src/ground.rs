@@ -19,7 +19,7 @@ impl Ground {
     pub fn level(&self, coord: XZPoint) -> i32 {
         if self.elevation_enabled {
             // Use sinusoidal terrain if elevation is enabled
-            (20.0 * (coord.x as f64 / 20.0).sin() + 20.0 * (coord.z as f64 / 20.0).sin() - 40.0)
+            (20.0 * (coord.x as f64 / 200.0).sin() + 20.0 * (coord.z as f64 / 200.0).sin() - 40.0)
                 as i32
         } else {
             // Flat terrain
