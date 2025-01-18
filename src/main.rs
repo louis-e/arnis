@@ -132,6 +132,13 @@ fn main() {
             std::process::exit(1);
         }));
 
+        // Workaround WebKit2GTK issue with NVIDIA drivers (likely explicit sync related?)
+        // Source: https://github.com/tauri-apps/tauri/issues/10702 (TODO: Remove this later)
+        #[cfg(target_os = "linux")]
+        unsafe {
+            env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
+
         tauri::Builder::default()
             .plugin(
                 LogBuilder::default()
