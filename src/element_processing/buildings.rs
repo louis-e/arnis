@@ -196,9 +196,8 @@ pub fn generate_buildings(
                     let x: i32 = node.x;
                     let z: i32 = node.z;
 
-                    for y in 1..=4 {
-                        editor.set_block(ground_block, x, y, z, None, None);
-                        editor.set_block(OAK_FENCE, x, y + y, z, None, None);
+                    for dy in 1..=4 {
+                        editor.set_block(OAK_FENCE, x, y + dy, z, None, None);
                     }
                     editor.set_block(roof_block, x, y + 5, z, None, None);
                 }

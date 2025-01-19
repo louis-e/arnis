@@ -145,7 +145,10 @@ pub fn generate_highways(
                 }
                 "motorway" | "primary" => {
                     block_range = 5;
-                    add_stripe = true; // Add stripes for motorways and primary roads
+                    add_stripe = true;
+                }
+                "tertiary" => {
+                    add_stripe = true;
                 }
                 "track" => {
                     block_range = 1;

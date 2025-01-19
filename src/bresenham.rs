@@ -12,7 +12,7 @@ pub fn bresenham_line(
     let dx = if x2 > x1 { x2 - x1 } else { x1 - x2 };
     let dy = if y2 > y1 { y2 - y1 } else { y1 - y2 };
     let dz = if z2 > z1 { z2 - z1 } else { z1 - z2 };
-    
+
     // Pre-allocate vector with exact size needed
     let capacity = dx.max(dy).max(dz) + 1;
     let mut points = Vec::with_capacity(capacity as usize);
@@ -30,10 +30,10 @@ pub fn bresenham_line(
     if dx >= dy && dx >= dz {
         let mut p1 = 2 * dy - dx;
         let mut p2 = 2 * dz - dx;
-        
+
         while x != x2 {
             points.push((x, y, z));
-            
+
             if p1 >= 0 {
                 y += ys;
                 p1 -= 2 * dx;
@@ -49,10 +49,10 @@ pub fn bresenham_line(
     } else if dy >= dx && dy >= dz {
         let mut p1 = 2 * dx - dy;
         let mut p2 = 2 * dz - dy;
-        
+
         while y != y2 {
             points.push((x, y, z));
-            
+
             if p1 >= 0 {
                 x += xs;
                 p1 -= 2 * dy;
@@ -68,10 +68,10 @@ pub fn bresenham_line(
     } else {
         let mut p1 = 2 * dy - dz;
         let mut p2 = 2 * dx - dz;
-        
+
         while z != z2 {
             points.push((x, y, z));
-            
+
             if p1 >= 0 {
                 y += ys;
                 p1 -= 2 * dz;

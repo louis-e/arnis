@@ -24,17 +24,6 @@ pub fn generate_world(
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
     let ground: Ground = Ground::new(args.terrain, args.ground_level, args.bbox.as_deref());
 
-    editor.set_sign(
-        "↑".to_string(),
-        "Generated World".to_string(),
-        "This direction".to_string(),
-        "".to_string(),
-        9,
-        -61,
-        9,
-        6,
-    );
-
     // Process data
     let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
@@ -161,13 +150,6 @@ pub fn generate_world(
             ground_levels.push(row);
         }
 
-        // Set blocks at spawn location
-        for x in 0..=20 {
-            for z in 0..=20 {
-                editor.set_block(groundlayer_block, x, -62, z, None, None);
-            }
-        }
-
         // Process blocks in larger batches
         for x in 0..=(scale_factor_x as i32) {
             for z in 0..=(scale_factor_z as i32) {
@@ -196,6 +178,13 @@ pub fn generate_world(
                 }
             }
         }
+
+        // Set blocks at spawn location
+        for x in 0..=20 {
+            for z in 0..=20 {
+                editor.set_block(groundlayer_block, x, -62, z, None, None);
+            }
+        }
     } else {
         for x in 0..=(scale_factor_x as i32) {
             for z in 0..=(scale_factor_z as i32) {
@@ -216,6 +205,18 @@ pub fn generate_world(
             }
         }
     }
+
+    // Set sign for player orientation
+    editor.set_sign(
+        "↑".to_string(),
+        "Generated World".to_string(),
+        "This direction".to_string(),
+        "".to_string(),
+        9,
+        -61,
+        9,
+        6,
+    );
 
     ground_pb.inc(block_counter % batch_size);
     ground_pb.finish();

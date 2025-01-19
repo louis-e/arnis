@@ -37,11 +37,11 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
             // Handle fence sub-types
             match element.tags().get("fence_type").map(|s| s.as_str()) {
                 Some("railing" | "bars" | "krest") => {
-                    barrier_material = IRON_BARS;
+                    barrier_material = STONE_BRICK_WALL;
                     barrier_height = 1;
                 }
                 Some("chain_link" | "metal" | "wire" | "barbed_wire" | "corrugated_metal") => {
-                    barrier_material = IRON_BARS;
+                    barrier_material = STONE_BRICK_WALL;
                     barrier_height = 2;
                 }
                 Some("slatted" | "paling") => {

@@ -142,6 +142,7 @@ impl Block {
             112 => "snow",
             113 => "oak_sign",
             114 => "andesite_wall",
+            115 => "stone_brick_wall",
             _ => panic!("Invalid id"),
         }
     }
@@ -303,6 +304,7 @@ pub const SNOW_BLOCK: Block = Block::new(111);
 pub const SNOW_LAYER: Block = Block::new(112);
 pub const SIGN: Block = Block::new(113);
 pub const ANDESITE_WALL: Block = Block::new(114);
+pub const STONE_BRICK_WALL: Block = Block::new(115);
 
 pub const CARROTS: Block = Block::new(105);
 pub const DARK_OAK_DOOR_LOWER: Block = Block::new(106);
