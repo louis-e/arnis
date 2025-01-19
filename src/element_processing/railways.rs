@@ -5,7 +5,9 @@ use crate::world_editor::WorldEditor;
 
 pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
     if let Some(railway_type) = element.tags.get("railway") {
-        if ["proposed", "abandoned", "subway", "construction", "razed"].contains(&railway_type.as_str()) {
+        if ["proposed", "abandoned", "subway", "construction", "razed"]
+            .contains(&railway_type.as_str())
+        {
             return;
         }
 
