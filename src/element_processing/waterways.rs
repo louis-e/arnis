@@ -1,11 +1,13 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
+pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, ground: &Ground) {
     if let Some(_waterway_type) = element.tags.get("waterway") {
-        let mut previous_node: Option<(i32, i32)> = None;
+        let mut previous_node: Option<XZPoint> = None;
         let mut waterway_width: i32 = 4; // Default waterway width
 
         // Check for custom width in tags
@@ -20,6 +22,8 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, grou
 
         // Process nodes to create waterways
         for node in &element.nodes {
+            let current_node = node.xz();
+
             if let Some(prev) = previous_node {
                 // Skip layers below the ground level
                 if !matches!(
@@ -28,11 +32,16 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, grou
                 ) {
                     // Draw a line between the current and previous node
                     let bresenham_points: Vec<(i32, i32, i32)> =
-                        bresenham_line(prev.0, ground_level, prev.1, node.x, ground_level, node.z);
+                        bresenham_line(prev.x, 0, prev.z, current_node.x, 0, current_node.z);
+
                     for (bx, _, bz) in bresenham_points {
+                        let ground_level = ground.level(XZPoint::new(bx, bz));
+
                         for x in (bx - waterway_width / 2)..=(bx + waterway_width / 2) {
                             for z in (bz - waterway_width / 2)..=(bz + waterway_width / 2) {
-                                editor.set_block(WATER, x, ground_level, z, None, None); // Set water block
+                                // Set water block at the ground level
+                                editor.set_block(WATER, x, ground_level, z, None, None);
+                                // Clear vegetation above the water
                                 editor.set_block(
                                     AIR,
                                     x,
@@ -46,7 +55,7 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, grou
                     }
                 }
             }
-            previous_node = Some((node.x, node.z));
+            previous_node = Some(current_node);
         }
     }
 }

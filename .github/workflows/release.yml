@@ -12,11 +12,15 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary_name: arnis.exe
-            asset_name: arnis-windows-x64.exe
+            asset_name: arnis-windows.exe
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             binary_name: arnis
-            asset_name: arnis-linux-x64
+            asset_name: arnis-linux
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary_name: arnis
+            asset_name: arnis-mac
 
     runs-on: ${{ matrix.os }}
 
@@ -47,11 +51,42 @@ jobs:
     - name: Build
       run: cargo build --release
 
+    - name: Rename binary for release
+      run: mv target/release/${{ matrix.binary_name }} target/release/${{ matrix.asset_name }}
+
+    - name: Install Windows SDK
+      if: matrix.os == 'windows-latest'
+      run: |
+        choco install windows-sdk-10.1 -y
+        $env:Path += ";C:\Program Files (x86)\Windows Kits\10\bin\x64"
+      shell: powershell
+
+    - name: Locate signtool.exe
+      if: matrix.os == 'windows-latest'
+      id: locate_signtool
+      run: |
+        $env:ProgramFilesX86 = [System.Environment]::GetFolderPath('ProgramFilesX86')
+        $signtoolPath = Get-ChildItem -Path "$env:ProgramFilesX86\Windows Kits\10\bin" -Recurse -Filter signtool.exe | Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1 -ExpandProperty FullName
+        if (-not $signtoolPath) { throw "signtool.exe not found." }
+        echo "signtool=$signtoolPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      shell: powershell
+    
+    - name: Self-sign Windows executable
+      if: matrix.os == 'windows-latest'
+      run: |
+        $password = ConvertTo-SecureString -String $env:WINDOWS_CERT_PASSWORD -Force -AsPlainText
+        $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=Arnis' -CertStoreLocation Cert:\CurrentUser\My -NotAfter (Get-Date).AddYears(5)
+        Export-PfxCertificate -Cert $cert -FilePath arnis-cert.pfx -Password $password
+        & $env:signtool sign /f arnis-cert.pfx /p $env:WINDOWS_CERT_PASSWORD /t http://timestamp.digicert.com target/release/${{ matrix.asset_name }}
+      env:
+        WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      shell: powershell
+
     - name: Upload artifact
       uses: actions/upload-artifact@v3
       with:
         name: ${{ matrix.os }}-build
-        path: target/release/${{ matrix.binary_name }}
+        path: target/release/${{ matrix.asset_name }}
 
   release:
     needs: build
@@ -72,14 +107,23 @@ jobs:
         name: ubuntu-latest-build
         path: ./builds/linux
 
-    - name: Make Linux binary executable
-      run: chmod +x ./builds/linux/arnis
+    - name: Download macOS build artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: macos-latest-build
+        path: ./builds/macos
+
+    - name: Make Linux and macOS binaries executable
+      run: |
+        chmod +x ./builds/linux/arnis-linux
+        chmod +x ./builds/macos/arnis-mac
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
       with:
         files: |
-          builds/windows/arnis.exe
-          builds/linux/arnis
+          builds/windows/arnis-windows.exe
+          builds/linux/arnis-linux
+          builds/macos/arnis-mac
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
