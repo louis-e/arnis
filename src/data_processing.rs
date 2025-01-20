@@ -22,7 +22,7 @@ pub fn generate_world(
 
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
-    let ground: Ground = Ground::new(args.terrain, args.ground_level, args.bbox.as_deref());
+    let ground: Ground = Ground::new(args);
 
     // Process data
     let elements_count: usize = elements.len();
@@ -139,7 +139,8 @@ pub fn generate_world(
 
     let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
 
-    if args.terrain {
+    // Differentiate between terrain and non-terrain generation
+    if ground.elevation_enabled {
         // Pre-calculate ground levels for all points
         let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(scale_factor_x as usize + 1);
         for x in 0..=(scale_factor_x as i32) {

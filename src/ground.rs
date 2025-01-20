@@ -6,7 +6,7 @@ const MIN_Y: i32 = -62;
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 256;
 /// Scale factor for converting real elevation to Minecraft heights
-const DEFAULT_HEIGHT_SCALE: f64 = 0.6; //0.3
+const BASE_HEIGHT_SCALE: f64 = 0.6;
 /// Mapbox API access token for terrain data
 const MAPBOX_PUBKEY: &str =
     "pk.eyJ1IjoiY3Vnb3MiLCJhIjoiY2p4Nm43MzA3MDFmZDQwcGxsMjB4Z3hnNiJ9.SQbnMASwdqZe6G4n6OMvVw";
@@ -17,9 +17,9 @@ const MAX_ZOOM: u8 = 15;
 
 /// Represents terrain data and elevation settings
 pub struct Ground {
-    elevation_enabled: bool,
+    pub elevation_enabled: bool,
     ground_level: i32,
-    elevation_data: Option<ElevationData>,
+    elevation_data: Option<ElevationData>
 }
 
 /// Holds processed elevation data and metadata
@@ -34,15 +34,17 @@ struct ElevationData {
 }
 
 impl Ground {
-    pub fn new(elevation_enabled: bool, ground_level: i32, bbox: Option<&str>) -> Self {
-        let elevation_data = if elevation_enabled && bbox.is_some() {
-            match Self::fetch_elevation_data(bbox.unwrap()) {
+    pub fn new(args: &crate::args::Args) -> Self {
+        let mut elevation_enabled: bool = args.terrain;
+        let elevation_data = if elevation_enabled && args.bbox.is_some() {
+            match Self::fetch_elevation_data(args.bbox.as_deref().unwrap(), args.scale) {
                 Ok(data) => {
-                    Self::save_debug_image(&data.heights, "elevation_debug");
+                    if args.debug { Self::save_debug_image(&data.heights, "elevation_debug"); }
                     Some(data)
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to fetch elevation data: {}", e);
+                    elevation_enabled = false;
                     None
                 }
             }
@@ -52,7 +54,7 @@ impl Ground {
 
         Self {
             elevation_enabled,
-            ground_level,
+            ground_level: args.ground_level,
             elevation_data,
         }
     }
@@ -118,7 +120,7 @@ impl Ground {
         (x, y)
     }
 
-    fn fetch_elevation_data(bbox_str: &str) -> Result<ElevationData, Box<dyn std::error::Error>> {
+    fn fetch_elevation_data(bbox_str: &str, scale: f64) -> Result<ElevationData, Box<dyn std::error::Error>> {
         let coords: Vec<f64> = bbox_str
             .split_whitespace()
             .map(|s| s.parse::<f64>())
@@ -126,9 +128,11 @@ impl Ground {
 
         let (min_lat, min_lng, max_lat, max_lng) = (coords[0], coords[1], coords[2], coords[3]);
 
-        // Use OSM parser's scale calculation
+        // Use OSM parser's scale calculation and apply user scale factor
         let (scale_factor_z, scale_factor_x) =
             crate::osm_parser::geo_distance(min_lat, max_lat, min_lng, max_lng);
+        let scale_factor_x = scale_factor_x * scale;
+        let scale_factor_z = scale_factor_z * scale;
 
         // Calculate zoom and tiles
         let zoom = Self::calculate_zoom_level((min_lat, min_lng, max_lat, max_lng));
@@ -213,7 +217,9 @@ impl Ground {
         }
 
         let height_range = max_height - min_height;
-        let scaled_range = height_range * DEFAULT_HEIGHT_SCALE;
+        // Apply scale factor to height scaling
+        let height_scale = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
+        let scaled_range = height_range * height_scale;
 
         // Convert to scaled Minecraft Y coordinates
         for row in blurred_heights {

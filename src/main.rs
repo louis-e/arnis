@@ -296,7 +296,7 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
             let current_time_millis = current_time.as_millis() as i64;
             data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
 
-            // Update player position
+            // Update player position and rotation
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
                     if let Value::Double(ref mut x) = pos.get_mut(0).unwrap() {
@@ -307,6 +307,12 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
                     }
                     if let Value::Double(ref mut z) = pos.get_mut(2).unwrap() {
                         *z = -5.0;
+                    }
+                }
+                
+                if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
+                    if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
+                        *x = -45.0;
                     }
                 }
             }
