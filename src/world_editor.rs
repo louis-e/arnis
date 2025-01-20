@@ -430,6 +430,33 @@ impl WorldEditor {
         false
     }
 
+    /// Helper function to create a base chunk with grass blocks at Y -62
+    fn create_base_chunk(abs_chunk_x: i32, abs_chunk_z: i32) -> (Vec<u8>, bool) {
+        let mut chunk = ChunkToModify::default();
+
+        // Fill the bottom layer with grass blocks at Y -62
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set_block(x, -62, z, GRASS_BLOCK);
+            }
+        }
+
+        // Prepare chunk data
+        let chunk_data = Chunk {
+            sections: chunk.sections().collect(),
+            x_pos: abs_chunk_x,
+            z_pos: abs_chunk_z,
+            is_light_on: 0,
+            other: chunk.other,
+        };
+
+        // Serialize the chunk
+        let mut ser_buffer = Vec::with_capacity(8192);
+        fastnbt::to_writer(&mut ser_buffer, &chunk_data).unwrap();
+
+        (ser_buffer, true)
+    }
+
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
         println!("{} Saving world...", "[5/5]".bold());
@@ -455,42 +482,51 @@ impl WorldEditor {
             .regions
             .par_iter()
             .for_each(|((region_x, region_z), region_to_modify)| {
-                // Create region file
+                // Create region and handle Result properly
                 let mut region = self.create_region(*region_x, *region_z);
 
                 // Reusable serialization buffer
                 let mut ser_buffer = Vec::with_capacity(8192);
 
-                // Process only modified chunks
+                // Process modified chunks
                 for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
                     if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
-                        // Calculate absolute chunk coordinates
-                        let abs_chunk_x = chunk_x + (region_x * 32);
-                        let abs_chunk_z = chunk_z + (region_z * 32);
-
-                        // Read existing chunk data or use empty chunk
                         let data = region
                             .read_chunk(chunk_x as usize, chunk_z as usize)
                             .unwrap()
                             .unwrap_or_default();
 
                         let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
-                        
-                        // Update chunk data
                         chunk.sections = chunk_to_modify.sections().collect();
                         chunk.other.extend(chunk_to_modify.other.clone());
-                        
-                        // Set correct chunk coordinates
-                        chunk.x_pos = abs_chunk_x;
-                        chunk.z_pos = abs_chunk_z;
+                        chunk.x_pos = chunk_x + (region_x * 32);
+                        chunk.z_pos = chunk_z + (region_z * 32);
                         chunk.is_light_on = 0;
 
-                        // Serialize and write chunk
                         ser_buffer.clear();
                         fastnbt::to_writer(&mut ser_buffer, &chunk).unwrap();
                         region
                             .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
                             .unwrap();
+                    }
+                }
+
+                // Second pass: ensure all chunks exist
+                for chunk_x in 0..32 {
+                    for chunk_z in 0..32 {
+                        let abs_chunk_x = chunk_x + (region_x * 32);
+                        let abs_chunk_z = chunk_z + (region_z * 32);
+
+                        // Check if chunk exists in our modifications
+                        let chunk_exists = region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
+
+                        // If chunk doesn't exist, create it with base layer
+                        if !chunk_exists {
+                            let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
+                            region
+                                .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                                .unwrap();
+                        }
                     }
                 }
 
