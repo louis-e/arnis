@@ -1,4 +1,4 @@
-use crate::{args::Args, progress::emit_gui_progress_update};
+use crate::{args::Args, cartesian::XZPoint, progress::emit_gui_progress_update};
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;
@@ -42,6 +42,15 @@ pub struct ProcessedNode {
     // Minecraft coordinates
     pub x: i32,
     pub z: i32,
+}
+
+impl ProcessedNode {
+    pub fn xz(&self) -> XZPoint {
+        XZPoint {
+            x: self.x,
+            z: self.z,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -281,7 +290,8 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
 }
 
 // (lat meters, lon meters)
-fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
+#[inline]
+pub fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
     let z: f64 = lat_distance(lat1, lat2);
 
     // distance between two lons depends on their latitude. In this case we'll just average them

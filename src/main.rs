@@ -3,10 +3,12 @@
 mod args;
 mod block_definitions;
 mod bresenham;
+mod cartesian;
 mod colors;
 mod data_processing;
 mod element_processing;
 mod floodfill;
+mod ground;
 mod osm_parser;
 mod progress;
 mod retrieve_data;
@@ -127,11 +129,10 @@ fn main() {
         panic::set_hook(Box::new(|panic_info| {
             let message = format!("Application panicked: {:?}", panic_info);
             error!("{}", message);
-            std::process::exit(1);
         }));
 
         // Workaround WebKit2GTK issue with NVIDIA drivers (likely explicit sync related?)
-        // Source: https://github.com/tauri-apps/tauri/issues/10702 (TODO: Remove this later)
+        // Source: https://github.com/tauri-apps/tauri/issues/10702
         #[cfg(target_os = "linux")]
         unsafe {
             env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -282,7 +283,7 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
     let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
         .map_err(|e| format!("Failed to parse level.dat template: {}", e))?;
 
-    // Modify the LevelName and LastPlayed fields
+    // Modify the LevelName, LastPlayed and player position fields
     if let Value::Compound(ref mut root) = level_data {
         if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
             // Update LevelName
@@ -294,6 +295,27 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
                 .map_err(|e| format!("Failed to get current time: {}", e))?;
             let current_time_millis = current_time.as_millis() as i64;
             data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
+
+            // Update player position and rotation
+            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+                    if let Value::Double(ref mut x) = pos.get_mut(0).unwrap() {
+                        *x = -5.0;
+                    }
+                    if let Value::Double(ref mut y) = pos.get_mut(1).unwrap() {
+                        *y = -61.0;
+                    }
+                    if let Value::Double(ref mut z) = pos.get_mut(2).unwrap() {
+                        *z = -5.0;
+                    }
+                }
+
+                if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
+                    if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
+                        *x = -45.0;
+                    }
+                }
+            }
         }
     }
 
@@ -343,6 +365,7 @@ fn gui_start_generation(
     ground_level: i32,
     winter_mode: bool,
     floodfill_timeout: u64,
+    terrain_enabled: bool,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -369,6 +392,7 @@ fn gui_start_generation(
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
+                terrain: terrain_enabled,
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),

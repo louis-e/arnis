@@ -1,10 +1,12 @@
 import { licenseText } from './license.js';
 
+let invoke;
 if (window.__TAURI__) {
-  const { invoke } = window.__TAURI__.core;
+  invoke = window.__TAURI__.core.invoke;
 } else {
   function dummyFunc() {}
   window.__TAURI__ = { event: { listen: dummyFunc } };
+  invoke = dummyFunc;
 }
 
 const DEFAULT_LOCALE_PATH = `./locales/en.json`;
@@ -435,6 +437,7 @@ async function startGeneration() {
       return;
     }
 
+    var terrain = document.getElementById("terrain-toggle").checked;
     var winter_mode = document.getElementById("winter-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
@@ -452,6 +455,7 @@ async function startGeneration() {
         groundLevel: ground_level,
         winterMode: winter_mode,
         floodfillTimeout: floodfill_timeout,
+        terrainEnabled: terrain
     });
 
     console.log("Generation process started.");

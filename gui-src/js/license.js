@@ -72,7 +72,7 @@ You may add Your own copyright statement to Your modifications andmay provide ad
 
 END OF TERMS AND CONDITIONS
 
-Copyright 2025 Louis Erbkamm
+Copyright ${new Date().getFullYear()} Louis Erbkamm
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License athttp://www.apache.org/licenses/LICENSE-2.0
 
