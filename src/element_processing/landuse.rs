@@ -217,7 +217,14 @@ pub fn generate_landuse(
                                     args.winter,
                                 );
                             } else if special_choice <= 6 {
-                                editor.set_block(HAY_BALE, x, ground_level + 1, z, None, Some(&[SPONGE]));
+                                editor.set_block(
+                                    HAY_BALE,
+                                    x,
+                                    ground_level + 1,
+                                    z,
+                                    None,
+                                    Some(&[SPONGE]),
+                                );
                             } else {
                                 editor.set_block(
                                     OAK_LEAVES,
@@ -230,23 +237,9 @@ pub fn generate_landuse(
                             }
                         } else {
                             // Set crops only if the block below is farmland
-                            if editor.check_for_block(
-                                x,
-                                ground_level,
-                                z,
-                                Some(&[FARMLAND]),
-                                None,
-                            ) {
-                                let crop_choice =
-                                    [WHEAT, CARROTS, POTATOES][rng.gen_range(0..3)];
-                                editor.set_block(
-                                    crop_choice,
-                                    x,
-                                    ground_level + 1,
-                                    z,
-                                    None,
-                                    None,
-                                );
+                            if editor.check_for_block(x, ground_level, z, Some(&[FARMLAND]), None) {
+                                let crop_choice = [WHEAT, CARROTS, POTATOES][rng.gen_range(0..3)];
+                                editor.set_block(crop_choice, x, ground_level + 1, z, None, None);
                             }
                         }
                     }
@@ -270,14 +263,7 @@ pub fn generate_landuse(
                         editor.set_block(SCAFFOLDING, x, ground_level + 4, z, None, None);
                         editor.set_block(SCAFFOLDING, x, ground_level + 5, z, None, None);
                         editor.set_block(SCAFFOLDING, x - 1, ground_level + 1, z, None, None);
-                        editor.set_block(
-                            SCAFFOLDING,
-                            x + 1,
-                            ground_level + 1,
-                            z - 1,
-                            None,
-                            None,
-                        );
+                        editor.set_block(SCAFFOLDING, x + 1, ground_level + 1, z - 1, None, None);
                     }
                 } else if random_choice < 30 {
                     let construction_items: [Block; 11] = [

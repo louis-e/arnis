@@ -132,7 +132,7 @@ fn main() {
         }));
 
         // Workaround WebKit2GTK issue with NVIDIA drivers (likely explicit sync related?)
-        // Source: https://github.com/tauri-apps/tauri/issues/10702 (TODO: Remove this later)
+        // Source: https://github.com/tauri-apps/tauri/issues/10702
         #[cfg(target_os = "linux")]
         unsafe {
             env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -309,7 +309,7 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
                         *z = -5.0;
                     }
                 }
-                
+
                 if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
                     if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
                         *x = -45.0;

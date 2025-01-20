@@ -25,7 +25,7 @@ pub fn generate_world(
         emit_gui_progress_update(10.0, "Fetching elevation...");
     }
     let ground: Ground = Ground::new(args);
-    
+
     emit_gui_progress_update(11.0, "Processing terrain...");
 
     // Process data
@@ -36,7 +36,7 @@ pub fn generate_world(
         .unwrap()
         .progress_chars("█▓░"));
 
-    let progress_increment_prcs: f64 = 50.0 / elements_count as f64;
+    let progress_increment_prcs: f64 = 49.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 11.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
@@ -125,7 +125,7 @@ pub fn generate_world(
 
     let mut block_counter: u64 = 0;
 
-    println!("{} Generating ground layer...", "[4/5]".bold());
+    println!("{} Generating ground...", "[4/5]".bold());
     emit_gui_progress_update(60.0, "Generating ground...");
 
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);

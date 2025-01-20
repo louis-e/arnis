@@ -455,27 +455,37 @@ impl WorldEditor {
             .regions
             .par_iter()
             .for_each(|((region_x, region_z), region_to_modify)| {
-                // Create region and handle Result properly
+                // Create region file
                 let mut region = self.create_region(*region_x, *region_z);
 
                 // Reusable serialization buffer
                 let mut ser_buffer = Vec::with_capacity(8192);
 
-                // Process modified chunks
+                // Process only modified chunks
                 for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
                     if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
+                        // Calculate absolute chunk coordinates
+                        let abs_chunk_x = chunk_x + (region_x * 32);
+                        let abs_chunk_z = chunk_z + (region_z * 32);
+
+                        // Read existing chunk data or use empty chunk
                         let data = region
                             .read_chunk(chunk_x as usize, chunk_z as usize)
                             .unwrap()
                             .unwrap_or_default();
 
                         let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
+                        
+                        // Update chunk data
                         chunk.sections = chunk_to_modify.sections().collect();
                         chunk.other.extend(chunk_to_modify.other.clone());
-                        chunk.x_pos = chunk_x + region_x * 32;
-                        chunk.z_pos = chunk_z + region_z * 32;
+                        
+                        // Set correct chunk coordinates
+                        chunk.x_pos = abs_chunk_x;
+                        chunk.z_pos = abs_chunk_z;
                         chunk.is_light_on = 0;
 
+                        // Serialize and write chunk
                         ser_buffer.clear();
                         fastnbt::to_writer(&mut ser_buffer, &chunk).unwrap();
                         region

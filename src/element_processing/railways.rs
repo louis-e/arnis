@@ -33,16 +33,24 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
             for j in 0..smoothed_points.len() {
                 let (bx, _, bz) = smoothed_points[j];
                 let ground_level = ground.level(XZPoint::new(bx, bz));
-                
+
                 editor.set_block(IRON_BLOCK, bx, ground_level, bz, None, None);
 
-                let prev = if j > 0 { Some(smoothed_points[j-1]) } else { None };
-                let next = if j < smoothed_points.len()-1 { Some(smoothed_points[j+1]) } else { None };
+                let prev = if j > 0 {
+                    Some(smoothed_points[j - 1])
+                } else {
+                    None
+                };
+                let next = if j < smoothed_points.len() - 1 {
+                    Some(smoothed_points[j + 1])
+                } else {
+                    None
+                };
 
                 let rail_block = determine_rail_direction(
                     (bx, bz),
-                    prev.map(|(x,_,z)| (x,z)),
-                    next.map(|(x,_,z)| (x,z))
+                    prev.map(|(x, _, z)| (x, z)),
+                    next.map(|(x, _, z)| (x, z)),
                 );
 
                 editor.set_block(rail_block, bx, ground_level + 1, bz, None, None);
@@ -57,11 +65,11 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
 
 fn smooth_diagonal_rails(points: &[(i32, i32, i32)]) -> Vec<(i32, i32, i32)> {
     let mut smoothed = Vec::new();
-    
+
     for i in 0..points.len() {
         let current = points[i];
         smoothed.push(current);
-        
+
         if i + 1 >= points.len() {
             continue;
         }
@@ -80,11 +88,7 @@ fn smooth_diagonal_rails(points: &[(i32, i32, i32)]) -> Vec<(i32, i32, i32)> {
             };
 
             // Look behind
-            let look_behind = if i > 0 {
-                Some(points[i - 1])
-            } else {
-                None
-            };
+            let look_behind = if i > 0 { Some(points[i - 1]) } else { None };
 
             // Choose intermediate point based on the overall curve direction
             let intermediate = if let Some((prev_x, _, _prev_z)) = look_behind {
@@ -118,10 +122,10 @@ fn smooth_diagonal_rails(points: &[(i32, i32, i32)]) -> Vec<(i32, i32, i32)> {
 fn determine_rail_direction(
     current: (i32, i32),
     prev: Option<(i32, i32)>,
-    next: Option<(i32, i32)>
+    next: Option<(i32, i32)>,
 ) -> Block {
     let (x, z) = current;
-    
+
     match (prev, next) {
         (Some((px, pz)), Some((nx, nz))) => {
             if px == nx {
@@ -132,7 +136,7 @@ fn determine_rail_direction(
                 // Calculate relative movements
                 let from_prev = (px - x, pz - z);
                 let to_next = (nx - x, nz - z);
-                
+
                 match (from_prev, to_next) {
                     // East to North or North to East
                     ((-1, 0), (0, -1)) | ((0, -1), (-1, 0)) => RAIL_NORTH_WEST,
@@ -151,7 +155,7 @@ fn determine_rail_direction(
                     }
                 }
             }
-        },
+        }
         (Some((px, pz)), None) | (None, Some((px, pz))) => {
             if px == x {
                 RAIL_NORTH_SOUTH
@@ -160,7 +164,7 @@ fn determine_rail_direction(
             } else {
                 RAIL_NORTH_SOUTH
             }
-        },
+        }
         (None, None) => RAIL_NORTH_SOUTH,
     }
 }

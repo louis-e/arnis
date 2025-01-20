@@ -192,7 +192,10 @@ impl Block {
 
             116 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("shape".to_string(), Value::String("north_south".to_string()));
+                map.insert(
+                    "shape".to_string(),
+                    Value::String("north_south".to_string()),
+                );
                 map
             })),
 
@@ -204,25 +207,37 @@ impl Block {
 
             118 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("shape".to_string(), Value::String("ascending_east".to_string()));
+                map.insert(
+                    "shape".to_string(),
+                    Value::String("ascending_east".to_string()),
+                );
                 map
             })),
 
             119 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("shape".to_string(), Value::String("ascending_west".to_string()));
+                map.insert(
+                    "shape".to_string(),
+                    Value::String("ascending_west".to_string()),
+                );
                 map
             })),
 
             120 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("shape".to_string(), Value::String("ascending_north".to_string()));
+                map.insert(
+                    "shape".to_string(),
+                    Value::String("ascending_north".to_string()),
+                );
                 map
             })),
 
             121 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("shape".to_string(), Value::String("ascending_south".to_string()));
+                map.insert(
+                    "shape".to_string(),
+                    Value::String("ascending_south".to_string()),
+                );
                 map
             })),
 
@@ -243,7 +258,7 @@ impl Block {
                 map.insert("shape".to_string(), Value::String("south_east".to_string()));
                 map
             })),
-            
+
             125 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("shape".to_string(), Value::String("south_west".to_string()));
