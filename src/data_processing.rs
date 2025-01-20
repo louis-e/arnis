@@ -17,12 +17,16 @@ pub fn generate_world(
     scale_factor_x: f64,
     scale_factor_z: f64,
 ) -> Result<(), String> {
-    println!("{} Processing data...", "[3/5]".bold());
-    emit_gui_progress_update(10.0, "Processing data...");
-
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
+
+    println!("{} Processing data...", "[3/5]".bold());
+    if args.terrain {
+        emit_gui_progress_update(10.0, "Fetching elevation...");
+    }
     let ground: Ground = Ground::new(args);
+    
+    emit_gui_progress_update(11.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -33,7 +37,7 @@ pub fn generate_world(
         .progress_chars("█▓░"));
 
     let progress_increment_prcs: f64 = 50.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 10.0;
+    let mut current_progress_prcs: f64 = 11.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {
@@ -122,7 +126,7 @@ pub fn generate_world(
     let mut block_counter: u64 = 0;
 
     println!("{} Generating ground layer...", "[4/5]".bold());
-    emit_gui_progress_update(60.0, "Generating ground layer...");
+    emit_gui_progress_update(60.0, "Generating ground...");
 
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
     ground_pb.set_style(
