@@ -41,6 +41,10 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub winter: bool,
 
+    /// Enable terrain (optional)
+    #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
+    pub terrain: bool,
+
     /// Enable debug mode (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
     pub debug: bool,
