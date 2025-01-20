@@ -325,18 +325,24 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground:
 }
 
 /// Generates an aeroway
-pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, ground_level: i32) {
+pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, ground: &Ground) {
     let mut previous_node: Option<(i32, i32)> = None;
     let surface_block = LIGHT_GRAY_CONCRETE;
 
     for node in &way.nodes {
         if let Some(prev) = previous_node {
-            let points = bresenham_line(prev.0, ground_level, prev.1, node.x, ground_level, node.z);
+            let (x1, z1) = prev;
+            let x2 = node.x;
+            let z2 = node.z;
+            let points = bresenham_line(x1, 0, z1, x2, 0, z2);
 
-            for (x, y, z) in points {
-                for dx in -12..=1 {
-                    for dz in -12..=1 {
-                        editor.set_block(surface_block, x + dx, y, z + dz, None, None);
+            for (x, _, z) in points {
+                for dx in -12..=12 {
+                    for dz in -12..=12 {
+                        let set_x = x + dx;
+                        let set_z = z + dz;
+                        let y = ground.level(XZPoint::new(set_x, set_z));
+                        editor.set_block(surface_block, set_x, y, set_z, None, None);
                     }
                 }
             }
