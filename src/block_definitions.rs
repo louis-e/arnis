@@ -143,6 +143,7 @@ impl Block {
             113 => "oak_sign",
             114 => "andesite_wall",
             115 => "stone_brick_wall",
+            116..=125 => "rail",
             _ => panic!("Invalid id"),
         }
     }
@@ -189,6 +190,65 @@ impl Block {
                 map
             })),
 
+            116 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("north_south".to_string()));
+                map
+            })),
+
+            117 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("east_west".to_string()));
+                map
+            })),
+
+            118 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("ascending_east".to_string()));
+                map
+            })),
+
+            119 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("ascending_west".to_string()));
+                map
+            })),
+
+            120 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("ascending_north".to_string()));
+                map
+            })),
+
+            121 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("ascending_south".to_string()));
+                map
+            })),
+
+            122 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("north_east".to_string()));
+                map
+            })),
+
+            123 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("north_west".to_string()));
+                map
+            })),
+
+            124 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("south_east".to_string()));
+                map
+            })),
+            
+            125 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("shape".to_string(), Value::String("south_west".to_string()));
+                map
+            })),
             _ => None,
         }
     }
@@ -313,6 +373,17 @@ pub const POTATOES: Block = Block::new(108);
 pub const WHEAT: Block = Block::new(109);
 
 pub const BEDROCK: Block = Block::new(110);
+
+pub const RAIL_NORTH_SOUTH: Block = Block::new(116);
+pub const RAIL_EAST_WEST: Block = Block::new(117);
+pub const RAIL_ASCENDING_EAST: Block = Block::new(118);
+pub const RAIL_ASCENDING_WEST: Block = Block::new(119);
+pub const RAIL_ASCENDING_NORTH: Block = Block::new(120);
+pub const RAIL_ASCENDING_SOUTH: Block = Block::new(121);
+pub const RAIL_NORTH_EAST: Block = Block::new(122);
+pub const RAIL_NORTH_WEST: Block = Block::new(123);
+pub const RAIL_SOUTH_EAST: Block = Block::new(124);
+pub const RAIL_SOUTH_WEST: Block = Block::new(125);
 
 // Variations for building corners
 pub fn building_corner_variations() -> Vec<Block> {
