@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "arnis"
-version = "2.1.3"
+version = "2.2.0"
 dependencies = [
  "clap",
  "colored",
