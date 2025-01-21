@@ -212,7 +212,7 @@ pub fn generate_world(
     }
 
     // Set sign for player orientation
-    editor.set_sign(
+    /*editor.set_sign(
         "↑".to_string(),
         "Generated World".to_string(),
         "This direction".to_string(),
@@ -221,7 +221,7 @@ pub fn generate_world(
         -61,
         9,
         6,
-    );
+    );*/
 
     ground_pb.inc(block_counter % batch_size);
     ground_pb.finish();
