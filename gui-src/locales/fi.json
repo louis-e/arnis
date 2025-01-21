@@ -9,8 +9,6 @@
   "custom_selection_confirmed": "Mukautettu valinta vahvistettu!",
   "error_coordinates_out_of_range": "Virhe: Koordinaatit ovat kantaman ulkopuolella tai vääriin aseteltu (Lat ennen Lng vaadittu).",
   "invalid_format": "Väärä formaatti. Käytä 'lat,lng,lat,lng' tai 'lat lng lat lng'.",
-  "select_a_location_first": "Valitse paikka ensin!",
-  "select_a_minecraft_world_first": "Valitse Minecraft-maailma ensin!",
   "generation_process_started": "Luontiprosessi aloitettu.",
   "winter_mode": "Talvitila:",
   "world_scale": "Maailmanskaalaus:",
@@ -31,5 +29,10 @@
   "select_location_first": "Valitse paikka ensin!",
   "area_too_large": "Tämä alue on todella iso ja voi ylittää tyypilliset laskentarajat.",
   "area_extensive": "Alue on aika laaja ja voi viedä pitkän ajan ja resursseja.",
-  "selection_confirmed": "Valinta vahvistettu!"
+  "selection_confirmed": "Valinta vahvistettu!",
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Seconds",
+  "placeholder_ground": "Ground Level"
 }

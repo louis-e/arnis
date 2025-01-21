@@ -29,5 +29,10 @@
   "select_location_first": "¡Seleccione una ubicación primero!",
   "area_too_large": "Esta área es muy grande y podría exceder los límites típicos de computación.",
   "area_extensive": "El área es bastante extensa y puede requerir mucho tiempo y recursos.",
-  "selection_confirmed": "¡Selección confirmada!"
+  "selection_confirmed": "¡Selección confirmada!",
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Seconds",
+  "placeholder_ground": "Ground Level"
 }
