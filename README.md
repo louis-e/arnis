@@ -22,9 +22,8 @@ Download the [latest release](https://github.com/louis-e/arnis/releases/) or [co
 Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
 The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
 
-If you choose to select an own world, make sure to generate a new flat world in advance in Minecraft.
-
 Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4.
+If you choose to select an own world, be aware that Arnis will overwrite certain areas.
 
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
