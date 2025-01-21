@@ -26,11 +26,21 @@ window.addEventListener("DOMContentLoaded", async () => {
   await checkForUpdates();
 });
 
+/**
+ * Checks if a JSON response is invalid or falls back to HTML
+ * @param {Response} response - The fetch response object
+ * @returns {boolean} True if the response is invalid JSON
+ */
 function invalidJSON(response) {
   // Workaround for Tauri always falling back to index.html for asset loading
   return !response.ok || response.headers.get("Content-Type") === "text/html";
 }
 
+/**
+ * Fetches and returns localization data based on user's language
+ * Falls back to English if requested language is not available
+ * @returns {Promise<Object>} The localization JSON object
+ */
 async function getLocalization() {
   const lang = navigator.language;
   let response = await fetch(`./locales/${lang}.json`);
@@ -49,6 +59,12 @@ async function getLocalization() {
   return localization;
 }
 
+/**
+ * Updates an HTML element with localized text
+ * @param {Object} json - Localization data
+ * @param {Object} elementObject - Object containing element or selector
+ * @param {string} localizedStringKey - Key for the localized string
+ */
 async function localizeElement(json, elementObject, localizedStringKey) {
   const element =
     (!elementObject.element || elementObject.element === "")
@@ -259,7 +275,11 @@ function initWorldPicker() {
   window.closeWorldPicker = closeWorldPicker;
 }
 
-// Function to validate and handle bbox input
+/**
+ * Validates and processes bounding box coordinates input
+ * Supports both comma and space-separated formats
+ * Updates the map display when valid coordinates are entered
+ */
 function handleBboxInput() {
   const inputBox = document.getElementById("bbox-coords");
   const bboxInfo = document.getElementById("bbox-info");
@@ -320,7 +340,15 @@ function handleBboxInput() {
   });
 }
 
-// Function to calculate the bounding box "size" in square meters based on latitude and longitude
+/**
+ * Calculates the approximate area of a bounding box in square meters
+ * Uses the Haversine formula for geodesic calculations
+ * @param {number} lng1 - First longitude coordinate
+ * @param {number} lat1 - First latitude coordinate
+ * @param {number} lng2 - Second longitude coordinate
+ * @param {number} lat2 - Second latitude coordinate
+ * @returns {number} Area in square meters
+ */
 function calculateBBoxSize(lng1, lat1, lng2, lat2) {
   // Approximate distance calculation using Haversine formula or geodesic formula
   const toRad = (angle) => (angle * Math.PI) / 180;
@@ -341,7 +369,11 @@ function calculateBBoxSize(lng1, lat1, lng2, lat2) {
   return Math.abs(width * height);
 }
 
-// Function to normalize longitude to the range [-180, 180]
+/**
+ * Normalizes a longitude value to the range [-180, 180]
+ * @param {number} lon - Longitude value to normalize
+ * @returns {number} Normalized longitude value
+ */
 function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
@@ -400,6 +432,10 @@ async function selectWorld(generate_new_world) {
   closeWorldPicker();
 }
 
+/**
+ * Handles world selection errors and displays appropriate messages
+ * @param {number} errorCode - Error code from the backend
+ */
 function handleWorldSelectionError(errorCode) {
   const errorKeys = {
     1: "minecraft_directory_not_found",
@@ -417,6 +453,11 @@ function handleWorldSelectionError(errorCode) {
 }
 
 let generationButtonEnabled = true;
+/**
+ * Initiates the world generation process
+ * Validates required inputs and sends generation parameters to the backend
+ * @returns {Promise<void>}
+ */
 async function startGeneration() {
   try {
     if (generationButtonEnabled === false) {
