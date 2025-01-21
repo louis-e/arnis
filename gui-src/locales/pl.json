@@ -9,8 +9,6 @@
     "custom_selection_confirmed": "Niestandardowy wybór potwierdzony!",
     "error_coordinates_out_of_range": "Błąd: Współrzędne są poza zakresem lub w złej kolejności (wymagana szerokość przed długością).",
     "invalid_format": "Nieprawidłowy format. Użyj 'szer.,dł.,szer.,dł.' lub 'szer. dł. szer. dł.'.",
-    "select_a_location_first": "Najpierw wybierz lokalizację!",
-    "select_a_minecraft_world_first": "Najpierw wybierz świat Minecrafta!",
     "generation_process_started": "Proces generowania rozpoczęty.",
     "winter_mode": "Tryb Zimowy:",
     "world_scale": "Skala świata:",

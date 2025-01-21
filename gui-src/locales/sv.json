@@ -9,8 +9,6 @@
   "custom_selection_confirmed": "Anpassad markering bekräftad!",
   "error_coordinates_out_of_range": "Fel: Koordinater är utanför området eller felaktigt ordnade (Lat före Lng krävs).",
   "invalid_format": "Ogiltigt format. Använd 'lat,lng,lat,lng' eller 'lat lng lat lng'.",
-  "select_a_location_first": "Välj en plats först!",
-  "select_a_minecraft_world_first": "Välj en Minecraft-värld först!",
   "generation_process_started": "Genereringsprocessen startad.",
   "winter_mode": "Vinterläge:",
   "world_scale": "Världsskala:",

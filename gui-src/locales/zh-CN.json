@@ -9,8 +9,6 @@
   "custom_selection_confirmed": "自定义选择已确认！",
   "error_coordinates_out_of_range": "错误：坐标超出范围或顺序不正确（需要先纬度后经度）。",
   "invalid_format": "格式无效。请使用 'lat,lng,lat,lng' 或 'lat lng lat lng'。",
-  "select_a_location_first": "请先选择一个位置！",
-  "select_a_minecraft_world_first": "请先选择一个 Minecraft 世界！",
   "generation_process_started": "生成过程已开始。",
   "winter_mode": "冬季模式：",
   "world_scale": "世界比例：",
