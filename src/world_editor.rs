@@ -270,10 +270,9 @@ impl WorldEditor {
         (self.scale_factor_x as i32, self.scale_factor_x as i32)
     }
 
-    // Unused and not tested
-    /*pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
+    pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
         self.world.get_block(x, y, z).is_some()
-    }*/
+    }
 
     #[allow(clippy::too_many_arguments)]
     pub fn set_sign(
@@ -431,6 +430,88 @@ impl WorldEditor {
         false
     }
 
+    /// Helper function to create a base chunk with grass blocks at Y -62
+    fn create_base_chunk(abs_chunk_x: i32, abs_chunk_z: i32) -> (Vec<u8>, bool) {
+        let mut chunk = ChunkToModify::default();
+
+        // Fill the bottom layer with grass blocks at Y -62
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set_block(x, -62, z, GRASS_BLOCK);
+            }
+        }
+
+        // Prepare chunk data
+        let chunk_data = Chunk {
+            sections: chunk.sections().collect(),
+            x_pos: abs_chunk_x,
+            z_pos: abs_chunk_z,
+            is_light_on: 0,
+            other: chunk.other,
+        };
+
+        // Create the Level wrapper
+        let level_data = HashMap::from([(
+            "Level".to_string(),
+            Value::Compound(HashMap::from([
+                ("xPos".to_string(), Value::Int(abs_chunk_x)),
+                ("zPos".to_string(), Value::Int(abs_chunk_z)),
+                ("isLightOn".to_string(), Value::Byte(0)),
+                (
+                    "sections".to_string(),
+                    Value::List(
+                        chunk_data
+                            .sections
+                            .iter()
+                            .map(|section| {
+                                Value::Compound(HashMap::from([
+                                    ("Y".to_string(), Value::Byte(section.y)),
+                                    (
+                                        "block_states".to_string(),
+                                        Value::Compound(HashMap::from([
+                                            (
+                                                "palette".to_string(),
+                                                Value::List(
+                                                    section
+                                                        .block_states
+                                                        .palette
+                                                        .iter()
+                                                        .map(|item| {
+                                                            Value::Compound(HashMap::from([(
+                                                                "Name".to_string(),
+                                                                Value::String(item.name.clone()),
+                                                            )]))
+                                                        })
+                                                        .collect(),
+                                                ),
+                                            ),
+                                            (
+                                                "data".to_string(),
+                                                Value::LongArray(
+                                                    section
+                                                        .block_states
+                                                        .data
+                                                        .clone()
+                                                        .unwrap_or_else(|| LongArray::new(vec![])),
+                                                ),
+                                            ),
+                                        ])),
+                                    ),
+                                ]))
+                            })
+                            .collect(),
+                    ),
+                ),
+            ])),
+        )]);
+
+        // Serialize the chunk with Level wrapper
+        let mut ser_buffer = Vec::with_capacity(8192);
+        fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
+
+        (ser_buffer, true)
+    }
+
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
         println!("{} Saving world...", "[5/5]".bold());
@@ -473,15 +554,103 @@ impl WorldEditor {
                         let mut chunk: Chunk = fastnbt::from_bytes(&data).unwrap();
                         chunk.sections = chunk_to_modify.sections().collect();
                         chunk.other.extend(chunk_to_modify.other.clone());
-                        chunk.x_pos = chunk_x + region_x * 32;
-                        chunk.z_pos = chunk_z + region_z * 32;
+                        chunk.x_pos = chunk_x + (region_x * 32);
+                        chunk.z_pos = chunk_z + (region_z * 32);
                         chunk.is_light_on = 0;
 
+                        // Create Level wrapper for modified chunks too
+                        let level_data = HashMap::from([(
+                            "Level".to_string(),
+                            Value::Compound(HashMap::from([
+                                ("xPos".to_string(), Value::Int(chunk.x_pos)),
+                                ("zPos".to_string(), Value::Int(chunk.z_pos)),
+                                (
+                                    "isLightOn".to_string(),
+                                    Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
+                                ),
+                                (
+                                    "sections".to_string(),
+                                    Value::List(
+                                        chunk
+                                            .sections
+                                            .iter()
+                                            .map(|section| {
+                                                Value::Compound(HashMap::from([
+                                                    ("Y".to_string(), Value::Byte(section.y)),
+                                                    (
+                                                        "block_states".to_string(),
+                                                        Value::Compound(HashMap::from([
+                                                            (
+                                                                "palette".to_string(),
+                                                                Value::List(
+                                                                    section
+                                                                        .block_states
+                                                                        .palette
+                                                                        .iter()
+                                                                        .map(|item| {
+                                                                            Value::Compound(
+                                                                                HashMap::from([(
+                                                                                    "Name"
+                                                                                        .to_string(
+                                                                                        ),
+                                                                                    Value::String(
+                                                                                        item.name
+                                                                                            .clone(
+                                                                                            ),
+                                                                                    ),
+                                                                                )]),
+                                                                            )
+                                                                        })
+                                                                        .collect(),
+                                                                ),
+                                                            ),
+                                                            (
+                                                                "data".to_string(),
+                                                                Value::LongArray(
+                                                                    section
+                                                                        .block_states
+                                                                        .data
+                                                                        .clone()
+                                                                        .unwrap_or_else(|| {
+                                                                            LongArray::new(vec![])
+                                                                        }),
+                                                                ),
+                                                            ),
+                                                        ])),
+                                                    ),
+                                                ]))
+                                            })
+                                            .collect(),
+                                    ),
+                                ),
+                            ])),
+                        )]);
+
                         ser_buffer.clear();
-                        fastnbt::to_writer(&mut ser_buffer, &chunk).unwrap();
+                        fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
                         region
                             .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
                             .unwrap();
+                    }
+                }
+
+                // Second pass: ensure all chunks exist
+                for chunk_x in 0..32 {
+                    for chunk_z in 0..32 {
+                        let abs_chunk_x = chunk_x + (region_x * 32);
+                        let abs_chunk_z = chunk_z + (region_z * 32);
+
+                        // Check if chunk exists in our modifications
+                        let chunk_exists =
+                            region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
+
+                        // If chunk doesn't exist, create it with base layer
+                        if !chunk_exists {
+                            let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
+                            region
+                                .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                                .unwrap();
+                        }
                     }
                 }
 

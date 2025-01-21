@@ -1,14 +1,16 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
+use crate::ground::Ground;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 
 pub fn generate_highways(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
-    ground_level: i32,
+    ground: &Ground,
     args: &Args,
 ) {
     if let Some(highway_type) = element.tags().get("highway") {
@@ -16,11 +18,12 @@ pub fn generate_highways(
             // Handle street lamps
             if let ProcessedElement::Node(first_node) = element {
                 let x: i32 = first_node.x;
+                let y: i32 = ground.level(first_node.xz());
                 let z: i32 = first_node.z;
-                for y in 1..=4 {
-                    editor.set_block(OAK_FENCE, x, ground_level + y, z, None, None);
+                for dy in 1..=4 {
+                    editor.set_block(OAK_FENCE, x, y + dy, z, None, None);
                 }
-                editor.set_block(GLOWSTONE, x, ground_level + 5, z, None, None);
+                editor.set_block(GLOWSTONE, x, y + 5, z, None, None);
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -28,17 +31,19 @@ pub fn generate_highways(
                 if crossing_type == "traffic_signals" {
                     if let ProcessedElement::Node(node) = element {
                         let x: i32 = node.x;
+                        let y: i32 = ground.level(node.xz());
                         let z: i32 = node.z;
-                        for y in 1..=3 {
-                            editor.set_block(COBBLESTONE_WALL, x, ground_level + y, z, None, None);
+
+                        for dy in 1..=3 {
+                            editor.set_block(COBBLESTONE_WALL, x, y + dy, z, None, None);
                         }
 
-                        editor.set_block(GREEN_WOOL, x, ground_level + 4, z, None, None);
-                        editor.set_block(YELLOW_WOOL, x, ground_level + 5, z, None, None);
-                        editor.set_block(RED_WOOL, x, ground_level + 6, z, None, None);
+                        editor.set_block(GREEN_WOOL, x, y + 4, z, None, None);
+                        editor.set_block(YELLOW_WOOL, x, y + 5, z, None, None);
+                        editor.set_block(RED_WOOL, x, y + 6, z, None, None);
 
                         if args.winter {
-                            editor.set_block(SNOW_LAYER, x, ground_level + 7, z, None, None);
+                            editor.set_block(SNOW_LAYER, x, y + 7, z, None, None);
                         }
                     }
                 }
@@ -46,14 +51,15 @@ pub fn generate_highways(
         } else if highway_type == "bus_stop" {
             // Handle bus stops
             if let ProcessedElement::Node(node) = element {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
-                for y in 1..=3 {
-                    editor.set_block(COBBLESTONE_WALL, x, ground_level + y, z, None, None);
+                let x = node.x;
+                let y = ground.level(node.xz());
+                let z = node.z;
+                for dy in 1..=3 {
+                    editor.set_block(COBBLESTONE_WALL, x, y + dy, z, None, None);
                 }
 
-                editor.set_block(WHITE_WOOL, x, ground_level + 4, z, None, None);
-                editor.set_block(WHITE_WOOL, x + 1, ground_level + 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x, y + 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x + 1, y + 4, z, None, None);
             }
         } else if element
             .tags()
@@ -99,7 +105,14 @@ pub fn generate_highways(
                 flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for (x, z) in filled_area {
-                editor.set_block(surface_block, x, ground_level, z, None, None);
+                editor.set_block(
+                    surface_block,
+                    x,
+                    ground.level(XZPoint::new(x, z)),
+                    z,
+                    None,
+                    None,
+                );
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -132,7 +145,10 @@ pub fn generate_highways(
                 }
                 "motorway" | "primary" => {
                     block_range = 5;
-                    add_stripe = true; // Add stripes for motorways and primary roads
+                    add_stripe = true;
+                }
+                "tertiary" => {
+                    add_stripe = true;
                 }
                 "track" => {
                     block_range = 1;
@@ -166,8 +182,10 @@ pub fn generate_highways(
                     let z2: i32 = node.z;
 
                     // Generate the line of coordinates between the two nodes
+                    // we don't care about the y because it's going to get overwritten
+                    // I'm not sure if we'll keep it this way
                     let bresenham_points: Vec<(i32, i32, i32)> =
-                        bresenham_line(x1, ground_level, z1, x2, ground_level, z2);
+                        bresenham_line(x1, 0, z1, x2, 0, z2);
 
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
@@ -192,7 +210,7 @@ pub fn generate_highways(
                                             editor.set_block(
                                                 WHITE_CONCRETE,
                                                 set_x,
-                                                ground_level,
+                                                ground.level(XZPoint::new(set_x, set_z)),
                                                 set_z,
                                                 Some(&[BLACK_CONCRETE]),
                                                 None,
@@ -201,7 +219,7 @@ pub fn generate_highways(
                                             editor.set_block(
                                                 BLACK_CONCRETE,
                                                 set_x,
-                                                ground_level,
+                                                ground.level(XZPoint::new(set_x, set_z)),
                                                 set_z,
                                                 None,
                                                 None,
@@ -211,7 +229,7 @@ pub fn generate_highways(
                                         editor.set_block(
                                             WHITE_CONCRETE,
                                             set_x,
-                                            ground_level,
+                                            ground.level(XZPoint::new(set_x, set_z)),
                                             set_z,
                                             Some(&[BLACK_CONCRETE]),
                                             None,
@@ -220,7 +238,7 @@ pub fn generate_highways(
                                         editor.set_block(
                                             BLACK_CONCRETE,
                                             set_x,
-                                            ground_level,
+                                            ground.level(XZPoint::new(set_x, set_z)),
                                             set_z,
                                             None,
                                             None,
@@ -230,7 +248,7 @@ pub fn generate_highways(
                                     editor.set_block(
                                         block_type,
                                         set_x,
-                                        ground_level,
+                                        ground.level(XZPoint::new(set_x, set_z)),
                                         set_z,
                                         None,
                                         Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
@@ -247,7 +265,7 @@ pub fn generate_highways(
                                 editor.set_block(
                                     WHITE_CONCRETE,
                                     stripe_x,
-                                    ground_level,
+                                    ground.level(XZPoint::new(stripe_x, stripe_z)),
                                     stripe_z,
                                     Some(&[BLACK_CONCRETE]),
                                     None,
@@ -269,48 +287,62 @@ pub fn generate_highways(
 }
 
 /// Generates a siding using stone brick slabs
-pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground_level: i32) {
-    let mut previous_node: Option<(i32, i32)> = None;
+pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground: &Ground) {
+    let mut previous_node: Option<XZPoint> = None;
     let siding_block: Block = STONE_BRICK_SLAB;
 
     for node in &element.nodes {
-        let x: i32 = node.x;
-        let z: i32 = node.z;
+        let current_node = node.xz();
 
         // Draw the siding using Bresenham's line algorithm between nodes
-        if let Some(prev) = previous_node {
-            let bresenham_points: Vec<(i32, i32, i32)> =
-                bresenham_line(prev.0, ground_level + 1, prev.1, x, ground_level + 1, z);
-            for (bx, by, bz) in bresenham_points {
+        if let Some(prev_node) = previous_node {
+            let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(
+                prev_node.x,
+                0,
+                prev_node.z,
+                current_node.x,
+                0,
+                current_node.z,
+            );
+
+            for (bx, _, bz) in bresenham_points {
+                let ground_level = ground.level(XZPoint::new(bx, bz)) + 1;
+
                 if !editor.check_for_block(
                     bx,
-                    by - 1,
+                    ground_level - 1,
                     bz,
                     None,
                     Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
                 ) {
-                    editor.set_block(siding_block, bx, by, bz, None, None);
+                    editor.set_block(siding_block, bx, ground_level, bz, None, None);
                 }
             }
         }
 
-        previous_node = Some((x, z));
+        previous_node = Some(current_node);
     }
 }
 
 /// Generates an aeroway
-pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, ground_level: i32) {
+pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, ground: &Ground) {
     let mut previous_node: Option<(i32, i32)> = None;
     let surface_block = LIGHT_GRAY_CONCRETE;
 
     for node in &way.nodes {
         if let Some(prev) = previous_node {
-            let points = bresenham_line(prev.0, ground_level, prev.1, node.x, ground_level, node.z);
+            let (x1, z1) = prev;
+            let x2 = node.x;
+            let z2 = node.z;
+            let points = bresenham_line(x1, 0, z1, x2, 0, z2);
 
-            for (x, y, z) in points {
-                for dx in -12..=1 {
-                    for dz in -12..=1 {
-                        editor.set_block(surface_block, x + dx, y, z + dz, None, None);
+            for (x, _, z) in points {
+                for dx in -12..=12 {
+                    for dz in -12..=12 {
+                        let set_x = x + dx;
+                        let set_z = z + dz;
+                        let y = ground.level(XZPoint::new(set_x, set_z));
+                        editor.set_block(surface_block, set_x, y, set_z, None, None);
                     }
                 }
             }

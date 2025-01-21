@@ -22,9 +22,8 @@ Download the [latest release](https://github.com/louis-e/arnis/releases/) or [co
 Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
 The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
 
-If you choose to select an own world, make sure to generate a new flat world in advance in Minecraft.
-
 Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4.
+If you choose to select an own world, be aware that Arnis will overwrite certain areas.
 
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
@@ -73,18 +72,18 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
 - [ ] Add interior to buildings
 - [ ] Implement house roof types
-- [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Add support for inner attribute in multipolygons and multipolygon elements other than buildings
-- [ ] Fix Github Action Workflow for releasing MacOS Binary
-- [ ] Evaluate and implement faster region saving
 - [ ] Refactor bridges implementation
-- [ ] Refactor railway implementation
 - [ ] Better code documentation
 - [ ] Refactor fountain structure implementation
 - [ ] Luanti Support (https://github.com/louis-e/arnis/issues/120)
 - [ ] Minecraft Bedrock Edition Support (https://github.com/louis-e/arnis/issues/148)
+- [x] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
+- [x] Refactor railway implementation
+- [x] Evaluate and implement faster region saving
 - [x] Support multipolygons (https://github.com/louis-e/arnis/issues/112, https://github.com/louis-e/arnis/issues/114)
 - [x] Memory optimization
+- [x] Fix Github Action Workflow for releasing MacOS Binary
 - [x] Design and implement a GUI
 - [x] Automatic new world creation instead of using an existing world
 - [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)

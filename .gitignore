@@ -27,6 +27,7 @@ Thumbs.db
 # Generated files
 /export.json
 /parsed_osm_data.txt
+/elevation_debug.png
 /gen/
 /build/
 *.rmeta

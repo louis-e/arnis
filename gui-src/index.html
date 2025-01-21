@@ -38,8 +38,8 @@
 
           <!-- Updated Tooltip Structure -->
           <div class="tooltip" style="width: 100%;">
-            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;" data-localize="choose_world">
-              Choose World
+            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;">
+              <span id="choose_world">Choose World</span>
               <br>
               <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
                 No world selected
@@ -86,6 +86,12 @@
         <span class="close-button" onclick="closeSettings()">&times;</span>
         <h2 data-localize="customization_settings">Customization Settings</h2>
 
+        <!-- Terrain Toggle Button -->
+        <div class="terrain-toggle-container">
+          <label for="terrain-toggle" data-localize="terrain">Terrain:</label>
+          <input type="checkbox" id="terrain-toggle" name="terrain-toggle">
+        </div>
+
         <!-- Winter Mode Toggle Button -->
         <div class="winter-toggle-container">
           <label for="winter-toggle" data-localize="winter_mode">Winter Mode:</label>
@@ -102,7 +108,7 @@
         <!-- Bounding Box Input -->
         <div class="bbox-input-container">
           <label for="bbox-coords" data-localize="custom_bounding_box">Custom Bounding Box:</label>
-          <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" style="width: 280px;" autocomplete="one-time-code" placeholder="Format: lat,lng,lat,lng">
+          <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" style="width: 280px;" placeholder="Format: lat,lng,lat,lng">
         </div>
 
         <!-- Floodfill Timeout Input -->
@@ -136,7 +142,7 @@
     <!-- Footer -->
     <footer class="footer">
       <a href="https://github.com/louis-e/arnis" target="_blank" class="footer-link" data-localize="footer_text">
-        © <span id="current-year"></span> Arnis v<span id="version-placeholder">x.x.x</span> by louis-e
+        © {year} Arnis v{version} by louis-e
       </a>
     </footer>
   </main>

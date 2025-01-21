@@ -9,8 +9,6 @@
   "custom_selection_confirmed": "Користувацький вибір підтверджено!",
   "error_coordinates_out_of_range": "Помилка: Координати поза діапазоном або неправильно впорядковані (потрібно широта перед довгота)",
   "invalid_format": "Неправильний формат. Будь ласка, використовуйте 'широта,довгота,широта,довгота' або 'широта довгота широта довгота'",
-  "select_a_location_first": "Спочатку оберіть місцезнахождення!",
-  "select_a_minecraft_world_first": "Спочатку оберіть світ Minecraft!",
   "generation_process_started": "Процес генерації розпочато",
   "winter_mode": "Зимовий режим:",
   "world_scale": "Масштаб світу:",
@@ -31,5 +29,10 @@
   "select_location_first": "Спочатку виберіть місцезнаходження!",
   "area_too_large": "Ця область дуже велика і може перевищити типові обчислювальні межі",
   "area_extensive": "Область досить велика і може вимагати значного часу та ресурсів",
-  "selection_confirmed": "Вибір підтверджено!"
+  "selection_confirmed": "Вибір підтверджено!",
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Seconds",
+  "placeholder_ground": "Ground Level"
 }
