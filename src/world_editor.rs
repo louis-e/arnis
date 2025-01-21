@@ -543,10 +543,11 @@ impl WorldEditor {
                 for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
                     if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
                         // Read existing chunk data if it exists
-                        let existing_data = region.read_chunk(chunk_x as usize, chunk_z as usize)
+                        let existing_data = region
+                            .read_chunk(chunk_x as usize, chunk_z as usize)
                             .unwrap()
                             .unwrap_or_default();
-                        
+
                         // Parse existing chunk or create new one
                         let mut chunk: Chunk = if !existing_data.is_empty() {
                             fastnbt::from_bytes(&existing_data).unwrap()
@@ -563,11 +564,12 @@ impl WorldEditor {
                         // Update sections while preserving existing data
                         let new_sections: Vec<Section> = chunk_to_modify.sections().collect();
                         for new_section in new_sections {
-                            if let Some(existing_section) = chunk.sections.iter_mut()
-                                .find(|s| s.y == new_section.y) 
+                            if let Some(existing_section) =
+                                chunk.sections.iter_mut().find(|s| s.y == new_section.y)
                             {
                                 // Merge block states
-                                existing_section.block_states.palette = new_section.block_states.palette;
+                                existing_section.block_states.palette =
+                                    new_section.block_states.palette;
                                 existing_section.block_states.data = new_section.block_states.data;
                             } else {
                                 // Add new section if it doesn't exist
@@ -577,8 +579,11 @@ impl WorldEditor {
 
                         // Preserve existing block entities and merge with new ones
                         if let Some(existing_entities) = chunk.other.get_mut("block_entities") {
-                            if let Some(new_entities) = chunk_to_modify.other.get("block_entities") {
-                                if let (Value::List(existing), Value::List(new)) = (existing_entities, new_entities) {
+                            if let Some(new_entities) = chunk_to_modify.other.get("block_entities")
+                            {
+                                if let (Value::List(existing), Value::List(new)) =
+                                    (existing_entities, new_entities)
+                                {
                                     // Remove old entities that are replaced by new ones
                                     existing.retain(|e| {
                                         if let Value::Compound(map) = e {
@@ -601,8 +606,11 @@ impl WorldEditor {
                             }
                         } else {
                             // If no existing entities, just add the new ones
-                            if let Some(new_entities) = chunk_to_modify.other.get("block_entities") {
-                                chunk.other.insert("block_entities".to_string(), new_entities.clone());
+                            if let Some(new_entities) = chunk_to_modify.other.get("block_entities")
+                            {
+                                chunk
+                                    .other
+                                    .insert("block_entities".to_string(), new_entities.clone());
                             }
                         }
 
@@ -614,7 +622,9 @@ impl WorldEditor {
                         let level_data = create_level_wrapper(&chunk);
                         ser_buffer.clear();
                         fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
-                        region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer).unwrap();
+                        region
+                            .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                            .unwrap();
                     }
                 }
 
@@ -657,39 +667,86 @@ impl WorldEditor {
 
 // Helper function to get entity coordinates
 fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
-    let x = if let Value::Int(x) = entity.get("x").unwrap_or(&Value::Int(0)) { *x } else { 0 };
-    let y = if let Value::Int(y) = entity.get("y").unwrap_or(&Value::Int(0)) { *y } else { 0 };
-    let z = if let Value::Int(z) = entity.get("z").unwrap_or(&Value::Int(0)) { *z } else { 0 };
+    let x = if let Value::Int(x) = entity.get("x").unwrap_or(&Value::Int(0)) {
+        *x
+    } else {
+        0
+    };
+    let y = if let Value::Int(y) = entity.get("y").unwrap_or(&Value::Int(0)) {
+        *y
+    } else {
+        0
+    };
+    let z = if let Value::Int(z) = entity.get("z").unwrap_or(&Value::Int(0)) {
+        *z
+    } else {
+        0
+    };
     (x, y, z)
 }
 
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
-    HashMap::from([
-        ("Level".to_string(), Value::Compound(HashMap::from([
+    HashMap::from([(
+        "Level".to_string(),
+        Value::Compound(HashMap::from([
             ("xPos".to_string(), Value::Int(chunk.x_pos)),
             ("zPos".to_string(), Value::Int(chunk.z_pos)),
-            ("isLightOn".to_string(), Value::Byte(i8::try_from(chunk.is_light_on).unwrap())),
-            ("sections".to_string(), Value::List(chunk.sections.iter().map(|section| {
-                Value::Compound(HashMap::from([
-                    ("Y".to_string(), Value::Byte(section.y)),
-                    ("block_states".to_string(), Value::Compound(HashMap::from([
-                        ("palette".to_string(), Value::List(
-                            section.block_states.palette.iter().map(|item| {
-                                let mut palette_item = HashMap::from([
-                                    ("Name".to_string(), Value::String(item.name.clone())),
-                                ]);
-                                if let Some(props) = &item.properties {
-                                    palette_item.insert("Properties".to_string(), props.clone());
-                                }
-                                Value::Compound(palette_item)
-                            }).collect()
-                        )),
-                        ("data".to_string(), Value::LongArray(
-                            section.block_states.data.clone().unwrap_or_else(|| LongArray::new(vec![]))
-                        )),
-                    ]))),
-                ]))
-            }).collect())),
-        ])))
-    ])
+            (
+                "isLightOn".to_string(),
+                Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
+            ),
+            (
+                "sections".to_string(),
+                Value::List(
+                    chunk
+                        .sections
+                        .iter()
+                        .map(|section| {
+                            Value::Compound(HashMap::from([
+                                ("Y".to_string(), Value::Byte(section.y)),
+                                (
+                                    "block_states".to_string(),
+                                    Value::Compound(HashMap::from([
+                                        (
+                                            "palette".to_string(),
+                                            Value::List(
+                                                section
+                                                    .block_states
+                                                    .palette
+                                                    .iter()
+                                                    .map(|item| {
+                                                        let mut palette_item = HashMap::from([(
+                                                            "Name".to_string(),
+                                                            Value::String(item.name.clone()),
+                                                        )]);
+                                                        if let Some(props) = &item.properties {
+                                                            palette_item.insert(
+                                                                "Properties".to_string(),
+                                                                props.clone(),
+                                                            );
+                                                        }
+                                                        Value::Compound(palette_item)
+                                                    })
+                                                    .collect(),
+                                            ),
+                                        ),
+                                        (
+                                            "data".to_string(),
+                                            Value::LongArray(
+                                                section
+                                                    .block_states
+                                                    .data
+                                                    .clone()
+                                                    .unwrap_or_else(|| LongArray::new(vec![])),
+                                            ),
+                                        ),
+                                    ])),
+                                ),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            ),
+        ])),
+    )])
 }
