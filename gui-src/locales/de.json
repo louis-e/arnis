@@ -29,5 +29,10 @@
   "select_location_first": "Wähle zuerst einen Standort aus!",
   "area_too_large": "Dieses Gebiet ist sehr groß und könnte das Berechnungslimit überschreiten.",
   "area_extensive": "Diese Gebietsgröße könnte längere Zeit für die Generierung benötigen.",
-  "selection_confirmed": "Auswahl bestätigt!"
+  "selection_confirmed": "Auswahl bestätigt!",
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Sekunden",
+  "placeholder_ground": "Bodenhöhe"
 }

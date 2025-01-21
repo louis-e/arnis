@@ -29,5 +29,10 @@
   "select_location_first": "Спочатку виберіть місцезнаходження!",
   "area_too_large": "Ця область дуже велика і може перевищити типові обчислювальні межі",
   "area_extensive": "Область досить велика і може вимагати значного часу та ресурсів",
-  "selection_confirmed": "Вибір підтверджено!"
+  "selection_confirmed": "Вибір підтверджено!",
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Seconds",
+  "placeholder_ground": "Ground Level"
 }
