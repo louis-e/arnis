@@ -11,6 +11,10 @@ readme = "README.md"
 [profile.release]
 lto = "thin"
 
+[features]
+default = ["gui"]
+gui = ["dep:tauri", "dep:tauri-plugin-log", "dep:tauri-plugin-shell"]
+
 [build-dependencies]
 tauri-build = "2"
 
@@ -36,7 +40,10 @@ rfd = "0.15.1"
 semver = "1.0.23"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = "2"
-tauri-plugin-log = { version = "2.2.0" }
-tauri-plugin-shell = "2"
+tauri = { version = "2", optional = true }
+tauri-plugin-log = { version = "2.2.0", optional = true }
+tauri-plugin-shell = { version = "2", optional = true }
 tokio = { version = "1.42.0", features = ["full"] }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.59.0", features = ["Win32_System_Console"] }
