@@ -22,9 +22,10 @@ Download the [latest release](https://github.com/louis-e/arnis/releases/) or [co
 Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
 The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
 
-If you choose to select an own world, make sure to generate a new flat world in advance in Minecraft.
+To generate your world with terrain, make sure to enable the corresponding feature in the generation settings.
 
 Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4.
+If you choose to select an own world, be aware that Arnis will overwrite certain areas.
 
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
@@ -43,7 +44,7 @@ The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each el
 - *Wasn't this written in Python before?*<br>
 Yes! Arnis was initially developed in Python, which benefited from Python's open-source friendliness and ease of readability. This is why we strive for clear, well-documented code in the Rust port of this project to find the right balance. I decided to port the project to Rust to learn more about the language and push the algorithm's performance further. We were nearing the limits of optimization in Python, and Rust's capabilities allow for even better performance and efficiency. The old Python implementation is still available in the python-legacy branch.
 - *Where does the data come from?*<br>
-The geographic data is sourced from OpenStreetMap (OSM)[^1], a free, collaborative mapping project that serves as an open-source alternative to commercial mapping services. The data is accessed via the Overpass API, which queries OSM's database.
+The geographic data is sourced from OpenStreetMap (OSM)[^1], a free, collaborative mapping project that serves as an open-source alternative to commercial mapping services. The data is accessed via the Overpass API, which queries OSM's database. Other services like Google Maps do not provide data like this, which makes OSM perfect for this project.
 - *How does the Minecraft world generation work?*<br>
 The script uses the [fastnbt](https://github.com/owengage/fastnbt) cargo package to interact with Minecraft's world format. This library allows Arnis to manipulate Minecraft region files, enabling the generation of real-world locations. The section 'Processing Pipeline' goes a bit further into the details and steps of the generation process itself.
 - *Where does the name come from?*<br>
@@ -57,6 +58,7 @@ Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16
 - *The generation did finish, but there's nothing in the world!*<br>
 Make sure to teleport to the generation starting point (/tp 0 0 0). If there is still nothing, you might need to travel a bit further into the positive X and positive Z direction.
 - *What features are in the world generation settings?*<br>
+**Terrain:** Make sure to enable this feature to generate your world with elevation data included.<br>
 **Winter Mode:** This setting changes the generation style to a snowy theme and adds snow layers to the ground.<br>
 **Scale Factor:** The scale factor determines the size of the generated world.<br>
 **Custom BBOX Input:** This setting allows you to manually input the bounding box coordinates for the area you want to generate.<br>
@@ -73,18 +75,18 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
 - [ ] Add interior to buildings
 - [ ] Implement house roof types
-- [ ] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
 - [ ] Add support for inner attribute in multipolygons and multipolygon elements other than buildings
-- [ ] Fix Github Action Workflow for releasing MacOS Binary
-- [ ] Evaluate and implement faster region saving
 - [ ] Refactor bridges implementation
-- [ ] Refactor railway implementation
 - [ ] Better code documentation
 - [ ] Refactor fountain structure implementation
 - [ ] Luanti Support (https://github.com/louis-e/arnis/issues/120)
 - [ ] Minecraft Bedrock Edition Support (https://github.com/louis-e/arnis/issues/148)
+- [x] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
+- [x] Refactor railway implementation
+- [x] Evaluate and implement faster region saving
 - [x] Support multipolygons (https://github.com/louis-e/arnis/issues/112, https://github.com/louis-e/arnis/issues/114)
 - [x] Memory optimization
+- [x] Fix Github Action Workflow for releasing MacOS Binary
 - [x] Design and implement a GUI
 - [x] Automatic new world creation instead of using an existing world
 - [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
@@ -101,7 +103,7 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 #### How to contribute
 This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. We encourage discussions and suggestions to ensure the project remains modular, optimized, and easy to use for the community. You can use the parameter --debug to get a more detailed output of the processed values, which can be helpful for debugging and development. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
 
-Build and run it using: ```cargo run --release -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```<br>
+Build and run it using: ```cargo run --release --no-default-features -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```<br>
 For the GUI: ```cargo run --release```<br>
 
 After your pull request was merged, I will take care of regularly creating update releases which will include your changes.

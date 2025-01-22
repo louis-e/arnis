@@ -9,8 +9,6 @@
   "custom_selection_confirmed": "Anpassad markering bekräftad!",
   "error_coordinates_out_of_range": "Fel: Koordinater är utanför området eller felaktigt ordnade (Lat före Lng krävs).",
   "invalid_format": "Ogiltigt format. Använd 'lat,lng,lat,lng' eller 'lat lng lat lng'.",
-  "select_a_location_first": "Välj en plats först!",
-  "select_a_minecraft_world_first": "Välj en Minecraft-värld först!",
   "generation_process_started": "Genereringsprocessen startad.",
   "winter_mode": "Vinterläge:",
   "world_scale": "Världsskala:",
@@ -31,5 +29,10 @@
   "select_location_first": "Välj plats först!",
   "area_too_large": "Detta område är mycket stort och kan överskrida vanliga beräkningsgränser.",
   "area_extensive": "Området är ganska extensivt och kan ta betydande tid och resurser.",
-  "selection_confirmed": "Val bekräftat!"
+  "selection_confirmed": "Val bekräftat!",
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Seconds",
+  "placeholder_ground": "Ground Level"
 }

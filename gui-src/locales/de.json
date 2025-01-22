@@ -9,8 +9,6 @@
   "custom_selection_confirmed": "Benutzerdefinierte Auswahl bestätigt!",
   "error_coordinates_out_of_range": "Fehler: Koordinaten sind außerhalb des Bereichs oder falsch geordnet (Lat vor Lng erforderlich).",
   "invalid_format": "Ungültiges Format. Bitte verwende 'lat,lng,lat,lng' oder 'lat lng lat lng'.",
-  "select_a_location_first": "Wähle zuerst einen Standort aus!",
-  "select_a_minecraft_world_first": "Wähle zuerst eine Minecraft Welt aus!",
   "generation_process_started": "Generierungsprozess gestartet.",
   "winter_mode": "Wintermodus:",
   "world_scale": "Weltmaßstab:",
@@ -31,5 +29,10 @@
   "select_location_first": "Wähle zuerst einen Standort aus!",
   "area_too_large": "Dieses Gebiet ist sehr groß und könnte das Berechnungslimit überschreiten.",
   "area_extensive": "Diese Gebietsgröße könnte längere Zeit für die Generierung benötigen.",
-  "selection_confirmed": "Auswahl bestätigt!"
+  "selection_confirmed": "Auswahl bestätigt!",
+  "unknown_error": "Unknown error",
+  "license_and_credits": "License and Credits",
+  "placeholder_bbox": "Format: lat,lng,lat,lng",
+  "placeholder_floodfill": "Sekunden",
+  "placeholder_ground": "Bodenhöhe"
 }
