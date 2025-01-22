@@ -10,6 +10,7 @@
   "error_coordinates_out_of_range": "Ошибка: Координаты находятся вне зоны действия или указаны в неправильном порядке (сначала широта, затем долгота)",
   "invalid_format": "Неверный формат. Используйте 'широта,долгота,широта,долгота' или 'широта долгота широта долгота'",
   "generation_process_started": "Процесс генерации начат",
+  "terrain": "Рельеф",
   "winter_mode": "Зимний режим:",
   "world_scale": "Масштаб мира:",
   "custom_bounding_box": "Пользовательская ограничивающая рамка:",
@@ -30,9 +31,9 @@
   "area_too_large": "Эта область слишком велика и может превысить типичные вычислительные ограничения",
   "area_extensive": "Область довольно обширна и может потребовать значительного времени и ресурсов",
   "selection_confirmed": "Выбор подтвержден!",
-  "unknown_error": "Unknown error",
-  "license_and_credits": "License and Credits",
-  "placeholder_bbox": "Format: lat,lng,lat,lng",
-  "placeholder_floodfill": "Seconds",
-  "placeholder_ground": "Ground Level"
+  "unknown_error": "Неизвестная ошибка",
+  "license_and_credits": "Лицензия и авторы",
+  "placeholder_bbox": "Формат: широта,долгота,широта,долгота",
+  "placeholder_floodfill": "Секунды",
+  "placeholder_ground": "Уровень земли"
 }
