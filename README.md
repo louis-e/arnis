@@ -52,7 +52,9 @@ The project is named after the smallest city in Germany, Arnis[^2]. The city's s
 - *I don't have Minecraft installed but want to generate a world for my kids. How?*<br>
 When selecting a world, click on 'Select existing world' and choose a directory. The world will be generated there.
 - *Arnis instantly closes again or the window is empty!*<br>
-If you're on Windows, please install the [Evergreen Bootstrapper from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download).
+  If you're on Windows, please install the [Evergreen Bootstrapper from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download).
+
+  If you're on Linux, your system might be missing the webkit2gtk-4.1 library, install the corresponding package using your distro's package manager.
 - *What Minecraft version should I use?*<br>
 Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16.5 and below is currently not supported, but we are working on it!
 - *The generation did finish, but there's nothing in the world!*<br>
