@@ -150,6 +150,11 @@ impl Block {
 
     pub fn properties(&self) -> Option<Value> {
         match self.id {
+            49 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("persistent".to_string(), Value::String("true".to_string()));
+                map
+            })),
             105 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
