@@ -144,6 +144,9 @@ impl Block {
             114 => "andesite_wall",
             115 => "stone_brick_wall",
             116..=125 => "rail",
+            126 => "coarse_dirt",
+            127 => "iron_ore",
+            128 => "coal_ore",
             _ => panic!("Invalid id"),
         }
     }
@@ -399,6 +402,10 @@ pub const RAIL_NORTH_EAST: Block = Block::new(122);
 pub const RAIL_NORTH_WEST: Block = Block::new(123);
 pub const RAIL_SOUTH_EAST: Block = Block::new(124);
 pub const RAIL_SOUTH_WEST: Block = Block::new(125);
+
+pub const COARSE_DIRT: Block = Block::new(126);
+pub const IRON_ORE: Block = Block::new(127);
+pub const COAL_ORE: Block = Block::new(128);
 
 // Variations for building corners
 pub fn building_corner_variations() -> Vec<Block> {
