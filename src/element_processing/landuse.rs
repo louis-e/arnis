@@ -44,16 +44,6 @@ pub fn generate_landuse(
         "industrial" => COBBLESTONE,
         "military" => GRAY_CONCRETE,
         "railway" => GRAVEL,
-        "landfill" => {
-            // Gravel if man_made = spoil_heap, coarse dirt else
-            let manmade = element.tags.get("man_made").unwrap_or(&binding);
-            if manmade == "spoil_heap" {
-                GRAVEL
-            } else {
-                COARSE_DIRT
-            }
-        }
-        "quarry" => STONE, // TODO: add ores
         _ => {
             if args.winter {
                 SNOW_BLOCK
