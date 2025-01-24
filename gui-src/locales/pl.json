@@ -10,6 +10,7 @@
   "error_coordinates_out_of_range": "Błąd: Współrzędne są poza zakresem lub w złej kolejności (wymagana szerokość przed długością).",
   "invalid_format": "Nieprawidłowy format. Użyj 'szer.,dł.,szer.,dł.' lub 'szer. dł. szer. dł.'.",
   "generation_process_started": "Proces generowania rozpoczęty.",
+  "terrain": "Teren:",
   "winter_mode": "Tryb Zimowy:",
   "world_scale": "Skala świata:",
   "custom_bounding_box": "Niestandardowy obszar:",
@@ -30,9 +31,9 @@
   "area_too_large": "Ten obszar jest bardzo duży i może przekroczyć limity obliczeniowe.",
   "area_extensive": "Ten obszar jest rozległy i może pochłonąć dużo czasu oraz zasobów.",
   "selection_confirmed": "Wybór potwierdzony!",
-  "unknown_error": "Unknown error",
-  "license_and_credits": "License and Credits",
-  "placeholder_bbox": "Format: lat,lng,lat,lng",
-  "placeholder_floodfill": "Seconds",
-  "placeholder_ground": "Ground Level"
+  "unknown_error": "Nieznany błąd",
+  "license_and_credits": "Licencja i autorzy",
+  "placeholder_bbox": "Format: szer,dł,szer,dł",
+  "placeholder_floodfill": "Sekundy",
+  "placeholder_ground": "Wysokość"
 }
