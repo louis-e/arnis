@@ -50,7 +50,7 @@ pub fn generate_landuse(
             if manmade_tag == "spoil_heap" || manmade_tag == "heap" {
                 GRAVEL
             } else {
-               COARSE_DIRT
+                COARSE_DIRT
             }
         }
         "quarry" => STONE,
@@ -357,7 +357,7 @@ pub fn generate_landuse(
                         "copper" => COPPER_ORE,
                         "gold" => GOLD_ORE,
                         "clay" | "kaolinite" => CLAY,
-                        _ => STONE
+                        _ => STONE,
                     };
                     let random_choice: i32 = rng.gen_range(0..100 + ground_level); // with more depth there's more resources
                     if random_choice < 5 {
