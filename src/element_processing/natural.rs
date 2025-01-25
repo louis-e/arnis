@@ -7,6 +7,7 @@ use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
+use rand::prelude::SliceRandom;
 use rand::Rng;
 
 pub fn generate_natural(
@@ -20,6 +21,55 @@ pub fn generate_natural(
             if let ProcessedElement::Node(node) = element {
                 let x: i32 = node.x;
                 let z: i32 = node.z;
+                // Generate a tree depending on what other info is there in the tags
+                let mut trees_ok_to_generate: Vec<u8> = vec![];
+                // Check if "species"-string, if available, _contains_ one of the genus names we know how to generate
+                if let Some(species) = element.tags().get("species") {
+                    if species.contains("Betula") {
+                        trees_ok_to_generate.push(3);
+                    }
+                    if species.contains("Quercus") {
+                        trees_ok_to_generate.push(1);
+                    }
+                    if species.contains("Picea") {
+                        trees_ok_to_generate.push(2);
+                    }
+                } else if let Some(genus_wikidata) = element.tags().get("genus:wikidata") {
+                    match genus_wikidata.as_str() {
+                        "Q12004" => trees_ok_to_generate.push(3),
+                        "Q26782" => trees_ok_to_generate.push(1),
+                        "Q25243" => trees_ok_to_generate.push(2),
+                        _ => {
+                            trees_ok_to_generate.push(1);
+                            trees_ok_to_generate.push(2);
+                            trees_ok_to_generate.push(3);
+                        }
+                    }
+                } else if let Some(genus) = element.tags().get("genus") {
+                    match genus.as_str() {
+                        "Betula" => trees_ok_to_generate.push(3),
+                        "Quercus" => trees_ok_to_generate.push(1),
+                        "Picea" => trees_ok_to_generate.push(2),
+                        _ => trees_ok_to_generate.push(1),
+                    }
+                } else if let Some(leaf_type) = element.tags().get("leaf_type") {
+                    match leaf_type.as_str() {
+                        "broadleaved" => {
+                            trees_ok_to_generate.push(1);
+                            trees_ok_to_generate.push(3);
+                        }
+                        "needleleaved" => trees_ok_to_generate.push(2),
+                        _ => {
+                            trees_ok_to_generate.push(1);
+                            trees_ok_to_generate.push(2);
+                            trees_ok_to_generate.push(3);
+                        }
+                    }
+                } else {
+                    trees_ok_to_generate.push(1);
+                    trees_ok_to_generate.push(2);
+                    trees_ok_to_generate.push(3);
+                }
 
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                 create_tree(
@@ -27,7 +77,7 @@ pub fn generate_natural(
                     x,
                     ground.level(node.xz()) + 1,
                     z,
-                    rng.gen_range(1..=3),
+                    *trees_ok_to_generate.choose(&mut rng).unwrap(),
                     args.winter,
                 );
             }
@@ -118,8 +168,35 @@ pub fn generate_natural(
                         }
 
                         let random_choice: i32 = rng.gen_range(0..26);
+                        // Decide what kind of trees to generate based on leaf_type
+                        let mut trees_ok_to_generate: Vec<u8> = vec![];
+                        if let Some(leaf_type) = element.tags().get("leaf_type") {
+                            match leaf_type.as_str() {
+                                "broadleaved" => {
+                                    trees_ok_to_generate.push(1);
+                                    trees_ok_to_generate.push(3);
+                                }
+                                "needleleaved" => trees_ok_to_generate.push(2),
+                                _ => {
+                                    trees_ok_to_generate.push(1);
+                                    trees_ok_to_generate.push(2);
+                                    trees_ok_to_generate.push(3);
+                                }
+                            }
+                        } else {
+                            trees_ok_to_generate.push(1);
+                            trees_ok_to_generate.push(2);
+                            trees_ok_to_generate.push(3);
+                        }
                         if random_choice == 25 {
-                            create_tree(editor, x, y + 1, z, rng.gen_range(1..=3), args.winter);
+                            create_tree(
+                                editor,
+                                x,
+                                y + 1,
+                                z,
+                                *trees_ok_to_generate.choose(&mut rng).unwrap(),
+                                args.winter,
+                            );
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,
