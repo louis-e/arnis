@@ -66,18 +66,18 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             editor.fill_blocks(OAK_LEAVES, x, y + 3, z - 1, x, y + 9, z - 1, None, None);
             editor.fill_blocks(OAK_LEAVES, x, y + 3, z + 1, x, y + 9, z + 1, None, None);
             editor.fill_blocks(OAK_LEAVES, x, y + 9, z, x, y + 10, z, None, None);
-            round1(editor, OAK_LEAVES, x, y + 8, z);
-            round1(editor, OAK_LEAVES, x, y + 7, z);
-            round1(editor, OAK_LEAVES, x, y + 6, z);
-            round1(editor, OAK_LEAVES, x, y + 5, z);
-            round1(editor, OAK_LEAVES, x, y + 4, z);
-            round1(editor, OAK_LEAVES, x, y + 3, z);
-            round2(editor, OAK_LEAVES, x, y + 7, z);
-            round2(editor, OAK_LEAVES, x, y + 6, z);
-            round2(editor, OAK_LEAVES, x, y + 5, z);
-            round2(editor, OAK_LEAVES, x, y + 4, z);
-            round3(editor, OAK_LEAVES, x, y + 6, z);
-            round3(editor, OAK_LEAVES, x, y + 5, z);
+
+            for i in (3..=8).rev() {
+                round1(editor, OAK_LEAVES, x, y + i, z);
+            }
+
+            for i in (4..=7).rev() {
+                round2(editor, OAK_LEAVES, x, y + i, z);
+            }
+
+            for i in (5..=6).rev() {
+                round3(editor, OAK_LEAVES, x, y + i, z);
+            }
 
             if snow {
                 editor.set_block(SNOW_LAYER, x, y + 11, z, None, None);
@@ -85,16 +85,18 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
                 editor.set_block(SNOW_LAYER, x - 1, y + 10, z, None, None);
                 editor.set_block(SNOW_LAYER, x, y + 10, z - 1, None, None);
                 editor.set_block(SNOW_LAYER, x, y + 10, z + 1, None, None);
-                round1(editor, SNOW_LAYER, x, y + 9, z);
-                round1(editor, SNOW_LAYER, x, y + 8, z);
-                round1(editor, SNOW_LAYER, x, y + 7, z);
-                round1(editor, SNOW_LAYER, x, y + 6, z);
-                round2(editor, SNOW_LAYER, x, y + 8, z);
-                round2(editor, SNOW_LAYER, x, y + 7, z);
-                round2(editor, SNOW_LAYER, x, y + 6, z);
-                round2(editor, SNOW_LAYER, x, y + 5, z);
-                round3(editor, SNOW_LAYER, x, y + 7, z);
-                round3(editor, SNOW_LAYER, x, y + 6, z);
+
+                for i in (6..=9).rev() {
+                    round1(editor, SNOW_LAYER, x, y + i, z);
+                }
+
+                for i in (5..=8).rev() {
+                    round2(editor, SNOW_LAYER, x, y + i, z);
+                }
+
+                for i in (6..=7).rev() {
+                    round3(editor, SNOW_LAYER, x, y + i, z);
+                }
             }
         }
         2 => {
@@ -105,13 +107,14 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             editor.fill_blocks(BIRCH_LEAVES, x, y + 3, z - 1, x, y + 10, z - 1, None, None);
             editor.fill_blocks(BIRCH_LEAVES, x, y + 3, z + 1, x, y + 10, z + 1, None, None);
             editor.set_block(BIRCH_LEAVES, x, y + 10, z, None, None);
-            round1(editor, BIRCH_LEAVES, x, y + 9, z);
-            round1(editor, BIRCH_LEAVES, x, y + 7, z);
-            round1(editor, BIRCH_LEAVES, x, y + 6, z);
-            round1(editor, BIRCH_LEAVES, x, y + 4, z);
-            round1(editor, BIRCH_LEAVES, x, y + 3, z);
-            round2(editor, BIRCH_LEAVES, x, y + 6, z);
-            round2(editor, BIRCH_LEAVES, x, y + 3, z);
+
+            for i in [9, 7, 6, 4, 3] {
+                round1(editor, BIRCH_LEAVES, x, y + i, z);
+            }
+
+            for i in [6, 3] {
+                round2(editor, BIRCH_LEAVES, x, y + i, z);
+            }
 
             if snow {
                 editor.set_block(SNOW_LAYER, x, y + 11, z, None, None);
@@ -119,13 +122,14 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
                 editor.set_block(SNOW_LAYER, x - 1, y + 11, z, None, None);
                 editor.set_block(SNOW_LAYER, x, y + 11, z - 1, None, None);
                 editor.set_block(SNOW_LAYER, x, y + 11, z + 1, None, None);
-                round1(editor, SNOW_LAYER, x, y + 10, z);
-                round1(editor, SNOW_LAYER, x, y + 8, z);
-                round1(editor, SNOW_LAYER, x, y + 7, z);
-                round1(editor, SNOW_LAYER, x, y + 5, z);
-                round1(editor, SNOW_LAYER, x, y + 4, z);
-                round2(editor, SNOW_LAYER, x, y + 7, z);
-                round2(editor, SNOW_LAYER, x, y + 4, z);
+
+                for i in [10, 8, 7, 5, 4] {
+                    round1(editor, SNOW_LAYER, x, y + i, z);
+                }
+
+                for i in [7, 4] {
+                    round2(editor, SNOW_LAYER, x, y + i, z);
+                }
             }
         }
         3 => {
@@ -136,14 +140,14 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
             editor.fill_blocks(BIRCH_LEAVES, x, y + 2, z - 1, x, y + 7, z - 1, None, None);
             editor.fill_blocks(BIRCH_LEAVES, x, y + 2, z + 1, x, y + 7, z + 1, None, None);
             editor.fill_blocks(BIRCH_LEAVES, x, y + 7, z, x, y + 8, z, None, None);
-            round1(editor, BIRCH_LEAVES, x, y + 6, z);
-            round1(editor, BIRCH_LEAVES, x, y + 5, z);
-            round1(editor, BIRCH_LEAVES, x, y + 4, z);
-            round1(editor, BIRCH_LEAVES, x, y + 3, z);
-            round1(editor, BIRCH_LEAVES, x, y + 2, z);
-            round2(editor, BIRCH_LEAVES, x, y + 2, z);
-            round2(editor, BIRCH_LEAVES, x, y + 3, z);
-            round2(editor, BIRCH_LEAVES, x, y + 4, z);
+
+            for i in (2..=6).rev() {
+                round1(editor, BIRCH_LEAVES, x, y + i, z);
+            }
+
+            for i in 2..=4 {
+                round2(editor, BIRCH_LEAVES, x, y + i, z);
+            }
 
             if snow {
                 editor.set_block(SNOW_LAYER, x, y + 9, z, None, None);
@@ -151,14 +155,14 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
                 editor.set_block(SNOW_LAYER, x - 1, y + 8, z, None, None);
                 editor.set_block(SNOW_LAYER, x, y + 8, z - 1, None, None);
                 editor.set_block(SNOW_LAYER, x, y + 8, z + 1, None, None);
-                round1(editor, SNOW_LAYER, x, y + 7, z);
-                round1(editor, SNOW_LAYER, x, y + 6, z);
-                round1(editor, SNOW_LAYER, x, y + 5, z);
-                round1(editor, SNOW_LAYER, x, y + 4, z);
-                round1(editor, SNOW_LAYER, x, y + 3, z);
-                round2(editor, SNOW_LAYER, x, y + 3, z);
-                round2(editor, SNOW_LAYER, x, y + 4, z);
-                round2(editor, SNOW_LAYER, x, y + 5, z);
+
+                for i in (3..=7).rev() {
+                    round1(editor, SNOW_LAYER, x, y + i, z);
+                }
+
+                for i in 3..=5 {
+                    round2(editor, SNOW_LAYER, x, y + i, z);
+                }
             }
         }
         _ => {} // Do nothing if typetree is not recognized
