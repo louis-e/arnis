@@ -162,9 +162,7 @@ pub fn generate_landuse(
                     } else if random_choice < 33 {
                         create_tree(
                             editor,
-                            x,
-                            ground_level + 1,
-                            z,
+                            (x, ground_level + 1, z),
                             rng.gen_range(1..=3),
                             args.winter,
                         );
@@ -177,9 +175,7 @@ pub fn generate_landuse(
                     if random_choice == 20 {
                         create_tree(
                             editor,
-                            x,
-                            ground_level + 1,
-                            z,
+                            (x, ground_level + 1, z),
                             rng.gen_range(1..=3),
                             args.winter,
                         );
@@ -220,9 +216,7 @@ pub fn generate_landuse(
                             if special_choice <= 2 {
                                 create_tree(
                                     editor,
-                                    x,
-                                    ground_level + 1,
-                                    z,
+                                    (x, ground_level + 1, z),
                                     rng.gen_range(1..=3),
                                     args.winter,
                                 );
@@ -338,9 +332,7 @@ pub fn generate_landuse(
                     if random_choice < 5 {
                         create_tree(
                             editor,
-                            x,
-                            ground_level + 1,
-                            z,
+                            (x, ground_level + 1, z),
                             rng.gen_range(1..=3),
                             args.winter,
                         );

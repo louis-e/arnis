@@ -24,9 +24,7 @@ pub fn generate_natural(
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                 create_tree(
                     editor,
-                    x,
-                    ground.level(node.xz()) + 1,
-                    z,
+                    (x, ground.level(node.xz()) + 1, z),
                     rng.gen_range(1..=3),
                     args.winter,
                 );
@@ -119,7 +117,7 @@ pub fn generate_natural(
 
                         let random_choice: i32 = rng.gen_range(0..26);
                         if random_choice == 25 {
-                            create_tree(editor, x, y + 1, z, rng.gen_range(1..=3), args.winter);
+                            create_tree(editor, (x, y + 1, z), rng.gen_range(1..=3), args.winter);
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,

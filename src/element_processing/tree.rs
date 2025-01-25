@@ -53,7 +53,8 @@ fn round(editor: &mut WorldEditor, material: Block, x: i32, y: i32, z: i32, bloc
 }
 
 /// Function to create different types of trees.
-pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u8, snow: bool) {
+pub fn create_tree(editor: &mut WorldEditor, (x, y, z): (i32, i32, i32), tree_type: u8, snow: bool) {
+    // TODO this gets created every time fn is called.
     let mut blacklist: Vec<Block> = Vec::new();
     blacklist.extend(building_corner_variations());
     blacklist.extend(building_wall_variations());
@@ -64,7 +65,7 @@ pub fn create_tree(editor: &mut WorldEditor, x: i32, y: i32, z: i32, typetree: u
         return;
     }
 
-    match typetree {
+    match tree_type {
         1 => {
             // Oak tree
             editor.fill_blocks(OAK_LOG, x, y, z, x, y + 8, z, None, None);

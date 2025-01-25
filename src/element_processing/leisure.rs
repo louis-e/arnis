@@ -136,9 +136,7 @@ pub fn generate_leisure(
                             // Tree
                             create_tree(
                                 editor,
-                                x,
-                                ground_level + 1,
-                                z,
+                                (x, ground_level + 1, z),
                                 rng.gen_range(1..=3),
                                 args.winter,
                             );
