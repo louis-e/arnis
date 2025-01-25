@@ -1,13 +1,17 @@
 name: CI Build
 
-# Trigger on pull request creation, update, and on pushes to the main branch
+# Trigger only when files in src/ are changed on pull requests or pushes to the main branch
 on:
   pull_request:
     branches:
       - main
+    paths:
+      - 'src/**'
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
   workflow_dispatch:
 
 jobs:
