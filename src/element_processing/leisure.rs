@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
-use crate::element_processing::tree::create_tree;
+use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -134,12 +134,7 @@ pub fn generate_leisure(
                         }
                         71..=80 => {
                             // Tree
-                            create_tree(
-                                editor,
-                                (x, ground_level + 1, z),
-                                rng.gen_range(1..=3),
-                                args.winter,
-                            );
+                            Tree::create(editor, (x, ground_level + 1, z), args.winter);
                         }
                         _ => {}
                     }
