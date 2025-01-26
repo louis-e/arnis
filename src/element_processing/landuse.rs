@@ -1,7 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::cartesian::XZPoint;
-use crate::element_processing::tree::create_tree;
+use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
@@ -160,14 +160,7 @@ pub fn generate_landuse(
                             editor.set_block(RED_FLOWER, x, ground_level + 1, z, None, None);
                         }
                     } else if random_choice < 33 {
-                        create_tree(
-                            editor,
-                            x,
-                            ground_level + 1,
-                            z,
-                            rng.gen_range(1..=3),
-                            args.winter,
-                        );
+                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     }
                 }
             }
@@ -175,14 +168,7 @@ pub fn generate_landuse(
                 if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
                     let random_choice: i32 = rng.gen_range(0..21);
                     if random_choice == 20 {
-                        create_tree(
-                            editor,
-                            x,
-                            ground_level + 1,
-                            z,
-                            rng.gen_range(1..=3),
-                            args.winter,
-                        );
+                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     } else if random_choice == 2 {
                         let flower_block: Block = match rng.gen_range(1..=4) {
                             1 => RED_FLOWER,
@@ -218,14 +204,7 @@ pub fn generate_landuse(
                         if rng.gen_range(0..76) == 0 {
                             let special_choice: i32 = rng.gen_range(1..=10);
                             if special_choice <= 2 {
-                                create_tree(
-                                    editor,
-                                    x,
-                                    ground_level + 1,
-                                    z,
-                                    rng.gen_range(1..=3),
-                                    args.winter,
-                                );
+                                Tree::create(editor, (x, ground_level + 1, z), args.winter);
                             } else if special_choice <= 6 {
                                 editor.set_block(
                                     HAY_BALE,
@@ -336,14 +315,7 @@ pub fn generate_landuse(
                 ) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
-                        create_tree(
-                            editor,
-                            x,
-                            ground_level + 1,
-                            z,
-                            rng.gen_range(1..=3),
-                            args.winter,
-                        );
+                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     } else if random_choice < 800 {
                         editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                     }
