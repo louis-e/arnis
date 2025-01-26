@@ -196,6 +196,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-shell",
  "tokio",
+ "toml 0.8.19",
  "windows 0.59.0",
 ]
 

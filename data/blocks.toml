@@ -1,0 +1,593 @@
+[[blocks]]
+name = "acacia_planks"
+id = 0
+floor_color = [181, 101, 59]
+
+[[blocks]]
+name = "air"
+id = 1
+
+[[blocks]]
+name = "andesite"
+id = 2
+building_corner = true
+
+[[blocks]]
+name = "birch_leaves"
+id = 3
+
+[[blocks]]
+name = "birch_log"
+id = 4
+
+[[blocks]]
+name = "black_concrete"
+id = 5
+
+[[blocks]]
+name = "blackstone"
+id = 6
+building_corner = true
+floor_color = [22, 15, 16]
+
+[[blocks]]
+name = "blue_flower"
+id = 7
+
+[[blocks]]
+name = "blue_terracotta"
+id = 8
+building_corner = true
+
+[[blocks]]
+name = "brick"
+id = 9
+building_corner = true
+wall_color = [233, 107, 57]
+
+[[blocks]]
+name = "cauldron"
+id = 10
+
+[[blocks]]
+name = "chiseled_stone_bricks"
+id = 11
+building_corner = true
+
+[[blocks]]
+name = "cobblestone_wall"
+id = 12
+
+[[blocks]]
+name = "cobblestone"
+id = 13
+building_corner = true
+
+[[blocks]]
+name = "cracked_polished_blackstone_bricks"
+id = 14
+wall_color = [18, 12, 13]
+
+[[blocks]]
+name = "cracked_stone_bricks"
+id = 15
+building_corner = true
+
+[[blocks]]
+name = "crimson_planks"
+id = 16
+floor_color = [104, 51, 74]
+
+[[blocks]]
+name = "cut_sandstone"
+id = 17
+building_corner = true
+
+[[blocks]]
+name = "cyan_concrete"
+id = 18
+wall_color = [76, 127, 153]
+
+[[blocks]]
+name = "dark_oak_planks"
+id = 19
+floor_color = [82, 55, 26]
+
+[[blocks]]
+name = "deepslate_bricks"
+id = 20
+wall_color = [0, 0, 0]
+
+[[blocks]]
+name = "diorite"
+id = 21
+building_corner = true
+
+[[blocks]]
+name = "dirt"
+id = 22
+
+[[blocks]]
+name = "end_stone_bricks"
+id = 23
+wall_color = [186, 195, 142]
+
+[[blocks]]
+name = "farmland"
+id = 24
+
+[[blocks]]
+name = "glass"
+id = 25
+
+[[blocks]]
+name = "glowstone"
+id = 26
+
+[[blocks]]
+name = "granite"
+id = 27
+building_corner = true
+
+[[blocks]]
+name = "grass_block"
+id = 28
+
+[[blocks]]
+name = "grass"
+id = 29
+
+[[blocks]]
+name = "gravel"
+id = 30
+
+[[blocks]]
+name = "gray_concrete"
+id = 31
+
+[[blocks]]
+name = "gray_terracotta"
+id = 32
+wall_color = [57, 41, 35]
+
+[[blocks]]
+name = "green_stained_hardened_clay"
+id = 33
+
+[[blocks]]
+name = "green_wool"
+id = 34
+
+[[blocks]]
+name = "hay_bale"
+id = 35
+
+[[blocks]]
+name = "iron_bars"
+id = 36
+
+[[blocks]]
+name = "iron_block"
+id = 37
+
+[[blocks]]
+name = "jungle_planks"
+id = 38
+floor_color = [182, 133, 99]
+
+[[blocks]]
+name = "ladder"
+id = 39
+
+[[blocks]]
+name = "light_blue_concrete"
+id = 40
+floor_color = [33, 128, 185]
+
+[[blocks]]
+name = "light_blue_terracotta"
+id = 41
+wall_color = [112, 108, 138]
+
+[[blocks]]
+name = "light_gray_concrete"
+id = 42
+
+[[blocks]]
+name = "moss_block"
+id = 43
+floor_color = [78, 103, 43]
+
+[[blocks]]
+name = "mossy_cobblestone"
+id = 44
+building_corner = true
+
+[[blocks]]
+name = "mud_bricks"
+id = 45
+wall_color = [122, 92, 66]
+
+[[blocks]]
+name = "nether_brick"
+id = 46
+building_corner = true
+
+[[blocks]]
+name = "nether_bricks"
+id = 47
+wall_color = [24, 13, 14]
+
+[[blocks]]
+name = "oak_fence"
+id = 48
+
+[[blocks]]
+name = "oak_leaves"
+id = 49
+properties.persistent = true
+
+[[blocks]]
+name = "oak_log"
+id = 50
+
+[[blocks]]
+name = "oak_planks"
+id = 51
+floor_color = [171, 138, 88]
+
+[[blocks]]
+name = "oak_slab"
+id = 52
+
+[[blocks]]
+name = "orange_terracotta"
+id = 53
+wall_color = [159, 82, 36]
+
+[[blocks]]
+name = "podzol"
+id = 54
+
+[[blocks]]
+name = "polished_andesite"
+id = 55
+wall_color = [128, 128, 128]
+
+[[blocks]]
+name = "polished_basalt"
+id = 56
+building_corner = true
+
+[[blocks]]
+name = "polished_blackstone_bricks"
+id = 57
+building_corner = true
+
+[[blocks]]
+name = "polished_blackstone"
+id = 58
+floor_color = [18, 12, 13]
+
+[[blocks]]
+name = "polished_deepslate"
+id = 59
+floor_color = [64, 64, 64]
+
+[[blocks]]
+name = "polished_diorite"
+id = 60
+wall_color = [174, 173, 174]
+floor_color = [255, 255, 255]
+
+[[blocks]]
+name = "polished_granite"
+id = 61
+floor_color = [143, 96, 79]
+
+[[blocks]]
+name = "prismarine"
+id = 62
+building_corner = true
+
+[[blocks]]
+name = "purpur_block"
+id = 63
+floor_color = [141, 101, 142]
+
+[[blocks]]
+name = "purpur_pillar"
+id = 64
+wall_color = [141, 101, 142]
+
+[[blocks]]
+name = "quartz_bricks"
+id = 65
+building_corner = true
+
+[[blocks]]
+name = "rail"
+id = 66
+
+[[blocks]]
+name = "red_flower"
+id = 67
+
+[[blocks]]
+name = "red_nether_bricks"
+id = 68
+building_corner = true
+floor_color = [128, 0, 0]
+
+[[blocks]]
+name = "red_terracotta"
+id = 69
+wall_color = [142, 60, 46]
+
+[[blocks]]
+name = "red_wool"
+id = 70
+
+[[blocks]]
+name = "sand"
+id = 71
+
+[[blocks]]
+name = "sandstone"
+id = 72
+building_corner = true
+
+[[blocks]]
+name = "scaffolding"
+id = 73
+
+[[blocks]]
+name = "smooth_quartz"
+id = 74
+building_corner = true
+
+[[blocks]]
+name = "smooth_red_sandstone"
+id = 75
+# TODO Interesting, are they always the same?
+wall_color = [153, 83, 28]
+floor_color = [153, 83, 28]
+
+[[blocks]]
+name = "smooth_sandstone"
+id = 76
+wall_color = [224, 216, 175]
+
+[[blocks]]
+name = "smooth_stone"
+id = 77
+wall_color = [188, 182, 179]
+
+[[blocks]]
+name = "sponge"
+id = 78
+
+[[blocks]]
+name = "spruce_log"
+id = 79
+
+[[blocks]]
+name = "spruce_planks"
+id = 80
+floor_color = [128, 96, 57]
+
+[[blocks]]
+name = "stone_block_slab"
+id = 81
+
+[[blocks]]
+name = "stone_brick_slab"
+id = 82
+
+[[blocks]]
+name = "stone_bricks"
+id = 83
+building_corner = true
+floor_color = [128, 128, 128]
+
+[[blocks]]
+name = "stone"
+id = 84
+
+[[blocks]]
+name = "terracotta"
+id = 85
+floor_color = [150, 93, 68]
+
+[[blocks]]
+name = "warped_planks"
+id = 86
+wall_color = [35, 86, 85]
+floor_color = [35, 86, 85]
+
+[[blocks]]
+name = "water"
+id = 87
+
+[[blocks]]
+name = "white_concrete"
+id = 88
+wall_color = [255, 255, 255]
+
+[[blocks]]
+name = "white_flower"
+id = 89
+
+[[blocks]]
+name = "white_stained_glass"
+id = 90
+
+[[blocks]]
+name = "white_terracotta"
+id = 91
+wall_color = [209, 177, 161]
+
+[[blocks]]
+name = "white_wool"
+id = 92
+
+[[blocks]]
+name = "yellow_concrete"
+id = 93
+
+[[blocks]]
+name = "yellow_flower"
+id = 94
+
+[[blocks]]
+name = "yellow_wool"
+id = 95
+
+[[blocks]]
+name = "lime_concrete"
+id = 96
+
+[[blocks]]
+name = "cyan_wool"
+id = 97
+
+[[blocks]]
+name = "blue_concrete"
+id = 98
+
+[[blocks]]
+name = "purple_concrete"
+id = 99
+
+[[blocks]]
+name = "red_concrete"
+id = 100
+
+[[blocks]]
+name = "magenta_concrete"
+id = 101
+
+[[blocks]]
+name = "brown_wool"
+id = 102
+
+[[blocks]]
+name = "oxidized_copper"
+id = 103
+floor_color = [0, 128, 0]
+
+[[blocks]]
+name = "yellow_terracotta"
+id = 104
+wall_color = [191, 147, 42]
+
+[[blocks]]
+name = "snow_block"
+id = 111
+
+[[blocks]]
+name = "snow_layer"
+id = 112
+
+[[blocks]]
+name = "sign"
+id = 113
+properties.rotation = 6
+properties.waterlogged = false
+
+[[blocks]]
+name = "andesite_wall"
+id = 114
+
+[[blocks]]
+name = "stone_brick_wall"
+id = 115
+
+[[blocks]]
+name = "carrots"
+id = 105
+properties.age = 7
+
+[[blocks]]
+name = "dark_oak_door_lower"
+id = 106
+properties.half = "lower"
+
+[[blocks]]
+name = "dark_oak_door_upper"
+id = 107
+properties.half = "upper"
+
+[[blocks]]
+name = "potatoes"
+id = 108
+
+[[blocks]]
+name = "wheat"
+id = 109
+
+[[blocks]]
+name = "bedrock"
+id = 110
+
+[[blocks]]
+name = "rail_north_south"
+id = 116
+properties.shape = "north_south"
+
+[[blocks]]
+name = "rail_east_west"
+id = 117
+properties.shape = "east_west"
+
+[[blocks]]
+name = "rail_ascending_east"
+id = 118
+properties.shape = "ascending_east"
+
+[[blocks]]
+name = "rail_ascending_west"
+id = 119
+properties.shape = "ascending_west"
+
+[[blocks]]
+name = "rail_ascending_north"
+id = 120
+properties.shape = "ascending_north"
+
+[[blocks]]
+name = "rail_ascending_south"
+id = 121
+properties.shape = "ascending_south"
+
+[[blocks]]
+name = "rail_north_east"
+id = 122
+properties.shape = "north_east"
+
+[[blocks]]
+name = "rail_north_west"
+id = 123
+properties.shape = "north_west"
+
+[[blocks]]
+name = "rail_south_east"
+id = 124
+properties.shape = "south_east"
+
+[[blocks]]
+name = "rail_south_west"
+id = 125
+properties.shape = "south_west"
+
+[[blocks]]
+name = "coarse_dirt"
+id = 126
+
+[[blocks]]
+name = "iron_ore"
+id = 127
+
+[[blocks]]
+name = "coal_ore"
+id = 128
