@@ -38,17 +38,17 @@ pub fn generate_buildings(
 
     // Randomly select block variations for corners, walls, and floors
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-    let variation_index_corner: usize = rng.gen_range(0..building_corner_variations().len());
+    let variation_index_corner: usize = rng.gen_range(0..BUILDING_CORNER_VARIATIONS.len());
     let variation_index_wall: usize = rng.gen_range(0..building_wall_variations().len());
     let variation_index_floor: usize = rng.gen_range(0..building_floor_variations().len());
 
-    let corner_block: Block = building_corner_variations()[variation_index_corner];
+    let corner_block: Block = BUILDING_CORNER_VARIATIONS[variation_index_corner];
     let wall_block: Block = element
         .tags
         .get("building:colour")
         .and_then(|building_colour: &String| {
             color_text_to_rgb_tuple(building_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, building_wall_color_map())
+                find_nearest_block_in_color_map(&rgb, &BUILDING_WALL_COLOR_MAP)
             })
         })
         .flatten()
@@ -58,7 +58,7 @@ pub fn generate_buildings(
         .get("roof:colour")
         .and_then(|roof_colour: &String| {
             color_text_to_rgb_tuple(roof_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, building_floor_color_map())
+                find_nearest_block_in_color_map(&rgb, &BUILDING_FLOOR_COLOR_MAP)
             })
         })
         .flatten()
@@ -505,12 +505,13 @@ pub fn generate_building_from_relation(
 
 fn find_nearest_block_in_color_map(
     rgb: &RGBTuple,
-    color_map: Vec<(RGBTuple, Block)>,
+    color_map: &[(RGBTuple, Block)],
 ) -> Option<Block> {
     color_map
-        .into_iter()
+        .iter()
         .min_by_key(|(entry_rgb, _)| rgb_distance(entry_rgb, rgb))
         .map(|(_, block)| block)
+        .copied()
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.
