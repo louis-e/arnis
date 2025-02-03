@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::BLOCKS;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::element_processing::tree::create_tree;
@@ -37,28 +37,28 @@ pub fn generate_natural(
             let mut current_natural: Vec<(i32, i32)> = vec![];
 
             // Determine block type based on natural tag
-            let block_type: Block = match natural_type.as_str() {
+            let block_type = match natural_type.as_str() {
                 "scrub" | "grassland" | "wood" => {
                     if args.winter {
-                        SNOW_BLOCK
+                        &*BLOCKS.by_name("snow_block").unwrap()
                     } else {
-                        GRASS_BLOCK
+                        &*BLOCKS.by_name("grass_block").unwrap()
                     }
                 }
-                "beach" | "sand" => SAND,
+                "beach" | "sand" => &*BLOCKS.by_name("sand").unwrap(),
                 "tree_row" => {
                     if args.winter {
-                        SNOW_BLOCK
+                        &*BLOCKS.by_name("snow_block").unwrap()
                     } else {
-                        GRASS_BLOCK
+                        &*BLOCKS.by_name("grass_block").unwrap()
                     }
                 }
-                "wetland" | "water" => WATER,
+                "wetland" | "water" => &*BLOCKS.by_name("water").unwrap(),
                 _ => {
                     if args.winter {
-                        SNOW_BLOCK
+                        &*BLOCKS.by_name("snow_block").unwrap()
                     } else {
-                        GRASS_BLOCK
+                        &*BLOCKS.by_name("grass_block").unwrap()
                     }
                 }
             };
@@ -113,7 +113,7 @@ pub fn generate_natural(
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
-                        if editor.check_for_block(x, y, z, None, Some(&[WATER])) {
+                        if editor.check_for_block(x, y, z, None, Some(&[&*BLOCKS.by_name("water").unwrap()])) {
                             continue;
                         }
 
@@ -122,14 +122,14 @@ pub fn generate_natural(
                             create_tree(editor, x, y + 1, z, rng.gen_range(1..=3), args.winter);
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
-                                1 => RED_FLOWER,
-                                2 => BLUE_FLOWER,
-                                3 => YELLOW_FLOWER,
-                                _ => WHITE_FLOWER,
+                                1 => &*BLOCKS.by_name("red_flower").unwrap(),
+                                2 => &*BLOCKS.by_name("blue_flower").unwrap(),
+                                3 => &*BLOCKS.by_name("yellow_flower").unwrap(),
+                                _ => &*BLOCKS.by_name("white_flower").unwrap(),
                             };
                             editor.set_block(flower_block, x, y + 1, z, None, None);
                         } else if random_choice <= 1 {
-                            editor.set_block(GRASS, x, y + 1, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, y + 1, z, None, None);
                         }
                     }
                 }

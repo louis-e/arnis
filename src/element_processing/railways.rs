@@ -1,4 +1,4 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{BLOCKS, Block};
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::ground::Ground;
@@ -43,7 +43,7 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
                 let (bx, _, bz) = smoothed_points[j];
                 let ground_level = ground.level(XZPoint::new(bx, bz));
 
-                editor.set_block(IRON_BLOCK, bx, ground_level, bz, None, None);
+                editor.set_block(&*BLOCKS.by_name("iron_block").unwrap(), bx, ground_level, bz, None, None);
 
                 let prev = if j > 0 {
                     Some(smoothed_points[j - 1])
@@ -65,7 +65,7 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
                 editor.set_block(rail_block, bx, ground_level + 1, bz, None, None);
 
                 if bx % 4 == 0 {
-                    editor.set_block(OAK_LOG, bx, ground_level, bz, None, None);
+                    editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), bx, ground_level, bz, None, None);
                 }
             }
         }
@@ -132,15 +132,15 @@ fn determine_rail_direction(
     current: (i32, i32),
     prev: Option<(i32, i32)>,
     next: Option<(i32, i32)>,
-) -> Block {
+) -> &'static Block {
     let (x, z) = current;
 
     match (prev, next) {
         (Some((px, pz)), Some((nx, nz))) => {
             if px == nx {
-                RAIL_NORTH_SOUTH
+                &*BLOCKS.by_name("rail_north_south").unwrap()
             } else if pz == nz {
-                RAIL_EAST_WEST
+                &*BLOCKS.by_name("rail_east_west").unwrap()
             } else {
                 // Calculate relative movements
                 let from_prev = (px - x, pz - z);
@@ -148,18 +148,18 @@ fn determine_rail_direction(
 
                 match (from_prev, to_next) {
                     // East to North or North to East
-                    ((-1, 0), (0, -1)) | ((0, -1), (-1, 0)) => RAIL_NORTH_WEST,
+                    ((-1, 0), (0, -1)) | ((0, -1), (-1, 0)) => &*BLOCKS.by_name("rail_north_west").unwrap(),
                     // West to North or North to West
-                    ((1, 0), (0, -1)) | ((0, -1), (1, 0)) => RAIL_NORTH_EAST,
+                    ((1, 0), (0, -1)) | ((0, -1), (1, 0)) => &*BLOCKS.by_name("rail_north_east").unwrap(),
                     // East to South or South to East
-                    ((-1, 0), (0, 1)) | ((0, 1), (-1, 0)) => RAIL_SOUTH_WEST,
+                    ((-1, 0), (0, 1)) | ((0, 1), (-1, 0)) => &*BLOCKS.by_name("rail_south_west").unwrap(),
                     // West to South or South to West
-                    ((1, 0), (0, 1)) | ((0, 1), (1, 0)) => RAIL_SOUTH_EAST,
+                    ((1, 0), (0, 1)) | ((0, 1), (1, 0)) => &*BLOCKS.by_name("rail_south_east").unwrap(),
                     _ => {
                         if (px - x).abs() > (pz - z).abs() {
-                            RAIL_EAST_WEST
+                            &*BLOCKS.by_name("rail_east_west").unwrap()
                         } else {
-                            RAIL_NORTH_SOUTH
+                            &*BLOCKS.by_name("rail_north_south").unwrap()
                         }
                     }
                 }
@@ -167,13 +167,13 @@ fn determine_rail_direction(
         }
         (Some((px, pz)), None) | (None, Some((px, pz))) => {
             if px == x {
-                RAIL_NORTH_SOUTH
+                &*BLOCKS.by_name("rail_north_south").unwrap()
             } else if pz == z {
-                RAIL_EAST_WEST
+                &*BLOCKS.by_name("rail_east_west").unwrap()
             } else {
-                RAIL_NORTH_SOUTH
+                &*BLOCKS.by_name("rail_north_south").unwrap()
             }
         }
-        (None, None) => RAIL_NORTH_SOUTH,
+        (None, None) => &*BLOCKS.by_name("rail_north_south").unwrap(),
     }
 }

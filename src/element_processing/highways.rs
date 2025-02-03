@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::BLOCKS;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
@@ -21,9 +21,9 @@ pub fn generate_highways(
                 let y: i32 = ground.level(first_node.xz());
                 let z: i32 = first_node.z;
                 for dy in 1..=4 {
-                    editor.set_block(OAK_FENCE, x, y + dy, z, None, None);
+                    editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x, y + dy, z, None, None);
                 }
-                editor.set_block(GLOWSTONE, x, y + 5, z, None, None);
+                editor.set_block(&*BLOCKS.by_name("glowstone").unwrap(), x, y + 5, z, None, None);
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -35,15 +35,15 @@ pub fn generate_highways(
                         let z: i32 = node.z;
 
                         for dy in 1..=3 {
-                            editor.set_block(COBBLESTONE_WALL, x, y + dy, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("cobblestone_wall").unwrap(), x, y + dy, z, None, None);
                         }
 
-                        editor.set_block(GREEN_WOOL, x, y + 4, z, None, None);
-                        editor.set_block(YELLOW_WOOL, x, y + 5, z, None, None);
-                        editor.set_block(RED_WOOL, x, y + 6, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("green_wool").unwrap(), x, y + 4, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("yellow_wool").unwrap(), x, y + 5, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("red_wool").unwrap(), x, y + 6, z, None, None);
 
                         if args.winter {
-                            editor.set_block(SNOW_LAYER, x, y + 7, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("snow_layer").unwrap(), x, y + 7, z, None, None);
                         }
                     }
                 }
@@ -55,11 +55,11 @@ pub fn generate_highways(
                 let y = ground.level(node.xz());
                 let z = node.z;
                 for dy in 1..=3 {
-                    editor.set_block(COBBLESTONE_WALL, x, y + dy, z, None, None);
+                    editor.set_block(&*BLOCKS.by_name("cobblestone_wall").unwrap(), x, y + dy, z, None, None);
                 }
 
-                editor.set_block(WHITE_WOOL, x, y + 4, z, None, None);
-                editor.set_block(WHITE_WOOL, x + 1, y + 4, z, None, None);
+                editor.set_block(&*BLOCKS.by_name("white_wool").unwrap(), x, y + 4, z, None, None);
+                editor.set_block(&*BLOCKS.by_name("white_wool").unwrap(), x + 1, y + 4, z, None, None);
             }
         } else if element
             .tags()
@@ -71,27 +71,27 @@ pub fn generate_highways(
             };
 
             // Handle areas like pedestrian plazas
-            let mut surface_block: Block = STONE; // Default block
+            let mut surface_block = &*BLOCKS.by_name("stone").unwrap(); // Default block
 
             // Determine the block type based on the 'surface' tag
             if let Some(surface) = element.tags().get("surface") {
                 surface_block = match surface.as_str() {
-                    "paving_stones" | "sett" => STONE_BRICKS,
-                    "bricks" => BRICK,
-                    "wood" => OAK_PLANKS,
-                    "asphalt" => BLACK_CONCRETE,
-                    "gravel" | "fine_gravel" => GRAVEL,
+                    "paving_stones" | "sett" => &*BLOCKS.by_name("stone_bricks").unwrap(),
+                    "bricks" => &*BLOCKS.by_name("brick").unwrap(),
+                    "wood" => &*BLOCKS.by_name("oak_planks").unwrap(),
+                    "asphalt" => &*BLOCKS.by_name("black_concrete").unwrap(),
+                    "gravel" | "fine_gravel" => &*BLOCKS.by_name("gravel").unwrap(),
                     "grass" => {
                         if args.winter {
-                            SNOW_BLOCK
+                            &*BLOCKS.by_name("snow_block").unwrap()
                         } else {
-                            GRASS_BLOCK
+                            &*BLOCKS.by_name("grass_block").unwrap()
                         }
                     }
-                    "dirt" => DIRT,
-                    "sand" => SAND,
-                    "concrete" => LIGHT_GRAY_CONCRETE,
-                    _ => STONE, // Default to stone for unknown surfaces
+                    "dirt" => &*BLOCKS.by_name("dirt").unwrap(),
+                    "sand" => &*BLOCKS.by_name("sand").unwrap(),
+                    "concrete" => &*BLOCKS.by_name("light_gray_concrete").unwrap(),
+                    _ => &*BLOCKS.by_name("stone").unwrap(), // Default to stone for unknown surfaces
                 };
             }
 
@@ -116,7 +116,7 @@ pub fn generate_highways(
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
-            let mut block_type = BLACK_CONCRETE;
+            let mut block_type = &*BLOCKS.by_name("black_concrete").unwrap();
             let mut block_range: i32 = 2;
             let mut add_stripe = false;
 
@@ -136,11 +136,11 @@ pub fn generate_highways(
             // Determine block type and range based on highway type
             match highway_type.as_str() {
                 "footway" | "pedestrian" => {
-                    block_type = GRAY_CONCRETE;
+                    block_type = &*BLOCKS.by_name("gray_concrete").unwrap();
                     block_range = 1;
                 }
                 "path" => {
-                    block_type = LIGHT_GRAY_CONCRETE;
+                    block_type = &*BLOCKS.by_name("light_gray_concrete").unwrap();
                     block_range = 1;
                 }
                 "motorway" | "primary" => {
@@ -154,7 +154,7 @@ pub fn generate_highways(
                     block_range = 1;
                 }
                 "service" => {
-                    block_type = GRAY_CONCRETE;
+                    block_type = &*BLOCKS.by_name("gray_concrete").unwrap();
                     block_range = 2;
                 }
                 _ => {
@@ -208,16 +208,16 @@ pub fn generate_highways(
                                     if is_horizontal {
                                         if set_x % 2 < 1 {
                                             editor.set_block(
-                                                WHITE_CONCRETE,
+                                                &*BLOCKS.by_name("white_concrete").unwrap(),
                                                 set_x,
                                                 ground.level(XZPoint::new(set_x, set_z)),
                                                 set_z,
-                                                Some(&[BLACK_CONCRETE]),
+                                                Some(&[&*BLOCKS.by_name("black_concrete").unwrap()]),
                                                 None,
                                             );
                                         } else {
                                             editor.set_block(
-                                                BLACK_CONCRETE,
+                                                &*BLOCKS.by_name("black_concrete").unwrap(),
                                                 set_x,
                                                 ground.level(XZPoint::new(set_x, set_z)),
                                                 set_z,
@@ -227,16 +227,16 @@ pub fn generate_highways(
                                         }
                                     } else if set_z % 2 < 1 {
                                         editor.set_block(
-                                            WHITE_CONCRETE,
+                                            &*BLOCKS.by_name("white_concrete").unwrap(),
                                             set_x,
                                             ground.level(XZPoint::new(set_x, set_z)),
                                             set_z,
-                                            Some(&[BLACK_CONCRETE]),
+                                            Some(&[&*BLOCKS.by_name("black_concrete").unwrap()]),
                                             None,
                                         );
                                     } else {
                                         editor.set_block(
-                                            BLACK_CONCRETE,
+                                            &*BLOCKS.by_name("black_concrete").unwrap(),
                                             set_x,
                                             ground.level(XZPoint::new(set_x, set_z)),
                                             set_z,
@@ -251,7 +251,7 @@ pub fn generate_highways(
                                         ground.level(XZPoint::new(set_x, set_z)),
                                         set_z,
                                         None,
-                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                                        Some(&[&*BLOCKS.by_name("black_concrete").unwrap(), &*BLOCKS.by_name("white_concrete").unwrap()]),
                                     );
                                 }
                             }
@@ -263,11 +263,11 @@ pub fn generate_highways(
                                 let stripe_x: i32 = x;
                                 let stripe_z: i32 = z;
                                 editor.set_block(
-                                    WHITE_CONCRETE,
+                                    &*BLOCKS.by_name("white_concrete").unwrap(),
                                     stripe_x,
                                     ground.level(XZPoint::new(stripe_x, stripe_z)),
                                     stripe_z,
-                                    Some(&[BLACK_CONCRETE]),
+                                    Some(&[&*BLOCKS.by_name("black_concrete").unwrap()]),
                                     None,
                                 );
                             }
@@ -289,7 +289,7 @@ pub fn generate_highways(
 /// Generates a siding using stone brick slabs
 pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground: &Ground) {
     let mut previous_node: Option<XZPoint> = None;
-    let siding_block: Block = STONE_BRICK_SLAB;
+    let siding_block = &*BLOCKS.by_name("stone_brick_slab").unwrap();
 
     for node in &element.nodes {
         let current_node = node.xz();
@@ -313,7 +313,7 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground:
                     ground_level - 1,
                     bz,
                     None,
-                    Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                    Some(&[&*BLOCKS.by_name("black_concrete").unwrap(), &*BLOCKS.by_name("white_concrete").unwrap()]),
                 ) {
                     editor.set_block(siding_block, bx, ground_level, bz, None, None);
                 }
@@ -327,7 +327,7 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground:
 /// Generates an aeroway
 pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, ground: &Ground) {
     let mut previous_node: Option<(i32, i32)> = None;
-    let surface_block = LIGHT_GRAY_CONCRETE;
+    let surface_block = &*BLOCKS.by_name("light_gray_concrete").unwrap();
 
     for node in &way.nodes {
         if let Some(prev) = previous_node {

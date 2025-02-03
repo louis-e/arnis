@@ -2,7 +2,7 @@ use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 use std::time::Instant;
 
 use crate::{
-    block_definitions::WATER,
+    block_definitions::BLOCKS,
     cartesian::XZPoint,
     ground::Ground,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
@@ -288,7 +288,7 @@ fn inverse_floodfill_iterative(
             if outers.iter().any(|poly: &Polygon| poly.contains(&p))
                 && inners.iter().all(|poly: &Polygon| !poly.contains(&p))
             {
-                editor.set_block(WATER, x, ground_level, z, None, None);
+                editor.set_block(&*BLOCKS.by_name("water").unwrap(), x, ground_level, z, None, None);
             }
         }
     }
@@ -304,7 +304,7 @@ fn rect_fill(
 ) {
     for x in min_x..max_x {
         for z in min_z..max_z {
-            editor.set_block(WATER, x, ground_level, z, None, None);
+            editor.set_block(&*BLOCKS.by_name("water").unwrap(), x, ground_level, z, None, None);
         }
     }
 }
