@@ -251,6 +251,14 @@ button:hover {
   margin: 15px 0;
 }
 
+#fillground-toggle {
+  accent-color: #fecc44;
+}
+
+.fillground-toggle-container, .scale-slider-container {
+  margin: 15px 0;
+}
+
 #winter-toggle {
   accent-color: #fecc44;
 }

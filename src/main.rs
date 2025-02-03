@@ -392,6 +392,7 @@ fn gui_check_for_updates() -> Result<bool, String> {
 
 #[cfg(feature = "gui")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
@@ -400,6 +401,7 @@ fn gui_start_generation(
     winter_mode: bool,
     floodfill_timeout: u64,
     terrain_enabled: bool,
+    fillground_enabled: bool,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -427,6 +429,7 @@ fn gui_start_generation(
                 scale: world_scale,
                 ground_level,
                 terrain: terrain_enabled,
+                fillground: fillground_enabled,
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
