@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{DIRT, GRASS_BLOCK, SNOW_BLOCK};
+use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
 use crate::cartesian::XZPoint;
 use crate::element_processing::*;
 use crate::ground::Ground;
@@ -9,7 +9,7 @@ use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-const MIN_Y: i32 = -64;
+pub const MIN_Y: i32 = -64;
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
@@ -170,6 +170,13 @@ pub fn generate_world(
                 editor.set_block(groundlayer_block, x, max_y, z, None, None);
                 editor.set_block(DIRT, x, max_y - 1, z, None, None);
                 editor.set_block(DIRT, x, max_y - 2, z, None, None);
+                // Fill underground with stone
+                if args.fillground {
+                    for y in MIN_Y + 1..max_y - 2 {
+                        editor.set_block(STONE, x, y, z, None, None);
+                    }
+                }
+                editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {
@@ -196,6 +203,7 @@ pub fn generate_world(
                 let ground_level = ground.level(XZPoint::new(x, z));
                 editor.set_block(groundlayer_block, x, ground_level, z, None, None);
                 editor.set_block(DIRT, x, ground_level - 1, z, None, None);
+                editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {
