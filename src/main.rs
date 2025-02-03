@@ -392,6 +392,7 @@ fn gui_check_for_updates() -> Result<bool, String> {
 
 #[cfg(feature = "gui")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
