@@ -366,7 +366,7 @@ pub fn generate_landuse(
                     }
                     // Fill everything with stone so dirt won't be there
                     if args.fillground {
-                        editor.fill_blocks(STONE, x, MIN_Y+1, z, x, ground_level, z, None, None);
+                        editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, ground_level, z, None, None);
                     }
                 }
             }
