@@ -55,7 +55,7 @@ struct SectionToModify {
 
 impl SectionToModify {
     fn get_block(&self, x: u8, y: u8, z: u8) -> Option<Block> {
-        let b = self.blocks[Self::index(x, y, z)];
+        let b = self.blocks[Self::index(x, y, z)].clone();
         if b == *BLOCKS.by_name("air").unwrap() {
             return None;
         }
@@ -151,12 +151,12 @@ impl ChunkToModify {
         section.get_block(x, (y & 15).try_into().unwrap(), z)
     }
 
-    fn set_block(&mut self, x: u8, y: i32, z: u8, block: Block) {
+    fn set_block(&mut self, x: u8, y: i32, z: u8, block: &Block) {
         let section_idx: i8 = (y >> 4).try_into().unwrap();
 
         let section = self.sections.entry(section_idx).or_default();
 
-        section.set_block(x, (y & 15).try_into().unwrap(), z, block);
+        section.set_block(x, (y & 15).try_into().unwrap(), z, *block);
     }
 
     fn sections(&self) -> impl Iterator<Item = Section> + '_ {
@@ -222,7 +222,7 @@ impl WorldToModify {
             (x & 15).try_into().unwrap(),
             y,
             (z & 15).try_into().unwrap(),
-            block,
+            &block,
         );
     }
 }

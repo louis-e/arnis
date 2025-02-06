@@ -1,7 +1,9 @@
+use std::hash::Hash;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use crate::colors::RGBTuple;
+
 
 /// Use this!
 pub static BLOCKS: LazyLock<Blocks> = LazyLock::new(|| Blocks::load());
@@ -23,6 +25,39 @@ pub struct Block {
     /// https://wiki.openstreetmap.org/wiki/Key:building:colour
     pub wall_color: Option<RGBTuple>,
     pub floor_color: Option<RGBTuple>,
+}
+
+impl Hash for Block {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.id.hash(state);
+        // self.properties.hash(state);
+        self.building_corner.hash(state);
+        self.wall_color.hash(state);
+        self.floor_color.hash(state);
+    }
+}
+
+impl Ord for Block {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+
+        if self.id < other.id {
+           Ordering::Less
+        }
+        else if self.id > other.id {
+            Ordering::Greater
+        }
+        else {
+            Ordering::Equal
+        }
+    }
+}
+
+impl PartialOrd for Block {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
 }
 
 #[derive(Deserialize, Debug)]

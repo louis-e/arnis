@@ -72,12 +72,13 @@ pub fn generate_buildings(
                 match building_type.as_str() {
                     "yes" | "house" | "detached" | "static_caravan" | "semidetached_house"
                     | "bungalow" | "manor" | "villa" => {
-                        return *BLOCKS.building_floor_variations()[variation_index_floor];
+                        return BLOCKS.building_floor_variations()[variation_index_floor].clone();
                     }
-                    _ => return *BLOCKS.by_name("light_gray_concrete").unwrap(),
+                    _ => return BLOCKS.by_name("light_gray_concrete").unwrap().clone(),
                 }
             }
-            *BLOCKS.by_name("light_gray_concrete").unwrap()
+
+            BLOCKS.by_name("light_gray_concrete").unwrap().clone()
         });
     let window_block = &*BLOCKS.by_name("white_stained_glass").unwrap();
 
