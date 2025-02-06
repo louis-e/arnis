@@ -6,14 +6,14 @@ use crate::colors::RGBTuple;
 /// Use this!
 pub static BLOCKS: LazyLock<Blocks> = LazyLock::new(|| Blocks::load());
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 enum PropertyType {
     IntType(i32),
     StrType(String),
     BoolType(bool),
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Block {
     pub name: String,
     pub id: u8, // TODO what type should this be?
@@ -39,23 +39,40 @@ impl Blocks {
         toml::from_str(&blocks_toml).unwrap()
     }
 
+
     pub fn by_name(&self, name: &str) -> Option<&Block> {
         self.blocks.iter().find(|e| e.name == name)
     }
+
 
     pub fn by_id(&self, id: u8) -> Option<&Block> {
         self.blocks.iter().find(|e| e.id == id)
     }
 
+
+    pub fn building_corner_variations(&self) -> Vec<&Block> {
+        self.blocks.iter().filter(|e| e.building_corner).collect()
+    }
+
+
     // Variations for building walls
-    // pub fn building_wall_variations(&self) -> Vec<Block> {
-    //     todo!();
-    // }
-    //
+    pub fn building_wall_variations(&self) -> Vec<&Block> {
+       self.blocks.iter().filter(|e| e.wall_color.is_some()).collect()
+    }
+
+
     // Variations for building floors
-    // pub fn building_floor_variations(&self) -> Vec<Block> {
-    //     todo!();
-    // }
+    pub fn building_floor_variations(&self) -> Vec<&Block> {
+       self.blocks.iter().filter(|e| e.floor_color.is_some()).collect()
+    }
+
+    pub fn building_wall_color_map(&self) -> Vec<(RGBTuple, &Block)> {
+       self.building_wall_variations().iter().map(|e| (e.wall_color.unwrap(), *e)).collect()
+    }
+
+    pub fn building_floor_color_map(&self) -> Vec<(RGBTuple, &Block)> {
+       self.building_floor_variations().iter().map(|e| (e.floor_color.unwrap(), *e)).collect()
+    }
 }
 
 #[cfg(test)]

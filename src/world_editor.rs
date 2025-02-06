@@ -56,7 +56,7 @@ struct SectionToModify {
 impl SectionToModify {
     fn get_block(&self, x: u8, y: u8, z: u8) -> Option<Block> {
         let b = self.blocks[Self::index(x, y, z)];
-        if b == &*BLOCKS.by_name("air").unwrap() {
+        if b == *BLOCKS.by_name("air").unwrap() {
             return None;
         }
 
@@ -111,8 +111,8 @@ impl SectionToModify {
         let palette = palette
             .iter()
             .map(|x| PaletteItem {
-                name: x.name().to_string(),
-                properties: x.properties(),
+                name: x.name.to_string(),
+                properties: x.properties,
             })
             .collect();
 
@@ -131,7 +131,7 @@ impl SectionToModify {
 impl Default for SectionToModify {
     fn default() -> Self {
         Self {
-            blocks: [&*BLOCKS.by_name("air").unwrap(); 4096],
+            blocks: [*BLOCKS.by_name("air").unwrap(); 4096],
         }
     }
 }
@@ -353,11 +353,11 @@ impl WorldEditor {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id == existing_block.id)
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id == existing_block.id)
             } else {
                 false
             }
@@ -366,7 +366,7 @@ impl WorldEditor {
         };
 
         if should_insert {
-            self.world.set_block(x, y, z, block);
+            self.world.set_block(x, y, z, *block);
         }
     }
 
@@ -412,7 +412,7 @@ impl WorldEditor {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id == existing_block.id)
                 {
                     return true; // Block is in whitelist
                 }
@@ -420,7 +420,7 @@ impl WorldEditor {
             if let Some(blacklist) = blacklist {
                 if blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id == existing_block.id)
                 {
                     return true; // Block is in blacklist
                 }

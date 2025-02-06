@@ -38,27 +38,27 @@ pub fn generate_buildings(
 
     // Randomly select block variations for corners, walls, and floors
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-    let variation_index_corner: usize = rng.gen_range(0..BUILDING_CORNER_VARIATIONS.len());
-    let variation_index_wall: usize = rng.gen_range(0..building_wall_variations().len());
-    let variation_index_floor: usize = rng.gen_range(0..building_floor_variations().len());
+    let variation_index_corner: usize = rng.gen_range(0..BLOCKS.building_corner_variations().len());
+    let variation_index_wall: usize = rng.gen_range(0..BLOCKS.building_wall_variations().len());
+    let variation_index_floor: usize = rng.gen_range(0..BLOCKS.building_floor_variations().len());
 
-    let corner_block: Block = BUILDING_CORNER_VARIATIONS[variation_index_corner];
-    let wall_block: Block = element
+    let corner_block = BLOCKS.building_corner_variations()[variation_index_corner];
+    let wall_block = element
         .tags
         .get("building:colour")
         .and_then(|building_colour: &String| {
             color_text_to_rgb_tuple(building_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, &BUILDING_WALL_COLOR_MAP)
+                find_nearest_block_in_color_map(&rgb, &*BLOCKS.building_wall_color_map())
             })
         })
         .flatten()
-        .unwrap_or_else(|| building_wall_variations()[variation_index_wall]);
+        .unwrap_or_else(|| BLOCKS.building_wall_variations()[variation_index_wall].clone());
     let floor_block = element
         .tags
         .get("roof:colour")
         .and_then(|roof_colour: &String| {
             color_text_to_rgb_tuple(roof_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, &BUILDING_FLOOR_COLOR_MAP)
+                find_nearest_block_in_color_map(&rgb, &*BLOCKS.building_floor_color_map())
             })
         })
         .flatten()
@@ -72,12 +72,12 @@ pub fn generate_buildings(
                 match building_type.as_str() {
                     "yes" | "house" | "detached" | "static_caravan" | "semidetached_house"
                     | "bungalow" | "manor" | "villa" => {
-                        return building_floor_variations()[variation_index_floor];
+                        return *BLOCKS.building_floor_variations()[variation_index_floor];
                     }
-                    _ => return &*BLOCKS.by_name("light_gray_concrete").unwrap(),
+                    _ => return *BLOCKS.by_name("light_gray_concrete").unwrap(),
                 }
             }
-            &*BLOCKS.by_name("light_gray_concrete").unwrap()
+            *BLOCKS.by_name("light_gray_concrete").unwrap()
         });
     let window_block = &*BLOCKS.by_name("white_stained_glass").unwrap();
 
@@ -505,13 +505,13 @@ pub fn generate_building_from_relation(
 
 fn find_nearest_block_in_color_map(
     rgb: &RGBTuple,
-    color_map: &[(RGBTuple, Block)],
+    color_map: &[(RGBTuple, &Block)],
 ) -> Option<Block> {
     color_map
         .iter()
         .min_by_key(|(entry_rgb, _)| rgb_distance(entry_rgb, rgb))
         .map(|(_, block)| block)
-        .copied()
+        .copied().cloned()
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.
