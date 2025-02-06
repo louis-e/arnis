@@ -1,4 +1,4 @@
-use crate::block_definitions::*;
+use crate::block_definitions::BLOCKS;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::ground::Ground;
@@ -40,14 +40,14 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, grou
                         for x in (bx - waterway_width / 2)..=(bx + waterway_width / 2) {
                             for z in (bz - waterway_width / 2)..=(bz + waterway_width / 2) {
                                 // Set water block at the ground level
-                                editor.set_block(WATER, x, ground_level, z, None, None);
+                                editor.set_block(&*BLOCKS.by_name("water").unwrap(), x, ground_level, z, None, None);
                                 // Clear vegetation above the water
                                 editor.set_block(
-                                    AIR,
+                                    &*BLOCKS.by_name("air").unwrap(),
                                     x,
                                     ground_level + 1,
                                     z,
-                                    Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
+                                    Some(&[&*BLOCKS.by_name("grass").unwrap(), &*BLOCKS.by_name("wheat").unwrap(), &*BLOCKS.by_name("carrots").unwrap(), &*BLOCKS.by_name("potatoes").unwrap()]),
                                     None,
                                 );
                             }

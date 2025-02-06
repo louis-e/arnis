@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::BLOCKS;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::element_processing::tree::create_tree;
@@ -21,39 +21,39 @@ pub fn generate_leisure(
         let mut current_leisure: Vec<(i32, i32)> = vec![];
 
         // Determine block type based on leisure type
-        let block_type: Block = match leisure_type.as_str() {
+        let block_type = match leisure_type.as_str() {
             "park" => {
                 if args.winter {
-                    SNOW_BLOCK
+                    &*BLOCKS.by_name("snow_block").unwrap()
                 } else {
-                    GRASS_BLOCK
+                    &*BLOCKS.by_name("grass_block").unwrap()
                 }
             }
             "playground" | "recreation_ground" | "pitch" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
-                        "clay" => TERRACOTTA,
-                        "sand" => SAND,
-                        "tartan" => RED_TERRACOTTA,
-                        _ => GREEN_STAINED_HARDENED_CLAY,
+                        "clay" => &*BLOCKS.by_name("terracotta").unwrap(),
+                        "sand" => &*BLOCKS.by_name("sand").unwrap(),
+                        "tartan" => &*BLOCKS.by_name("red_terracotta").unwrap(),
+                        _ => &*BLOCKS.by_name("green_stained_hardened_clay").unwrap(),
                     }
                 } else {
-                    GREEN_STAINED_HARDENED_CLAY
+                    &*BLOCKS.by_name("green_stained_hardened_clay").unwrap()
                 }
             }
             "garden" => {
                 if args.winter {
-                    SNOW_BLOCK
+                    &*BLOCKS.by_name("snow_block").unwrap()
                 } else {
-                    GRASS_BLOCK
+                    &*BLOCKS.by_name("grass_block").unwrap()
                 }
             }
-            "swimming_pool" => WATER,
+            "swimming_pool" => &*BLOCKS.by_name("water").unwrap(),
             _ => {
                 if args.winter {
-                    SNOW_BLOCK
+                    &*BLOCKS.by_name("snow_block").unwrap()
                 } else {
-                    GRASS_BLOCK
+                    &*BLOCKS.by_name("grass_block").unwrap()
                 }
             }
         };
@@ -71,12 +71,12 @@ pub fn generate_leisure(
                         ground.level(XZPoint::new(bx, bz)),
                         bz,
                         Some(&[
-                            GRASS_BLOCK,
-                            STONE_BRICKS,
-                            SMOOTH_STONE,
-                            LIGHT_GRAY_CONCRETE,
-                            COBBLESTONE,
-                            GRAY_CONCRETE,
+                            &*BLOCKS.by_name("grass_block").unwrap(),
+                            &*BLOCKS.by_name("stone_bricks").unwrap(),
+                            &*BLOCKS.by_name("smooth_stone").unwrap(),
+                            &*BLOCKS.by_name("light_gray_concrete").unwrap(),
+                            &*BLOCKS.by_name("cobblestone").unwrap(),
+                            &*BLOCKS.by_name("gray_concrete").unwrap(),
                         ]),
                         None,
                     );
@@ -102,11 +102,11 @@ pub fn generate_leisure(
 
             for (x, z) in filled_area {
                 let ground_level = ground.level(XZPoint::new(x, z));
-                editor.set_block(block_type, x, ground_level, z, Some(&[GRASS_BLOCK]), None);
+                editor.set_block(block_type, x, ground_level, z, Some(&[&*BLOCKS.by_name("grass_block").unwrap()]), None);
 
                 // Add decorative elements for parks and gardens
                 if matches!(leisure_type.as_str(), "park" | "garden")
-                    && editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]), None)
+                    && editor.check_for_block(x, ground_level, z, Some(&[&*BLOCKS.by_name("grass_block").unwrap()]), None)
                 {
                     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                     let random_choice: i32 = rng.gen_range(0..1000);
@@ -114,23 +114,23 @@ pub fn generate_leisure(
                     match random_choice {
                         0 => {
                             // Benches
-                            editor.set_block(OAK_LOG, x, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), x, ground_level + 1, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), x + 1, ground_level + 1, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), x - 1, ground_level + 1, z, None, None);
                         }
                         1..=30 => {
                             // Flowers
                             let flower_choice = match rng.gen_range(0..4) {
-                                0 => RED_FLOWER,
-                                1 => YELLOW_FLOWER,
-                                2 => BLUE_FLOWER,
-                                _ => WHITE_FLOWER,
+                                0 => &*BLOCKS.by_name("red_flower").unwrap(),
+                                1 => &*BLOCKS.by_name("yellow_flower").unwrap(),
+                                2 => &*BLOCKS.by_name("blue_flower").unwrap(),
+                                _ => &*BLOCKS.by_name("white_flower").unwrap(),
                             };
                             editor.set_block(flower_choice, x, ground_level + 1, z, None, None);
                         }
                         31..=70 => {
                             // Grass
-                            editor.set_block(GRASS, x, ground_level + 1, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, ground_level + 1, z, None, None);
                         }
                         71..=80 => {
                             // Tree
@@ -156,35 +156,35 @@ pub fn generate_leisure(
                         0..=10 => {
                             // Swing set
                             for y in 1..=4 {
-                                editor.set_block(OAK_FENCE, x - 1, ground_level + y, z, None, None);
-                                editor.set_block(OAK_FENCE, x + 1, ground_level + y, z, None, None);
+                                editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x - 1, ground_level + y, z, None, None);
+                                editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x + 1, ground_level + y, z, None, None);
                             }
-                            editor.set_block(OAK_FENCE, x, ground_level + 4, z, None, None);
-                            editor.set_block(STONE_BLOCK_SLAB, x, ground_level + 2, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x, ground_level + 4, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("stone_block_slab").unwrap(), x, ground_level + 2, z, None, None);
                         }
                         11..=20 => {
                             // Slide
-                            editor.set_block(OAK_SLAB, x, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_SLAB, x + 1, ground_level + 2, z, None, None);
-                            editor.set_block(OAK_SLAB, x + 2, ground_level + 3, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_slab").unwrap(), x, ground_level + 1, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_slab").unwrap(), x + 1, ground_level + 2, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_slab").unwrap(), x + 2, ground_level + 3, z, None, None);
 
-                            editor.set_block(OAK_PLANKS, x + 2, ground_level + 2, z, None, None);
-                            editor.set_block(OAK_PLANKS, x + 2, ground_level + 1, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_planks").unwrap(), x + 2, ground_level + 2, z, None, None);
+                            editor.set_block(&*BLOCKS.by_name("oak_planks").unwrap(), x + 2, ground_level + 1, z, None, None);
 
-                            editor.set_block(LADDER, x + 2, ground_level + 2, z - 1, None, None);
-                            editor.set_block(LADDER, x + 2, ground_level + 1, z - 1, None, None);
+                            editor.set_block(&*BLOCKS.by_name("ladder").unwrap(), x + 2, ground_level + 2, z - 1, None, None);
+                            editor.set_block(&*BLOCKS.by_name("ladder").unwrap(), x + 2, ground_level + 1, z - 1, None, None);
                         }
                         21..=30 => {
                             // Sandpit
                             editor.fill_blocks(
-                                SAND,
+                                &*BLOCKS.by_name("sand").unwrap(),
                                 x - 3,
                                 ground_level,
                                 z - 3,
                                 x + 3,
                                 ground_level,
                                 z + 3,
-                                Some(&[GREEN_STAINED_HARDENED_CLAY]),
+                                Some(&[&*BLOCKS.by_name("green_stained_hardened_clay").unwrap()]),
                                 None,
                             );
                         }

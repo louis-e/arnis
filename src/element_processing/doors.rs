@@ -1,4 +1,4 @@
-use crate::block_definitions::*;
+use crate::block_definitions::BLOCKS;
 use crate::cartesian::XZPoint;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedNode;
@@ -23,8 +23,8 @@ pub fn generate_doors(editor: &mut WorldEditor, element: &ProcessedNode, ground:
         let ground_level = ground.level(XZPoint::new(x, z));
 
         // Set the ground block and the door blocks
-        editor.set_block(GRAY_CONCRETE, x, ground_level, z, None, None);
-        editor.set_block(DARK_OAK_DOOR_LOWER, x, ground_level + 1, z, None, None);
-        editor.set_block(DARK_OAK_DOOR_UPPER, x, ground_level + 2, z, None, None);
+        editor.set_block(&*BLOCKS.by_name("gray_concrete").unwrap(), x, ground_level, z, None, None);
+        editor.set_block(&*BLOCKS.by_name("dark_oak_door_lower").unwrap(), x, ground_level + 1, z, None, None);
+        editor.set_block(&*BLOCKS.by_name("dark_oak_door_upper").unwrap(), x, ground_level + 2, z, None, None);
     }
 }

@@ -1,4 +1,4 @@
-use crate::block_definitions::*;
+use crate::block_definitions::BLOCKS;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::ground::Ground;
@@ -7,14 +7,14 @@ use crate::world_editor::WorldEditor;
 
 pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, ground: &Ground) {
     // Default values
-    let mut barrier_material: Block = COBBLESTONE_WALL;
+    let mut barrier_material = &*BLOCKS.by_name("cobblestone_wall").unwrap();
     let mut barrier_height: i32 = 2;
 
     match element.tags().get("barrier").map(|s| s.as_str()) {
         Some("bollard") => {
             if let ProcessedElement::Node(node) = element {
                 editor.set_block(
-                    COBBLESTONE_WALL,
+                    &*BLOCKS.by_name("cobblestone_wall").unwrap(),
                     node.x,
                     ground.level(node.xz()) + 1,
                     node.z,
@@ -30,34 +30,34 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
             return;
         }
         Some("hedge") => {
-            barrier_material = OAK_LEAVES;
+            barrier_material = &*BLOCKS.by_name("oak_leaves").unwrap();
             barrier_height = 2;
         }
         Some("fence") => {
             // Handle fence sub-types
             match element.tags().get("fence_type").map(|s| s.as_str()) {
                 Some("railing" | "bars" | "krest") => {
-                    barrier_material = STONE_BRICK_WALL;
+                    barrier_material = &*BLOCKS.by_name("stone_brick_wall").unwrap();
                     barrier_height = 1;
                 }
                 Some("chain_link" | "metal" | "wire" | "barbed_wire" | "corrugated_metal") => {
-                    barrier_material = STONE_BRICK_WALL;
+                    barrier_material = &*BLOCKS.by_name("stone_brick_wall").unwrap();
                     barrier_height = 2;
                 }
                 Some("slatted" | "paling") => {
-                    barrier_material = OAK_FENCE;
+                    barrier_material = &*BLOCKS.by_name("oak_fence").unwrap();
                     barrier_height = 1;
                 }
                 Some("wood" | "split_rail" | "panel" | "pole") => {
-                    barrier_material = OAK_FENCE;
+                    barrier_material = &*BLOCKS.by_name("oak_fence").unwrap();
                     barrier_height = 2;
                 }
                 Some("concrete") => {
-                    barrier_material = ANDESITE_WALL;
+                    barrier_material = &*BLOCKS.by_name("andesite_wall").unwrap();
                     barrier_height = 2;
                 }
                 Some("glass") => {
-                    barrier_material = GLASS;
+                    barrier_material = &*BLOCKS.by_name("glass").unwrap();
                     barrier_height = 1;
                 }
                 _ => {}
@@ -68,7 +68,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
     // Tagged material takes priority over inferred
     if let Some(barrier_mat) = element.tags().get("material") {
         if barrier_mat == "brick" {
-            barrier_material = BRICK;
+            barrier_material = &*BLOCKS.by_name("brick").unwrap();
         }
     }
 
@@ -105,7 +105,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
                 // Add an optional top to the barrier if the height is more than 1
                 if wall_height > 1 {
                     editor.set_block(
-                        STONE_BRICK_SLAB,
+                        &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                         bx,
                         ground_level + wall_height + 1,
                         bz,

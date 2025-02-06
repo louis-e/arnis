@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{DIRT, GRASS_BLOCK, SNOW_BLOCK};
+use crate::block_definitions::BLOCKS;
 use crate::cartesian::XZPoint;
 use crate::element_processing::*;
 use crate::ground::Ground;
@@ -141,7 +141,7 @@ pub fn generate_world(
     let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
     let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
 
-    let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
+    let groundlayer_block = if args.winter { &*BLOCKS.by_name("snow_block").unwrap() } else { &*BLOCKS.by_name("grass_block").unwrap() };
 
     // Differentiate between terrain and non-terrain generation
     if ground.elevation_enabled {
@@ -168,8 +168,8 @@ pub fn generate_world(
 
                 // Set blocks in a single batch
                 editor.set_block(groundlayer_block, x, max_y, z, None, None);
-                editor.set_block(DIRT, x, max_y - 1, z, None, None);
-                editor.set_block(DIRT, x, max_y - 2, z, None, None);
+                editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, max_y - 1, z, None, None);
+                editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, max_y - 2, z, None, None);
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {
@@ -195,7 +195,7 @@ pub fn generate_world(
             for z in 0..=(scale_factor_z as i32) {
                 let ground_level = ground.level(XZPoint::new(x, z));
                 editor.set_block(groundlayer_block, x, ground_level, z, None, None);
-                editor.set_block(DIRT, x, ground_level - 1, z, None, None);
+                editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level - 1, z, None, None);
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {
