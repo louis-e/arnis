@@ -88,7 +88,7 @@ pub fn generate_highways(
                             GRASS_BLOCK
                         }
                     }
-                    "dirt" => DIRT,
+                    "dirt" | "ground" | "earth" => DIRT,
                     "sand" => SAND,
                     "concrete" => LIGHT_GRAY_CONCRETE,
                     _ => STONE, // Default to stone for unknown surfaces
@@ -140,7 +140,7 @@ pub fn generate_highways(
                     block_range = 1;
                 }
                 "path" => {
-                    block_type = LIGHT_GRAY_CONCRETE;
+                    block_type = DIRT_PATH;
                     block_range = 1;
                 }
                 "motorway" | "primary" => {
