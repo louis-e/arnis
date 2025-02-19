@@ -14,15 +14,15 @@ use std::time::Duration;
 ))]
 pub struct Args {
     /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true)]
+    #[arg(long, allow_hyphen_values = true, group = "location")]
     pub bbox: Option<String>,
 
     /// JSON file containing OSM data (optional)
-    #[arg(long)]
+    #[arg(long, group = "location")]
     pub file: Option<String>,
 
     /// Path to the Minecraft world (required)
-    #[arg(long, required = true)]
+    #[arg(long)]
     pub path: String,
 
     /// Downloader method (requests/curl/wget) (optional)
@@ -30,7 +30,7 @@ pub struct Args {
     pub downloader: String,
 
     /// World scale to use, in blocks per meter
-    #[arg(long, default_value = "1.0")]
+    #[arg(long, default_value_t = 1.0)]
     pub scale: f64,
 
     /// Ground level to use in the Minecraft world
@@ -38,17 +38,17 @@ pub struct Args {
     pub ground_level: i32,
 
     /// Enable winter mode (default: false)
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     pub winter: bool,
 
     /// Enable terrain (optional)
-    #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
+    #[arg(long)]
     pub terrain: bool,
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
     pub fillground: bool,
     /// Enable debug mode (optional)
-    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    #[arg(long)]
     pub debug: bool,
 
     /// Set floodfill timeout (seconds) (optional)
