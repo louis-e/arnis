@@ -107,3 +107,57 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
     let seconds = arg.parse()?;
     Ok(std::time::Duration::from_secs(seconds))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flags() {
+        // Test that winter/terrain/debug are SetTrue
+        let cmd = [
+            "arnis",
+            "--path",
+            "",
+            "--bbox",
+            "",
+            "--winter",
+            "--terrain",
+            "--debug",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(args.winter);
+        assert!(args.debug);
+        assert!(args.terrain);
+
+        let cmd = ["arnis", "--path", "", "--bbox", ""];
+        let args = Args::parse_from(cmd.iter());
+        assert!(!args.winter);
+        assert!(!args.debug);
+        assert!(!args.terrain);
+    }
+
+    #[test]
+    fn test_required_options() {
+        let cmd = ["arnis"];
+        assert!(Args::try_parse_from(cmd.iter()).is_err());
+
+        let cmd = ["arnis", "--path", "", "--bbox", ""];
+        assert!(Args::try_parse_from(cmd.iter()).is_ok());
+
+        let cmd = ["arnis", "--path", "", "--file", ""];
+        assert!(Args::try_parse_from(cmd.iter()).is_ok());
+
+        // let cmd = [
+        //     "arnis",
+        //     "--gui",
+        // ];
+        // assert!(Args::try_parse_from(cmd.iter()).is_ok());
+
+        let cmd = [
+            "arnis", // "--gui",
+            "--path", "", "--bbox", "",
+        ];
+        assert!(Args::try_parse_from(cmd.iter()).is_ok());
+    }
+}
