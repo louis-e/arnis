@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod bbox;
 mod block_definitions;
 mod bresenham;
 mod cartesian;
@@ -8,6 +9,7 @@ mod colors;
 mod data_processing;
 mod element_processing;
 mod floodfill;
+mod geo_coord;
 mod ground;
 mod osm_parser;
 #[cfg(feature = "gui")]
@@ -103,24 +105,14 @@ fn main() {
         let args: Args = Args::parse();
         args.run();
 
-        let bbox: Vec<f64> = args
-            .bbox
-            .as_ref()
-            .expect("Bounding box is required")
-            .split(',')
-            .map(|s: &str| s.parse::<f64>().expect("Invalid bbox coordinate"))
-            .collect::<Vec<f64>>();
-
-        let bbox_tuple: (f64, f64, f64, f64) = (bbox[0], bbox[1], bbox[2], bbox[3]);
-
         // Fetch data
         let raw_data: serde_json::Value =
-            retrieve_data::fetch_data(bbox_tuple, args.file.as_deref(), args.debug, "requests")
+            retrieve_data::fetch_data(args.bbox, args.file.as_deref(), args.debug, "requests")
                 .expect("Failed to fetch data");
 
         // Parse raw data
         let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-            osm_parser::parse_osm_data(&raw_data, bbox_tuple, &args);
+            osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
         parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| {
             osm_parser::get_priority(element)
         });
@@ -406,26 +398,13 @@ fn gui_start_generation(
     terrain_enabled: bool,
     fillground_enabled: bool,
 ) -> Result<(), String> {
+    use bbox::BBox;
+
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
-            // Utility function to reorder bounding box coordinates
-            fn reorder_bbox(bbox: &[f64]) -> (f64, f64, f64, f64) {
-                (bbox[1], bbox[0], bbox[3], bbox[2])
-            }
-
-            // Parse bounding box string and validate it
-            let bbox: Vec<f64> = bbox_text
-                .split_whitespace()
-                .map(|s| s.parse::<f64>().expect("Invalid bbox coordinate"))
-                .collect();
-
-            if bbox.len() != 4 {
-                return Err("Invalid bounding box format".to_string());
-            }
-
             // Create an Args instance with the chosen bounding box and world directory path
             let args: Args = Args {
-                bbox: Some(bbox_text),
+                bbox: BBox::from_str(&bbox_text).expect("Should be valid bounding box"),
                 file: None,
                 path: selected_world,
                 downloader: "requests".to_string(),
@@ -438,14 +417,11 @@ fn gui_start_generation(
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
             };
 
-            // Reorder bounding box coordinates for further processing
-            let reordered_bbox: (f64, f64, f64, f64) = reorder_bbox(&bbox);
-
             // Run data fetch and world generation
-            match retrieve_data::fetch_data(reordered_bbox, None, args.debug, "requests") {
+            match retrieve_data::fetch_data(args.bbox, None, args.debug, "requests") {
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-                        osm_parser::parse_osm_data(&raw_data, reordered_bbox, &args);
+                        osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));

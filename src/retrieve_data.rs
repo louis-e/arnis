@@ -1,3 +1,4 @@
+use crate::bbox::BBox;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 use colored::Colorize;
 use rand::seq::SliceRandom;
@@ -80,7 +81,7 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
 
 /// Main function to fetch data
 pub fn fetch_data(
-    bbox: (f64, f64, f64, f64),
+    bbox: BBox,
     file: Option<&str>,
     debug: bool,
     download_method: &str,
@@ -130,7 +131,10 @@ pub fn fetch_data(
     .relsinbbox out body;
     .waysinbbox out body;
     .nodesinbbox out skel qt;"#,
-        bbox.1, bbox.0, bbox.3, bbox.2
+        bbox.min().lat(),
+        bbox.min().lng(),
+        bbox.max().lat(),
+        bbox.max().lng(),
     );
 
     if let Some(file) = file {
