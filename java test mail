@@ -1,0 +1,82 @@
+import javax.mail.*;
+import javax.mail.internet.*;
+import java.util.*;
+import java.text.SimpleDateFormat;
+
+public class EmailSender {
+
+    public static void main(String[] args) {
+        // Scanner für Benutzereingabe
+        Scanner scanner = new Scanner(System.in);
+
+        // Eingabe von Betreff und Nachricht
+        System.out.print("Betreff der E-Mail: ");
+        String subject = scanner.nextLine();
+
+        System.out.print("Nachricht der E-Mail: ");
+        String body = scanner.nextLine();
+
+        // Liste der Ziel-E-Mail-Adressen
+        List<String> emailList = new ArrayList<>();
+        emailList.add("crackerytbusiness@gmail.com"); // Beispiel-Empfänger 1
+        emailList.add("andereemail@example.com");    // Beispiel-Empfänger 2
+        emailList.add("nochmehremail@example.com");  // Beispiel-Empfänger 3
+
+        // Sende die E-Mail an alle Empfänger
+        for (String toEmail : emailList) {
+            sendEmail(subject, body, toEmail);
+        }
+
+        scanner.close();
+    }
+
+    public static void sendEmail(String subject, String body, String toEmail) {
+        // Deine Gmail-Adresse und App-Passwort
+        final String username = "deineEmail@gmail.com"; // Absender E-Mail (z.B. Gmail)
+        final String password = "deinAppPassword"; // Dein App-Passwort (erstellbar in Google-Konto)
+
+        // SMTP-Server-Einstellungen für Gmail
+        Properties properties = new Properties();
+        properties.put("mail.smtp.auth", "true");
+        properties.put("mail.smtp.starttls.enable", "true");
+        properties.put("mail.smtp.host", "smtp.gmail.com");
+        properties.put("mail.smtp.port", "587");
+
+        // Session erstellen und E-Mail authentifizieren
+        Session session = Session.getInstance(properties, new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                return new PasswordAuthentication(username, password);
+            }
+        });
+
+        try {
+            // Nachricht erstellen
+            Message message = new MimeMessage(session);
+            message.setFrom(new InternetAddress(username)); // Absender
+            message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(toEmail)); // Empfänger
+            message.setSubject(subject); // Betreff
+
+            // Aktuelles Datum und Uhrzeit
+            String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date());
+
+            // Erweiterte E-Mail-Nachricht
+            String extendedBody = "Test-E-Mail versendet am: " + timestamp + "\n\n" +
+                                  "Absender: " + username + "\n\n" +
+                                  "Empfänger: " + toEmail + "\n\n" +
+                                  "Betreff: " + subject + "\n\n" +
+                                  "Nachricht:\n" + body + "\n\n" +
+                                  "-----------------------------------------------------\n" +
+                                  "Dies ist eine automatisch generierte Test-E-Mail.";
+
+            message.setText(extendedBody); // Erweiteter Inhalt der E-Mail
+
+            // E-Mail senden
+            Transport.send(message);
+            System.out.println("E-Mail erfolgreich an " + toEmail + " gesendet!");
+
+        } catch (MessagingException e) {
+            e.printStackTrace();
+        }
+    }
+}
