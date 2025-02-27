@@ -1,0 +1,16 @@
+public class YouTubeAbonnementBestätigung {
+
+    public static void main(String[] args) {
+        // Kanalname
+        String channelName = "@sommer_cracker"; // Hier den Kanalnamen einfügen
+
+        // Aufruf der Bestätigungsmethode
+        abonnierenBestätigung(channelName);
+    }
+
+    // Methode zur Bestätigung des Abonnierens
+    public static void abonnierenBestätigung(String channel) {
+        // Ausgabe der Bestätigungsmeldung in der Konsole
+        System.out.println("Du hast erfolgreich den YouTube-Kanal " + channel + " abonniert! 🎉");
+    }
+}
