@@ -1,3 +1,4 @@
+use crate::bbox::BBox;
 use clap::{ArgGroup, Parser};
 use colored::Colorize;
 use std::path::Path;
@@ -14,8 +15,8 @@ use std::time::Duration;
 ))]
 pub struct Args {
     /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true)]
-    pub bbox: Option<String>,
+    #[arg(long, allow_hyphen_values = true, value_parser = BBox::from_str)]
+    pub bbox: BBox,
 
     /// JSON file containing OSM data (optional)
     #[arg(long)]
@@ -67,38 +68,7 @@ impl Args {
             );
             exit(1);
         }
-
-        // Validating bbox if provided
-        if let Some(bbox) = &self.bbox {
-            if !validate_bounding_box(bbox) {
-                eprintln!("{}", "Error! Invalid bbox input".red().bold());
-                exit(1);
-            }
-        }
     }
-}
-
-/// Validates the bounding box string
-fn validate_bounding_box(bbox: &str) -> bool {
-    let parts: Vec<&str> = bbox.split(',').collect();
-    if parts.len() != 4 {
-        return false;
-    }
-
-    let min_lng: f64 = parts[0].parse().ok().unwrap_or(0.0);
-    let min_lat: f64 = parts[1].parse().ok().unwrap_or(0.0);
-    let max_lng: f64 = parts[2].parse().ok().unwrap_or(0.0);
-    let max_lat: f64 = parts[3].parse().ok().unwrap_or(0.0);
-
-    if !(-180.0..=180.0).contains(&min_lng) || !(-180.0..=180.0).contains(&max_lng) {
-        return false;
-    }
-
-    if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
-        return false;
-    }
-
-    min_lng < max_lng && min_lat < max_lat
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
