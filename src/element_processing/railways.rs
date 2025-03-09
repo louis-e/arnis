@@ -43,7 +43,7 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
                 let (bx, _, bz) = smoothed_points[j];
                 let ground_level = ground.level(XZPoint::new(bx, bz));
 
-                editor.set_block(IRON_BLOCK, bx, ground_level, bz, None, None);
+                editor.set_block(GRAVEL, bx, ground_level, bz, None, None);
 
                 let prev = if j > 0 {
                     Some(smoothed_points[j - 1])

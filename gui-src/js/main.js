@@ -480,6 +480,7 @@ async function startGeneration() {
 
     var terrain = document.getElementById("terrain-toggle").checked;
     var winter_mode = document.getElementById("winter-toggle").checked;
+    var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     var ground_level = parseInt(document.getElementById("ground-level").value, 10);
@@ -496,7 +497,8 @@ async function startGeneration() {
         groundLevel: ground_level,
         winterMode: winter_mode,
         floodfillTimeout: floodfill_timeout,
-        terrainEnabled: terrain
+        terrainEnabled: terrain,
+        fillgroundEnabled: fill_ground
     });
 
     console.log("Generation process started.");

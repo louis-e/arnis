@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::cartesian::XZPoint;
+use crate::data_processing::MIN_Y;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
@@ -45,15 +46,15 @@ pub fn generate_landuse(
         "military" => GRAY_CONCRETE,
         "railway" => GRAVEL,
         "landfill" => {
-            // Gravel if man_made = spoil_heap, coarse dirt else
-            let manmade = element.tags.get("man_made").unwrap_or(&binding);
-            if manmade == "spoil_heap" {
+            // Gravel if man_made = spoil_heap or heap, coarse dirt else
+            let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);
+            if manmade_tag == "spoil_heap" || manmade_tag == "heap" {
                 GRAVEL
             } else {
                 COARSE_DIRT
             }
         }
-        "quarry" => STONE, // TODO: add ores
+        "quarry" => STONE,
         _ => {
             if args.winter {
                 SNOW_BLOCK
@@ -318,6 +319,26 @@ pub fn generate_landuse(
                         Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     } else if random_choice < 800 {
                         editor.set_block(GRASS, x, ground_level + 1, z, None, None);
+                    }
+                }
+            }
+            "quarry" => {
+                if let Some(resource) = element.tags.get("resource") {
+                    let ore_block = match resource.as_str() {
+                        "iron_ore" => IRON_ORE,
+                        "coal" => COAL_ORE,
+                        "copper" => COPPER_ORE,
+                        "gold" => GOLD_ORE,
+                        "clay" | "kaolinite" => CLAY,
+                        _ => STONE,
+                    };
+                    let random_choice: i32 = rng.gen_range(0..100 + ground_level); // with more depth there's more resources
+                    if random_choice < 5 {
+                        editor.set_block(ore_block, x, ground_level, z, Some(&[STONE]), None);
+                    }
+                    // Fill everything with stone so dirt won't be there
+                    if args.fillground {
+                        editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, ground_level, z, None, None);
                     }
                 }
             }
