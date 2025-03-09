@@ -75,6 +75,8 @@ pub fn generate_landuse(
             editor.set_block(block_type, x, ground_level + 1, z, None, None);
         } else if landuse_tag == "construction" || landuse_tag == "railway" {
             editor.set_block(block_type, x, ground_level, z, None, Some(&[SPONGE]));
+        } else if landuse_tag == "grass" {
+            editor.set_block(block_type, x, ground_level, z, None, Some(&[SPONGE]));
         } else {
             editor.set_block(block_type, x, ground_level, z, None, None);
         }
