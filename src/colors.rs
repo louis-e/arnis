@@ -37,11 +37,11 @@ fn short_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
         return None;
     }
     let r: u8 = u8::from_str_radix(&text[1..2], 16).unwrap();
-    let r: u8 = r | r << 4;
+    let r: u8 = r | (r << 4);
     let g: u8 = u8::from_str_radix(&text[2..3], 16).unwrap();
-    let g: u8 = g | g << 4;
+    let g: u8 = g | (g << 4);
     let b: u8 = u8::from_str_radix(&text[3..4], 16).unwrap();
-    let b: u8 = b | b << 4;
+    let b: u8 = b | (b << 4);
     Some((r, g, b))
 }
 
