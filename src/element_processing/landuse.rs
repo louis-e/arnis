@@ -39,7 +39,18 @@ pub fn generate_landuse(
         "beach" => SAND,
         "construction" => DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
-        "residential" => STONE_BRICKS,
+        "residential" => {
+            let residential_tag = element.tags.get("residential").unwrap_or(&binding);
+            if residential_tag == "rural" {
+                if args.winter {
+                    SNOW_BLOCK
+                } else {
+                    GRASS_BLOCK
+                }
+            } else {
+                STONE_BRICKS
+            }
+        }
         "commercial" => SMOOTH_STONE,
         "education" => LIGHT_GRAY_CONCRETE,
         "industrial" => COBBLESTONE,
