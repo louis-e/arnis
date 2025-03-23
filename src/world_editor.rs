@@ -1,4 +1,4 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{BLOCKS, Block};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
@@ -55,8 +55,8 @@ struct SectionToModify {
 
 impl SectionToModify {
     fn get_block(&self, x: u8, y: u8, z: u8) -> Option<Block> {
-        let b = self.blocks[Self::index(x, y, z)];
-        if b == AIR {
+        let b = self.blocks[Self::index(x, y, z)].clone();
+        if b == *BLOCKS.by_name("air").unwrap() {
             return None;
         }
 
@@ -111,8 +111,8 @@ impl SectionToModify {
         let palette = palette
             .iter()
             .map(|x| PaletteItem {
-                name: x.name().to_string(),
-                properties: x.properties(),
+                name: x.name.to_string(),
+                properties: x.properties,
             })
             .collect();
 
@@ -131,7 +131,7 @@ impl SectionToModify {
 impl Default for SectionToModify {
     fn default() -> Self {
         Self {
-            blocks: [AIR; 4096],
+            blocks: [*BLOCKS.by_name("air").unwrap(); 4096],
         }
     }
 }
@@ -151,12 +151,12 @@ impl ChunkToModify {
         section.get_block(x, (y & 15).try_into().unwrap(), z)
     }
 
-    fn set_block(&mut self, x: u8, y: i32, z: u8, block: Block) {
+    fn set_block(&mut self, x: u8, y: i32, z: u8, block: &Block) {
         let section_idx: i8 = (y >> 4).try_into().unwrap();
 
         let section = self.sections.entry(section_idx).or_default();
 
-        section.set_block(x, (y & 15).try_into().unwrap(), z, block);
+        section.set_block(x, (y & 15).try_into().unwrap(), z, *block);
     }
 
     fn sections(&self) -> impl Iterator<Item = Section> + '_ {
@@ -222,7 +222,7 @@ impl WorldToModify {
             (x & 15).try_into().unwrap(),
             y,
             (z & 15).try_into().unwrap(),
-            block,
+            &block,
         );
     }
 }
@@ -330,18 +330,18 @@ impl WorldEditor {
             );
         }
 
-        self.set_block(SIGN, x, y, z, None, None);
+        self.set_block(&*BLOCKS.by_name("sign").unwrap(), x, y, z, None, None);
     }
 
     /// Sets a block of the specified type at the given coordinates.
     pub fn set_block(
         &mut self,
-        block: Block,
+        block: &Block,
         x: i32,
         y: i32,
         z: i32,
-        override_whitelist: Option<&[Block]>,
-        override_blacklist: Option<&[Block]>,
+        override_whitelist: Option<&[&Block]>,
+        override_blacklist: Option<&[&Block]>,
     ) {
         // Check if coordinates are within bounds
         if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
@@ -353,11 +353,11 @@ impl WorldEditor {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id == existing_block.id)
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id == existing_block.id)
             } else {
                 false
             }
@@ -366,7 +366,7 @@ impl WorldEditor {
         };
 
         if should_insert {
-            self.world.set_block(x, y, z, block);
+            self.world.set_block(x, y, z, *block);
         }
     }
 
@@ -374,15 +374,15 @@ impl WorldEditor {
     #[allow(clippy::too_many_arguments)]
     pub fn fill_blocks(
         &mut self,
-        block: Block,
+        block: &Block,
         x1: i32,
         y1: i32,
         z1: i32,
         x2: i32,
         y2: i32,
         z2: i32,
-        override_whitelist: Option<&[Block]>,
-        override_blacklist: Option<&[Block]>,
+        override_whitelist: Option<&[&Block]>,
+        override_blacklist: Option<&[&Block]>,
     ) {
         let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
         let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
@@ -403,8 +403,8 @@ impl WorldEditor {
         x: i32,
         y: i32,
         z: i32,
-        whitelist: Option<&[Block]>,
-        blacklist: Option<&[Block]>,
+        whitelist: Option<&[&Block]>,
+        blacklist: Option<&[&Block]>,
     ) -> bool {
         // Retrieve the chunk modification map
         if let Some(existing_block) = self.world.get_block(x, y, z) {
@@ -412,7 +412,7 @@ impl WorldEditor {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.id == existing_block.id)
                 {
                     return true; // Block is in whitelist
                 }
@@ -420,7 +420,7 @@ impl WorldEditor {
             if let Some(blacklist) = blacklist {
                 if blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.id == existing_block.id)
                 {
                     return true; // Block is in blacklist
                 }
@@ -437,7 +437,7 @@ impl WorldEditor {
         // Fill the bottom layer with grass blocks at Y -62
         for x in 0..16 {
             for z in 0..16 {
-                chunk.set_block(x, -62, z, GRASS_BLOCK);
+                chunk.set_block(x, -62, z, &*BLOCKS.by_name("grass_block").unwrap());
             }
         }
 

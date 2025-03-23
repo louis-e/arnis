@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::BLOCKS;
 use crate::cartesian::XZPoint;
 use crate::data_processing::MIN_Y;
 use crate::element_processing::tree::Tree;
@@ -22,55 +22,55 @@ pub fn generate_landuse(
     let block_type = match landuse_tag.as_str() {
         "greenfield" | "meadow" | "grass" => {
             if args.winter {
-                SNOW_BLOCK
+                &*BLOCKS.by_name("snow_block").unwrap()
             } else {
-                GRASS_BLOCK
+                &*BLOCKS.by_name("grass_block").unwrap()
             }
         }
-        "farmland" => FARMLAND,
+        "farmland" => &*BLOCKS.by_name("farmland").unwrap(),
         "forest" => {
             if args.winter {
-                SNOW_BLOCK
+                &*BLOCKS.by_name("snow_block").unwrap()
             } else {
-                GRASS_BLOCK
+                &*BLOCKS.by_name("grass_block").unwrap()
             }
         }
-        "cemetery" => PODZOL,
-        "beach" => SAND,
-        "construction" => DIRT,
-        "traffic_island" => STONE_BLOCK_SLAB,
+        "cemetery" => &*BLOCKS.by_name("podzol").unwrap(),
+        "beach" => &*BLOCKS.by_name("sand").unwrap(),
+        "construction" => &*BLOCKS.by_name("dirt").unwrap(),
+        "traffic_island" => &*BLOCKS.by_name("stone_block_slab").unwrap(),
         "residential" => {
             let residential_tag = element.tags.get("residential").unwrap_or(&binding);
             if residential_tag == "rural" {
                 if args.winter {
-                    SNOW_BLOCK
+                    &*BLOCKS.by_name("snow_block").unwrap()
                 } else {
-                    GRASS_BLOCK
+                    &*BLOCKS.by_name("grass_block").unwrap()
                 }
             } else {
-                STONE_BRICKS
+                &*BLOCKS.by_name("stone_bricks").unwrap()
             }
         }
-        "commercial" => SMOOTH_STONE,
-        "education" => LIGHT_GRAY_CONCRETE,
-        "industrial" => COBBLESTONE,
-        "military" => GRAY_CONCRETE,
-        "railway" => GRAVEL,
+        "commercial" => &*BLOCKS.by_name("smooth_stone").unwrap(),
+        "education" => &*BLOCKS.by_name("light_gray_concrete").unwrap(),
+        "industrial" => &*BLOCKS.by_name("cobblestone").unwrap(),
+        "military" => &*BLOCKS.by_name("gray_concrete").unwrap(),
+        "railway" => &*BLOCKS.by_name("gravel").unwrap(),
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
-            let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);
+            let manmade = element.tags.get("man_made").unwrap_or(&binding);
             if manmade_tag == "spoil_heap" || manmade_tag == "heap" {
-                GRAVEL
+                &*BLOCKS.by_name("gravel").unwrap()
             } else {
-                COARSE_DIRT
+                &*BLOCKS.by_name("coarse_dirt").unwrap()
             }
         }
-        "quarry" => STONE,
+        "quarry" => &*BLOCKS.by_name("stone").unwrap(),
         _ => {
             if args.winter {
-                SNOW_BLOCK
+                &*BLOCKS.by_name("snow_block").unwrap()
             } else {
-                GRASS_BLOCK
+                &*BLOCKS.by_name("grass_block").unwrap()
             }
         }
     };
@@ -86,7 +86,7 @@ pub fn generate_landuse(
         if landuse_tag == "traffic_island" {
             editor.set_block(block_type, x, ground_level + 1, z, None, None);
         } else if landuse_tag == "construction" || landuse_tag == "railway" {
-            editor.set_block(block_type, x, ground_level, z, None, Some(&[SPONGE]));
+            editor.set_block(block_type, x, ground_level, z, None, Some(&[&*BLOCKS.by_name("sponge").unwrap()]));
         } else {
             editor.set_block(block_type, x, ground_level, z, None, None);
         }
@@ -98,10 +98,10 @@ pub fn generate_landuse(
                     let random_choice: i32 = rng.gen_range(0..100);
                     if random_choice < 15 {
                         // Place graves
-                        if editor.check_for_block(x, ground_level, z, Some(&[PODZOL]), None) {
+                        if editor.check_for_block(x, ground_level, z, Some(&[&*BLOCKS.by_name("podzol").unwrap()]), None) {
                             if rng.gen_bool(0.5) {
                                 editor.set_block(
-                                    COBBLESTONE,
+                                    &*BLOCKS.by_name("cobblestone").unwrap(),
                                     x - 1,
                                     ground_level + 1,
                                     z,
@@ -109,7 +109,7 @@ pub fn generate_landuse(
                                     None,
                                 );
                                 editor.set_block(
-                                    STONE_BRICK_SLAB,
+                                    &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                                     x - 1,
                                     ground_level + 2,
                                     z,
@@ -117,7 +117,7 @@ pub fn generate_landuse(
                                     None,
                                 );
                                 editor.set_block(
-                                    STONE_BRICK_SLAB,
+                                    &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                                     x,
                                     ground_level + 1,
                                     z,
@@ -125,7 +125,7 @@ pub fn generate_landuse(
                                     None,
                                 );
                                 editor.set_block(
-                                    STONE_BRICK_SLAB,
+                                    &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                                     x + 1,
                                     ground_level + 1,
                                     z,
@@ -134,7 +134,7 @@ pub fn generate_landuse(
                                 );
                             } else {
                                 editor.set_block(
-                                    COBBLESTONE,
+                                    &*BLOCKS.by_name("cobblestone").unwrap(),
                                     x,
                                     ground_level + 1,
                                     z - 1,
@@ -142,7 +142,7 @@ pub fn generate_landuse(
                                     None,
                                 );
                                 editor.set_block(
-                                    STONE_BRICK_SLAB,
+                                    &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                                     x,
                                     ground_level + 2,
                                     z - 1,
@@ -150,7 +150,7 @@ pub fn generate_landuse(
                                     None,
                                 );
                                 editor.set_block(
-                                    STONE_BRICK_SLAB,
+                                    &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                                     x,
                                     ground_level + 1,
                                     z,
@@ -158,7 +158,7 @@ pub fn generate_landuse(
                                     None,
                                 );
                                 editor.set_block(
-                                    STONE_BRICK_SLAB,
+                                    &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                                     x,
                                     ground_level + 1,
                                     z + 1,
@@ -168,8 +168,8 @@ pub fn generate_landuse(
                             }
                         }
                     } else if random_choice < 30 {
-                        if editor.check_for_block(x, ground_level, z, Some(&[PODZOL]), None) {
-                            editor.set_block(RED_FLOWER, x, ground_level + 1, z, None, None);
+                        if editor.check_for_block(x, ground_level, z, Some(&[&*BLOCKS.by_name("podzol").unwrap()]), None) {
+                            editor.set_block(&*BLOCKS.by_name("red_flower").unwrap(), x, ground_level + 1, z, None, None);
                         }
                     } else if random_choice < 33 {
                         Tree::create(editor, (x, ground_level + 1, z), args.winter);
@@ -177,40 +177,40 @@ pub fn generate_landuse(
                 }
             }
             "forest" => {
-                if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
+                if !editor.check_for_block(x, ground_level, z, None, Some(&[&*BLOCKS.by_name("water").unwrap()])) {
                     let random_choice: i32 = rng.gen_range(0..21);
                     if random_choice == 20 {
                         Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     } else if random_choice == 2 {
-                        let flower_block: Block = match rng.gen_range(1..=4) {
-                            1 => RED_FLOWER,
-                            2 => BLUE_FLOWER,
-                            3 => YELLOW_FLOWER,
-                            _ => WHITE_FLOWER,
+                        let flower_block = match rng.gen_range(1..=4) {
+                            1 => &*BLOCKS.by_name("red_flower").unwrap(),
+                            2 => &*BLOCKS.by_name("blue_flower").unwrap(),
+                            3 => &*BLOCKS.by_name("yellow_flower").unwrap(),
+                            _ => &*BLOCKS.by_name("white_flower").unwrap(),
                         };
                         editor.set_block(flower_block, x, ground_level + 1, z, None, None);
                     } else if random_choice <= 1 {
-                        editor.set_block(GRASS, x, ground_level + 1, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, ground_level + 1, z, None, None);
                     }
                 }
             }
             "farmland" => {
                 // Check if the current block is not water or another undesired block
-                if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
+                if !editor.check_for_block(x, ground_level, z, None, Some(&[&*BLOCKS.by_name("water").unwrap()])) {
                     if x % 15 == 0 || z % 15 == 0 {
                         // Place water on the edges
-                        editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND]), None);
+                        editor.set_block(&*BLOCKS.by_name("water").unwrap(), x, ground_level, z, Some(&[&*BLOCKS.by_name("farmland").unwrap()]), None);
                         editor.set_block(
-                            AIR,
+                            &*BLOCKS.by_name("air").unwrap(),
                             x,
                             ground_level + 1,
                             z,
-                            Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
+                            Some(&[&*BLOCKS.by_name("grass").unwrap(), &*BLOCKS.by_name("wheat").unwrap(), &*BLOCKS.by_name("carrots").unwrap(), &*BLOCKS.by_name("potatoes").unwrap()]),
                             None,
                         );
                     } else {
                         // Set the block below as farmland
-                        editor.set_block(FARMLAND, x, ground_level, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("farmland").unwrap(), x, ground_level, z, None, None);
 
                         // If a random condition is met, place a special object
                         if rng.gen_range(0..76) == 0 {
@@ -219,27 +219,27 @@ pub fn generate_landuse(
                                 Tree::create(editor, (x, ground_level + 1, z), args.winter);
                             } else if special_choice <= 6 {
                                 editor.set_block(
-                                    HAY_BALE,
+                                    &*BLOCKS.by_name("hay_bale").unwrap(),
                                     x,
                                     ground_level + 1,
                                     z,
                                     None,
-                                    Some(&[SPONGE]),
+                                    Some(&[&*BLOCKS.by_name("sponge").unwrap()]),
                                 );
                             } else {
                                 editor.set_block(
-                                    OAK_LEAVES,
+                                    &*BLOCKS.by_name("oak_leaves").unwrap(),
                                     x,
                                     ground_level + 1,
                                     z,
                                     None,
-                                    Some(&[SPONGE]),
+                                    Some(&[&*BLOCKS.by_name("sponge").unwrap()]),
                                 );
                             }
                         } else {
                             // Set crops only if the block below is farmland
-                            if editor.check_for_block(x, ground_level, z, Some(&[FARMLAND]), None) {
-                                let crop_choice = [WHEAT, CARROTS, POTATOES][rng.gen_range(0..3)];
+                            if editor.check_for_block(x, ground_level, z, Some(&[&*BLOCKS.by_name("farmland").unwrap()]), None) {
+                                let crop_choice = [&*BLOCKS.by_name("wheat").unwrap(), &*BLOCKS.by_name("carrots").unwrap(), &*BLOCKS.by_name("potatoes").unwrap()][rng.gen_range(0..3)];
                                 editor.set_block(crop_choice, x, ground_level + 1, z, None, None);
                             }
                         }
@@ -249,36 +249,36 @@ pub fn generate_landuse(
             "construction" => {
                 let random_choice: i32 = rng.gen_range(0..1501);
                 if random_choice < 6 {
-                    editor.set_block(SCAFFOLDING, x, ground_level + 1, z, None, None);
+                    editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 1, z, None, None);
                     if random_choice < 2 {
-                        editor.set_block(SCAFFOLDING, x, ground_level + 2, z, None, None);
-                        editor.set_block(SCAFFOLDING, x, ground_level + 3, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 2, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 3, z, None, None);
                     } else if random_choice < 4 {
-                        editor.set_block(SCAFFOLDING, x, ground_level + 2, z, None, None);
-                        editor.set_block(SCAFFOLDING, x, ground_level + 3, z, None, None);
-                        editor.set_block(SCAFFOLDING, x, ground_level + 4, z, None, None);
-                        editor.set_block(SCAFFOLDING, x, ground_level + 1, z + 1, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 2, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 3, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 4, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 1, z + 1, None, None);
                     } else {
-                        editor.set_block(SCAFFOLDING, x, ground_level + 2, z, None, None);
-                        editor.set_block(SCAFFOLDING, x, ground_level + 3, z, None, None);
-                        editor.set_block(SCAFFOLDING, x, ground_level + 4, z, None, None);
-                        editor.set_block(SCAFFOLDING, x, ground_level + 5, z, None, None);
-                        editor.set_block(SCAFFOLDING, x - 1, ground_level + 1, z, None, None);
-                        editor.set_block(SCAFFOLDING, x + 1, ground_level + 1, z - 1, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 2, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 3, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 4, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x, ground_level + 5, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x - 1, ground_level + 1, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("scaffolding").unwrap(), x + 1, ground_level + 1, z - 1, None, None);
                     }
                 } else if random_choice < 30 {
-                    let construction_items: [Block; 11] = [
-                        OAK_LOG,
-                        COBBLESTONE,
-                        GRAVEL,
-                        GLOWSTONE,
-                        STONE,
-                        COBBLESTONE_WALL,
-                        BLACK_CONCRETE,
-                        SAND,
-                        OAK_PLANKS,
-                        DIRT,
-                        BRICK,
+                    let construction_items = [
+                        &*BLOCKS.by_name("oak_log").unwrap(),
+                        &*BLOCKS.by_name("cobblestone").unwrap(),
+                        &*BLOCKS.by_name("gravel").unwrap(),
+                        &*BLOCKS.by_name("glowstone").unwrap(),
+                        &*BLOCKS.by_name("stone").unwrap(),
+                        &*BLOCKS.by_name("cobblestone_wall").unwrap(),
+                        &*BLOCKS.by_name("black_concrete").unwrap(),
+                        &*BLOCKS.by_name("sand").unwrap(),
+                        &*BLOCKS.by_name("oak_planks").unwrap(),
+                        &*BLOCKS.by_name("dirt").unwrap(),
+                        &*BLOCKS.by_name("brick").unwrap(),
                     ];
                     editor.set_block(
                         construction_items[rng.gen_range(0..construction_items.len())],
@@ -290,18 +290,18 @@ pub fn generate_landuse(
                     );
                 } else if random_choice < 35 {
                     if random_choice < 30 {
-                        editor.set_block(DIRT, x, ground_level + 1, z, None, None);
-                        editor.set_block(DIRT, x, ground_level + 2, z, None, None);
-                        editor.set_block(DIRT, x + 1, ground_level + 1, z, None, None);
-                        editor.set_block(DIRT, x, ground_level + 1, z + 1, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level + 1, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level + 2, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x + 1, ground_level + 1, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level + 1, z + 1, None, None);
                     } else {
-                        editor.set_block(DIRT, x, ground_level + 1, z, None, None);
-                        editor.set_block(DIRT, x, ground_level + 2, z, None, None);
-                        editor.set_block(DIRT, x - 1, ground_level + 1, z, None, None);
-                        editor.set_block(DIRT, x, ground_level + 1, z - 1, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level + 1, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level + 2, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x - 1, ground_level + 1, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level + 1, z - 1, None, None);
                     }
                 } else if random_choice < 150 {
-                    editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
+                    editor.set_block(&*BLOCKS.by_name("air").unwrap(), x, ground_level, z, None, Some(&[&*BLOCKS.by_name("sponge").unwrap()]));
                 }
             }
             "grass" => {
@@ -310,11 +310,11 @@ pub fn generate_landuse(
                         x,
                         ground_level,
                         z,
-                        Some(&[GRASS_BLOCK, SNOW_BLOCK]),
+                        Some(&[&*BLOCKS.by_name("grass_block").unwrap(), &*BLOCKS.by_name("snow_block").unwrap()]),
                         None,
                     )
                 {
-                    editor.set_block(GRASS, x, ground_level + 1, z, None, None);
+                    editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, ground_level + 1, z, None, None);
                 }
             }
             "meadow" => {
@@ -322,14 +322,14 @@ pub fn generate_landuse(
                     x,
                     ground_level,
                     z,
-                    Some(&[GRASS_BLOCK, SNOW_BLOCK]),
+                    Some(&[&*BLOCKS.by_name("grass_block").unwrap(), &*BLOCKS.by_name("snow_block").unwrap()]),
                     None,
                 ) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
                         Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     } else if random_choice < 800 {
-                        editor.set_block(GRASS, x, ground_level + 1, z, None, None);
+                        editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, ground_level + 1, z, None, None);
                     }
                 }
             }
