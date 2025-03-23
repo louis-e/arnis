@@ -88,7 +88,7 @@ pub fn generate_highways(
                             &*BLOCKS.by_name("grass_block").unwrap()
                         }
                     }
-                    "dirt" => &*BLOCKS.by_name("dirt").unwrap(),
+                    "dirt" | "ground" | "earth" => &*BLOCKS.by_name("dirt").unwrap(),
                     "sand" => &*BLOCKS.by_name("sand").unwrap(),
                     "concrete" => &*BLOCKS.by_name("light_gray_concrete").unwrap(),
                     _ => &*BLOCKS.by_name("stone").unwrap(), // Default to stone for unknown surfaces
@@ -140,7 +140,7 @@ pub fn generate_highways(
                     block_range = 1;
                 }
                 "path" => {
-                    block_type = &*BLOCKS.by_name("light_gray_concrete").unwrap();
+                    block_type = &*BLOCKS.by_name("dirt_path").unwrap();
                     block_range = 1;
                 }
                 "motorway" | "primary" => {

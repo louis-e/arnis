@@ -28,17 +28,19 @@ mod world_editor;
 use args::Args;
 use clap::Parser;
 use colored::*;
+#[cfg(feature = "gui")]
 use fastnbt::Value;
+#[cfg(feature = "gui")]
 use flate2::read::GzDecoder;
+#[cfg(feature = "gui")]
 use log::{error, LevelFilter};
+#[cfg(feature = "gui")]
 use rfd::FileDialog;
-use std::{
-    env,
-    fs::{self, File},
-    io::{Read, Write},
-    panic,
-    path::{Path, PathBuf},
-};
+#[cfg(feature = "gui")]
+use std::io::Read;
+#[cfg(feature = "gui")]
+use std::path::{Path, PathBuf};
+use std::{env, fs, io::Write, panic};
 #[cfg(feature = "gui")]
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 #[cfg(target_os = "windows")]
@@ -125,8 +127,8 @@ fn main() {
 
         // Write the parsed OSM data to a file for inspection
         if args.debug {
-            let mut output_file: File =
-                File::create("parsed_osm_data.txt").expect("Failed to create output file");
+            let mut output_file: fs::File =
+                fs::File::create("parsed_osm_data.txt").expect("Failed to create output file");
             for element in &parsed_elements {
                 writeln!(
                     output_file,
@@ -254,7 +256,7 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 let session_lock_path = path.join("session.lock");
                 if session_lock_path.exists() {
                     // Try to acquire a lock on the session.lock file
-                    if let Ok(file) = File::open(&session_lock_path) {
+                    if let Ok(file) = fs::File::open(&session_lock_path) {
                         if fs2::FileExt::try_lock_shared(&file).is_err() {
                             return Err(2); // Error code 2: The selected world is currently in use
                         } else {
@@ -276,6 +278,7 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
     }
 }
 
+#[cfg(feature = "gui")]
 fn create_new_world(base_path: &Path) -> Result<String, String> {
     // Generate a unique world name
     let mut counter: i32 = 1;
@@ -392,6 +395,7 @@ fn gui_check_for_updates() -> Result<bool, String> {
 
 #[cfg(feature = "gui")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
@@ -400,6 +404,7 @@ fn gui_start_generation(
     winter_mode: bool,
     floodfill_timeout: u64,
     terrain_enabled: bool,
+    fillground_enabled: bool,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
@@ -427,6 +432,7 @@ fn gui_start_generation(
                 scale: world_scale,
                 ground_level,
                 terrain: terrain_enabled,
+                fillground: fillground_enabled,
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),

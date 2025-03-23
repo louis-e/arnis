@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::BLOCKS;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
-use crate::element_processing::tree::create_tree;
+use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -21,15 +21,7 @@ pub fn generate_natural(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                create_tree(
-                    editor,
-                    x,
-                    ground.level(node.xz()) + 1,
-                    z,
-                    rng.gen_range(1..=3),
-                    args.winter,
-                );
+                Tree::create(editor, (x, ground.level(node.xz()) + 1, z), args.winter);
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -119,7 +111,7 @@ pub fn generate_natural(
 
                         let random_choice: i32 = rng.gen_range(0..26);
                         if random_choice == 25 {
-                            create_tree(editor, x, y + 1, z, rng.gen_range(1..=3), args.winter);
+                            Tree::create(editor, (x, y + 1, z), args.winter);
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
                                 1 => &*BLOCKS.by_name("red_flower").unwrap(),

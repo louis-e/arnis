@@ -1,7 +1,8 @@
 use crate::args::Args;
 use crate::block_definitions::BLOCKS;
 use crate::cartesian::XZPoint;
-use crate::element_processing::tree::create_tree;
+use crate::data_processing::MIN_Y;
+use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
@@ -38,22 +39,33 @@ pub fn generate_landuse(
         "beach" => &*BLOCKS.by_name("sand").unwrap(),
         "construction" => &*BLOCKS.by_name("dirt").unwrap(),
         "traffic_island" => &*BLOCKS.by_name("stone_block_slab").unwrap(),
-        "residential" => &*BLOCKS.by_name("stone_bricks").unwrap(),
+        "residential" => {
+            let residential_tag = element.tags.get("residential").unwrap_or(&binding);
+            if residential_tag == "rural" {
+                if args.winter {
+                    &*BLOCKS.by_name("snow_block").unwrap(),
+                } else {
+                    &*BLOCKS.by_name("grass_block").unwrap(),
+                }
+            } else {
+                &*BLOCKS.by_name("stone_bricks").unwrap(),
+            }
+        }
         "commercial" => &*BLOCKS.by_name("smooth_stone").unwrap(),
         "education" => &*BLOCKS.by_name("light_gray_concrete").unwrap(),
         "industrial" => &*BLOCKS.by_name("cobblestone").unwrap(),
         "military" => &*BLOCKS.by_name("gray_concrete").unwrap(),
         "railway" => &*BLOCKS.by_name("gravel").unwrap(),
         "landfill" => {
-            // Gravel if man_made = spoil_heap, coarse dirt else
+            // Gravel if man_made = spoil_heap or heap, coarse dirt else
             let manmade = element.tags.get("man_made").unwrap_or(&binding);
-            if manmade == "spoil_heap" {
+            if manmade_tag == "spoil_heap" || manmade_tag == "heap" {
                 &*BLOCKS.by_name("gravel").unwrap()
             } else {
                 &*BLOCKS.by_name("coarse_dirt").unwrap()
             }
         }
-        "quarry" => &*BLOCKS.by_name("stone").unwrap(), // TODO: add ores
+        "quarry" => &*BLOCKS.by_name("stone").unwrap(),
         _ => {
             if args.winter {
                 &*BLOCKS.by_name("snow_block").unwrap()
@@ -160,14 +172,7 @@ pub fn generate_landuse(
                             editor.set_block(&*BLOCKS.by_name("red_flower").unwrap(), x, ground_level + 1, z, None, None);
                         }
                     } else if random_choice < 33 {
-                        create_tree(
-                            editor,
-                            x,
-                            ground_level + 1,
-                            z,
-                            rng.gen_range(1..=3),
-                            args.winter,
-                        );
+                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     }
                 }
             }
@@ -175,14 +180,7 @@ pub fn generate_landuse(
                 if !editor.check_for_block(x, ground_level, z, None, Some(&[&*BLOCKS.by_name("water").unwrap()])) {
                     let random_choice: i32 = rng.gen_range(0..21);
                     if random_choice == 20 {
-                        create_tree(
-                            editor,
-                            x,
-                            ground_level + 1,
-                            z,
-                            rng.gen_range(1..=3),
-                            args.winter,
-                        );
+                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     } else if random_choice == 2 {
                         let flower_block = match rng.gen_range(1..=4) {
                             1 => &*BLOCKS.by_name("red_flower").unwrap(),
@@ -218,14 +216,7 @@ pub fn generate_landuse(
                         if rng.gen_range(0..76) == 0 {
                             let special_choice: i32 = rng.gen_range(1..=10);
                             if special_choice <= 2 {
-                                create_tree(
-                                    editor,
-                                    x,
-                                    ground_level + 1,
-                                    z,
-                                    rng.gen_range(1..=3),
-                                    args.winter,
-                                );
+                                Tree::create(editor, (x, ground_level + 1, z), args.winter);
                             } else if special_choice <= 6 {
                                 editor.set_block(
                                     &*BLOCKS.by_name("hay_bale").unwrap(),
@@ -336,16 +327,29 @@ pub fn generate_landuse(
                 ) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
-                        create_tree(
-                            editor,
-                            x,
-                            ground_level + 1,
-                            z,
-                            rng.gen_range(1..=3),
-                            args.winter,
-                        );
+                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
                     } else if random_choice < 800 {
                         editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, ground_level + 1, z, None, None);
+                    }
+                }
+            }
+            "quarry" => {
+                if let Some(resource) = element.tags.get("resource") {
+                    let ore_block = match resource.as_str() {
+                        "iron_ore" => IRON_ORE,
+                        "coal" => COAL_ORE,
+                        "copper" => COPPER_ORE,
+                        "gold" => GOLD_ORE,
+                        "clay" | "kaolinite" => CLAY,
+                        _ => STONE,
+                    };
+                    let random_choice: i32 = rng.gen_range(0..100 + ground_level); // with more depth there's more resources
+                    if random_choice < 5 {
+                        editor.set_block(ore_block, x, ground_level, z, Some(&[STONE]), None);
+                    }
+                    // Fill everything with stone so dirt won't be there
+                    if args.fillground {
+                        editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, ground_level, z, None, None);
                     }
                 }
             }

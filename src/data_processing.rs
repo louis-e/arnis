@@ -9,7 +9,7 @@ use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
-const MIN_Y: i32 = -64;
+pub const MIN_Y: i32 = -64;
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
@@ -170,6 +170,12 @@ pub fn generate_world(
                 editor.set_block(groundlayer_block, x, max_y, z, None, None);
                 editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, max_y - 1, z, None, None);
                 editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, max_y - 2, z, None, None);
+
+                // Fill underground with stone
+                if args.fillground {
+                    editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, max_y - 2, z, None, None);
+                    editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+                }
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {
