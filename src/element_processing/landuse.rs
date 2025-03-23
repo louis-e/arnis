@@ -43,12 +43,12 @@ pub fn generate_landuse(
             let residential_tag = element.tags.get("residential").unwrap_or(&binding);
             if residential_tag == "rural" {
                 if args.winter {
-                    &*BLOCKS.by_name("snow_block").unwrap(),
+                    &*BLOCKS.by_name("snow_block").unwrap()
                 } else {
-                    &*BLOCKS.by_name("grass_block").unwrap(),
+                    &*BLOCKS.by_name("grass_block").unwrap()
                 }
             } else {
-                &*BLOCKS.by_name("stone_bricks").unwrap(),
+                &*BLOCKS.by_name("stone_bricks").unwrap()
             }
         }
         "commercial" => &*BLOCKS.by_name("smooth_stone").unwrap(),
