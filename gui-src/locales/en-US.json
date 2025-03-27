@@ -10,6 +10,7 @@
   "error_coordinates_out_of_range": "Error: Coordinates are out of range or incorrectly ordered (Lat before Lng required).",
   "invalid_format": "Invalid format. Please use 'lat,lng,lat,lng' or 'lat lng lat lng'.",
   "generation_process_started": "Generation process started.",
+  "terrain": "Terrain:",
   "winter_mode": "Winter Mode:",
   "world_scale": "World Scale:",
   "custom_bounding_box": "Custom Bounding Box:",

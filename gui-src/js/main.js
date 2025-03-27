@@ -96,6 +96,7 @@ async function applyLocalization(localization) {
     "button[data-localize='select_existing_world']": "select_existing_world",
     "button[data-localize='generate_new_world']": "generate_new_world",
     "h2[data-localize='customization_settings']": "customization_settings",
+    "label[data-localize='terrain']": "terrain",
     "label[data-localize='winter_mode']": "winter_mode",
     "label[data-localize='world_scale']": "world_scale",
     "label[data-localize='custom_bounding_box']": "custom_bounding_box",
