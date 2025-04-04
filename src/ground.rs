@@ -4,7 +4,7 @@ use image::{Rgb, RgbImage};
 /// Minimum Y coordinate in Minecraft (bedrock level)
 const MIN_Y: i32 = -62;
 /// Maximum Y coordinate in Minecraft (build height limit)
-const MAX_Y: i32 = 256;
+const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
 const BASE_HEIGHT_SCALE: f64 = 0.6;
 /// Mapbox API access token for terrain data
