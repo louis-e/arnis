@@ -45,7 +45,13 @@ pub fn generate_natural(
                         GRASS_BLOCK
                     }
                 }
-                "wetland" | "water" => WATER,
+                "wetland" | "water" => {
+                    if args.winter {
+                        ICE
+                    } else {
+                        WATER
+                    }
+                }
                 "bare_rock" => STONE,
                 "glacier" => PACKED_ICE,
                 "mud" => MUD,
