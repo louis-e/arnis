@@ -196,7 +196,7 @@ pub fn generate_landuse(
             }
             "farmland" => {
                 // Check if the current block is not water or another undesired block
-                if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER,ICE])) {
+                if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER, ICE])) {
                     if x % 15 == 0 || z % 15 == 0 {
                         // Place water/ice on the edges
                         editor.set_block(
@@ -226,9 +226,7 @@ pub fn generate_landuse(
                             // If a random condition is met, place a special object
                             if rng.gen_range(0..76) == 0 {
                                 let special_choice: i32 = rng.gen_range(1..=10);
-                                if special_choice <= 2 {
-                                    Tree::create(editor, (x, ground_level + 1, z), args.winter);
-                                } else if special_choice <= 6 {
+                                if special_choice <= 4 {
                                     editor.set_block(
                                         HAY_BALE,
                                         x,
