@@ -6,7 +6,7 @@ const MIN_Y: i32 = -62;
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
-const BASE_HEIGHT_SCALE: f64 = 0.6;
+const BASE_HEIGHT_SCALE: f64 = 1.0;
 /// Mapbox API access token for terrain data
 const MAPBOX_PUBKEY: &str =
     "pk.eyJ1IjoiY3Vnb3MiLCJhIjoiY2p4Nm43MzA3MDFmZDQwcGxsMjB4Z3hnNiJ9.SQbnMASwdqZe6G4n6OMvVw";
