@@ -29,8 +29,22 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
             if let Some("board") = element.tags.get("information").map(|x: &String| x.as_str()) {
                 // Draw an information board
                 // TODO draw a sign with text
-                editor.set_block(&*BLOCKS.by_name("cobblestone_wall").unwrap(), x, ground_level + 1, z, None, None);
-                editor.set_block(&*BLOCKS.by_name("oak_planks").unwrap(), x, ground_level + 2, z, None, None);
+                editor.set_block(
+                    &*BLOCKS.by_name("cobblestone_wall").unwrap(),
+                    x,
+                    ground_level + 1,
+                    z,
+                    None,
+                    None,
+                );
+                editor.set_block(
+                    &*BLOCKS.by_name("oak_planks").unwrap(),
+                    x,
+                    ground_level + 2,
+                    z,
+                    None,
+                    None,
+                );
             }
         }
     }

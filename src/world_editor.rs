@@ -1,4 +1,4 @@
-use crate::block_definitions::{BLOCKS, Block};
+use crate::block_definitions::{Block, BLOCKS};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;

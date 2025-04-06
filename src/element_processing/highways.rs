@@ -21,9 +21,23 @@ pub fn generate_highways(
                 let y: i32 = ground.level(first_node.xz());
                 let z: i32 = first_node.z;
                 for dy in 1..=4 {
-                    editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x, y + dy, z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("oak_fence").unwrap(),
+                        x,
+                        y + dy,
+                        z,
+                        None,
+                        None,
+                    );
                 }
-                editor.set_block(&*BLOCKS.by_name("glowstone").unwrap(), x, y + 5, z, None, None);
+                editor.set_block(
+                    &*BLOCKS.by_name("glowstone").unwrap(),
+                    x,
+                    y + 5,
+                    z,
+                    None,
+                    None,
+                );
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -35,15 +49,50 @@ pub fn generate_highways(
                         let z: i32 = node.z;
 
                         for dy in 1..=3 {
-                            editor.set_block(&*BLOCKS.by_name("cobblestone_wall").unwrap(), x, y + dy, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("cobblestone_wall").unwrap(),
+                                x,
+                                y + dy,
+                                z,
+                                None,
+                                None,
+                            );
                         }
 
-                        editor.set_block(&*BLOCKS.by_name("green_wool").unwrap(), x, y + 4, z, None, None);
-                        editor.set_block(&*BLOCKS.by_name("yellow_wool").unwrap(), x, y + 5, z, None, None);
-                        editor.set_block(&*BLOCKS.by_name("red_wool").unwrap(), x, y + 6, z, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("green_wool").unwrap(),
+                            x,
+                            y + 4,
+                            z,
+                            None,
+                            None,
+                        );
+                        editor.set_block(
+                            &*BLOCKS.by_name("yellow_wool").unwrap(),
+                            x,
+                            y + 5,
+                            z,
+                            None,
+                            None,
+                        );
+                        editor.set_block(
+                            &*BLOCKS.by_name("red_wool").unwrap(),
+                            x,
+                            y + 6,
+                            z,
+                            None,
+                            None,
+                        );
 
                         if args.winter {
-                            editor.set_block(&*BLOCKS.by_name("snow_layer").unwrap(), x, y + 7, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("snow_layer").unwrap(),
+                                x,
+                                y + 7,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                     }
                 }
@@ -55,11 +104,32 @@ pub fn generate_highways(
                 let y = ground.level(node.xz());
                 let z = node.z;
                 for dy in 1..=3 {
-                    editor.set_block(&*BLOCKS.by_name("cobblestone_wall").unwrap(), x, y + dy, z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("cobblestone_wall").unwrap(),
+                        x,
+                        y + dy,
+                        z,
+                        None,
+                        None,
+                    );
                 }
 
-                editor.set_block(&*BLOCKS.by_name("white_wool").unwrap(), x, y + 4, z, None, None);
-                editor.set_block(&*BLOCKS.by_name("white_wool").unwrap(), x + 1, y + 4, z, None, None);
+                editor.set_block(
+                    &*BLOCKS.by_name("white_wool").unwrap(),
+                    x,
+                    y + 4,
+                    z,
+                    None,
+                    None,
+                );
+                editor.set_block(
+                    &*BLOCKS.by_name("white_wool").unwrap(),
+                    x + 1,
+                    y + 4,
+                    z,
+                    None,
+                    None,
+                );
             }
         } else if element
             .tags()
@@ -212,7 +282,9 @@ pub fn generate_highways(
                                                 set_x,
                                                 ground.level(XZPoint::new(set_x, set_z)),
                                                 set_z,
-                                                Some(&[&*BLOCKS.by_name("black_concrete").unwrap()]),
+                                                Some(&[&*BLOCKS
+                                                    .by_name("black_concrete")
+                                                    .unwrap()]),
                                                 None,
                                             );
                                         } else {
@@ -251,7 +323,10 @@ pub fn generate_highways(
                                         ground.level(XZPoint::new(set_x, set_z)),
                                         set_z,
                                         None,
-                                        Some(&[&*BLOCKS.by_name("black_concrete").unwrap(), &*BLOCKS.by_name("white_concrete").unwrap()]),
+                                        Some(&[
+                                            &*BLOCKS.by_name("black_concrete").unwrap(),
+                                            &*BLOCKS.by_name("white_concrete").unwrap(),
+                                        ]),
                                     );
                                 }
                             }
@@ -313,7 +388,10 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground:
                     ground_level - 1,
                     bz,
                     None,
-                    Some(&[&*BLOCKS.by_name("black_concrete").unwrap(), &*BLOCKS.by_name("white_concrete").unwrap()]),
+                    Some(&[
+                        &*BLOCKS.by_name("black_concrete").unwrap(),
+                        &*BLOCKS.by_name("white_concrete").unwrap(),
+                    ]),
                 ) {
                     editor.set_block(siding_block, bx, ground_level, bz, None, None);
                 }

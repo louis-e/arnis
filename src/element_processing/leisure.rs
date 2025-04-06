@@ -102,11 +102,24 @@ pub fn generate_leisure(
 
             for (x, z) in filled_area {
                 let ground_level = ground.level(XZPoint::new(x, z));
-                editor.set_block(block_type, x, ground_level, z, Some(&[&*BLOCKS.by_name("grass_block").unwrap()]), None);
+                editor.set_block(
+                    block_type,
+                    x,
+                    ground_level,
+                    z,
+                    Some(&[&*BLOCKS.by_name("grass_block").unwrap()]),
+                    None,
+                );
 
                 // Add decorative elements for parks and gardens
                 if matches!(leisure_type.as_str(), "park" | "garden")
-                    && editor.check_for_block(x, ground_level, z, Some(&[&*BLOCKS.by_name("grass_block").unwrap()]), None)
+                    && editor.check_for_block(
+                        x,
+                        ground_level,
+                        z,
+                        Some(&[&*BLOCKS.by_name("grass_block").unwrap()]),
+                        None,
+                    )
                 {
                     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                     let random_choice: i32 = rng.gen_range(0..1000);
@@ -114,9 +127,30 @@ pub fn generate_leisure(
                     match random_choice {
                         0 => {
                             // Benches
-                            editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), x, ground_level + 1, z, None, None);
-                            editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), x + 1, ground_level + 1, z, None, None);
-                            editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), x - 1, ground_level + 1, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_log").unwrap(),
+                                x,
+                                ground_level + 1,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_log").unwrap(),
+                                x + 1,
+                                ground_level + 1,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_log").unwrap(),
+                                x - 1,
+                                ground_level + 1,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                         1..=30 => {
                             // Flowers
@@ -130,7 +164,14 @@ pub fn generate_leisure(
                         }
                         31..=70 => {
                             // Grass
-                            editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, ground_level + 1, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("grass").unwrap(),
+                                x,
+                                ground_level + 1,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                         71..=80 => {
                             // Tree
@@ -149,23 +190,100 @@ pub fn generate_leisure(
                         0..=10 => {
                             // Swing set
                             for y in 1..=4 {
-                                editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x - 1, ground_level + y, z, None, None);
-                                editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x + 1, ground_level + y, z, None, None);
+                                editor.set_block(
+                                    &*BLOCKS.by_name("oak_fence").unwrap(),
+                                    x - 1,
+                                    ground_level + y,
+                                    z,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block(
+                                    &*BLOCKS.by_name("oak_fence").unwrap(),
+                                    x + 1,
+                                    ground_level + y,
+                                    z,
+                                    None,
+                                    None,
+                                );
                             }
-                            editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x, ground_level + 4, z, None, None);
-                            editor.set_block(&*BLOCKS.by_name("stone_block_slab").unwrap(), x, ground_level + 2, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_fence").unwrap(),
+                                x,
+                                ground_level + 4,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block(
+                                &*BLOCKS.by_name("stone_block_slab").unwrap(),
+                                x,
+                                ground_level + 2,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                         11..=20 => {
                             // Slide
-                            editor.set_block(&*BLOCKS.by_name("oak_slab").unwrap(), x, ground_level + 1, z, None, None);
-                            editor.set_block(&*BLOCKS.by_name("oak_slab").unwrap(), x + 1, ground_level + 2, z, None, None);
-                            editor.set_block(&*BLOCKS.by_name("oak_slab").unwrap(), x + 2, ground_level + 3, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_slab").unwrap(),
+                                x,
+                                ground_level + 1,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_slab").unwrap(),
+                                x + 1,
+                                ground_level + 2,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_slab").unwrap(),
+                                x + 2,
+                                ground_level + 3,
+                                z,
+                                None,
+                                None,
+                            );
 
-                            editor.set_block(&*BLOCKS.by_name("oak_planks").unwrap(), x + 2, ground_level + 2, z, None, None);
-                            editor.set_block(&*BLOCKS.by_name("oak_planks").unwrap(), x + 2, ground_level + 1, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_planks").unwrap(),
+                                x + 2,
+                                ground_level + 2,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block(
+                                &*BLOCKS.by_name("oak_planks").unwrap(),
+                                x + 2,
+                                ground_level + 1,
+                                z,
+                                None,
+                                None,
+                            );
 
-                            editor.set_block(&*BLOCKS.by_name("ladder").unwrap(), x + 2, ground_level + 2, z - 1, None, None);
-                            editor.set_block(&*BLOCKS.by_name("ladder").unwrap(), x + 2, ground_level + 1, z - 1, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("ladder").unwrap(),
+                                x + 2,
+                                ground_level + 2,
+                                z - 1,
+                                None,
+                                None,
+                            );
+                            editor.set_block(
+                                &*BLOCKS.by_name("ladder").unwrap(),
+                                x + 2,
+                                ground_level + 1,
+                                z - 1,
+                                None,
+                                None,
+                            );
                         }
                         21..=30 => {
                             // Sandpit

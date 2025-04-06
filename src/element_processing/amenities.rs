@@ -35,15 +35,36 @@ pub fn generate_amenities(
             "waste_disposal" | "waste_basket" => {
                 // Place a cauldron for waste disposal or waste basket
                 if let Some(pt) = first_node {
-                    editor.set_block(&*BLOCKS.by_name("cauldron").unwrap(), pt.x, ground.level(pt) + 1, pt.z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("cauldron").unwrap(),
+                        pt.x,
+                        ground.level(pt) + 1,
+                        pt.z,
+                        None,
+                        None,
+                    );
                 }
             }
             "vending_machine" | "atm" => {
                 if let Some(pt) = first_node {
                     let y = ground.level(pt);
 
-                    editor.set_block(&*BLOCKS.by_name("iron_block").unwrap(), pt.x, y + 1, pt.z, None, None);
-                    editor.set_block(&*BLOCKS.by_name("iron_block").unwrap(), pt.x, y + 2, pt.z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("iron_block").unwrap(),
+                        pt.x,
+                        y + 1,
+                        pt.z,
+                        None,
+                        None,
+                    );
+                    editor.set_block(
+                        &*BLOCKS.by_name("iron_block").unwrap(),
+                        pt.x,
+                        y + 2,
+                        pt.z,
+                        None,
+                        None,
+                    );
                 }
             }
             "bicycle_parking" => {
@@ -82,7 +103,14 @@ pub fn generate_amenities(
                     editor.set_block(ground_block, x, y, z, None, None);
 
                     for cur_y in (y_min + 1)..roof_y {
-                        editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x, cur_y, z, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("oak_fence").unwrap(),
+                            x,
+                            cur_y,
+                            z,
+                            None,
+                            None,
+                        );
                     }
                     editor.set_block(roof_block, x, roof_y, z, None, None);
                 }
@@ -97,9 +125,30 @@ pub fn generate_amenities(
                 if let Some(pt) = first_node {
                     let y = ground.level(pt) + 1;
 
-                    editor.set_block(&*BLOCKS.by_name("smooth_stone").unwrap(), pt.x, y, pt.z, None, None);
-                    editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), pt.x + 1, y, pt.z, None, None);
-                    editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), pt.x - 1, y, pt.z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("smooth_stone").unwrap(),
+                        pt.x,
+                        y,
+                        pt.z,
+                        None,
+                        None,
+                    );
+                    editor.set_block(
+                        &*BLOCKS.by_name("oak_log").unwrap(),
+                        pt.x + 1,
+                        y,
+                        pt.z,
+                        None,
+                        None,
+                    );
+                    editor.set_block(
+                        &*BLOCKS.by_name("oak_log").unwrap(),
+                        pt.x - 1,
+                        y,
+                        pt.z,
+                        None,
+                        None,
+                    );
                 }
             }
             "vending" => {
@@ -107,8 +156,22 @@ pub fn generate_amenities(
                 if let Some(pt) = first_node {
                     let y = ground.level(pt);
 
-                    editor.set_block(&*BLOCKS.by_name("iron_block").unwrap(), pt.x, y + 1, pt.z, None, None);
-                    editor.set_block(&*BLOCKS.by_name("iron_block").unwrap(), pt.x, y + 2, pt.z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("iron_block").unwrap(),
+                        pt.x,
+                        y + 1,
+                        pt.z,
+                        None,
+                        None,
+                    );
+                    editor.set_block(
+                        &*BLOCKS.by_name("iron_block").unwrap(),
+                        pt.x,
+                        y + 2,
+                        pt.z,
+                        None,
+                        None,
+                    );
                 }
             }
             "shelter" => {
@@ -131,7 +194,14 @@ pub fn generate_amenities(
                     };
 
                     for fence_height in 1..=4 {
-                        editor.set_block(&*BLOCKS.by_name("oak_fence").unwrap(), x, y + fence_height, z, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("oak_fence").unwrap(),
+                            x,
+                            y + fence_height,
+                            z,
+                            None,
+                            None,
+                        );
                     }
                     editor.set_block(roof_block, x, y + 5, z, None, None);
                 }
@@ -168,7 +238,14 @@ pub fn generate_amenities(
                         let bresenham_points: Vec<(i32, i32, i32)> =
                             bresenham_line(prev.x, prev_y, prev.z, pt.x, y, pt.z);
                         for (bx, by, bz) in bresenham_points {
-                            editor.set_block(block_type, bx, by, bz, Some(&[&*BLOCKS.by_name("black_concrete").unwrap()]), None);
+                            editor.set_block(
+                                block_type,
+                                bx,
+                                by,
+                                bz,
+                                Some(&[&*BLOCKS.by_name("black_concrete").unwrap()]),
+                                None,
+                            );
 
                             // Decorative border around fountains
                             if amenity_type == "fountain" {
@@ -211,7 +288,10 @@ pub fn generate_amenities(
                             x,
                             y,
                             z,
-                            Some(&[&*BLOCKS.by_name("black_concrete").unwrap(), &*BLOCKS.by_name("gray_concrete").unwrap()]),
+                            Some(&[
+                                &*BLOCKS.by_name("black_concrete").unwrap(),
+                                &*BLOCKS.by_name("gray_concrete").unwrap(),
+                            ]),
                             None,
                         );
 
@@ -222,7 +302,10 @@ pub fn generate_amenities(
                                 x,
                                 y,
                                 z,
-                                Some(&[&*BLOCKS.by_name("black_concrete").unwrap(), &*BLOCKS.by_name("gray_concrete").unwrap()]),
+                                Some(&[
+                                    &*BLOCKS.by_name("black_concrete").unwrap(),
+                                    &*BLOCKS.by_name("gray_concrete").unwrap(),
+                                ]),
                                 None,
                             );
                         }

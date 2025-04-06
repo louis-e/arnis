@@ -141,7 +141,11 @@ pub fn generate_world(
     let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
     let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
 
-    let groundlayer_block = if args.winter { &*BLOCKS.by_name("snow_block").unwrap() } else { &*BLOCKS.by_name("grass_block").unwrap() };
+    let groundlayer_block = if args.winter {
+        &*BLOCKS.by_name("snow_block").unwrap()
+    } else {
+        &*BLOCKS.by_name("grass_block").unwrap()
+    };
 
     // Differentiate between terrain and non-terrain generation
     if ground.elevation_enabled {
@@ -168,8 +172,22 @@ pub fn generate_world(
 
                 // Set blocks in a single batch
                 editor.set_block(groundlayer_block, x, max_y, z, None, None);
-                editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, max_y - 1, z, None, None);
-                editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, max_y - 2, z, None, None);
+                editor.set_block(
+                    &*BLOCKS.by_name("dirt").unwrap(),
+                    x,
+                    max_y - 1,
+                    z,
+                    None,
+                    None,
+                );
+                editor.set_block(
+                    &*BLOCKS.by_name("dirt").unwrap(),
+                    x,
+                    max_y - 2,
+                    z,
+                    None,
+                    None,
+                );
 
                 // Fill underground with stone
                 if args.fillground {
@@ -201,7 +219,14 @@ pub fn generate_world(
             for z in 0..=(scale_factor_z as i32) {
                 let ground_level = ground.level(XZPoint::new(x, z));
                 editor.set_block(groundlayer_block, x, ground_level, z, None, None);
-                editor.set_block(&*BLOCKS.by_name("dirt").unwrap(), x, ground_level - 1, z, None, None);
+                editor.set_block(
+                    &*BLOCKS.by_name("dirt").unwrap(),
+                    x,
+                    ground_level - 1,
+                    z,
+                    None,
+                    None,
+                );
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {

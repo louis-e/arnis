@@ -1,9 +1,8 @@
-use std::hash::Hash;
+use crate::colors::RGBTuple;
 use serde::Deserialize;
 use std::collections::HashMap;
+use std::hash::Hash;
 use std::sync::LazyLock;
-use crate::colors::RGBTuple;
-
 
 /// Use this!
 pub static BLOCKS: LazyLock<Blocks> = LazyLock::new(|| Blocks::load());
@@ -43,12 +42,10 @@ impl Ord for Block {
         use std::cmp::Ordering;
 
         if self.id < other.id {
-           Ordering::Less
-        }
-        else if self.id > other.id {
+            Ordering::Less
+        } else if self.id > other.id {
             Ordering::Greater
-        }
-        else {
+        } else {
             Ordering::Equal
         }
     }
@@ -66,7 +63,6 @@ pub struct Blocks {
 }
 
 impl Blocks {
-
     fn load() -> Self {
         let blocks_toml = std::fs::read_to_string("../data/blocks.toml")
             .expect("Should have been able to read data/blocks.toml");
@@ -74,39 +70,46 @@ impl Blocks {
         toml::from_str(&blocks_toml).unwrap()
     }
 
-
     pub fn by_name(&self, name: &str) -> Option<&Block> {
         self.blocks.iter().find(|e| e.name == name)
     }
-
 
     pub fn by_id(&self, id: u8) -> Option<&Block> {
         self.blocks.iter().find(|e| e.id == id)
     }
 
-
     pub fn building_corner_variations(&self) -> Vec<&Block> {
         self.blocks.iter().filter(|e| e.building_corner).collect()
     }
 
-
     // Variations for building walls
     pub fn building_wall_variations(&self) -> Vec<&Block> {
-       self.blocks.iter().filter(|e| e.wall_color.is_some()).collect()
+        self.blocks
+            .iter()
+            .filter(|e| e.wall_color.is_some())
+            .collect()
     }
-
 
     // Variations for building floors
     pub fn building_floor_variations(&self) -> Vec<&Block> {
-       self.blocks.iter().filter(|e| e.floor_color.is_some()).collect()
+        self.blocks
+            .iter()
+            .filter(|e| e.floor_color.is_some())
+            .collect()
     }
 
     pub fn building_wall_color_map(&self) -> Vec<(RGBTuple, &Block)> {
-       self.building_wall_variations().iter().map(|e| (e.wall_color.unwrap(), *e)).collect()
+        self.building_wall_variations()
+            .iter()
+            .map(|e| (e.wall_color.unwrap(), *e))
+            .collect()
     }
 
     pub fn building_floor_color_map(&self) -> Vec<(RGBTuple, &Block)> {
-       self.building_floor_variations().iter().map(|e| (e.floor_color.unwrap(), *e)).collect()
+        self.building_floor_variations()
+            .iter()
+            .map(|e| (e.floor_color.unwrap(), *e))
+            .collect()
     }
 }
 
@@ -186,7 +189,9 @@ mod tests {
         // properties.half = "lower"
         let dark_oak_door_lower_block = &*BLOCKS.by_id(106).unwrap();
         assert_eq!(dark_oak_door_lower_block.name, "dark_oak_door_lower");
-        assert_eq!(dark_oak_door_lower_block.properties.unwrap().get("half"), "lower");
+        assert_eq!(
+            dark_oak_door_lower_block.properties.unwrap().get("half"),
+            "lower"
+        );
     }
-
 }

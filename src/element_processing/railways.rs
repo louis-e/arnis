@@ -1,4 +1,4 @@
-use crate::block_definitions::{BLOCKS, Block};
+use crate::block_definitions::{Block, BLOCKS};
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::ground::Ground;
@@ -43,7 +43,14 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
                 let (bx, _, bz) = smoothed_points[j];
                 let ground_level = ground.level(XZPoint::new(bx, bz));
 
-                editor.set_block(&*BLOCKS.by_name("gravel").unwrap(), bx, ground_level, bz, None, None);
+                editor.set_block(
+                    &*BLOCKS.by_name("gravel").unwrap(),
+                    bx,
+                    ground_level,
+                    bz,
+                    None,
+                    None,
+                );
 
                 let prev = if j > 0 {
                     Some(smoothed_points[j - 1])
@@ -65,7 +72,14 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
                 editor.set_block(rail_block, bx, ground_level + 1, bz, None, None);
 
                 if bx % 4 == 0 {
-                    editor.set_block(&*BLOCKS.by_name("oak_log").unwrap(), bx, ground_level, bz, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("oak_log").unwrap(),
+                        bx,
+                        ground_level,
+                        bz,
+                        None,
+                        None,
+                    );
                 }
             }
         }
@@ -148,13 +162,21 @@ fn determine_rail_direction(
 
                 match (from_prev, to_next) {
                     // East to North or North to East
-                    ((-1, 0), (0, -1)) | ((0, -1), (-1, 0)) => &*BLOCKS.by_name("rail_north_west").unwrap(),
+                    ((-1, 0), (0, -1)) | ((0, -1), (-1, 0)) => {
+                        &*BLOCKS.by_name("rail_north_west").unwrap()
+                    }
                     // West to North or North to West
-                    ((1, 0), (0, -1)) | ((0, -1), (1, 0)) => &*BLOCKS.by_name("rail_north_east").unwrap(),
+                    ((1, 0), (0, -1)) | ((0, -1), (1, 0)) => {
+                        &*BLOCKS.by_name("rail_north_east").unwrap()
+                    }
                     // East to South or South to East
-                    ((-1, 0), (0, 1)) | ((0, 1), (-1, 0)) => &*BLOCKS.by_name("rail_south_west").unwrap(),
+                    ((-1, 0), (0, 1)) | ((0, 1), (-1, 0)) => {
+                        &*BLOCKS.by_name("rail_south_west").unwrap()
+                    }
                     // West to South or South to West
-                    ((1, 0), (0, 1)) | ((0, 1), (1, 0)) => &*BLOCKS.by_name("rail_south_east").unwrap(),
+                    ((1, 0), (0, 1)) | ((0, 1), (1, 0)) => {
+                        &*BLOCKS.by_name("rail_south_east").unwrap()
+                    }
                     _ => {
                         if (px - x).abs() > (pz - z).abs() {
                             &*BLOCKS.by_name("rail_east_west").unwrap()

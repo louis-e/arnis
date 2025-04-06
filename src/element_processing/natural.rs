@@ -105,7 +105,13 @@ pub fn generate_natural(
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
-                        if editor.check_for_block(x, y, z, None, Some(&[&*BLOCKS.by_name("water").unwrap()])) {
+                        if editor.check_for_block(
+                            x,
+                            y,
+                            z,
+                            None,
+                            Some(&[&*BLOCKS.by_name("water").unwrap()]),
+                        ) {
                             continue;
                         }
 
@@ -121,7 +127,14 @@ pub fn generate_natural(
                             };
                             editor.set_block(flower_block, x, y + 1, z, None, None);
                         } else if random_choice <= 1 {
-                            editor.set_block(&*BLOCKS.by_name("grass").unwrap(), x, y + 1, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("grass").unwrap(),
+                                x,
+                                y + 1,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                     }
                 }
