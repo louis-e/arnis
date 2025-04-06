@@ -1,4 +1,4 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{Block, BLOCKS};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
@@ -209,9 +209,9 @@ impl Tree<'_> {
         match kind {
             TreeType::Oak => Self {
                 // kind,
-                log_block: OAK_LOG,
+                log_block: &*BLOCKS.by_name("oak_log").unwrap(),
                 log_height: 8,
-                leaves_block: OAK_LEAVES,
+                leaves_block: &*BLOCKS.by_name("oak_leaves").unwrap(),
                 leaves_fill: &OAK_LEAVES_FILL,
                 round_ranges: [
                     (3..=8).rev().collect(),
@@ -228,9 +228,9 @@ impl Tree<'_> {
 
             TreeType::Spruce => Self {
                 // kind,
-                log_block: SPRUCE_LOG,
+                log_block: &*BLOCKS.by_name("spruce_log").unwrap(),
                 log_height: 9,
-                leaves_block: BIRCH_LEAVES, // TODO Is this correct?
+                leaves_block: &*BLOCKS.by_name("birch_leaves").unwrap(), // TODO Is this correct?
                 leaves_fill: &SPRUCE_LEAVES_FILL,
                 // TODO can I omit the third empty vec? May cause issues with iter zip
                 round_ranges: [vec![9, 7, 6, 4, 3], vec![6, 3], vec![]],
@@ -240,9 +240,9 @@ impl Tree<'_> {
 
             TreeType::Birch => Self {
                 // kind,
-                log_block: BIRCH_LOG,
+                log_block: &*BLOCKS.by_name("birch_log").unwrap(),
                 log_height: 6,
-                leaves_block: BIRCH_LEAVES,
+                leaves_block: &*BLOCKS.by_name("birch_leaves").unwrap(),
                 leaves_fill: &BIRCH_LEAVES_FILL,
                 round_ranges: [(2..=6).rev().collect(), (2..=4).collect(), vec![]],
                 snow_layer: BIRCH_SNOW_LAYERS,

@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{Block, BLOCKS};
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
@@ -38,27 +38,27 @@ pub fn generate_buildings(
 
     // Randomly select block variations for corners, walls, and floors
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-    let variation_index_corner: usize = rng.gen_range(0..building_corner_variations().len());
-    let variation_index_wall: usize = rng.gen_range(0..building_wall_variations().len());
-    let variation_index_floor: usize = rng.gen_range(0..building_floor_variations().len());
+    let variation_index_corner: usize = rng.gen_range(0..BLOCKS.building_corner_variations().len());
+    let variation_index_wall: usize = rng.gen_range(0..BLOCKS.building_wall_variations().len());
+    let variation_index_floor: usize = rng.gen_range(0..BLOCKS.building_floor_variations().len());
 
-    let corner_block: Block = building_corner_variations()[variation_index_corner];
-    let wall_block: Block = element
+    let corner_block = BLOCKS.building_corner_variations()[variation_index_corner];
+    let wall_block = element
         .tags
         .get("building:colour")
         .and_then(|building_colour: &String| {
             color_text_to_rgb_tuple(building_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, building_wall_color_map())
+                find_nearest_block_in_color_map(&rgb, &*BLOCKS.building_wall_color_map())
             })
         })
         .flatten()
-        .unwrap_or_else(|| building_wall_variations()[variation_index_wall]);
-    let floor_block: Block = element
+        .unwrap_or_else(|| BLOCKS.building_wall_variations()[variation_index_wall].clone());
+    let floor_block = element
         .tags
         .get("roof:colour")
         .and_then(|roof_colour: &String| {
             color_text_to_rgb_tuple(roof_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, building_floor_color_map())
+                find_nearest_block_in_color_map(&rgb, &*BLOCKS.building_floor_color_map())
             })
         })
         .flatten()
@@ -72,14 +72,15 @@ pub fn generate_buildings(
                 match building_type.as_str() {
                     "yes" | "house" | "detached" | "static_caravan" | "semidetached_house"
                     | "bungalow" | "manor" | "villa" => {
-                        return building_floor_variations()[variation_index_floor];
+                        return BLOCKS.building_floor_variations()[variation_index_floor].clone();
                     }
-                    _ => return LIGHT_GRAY_CONCRETE,
+                    _ => return BLOCKS.by_name("light_gray_concrete").unwrap().clone(),
                 }
             }
-            LIGHT_GRAY_CONCRETE
+
+            BLOCKS.by_name("light_gray_concrete").unwrap().clone()
         });
-    let window_block: Block = WHITE_STAINED_GLASS;
+    let window_block = &*BLOCKS.by_name("white_stained_glass").unwrap();
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
@@ -125,7 +126,7 @@ pub fn generate_buildings(
 
     if let Some(amenity_type) = element.tags.get("amenity") {
         if amenity_type == "shelter" {
-            let roof_block: Block = STONE_BRICK_SLAB;
+            let roof_block = &*BLOCKS.by_name("stone_brick_slab").unwrap();
 
             let polygon_coords: Vec<(i32, i32)> = element
                 .nodes
@@ -145,7 +146,14 @@ pub fn generate_buildings(
                 };
 
                 for shelter_y in 1..=4 {
-                    editor.set_block(OAK_FENCE, x, shelter_y + y, z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("oak_fence").unwrap(),
+                        x,
+                        shelter_y + y,
+                        z,
+                        None,
+                        None,
+                    );
                 }
                 editor.set_block(roof_block, x, y + 5, z, None, None);
             }
@@ -171,8 +179,8 @@ pub fn generate_buildings(
             building_height = ((2.0 * scale_factor) as i32).max(3);
 
             if element.tags.contains_key("bicycle_parking") {
-                let ground_block: Block = OAK_PLANKS;
-                let roof_block: Block = STONE_BLOCK_SLAB;
+                let ground_block = &*BLOCKS.by_name("oak_planks").unwrap();
+                let roof_block = &*BLOCKS.by_name("stone_block_slab").unwrap();
 
                 let polygon_coords: Vec<(i32, i32)> = element
                     .nodes
@@ -197,7 +205,14 @@ pub fn generate_buildings(
                     let z: i32 = node.z;
 
                     for dy in 1..=4 {
-                        editor.set_block(OAK_FENCE, x, y + dy, z, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("oak_fence").unwrap(),
+                            x,
+                            y + dy,
+                            z,
+                            None,
+                            None,
+                        );
                     }
                     editor.set_block(roof_block, x, y + 5, z, None, None);
                 }
@@ -243,16 +258,37 @@ pub fn generate_buildings(
 
                     // Build walls up to the current level
                     for y in (current_level + 1)..=(current_level + 4) {
-                        editor.set_block(STONE_BRICKS, x, y, z, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("stone_bricks").unwrap(),
+                            x,
+                            y,
+                            z,
+                            None,
+                            None,
+                        );
                     }
                 }
 
                 // Fill the floor area for each level
                 for (x, z) in &floor_area {
                     if level == 0 {
-                        editor.set_block(SMOOTH_STONE, *x, current_level, *z, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("smooth_stone").unwrap(),
+                            *x,
+                            current_level,
+                            *z,
+                            None,
+                            None,
+                        );
                     } else {
-                        editor.set_block(COBBLESTONE, *x, current_level, *z, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("cobblestone").unwrap(),
+                            *x,
+                            current_level,
+                            *z,
+                            None,
+                            None,
+                        );
                     }
                 }
             }
@@ -272,15 +308,18 @@ pub fn generate_buildings(
                             bresenham_line(prev_x, current_level, prev_z, x, current_level, z);
                         for (bx, _, bz) in outline_points {
                             editor.set_block(
-                                SMOOTH_STONE,
+                                &*BLOCKS.by_name("smooth_stone").unwrap(),
                                 bx,
                                 current_level,
                                 bz,
-                                Some(&[COBBLESTONE, COBBLESTONE_WALL]),
+                                Some(&[
+                                    &*BLOCKS.by_name("cobblestone").unwrap(),
+                                    &*BLOCKS.by_name("cobblestone_wall").unwrap(),
+                                ]),
                                 None,
                             );
                             editor.set_block(
-                                STONE_BRICK_SLAB,
+                                &*BLOCKS.by_name("stone_brick_slab").unwrap(),
                                 bx,
                                 current_level + 2,
                                 bz,
@@ -289,7 +328,7 @@ pub fn generate_buildings(
                             );
                             if bx % 2 == 0 {
                                 editor.set_block(
-                                    COBBLESTONE_WALL,
+                                    &*BLOCKS.by_name("cobblestone_wall").unwrap(),
                                     bx,
                                     current_level + 1,
                                     bz,
@@ -319,13 +358,27 @@ pub fn generate_buildings(
                     let bresenham_points: Vec<(i32, i32, i32)> =
                         bresenham_line(prev.0, roof_height, prev.1, x, roof_height, z);
                     for (bx, _, bz) in bresenham_points {
-                        editor.set_block(STONE_BRICK_SLAB, bx, roof_height, bz, None, None);
+                        editor.set_block(
+                            &*BLOCKS.by_name("stone_brick_slab").unwrap(),
+                            bx,
+                            roof_height,
+                            bz,
+                            None,
+                            None,
+                        );
                         // Set roof block at edge
                     }
                 }
 
                 for y in (ground_level + 1)..=(roof_height - 1) {
-                    editor.set_block(COBBLESTONE_WALL, x, y, z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("cobblestone_wall").unwrap(),
+                        x,
+                        y,
+                        z,
+                        None,
+                        None,
+                    );
                 }
 
                 previous_node = Some((x, z));
@@ -342,7 +395,14 @@ pub fn generate_buildings(
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
             for (x, z) in roof_area.iter() {
-                editor.set_block(STONE_BRICK_SLAB, *x, roof_height, *z, None, None);
+                editor.set_block(
+                    &*BLOCKS.by_name("stone_brick_slab").unwrap(),
+                    *x,
+                    roof_height,
+                    *z,
+                    None,
+                    None,
+                );
                 // Set roof block
             }
 
@@ -375,19 +435,19 @@ pub fn generate_buildings(
                 for h in (start_level + 1)..=(start_level + building_height) {
                     if element.nodes[0].x == bx && element.nodes[0].x == bz {
                         // Corner Block
-                        editor.set_block(corner_block, bx, h, bz, None, None);
+                        editor.set_block(&corner_block, bx, h, bz, None, None);
                     } else {
                         // Add windows to the walls at intervals
                         if h > start_level + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
-                            editor.set_block(window_block, bx, h, bz, None, None);
+                            editor.set_block(&window_block, bx, h, bz, None, None);
                         } else {
-                            editor.set_block(wall_block, bx, h, bz, None, None);
+                            editor.set_block(&wall_block, bx, h, bz, None, None);
                         }
                     }
                 }
 
                 editor.set_block(
-                    COBBLESTONE,
+                    &*BLOCKS.by_name("cobblestone").unwrap(),
                     bx,
                     start_level + building_height + 1,
                     bz,
@@ -397,7 +457,7 @@ pub fn generate_buildings(
 
                 if args.winter {
                     editor.set_block(
-                        SNOW_LAYER,
+                        &*BLOCKS.by_name("snow_layer").unwrap(),
                         bx,
                         start_level + building_height + 2,
                         bz,
@@ -426,25 +486,39 @@ pub fn generate_buildings(
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
                 // Set floor at start_level
-                editor.set_block(floor_block, x, start_level, z, None, None);
+                editor.set_block(&floor_block, x, start_level, z, None, None);
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
                     for h in (start_level + 2 + 4..start_level + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
                             // Light fixtures
-                            editor.set_block(GLOWSTONE, x, h, z, None, None);
+                            editor.set_block(
+                                &*BLOCKS.by_name("glowstone").unwrap(),
+                                x,
+                                h,
+                                z,
+                                None,
+                                None,
+                            );
                         } else {
-                            editor.set_block(floor_block, x, h, z, None, None);
+                            editor.set_block(&floor_block, x, h, z, None, None);
                         }
                     }
                 } else if x % 6 == 0 && z % 6 == 0 {
-                    editor.set_block(GLOWSTONE, x, start_level + building_height, z, None, None);
+                    editor.set_block(
+                        &*BLOCKS.by_name("glowstone").unwrap(),
+                        x,
+                        start_level + building_height,
+                        z,
+                        None,
+                        None,
+                    );
                 }
 
                 // Set ceiling at proper height
                 editor.set_block(
-                    floor_block,
+                    &floor_block,
                     x,
                     start_level + building_height + 1,
                     z,
@@ -454,7 +528,7 @@ pub fn generate_buildings(
 
                 if args.winter {
                     editor.set_block(
-                        SNOW_LAYER,
+                        &*BLOCKS.by_name("snow_layer").unwrap(),
                         x,
                         start_level + building_height + 2,
                         z,
@@ -505,12 +579,14 @@ pub fn generate_building_from_relation(
 
 fn find_nearest_block_in_color_map(
     rgb: &RGBTuple,
-    color_map: Vec<(RGBTuple, Block)>,
+    color_map: &[(RGBTuple, &Block)],
 ) -> Option<Block> {
     color_map
-        .into_iter()
+        .iter()
         .min_by_key(|(entry_rgb, _)| rgb_distance(entry_rgb, rgb))
         .map(|(_, block)| block)
+        .copied()
+        .cloned()
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.
@@ -520,8 +596,8 @@ fn generate_bridge(
     ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
-    let floor_block: Block = STONE;
-    let railing_block: Block = STONE_BRICKS;
+    let floor_block = &*BLOCKS.by_name("stone").unwrap();
+    let railing_block = &*BLOCKS.by_name("stone_bricks").unwrap();
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
