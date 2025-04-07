@@ -109,8 +109,23 @@ pub fn generate_natural(
 
                 for (x, z) in filled_area {
                     let y = ground.level(XZPoint::new(x, z));
-
                     editor.set_block(block_type, x, y, z, None, None);
+                    // Make custom layer instead of dirt
+                    match natural_type.as_str() {
+                        "beach" | "sand" | "dune" => {
+                            editor.set_block(SAND, x, y - 1, z, None, None);
+                            editor.set_block(STONE, x, y - 2, z, None, None);
+                        }
+                        "glacier" => {
+                            editor.set_block(PACKED_ICE, x, y - 1, z, None, None);
+                            editor.set_block(STONE, x, y - 2, z, None, None);
+                        }
+                        "bare_rock" => {
+                            editor.set_block(STONE, x, y - 1, z, None, None);
+                            editor.set_block(STONE, x, y - 2, z, None, None);
+                        }
+                        _ => {}
+                    }
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {

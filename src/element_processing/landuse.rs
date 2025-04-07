@@ -36,7 +36,7 @@ pub fn generate_landuse(
         }
         "cemetery" => PODZOL,
         "beach" => SAND,
-        "construction" => DIRT,
+        "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
         "residential" => {
             let residential_tag = element.tags.get("residential").unwrap_or(&binding);
@@ -341,6 +341,10 @@ pub fn generate_landuse(
                 }
             }
             "quarry" => {
+                // Add stone layer under it
+                editor.set_block(STONE, x, ground_level - 1, z, Some(&[STONE]), None);
+                editor.set_block(STONE, x, ground_level - 2, z, Some(&[STONE]), None);
+                // Generate ore blocks
                 if let Some(resource) = element.tags.get("resource") {
                     let ore_block = match resource.as_str() {
                         "iron_ore" => IRON_ORE,
