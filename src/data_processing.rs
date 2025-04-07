@@ -167,7 +167,7 @@ pub fn generate_world(
                     .min(ground_level);
 
                 // Set blocks in a single batch
-                // TODO: Rework because there must not be dirt under quarries, glaciers
+                // TODO: Rework because there must not be dirt under quarries, glaciers, sand, water etc.
                 editor.set_block(groundlayer_block, x, max_y, z, None, None);
                 editor.set_block(DIRT, x, max_y - 1, z, None, None);
                 editor.set_block(DIRT, x, max_y - 2, z, None, None);
