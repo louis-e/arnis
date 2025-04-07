@@ -1,7 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::cartesian::XZPoint;
-use crate::data_processing::MIN_Y;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
@@ -351,13 +350,9 @@ pub fn generate_landuse(
                         "clay" | "kaolinite" => CLAY,
                         _ => STONE,
                     };
-                    let random_choice: i32 = rng.gen_range(0..100 + ground_level); // with more depth there's more resources
+                    let random_choice: i32 = rng.gen_range(0..100 + ground_level); // With more depth there's more resources
                     if random_choice < 5 {
                         editor.set_block(ore_block, x, ground_level, z, Some(&[STONE]), None);
-                    }
-                    // Fill everything with stone so dirt won't be there
-                    if args.fillground {
-                        editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, ground_level, z, None, None);
                     }
                 }
             }
