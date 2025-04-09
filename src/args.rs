@@ -54,6 +54,10 @@ pub struct Args {
     /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
+
+    /// Set spawn coordinates (optional)
+    #[arg(long)]
+    pub spawn_point: Option<String>,
 }
 
 impl Args {
@@ -75,6 +79,14 @@ impl Args {
             if !validate_bounding_box(bbox) {
                 eprintln!("{}", "Error! Invalid bbox input".red().bold());
                 exit(1);
+            }
+        }
+
+        // Validating spawn if provided
+        if let Some(spawn_point) = &self.spawn_point {
+            if !validate_spawn_point(spawn_point) {
+                eprintln!("{}", "Error! Invalid spawn input".red().bold());
+                exit(1000); // idk what exit code to put in so hopefully this one dont get used already
             }
         }
     }
@@ -101,6 +113,22 @@ fn validate_bounding_box(bbox: &str) -> bool {
     }
 
     min_lng < max_lng && min_lat < max_lat
+}
+
+/// Validates the spawn point
+fn validate_spawn_point(spawn_point: &str) -> bool {
+    let parts: Vec<&str> = spawn_point .split(',').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let spawn_lng: f64 = parts[0].parse().ok().unwrap_or(0.0);
+    let spawn_lat: f64 = parts[1].parse().ok().unwrap_or(0.0);
+
+    if !(-180.0..=180.0).contains(&spawn_lng) || !(-90.0..=90.0).contains(&spawn_lat) {
+        return false;
+    }
+
+    true
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {

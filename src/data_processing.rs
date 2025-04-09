@@ -1,13 +1,18 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
 use crate::cartesian::XZPoint;
-use crate::element_processing::*;
+use crate::{element_processing::*, osm_parser};
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use fastnbt::Value;
+use flate2::read::GzDecoder;
+use std::io::Read;
+use std::path::PathBuf;
+use std::{fs, io::Write};
 
 pub const MIN_Y: i32 = -64;
 
@@ -17,6 +22,10 @@ pub fn generate_world(
     scale_factor_x: f64,
     scale_factor_z: f64,
 ) -> Result<(), String> {
+    // Set spawn point     not sure where to put this
+    set_spawn_point(&args);
+
+
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
 
@@ -238,4 +247,102 @@ pub fn generate_world(
     emit_gui_progress_update(100.0, "Done! World generation completed.");
     println!("{}", "Done! World generation completed.".green().bold());
     Ok(())
+}
+
+fn set_spawn_point(args: &Args) -> () {
+    if args.spawn_point == None {
+        return
+    }
+    
+    let world_path = &args.path;
+    let mut path_buf =  PathBuf::from(world_path);
+    path_buf.push("level.dat");
+    
+    let spawn_point: Vec<f64> = args
+        .spawn_point
+        .as_ref()
+        .unwrap()
+        .split(",")
+        .map(|s:&str| s.parse::<f64>().expect("Invalid spawn point coordinate"))
+        .collect();
+
+    //convert lat/long spawn coordinates to minecraft coordinates
+    let bbox: Vec<f64> = args
+        .bbox
+        .as_ref()
+        .expect("Bounding box is required")
+        .split(',')
+        .map(|s: &str| s.parse::<f64>().expect("Invalid bbox coordinate"))
+        .collect::<Vec<f64>>();
+            
+    let bbox_tuple: (f64, f64, f64, f64) = (bbox[0], bbox[1], bbox[2], bbox[3]);
+
+    let (scale_factor_z, scale_factor_x) = osm_parser::geo_distance(bbox_tuple.1, bbox_tuple.3, bbox_tuple.0, bbox_tuple.2);
+    let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
+    let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
+    let (x_coord, z_coord) = osm_parser::lat_lon_to_minecraft_coords(spawn_point[1], spawn_point[0], bbox_tuple, scale_factor_z, scale_factor_x);
+
+    // Grab and decompress level.dat
+    let level_file = fs::File::open(&path_buf).expect("Failed to open level.bat");
+    let mut decoder = GzDecoder::new(level_file);
+    let mut decompressed_data = vec![];
+    decoder
+        .read_to_end(&mut decompressed_data)
+        .expect("Failed to decompress level.dat");
+
+    // Parse the decompressed NBT data
+    let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
+        .expect("Failed to parse level.dat");
+
+    if let Value::Compound(ref mut root) = level_data {
+        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
+            //Set spawn point
+            if let Value::Long(ref mut spawn_x) = data.get_mut("SpawnX").unwrap() {
+                *spawn_x = x_coord as i64;
+            }
+            if let Value::Long(ref mut spawn_z) = data.get_mut("SpawnZ").unwrap() {
+                *spawn_z = z_coord as i64;
+            }
+            if let Value::Long(ref mut spawn_y) = data.get_mut("SpawnY").unwrap() {
+                *spawn_y = -61;
+            }
+            // Update player position and rotation
+            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+                    if let Value::Double(ref mut x) = pos.get_mut(0).unwrap() {
+                        *x = x_coord as f64;
+                    }
+                    if let Value::Double(ref mut y) = pos.get_mut(1).unwrap() {
+                        *y = -61.0;
+                    }
+                    if let Value::Double(ref mut z) = pos.get_mut(2).unwrap() {
+                        *z = z_coord as f64;
+                    }
+                }
+
+                if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
+                    if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
+                        *x = -45.0;
+                    }
+                }
+            }
+        }
+    }
+    // Serialize the updated NBT data back to bytes
+    let serialized_level_data: Vec<u8> = fastnbt::to_bytes(&level_data)
+        .expect("Failed to serialize updated level.dat");
+
+    // Compress the serialized data back to gzip
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized_level_data)
+        .expect("Failed to compress updated level.dat");
+    let compressed_level_data = encoder
+        .finish()
+        .expect("Failed to finalize compression for level.dat");
+
+    // Write the level.dat file
+    fs::write(&path_buf, compressed_level_data)
+        .expect("Failed to create level.dat file");
+    println!("({},{})",x_coord,z_coord);
 }
