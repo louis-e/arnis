@@ -117,7 +117,7 @@ fn validate_bounding_box(bbox: &str) -> bool {
 
 /// Validates the spawn point
 fn validate_spawn_point(spawn_point: &str) -> bool {
-    let parts: Vec<&str> = spawn_point .split(',').collect();
+    let parts: Vec<&str> = spawn_point.split(',').collect();
     if parts.len() != 2 {
         return false;
     }
