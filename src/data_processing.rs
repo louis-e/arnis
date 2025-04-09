@@ -250,37 +250,42 @@ pub fn generate_world(
 }
 
 fn set_spawn_point(args: &Args) -> () {
-    if args.spawn_point == None {
-        return
-    }
     
     let world_path = &args.path;
     let mut path_buf =  PathBuf::from(world_path);
     path_buf.push("level.dat");
+    let x_coord: i32;
+    let z_coord: i32;
     
-    let spawn_point: Vec<f64> = args
-        .spawn_point
-        .as_ref()
-        .unwrap()
-        .split(",")
-        .map(|s:&str| s.parse::<f64>().expect("Invalid spawn point coordinate"))
-        .collect();
+    // If spawn point argument provided, change spawn point from the origin to the given coordinates
+    if args.spawn_point == None {
+        x_coord = 0;
+        z_coord = 0;
+    } else {
+        //convert lat/long spawn coordinates to minecraft coordinates
+        let spawn_point: Vec<f64> = args
+            .spawn_point
+            .as_ref()
+            .unwrap()
+            .split(",")
+            .map(|s:&str| s.parse::<f64>().expect("Invalid spawn point coordinate"))
+            .collect();
 
-    //convert lat/long spawn coordinates to minecraft coordinates
-    let bbox: Vec<f64> = args
-        .bbox
-        .as_ref()
-        .expect("Bounding box is required")
-        .split(',')
-        .map(|s: &str| s.parse::<f64>().expect("Invalid bbox coordinate"))
-        .collect::<Vec<f64>>();
+        let bbox: Vec<f64> = args
+            .bbox
+            .as_ref()
+            .expect("Bounding box is required")
+            .split(',')
+            .map(|s: &str| s.parse::<f64>().expect("Invalid bbox coordinate"))
+            .collect::<Vec<f64>>();
             
-    let bbox_tuple: (f64, f64, f64, f64) = (bbox[0], bbox[1], bbox[2], bbox[3]);
+        let bbox_tuple: (f64, f64, f64, f64) = (bbox[0], bbox[1], bbox[2], bbox[3]);
 
-    let (scale_factor_z, scale_factor_x) = osm_parser::geo_distance(bbox_tuple.1, bbox_tuple.3, bbox_tuple.0, bbox_tuple.2);
-    let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
-    let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
-    let (x_coord, z_coord) = osm_parser::lat_lon_to_minecraft_coords(spawn_point[1], spawn_point[0], bbox_tuple, scale_factor_z, scale_factor_x);
+        let (scale_factor_z, scale_factor_x) = osm_parser::geo_distance(bbox_tuple.1, bbox_tuple.3, bbox_tuple.0, bbox_tuple.2);
+        let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
+        let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
+        (x_coord, z_coord) = osm_parser::lat_lon_to_minecraft_coords(spawn_point[1], spawn_point[0], bbox_tuple, scale_factor_z, scale_factor_x);
+    }
 
     // Grab and decompress level.dat
     let level_file = fs::File::open(&path_buf).expect("Failed to open level.bat");
