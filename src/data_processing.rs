@@ -23,7 +23,7 @@ pub fn generate_world(
     scale_factor_z: f64,
 ) -> Result<(), String> {
     // Set spawn point     not sure where to put this
-    set_spawn_point(&args);
+    set_spawn_point(args);
 
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
@@ -248,7 +248,7 @@ pub fn generate_world(
     Ok(())
 }
 
-fn set_spawn_point(args: &Args) -> () {
+fn set_spawn_point(args: &Args) {
     let world_path = &args.path;
     let mut path_buf = PathBuf::from(world_path);
     path_buf.push("level.dat");
@@ -256,7 +256,7 @@ fn set_spawn_point(args: &Args) -> () {
     let z_coord: i32;
 
     // If spawn point argument provided, change spawn point from the origin to the given coordinates
-    if args.spawn_point == None {
+    if args.spawn_point.is_none() {
         x_coord = 0;
         z_coord = 0;
     } else {
