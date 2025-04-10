@@ -201,14 +201,7 @@ pub fn generate_landuse(
                         if args.winter {
                             // Less frozen water in winter
                             if rng.gen_range(0..8) == 0 {
-                                editor.set_block(
-                                    ICE,
-                                    x,
-                                    ground_level,
-                                    z,
-                                    Some(&[FARMLAND]),
-                                    None,
-                                );
+                                editor.set_block(ICE, x, ground_level, z, Some(&[FARMLAND]), None);
                                 editor.set_block(
                                     AIR,
                                     x,
@@ -217,16 +210,12 @@ pub fn generate_landuse(
                                     Some(&[GRASS, WHEAT, CARROTS, POTATOES, SNOW_LAYER]),
                                     None,
                                 );
+                            } else {
+                                editor.set_block(DIRT, x, ground_level, z, Some(&[FARMLAND]), None);
+                                editor.set_block(SNOW_LAYER, x, ground_level + 1, z, None, None);
                             }
                         } else {
-                            editor.set_block(
-                                WATER,
-                                x,
-                                ground_level,
-                                z,
-                                Some(&[FARMLAND]),
-                                None,
-                            );
+                            editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND]), None);
                             editor.set_block(
                                 AIR,
                                 x,
