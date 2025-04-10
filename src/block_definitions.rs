@@ -151,6 +151,9 @@ impl Block {
             130 => "copper_ore",
             131 => "clay",
             132 => "dirt_path",
+            133 => "ice",
+            134 => "packed_ice",
+            135 => "mud",
             _ => panic!("Invalid id"),
         }
     }
@@ -419,6 +422,9 @@ pub const GOLD_ORE: Block = Block::new(129);
 pub const COPPER_ORE: Block = Block::new(130);
 pub const CLAY: Block = Block::new(131);
 pub const DIRT_PATH: Block = Block::new(132);
+pub const ICE: Block = Block::new(133);
+pub const PACKED_ICE: Block = Block::new(134);
+pub const MUD: Block = Block::new(135);
 
 // Variations for building corners
 pub fn building_corner_variations() -> Vec<Block> {
