@@ -112,7 +112,13 @@ pub fn generate_leisure(
                     let random_choice: i32 = rng.gen_range(0..1000);
 
                     match random_choice {
-                        0..40 => {
+                        0 => {
+                            // Benches
+                            editor.set_block(OAK_LOG, x, ground_level + 1, z, None, None);
+                            editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
+                            editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
+                        }
+                        1..40 => {
                             // Flowers
                             let flower_choice = match random_choice {
                                 0..10 => RED_FLOWER,

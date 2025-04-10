@@ -24,7 +24,7 @@ The world will always be generated starting from the Minecraft coordinates 0 0 0
 
 To generate your world with terrain, make sure to enable the corresponding feature in the generation settings.
 
-Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4.
+Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4 or above.
 If you choose to select an own world, be aware that Arnis will overwrite certain areas.
 
 ## :floppy_disk: How it works

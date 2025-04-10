@@ -5,6 +5,8 @@ use image::{Rgb, RgbImage};
 const MIN_Y: i32 = -62;
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
+/// Scale factor for converting real elevation to Minecraft heights
+const BASE_HEIGHT_SCALE: f64 = 0.72;
 
 /// Mapbox API access token for terrain data
 const MAPBOX_PUBKEY: &str =
@@ -223,7 +225,9 @@ impl Ground {
         }
 
         let height_range: f64 = max_height - min_height;
-        let scaled_range: f64 = height_range * scale;
+        // Apply scale factor to height scaling
+        let height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
+        let scaled_range: f64 = height_range * height_scale;
 
         // Convert to scaled Minecraft Y coordinates
         for row in blurred_heights {
