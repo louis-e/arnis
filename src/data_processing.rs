@@ -174,14 +174,14 @@ pub fn generate_world(
                     .unwrap_or(ground_level)
                     .min(ground_level);
 
-                // Set blocks in a single batch
-                editor.set_block(groundlayer_block, x, max_y, z, None, None);
-                editor.set_block(DIRT, x, max_y - 1, z, None, None);
-                editor.set_block(DIRT, x, max_y - 2, z, None, None);
-
+                // Add default dirt and grass layer if there isn't a stone layer already
+                if !editor.check_for_block(x, max_y, z, Some(&[STONE]), None) {
+                    editor.set_block(groundlayer_block, x, max_y, z, None, None);
+                    editor.set_block(DIRT, x, max_y - 1, z, None, None);
+                }
                 // Fill underground with stone
                 if args.fillground {
-                    editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, max_y - 2, z, None, None);
+                    editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, max_y - 1, z, None, None);
                     editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
                 }
 
