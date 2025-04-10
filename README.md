@@ -4,26 +4,22 @@
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases)
 
-This open source project written in Rust generates any chosen location from the real world in Minecraft Java Edition with a high level of detail.
+Arnis creates complex and accurate Minecraft Java Edition worlds that reflect real-world geography and architecture using OpenStreetMap.
 
 ###### ⚠️ This Github page is the official project website. Do not download Arnis from any other website.
 
 ## :desktop_computer: Example
 ![Minecraft Preview](https://github.com/louis-e/arnis/blob/main/gitassets/mc.gif?raw=true)
 
-By leveraging geospatial data from OpenStreetMap and utilizing the powerful capabilities of Rust, Arnis provides an efficient and robust solution for creating complex and accurate Minecraft worlds that reflect real-world geography and architecture.
-
-Arnis is designed to handle large-scale data and generate rich, immersive environments that bring real-world cities, landmarks, and natural features into the Minecraft universe. Whether you're looking to replicate your hometown, explore urban environments, or simply build something unique and realistic, Arnis generates your vision.
+Arnis is designed to handle large-scale data and generate rich, immersive environments that bring real-world cities, landmarks, and natural features into Minecraft. Whether you're looking to replicate your hometown, explore urban environments, or simply build something unique and realistic, Arnis generates your vision.
 
 ## :keyboard: Usage
 <img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
  
-Choose your area in Arnis using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
-The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
+Choose your area using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
 
-To generate your world with terrain, make sure to enable the corresponding feature in the generation settings.
-
+> The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
 Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4 or above.
 If you choose to select an own world, be aware that Arnis will overwrite certain areas.
 
@@ -69,14 +65,14 @@ Make sure to teleport to the generation starting point (/tp 0 0 0). If there is 
 
 ## :memo: ToDo and Known Bugs
 Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
-- [ ] Fix compilation for Linux
-- [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
+- [ ] Fix compilation for Linux and Mac
 - [ ] Fix coastal cities generation duration time (water_areas.rs)
-- [ ] Add street names as signs
+- [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
 - [ ] Add support for older Minecraft versions (<=1.16.5) (https://github.com/louis-e/arnis/issues/124, https://github.com/louis-e/arnis/issues/137)
 - [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
 - [ ] Add interior to buildings
 - [ ] Implement house roof types
+- [ ] Add street names as signs
 - [ ] Add support for inner attribute in multipolygons and multipolygon elements other than buildings
 - [ ] Refactor bridges implementation
 - [ ] Better code documentation
@@ -97,16 +93,18 @@ Feel free to choose an item from the To-Do or Known Bugs list, or bring your own
 ## :trophy: Open Source
 #### Key objectives of this project
 - **Modularity**: Ensure that all components (e.g., data fetching, processing, and world generation) are cleanly separated into distinct modules for better maintainability and scalability.
-- **Performance Optimization**: Utilize Rust’s memory safety and concurrency features to optimize the performance of the world generation process.
+- **Performance Optimization**: We aim to keep a good performance and speed of the world generation process.
 - **Comprehensive Documentation**: Detailed in-code documentation for a clear structure and logic.
 - **User-Friendly Experience**: Focus on making the project easy to use for end users.
-- **Cross-Platform Support**: Ensure the project runs smoothly on Windows, macOS, and Linux.
+- **Cross-Platform Support**: We want this project to run smoothly on Windows, macOS, and Linux.
 
 #### How to contribute
-This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. We encourage discussions and suggestions to ensure the project remains modular, optimized, and easy to use for the community. You can use the parameter --debug to get a more detailed output of the processed values, which can be helpful for debugging and development. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
+This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. Please respect the above mentioned key objectives. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
 
 Build and run it using: ```cargo run --release --no-default-features -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```<br>
 For the GUI: ```cargo run --release```<br>
+
+> You can use the parameter --debug to get a more detailed output of the processed values, which can be helpful for debugging and development.
 
 After your pull request was merged, I will take care of regularly creating update releases which will include your changes.
 
