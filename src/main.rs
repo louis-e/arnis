@@ -436,6 +436,7 @@ fn gui_start_generation(
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
+                spawn_point: None,
             };
 
             // Reorder bounding box coordinates for further processing
