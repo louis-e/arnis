@@ -83,7 +83,7 @@ jobs:
       shell: powershell
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.os }}-build
         path: target/release/${{ matrix.asset_name }}
