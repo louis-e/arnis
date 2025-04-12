@@ -15,7 +15,7 @@ use std::time::Duration;
 ))]
 pub struct Args {
     /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true, value_parser = BBox::from_str)]
+    #[arg(long, allow_hyphen_values = true, group = "location", value_parser = BBox::from_str)]
     pub bbox: BBox,
 
     /// JSON file containing OSM data (optional)

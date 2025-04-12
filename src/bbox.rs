@@ -27,19 +27,22 @@ impl BBox {
     pub fn from_str(s: &str) -> Result<Self, String> {
         // Split by either commas or spaces
         let parts: Vec<&str> = s.split(|c| c == ',' || c == ' ').collect();
-        
+
         if parts.len() != 4 {
-            return Err(format!("Invalid BBox format: expected 4 values, got {}", parts.len()));
+            return Err(format!(
+                "Invalid BBox format: expected 4 values, got {}",
+                parts.len()
+            ));
         }
-        
+
         // Parse the four floating point values
         let mut values = [0.0; 4];
         for (i, part) in parts.iter().enumerate() {
-            values[i] = part.parse::<f64>().map_err(|e| {
-                format!("Failed to parse coordinate value '{}': {}", part, e)
-            })?;
+            values[i] = part
+                .parse::<f64>()
+                .map_err(|e| format!("Failed to parse coordinate value '{}': {}", part, e))?;
         }
-        
+
         let [min_lat, min_lng, max_lat, max_lng] = values;
         Self::new(min_lat, min_lng, max_lat, max_lng)
     }
@@ -79,7 +82,7 @@ mod tests {
 
         assert_eq!(bbox_result.unwrap(), arnis_correct);
     }
-    
+
     #[test]
     fn test_from_str_spaces() {
         const ARNIS_SPACE_STR: &str = "9.927928 54.627053 9.937563 54.634902";

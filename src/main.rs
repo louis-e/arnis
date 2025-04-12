@@ -413,7 +413,7 @@ fn gui_start_generation(
                     return Err(error_msg);
                 }
             };
-            
+
             // Create an Args instance with the chosen bounding box and world directory path
             let args: Args = Args {
                 bbox,
