@@ -90,7 +90,7 @@ mod tests {
             "--path",
             "",
             "--bbox",
-            "",
+            "54.627053 9.927928 54.634902 9.937563",
             "--winter",
             "--terrain",
             "--debug",
@@ -100,7 +100,7 @@ mod tests {
         assert!(args.debug);
         assert!(args.terrain);
 
-        let cmd = ["arnis", "--path", "", "--bbox", ""];
+        let cmd = ["arnis", "--path", "", "--bbox", "54.627053 9.927928 54.634902 9.937563"];
         let args = Args::parse_from(cmd.iter());
         assert!(!args.winter);
         assert!(!args.debug);
@@ -112,10 +112,7 @@ mod tests {
         let cmd = ["arnis"];
         assert!(Args::try_parse_from(cmd.iter()).is_err());
 
-        let cmd = ["arnis", "--path", "", "--bbox", ""];
-        assert!(Args::try_parse_from(cmd.iter()).is_ok());
-
-        let cmd = ["arnis", "--path", "", "--file", ""];
+        let cmd = ["arnis", "--path", "", "--bbox", "54.627053 9.927928 54.634902 9.937563"];
         assert!(Args::try_parse_from(cmd.iter()).is_ok());
 
         // let cmd = [
@@ -126,7 +123,7 @@ mod tests {
 
         let cmd = [
             "arnis", // "--gui",
-            "--path", "", "--bbox", "",
+            "--path", "", "--bbox", "54.627053 9.927928 54.634902 9.937563",
         ];
         assert!(Args::try_parse_from(cmd.iter()).is_ok());
     }

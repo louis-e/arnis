@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn test_from_str() {
-        const ARNIS_STR: &str = "9.927928,54.627053,9.937563,54.634902";
+        const ARNIS_STR: &str = "54.627053,9.927928,54.634902,9.937563";
 
         let bbox_result = BBox::from_str(ARNIS_STR);
         assert!(bbox_result.is_ok());
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn test_from_str_spaces() {
-        const ARNIS_SPACE_STR: &str = "9.927928 54.627053 9.937563 54.634902";
+        const ARNIS_SPACE_STR: &str = "54.627053 9.927928 54.634902 9.937563";
 
         let bbox_result = BBox::from_str(ARNIS_SPACE_STR);
         assert!(bbox_result.is_ok());
