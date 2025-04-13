@@ -26,7 +26,7 @@ impl BBox {
 
     pub fn from_str(s: &str) -> Result<Self, String> {
         // Split by either commas or spaces
-        let parts: Vec<&str> = s.split(|c| c == ',' || c == ' ').collect();
+        let parts: Vec<&str> = s.split([',', ' ']).collect();
 
         if parts.len() != 4 {
             return Err(format!(
