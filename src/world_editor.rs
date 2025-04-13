@@ -240,7 +240,7 @@ impl WorldEditor {
         Self {
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
-            xzbbox: xzbbox,
+            xzbbox,
         }
     }
 

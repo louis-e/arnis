@@ -36,7 +36,7 @@ impl Operator {
     pub fn vec_from_json(list: &serde_json::Value) -> Vec<Self> {
         let oplist = list.as_array().expect("Expected a list of operations");
 
-        let operators: Vec<Self> = oplist.iter().map(|v| Self::from_json(v)).collect();
+        let operators: Vec<Self> = oplist.iter().map(Self::from_json).collect();
 
         operators
     }
