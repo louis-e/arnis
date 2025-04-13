@@ -1,5 +1,6 @@
 use crate::block_definitions::*;
 use crate::progress::emit_gui_progress_update;
+use crate::cartesian::{XZPoint, XZBBox};
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
@@ -230,18 +231,16 @@ impl WorldToModify {
 pub struct WorldEditor {
     region_dir: String,
     world: WorldToModify,
-    scale_factor_x: f64,
-    scale_factor_z: f64,
+    xzbbox: XZBBox,
 }
 
 impl WorldEditor {
     /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64) -> Self {
+    pub fn new(region_dir: &str, xzbbox: XZBBox) -> Self {
         Self {
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
-            scale_factor_x,
-            scale_factor_z,
+            xzbbox: xzbbox,
         }
     }
 
@@ -267,7 +266,7 @@ impl WorldEditor {
     }
 
     pub fn get_max_coords(&self) -> (i32, i32) {
-        (self.scale_factor_x as i32, self.scale_factor_x as i32)
+        (self.xzbbox.point2.x, self.xzbbox.point2.z)
     }
 
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
@@ -344,7 +343,7 @@ impl WorldEditor {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+        if !self.xzbbox.contains(&XZPoint{x,z}) {
             return;
         }
 

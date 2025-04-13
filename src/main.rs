@@ -9,6 +9,7 @@ mod data_processing;
 mod element_processing;
 mod floodfill;
 mod ground;
+mod map_editing;
 mod osm_parser;
 #[cfg(feature = "gui")]
 mod progress;
@@ -141,9 +142,17 @@ fn main() {
             }
         }
 
+        // Edit map (parsed_elements). Operations are defined in a json file
+        let mut xzbbox = cartesian::XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
+        let mapediting_json_str =
+            fs::read_to_string("map_editing.json").expect("Failed to open map editing config file");
+        let mapediting_json = serde_json::from_str(&mapediting_json_str)
+            .expect("Failed to parse map editing config file. JSON not valid");
+        map_editing::edit_map(&mut parsed_elements, &mut xzbbox, &mapediting_json);
+
         // Generate world
         let _ =
-            data_processing::generate_world(parsed_elements, &args, scale_factor_x, scale_factor_z);
+            data_processing::generate_world(parsed_elements, xzbbox, &args);
     } else {
         #[cfg(not(feature = "gui"))]
         {
@@ -459,11 +468,19 @@ fn gui_start_generation(
                         }
                     });
 
+                    // Edit map (parsed_elements). Operations are defined in a json file
+                    let mut xzbbox =
+                        cartesian::XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
+                    let mapediting_json_str = fs::read_to_string("map_editing.json")
+                        .expect("Failed to open map editing config file");
+                    let mapediting_json = serde_json::from_str(&mapediting_json_str)
+                        .expect("Failed to parse map editing config file. JSON not valid");
+                    map_editing::edit_map(&mut parsed_elements, &mut xzbbox, &mapediting_json);
+
                     let _ = data_processing::generate_world(
                         parsed_elements,
+                        xzbbox,
                         &args,
-                        scale_factor_x,
-                        scale_factor_z,
                     );
                     Ok(())
                 }
