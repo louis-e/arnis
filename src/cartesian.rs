@@ -29,10 +29,7 @@ pub struct XZBBox {
 impl XZBBox {
     pub fn from_scale_factors(scale_factor_x: f64, scale_factor_z: f64) -> Self {
         XZBBox {
-            point1: XZPoint {
-                x: 0,
-                z: 0,
-            },
+            point1: XZPoint { x: 0, z: 0 },
             point2: XZPoint {
                 x: scale_factor_x as i32,
                 z: scale_factor_z as i32,
@@ -43,8 +40,6 @@ impl XZBBox {
     pub fn nblock(&self) -> u64 {
         let nx = self.point2.x - self.point1.x + 1;
         let nz = self.point2.z - self.point1.z + 1;
-
-        println!("nx nz {} {}", nx, nz);
 
         (nx as u64) * (nz as u64)
     }
@@ -59,9 +54,12 @@ impl XZBBox {
         nz as u32
     }
 
+    #[inline]
     pub fn contains(&self, xzpoint: &XZPoint) -> bool {
-        xzpoint.x >= self.point1.x && xzpoint.x <= self.point2.x &&
-        xzpoint.z >= self.point1.z && xzpoint.z <= self.point2.z
+        xzpoint.x >= self.point1.x
+            && xzpoint.x <= self.point2.x
+            && xzpoint.z >= self.point1.z
+            && xzpoint.z <= self.point2.z
     }
 }
 

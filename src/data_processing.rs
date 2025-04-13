@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
-use crate::cartesian::{XZPoint, XZBBox};
+use crate::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -19,13 +19,13 @@ pub fn generate_world(
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, xzbbox);
 
-    println!("{} Processing data...", "[3/5]".bold());
+    println!("{} Processing data...", "[4/6]".bold());
     if args.terrain {
-        emit_gui_progress_update(10.0, "Fetching elevation...");
+        emit_gui_progress_update(30.0, "Fetching elevation...");
     }
     let ground: Ground = Ground::new(args);
 
-    emit_gui_progress_update(11.0, "Processing terrain...");
+    emit_gui_progress_update(31.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -35,8 +35,8 @@ pub fn generate_world(
         .unwrap()
         .progress_chars("█▓░"));
 
-    let progress_increment_prcs: f64 = 49.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 11.0;
+    let progress_increment_prcs: f64 = 39.0 / elements_count as f64;
+    let mut current_progress_prcs: f64 = 31.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {
@@ -119,14 +119,13 @@ pub fn generate_world(
 
     // Generate ground layer
     let total_blocks: u64 = xzbbox.nblock();
-    println!("total blocks {}", xzbbox.nblock());
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 
     let mut block_counter: u64 = 0;
 
-    println!("{} Generating ground...", "[4/5]".bold());
-    emit_gui_progress_update(60.0, "Generating ground...");
+    println!("{} Generating ground...", "[5/6]".bold());
+    emit_gui_progress_update(70.0, "Generating ground...");
 
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
     ground_pb.set_style(
@@ -136,10 +135,10 @@ pub fn generate_world(
             .progress_chars("█▓░"),
     );
 
-    let mut gui_progress_grnd: f64 = 60.0;
+    let mut gui_progress_grnd: f64 = 70.0;
     let mut last_emitted_progress: f64 = gui_progress_grnd;
     let total_iterations_grnd: f64 = total_blocks as f64;
-    let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
+    let progress_increment_grnd: f64 = 20.0 / total_iterations_grnd;
 
     let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
 
@@ -191,8 +190,8 @@ pub fn generate_world(
         }
 
         // Set blocks at spawn location
-        for x in xzbbox.point1.x..=xzbbox.point1.x+20 {
-            for z in xzbbox.point1.z..=xzbbox.point1.z+20 {
+        for x in xzbbox.point1.x..=xzbbox.point1.x + 20 {
+            for z in xzbbox.point1.z..=xzbbox.point1.z + 20 {
                 editor.set_block(groundlayer_block, x, -62, z, None, None);
             }
         }

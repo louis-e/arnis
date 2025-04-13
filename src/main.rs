@@ -142,17 +142,13 @@ fn main() {
             }
         }
 
-        // Edit map (parsed_elements). Operations are defined in a json file
         let mut xzbbox = cartesian::XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
-        let mapediting_json_str =
-            fs::read_to_string("map_editing.json").expect("Failed to open map editing config file");
-        let mapediting_json = serde_json::from_str(&mapediting_json_str)
-            .expect("Failed to parse map editing config file. JSON not valid");
-        map_editing::edit_map(&mut parsed_elements, &mut xzbbox, &mapediting_json);
+
+        // Edit map (parsed_elements). Operations are defined in a json file, if exists
+        map_editing::edit_map(&mut parsed_elements, &mut xzbbox);
 
         // Generate world
-        let _ =
-            data_processing::generate_world(parsed_elements, xzbbox, &args);
+        let _ = data_processing::generate_world(parsed_elements, xzbbox, &args);
     } else {
         #[cfg(not(feature = "gui"))]
         {
@@ -468,20 +464,13 @@ fn gui_start_generation(
                         }
                     });
 
-                    // Edit map (parsed_elements). Operations are defined in a json file
                     let mut xzbbox =
                         cartesian::XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
-                    let mapediting_json_str = fs::read_to_string("map_editing.json")
-                        .expect("Failed to open map editing config file");
-                    let mapediting_json = serde_json::from_str(&mapediting_json_str)
-                        .expect("Failed to parse map editing config file. JSON not valid");
-                    map_editing::edit_map(&mut parsed_elements, &mut xzbbox, &mapediting_json);
 
-                    let _ = data_processing::generate_world(
-                        parsed_elements,
-                        xzbbox,
-                        &args,
-                    );
+                    // Edit map (parsed_elements). Operations are defined in a json file, if exists
+                    map_editing::edit_map(&mut parsed_elements, &mut xzbbox);
+
+                    let _ = data_processing::generate_world(parsed_elements, xzbbox, &args);
                     Ok(())
                 }
                 Err(e) => Err(format!("Failed to start generation: {}", e)),

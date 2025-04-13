@@ -1,6 +1,6 @@
 use crate::block_definitions::*;
+use crate::cartesian::{XZBBox, XZPoint};
 use crate::progress::emit_gui_progress_update;
-use crate::cartesian::{XZPoint, XZBBox};
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
@@ -343,7 +343,7 @@ impl WorldEditor {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint{x,z}) {
+        if !self.xzbbox.contains(&XZPoint { x, z }) {
             return;
         }
 
@@ -513,7 +513,7 @@ impl WorldEditor {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("{} Saving world...", "[5/5]".bold());
+        println!("{} Saving world...", "[6/6]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
         let total_regions = self.world.regions.len() as u64;
