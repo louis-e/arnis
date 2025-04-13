@@ -1,7 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::cartesian::XZPoint;
-use crate::data_processing::MIN_Y;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
@@ -37,7 +36,7 @@ pub fn generate_landuse(
         }
         "cemetery" => PODZOL,
         "beach" => SAND,
-        "construction" => DIRT,
+        "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
         "residential" => {
             let residential_tag = element.tags.get("residential").unwrap_or(&binding);
@@ -196,28 +195,49 @@ pub fn generate_landuse(
             }
             "farmland" => {
                 // Check if the current block is not water or another undesired block
-                if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
-                    if x % 15 == 0 || z % 15 == 0 {
-                        // Place water on the edges
-                        editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND]), None);
-                        editor.set_block(
-                            AIR,
-                            x,
-                            ground_level + 1,
-                            z,
-                            Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
-                            None,
-                        );
+                if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER, ICE])) {
+                    if x % 8 == 0 && z % 8 == 0 {
+                        // Place water/ice in dot pattern
+                        if args.winter {
+                            // Less frozen water in winter
+                            if rng.gen_range(0..8) == 0 {
+                                editor.set_block(ICE, x, ground_level, z, Some(&[FARMLAND]), None);
+                                editor.set_block(
+                                    AIR,
+                                    x,
+                                    ground_level + 1,
+                                    z,
+                                    Some(&[GRASS, WHEAT, CARROTS, POTATOES, SNOW_LAYER]),
+                                    None,
+                                );
+                            } else {
+                                editor.set_block(DIRT, x, ground_level, z, Some(&[FARMLAND]), None);
+                                editor.set_block(SNOW_LAYER, x, ground_level + 1, z, None, None);
+                            }
+                        } else {
+                            editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND]), None);
+                            editor.set_block(
+                                AIR,
+                                x,
+                                ground_level + 1,
+                                z,
+                                Some(&[GRASS, WHEAT, CARROTS, POTATOES, SNOW_LAYER]),
+                                None,
+                            );
+                        }
+                    } else if args.winter {
+                        editor.set_block(DIRT, x, ground_level, z, Some(&[FARMLAND]), None);
+                        editor.set_block(SNOW_LAYER, x, ground_level + 1, z, None, None);
                     } else {
                         // Set the block below as farmland
                         editor.set_block(FARMLAND, x, ground_level, z, None, None);
 
                         // If a random condition is met, place a special object
                         if rng.gen_range(0..76) == 0 {
-                            let special_choice: i32 = rng.gen_range(1..=10);
-                            if special_choice <= 2 {
+                            let special_choice: i32 = rng.gen_range(1..=25);
+                            if special_choice <= 1 {
                                 Tree::create(editor, (x, ground_level + 1, z), args.winter);
-                            } else if special_choice <= 6 {
+                            } else if special_choice <= 4 {
                                 editor.set_block(
                                     HAY_BALE,
                                     x,
@@ -226,7 +246,7 @@ pub fn generate_landuse(
                                     None,
                                     Some(&[SPONGE]),
                                 );
-                            } else {
+                            } else if special_choice <= 10 {
                                 editor.set_block(
                                     OAK_LEAVES,
                                     x,
@@ -334,6 +354,10 @@ pub fn generate_landuse(
                 }
             }
             "quarry" => {
+                // Add stone layer under it
+                editor.set_block(STONE, x, ground_level - 1, z, Some(&[STONE]), None);
+                editor.set_block(STONE, x, ground_level - 2, z, Some(&[STONE]), None);
+                // Generate ore blocks
                 if let Some(resource) = element.tags.get("resource") {
                     let ore_block = match resource.as_str() {
                         "iron_ore" => IRON_ORE,
@@ -343,13 +367,9 @@ pub fn generate_landuse(
                         "clay" | "kaolinite" => CLAY,
                         _ => STONE,
                     };
-                    let random_choice: i32 = rng.gen_range(0..100 + ground_level); // with more depth there's more resources
+                    let random_choice: i32 = rng.gen_range(0..100 + ground_level); // With more depth there's more resources
                     if random_choice < 5 {
                         editor.set_block(ore_block, x, ground_level, z, Some(&[STONE]), None);
-                    }
-                    // Fill everything with stone so dirt won't be there
-                    if args.fillground {
-                        editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, ground_level, z, None, None);
                     }
                 }
             }

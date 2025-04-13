@@ -118,21 +118,21 @@ pub fn generate_leisure(
                             editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
                             editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
                         }
-                        1..=30 => {
+                        1..40 => {
                             // Flowers
-                            let flower_choice = match rng.gen_range(0..4) {
-                                0 => RED_FLOWER,
-                                1 => YELLOW_FLOWER,
-                                2 => BLUE_FLOWER,
+                            let flower_choice = match random_choice {
+                                0..10 => RED_FLOWER,
+                                10..20 => YELLOW_FLOWER,
+                                20..30 => BLUE_FLOWER,
                                 _ => WHITE_FLOWER,
                             };
                             editor.set_block(flower_choice, x, ground_level + 1, z, None, None);
                         }
-                        31..=70 => {
+                        40..80 => {
                             // Grass
                             editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                         }
-                        71..=80 => {
+                        80..90 => {
                             // Tree
                             Tree::create(editor, (x, ground_level + 1, z), args.winter);
                         }

@@ -14,15 +14,15 @@ use std::time::Duration;
 ))]
 pub struct Args {
     /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true)]
+    #[arg(long, allow_hyphen_values = true, group = "location")]
     pub bbox: Option<String>,
 
     /// JSON file containing OSM data (optional)
-    #[arg(long)]
+    #[arg(long, group = "location")]
     pub file: Option<String>,
 
     /// Path to the Minecraft world (required)
-    #[arg(long, required = true)]
+    #[arg(long)]
     pub path: String,
 
     /// Downloader method (requests/curl/wget) (optional)
@@ -30,7 +30,7 @@ pub struct Args {
     pub downloader: String,
 
     /// World scale to use, in blocks per meter
-    #[arg(long, default_value = "1.0")]
+    #[arg(long, default_value_t = 1.0)]
     pub scale: f64,
 
     /// Ground level to use in the Minecraft world
@@ -38,17 +38,17 @@ pub struct Args {
     pub ground_level: i32,
 
     /// Enable winter mode (default: false)
-    #[arg(long, default_value_t = false)]
+    #[arg(long)]
     pub winter: bool,
 
     /// Enable terrain (optional)
-    #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
+    #[arg(long)]
     pub terrain: bool,
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
     pub fillground: bool,
     /// Enable debug mode (optional)
-    #[arg(long, default_value_t = false, action = clap::ArgAction::SetTrue)]
+    #[arg(long)]
     pub debug: bool,
 
     /// Set floodfill timeout (seconds) (optional)
@@ -106,4 +106,58 @@ fn validate_bounding_box(bbox: &str) -> bool {
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
     Ok(std::time::Duration::from_secs(seconds))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_flags() {
+        // Test that winter/terrain/debug are SetTrue
+        let cmd = [
+            "arnis",
+            "--path",
+            "",
+            "--bbox",
+            "",
+            "--winter",
+            "--terrain",
+            "--debug",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(args.winter);
+        assert!(args.debug);
+        assert!(args.terrain);
+
+        let cmd = ["arnis", "--path", "", "--bbox", ""];
+        let args = Args::parse_from(cmd.iter());
+        assert!(!args.winter);
+        assert!(!args.debug);
+        assert!(!args.terrain);
+    }
+
+    #[test]
+    fn test_required_options() {
+        let cmd = ["arnis"];
+        assert!(Args::try_parse_from(cmd.iter()).is_err());
+
+        let cmd = ["arnis", "--path", "", "--bbox", ""];
+        assert!(Args::try_parse_from(cmd.iter()).is_ok());
+
+        let cmd = ["arnis", "--path", "", "--file", ""];
+        assert!(Args::try_parse_from(cmd.iter()).is_ok());
+
+        // let cmd = [
+        //     "arnis",
+        //     "--gui",
+        // ];
+        // assert!(Args::try_parse_from(cmd.iter()).is_ok());
+
+        let cmd = [
+            "arnis", // "--gui",
+            "--path", "", "--bbox", "",
+        ];
+        assert!(Args::try_parse_from(cmd.iter()).is_ok());
+    }
 }

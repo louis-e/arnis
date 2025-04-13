@@ -139,7 +139,7 @@ pub struct Tree<'a> {
 impl Tree<'_> {
     pub fn create(editor: &mut WorldEditor, (x, y, z): Coord, snow: bool) {
         let mut blacklist: Vec<Block> = Vec::new();
-        blacklist.extend(building_corner_variations());
+        blacklist.extend(BUILDING_CORNER_VARIATIONS);
         blacklist.extend(building_wall_variations());
         blacklist.extend(building_floor_variations());
         blacklist.push(WATER);
