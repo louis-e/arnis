@@ -43,8 +43,8 @@ impl BBox {
                 .map_err(|e| format!("Failed to parse coordinate value '{}': {}", part, e))?;
         }
 
-        let [min_lat, min_lng, max_lat, max_lng] = values;
-        Self::new(min_lat, min_lng, max_lat, max_lng)
+        let [min_lng, min_lat, max_lng, max_lat] = values;
+        Self::new(min_lng, min_lat, max_lng, max_lat)
     }
 
     pub fn min(&self) -> GeoCoord {
