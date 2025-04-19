@@ -146,7 +146,7 @@ pub fn parse_osm_data(
     bbox: (f64, f64, f64, f64),
     args: &Args,
 ) -> (Vec<ProcessedElement>, f64, f64) {
-    println!("{} Parsing data...", "[2/5]".bold());
+    println!("{} Parsing data...", "[2/6]".bold());
     emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure

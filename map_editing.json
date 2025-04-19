@@ -1,0 +1,14 @@
+[
+    {
+        "operation": "translate",
+        "config": {
+            "type": "vector",
+            "config": {
+                "vector": {
+                    "dx": 500,
+                    "dz": 500
+                }
+            }
+        }
+    }
+]

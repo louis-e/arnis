@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
-use crate::cartesian::XZPoint;
+use crate::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -13,20 +13,19 @@ pub const MIN_Y: i32 = -64;
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
     args: &Args,
-    scale_factor_x: f64,
-    scale_factor_z: f64,
 ) -> Result<(), String> {
     let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
+    let mut editor: WorldEditor = WorldEditor::new(&region_dir, xzbbox);
 
-    println!("{} Processing data...", "[3/5]".bold());
+    println!("{} Processing data...", "[4/6]".bold());
     if args.terrain {
-        emit_gui_progress_update(10.0, "Fetching elevation...");
+        emit_gui_progress_update(30.0, "Fetching elevation...");
     }
     let ground: Ground = Ground::new(args);
 
-    emit_gui_progress_update(11.0, "Processing terrain...");
+    emit_gui_progress_update(31.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -36,8 +35,8 @@ pub fn generate_world(
         .unwrap()
         .progress_chars("█▓░"));
 
-    let progress_increment_prcs: f64 = 49.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 11.0;
+    let progress_increment_prcs: f64 = 39.0 / elements_count as f64;
+    let mut current_progress_prcs: f64 = 31.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {
@@ -119,14 +118,14 @@ pub fn generate_world(
     process_pb.finish();
 
     // Generate ground layer
-    let total_blocks: u64 = (scale_factor_x as i32 + 1) as u64 * (scale_factor_z as i32 + 1) as u64;
+    let total_blocks: u64 = xzbbox.nblock();
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 
     let mut block_counter: u64 = 0;
 
-    println!("{} Generating ground...", "[4/5]".bold());
-    emit_gui_progress_update(60.0, "Generating ground...");
+    println!("{} Generating ground...", "[5/6]".bold());
+    emit_gui_progress_update(70.0, "Generating ground...");
 
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
     ground_pb.set_style(
@@ -136,28 +135,28 @@ pub fn generate_world(
             .progress_chars("█▓░"),
     );
 
-    let mut gui_progress_grnd: f64 = 60.0;
+    let mut gui_progress_grnd: f64 = 70.0;
     let mut last_emitted_progress: f64 = gui_progress_grnd;
-    let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
-    let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
+    let total_iterations_grnd: f64 = total_blocks as f64;
+    let progress_increment_grnd: f64 = 20.0 / total_iterations_grnd;
 
     let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
 
     // Differentiate between terrain and non-terrain generation
     if ground.elevation_enabled {
         // Pre-calculate ground levels for all points
-        let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(scale_factor_x as usize + 1);
-        for x in 0..=(scale_factor_x as i32) {
-            let mut row = Vec::with_capacity(scale_factor_z as usize + 1);
-            for z in 0..=(scale_factor_z as i32) {
+        let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(xzbbox.nblock_x() as usize);
+        for x in xzbbox.point1.x..=xzbbox.point2.x {
+            let mut row = Vec::with_capacity(xzbbox.nblock_z() as usize);
+            for z in xzbbox.point1.z..=xzbbox.point2.z {
                 row.push(ground.level(XZPoint::new(x, z)));
             }
             ground_levels.push(row);
         }
 
         // Process blocks in larger batches
-        for x in 0..=(scale_factor_x as i32) {
-            for z in 0..=(scale_factor_z as i32) {
+        for x in xzbbox.point1.x..=xzbbox.point2.x {
+            for z in xzbbox.point1.z..=xzbbox.point2.z {
                 let ground_level = ground_levels[x as usize][z as usize];
 
                 // Find the highest block in this column
@@ -191,14 +190,14 @@ pub fn generate_world(
         }
 
         // Set blocks at spawn location
-        for x in 0..=20 {
-            for z in 0..=20 {
+        for x in xzbbox.point1.x..=xzbbox.point1.x + 20 {
+            for z in xzbbox.point1.z..=xzbbox.point1.z + 20 {
                 editor.set_block(groundlayer_block, x, -62, z, None, None);
             }
         }
     } else {
-        for x in 0..=(scale_factor_x as i32) {
-            for z in 0..=(scale_factor_z as i32) {
+        for x in xzbbox.point1.x..=xzbbox.point2.x {
+            for z in xzbbox.point1.x..=xzbbox.point2.z {
                 let ground_level = ground.level(XZPoint::new(x, z));
                 editor.set_block(groundlayer_block, x, ground_level, z, None, None);
                 editor.set_block(DIRT, x, ground_level - 1, z, None, None);
