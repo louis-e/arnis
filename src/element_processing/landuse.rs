@@ -198,33 +198,22 @@ pub fn generate_landuse(
                 if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER, ICE])) {
                     if x % 8 == 0 && z % 8 == 0 {
                         // Place water/ice in dot pattern
-                        if args.winter {
-                            // Less frozen water in winter
-                            if rng.gen_range(0..8) == 0 {
-                                editor.set_block(ICE, x, ground_level, z, Some(&[FARMLAND]), None);
-                                editor.set_block(
-                                    AIR,
-                                    x,
-                                    ground_level + 1,
-                                    z,
-                                    Some(&[GRASS, WHEAT, CARROTS, POTATOES, SNOW_LAYER]),
-                                    None,
-                                );
-                            } else {
-                                editor.set_block(DIRT, x, ground_level, z, Some(&[FARMLAND]), None);
-                                editor.set_block(SNOW_LAYER, x, ground_level + 1, z, None, None);
-                            }
-                        } else {
-                            editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND]), None);
-                            editor.set_block(
-                                AIR,
-                                x,
-                                ground_level + 1,
-                                z,
-                                Some(&[GRASS, WHEAT, CARROTS, POTATOES, SNOW_LAYER]),
-                                None,
-                            );
-                        }
+                        editor.set_block(
+                            if args.winter { ICE } else { WATER },
+                            x,
+                            ground_level,
+                            z,
+                            Some(&[FARMLAND]),
+                            None,
+                        );
+                        editor.set_block(
+                            AIR,
+                            x,
+                            ground_level + 1,
+                            z,
+                            Some(&[GRASS, WHEAT, CARROTS, POTATOES, SNOW_LAYER]),
+                            None,
+                        );
                     } else if args.winter {
                         editor.set_block(DIRT, x, ground_level, z, Some(&[FARMLAND]), None);
                         editor.set_block(SNOW_LAYER, x, ground_level + 1, z, None, None);
@@ -234,10 +223,8 @@ pub fn generate_landuse(
 
                         // If a random condition is met, place a special object
                         if rng.gen_range(0..76) == 0 {
-                            let special_choice: i32 = rng.gen_range(1..=25);
-                            if special_choice <= 1 {
-                                Tree::create(editor, (x, ground_level + 1, z), args.winter);
-                            } else if special_choice <= 4 {
+                            let special_choice: i32 = rng.gen_range(1..=10);
+                            if special_choice <= 4 {
                                 editor.set_block(
                                     HAY_BALE,
                                     x,
@@ -246,7 +233,7 @@ pub fn generate_landuse(
                                     None,
                                     Some(&[SPONGE]),
                                 );
-                            } else if special_choice <= 10 {
+                            } else {
                                 editor.set_block(
                                     OAK_LEAVES,
                                     x,
