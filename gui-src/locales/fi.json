@@ -30,9 +30,9 @@
   "area_too_large": "Tämä alue on todella iso ja voi ylittää tyypilliset laskentarajat.",
   "area_extensive": "Alue on aika laaja ja voi viedä pitkän ajan ja resursseja.",
   "selection_confirmed": "Valinta vahvistettu!",
-  "unknown_error": "Unknown error",
-  "license_and_credits": "License and Credits",
-  "placeholder_bbox": "Format: lat,lng,lat,lng",
-  "placeholder_floodfill": "Seconds",
-  "placeholder_ground": "Ground Level"
+  "unknown_error": "Tuntematon virhe",
+  "license_and_credits": "Lisenssi ja krediitit",
+  "placeholder_bbox": "Formatti: lat,lng,lat,lng",
+  "placeholder_floodfill": "Sekuntia",
+  "placeholder_ground": "Maataso"
 }
