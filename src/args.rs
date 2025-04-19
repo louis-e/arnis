@@ -1,3 +1,4 @@
+use crate::bbox::BBox;
 use clap::{ArgGroup, Parser};
 use colored::Colorize;
 use std::path::Path;
@@ -14,8 +15,8 @@ use std::time::Duration;
 ))]
 pub struct Args {
     /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true, group = "location")]
-    pub bbox: Option<String>,
+    #[arg(long, allow_hyphen_values = true, group = "location", value_parser = BBox::from_str)]
+    pub bbox: BBox,
 
     /// JSON file containing OSM data (optional)
     #[arg(long, group = "location")]
@@ -69,38 +70,7 @@ impl Args {
             );
             exit(1);
         }
-
-        // Validating bbox if provided
-        if let Some(bbox) = &self.bbox {
-            if !validate_bounding_box(bbox) {
-                eprintln!("{}", "Error! Invalid bbox input".red().bold());
-                exit(1);
-            }
-        }
     }
-}
-
-/// Validates the bounding box string
-fn validate_bounding_box(bbox: &str) -> bool {
-    let parts: Vec<&str> = bbox.split(',').collect();
-    if parts.len() != 4 {
-        return false;
-    }
-
-    let min_lng: f64 = parts[0].parse().ok().unwrap_or(0.0);
-    let min_lat: f64 = parts[1].parse().ok().unwrap_or(0.0);
-    let max_lng: f64 = parts[2].parse().ok().unwrap_or(0.0);
-    let max_lat: f64 = parts[3].parse().ok().unwrap_or(0.0);
-
-    if !(-180.0..=180.0).contains(&min_lng) || !(-180.0..=180.0).contains(&max_lng) {
-        return false;
-    }
-
-    if !(-90.0..=90.0).contains(&min_lat) || !(-90.0..=90.0).contains(&max_lat) {
-        return false;
-    }
-
-    min_lng < max_lng && min_lat < max_lat
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
@@ -120,7 +90,7 @@ mod tests {
             "--path",
             "",
             "--bbox",
-            "",
+            "54.627053 9.927928 54.634902 9.937563",
             "--winter",
             "--terrain",
             "--debug",
@@ -130,7 +100,13 @@ mod tests {
         assert!(args.debug);
         assert!(args.terrain);
 
-        let cmd = ["arnis", "--path", "", "--bbox", ""];
+        let cmd = [
+            "arnis",
+            "--path",
+            "",
+            "--bbox",
+            "54.627053 9.927928 54.634902 9.937563",
+        ];
         let args = Args::parse_from(cmd.iter());
         assert!(!args.winter);
         assert!(!args.debug);
@@ -142,10 +118,13 @@ mod tests {
         let cmd = ["arnis"];
         assert!(Args::try_parse_from(cmd.iter()).is_err());
 
-        let cmd = ["arnis", "--path", "", "--bbox", ""];
-        assert!(Args::try_parse_from(cmd.iter()).is_ok());
-
-        let cmd = ["arnis", "--path", "", "--file", ""];
+        let cmd = [
+            "arnis",
+            "--path",
+            "",
+            "--bbox",
+            "54.627053 9.927928 54.634902 9.937563",
+        ];
         assert!(Args::try_parse_from(cmd.iter()).is_ok());
 
         // let cmd = [
@@ -156,7 +135,10 @@ mod tests {
 
         let cmd = [
             "arnis", // "--gui",
-            "--path", "", "--bbox", "",
+            "--path",
+            "",
+            "--bbox",
+            "54.627053 9.927928 54.634902 9.937563",
         ];
         assert!(Args::try_parse_from(cmd.iter()).is_ok());
     }
