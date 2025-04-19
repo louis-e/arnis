@@ -32,7 +32,7 @@
   "selection_confirmed": "Valinta vahvistettu!",
   "unknown_error": "Tuntematon virhe",
   "license_and_credits": "Lisenssi ja krediitit",
-  "placeholder_bbox": "Formatti: lat,lng,lat,lng",
+  "placeholder_bbox": "Formaatti: lat,lng,lat,lng",
   "placeholder_floodfill": "Sekuntia",
   "placeholder_ground": "Maataso"
 }
