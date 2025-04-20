@@ -1,6 +1,6 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::XZPoint;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;

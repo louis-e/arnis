@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
-use crate::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;

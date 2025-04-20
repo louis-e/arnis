@@ -1,4 +1,5 @@
-use crate::{args::Args, cartesian::XZPoint, progress::emit_gui_progress_update};
+use crate::coordinate_system::cartesian::XZPoint;
+use crate::{args::Args, progress::emit_gui_progress_update};
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;

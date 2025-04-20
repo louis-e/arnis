@@ -1,5 +1,5 @@
 use crate::block_definitions::*;
-use crate::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::XZPoint;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;

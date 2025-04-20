@@ -1,24 +1,7 @@
+use super::xzpoint::XZPoint;
+use super::xzvector::XZVector;
 use serde::Deserialize;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
-
-#[derive(Debug, Deserialize, Copy, Clone)]
-pub struct XZPoint {
-    pub x: i32,
-    pub z: i32,
-}
-
-impl XZPoint {
-    #[inline]
-    pub fn new(x: i32, z: i32) -> Self {
-        Self { x, z }
-    }
-}
-
-#[derive(Debug, Deserialize, Copy, Clone)]
-pub struct XZVector {
-    pub dx: i32,
-    pub dz: i32,
-}
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 pub struct XZBBox {
@@ -64,53 +47,6 @@ impl XZBBox {
 }
 
 // below are associated +- operators
-impl Add<XZVector> for XZPoint {
-    type Output = XZPoint;
-
-    fn add(self, other: XZVector) -> XZPoint {
-        XZPoint {
-            x: self.x + other.dx,
-            z: self.z + other.dz,
-        }
-    }
-}
-
-impl AddAssign<XZVector> for XZPoint {
-    fn add_assign(&mut self, other: XZVector) {
-        self.x += other.dx;
-        self.z += other.dz;
-    }
-}
-
-impl Sub for XZPoint {
-    type Output = XZVector;
-
-    fn sub(self, other: XZPoint) -> XZVector {
-        XZVector {
-            dx: self.x - other.x,
-            dz: self.z - other.z,
-        }
-    }
-}
-
-impl Sub<XZVector> for XZPoint {
-    type Output = XZPoint;
-
-    fn sub(self, other: XZVector) -> XZPoint {
-        XZPoint {
-            x: self.x - other.dx,
-            z: self.z - other.dz,
-        }
-    }
-}
-
-impl SubAssign<XZVector> for XZPoint {
-    fn sub_assign(&mut self, other: XZVector) {
-        self.x -= other.dx;
-        self.z -= other.dz;
-    }
-}
-
 impl Add<XZVector> for XZBBox {
     type Output = XZBBox;
 

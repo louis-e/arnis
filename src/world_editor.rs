@@ -1,5 +1,5 @@
 use crate::block_definitions::*;
-use crate::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;

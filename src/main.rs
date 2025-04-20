@@ -3,8 +3,8 @@
 mod args;
 mod block_definitions;
 mod bresenham;
-mod cartesian;
 mod colors;
+mod coordinate_system;
 mod data_processing;
 mod element_processing;
 mod floodfill;
@@ -29,6 +29,7 @@ mod world_editor;
 use args::Args;
 use clap::Parser;
 use colored::*;
+use coordinate_system::cartesian::XZBBox;
 #[cfg(feature = "gui")]
 use fastnbt::Value;
 #[cfg(feature = "gui")]
@@ -142,7 +143,7 @@ fn main() {
             }
         }
 
-        let mut xzbbox = cartesian::XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
+        let mut xzbbox = XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
 
         // Edit map (parsed_elements). Operations are defined in a json file, if exists
         map_editing::edit_map(&mut parsed_elements, &mut xzbbox);
@@ -464,8 +465,7 @@ fn gui_start_generation(
                         }
                     });
 
-                    let mut xzbbox =
-                        cartesian::XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
+                    let mut xzbbox = XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
 
                     // Edit map (parsed_elements). Operations are defined in a json file, if exists
                     map_editing::edit_map(&mut parsed_elements, &mut xzbbox);

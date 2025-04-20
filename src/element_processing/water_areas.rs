@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crate::{
     block_definitions::WATER,
-    cartesian::XZPoint,
+    coordinate_system::cartesian::XZPoint,
     ground::Ground,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
     world_editor::WorldEditor,

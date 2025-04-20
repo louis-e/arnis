@@ -1,24 +1,12 @@
-use crate::cartesian::{XZBBox, XZPoint, XZVector};
+use super::startend_translator::StartEndTranslator;
+use super::vector_translator::VectorTranslator;
+use crate::coordinate_system::cartesian::{XZBBox, XZVector};
 use crate::osm_parser::ProcessedElement;
-use serde::Deserialize;
 
 // types of translation
 pub enum Translator {
     Vector(VectorTranslator),
     StartEnd(StartEndTranslator),
-}
-
-// directly specify movement on x, z directions
-#[derive(Debug, Deserialize)]
-pub struct VectorTranslator {
-    pub vector: XZVector,
-}
-
-// move the map so that start goes to end
-#[derive(Debug, Deserialize)]
-pub struct StartEndTranslator {
-    pub start: XZPoint,
-    pub end: XZPoint,
 }
 
 impl Translator {

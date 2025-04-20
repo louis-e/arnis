@@ -1,4 +1,4 @@
-use crate::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::XZPoint;
 use image::{Rgb, RgbImage};
 
 /// Minimum Y coordinate in Minecraft (bedrock level)
