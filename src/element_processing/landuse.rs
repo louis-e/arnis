@@ -196,7 +196,7 @@ pub fn generate_landuse(
             "farmland" => {
                 // Check if the current block is not water or another undesired block
                 if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER, ICE])) {
-                    if x % 8 == 0 && z % 8 == 0 {
+                    if x % 9 == 0 && z % 9 == 0 {
                         // Place water/ice in dot pattern
                         editor.set_block(
                             if args.winter { ICE } else { WATER },
