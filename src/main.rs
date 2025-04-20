@@ -399,12 +399,24 @@ fn gui_start_generation(
     fillground_enabled: bool,
 ) -> Result<(), String> {
     use bbox::BBox;
+    use progress::emit_gui_error;
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
+            // Parse the bounding box from the text with proper error handling
+            let bbox = match BBox::from_str(&bbox_text) {
+                Ok(bbox) => bbox,
+                Err(e) => {
+                    let error_msg = format!("Failed to parse bounding box: {}", e);
+                    eprintln!("{}", error_msg);
+                    emit_gui_error(&error_msg);
+                    return Err(error_msg);
+                }
+            };
+
             // Create an Args instance with the chosen bounding box and world directory path
             let args: Args = Args {
-                bbox: BBox::from_str(&bbox_text).expect("Should be valid bounding box"),
+                bbox,
                 file: None,
                 path: selected_world,
                 downloader: "requests".to_string(),
@@ -443,12 +455,18 @@ fn gui_start_generation(
                     );
                     Ok(())
                 }
-                Err(e) => Err(format!("Failed to start generation: {}", e)),
+                Err(e) => {
+                    let error_msg = format!("Failed to fetch data: {}", e);
+                    emit_gui_error(&error_msg);
+                    Err(error_msg)
+                }
             }
         })
         .await
         {
-            eprintln!("Error in blocking task: {}", e);
+            let error_msg = format!("Error in generation task: {}", e);
+            eprintln!("{}", error_msg);
+            emit_gui_error(&error_msg);
         }
     });
 
