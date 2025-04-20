@@ -26,7 +26,13 @@ pub fn generate_landuse(
                 GRASS_BLOCK
             }
         }
-        "farmland" => FARMLAND,
+        "farmland" => {
+            if args.winter {
+                DIRT
+            } else {
+                FARMLAND
+            }
+        }
         "forest" => {
             if args.winter {
                 SNOW_BLOCK
@@ -203,52 +209,37 @@ pub fn generate_landuse(
                             x,
                             ground_level,
                             z,
-                            Some(&[FARMLAND]),
-                            None,
-                        );
-                        editor.set_block(
-                            AIR,
-                            x,
-                            ground_level + 1,
-                            z,
-                            Some(&[GRASS, WHEAT, CARROTS, POTATOES, SNOW_LAYER]),
+                            Some(&[FARMLAND, DIRT]),
                             None,
                         );
                     } else if args.winter {
-                        editor.set_block(DIRT, x, ground_level, z, Some(&[FARMLAND]), None);
                         editor.set_block(SNOW_LAYER, x, ground_level + 1, z, None, None);
-                    } else {
-                        // Set the block below as farmland
-                        editor.set_block(FARMLAND, x, ground_level, z, None, None);
-
-                        // If a random condition is met, place a special object
-                        if rng.gen_range(0..76) == 0 {
-                            let special_choice: i32 = rng.gen_range(1..=10);
-                            if special_choice <= 4 {
-                                editor.set_block(
-                                    HAY_BALE,
-                                    x,
-                                    ground_level + 1,
-                                    z,
-                                    None,
-                                    Some(&[SPONGE]),
-                                );
-                            } else {
-                                editor.set_block(
-                                    OAK_LEAVES,
-                                    x,
-                                    ground_level + 1,
-                                    z,
-                                    None,
-                                    Some(&[SPONGE]),
-                                );
-                            }
+                    } else if rng.gen_range(0..76) == 0 {
+                        let special_choice: i32 = rng.gen_range(1..=10);
+                        if special_choice <= 4 {
+                            editor.set_block(
+                                HAY_BALE,
+                                x,
+                                ground_level + 1,
+                                z,
+                                None,
+                                Some(&[SPONGE]),
+                            );
                         } else {
-                            // Set crops only if the block below is farmland
-                            if editor.check_for_block(x, ground_level, z, Some(&[FARMLAND]), None) {
-                                let crop_choice = [WHEAT, CARROTS, POTATOES][rng.gen_range(0..3)];
-                                editor.set_block(crop_choice, x, ground_level + 1, z, None, None);
-                            }
+                            editor.set_block(
+                                OAK_LEAVES,
+                                x,
+                                ground_level + 1,
+                                z,
+                                None,
+                                Some(&[SPONGE]),
+                            );
+                        }
+                    } else {
+                        // Set crops only if the block below is farmland
+                        if editor.check_for_block(x, ground_level, z, Some(&[FARMLAND]), None) {
+                            let crop_choice = [WHEAT, CARROTS, POTATOES][rng.gen_range(0..3)];
+                            editor.set_block(crop_choice, x, ground_level + 1, z, None, None);
                         }
                     }
                 }
