@@ -1,8 +1,6 @@
 use crate::cartesian::XZPoint;
 use image::{Rgb, RgbImage};
 
-/// Minimum Y coordinate in Minecraft (bedrock level)
-const MIN_Y: i32 = -62;
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
@@ -38,7 +36,7 @@ impl Ground {
     pub fn new(args: &crate::args::Args) -> Self {
         let mut elevation_enabled: bool = args.terrain;
         let elevation_data: Option<ElevationData> = if elevation_enabled && args.bbox.is_some() {
-            match Self::fetch_elevation_data(args.bbox.as_deref().unwrap(), args.scale) {
+            match Self::fetch_elevation_data(args.bbox.as_deref().unwrap(), args) {
                 Ok(data) => {
                     if args.debug {
                         Self::save_debug_image(&data.heights, "elevation_debug");
@@ -126,7 +124,7 @@ impl Ground {
 
     fn fetch_elevation_data(
         bbox_str: &str,
-        scale: f64,
+        args: &crate::args::Args,
     ) -> Result<ElevationData, Box<dyn std::error::Error>> {
         let coords: Vec<f64> = bbox_str
             .split_whitespace()
@@ -138,8 +136,8 @@ impl Ground {
         // Use OSM parser's scale calculation and apply user scale factor
         let (scale_factor_z, scale_factor_x) =
             crate::osm_parser::geo_distance(min_lat, max_lat, min_lng, max_lng);
-        let scale_factor_x: f64 = scale_factor_x * scale;
-        let scale_factor_z: f64 = scale_factor_z * scale;
+        let scale_factor_x: f64 = scale_factor_x * args.scale;
+        let scale_factor_z: f64 = scale_factor_z * args.scale;
 
         // Calculate zoom and tiles
         let zoom: u8 = Self::calculate_zoom_level((min_lat, min_lng, max_lat, max_lng));
@@ -226,7 +224,7 @@ impl Ground {
 
         let height_range: f64 = max_height - min_height;
         // Apply scale factor to height scaling
-        let height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
+        let height_scale: f64 = BASE_HEIGHT_SCALE * args.scale.sqrt(); // sqrt to make height scaling less extreme
         let scaled_range: f64 = height_range * height_scale;
 
         // Convert to scaled Minecraft Y coordinates
@@ -237,7 +235,9 @@ impl Ground {
                     // Scale the height differences
                     let relative_height: f64 = (h - min_height) / height_range;
                     let scaled_height: f64 = relative_height * scaled_range;
-                    ((MIN_Y as f64 + scaled_height).round() as i32).clamp(MIN_Y, MAX_Y)
+                    // With terrain enabled, ground_level is used as the MIN_Y for terrain
+                    ((args.ground_level as f64 + scaled_height).round() as i32)
+                        .clamp(args.ground_level, MAX_Y)
                 })
                 .collect();
             mc_heights.push(mc_row);
