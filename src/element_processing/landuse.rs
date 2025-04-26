@@ -175,8 +175,8 @@ pub fn generate_landuse(
                 // Check if the current block is not water or another undesired block
                 if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER, ICE])) {
                     if x % 9 == 0 && z % 9 == 0 {
-                        // Place water/ice in dot pattern
-                        editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND, DIRT]), None);
+                        // Place water in dot pattern
+                        editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND]), None);
                     } else if rng.gen_range(0..76) == 0 {
                         let special_choice: i32 = rng.gen_range(1..=10);
                         if special_choice <= 4 {
