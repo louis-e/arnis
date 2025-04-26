@@ -1,16 +1,18 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::element_processing::tree::create_tree;
+use crate::cartesian::XZPoint;
+use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::ProcessedWay;
+use crate::ground::Ground;
+use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
 pub fn generate_leisure(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    ground_level: i32,
+    ground: &Ground,
     args: &Args,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
@@ -61,12 +63,12 @@ pub fn generate_leisure(
             if let Some(prev) = previous_node {
                 // Draw a line between the current and previous node
                 let bresenham_points: Vec<(i32, i32, i32)> =
-                    bresenham_line(prev.0, ground_level, prev.1, node.x, ground_level, node.z);
+                    bresenham_line(prev.0, 0, prev.1, node.x, 0, node.z);
                 for (bx, _, bz) in bresenham_points {
                     editor.set_block(
                         block_type,
                         bx,
-                        ground_level,
+                        ground.level(XZPoint::new(bx, bz)),
                         bz,
                         Some(&[
                             GRASS_BLOCK,
@@ -99,6 +101,7 @@ pub fn generate_leisure(
                 flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for (x, z) in filled_area {
+                let ground_level = ground.level(XZPoint::new(x, z));
                 editor.set_block(block_type, x, ground_level, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens
@@ -109,36 +112,23 @@ pub fn generate_leisure(
                     let random_choice: i32 = rng.gen_range(0..1000);
 
                     match random_choice {
-                        0 => {
-                            // Benches
-                            editor.set_block(OAK_LOG, x, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
-                        }
-                        1..=30 => {
+                        0..40 => {
                             // Flowers
-                            let flower_choice = match rng.gen_range(0..4) {
-                                0 => RED_FLOWER,
-                                1 => YELLOW_FLOWER,
-                                2 => BLUE_FLOWER,
+                            let flower_choice = match random_choice {
+                                0..10 => RED_FLOWER,
+                                10..20 => YELLOW_FLOWER,
+                                20..30 => BLUE_FLOWER,
                                 _ => WHITE_FLOWER,
                             };
                             editor.set_block(flower_choice, x, ground_level + 1, z, None, None);
                         }
-                        31..=70 => {
+                        40..80 => {
                             // Grass
                             editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                         }
-                        71..=80 => {
+                        80..90 => {
                             // Tree
-                            create_tree(
-                                editor,
-                                x,
-                                ground_level + 1,
-                                z,
-                                rng.gen_range(1..=3),
-                                args.winter,
-                            );
+                            Tree::create(editor, (x, ground_level + 1, z), args.winter);
                         }
                         _ => {}
                     }
@@ -190,5 +180,39 @@ pub fn generate_leisure(
                 }
             }
         }
+    }
+}
+
+pub fn generate_leisure_from_relation(
+    editor: &mut WorldEditor,
+    rel: &ProcessedRelation,
+    ground: &Ground,
+    args: &Args,
+) {
+    if rel.tags.get("leisure") == Some(&"park".to_string()) {
+        // First generate individual ways with their original tags
+        for member in &rel.members {
+            if member.role == ProcessedMemberRole::Outer {
+                generate_leisure(editor, &member.way, ground, args);
+            }
+        }
+
+        // Then combine all outer ways into one
+        let mut combined_nodes = Vec::new();
+        for member in &rel.members {
+            if member.role == ProcessedMemberRole::Outer {
+                combined_nodes.extend(member.way.nodes.clone());
+            }
+        }
+
+        // Create combined way with relation tags
+        let combined_way = ProcessedWay {
+            id: rel.id,
+            nodes: combined_nodes,
+            tags: rel.tags.clone(),
+        };
+
+        // Generate leisure area from combined way
+        generate_leisure(editor, &combined_way, ground, args);
     }
 }
