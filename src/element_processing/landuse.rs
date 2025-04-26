@@ -176,14 +176,7 @@ pub fn generate_landuse(
                 if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER, ICE])) {
                     if x % 9 == 0 && z % 9 == 0 {
                         // Place water/ice in dot pattern
-                        editor.set_block(
-                            WATER,
-                            x,
-                            ground_level,
-                            z,
-                            Some(&[FARMLAND, DIRT]),
-                            None,
-                        );
+                        editor.set_block(WATER, x, ground_level, z, Some(&[FARMLAND, DIRT]), None);
                     } else if rng.gen_range(0..76) == 0 {
                         let special_choice: i32 = rng.gen_range(1..=10);
                         if special_choice <= 4 {
@@ -274,25 +267,13 @@ pub fn generate_landuse(
             }
             "grass" => {
                 if rng.gen_range(1..=7) != 1
-                    && editor.check_for_block(
-                        x,
-                        ground_level,
-                        z,
-                        Some(&[GRASS_BLOCK]),
-                        None,
-                    )
+                    && editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]), None)
                 {
                     editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                 }
             }
             "meadow" => {
-                if editor.check_for_block(
-                    x,
-                    ground_level,
-                    z,
-                    Some(&[GRASS_BLOCK]),
-                    None,
-                ) {
+                if editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]), None) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
                         Tree::create(editor, (x, ground_level + 1, z));
