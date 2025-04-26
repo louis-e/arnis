@@ -170,6 +170,7 @@ pub fn generate_world(
                 if !editor.check_for_block(x, max_y, z, Some(&[STONE]), None) {
                     editor.set_block(groundlayer_block, x, max_y, z, None, None);
                     editor.set_block(DIRT, x, max_y - 1, z, None, None);
+                    editor.set_block(DIRT, x, max_y - 2, z, None, None);
                 }
                 // Fill underground with stone
                 if args.fillground {
