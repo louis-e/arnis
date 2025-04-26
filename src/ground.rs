@@ -1,4 +1,4 @@
-use crate::cartesian::XZPoint;
+use crate::{bbox::BBox, cartesian::XZPoint};
 use image::{Rgb, RgbImage};
 
 /// Maximum Y coordinate in Minecraft (build height limit)
@@ -35,8 +35,8 @@ struct ElevationData {
 impl Ground {
     pub fn new(args: &crate::args::Args) -> Self {
         let mut elevation_enabled: bool = args.terrain;
-        let elevation_data: Option<ElevationData> = if elevation_enabled && args.bbox.is_some() {
-            match Self::fetch_elevation_data(args.bbox.as_deref().unwrap(), args) {
+        let elevation_data: Option<ElevationData> = if elevation_enabled {
+            match Self::fetch_elevation_data(args) {
                 Ok(data) => {
                     if args.debug {
                         Self::save_debug_image(&data.heights, "elevation_debug");
@@ -105,9 +105,9 @@ impl Ground {
     }
 
     /// Calculates appropriate zoom level for the given bounding box
-    fn calculate_zoom_level(bbox: (f64, f64, f64, f64)) -> u8 {
-        let lat_diff: f64 = (bbox.2 - bbox.0).abs();
-        let lng_diff: f64 = (bbox.3 - bbox.1).abs();
+    fn calculate_zoom_level(bbox: BBox) -> u8 {
+        let lat_diff: f64 = (bbox.max().lat() - bbox.min().lat()).abs();
+        let lng_diff: f64 = (bbox.max().lng() - bbox.min().lng()).abs();
         let max_diff: f64 = lat_diff.max(lng_diff);
         let zoom: u8 = (-max_diff.log2() + 20.0) as u8;
         zoom.clamp(MIN_ZOOM, MAX_ZOOM)
@@ -123,26 +123,17 @@ impl Ground {
     }
 
     fn fetch_elevation_data(
-        bbox_str: &str,
         args: &crate::args::Args,
     ) -> Result<ElevationData, Box<dyn std::error::Error>> {
-        let coords: Vec<f64> = bbox_str
-            .split_whitespace()
-            .map(|s: &str| s.parse::<f64>())
-            .collect::<Result<Vec<f64>, _>>()?;
-
-        let (min_lat, min_lng, max_lat, max_lng) = (coords[0], coords[1], coords[2], coords[3]);
-
         // Use OSM parser's scale calculation and apply user scale factor
         let (scale_factor_z, scale_factor_x) =
-            crate::osm_parser::geo_distance(min_lat, max_lat, min_lng, max_lng);
+            crate::osm_parser::geo_distance(args.bbox.min(), args.bbox.max());
         let scale_factor_x: f64 = scale_factor_x * args.scale;
         let scale_factor_z: f64 = scale_factor_z * args.scale;
 
         // Calculate zoom and tiles
-        let zoom: u8 = Self::calculate_zoom_level((min_lat, min_lng, max_lat, max_lng));
-        let tiles: Vec<(u32, u32)> =
-            Self::get_tile_coordinates(min_lat, min_lng, max_lat, max_lng, zoom);
+        let zoom: u8 = Self::calculate_zoom_level(args.bbox);
+        let tiles: Vec<(u32, u32)> = Self::get_tile_coordinates(args.bbox, zoom);
 
         // Calculate tile boundaries
         let x_min: &u32 = tiles.iter().map(|(x, _)| x).min().unwrap();
@@ -250,16 +241,10 @@ impl Ground {
         })
     }
 
-    fn get_tile_coordinates(
-        min_lat: f64,
-        min_lng: f64,
-        max_lat: f64,
-        max_lng: f64,
-        zoom: u8,
-    ) -> Vec<(u32, u32)> {
+    fn get_tile_coordinates(bbox: BBox, zoom: u8) -> Vec<(u32, u32)> {
         // Convert lat/lng to tile coordinates
-        let (x1, y1) = Self::lat_lng_to_tile(min_lat, min_lng, zoom);
-        let (x2, y2) = Self::lat_lng_to_tile(max_lat, max_lng, zoom);
+        let (x1, y1) = Self::lat_lng_to_tile(bbox.min().lat(), bbox.min().lng(), zoom);
+        let (x2, y2) = Self::lat_lng_to_tile(bbox.max().lat(), bbox.max().lng(), zoom);
 
         let mut tiles: Vec<(u32, u32)> = Vec::new();
         for x in x1.min(x2)..=x1.max(x2) {

@@ -313,8 +313,8 @@ function handleBboxInput() {
               lat2 >= -90 && lat2 <= 90 &&
               lng2 >= -180 && lng2 <= 180
           ) {
-              // Input is valid; trigger the event
-              const bboxText = `${lat1} ${lng1} ${lat2} ${lng2}`;
+              // Input is valid; trigger the event with consistent comma-separated format
+              const bboxText = `${lat1},${lng1},${lat2},${lng2}`;
               window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
               // Show custom bbox on the map
