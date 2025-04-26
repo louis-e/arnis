@@ -22,7 +22,8 @@ Choose your area using the rectangle tool and select your Minecraft world - then
 > The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
 Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4 or above.
 If you choose to select an own world, be aware that Arnis will overwrite certain areas.
-There is an [AUR package](https://aur.archlinux.org/packages/arnis) available for Arch Linux users.
+
+[[Arch Linux AUR package](https://aur.archlinux.org/packages/arnis)]
 
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
