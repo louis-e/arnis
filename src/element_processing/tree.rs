@@ -82,35 +82,6 @@ const BIRCH_LEAVES_FILL: [(Coord, Coord); 5] = [
 
 //////////////////////////////////////////////////
 
-#[rustfmt::skip]
-const OAK_SNOW_LAYERS: [Coord; 5] = [
-    (0, 11, 0), 
-    (1, 10, 0),
-    (-1, 10, 0),
-    (0, 10, -1),
-    (0, 10, 1),
-];
-
-#[rustfmt::skip]
-const SPRUCE_SNOW_LAYERS: [Coord; 5] = [
-    (0, 11, 0),
-    (1, 11, 0),
-    (-1, 11, 0),
-    (0, 11, -1),
-    (0, 11, 1),
-];
-
-#[rustfmt::skip]
-const BIRCH_SNOW_LAYERS: [Coord; 5] = [
-    (0, 9, 0),
-    (1, 8, 0),
-    (-1, 8, 0),
-    (0, 8, -1),
-    (0, 8, 1),
-];
-
-//////////////////////////////////////////////////
-
 /// Helper function to set blocks in various patterns.
 fn round(editor: &mut WorldEditor, material: Block, (x, y, z): Coord, block_pattern: &[Coord]) {
     for (i, j, k) in block_pattern {
@@ -132,12 +103,10 @@ pub struct Tree<'a> {
     leaves_block: Block,
     leaves_fill: &'a [(Coord, Coord)],
     round_ranges: [Vec<i32>; 3],
-    snow_layer: [Coord; 5],
-    snow_ranges: [Vec<i32>; 3],
 }
 
 impl Tree<'_> {
-    pub fn create(editor: &mut WorldEditor, (x, y, z): Coord, snow: bool) {
+    pub fn create(editor: &mut WorldEditor, (x, y, z): Coord) {
         let mut blacklist: Vec<Block> = Vec::new();
         blacklist.extend(BUILDING_CORNER_VARIATIONS);
         blacklist.extend(building_wall_variations());
@@ -187,22 +156,6 @@ impl Tree<'_> {
                 round(editor, tree.leaves_block, (x, y + offset, z), round_pattern);
             }
         }
-
-        if !snow {
-            return;
-        }
-
-        // Do the snow layers now
-        for (i, j, k) in tree.snow_layer {
-            editor.set_block(SNOW_LAYER, x + i, y + j, z + k, None, None);
-        }
-
-        // Snow rounds
-        for (round_range, round_pattern) in tree.snow_ranges.iter().zip(ROUND_PATTERNS) {
-            for offset in round_range {
-                round(editor, SNOW_LAYER, (x, y + offset, z), round_pattern);
-            }
-        }
     }
 
     fn get_tree(kind: TreeType) -> Self {
@@ -218,12 +171,6 @@ impl Tree<'_> {
                     (4..=7).rev().collect(),
                     (5..=6).rev().collect(),
                 ],
-                snow_layer: OAK_SNOW_LAYERS,
-                snow_ranges: [
-                    (6..=9).rev().collect(),
-                    (5..=8).rev().collect(),
-                    (6..=7).rev().collect(),
-                ],
             },
 
             TreeType::Spruce => Self {
@@ -234,8 +181,6 @@ impl Tree<'_> {
                 leaves_fill: &SPRUCE_LEAVES_FILL,
                 // TODO can I omit the third empty vec? May cause issues with iter zip
                 round_ranges: [vec![9, 7, 6, 4, 3], vec![6, 3], vec![]],
-                snow_layer: SPRUCE_SNOW_LAYERS,
-                snow_ranges: [vec![10, 8, 7, 5, 4], vec![7, 4], vec![]],
             },
 
             TreeType::Birch => Self {
@@ -245,8 +190,6 @@ impl Tree<'_> {
                 leaves_block: BIRCH_LEAVES,
                 leaves_fill: &BIRCH_LEAVES_FILL,
                 round_ranges: [(2..=6).rev().collect(), (2..=4).collect(), vec![]],
-                snow_layer: BIRCH_SNOW_LAYERS,
-                snow_ranges: [(3..=7).rev().collect(), (3..=5).collect(), vec![]],
             },
         } // match
     } // fn get_tree
