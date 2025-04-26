@@ -1,4 +1,7 @@
-use crate::{args::Args, cartesian::XZPoint, progress::emit_gui_progress_update};
+use crate::{
+    args::Args, bbox::BBox, cartesian::XZPoint, geo_coord::GeoCoord,
+    progress::emit_gui_progress_update,
+};
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;
@@ -124,15 +127,13 @@ impl ProcessedElement {
 fn lat_lon_to_minecraft_coords(
     lat: f64,
     lon: f64,
-    bbox: (f64, f64, f64, f64), // (min_lon, min_lat, max_lon, max_lat)
+    bbox: BBox, // (min_lon, min_lat, max_lon, max_lat)
     scale_factor_z: f64,
     scale_factor_x: f64,
 ) -> (i32, i32) {
-    let (min_lon, min_lat, max_lon, max_lat) = bbox;
-
     // Calculate the relative position within the bounding box
-    let rel_x: f64 = (lon - min_lon) / (max_lon - min_lon);
-    let rel_z: f64 = 1.0 - (lat - min_lat) / (max_lat - min_lat);
+    let rel_x: f64 = (lon - bbox.min().lng()) / (bbox.max().lng() - bbox.min().lng());
+    let rel_z: f64 = 1.0 - (lat - bbox.min().lat()) / (bbox.max().lat() - bbox.min().lat());
 
     // Apply scaling factors for each dimension and convert to Minecraft coordinates
     let x: i32 = (rel_x * scale_factor_x) as i32;
@@ -143,7 +144,7 @@ fn lat_lon_to_minecraft_coords(
 
 pub fn parse_osm_data(
     json_data: &Value,
-    bbox: (f64, f64, f64, f64),
+    bbox: BBox,
     args: &Args,
 ) -> (Vec<ProcessedElement>, f64, f64) {
     println!("{} Parsing data...", "[2/5]".bold());
@@ -154,7 +155,7 @@ pub fn parse_osm_data(
         serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
 
     // Determine which dimension is larger and assign scale factors accordingly
-    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.1, bbox.3, bbox.0, bbox.2);
+    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
     let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
     let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
 
@@ -291,11 +292,11 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
 
 // (lat meters, lon meters)
 #[inline]
-pub fn geo_distance(lat1: f64, lat2: f64, lon1: f64, lon2: f64) -> (f64, f64) {
-    let z: f64 = lat_distance(lat1, lat2);
+pub fn geo_distance(a: GeoCoord, b: GeoCoord) -> (f64, f64) {
+    let z: f64 = lat_distance(a.lat(), b.lat());
 
     // distance between two lons depends on their latitude. In this case we'll just average them
-    let x: f64 = lon_distance((lat1 + lat2) / 2.0, lon1, lon2);
+    let x: f64 = lon_distance((a.lat() + b.lat()) / 2.0, a.lng(), b.lng());
 
     (z, x)
 }

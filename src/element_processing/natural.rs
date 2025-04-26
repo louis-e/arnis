@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
-use crate::element_processing::tree::create_tree;
+use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -21,15 +21,7 @@ pub fn generate_natural(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                create_tree(
-                    editor,
-                    x,
-                    ground.level(node.xz()) + 1,
-                    z,
-                    rng.gen_range(1..=3),
-                    args.winter,
-                );
+                Tree::create(editor, (x, ground.level(node.xz()) + 1, z), args.winter);
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -45,7 +37,7 @@ pub fn generate_natural(
                         GRASS_BLOCK
                     }
                 }
-                "beach" | "sand" => SAND,
+                "beach" | "sand" | "dune" => SAND,
                 "tree_row" => {
                     if args.winter {
                         SNOW_BLOCK
@@ -53,7 +45,16 @@ pub fn generate_natural(
                         GRASS_BLOCK
                     }
                 }
-                "wetland" | "water" => WATER,
+                "wetland" | "water" => {
+                    if args.winter {
+                        ICE
+                    } else {
+                        WATER
+                    }
+                }
+                "bare_rock" => STONE,
+                "glacier" => PACKED_ICE,
+                "mud" => MUD,
                 _ => {
                     if args.winter {
                         SNOW_BLOCK
@@ -108,8 +109,23 @@ pub fn generate_natural(
 
                 for (x, z) in filled_area {
                     let y = ground.level(XZPoint::new(x, z));
-
                     editor.set_block(block_type, x, y, z, None, None);
+                    // Make custom layer instead of dirt
+                    match natural_type.as_str() {
+                        "beach" | "sand" | "dune" => {
+                            editor.set_block(SAND, x, y - 1, z, None, None);
+                            editor.set_block(STONE, x, y - 2, z, None, None);
+                        }
+                        "glacier" => {
+                            editor.set_block(PACKED_ICE, x, y - 1, z, None, None);
+                            editor.set_block(STONE, x, y - 2, z, None, None);
+                        }
+                        "bare_rock" => {
+                            editor.set_block(STONE, x, y - 1, z, None, None);
+                            editor.set_block(STONE, x, y - 2, z, None, None);
+                        }
+                        _ => {}
+                    }
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
@@ -119,7 +135,7 @@ pub fn generate_natural(
 
                         let random_choice: i32 = rng.gen_range(0..26);
                         if random_choice == 25 {
-                            create_tree(editor, x, y + 1, z, rng.gen_range(1..=3), args.winter);
+                            Tree::create(editor, (x, y + 1, z), args.winter);
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,

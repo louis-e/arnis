@@ -147,6 +147,13 @@ impl Block {
             126 => "coarse_dirt",
             127 => "iron_ore",
             128 => "coal_ore",
+            129 => "gold_ore",
+            130 => "copper_ore",
+            131 => "clay",
+            132 => "dirt_path",
+            133 => "ice",
+            134 => "packed_ice",
+            135 => "mud",
             _ => panic!("Invalid id"),
         }
     }
@@ -411,97 +418,98 @@ pub const RAIL_SOUTH_WEST: Block = Block::new(125);
 pub const COARSE_DIRT: Block = Block::new(126);
 pub const IRON_ORE: Block = Block::new(127);
 pub const COAL_ORE: Block = Block::new(128);
+pub const GOLD_ORE: Block = Block::new(129);
+pub const COPPER_ORE: Block = Block::new(130);
+pub const CLAY: Block = Block::new(131);
+pub const DIRT_PATH: Block = Block::new(132);
+pub const ICE: Block = Block::new(133);
+pub const PACKED_ICE: Block = Block::new(134);
+pub const MUD: Block = Block::new(135);
 
 // Variations for building corners
-pub fn building_corner_variations() -> Vec<Block> {
-    vec![
-        STONE_BRICKS,
-        COBBLESTONE,
-        BRICK,
-        MOSSY_COBBLESTONE,
-        SANDSTONE,
-        RED_NETHER_BRICKS,
-        BLACKSTONE,
-        SMOOTH_QUARTZ,
-        CHISELED_STONE_BRICKS,
-        POLISHED_BASALT,
-        CUT_SANDSTONE,
-        POLISHED_BLACKSTONE_BRICKS,
-        ANDESITE,
-        GRANITE,
-        DIORITE,
-        CRACKED_STONE_BRICKS,
-        PRISMARINE,
-        BLUE_TERRACOTTA,
-        NETHER_BRICK,
-        QUARTZ_BRICKS,
-    ]
-}
+pub static BUILDING_CORNER_VARIATIONS: [Block; 20] = [
+    STONE_BRICKS,
+    COBBLESTONE,
+    BRICK,
+    MOSSY_COBBLESTONE,
+    SANDSTONE,
+    RED_NETHER_BRICKS,
+    BLACKSTONE,
+    SMOOTH_QUARTZ,
+    CHISELED_STONE_BRICKS,
+    POLISHED_BASALT,
+    CUT_SANDSTONE,
+    POLISHED_BLACKSTONE_BRICKS,
+    ANDESITE,
+    GRANITE,
+    DIORITE,
+    CRACKED_STONE_BRICKS,
+    PRISMARINE,
+    BLUE_TERRACOTTA,
+    NETHER_BRICK,
+    QUARTZ_BRICKS,
+];
 
 // Variations for building walls
 pub fn building_wall_variations() -> Vec<Block> {
-    building_wall_color_map()
+    BUILDING_WALL_COLOR_MAP
         .into_iter()
         .map(|(_, block)| block)
         .collect()
 }
 
 // https://wiki.openstreetmap.org/wiki/Key:building:colour
-pub fn building_wall_color_map() -> Vec<(RGBTuple, Block)> {
-    vec![
-        ((233, 107, 57), BRICK),
-        ((18, 12, 13), CRACKED_POLISHED_BLACKSTONE_BRICKS),
-        ((76, 127, 153), CYAN_CONCRETE),
-        ((0, 0, 0), DEEPSLATE_BRICKS),
-        ((186, 195, 142), END_STONE_BRICKS),
-        ((57, 41, 35), GRAY_TERRACOTTA),
-        ((112, 108, 138), LIGHT_BLUE_TERRACOTTA),
-        ((122, 92, 66), MUD_BRICKS),
-        ((24, 13, 14), NETHER_BRICKS),
-        ((159, 82, 36), ORANGE_TERRACOTTA),
-        ((128, 128, 128), POLISHED_ANDESITE),
-        ((174, 173, 174), POLISHED_DIORITE),
-        ((141, 101, 142), PURPUR_PILLAR),
-        ((142, 60, 46), RED_TERRACOTTA),
-        ((153, 83, 28), SMOOTH_RED_SANDSTONE),
-        ((224, 216, 175), SMOOTH_SANDSTONE),
-        ((188, 182, 179), SMOOTH_STONE),
-        ((35, 86, 85), WARPED_PLANKS),
-        ((255, 255, 255), WHITE_CONCRETE),
-        ((209, 177, 161), WHITE_TERRACOTTA),
-        ((191, 147, 42), YELLOW_TERRACOTTA),
-    ]
-}
+pub static BUILDING_WALL_COLOR_MAP: [(RGBTuple, Block); 21] = [
+    ((233, 107, 57), BRICK),
+    ((18, 12, 13), CRACKED_POLISHED_BLACKSTONE_BRICKS),
+    ((76, 127, 153), CYAN_CONCRETE),
+    ((0, 0, 0), DEEPSLATE_BRICKS),
+    ((186, 195, 142), END_STONE_BRICKS),
+    ((57, 41, 35), GRAY_TERRACOTTA),
+    ((112, 108, 138), LIGHT_BLUE_TERRACOTTA),
+    ((122, 92, 66), MUD_BRICKS),
+    ((24, 13, 14), NETHER_BRICKS),
+    ((159, 82, 36), ORANGE_TERRACOTTA),
+    ((128, 128, 128), POLISHED_ANDESITE),
+    ((174, 173, 174), POLISHED_DIORITE),
+    ((141, 101, 142), PURPUR_PILLAR),
+    ((142, 60, 46), RED_TERRACOTTA),
+    ((153, 83, 28), SMOOTH_RED_SANDSTONE),
+    ((224, 216, 175), SMOOTH_SANDSTONE),
+    ((188, 182, 179), SMOOTH_STONE),
+    ((35, 86, 85), WARPED_PLANKS),
+    ((255, 255, 255), WHITE_CONCRETE),
+    ((209, 177, 161), WHITE_TERRACOTTA),
+    ((191, 147, 42), YELLOW_TERRACOTTA),
+];
 
 // Variations for building floors
 pub fn building_floor_variations() -> Vec<Block> {
-    building_wall_color_map()
+    BUILDING_WALL_COLOR_MAP
         .into_iter()
         .map(|(_, block)| block)
         .collect()
 }
 
-pub fn building_floor_color_map() -> Vec<(RGBTuple, Block)> {
-    vec![
-        ((181, 101, 59), ACACIA_PLANKS),
-        ((22, 15, 16), BLACKSTONE),
-        ((104, 51, 74), CRIMSON_PLANKS),
-        ((82, 55, 26), DARK_OAK_PLANKS),
-        ((182, 133, 99), JUNGLE_PLANKS),
-        ((33, 128, 185), LIGHT_BLUE_CONCRETE),
-        ((78, 103, 43), MOSS_BLOCK),
-        ((171, 138, 88), OAK_PLANKS),
-        ((0, 128, 0), OXIDIZED_COPPER),
-        ((18, 12, 13), POLISHED_BLACKSTONE),
-        ((64, 64, 64), POLISHED_DEEPSLATE),
-        ((255, 255, 255), POLISHED_DIORITE),
-        ((143, 96, 79), POLISHED_GRANITE),
-        ((141, 101, 142), PURPUR_BLOCK),
-        ((128, 0, 0), RED_NETHER_BRICKS),
-        ((153, 83, 28), SMOOTH_RED_SANDSTONE),
-        ((128, 96, 57), SPRUCE_PLANKS),
-        ((128, 128, 128), STONE_BRICKS),
-        ((150, 93, 68), TERRACOTTA),
-        ((35, 86, 85), WARPED_PLANKS),
-    ]
-}
+pub static BUILDING_FLOOR_COLOR_MAP: [(RGBTuple, Block); 20] = [
+    ((181, 101, 59), ACACIA_PLANKS),
+    ((22, 15, 16), BLACKSTONE),
+    ((104, 51, 74), CRIMSON_PLANKS),
+    ((82, 55, 26), DARK_OAK_PLANKS),
+    ((182, 133, 99), JUNGLE_PLANKS),
+    ((33, 128, 185), LIGHT_BLUE_CONCRETE),
+    ((78, 103, 43), MOSS_BLOCK),
+    ((171, 138, 88), OAK_PLANKS),
+    ((0, 128, 0), OXIDIZED_COPPER),
+    ((18, 12, 13), POLISHED_BLACKSTONE),
+    ((64, 64, 64), POLISHED_DEEPSLATE),
+    ((255, 255, 255), POLISHED_DIORITE),
+    ((143, 96, 79), POLISHED_GRANITE),
+    ((141, 101, 142), PURPUR_BLOCK),
+    ((128, 0, 0), RED_NETHER_BRICKS),
+    ((153, 83, 28), SMOOTH_RED_SANDSTONE),
+    ((128, 96, 57), SPRUCE_PLANKS),
+    ((128, 128, 128), STONE_BRICKS),
+    ((150, 93, 68), TERRACOTTA),
+    ((35, 86, 85), WARPED_PLANKS),
+];

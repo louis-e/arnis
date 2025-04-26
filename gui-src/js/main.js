@@ -313,8 +313,8 @@ function handleBboxInput() {
               lat2 >= -90 && lat2 <= 90 &&
               lng2 >= -180 && lng2 <= 180
           ) {
-              // Input is valid; trigger the event
-              const bboxText = `${lat1} ${lng1} ${lat2} ${lng2}`;
+              // Input is valid; trigger the event with consistent comma-separated format
+              const bboxText = `${lat1},${lng1},${lat2},${lng2}`;
               window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
               // Show custom bbox on the map
@@ -480,6 +480,7 @@ async function startGeneration() {
 
     var terrain = document.getElementById("terrain-toggle").checked;
     var winter_mode = document.getElementById("winter-toggle").checked;
+    var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     var ground_level = parseInt(document.getElementById("ground-level").value, 10);
@@ -496,7 +497,8 @@ async function startGeneration() {
         groundLevel: ground_level,
         winterMode: winter_mode,
         floodfillTimeout: floodfill_timeout,
-        terrainEnabled: terrain
+        terrainEnabled: terrain,
+        fillgroundEnabled: fill_ground
     });
 
     console.log("Generation process started.");

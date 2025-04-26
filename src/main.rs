@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+mod bbox;
 mod block_definitions;
 mod bresenham;
 mod cartesian;
@@ -8,6 +9,7 @@ mod colors;
 mod data_processing;
 mod element_processing;
 mod floodfill;
+mod geo_coord;
 mod ground;
 mod osm_parser;
 #[cfg(feature = "gui")]
@@ -28,17 +30,19 @@ mod world_editor;
 use args::Args;
 use clap::Parser;
 use colored::*;
+#[cfg(feature = "gui")]
 use fastnbt::Value;
+#[cfg(feature = "gui")]
 use flate2::read::GzDecoder;
+#[cfg(feature = "gui")]
 use log::{error, LevelFilter};
+#[cfg(feature = "gui")]
 use rfd::FileDialog;
-use std::{
-    env,
-    fs::{self, File},
-    io::{Read, Write},
-    panic,
-    path::{Path, PathBuf},
-};
+#[cfg(feature = "gui")]
+use std::io::Read;
+#[cfg(feature = "gui")]
+use std::path::{Path, PathBuf};
+use std::{env, fs, io::Write, panic};
 #[cfg(feature = "gui")]
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 #[cfg(target_os = "windows")]
@@ -101,32 +105,22 @@ fn main() {
         let args: Args = Args::parse();
         args.run();
 
-        let bbox: Vec<f64> = args
-            .bbox
-            .as_ref()
-            .expect("Bounding box is required")
-            .split(',')
-            .map(|s: &str| s.parse::<f64>().expect("Invalid bbox coordinate"))
-            .collect::<Vec<f64>>();
-
-        let bbox_tuple: (f64, f64, f64, f64) = (bbox[0], bbox[1], bbox[2], bbox[3]);
-
         // Fetch data
         let raw_data: serde_json::Value =
-            retrieve_data::fetch_data(bbox_tuple, args.file.as_deref(), args.debug, "requests")
+            retrieve_data::fetch_data(args.bbox, args.file.as_deref(), args.debug, "requests")
                 .expect("Failed to fetch data");
 
         // Parse raw data
         let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-            osm_parser::parse_osm_data(&raw_data, bbox_tuple, &args);
+            osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
         parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| {
             osm_parser::get_priority(element)
         });
 
         // Write the parsed OSM data to a file for inspection
         if args.debug {
-            let mut output_file: File =
-                File::create("parsed_osm_data.txt").expect("Failed to create output file");
+            let mut output_file: fs::File =
+                fs::File::create("parsed_osm_data.txt").expect("Failed to create output file");
             for element in &parsed_elements {
                 writeln!(
                     output_file,
@@ -254,7 +248,7 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                 let session_lock_path = path.join("session.lock");
                 if session_lock_path.exists() {
                     // Try to acquire a lock on the session.lock file
-                    if let Ok(file) = File::open(&session_lock_path) {
+                    if let Ok(file) = fs::File::open(&session_lock_path) {
                         if fs2::FileExt::try_lock_shared(&file).is_err() {
                             return Err(2); // Error code 2: The selected world is currently in use
                         } else {
@@ -276,6 +270,7 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
     }
 }
 
+#[cfg(feature = "gui")]
 fn create_new_world(base_path: &Path) -> Result<String, String> {
     // Generate a unique world name
     let mut counter: i32 = 1;
@@ -392,6 +387,7 @@ fn gui_check_for_updates() -> Result<bool, String> {
 
 #[cfg(feature = "gui")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
@@ -400,46 +396,44 @@ fn gui_start_generation(
     winter_mode: bool,
     floodfill_timeout: u64,
     terrain_enabled: bool,
+    fillground_enabled: bool,
 ) -> Result<(), String> {
+    use bbox::BBox;
+    use progress::emit_gui_error;
+
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
-            // Utility function to reorder bounding box coordinates
-            fn reorder_bbox(bbox: &[f64]) -> (f64, f64, f64, f64) {
-                (bbox[1], bbox[0], bbox[3], bbox[2])
-            }
-
-            // Parse bounding box string and validate it
-            let bbox: Vec<f64> = bbox_text
-                .split_whitespace()
-                .map(|s| s.parse::<f64>().expect("Invalid bbox coordinate"))
-                .collect();
-
-            if bbox.len() != 4 {
-                return Err("Invalid bounding box format".to_string());
-            }
+            // Parse the bounding box from the text with proper error handling
+            let bbox = match BBox::from_str(&bbox_text) {
+                Ok(bbox) => bbox,
+                Err(e) => {
+                    let error_msg = format!("Failed to parse bounding box: {}", e);
+                    eprintln!("{}", error_msg);
+                    emit_gui_error(&error_msg);
+                    return Err(error_msg);
+                }
+            };
 
             // Create an Args instance with the chosen bounding box and world directory path
             let args: Args = Args {
-                bbox: Some(bbox_text),
+                bbox,
                 file: None,
                 path: selected_world,
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
                 terrain: terrain_enabled,
+                fillground: fillground_enabled,
                 winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
             };
 
-            // Reorder bounding box coordinates for further processing
-            let reordered_bbox: (f64, f64, f64, f64) = reorder_bbox(&bbox);
-
             // Run data fetch and world generation
-            match retrieve_data::fetch_data(reordered_bbox, None, args.debug, "requests") {
+            match retrieve_data::fetch_data(args.bbox, None, args.debug, "requests") {
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-                        osm_parser::parse_osm_data(&raw_data, reordered_bbox, &args);
+                        osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
@@ -461,12 +455,18 @@ fn gui_start_generation(
                     );
                     Ok(())
                 }
-                Err(e) => Err(format!("Failed to start generation: {}", e)),
+                Err(e) => {
+                    let error_msg = format!("Failed to fetch data: {}", e);
+                    emit_gui_error(&error_msg);
+                    Err(error_msg)
+                }
             }
         })
         .await
         {
-            eprintln!("Error in blocking task: {}", e);
+            let error_msg = format!("Error in generation task: {}", e);
+            eprintln!("{}", error_msg);
+            emit_gui_error(&error_msg);
         }
     });
 

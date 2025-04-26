@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
-use crate::element_processing::tree::create_tree;
+use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::ground::Ground;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -112,36 +112,23 @@ pub fn generate_leisure(
                     let random_choice: i32 = rng.gen_range(0..1000);
 
                     match random_choice {
-                        0 => {
-                            // Benches
-                            editor.set_block(OAK_LOG, x, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
-                        }
-                        1..=30 => {
+                        0..40 => {
                             // Flowers
-                            let flower_choice = match rng.gen_range(0..4) {
-                                0 => RED_FLOWER,
-                                1 => YELLOW_FLOWER,
-                                2 => BLUE_FLOWER,
+                            let flower_choice = match random_choice {
+                                0..10 => RED_FLOWER,
+                                10..20 => YELLOW_FLOWER,
+                                20..30 => BLUE_FLOWER,
                                 _ => WHITE_FLOWER,
                             };
                             editor.set_block(flower_choice, x, ground_level + 1, z, None, None);
                         }
-                        31..=70 => {
+                        40..80 => {
                             // Grass
                             editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                         }
-                        71..=80 => {
+                        80..90 => {
                             // Tree
-                            create_tree(
-                                editor,
-                                x,
-                                ground_level + 1,
-                                z,
-                                rng.gen_range(1..=3),
-                                args.winter,
-                            );
+                            Tree::create(editor, (x, ground_level + 1, z), args.winter);
                         }
                         _ => {}
                     }
