@@ -41,10 +41,6 @@ pub fn generate_highways(
                         editor.set_block(GREEN_WOOL, x, y + 4, z, None, None);
                         editor.set_block(YELLOW_WOOL, x, y + 5, z, None, None);
                         editor.set_block(RED_WOOL, x, y + 6, z, None, None);
-
-                        if args.winter {
-                            editor.set_block(SNOW_LAYER, x, y + 7, z, None, None);
-                        }
                     }
                 }
             }
@@ -81,13 +77,7 @@ pub fn generate_highways(
                     "wood" => OAK_PLANKS,
                     "asphalt" => BLACK_CONCRETE,
                     "gravel" | "fine_gravel" => GRAVEL,
-                    "grass" => {
-                        if args.winter {
-                            SNOW_BLOCK
-                        } else {
-                            GRASS_BLOCK
-                        }
-                    }
+                    "grass" => GRASS_BLOCK,
                     "dirt" | "ground" | "earth" => DIRT,
                     "sand" => SAND,
                     "concrete" => LIGHT_GRAY_CONCRETE,

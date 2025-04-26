@@ -393,7 +393,6 @@ fn gui_start_generation(
     selected_world: String,
     world_scale: f64,
     ground_level: i32,
-    winter_mode: bool,
     floodfill_timeout: u64,
     terrain_enabled: bool,
     fillground_enabled: bool,
@@ -424,7 +423,6 @@ fn gui_start_generation(
                 ground_level,
                 terrain: terrain_enabled,
                 fillground: fillground_enabled,
-                winter: winter_mode,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
             };

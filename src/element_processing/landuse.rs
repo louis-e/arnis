@@ -19,27 +19,9 @@ pub fn generate_landuse(
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
 
     let block_type = match landuse_tag.as_str() {
-        "greenfield" | "meadow" | "grass" => {
-            if args.winter {
-                SNOW_BLOCK
-            } else {
-                GRASS_BLOCK
-            }
-        }
-        "farmland" => {
-            if args.winter {
-                DIRT
-            } else {
-                FARMLAND
-            }
-        }
-        "forest" => {
-            if args.winter {
-                SNOW_BLOCK
-            } else {
-                GRASS_BLOCK
-            }
-        }
+        "greenfield" | "meadow" | "grass" => GRASS_BLOCK,
+        "farmland" => FARMLAND,
+        "forest" => GRASS_BLOCK,
         "cemetery" => PODZOL,
         "beach" => SAND,
         "construction" => COARSE_DIRT,
@@ -47,11 +29,7 @@ pub fn generate_landuse(
         "residential" => {
             let residential_tag = element.tags.get("residential").unwrap_or(&binding);
             if residential_tag == "rural" {
-                if args.winter {
-                    SNOW_BLOCK
-                } else {
-                    GRASS_BLOCK
-                }
+                GRASS_BLOCK
             } else {
                 STONE_BRICKS
             }
@@ -71,13 +49,7 @@ pub fn generate_landuse(
             }
         }
         "quarry" => STONE,
-        _ => {
-            if args.winter {
-                SNOW_BLOCK
-            } else {
-                GRASS_BLOCK
-            }
-        }
+        _ => GRASS_BLOCK,
     };
 
     // Get the area of the landuse element
@@ -177,7 +149,7 @@ pub fn generate_landuse(
                             editor.set_block(RED_FLOWER, x, ground_level + 1, z, None, None);
                         }
                     } else if random_choice < 33 {
-                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
+                        Tree::create(editor, (x, ground_level + 1, z));
                     }
                 }
             }
@@ -185,7 +157,7 @@ pub fn generate_landuse(
                 if !editor.check_for_block(x, ground_level, z, None, Some(&[WATER])) {
                     let random_choice: i32 = rng.gen_range(0..21);
                     if random_choice == 20 {
-                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
+                        Tree::create(editor, (x, ground_level + 1, z));
                     } else if random_choice == 2 {
                         let flower_block: Block = match rng.gen_range(1..=4) {
                             1 => RED_FLOWER,
@@ -205,15 +177,13 @@ pub fn generate_landuse(
                     if x % 9 == 0 && z % 9 == 0 {
                         // Place water/ice in dot pattern
                         editor.set_block(
-                            if args.winter { ICE } else { WATER },
+                            WATER,
                             x,
                             ground_level,
                             z,
                             Some(&[FARMLAND, DIRT]),
                             None,
                         );
-                    } else if args.winter {
-                        editor.set_block(SNOW_LAYER, x, ground_level + 1, z, None, None);
                     } else if rng.gen_range(0..76) == 0 {
                         let special_choice: i32 = rng.gen_range(1..=10);
                         if special_choice <= 4 {
@@ -308,7 +278,7 @@ pub fn generate_landuse(
                         x,
                         ground_level,
                         z,
-                        Some(&[GRASS_BLOCK, SNOW_BLOCK]),
+                        Some(&[GRASS_BLOCK]),
                         None,
                     )
                 {
@@ -320,12 +290,12 @@ pub fn generate_landuse(
                     x,
                     ground_level,
                     z,
-                    Some(&[GRASS_BLOCK, SNOW_BLOCK]),
+                    Some(&[GRASS_BLOCK]),
                     None,
                 ) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
-                        Tree::create(editor, (x, ground_level + 1, z), args.winter);
+                        Tree::create(editor, (x, ground_level + 1, z));
                     } else if random_choice < 800 {
                         editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                     }

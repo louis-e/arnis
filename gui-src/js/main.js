@@ -96,7 +96,6 @@ async function applyLocalization(localization) {
     "button[data-localize='select_existing_world']": "select_existing_world",
     "button[data-localize='generate_new_world']": "generate_new_world",
     "h2[data-localize='customization_settings']": "customization_settings",
-    "label[data-localize='winter_mode']": "winter_mode",
     "label[data-localize='world_scale']": "world_scale",
     "label[data-localize='custom_bounding_box']": "custom_bounding_box",
     "label[data-localize='floodfill_timeout']": "floodfill_timeout",
@@ -479,7 +478,6 @@ async function startGeneration() {
     }
 
     var terrain = document.getElementById("terrain-toggle").checked;
-    var winter_mode = document.getElementById("winter-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
@@ -495,7 +493,6 @@ async function startGeneration() {
         selectedWorld: worldPath,
         worldScale: scale,
         groundLevel: ground_level,
-        winterMode: winter_mode,
         floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
         fillgroundEnabled: fill_ground

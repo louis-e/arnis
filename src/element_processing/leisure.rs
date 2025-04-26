@@ -22,13 +22,7 @@ pub fn generate_leisure(
 
         // Determine block type based on leisure type
         let block_type: Block = match leisure_type.as_str() {
-            "park" => {
-                if args.winter {
-                    SNOW_BLOCK
-                } else {
-                    GRASS_BLOCK
-                }
-            }
+            "park" => GRASS_BLOCK,
             "playground" | "recreation_ground" | "pitch" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
@@ -41,21 +35,9 @@ pub fn generate_leisure(
                     GREEN_STAINED_HARDENED_CLAY
                 }
             }
-            "garden" => {
-                if args.winter {
-                    SNOW_BLOCK
-                } else {
-                    GRASS_BLOCK
-                }
-            }
+            "garden" => GRASS_BLOCK,
             "swimming_pool" => WATER,
-            _ => {
-                if args.winter {
-                    SNOW_BLOCK
-                } else {
-                    GRASS_BLOCK
-                }
-            }
+            _ => GRASS_BLOCK,
         };
 
         // Process leisure area nodes
@@ -128,7 +110,7 @@ pub fn generate_leisure(
                         }
                         80..90 => {
                             // Tree
-                            Tree::create(editor, (x, ground_level + 1, z), args.winter);
+                            Tree::create(editor, (x, ground_level + 1, z));
                         }
                         _ => {}
                     }

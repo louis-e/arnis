@@ -33,10 +33,6 @@ pub struct Args {
     #[arg(long, default_value_t = -62)]
     pub ground_level: i32,
 
-    /// Enable winter mode (default: false)
-    #[arg(long)]
-    pub winter: bool,
-
     /// Enable terrain (optional)
     #[arg(long)]
     pub terrain: bool,
@@ -79,25 +75,22 @@ mod tests {
 
     #[test]
     fn test_flags() {
-        // Test that winter/terrain/debug are SetTrue
+        // Test that terrain/debug are SetTrue
         let cmd = [
             "arnis",
             "--path",
             "",
             "--bbox",
             "1,2,3,4",
-            "--winter",
             "--terrain",
             "--debug",
         ];
         let args = Args::parse_from(cmd.iter());
-        assert!(args.winter);
         assert!(args.debug);
         assert!(args.terrain);
 
         let cmd = ["arnis", "--path", "", "--bbox", "1,2,3,4"];
         let args = Args::parse_from(cmd.iter());
-        assert!(!args.winter);
         assert!(!args.debug);
         assert!(!args.terrain);
     }

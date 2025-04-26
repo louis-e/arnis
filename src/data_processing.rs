@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
+use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::cartesian::XZPoint;
 use crate::element_processing::*;
 use crate::ground::Ground;
@@ -141,7 +141,7 @@ pub fn generate_world(
     let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
     let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
 
-    let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
+    let groundlayer_block = GRASS_BLOCK;
 
     // Differentiate between terrain and non-terrain generation
     if ground.elevation_enabled {
