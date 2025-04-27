@@ -1,10 +1,8 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::cartesian::XZPoint;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::floodfill::flood_fill_area;
-use crate::ground::Ground;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -14,14 +12,9 @@ use std::time::Duration;
 pub fn generate_buildings(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    ground: &Ground,
     args: &Args,
     relation_levels: Option<i32>,
 ) {
-    let Some(base_y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-        return;
-    };
-
     // Get min_level first so we can use it both for start_level and building height calculations
     let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
         min_level_str.parse::<i32>().unwrap_or(0)
@@ -29,8 +22,8 @@ pub fn generate_buildings(
         0
     };
 
-    // Calculate starting level using base_y and min_level
-    let start_level = base_y + (min_level * 4);
+    // Calculate starting y-offset from min_level
+    let start_y_offset = min_level * 4;
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -140,24 +133,15 @@ pub fn generate_buildings(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-                    return;
-                };
-
                 for shelter_y in 1..=4 {
-                    editor.set_block(OAK_FENCE, x, shelter_y + y, z, None, None);
+                    editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
                 }
-                editor.set_block(roof_block, x, y + 5, z, None, None);
+                editor.set_block(roof_block, x, 5, z, None, None);
             }
 
             // Flood fill the roof area
-            let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-                return;
-            };
-
-            let roof_height: i32 = y + 5;
             for (x, z) in roof_area.iter() {
-                editor.set_block(roof_block, *x, roof_height, *z, None, None);
+                editor.set_block(roof_block, *x, 5, *z, None, None);
             }
 
             return;
@@ -182,13 +166,9 @@ pub fn generate_buildings(
                 let floor_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
-                let Some(y) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-                    return;
-                };
-
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
-                    editor.set_block(ground_block, *x, y, *z, None, None);
+                    editor.set_block(ground_block, *x, 0, *z, None, None);
                 }
 
                 // Place fences and roof slabs at each corner node directly
@@ -197,15 +177,14 @@ pub fn generate_buildings(
                     let z: i32 = node.z;
 
                     for dy in 1..=4 {
-                        editor.set_block(OAK_FENCE, x, y + dy, z, None, None);
+                        editor.set_block(OAK_FENCE, x, dy, z, None, None);
                     }
-                    editor.set_block(roof_block, x, y + 5, z, None, None);
+                    editor.set_block(roof_block, x, 5, z, None, None);
                 }
 
                 // Flood fill the roof area
-                let roof_height: i32 = y + 5;
                 for (x, z) in floor_area.iter() {
-                    editor.set_block(roof_block, *x, roof_height, *z, None, None);
+                    editor.set_block(roof_block, *x, 5, *z, None, None);
                 }
 
                 return;
@@ -229,12 +208,8 @@ pub fn generate_buildings(
             let floor_area: Vec<(i32, i32)> =
                 flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
-            let Some(ground_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-                return;
-            };
-
             for level in 0..=(building_height / 4) {
-                let current_level = ground_level + level * 4;
+                let current_level_y = level * 4;
 
                 // Build walls
                 for node in &element.nodes {
@@ -242,7 +217,7 @@ pub fn generate_buildings(
                     let z: i32 = node.z;
 
                     // Build walls up to the current level
-                    for y in (current_level + 1)..=(current_level + 4) {
+                    for y in (current_level_y + 1)..=(current_level_y + 4) {
                         editor.set_block(STONE_BRICKS, x, y, z, None, None);
                     }
                 }
@@ -250,16 +225,16 @@ pub fn generate_buildings(
                 // Fill the floor area for each level
                 for (x, z) in &floor_area {
                     if level == 0 {
-                        editor.set_block(SMOOTH_STONE, *x, current_level, *z, None, None);
+                        editor.set_block(SMOOTH_STONE, *x, current_level_y, *z, None, None);
                     } else {
-                        editor.set_block(COBBLESTONE, *x, current_level, *z, None, None);
+                        editor.set_block(COBBLESTONE, *x, current_level_y, *z, None, None);
                     }
                 }
             }
 
             // Outline for each level
             for level in 0..=(building_height / 4) {
-                let current_level = ground_level + level * 4;
+                let current_level_y = level * 4;
 
                 // Use the nodes to create the outline
                 let mut prev_outline = None;
@@ -269,12 +244,12 @@ pub fn generate_buildings(
 
                     if let Some((prev_x, prev_z)) = prev_outline {
                         let outline_points =
-                            bresenham_line(prev_x, current_level, prev_z, x, current_level, z);
+                            bresenham_line(prev_x, current_level_y, prev_z, x, current_level_y, z);
                         for (bx, _, bz) in outline_points {
                             editor.set_block(
                                 SMOOTH_STONE,
                                 bx,
-                                current_level,
+                                current_level_y,
                                 bz,
                                 Some(&[COBBLESTONE, COBBLESTONE_WALL]),
                                 None,
@@ -282,7 +257,7 @@ pub fn generate_buildings(
                             editor.set_block(
                                 STONE_BRICK_SLAB,
                                 bx,
-                                current_level + 2,
+                                current_level_y + 2,
                                 bz,
                                 None,
                                 None,
@@ -291,7 +266,7 @@ pub fn generate_buildings(
                                 editor.set_block(
                                     COBBLESTONE_WALL,
                                     bx,
-                                    current_level + 1,
+                                    current_level_y + 1,
                                     bz,
                                     None,
                                     None,
@@ -305,10 +280,7 @@ pub fn generate_buildings(
 
             return;
         } else if building_type == "roof" {
-            let Some(ground_level) = ground.min_level(element.nodes.iter().map(|n| n.xz())) else {
-                return;
-            };
-            let roof_height: i32 = ground_level + 5;
+            let roof_height: i32 = 5;
 
             // Iterate through the nodes to create the roof edges using Bresenham's line algorithm
             for node in &element.nodes {
@@ -324,7 +296,7 @@ pub fn generate_buildings(
                     }
                 }
 
-                for y in (ground_level + 1)..=(roof_height - 1) {
+                for y in 1..=(roof_height - 1) {
                     editor.set_block(COBBLESTONE_WALL, x, y, z, None, None);
                 }
 
@@ -358,7 +330,7 @@ pub fn generate_buildings(
                 building_height = ((23.0 * scale_factor) as i32).max(3);
             }
         } else if building_type == "bridge" {
-            generate_bridge(editor, element, ground, args.timeout.as_ref());
+            generate_bridge(editor, element, args.timeout.as_ref());
             return;
         }
     }
@@ -370,15 +342,15 @@ pub fn generate_buildings(
 
         if let Some(prev) = previous_node {
             // Calculate walls and corners using Bresenham line
-            let bresenham_points = bresenham_line(prev.0, start_level, prev.1, x, start_level, z);
+            let bresenham_points = bresenham_line(prev.0, start_y_offset, prev.1, x, start_y_offset, z);
             for (bx, _, bz) in bresenham_points {
-                for h in (start_level + 1)..=(start_level + building_height) {
+                for h in (start_y_offset + 1)..=(start_y_offset + building_height) {
                     if element.nodes[0].x == bx && element.nodes[0].x == bz {
                         // Corner Block
                         editor.set_block(corner_block, bx, h, bz, None, None);
                     } else {
                         // Add windows to the walls at intervals
-                        if h > start_level + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
+                        if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
                             editor.set_block(window_block, bx, h, bz, None, None);
                         } else {
                             editor.set_block(wall_block, bx, h, bz, None, None);
@@ -389,7 +361,7 @@ pub fn generate_buildings(
                 editor.set_block(
                     COBBLESTONE,
                     bx,
-                    start_level + building_height + 1,
+                    start_y_offset + building_height + 1,
                     bz,
                     None,
                     None,
@@ -414,12 +386,12 @@ pub fn generate_buildings(
 
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
-                // Set floor at start_level
-                editor.set_block(floor_block, x, start_level, z, None, None);
+                // Set floor at start_y_offset
+                editor.set_block(floor_block, x, start_y_offset, z, None, None);
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
-                    for h in (start_level + 2 + 4..start_level + building_height).step_by(4) {
+                    for h in (start_y_offset + 2 + 4..start_y_offset + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
                             // Light fixtures
                             editor.set_block(GLOWSTONE, x, h, z, None, None);
@@ -428,14 +400,14 @@ pub fn generate_buildings(
                         }
                     }
                 } else if x % 6 == 0 && z % 6 == 0 {
-                    editor.set_block(GLOWSTONE, x, start_level + building_height, z, None, None);
+                    editor.set_block(GLOWSTONE, x, start_y_offset + building_height, z, None, None);
                 }
 
                 // Set ceiling at proper height
                 editor.set_block(
                     floor_block,
                     x,
-                    start_level + building_height + 1,
+                    start_y_offset + building_height + 1,
                     z,
                     None,
                     None,
@@ -448,7 +420,6 @@ pub fn generate_buildings(
 pub fn generate_building_from_relation(
     editor: &mut WorldEditor,
     relation: &ProcessedRelation,
-    ground: &Ground,
     args: &Args,
 ) {
     // Extract levels from relation tags
@@ -461,7 +432,7 @@ pub fn generate_building_from_relation(
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(editor, &member.way, ground, args, Some(relation_levels));
+            generate_buildings(editor, &member.way, args, Some(relation_levels));
         }
     }
 
@@ -496,7 +467,6 @@ fn find_nearest_block_in_color_map(
 fn generate_bridge(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    ground: &Ground,
     floodfill_timeout: Option<&Duration>,
 ) {
     let floor_block: Block = STONE;
@@ -508,20 +478,21 @@ fn generate_bridge(
         let x: i32 = node.x;
         let z: i32 = node.z;
 
-        // Calculate the dynamic bridge level based on the ground level
-        let mut bridge_level = ground.level(XZPoint::new(x, z));
-
-        // Adjust the bridge level based on the "level" tag
-        if let Some(level_str) = element.tags.get("level") {
+        // Calculate bridge level based on the "level" tag
+        let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
             if let Ok(level) = level_str.parse::<i32>() {
-                bridge_level += (level * 3) + 1;
+                (level * 3) + 1
+            } else {
+                1 // Default elevation
             }
-        }
+        } else {
+            1 // Default elevation
+        };
 
         // Create bridge path using Bresenham's line
         if let Some(prev) = previous_node {
             let bridge_points: Vec<(i32, i32, i32)> =
-                bresenham_line(prev.0, bridge_level, prev.1, x, bridge_level, z);
+                bresenham_line(prev.0, bridge_y_offset, prev.1, x, bridge_y_offset, z);
 
             for (bx, by, bz) in bridge_points {
                 // Place railing blocks
@@ -534,30 +505,27 @@ fn generate_bridge(
     }
 
     // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<XZPoint> = element.nodes.iter().map(|n| n.xz()).collect();
-    let bridge_area: Vec<XZPoint> = flood_fill_area(
-        &polygon_coords
-            .iter()
-            .map(|pt| (pt.x, pt.z))
-            .collect::<Vec<_>>(),
-        floodfill_timeout,
-    )
-    .into_iter()
-    .map(|(x, z)| XZPoint::new(x, z))
-    .collect();
+    let polygon_coords: Vec<(i32, i32)> = element
+        .nodes
+        .iter()
+        .map(|n| (n.x, n.z))
+        .collect();
 
-    for pt in bridge_area {
-        // Calculate the bridge's floor level dynamically
-        let mut bridge_level = ground.level(pt);
+    let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
-        // Adjust the bridge level based on the "level" tag
-        if let Some(level_str) = element.tags.get("level") {
-            if let Ok(level) = level_str.parse::<i32>() {
-                bridge_level += (level * 3) + 1;
-            }
+    // Calculate bridge level based on the "level" tag
+    let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
+        if let Ok(level) = level_str.parse::<i32>() {
+            (level * 3) + 1
+        } else {
+            1 // Default elevation
         }
+    } else {
+        1 // Default elevation
+    };
 
-        // Place floor blocks
-        editor.set_block(floor_block, pt.x, bridge_level, pt.z, None, None);
+    // Place floor blocks
+    for (x, z) in bridge_area {
+        editor.set_block(floor_block, x, bridge_y_offset, z, None, None);
     }
 }

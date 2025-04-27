@@ -64,7 +64,7 @@ pub fn generate_world(
         match element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    //buildings::generate_buildings(&mut editor, way, args, None);
+                    buildings::generate_buildings(&mut editor, way, args, None);
                 } else if way.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, args);
                 } else if way.tags.contains_key("landuse") {
@@ -109,7 +109,7 @@ pub fn generate_world(
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
-                    //buildings::generate_building_from_relation(&mut editor, rel, args);
+                    buildings::generate_building_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
