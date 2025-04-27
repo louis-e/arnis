@@ -5,13 +5,36 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct XZBBoxRect {
     /// The "bottom-left" vertex of the rectangle
-    pub point1: XZPoint,
+    point1: XZPoint,
 
     /// The "top-right" vertex of the rectangle
-    pub point2: XZPoint,
+    point2: XZPoint,
 }
 
 impl XZBBoxRect {
+    pub fn new(point1: XZPoint, point2: XZPoint) -> Result<Self, String> {
+        let obj = Self { point1, point2 };
+
+        let blockx_ge_1 = obj.total_blocks_x() >= 1;
+        let blockz_ge_1 = obj.total_blocks_z() >= 1;
+
+        if !blockx_ge_1 || !blockz_ge_1 {
+            return Err(
+                "Invalid XZBBox: Total number of blocks in x and z should both > 1".to_string(),
+            );
+        }
+
+        Ok(obj)
+    }
+
+    pub fn point1(&self) -> XZPoint {
+        self.point1
+    }
+
+    pub fn point2(&self) -> XZPoint {
+        self.point2
+    }
+
     /// Total number of blocks covered in this 2D bbox
     pub fn total_blocks(&self) -> u64 {
         (self.total_blocks_x() as u64) * (self.total_blocks_z() as u64)

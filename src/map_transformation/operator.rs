@@ -43,3 +43,18 @@ pub fn operator_vec_from_json(list: &serde_json::Value) -> Result<Vec<Box<dyn Op
         })
         .collect()
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+
+//     #[test]
+//     fn test_valid_input() {
+//         assert!(BBox::new(0., 0., 1., 1.).is_ok());
+
+//         assert!(BBox::new(1., 2., 3., 4.).is_ok());
+
+//         // Arnis, Germany
+//         assert!(BBox::new(9.927928, 54.627053, 9.937563, 54.634902).is_ok());
+//     }
+// }
