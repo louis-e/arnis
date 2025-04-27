@@ -2,14 +2,13 @@ use super::xzvector::XZVector;
 use serde::Deserialize;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-#[derive(Debug, Deserialize, Copy, Clone)]
+#[derive(Debug, Deserialize, Copy, Clone, PartialEq)]
 pub struct XZPoint {
     pub x: i32,
     pub z: i32,
 }
 
 impl XZPoint {
-    #[inline]
     pub fn new(x: i32, z: i32) -> Self {
         Self { x, z }
     }

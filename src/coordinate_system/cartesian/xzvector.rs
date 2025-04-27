@@ -1,9 +1,13 @@
 use serde::Deserialize;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-#[derive(Debug, Deserialize, Copy, Clone)]
+/// Vector between two points in minecraft xz space.
+#[derive(Debug, Deserialize, Copy, Clone, PartialEq)]
 pub struct XZVector {
+    /// Increment in x direction
     pub dx: i32,
+
+    /// Increment in z direction
     pub dz: i32,
 }
 

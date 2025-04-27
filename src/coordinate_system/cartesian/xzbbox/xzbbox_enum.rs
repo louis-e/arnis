@@ -2,46 +2,60 @@ use super::rectangle::XZBBoxRect;
 use crate::coordinate_system::cartesian::{XZPoint, XZVector};
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-#[derive(Clone)]
+/// Bounding Box in minecraft XZ space with varied shapes.
+#[derive(Clone, Debug)]
 pub enum XZBBox {
     Rect(XZBBoxRect),
 }
 
 impl XZBBox {
-    pub fn from_scale_factors(scale_factor_x: f64, scale_factor_z: f64) -> Self {
-        Self::Rect(XZBBoxRect {
+    /// Construct rectangle shape bbox from the x and z lengths of the world, originated at (0, 0)
+    pub fn rect_from_xz_lengths(length_x: f64, length_z: f64) -> Result<Self, String> {
+        let len_ge_1 = length_x >= 1.0 && length_z >= 1.0;
+
+        if !len_ge_1 {
+            return Err("Invalid XZBBox: World length in x and z should both >= 1.0".to_string());
+        }
+
+        Ok(Self::Rect(XZBBoxRect {
             point1: XZPoint { x: 0, z: 0 },
             point2: XZPoint {
-                x: scale_factor_x as i32,
-                z: scale_factor_z as i32,
+                x: length_x as i32,
+                z: length_z as i32,
             },
-        })
+        }))
     }
 
-    pub fn contains(&self, xzpoint: XZPoint) -> bool {
+    /// Check whether an XZPoint is covered
+    pub fn contains(&self, xzpoint: &XZPoint) -> bool {
         match self {
             Self::Rect(r) => r.contains(xzpoint),
         }
     }
 
+    /// Return the circumscribed rectangle of the current XZBBox shape
     pub fn circumscribed_rect(&self) -> XZBBoxRect {
         match self {
             Self::Rect(r) => *r,
         }
     }
 
+    /// Return the min x in all covered blocks
     pub fn min_x(&self) -> i32 {
         self.circumscribed_rect().point1.x
     }
 
+    /// Return the max x in all covered blocks
     pub fn max_x(&self) -> i32 {
         self.circumscribed_rect().point2.x
     }
 
+    /// Return the min z in all covered blocks
     pub fn min_z(&self) -> i32 {
         self.circumscribed_rect().point1.z
     }
 
+    /// Return the max z in all covered blocks
     pub fn max_z(&self) -> i32 {
         self.circumscribed_rect().point2.z
     }

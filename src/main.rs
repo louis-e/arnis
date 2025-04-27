@@ -135,7 +135,8 @@ fn main() {
             }
         }
 
-        let mut xzbbox = XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
+        let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
+            .expect("Parsed world lengths < 1");
 
         // Edit map (parsed_elements). Operations are defined in a json file, if exists
         map_transformation::transform_map(&mut parsed_elements, &mut xzbbox);
@@ -451,7 +452,8 @@ fn gui_start_generation(
                         }
                     });
 
-                    let mut xzbbox = XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
+                    let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
+                        .expect("Parsed world lengths < 1");
 
                     // Edit map (parsed_elements). Operations are defined in a json file, if exists
                     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox);

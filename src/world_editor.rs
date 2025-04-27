@@ -353,7 +353,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(XZPoint::new(x, z)) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
 
