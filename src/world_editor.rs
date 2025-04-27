@@ -290,6 +290,7 @@ impl WorldEditor {
     }
 
     #[allow(unused)]
+    #[inline]
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
         let absolute_y = self.get_absolute_y(x, y, z);
         self.world.get_block(x, absolute_y, z).is_some()
@@ -357,6 +358,7 @@ impl WorldEditor {
 
     /// Sets a block of the specified type at the given coordinates.
     /// Y value is interpreted as an offset from ground level.
+    #[inline]
     pub fn set_block(
         &mut self,
         block: Block,
@@ -397,6 +399,7 @@ impl WorldEditor {
     }
 
     /// Sets a block of the specified type at the given coordinates with absolute Y value.
+    #[inline]
     pub fn set_block_absolute(
         &mut self,
         block: Block,
@@ -435,6 +438,7 @@ impl WorldEditor {
 
     /// Fills a cuboid area with the specified block between two coordinates.
     #[allow(clippy::too_many_arguments)]
+    #[inline]
     pub fn fill_blocks(
         &mut self,
         block: Block,
@@ -469,6 +473,7 @@ impl WorldEditor {
 
     /// Fills a cuboid area with the specified block between two coordinates using absolute Y values.
     #[allow(clippy::too_many_arguments)]
+    #[inline]
     pub fn fill_blocks_absolute(
         &mut self,
         block: Block,
@@ -506,6 +511,7 @@ impl WorldEditor {
     }
 
     /// Checks for a block at the given coordinates.
+    #[inline]
     pub fn check_for_block(
         &self,
         x: i32,
@@ -584,6 +590,7 @@ impl WorldEditor {
     }
 
     /// Converts a relative Y coordinate to an absolute Y coordinate
+    #[inline]
     pub fn relative_to_absolute_y(&self, x: i32, y_relative: i32, z: i32) -> i32 {
         self.get_absolute_y(x, y_relative, z)
     }
@@ -824,6 +831,7 @@ impl WorldEditor {
 }
 
 // Helper function to get entity coordinates
+#[inline]
 fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
     let x = if let Value::Int(x) = entity.get("x").unwrap_or(&Value::Int(0)) {
         *x
@@ -843,6 +851,7 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
     (x, y, z)
 }
 
+#[inline]
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
     HashMap::from([(
         "Level".to_string(),
