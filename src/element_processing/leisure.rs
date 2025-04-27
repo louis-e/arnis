@@ -80,7 +80,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 
                 // Add decorative elements for parks and gardens
                 if matches!(leisure_type.as_str(), "park" | "garden")
-                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]), None)
+                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
                     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                     let random_choice: i32 = rng.gen_range(0..1000);
@@ -114,7 +114,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     let random_choice: i32 = rng.gen_range(0..5000);
 
                     match random_choice {
-                        0..=10 => {
+                        0..10 => {
                             // Swing set
                             for y in 1..=4 {
                                 editor.set_block(OAK_FENCE, x - 1, y, z, None, None);
@@ -123,7 +123,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                             editor.set_block(OAK_FENCE, x, 4, z, None, None);
                             editor.set_block(STONE_BLOCK_SLAB, x, 2, z, None, None);
                         }
-                        11..=20 => {
+                        10..20 => {
                             // Slide
                             editor.set_block(OAK_SLAB, x, 1, z, None, None);
                             editor.set_block(OAK_SLAB, x + 1, 2, z, None, None);
@@ -135,7 +135,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                             editor.set_block(LADDER, x + 2, 2, z - 1, None, None);
                             editor.set_block(LADDER, x + 2, 1, z - 1, None, None);
                         }
-                        21..=30 => {
+                        20..30 => {
                             // Sandpit
                             editor.fill_blocks(
                                 SAND,

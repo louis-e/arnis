@@ -12,11 +12,9 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
 
     let block_type = match landuse_tag.as_str() {
-        "greenfield" | "meadow" | "grass" => GRASS_BLOCK,
+        "greenfield" | "meadow" | "grass" | "orchard" | "forest" => GRASS_BLOCK,
         "farmland" => FARMLAND,
-        "forest" => GRASS_BLOCK,
         "cemetery" => PODZOL,
-        "beach" => SAND,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
         "residential" => {
@@ -67,7 +65,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     let random_choice: i32 = rng.gen_range(0..100);
                     if random_choice < 15 {
                         // Place graves
-                        if editor.check_for_block(x, 0, z, Some(&[PODZOL]), None) {
+                        if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
                             if rng.gen_bool(0.5) {
                                 editor.set_block(COBBLESTONE, x - 1, 1, z, None, None);
                                 editor.set_block(STONE_BRICK_SLAB, x - 1, 2, z, None, None);
@@ -81,7 +79,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                             }
                         }
                     } else if random_choice < 30 {
-                        if editor.check_for_block(x, 0, z, Some(&[PODZOL]), None) {
+                        if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
                             editor.set_block(RED_FLOWER, x, 1, z, None, None);
                         }
                     } else if random_choice < 33 {
@@ -90,8 +88,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 }
             }
             "forest" => {
-                if !editor.check_for_block(x, 0, z, None, Some(&[WATER])) {
-                    let random_choice: i32 = rng.gen_range(0..21);
+                if !editor.check_for_block(x, 0, z, Some(&[WATER])) {
+                    let random_choice: i32 = rng.gen_range(0..30);
                     if random_choice == 20 {
                         Tree::create(editor, (x, 1, z));
                     } else if random_choice == 2 {
@@ -102,14 +100,14 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                             _ => WHITE_FLOWER,
                         };
                         editor.set_block(flower_block, x, 1, z, None, None);
-                    } else if random_choice <= 1 {
+                    } else if random_choice <= 12 {
                         editor.set_block(GRASS, x, 1, z, None, None);
                     }
                 }
             }
             "farmland" => {
                 // Check if the current block is not water or another undesired block
-                if !editor.check_for_block(x, 0, z, None, Some(&[WATER, ICE])) {
+                if !editor.check_for_block(x, 0, z, Some(&[WATER])) {
                     if x % 9 == 0 && z % 9 == 0 {
                         // Place water in dot pattern
                         editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
@@ -122,7 +120,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         }
                     } else {
                         // Set crops only if the block below is farmland
-                        if editor.check_for_block(x, 0, z, Some(&[FARMLAND]), None) {
+                        if editor.check_for_block(x, 0, z, Some(&[FARMLAND])) {
                             let crop_choice = [WHEAT, CARROTS, POTATOES][rng.gen_range(0..3)];
                             editor.set_block(crop_choice, x, 1, z, None, None);
                         }
@@ -188,20 +186,25 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 }
             }
             "grass" => {
-                if rng.gen_range(1..=7) != 1
-                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]), None)
+                if rng.gen_range(1..8) != 1
+                    && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
                     editor.set_block(GRASS, x, 1, z, None, None);
                 }
             }
             "meadow" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]), None) {
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
                         Tree::create(editor, (x, 1, z));
                     } else if random_choice < 800 {
                         editor.set_block(GRASS, x, 1, z, None, None);
                     }
+                }
+            }
+            "orchard" => {
+                if x % 18 == 0 && z % 10 == 0 {
+                    Tree::create(editor, (x, 1, z));
                 }
             }
             "quarry" => {

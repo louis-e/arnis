@@ -145,109 +145,56 @@ pub fn generate_world(
 
     let groundlayer_block = GRASS_BLOCK;
 
-    // Differentiate between terrain and non-terrain generation
-    if ground.elevation_enabled {
-        // Process blocks in larger batches
-        for x in 0..=(scale_factor_x as i32) {
-            for z in 0..=(scale_factor_z as i32) {
-                // Add default dirt and grass layer if there isn't a stone layer already
-                if !editor.check_for_block(x, 0, z, Some(&[STONE]), None) {
-                    editor.set_block(groundlayer_block, x, 0, z, None, None);
-                    editor.set_block(DIRT, x, -1, z, None, None);
-                    editor.set_block(DIRT, x, -2, z, None, None);
-                }
-
-                // Fill underground with stone and place bedrock at bottom
-                if args.fillground {
-                    // Set bedrock at the absolute Y = MIN_Y
-                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
-
-                    // Fill from bedrock+1 to 3 blocks below ground with stone
-                    editor.fill_blocks_absolute(
-                        STONE,
-                        x,
-                        MIN_Y + 1,
-                        z,
-                        x,
-                        editor.relative_to_absolute_y(x, -3, z),
-                        z,
-                        None,
-                        None,
-                    );
-
-                    // Fill from stone top to ground bottom with dirt
-                    editor.fill_blocks_absolute(
-                        DIRT,
-                        x,
-                        editor.relative_to_absolute_y(x, -3, z) + 1,
-                        z,
-                        x,
-                        editor.relative_to_absolute_y(x, -1, z),
-                        z,
-                        None,
-                        None,
-                    );
-                }
-
-                block_counter += 1;
-                if block_counter % batch_size == 0 {
-                    ground_pb.inc(batch_size);
-                }
-
-                gui_progress_grnd += progress_increment_grnd;
-                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                    emit_gui_progress_update(gui_progress_grnd, "");
-                    last_emitted_progress = gui_progress_grnd;
-                }
-            }
-        }
-    } else {
-        for x in 0..=(scale_factor_x as i32) {
-            for z in 0..=(scale_factor_z as i32) {
+    for x in 0..=(scale_factor_x as i32) {
+        for z in 0..=(scale_factor_z as i32) {
+            // Add default dirt and grass layer if there isn't a stone layer already
+            if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
                 editor.set_block(groundlayer_block, x, 0, z, None, None);
                 editor.set_block(DIRT, x, -1, z, None, None);
+                editor.set_block(DIRT, x, -2, z, None, None);
+            }
 
-                if args.fillground {
-                    // Set bedrock at the absolute bottom level
-                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+            // Fill underground with stone
+            if args.fillground {
+                // Set bedrock at the absolute Y = MIN_Y
+                editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
-                    // Fill from bedrock+1 to ground_level-3 with stone
-                    editor.fill_blocks_absolute(
-                        STONE,
-                        x,
-                        MIN_Y + 1,
-                        z,
-                        x,
-                        args.ground_level - 3,
-                        z,
-                        None,
-                        None,
-                    );
+                // Fill from bedrock+1 to 3 blocks below ground with stone
+                editor.fill_blocks_absolute(
+                    STONE,
+                    x,
+                    MIN_Y + 1,
+                    z,
+                    x,
+                    editor.relative_to_absolute_y(x, -3, z),
+                    z,
+                    None,
+                    None,
+                );
 
-                    // Fill from stone top to ground bottom with dirt
-                    editor.fill_blocks_absolute(
-                        DIRT,
-                        x,
-                        args.ground_level - 3 + 1,
-                        z,
-                        x,
-                        args.ground_level - 1,
-                        z,
-                        None,
-                        None,
-                    );
-                }
+                // Fill from stone top to ground bottom with dirt
+                editor.fill_blocks_absolute(
+                    DIRT,
+                    x,
+                    editor.relative_to_absolute_y(x, -3, z) + 1,
+                    z,
+                    x,
+                    editor.relative_to_absolute_y(x, -1, z),
+                    z,
+                    None,
+                    None,
+                );
+            }
 
-                block_counter += 1;
-                if block_counter % batch_size == 0 {
-                    ground_pb.inc(batch_size);
-                }
+            block_counter += 1;
+            if block_counter % batch_size == 0 {
+                ground_pb.inc(batch_size);
+            }
 
-                gui_progress_grnd += progress_increment_grnd;
-                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                    emit_gui_progress_update(gui_progress_grnd, "");
-                    last_emitted_progress = gui_progress_grnd;
-                }
+            gui_progress_grnd += progress_increment_grnd;
+            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                emit_gui_progress_update(gui_progress_grnd, "");
+                last_emitted_progress = gui_progress_grnd;
             }
         }
     }
