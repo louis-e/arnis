@@ -1,6 +1,5 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
-use crate::cartesian::XZPoint;
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -151,12 +150,6 @@ pub fn generate_world(
         // Process blocks in larger batches
         for x in 0..=(scale_factor_x as i32) {
             for z in 0..=(scale_factor_z as i32) {
-                // Find the highest block in this column relative to ground level
-                let max_y_offset = (MIN_Y - args.ground_level..=0)
-                    .find(|&y_offset| editor.block_at(x, y_offset, z))
-                    .unwrap_or(0)
-                    .min(0);
-
                 // Add default dirt and grass layer if there isn't a stone layer already
                 if !editor.check_for_block(x, 0, z, Some(&[STONE]), None) {
                     editor.set_block(groundlayer_block, x, 0, z, None, None);

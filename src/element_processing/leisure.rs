@@ -1,7 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::cartesian::XZPoint;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};

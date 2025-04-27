@@ -289,6 +289,7 @@ impl WorldEditor {
         (self.scale_factor_x as i32, self.scale_factor_x as i32)
     }
 
+    #[allow(unused)]
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
         let absolute_y = self.get_absolute_y(x, y, z);
         self.world.get_block(x, absolute_y, z).is_some()
@@ -540,6 +541,7 @@ impl WorldEditor {
     }
 
     /// Checks for a block at the given coordinates with absolute Y value.
+    #[allow(unused)]
     pub fn check_for_block_absolute(
         &self,
         x: i32,
@@ -576,6 +578,7 @@ impl WorldEditor {
 
     /// Checks if a block exists at the given coordinates with absolute Y value.
     /// Unlike check_for_block_absolute, this doesn't filter by block type.
+    #[allow(unused)]
     pub fn block_at_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
         self.world.get_block(x, absolute_y, z).is_some()
     }
@@ -583,15 +586,6 @@ impl WorldEditor {
     /// Converts a relative Y coordinate to an absolute Y coordinate
     pub fn relative_to_absolute_y(&self, x: i32, y_relative: i32, z: i32) -> i32 {
         self.get_absolute_y(x, y_relative, z)
-    }
-
-    /// Converts an absolute Y coordinate to a ground-relative Y coordinate
-    pub fn absolute_to_relative_y(&self, x: i32, y_absolute: i32, z: i32) -> i32 {
-        if let Some(ground) = &self.ground {
-            y_absolute - ground.level(XZPoint::new(x, z))
-        } else {
-            y_absolute // If no ground reference, absolute and relative are the same
-        }
     }
 
     /// Helper function to create a base chunk with grass blocks at Y -62
