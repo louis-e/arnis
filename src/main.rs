@@ -9,7 +9,7 @@ mod data_processing;
 mod element_processing;
 mod floodfill;
 mod ground;
-mod map_editing;
+mod map_transformation;
 mod osm_parser;
 #[cfg(feature = "gui")]
 mod progress;
@@ -146,7 +146,7 @@ fn main() {
         let mut xzbbox = XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
 
         // Edit map (parsed_elements). Operations are defined in a json file, if exists
-        map_editing::edit_map(&mut parsed_elements, &mut xzbbox);
+        map_transformation::transform_map(&mut parsed_elements, &mut xzbbox);
 
         // Generate world
         let _ = data_processing::generate_world(parsed_elements, xzbbox, &args);
@@ -468,7 +468,7 @@ fn gui_start_generation(
                     let mut xzbbox = XZBBox::from_scale_factors(scale_factor_x, scale_factor_z);
 
                     // Edit map (parsed_elements). Operations are defined in a json file, if exists
-                    map_editing::edit_map(&mut parsed_elements, &mut xzbbox);
+                    map_transformation::transform_map(&mut parsed_elements, &mut xzbbox);
 
                     let _ = data_processing::generate_world(parsed_elements, xzbbox, &args);
                     Ok(())

@@ -5,11 +5,11 @@ use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use std::fs;
 
-pub fn edit_map(elements: &mut Vec<ProcessedElement>, xzbbox: &mut XZBBox) {
-    println!("{} Editing data...", "[3/6]".bold());
-    emit_gui_progress_update(11.0, "Reading map editing config...");
+pub fn transform_map(elements: &mut Vec<ProcessedElement>, xzbbox: &mut XZBBox) {
+    println!("{} Transforming map...", "[3/6]".bold());
+    emit_gui_progress_update(11.0, "Reading map transformation config...");
 
-    match fs::read_to_string("map_editing.json") {
+    match fs::read_to_string("example_transformations.json") {
         Ok(opjson_string) => {
             let opjson = serde_json::from_str(&opjson_string)
                 .expect("Failed to parse map editing config json");
@@ -34,7 +34,7 @@ pub fn edit_map(elements: &mut Vec<ProcessedElement>, xzbbox: &mut XZBBox) {
             emit_gui_progress_update(20.0, "Map operations applied...");
         }
         Err(_) => {
-            emit_gui_progress_update(20.0, "No map editing config, skipped...");
+            emit_gui_progress_update(20.0, "No map transformation config, skipped...");
         }
     }
 }

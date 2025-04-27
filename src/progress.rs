@@ -23,7 +23,7 @@ pub fn is_running_with_gui() -> bool {
 ///
 /// [1/6] Fetching data... - Starts at: 0% / Completes at: 5%
 /// [2/6] Parsing data... - Starts at: 5% / Completes at: 10%
-/// [3/6] Editing data... - Starts at: 10% / Completes at: 30%
+/// [3/6] Transforming map... - Starts at: 10% / Completes at: 30%
 /// [4/6] Processing data... - Starts at: 30% / Completes at: 70%
 /// [5/6] Generating ground layer... - Starts at: 70% / Completes at: 90%
 /// [6/6] Saving world... - Starts at: 90% / Completes at: 100%

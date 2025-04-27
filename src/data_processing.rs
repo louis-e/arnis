@@ -17,7 +17,7 @@ pub fn generate_world(
     args: &Args,
 ) -> Result<(), String> {
     let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor = WorldEditor::new(&region_dir, xzbbox);
+    let mut editor: WorldEditor = WorldEditor::new(&region_dir, &xzbbox);
 
     println!("{} Processing data...", "[4/6]".bold());
     if args.terrain {
@@ -118,7 +118,7 @@ pub fn generate_world(
     process_pb.finish();
 
     // Generate ground layer
-    let total_blocks: u64 = xzbbox.nblock();
+    let total_blocks: u64 = xzbbox.circumscribed_rect().total_blocks();
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 
@@ -142,22 +142,28 @@ pub fn generate_world(
 
     let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
 
+    let min_x = xzbbox.min_x();
+    let max_x = xzbbox.max_x();
+    let min_z = xzbbox.min_z();
+    let max_z = xzbbox.max_z();
+
     // Differentiate between terrain and non-terrain generation
     if ground.elevation_enabled {
         // Pre-calculate ground levels for all points
-        let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(xzbbox.nblock_x() as usize);
-        for x in xzbbox.point1.x..=xzbbox.point2.x {
-            let mut row = Vec::with_capacity(xzbbox.nblock_z() as usize);
-            for z in xzbbox.point1.z..=xzbbox.point2.z {
+        let mut ground_levels: Vec<Vec<i32>> =
+            Vec::with_capacity(xzbbox.circumscribed_rect().total_blocks_x() as usize);
+        for x in min_x..=max_x {
+            let mut row = Vec::with_capacity(xzbbox.circumscribed_rect().total_blocks_z() as usize);
+            for z in min_z..=max_z {
                 row.push(ground.level(XZPoint::new(x, z)));
             }
             ground_levels.push(row);
         }
 
         // Process blocks in larger batches
-        for x in xzbbox.point1.x..=xzbbox.point2.x {
-            for z in xzbbox.point1.z..=xzbbox.point2.z {
-                let ground_level = ground_levels[x as usize][z as usize];
+        for x in min_x..=max_x {
+            for z in min_z..=max_z {
+                let ground_level = ground_levels[(x - min_x) as usize][(z - min_z) as usize];
 
                 // Find the highest block in this column
                 let max_y = (MIN_Y..ground_level)
@@ -190,14 +196,14 @@ pub fn generate_world(
         }
 
         // Set blocks at spawn location
-        for x in xzbbox.point1.x..=xzbbox.point1.x + 20 {
-            for z in xzbbox.point1.z..=xzbbox.point1.z + 20 {
+        for x in min_x..=max_x + 20 {
+            for z in min_z..=max_z + 20 {
                 editor.set_block(groundlayer_block, x, -62, z, None, None);
             }
         }
     } else {
-        for x in xzbbox.point1.x..=xzbbox.point2.x {
-            for z in xzbbox.point1.x..=xzbbox.point2.z {
+        for x in min_x..=max_x {
+            for z in min_z..=max_z {
                 let ground_level = ground.level(XZPoint::new(x, z));
                 editor.set_block(groundlayer_block, x, ground_level, z, None, None);
                 editor.set_block(DIRT, x, ground_level - 1, z, None, None);

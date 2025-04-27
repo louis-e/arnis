@@ -5,8 +5,8 @@
             "type": "vector",
             "config": {
                 "vector": {
-                    "dx": 500,
-                    "dz": 500
+                    "dx": 2000,
+                    "dz": 2000
                 }
             }
         }

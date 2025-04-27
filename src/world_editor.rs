@@ -228,15 +228,21 @@ impl WorldToModify {
     }
 }
 
-pub struct WorldEditor {
+// Notes for someone not familiar with lifetime parameter:
+// The follwing is like a C++ template:
+// template<lifetime A>
+// struct WorldEditor {const XZBBox<A>& xzbbox;}
+pub struct WorldEditor<'a> {
     region_dir: String,
     world: WorldToModify,
-    xzbbox: XZBBox,
+    xzbbox: &'a XZBBox,
 }
 
-impl WorldEditor {
-    /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, xzbbox: XZBBox) -> Self {
+// template<lifetime A>
+// impl for struct WorldEditor<A> {...}
+impl<'a> WorldEditor<'a> {
+    // Initializes the WorldEditor with the region directory and template region path.
+    pub fn new(region_dir: &str, xzbbox: &'a XZBBox) -> Self {
         Self {
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
@@ -265,8 +271,12 @@ impl WorldEditor {
         Region::from_stream(region_file).expect("Failed to load region")
     }
 
+    pub fn get_min_coords(&self) -> (i32, i32) {
+        (self.xzbbox.min_x(), self.xzbbox.min_z())
+    }
+
     pub fn get_max_coords(&self) -> (i32, i32) {
-        (self.xzbbox.point2.x, self.xzbbox.point2.z)
+        (self.xzbbox.max_x(), self.xzbbox.max_z())
     }
 
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
@@ -343,7 +353,7 @@ impl WorldEditor {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint { x, z }) {
+        if !self.xzbbox.contains(XZPoint::new(x, z)) {
             return;
         }
 
