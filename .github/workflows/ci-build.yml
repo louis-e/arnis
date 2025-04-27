@@ -1,17 +1,21 @@
 name: CI Build
 
-# Trigger only when files in src/ are changed on pull requests or pushes to the main branch
+# Trigger CI on pull requests and pushes to main, when relevant files change
 on:
   pull_request:
     branches:
       - main
     paths:
       - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   push:
     branches:
       - main
     paths:
       - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
   workflow_dispatch:
 
 jobs:
@@ -43,6 +47,17 @@ jobs:
         sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
+    - name: Set up cache for Cargo
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
     - name: Check formatting
       run: cargo fmt -- --check
 
@@ -52,8 +67,8 @@ jobs:
     - name: Install Rust dependencies
       run: cargo fetch
 
-    - name: Build
-      run: cargo build --release
+    - name: Build (all targets, all features)
+      run: cargo build --all-targets --all-features --release
 
-    - name: Unit tests
-      run: cargo test
+    - name: Run unit tests
+      run: cargo test --all-targets --all-features

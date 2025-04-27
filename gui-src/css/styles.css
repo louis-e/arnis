@@ -259,14 +259,6 @@ button:hover {
   margin: 15px 0;
 }
 
-#winter-toggle {
-  accent-color: #fecc44;
-}
-
-.winter-toggle-container, .scale-slider-container {
-  margin: 15px 0;
-}
-
 .scale-slider-container label {
   display: block;
   margin-bottom: 5px;

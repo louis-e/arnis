@@ -59,7 +59,6 @@ Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16
 Make sure to teleport to the generation starting point (/tp 0 0 0). If there is still nothing, you might need to travel a bit further into the positive X and positive Z direction.
 - *What features are in the world generation settings?*<br>
 **Terrain:** Make sure to enable this feature to generate your world with elevation data included.<br>
-**Winter Mode:** This setting changes the generation style to a snowy theme and adds snow layers to the ground.<br>
 **Scale Factor:** The scale factor determines the size of the generated world.<br>
 **Custom BBOX Input:** This setting allows you to manually input the bounding box coordinates for the area you want to generate.<br>
 **Floodfill-Timeout (Sec):** This setting determines the maximum time the floodfill algorithm is allowed to run before being terminated. Increasing this value may improve the generation of large water areas but may also increase processing time.<br>
