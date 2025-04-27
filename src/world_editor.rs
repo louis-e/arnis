@@ -1,5 +1,7 @@
 use crate::block_definitions::*;
 use crate::progress::emit_gui_progress_update;
+use crate::cartesian::XZPoint;
+use crate::ground::Ground;
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
@@ -232,6 +234,7 @@ pub struct WorldEditor {
     world: WorldToModify,
     scale_factor_x: f64,
     scale_factor_z: f64,
+    ground: Option<Box<Ground>>,
 }
 
 impl WorldEditor {
@@ -242,6 +245,22 @@ impl WorldEditor {
             world: WorldToModify::default(),
             scale_factor_x,
             scale_factor_z,
+            ground: None,
+        }
+    }
+
+    /// Sets the ground reference for elevation-based block placement
+    pub fn set_ground(&mut self, ground: &Ground) {
+        self.ground = Some(Box::new(ground.clone()));
+    }
+
+    /// Calculate the absolute Y position from a ground-relative offset
+    #[inline(always)]
+    fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {
+        if let Some(ground) = &self.ground {
+            ground.level(XZPoint::new(x, z)) + y_offset
+        } else {
+            y_offset // If no ground reference, use y_offset as absolute Y
         }
     }
 
@@ -271,7 +290,8 @@ impl WorldEditor {
     }
 
     pub fn block_at(&self, x: i32, y: i32, z: i32) -> bool {
-        self.world.get_block(x, y, z).is_some()
+        let absolute_y = self.get_absolute_y(x, y, z);
+        self.world.get_block(x, absolute_y, z).is_some()
     }
 
     #[allow(clippy::too_many_arguments, dead_code)]
@@ -286,6 +306,7 @@ impl WorldEditor {
         z: i32,
         _rotation: i8,
     ) {
+        let absolute_y = self.get_absolute_y(x, y, z);
         let chunk_x = x >> 4;
         let chunk_z = z >> 4;
         let region_x = chunk_x >> 5;
@@ -313,7 +334,7 @@ impl WorldEditor {
         block_entities.insert("is_waxed".to_string(), Value::Byte(0));
         block_entities.insert("keepPacked".to_string(), Value::Byte(0));
         block_entities.insert("x".to_string(), Value::Int(x));
-        block_entities.insert("y".to_string(), Value::Int(y));
+        block_entities.insert("y".to_string(), Value::Int(absolute_y));
         block_entities.insert("z".to_string(), Value::Int(z));
 
         let region: &mut RegionToModify = self.world.get_or_create_region(region_x, region_z);
@@ -334,6 +355,7 @@ impl WorldEditor {
     }
 
     /// Sets a block of the specified type at the given coordinates.
+    /// Y value is interpreted as an offset from ground level.
     pub fn set_block(
         &mut self,
         block: Block,
@@ -348,7 +370,10 @@ impl WorldEditor {
             return;
         }
 
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, y, z) {
+        // Calculate the absolute Y coordinate based on ground level
+        let absolute_y = self.get_absolute_y(x, y, z);
+
+        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
                 whitelist
@@ -366,7 +391,7 @@ impl WorldEditor {
         };
 
         if should_insert {
-            self.world.set_block(x, y, z, block);
+            self.world.set_block(x, absolute_y, z, block);
         }
     }
 
@@ -389,9 +414,9 @@ impl WorldEditor {
         let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
 
         for x in min_x..=max_x {
-            for y in min_y..=max_y {
+            for y_offset in min_y..=max_y {
                 for z in min_z..=max_z {
-                    self.set_block(block, x, y, z, override_whitelist, override_blacklist);
+                    self.set_block(block, x, y_offset, z, override_whitelist, override_blacklist);
                 }
             }
         }
@@ -406,8 +431,10 @@ impl WorldEditor {
         whitelist: Option<&[Block]>,
         blacklist: Option<&[Block]>,
     ) -> bool {
+        let absolute_y = self.get_absolute_y(x, y, z);
+        
         // Retrieve the chunk modification map
-        if let Some(existing_block) = self.world.get_block(x, y, z) {
+        if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = whitelist {
                 if whitelist

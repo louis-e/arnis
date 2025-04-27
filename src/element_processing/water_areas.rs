@@ -4,7 +4,6 @@ use std::time::Instant;
 use crate::{
     block_definitions::WATER,
     cartesian::XZPoint,
-    ground::Ground,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
     world_editor::WorldEditor,
 };
@@ -12,7 +11,6 @@ use crate::{
 pub fn generate_water_areas(
     editor: &mut WorldEditor,
     element: &ProcessedRelation,
-    ground: &Ground,
 ) {
     let start_time = Instant::now();
 
@@ -57,7 +55,7 @@ pub fn generate_water_areas(
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    inverse_floodfill(max_x, max_z, outers, inners, editor, ground, start_time);
+    inverse_floodfill(max_x, max_z, outers, inners, editor, start_time);
 }
 
 // Merges ways that share nodes into full loops
@@ -153,7 +151,6 @@ fn inverse_floodfill(
     outers: Vec<Vec<XZPoint>>,
     inners: Vec<Vec<XZPoint>>,
     editor: &mut WorldEditor,
-    ground: &Ground,
     start_time: Instant,
 ) {
     let min_x: i32 = 0;
@@ -193,7 +190,6 @@ fn inverse_floodfill(
         &outers,
         &inners,
         editor,
-        ground,
         start_time,
     );
 }
@@ -204,7 +200,6 @@ fn inverse_floodfill_recursive(
     outers: &[Polygon],
     inners: &[Polygon],
     editor: &mut WorldEditor,
-    ground: &Ground,
     start_time: Instant,
 ) {
     // Check if we've exceeded 25 seconds
@@ -219,8 +214,7 @@ fn inverse_floodfill_recursive(
     }
 
     if (max.0 - min.0) * (max.1 - min.1) < ITERATIVE_THRES {
-        let ground_level = ground.level(XZPoint::new(min.0, min.1));
-        inverse_floodfill_iterative(min, max, ground_level, outers, inners, editor);
+        inverse_floodfill_iterative(min, max, 0, outers, inners, editor);
         return;
     }
 
@@ -242,8 +236,7 @@ fn inverse_floodfill_recursive(
         if outers.iter().any(|outer: &Polygon| outer.contains(&rect))
             && !inners.iter().any(|inner: &Polygon| inner.intersects(&rect))
         {
-            let ground_level = ground.level(XZPoint::new(min_x, min_z));
-            rect_fill(min_x, max_x, min_z, max_z, ground_level, editor);
+            rect_fill(min_x, max_x, min_z, max_z, 0, editor);
             continue;
         }
 
@@ -265,7 +258,6 @@ fn inverse_floodfill_recursive(
                 &outers_intersects,
                 &inners_intersects,
                 editor,
-                ground,
                 start_time,
             );
         }

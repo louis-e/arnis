@@ -25,6 +25,9 @@ pub fn generate_world(
         emit_gui_progress_update(10.0, "Fetching elevation...");
     }
     let ground: Ground = Ground::new(args);
+    
+    // Set ground reference in the editor to enable elevation-aware block placement
+    editor.set_ground(&ground);
 
     emit_gui_progress_update(11.0, "Processing terrain...");
 
@@ -61,56 +64,56 @@ pub fn generate_world(
         match element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    buildings::generate_buildings(&mut editor, way, &ground, args, None);
+                    //buildings::generate_buildings(&mut editor, way, args, None);
                 } else if way.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, &ground, args);
+                    highways::generate_highways(&mut editor, element, args);
                 } else if way.tags.contains_key("landuse") {
-                    landuse::generate_landuse(&mut editor, way, &ground, args);
+                    landuse::generate_landuse(&mut editor, way, args);
                 } else if way.tags.contains_key("natural") {
-                    natural::generate_natural(&mut editor, element, &ground, args);
+                    natural::generate_natural(&mut editor, element, args);
                 } else if way.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, element, &ground, args);
+                    amenities::generate_amenities(&mut editor, element, args);
                 } else if way.tags.contains_key("leisure") {
-                    leisure::generate_leisure(&mut editor, way, &ground, args);
+                    leisure::generate_leisure(&mut editor, way, args);
                 } else if way.tags.contains_key("barrier") {
-                    barriers::generate_barriers(&mut editor, element, &ground);
+                    barriers::generate_barriers(&mut editor, element);
                 } else if way.tags.contains_key("waterway") {
-                    waterways::generate_waterways(&mut editor, way, &ground);
+                    waterways::generate_waterways(&mut editor, way);
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way, &ground);
+                    railways::generate_railways(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
-                    highways::generate_aeroway(&mut editor, way, &ground);
+                    highways::generate_aeroway(&mut editor, way);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
-                    highways::generate_siding(&mut editor, way, &ground);
+                    highways::generate_siding(&mut editor, way);
                 }
             }
             ProcessedElement::Node(node) => {
                 if node.tags.contains_key("door") || node.tags.contains_key("entrance") {
-                    doors::generate_doors(&mut editor, node, &ground);
+                    doors::generate_doors(&mut editor, node);
                 } else if node.tags.contains_key("natural")
                     && node.tags.get("natural") == Some(&"tree".to_string())
                 {
-                    natural::generate_natural(&mut editor, element, &ground, args);
+                    natural::generate_natural(&mut editor, element, args);
                 } else if node.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, element, &ground, args);
+                    amenities::generate_amenities(&mut editor, element, args);
                 } else if node.tags.contains_key("barrier") {
-                    barriers::generate_barriers(&mut editor, element, &ground);
+                    barriers::generate_barriers(&mut editor, element);
                 } else if node.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, &ground, args);
+                    highways::generate_highways(&mut editor, element, args);
                 } else if node.tags.contains_key("tourism") {
-                    tourisms::generate_tourisms(&mut editor, node, &ground);
+                    tourisms::generate_tourisms(&mut editor, node);
                 }
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
-                    buildings::generate_building_from_relation(&mut editor, rel, &ground, args);
+                    //buildings::generate_building_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("water") {
-                    water_areas::generate_water_areas(&mut editor, rel, &ground);
+                    water_areas::generate_water_areas(&mut editor, rel);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
-                    leisure::generate_leisure_from_relation(&mut editor, rel, &ground, args);
+                    leisure::generate_leisure_from_relation(&mut editor, rel, args);
                 }
             }
         }
@@ -145,37 +148,26 @@ pub fn generate_world(
 
     // Differentiate between terrain and non-terrain generation
     if ground.elevation_enabled {
-        // Pre-calculate ground levels for all points
-        let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(scale_factor_x as usize + 1);
-        for x in 0..=(scale_factor_x as i32) {
-            let mut row = Vec::with_capacity(scale_factor_z as usize + 1);
-            for z in 0..=(scale_factor_z as i32) {
-                row.push(ground.level(XZPoint::new(x, z)));
-            }
-            ground_levels.push(row);
-        }
-
         // Process blocks in larger batches
         for x in 0..=(scale_factor_x as i32) {
             for z in 0..=(scale_factor_z as i32) {
-                let ground_level = ground_levels[x as usize][z as usize];
-
-                // Find the highest block in this column
-                let max_y = (MIN_Y..ground_level)
-                    .find(|y: &i32| editor.block_at(x, *y, z))
-                    .unwrap_or(ground_level)
-                    .min(ground_level);
+                // Find the highest block in this column relative to ground level
+                let max_y_offset = (MIN_Y - args.ground_level..=0)
+                    .find(|&y_offset| editor.block_at(x, y_offset, z))
+                    .unwrap_or(0)
+                    .min(0);
 
                 // Add default dirt and grass layer if there isn't a stone layer already
-                if !editor.check_for_block(x, max_y, z, Some(&[STONE]), None) {
-                    editor.set_block(groundlayer_block, x, max_y, z, None, None);
-                    editor.set_block(DIRT, x, max_y - 1, z, None, None);
-                    editor.set_block(DIRT, x, max_y - 2, z, None, None);
+                if !editor.check_for_block(x, 0, z, Some(&[STONE]), None) {
+                    editor.set_block(groundlayer_block, x, 0, z, None, None);
+                    editor.set_block(DIRT, x, -1, z, None, None);
+                    editor.set_block(DIRT, x, -2, z, None, None);
                 }
-                // Fill underground with stone
+                
+                // Fill underground with stone - using relative Y offsets from ground level
                 if args.fillground {
-                    editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, max_y - 1, z, None, None);
-                    editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+                    editor.fill_blocks(STONE, x, MIN_Y - args.ground_level + 1, z, x, -1, z, None, None);
+                    editor.set_block(BEDROCK, x, MIN_Y - args.ground_level, z, None, Some(&[BEDROCK]));
                 }
 
                 block_counter += 1;
@@ -190,19 +182,13 @@ pub fn generate_world(
                 }
             }
         }
-
-        // Set blocks at spawn location
-        for x in 0..=20 {
-            for z in 0..=20 {
-                editor.set_block(groundlayer_block, x, -62, z, None, None);
-            }
-        }
     } else {
         for x in 0..=(scale_factor_x as i32) {
             for z in 0..=(scale_factor_z as i32) {
-                let ground_level = ground.level(XZPoint::new(x, z));
-                editor.set_block(groundlayer_block, x, ground_level, z, None, None);
-                editor.set_block(DIRT, x, ground_level - 1, z, None, None);
+                // Since ground level is already handled by WorldEditor, we simply use 0 for the surface
+                // and negative values for blocks below the surface
+                editor.set_block(groundlayer_block, x, 0, z, None, None);
+                editor.set_block(DIRT, x, -1, z, None, None);
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {

@@ -15,6 +15,7 @@ const MIN_ZOOM: u8 = 10;
 const MAX_ZOOM: u8 = 15;
 
 /// Represents terrain data and elevation settings
+#[derive(Clone)]
 pub struct Ground {
     pub elevation_enabled: bool,
     ground_level: i32,

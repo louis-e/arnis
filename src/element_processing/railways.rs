@@ -1,11 +1,10 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::cartesian::XZPoint;
-use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, ground: &Ground) {
+pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(railway_type) = element.tags.get("railway") {
         if [
             "proposed",
@@ -41,9 +40,8 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
 
             for j in 0..smoothed_points.len() {
                 let (bx, _, bz) = smoothed_points[j];
-                let ground_level = ground.level(XZPoint::new(bx, bz));
 
-                editor.set_block(GRAVEL, bx, ground_level, bz, None, None);
+                editor.set_block(GRAVEL, bx, 0, bz, None, None);
 
                 let prev = if j > 0 {
                     Some(smoothed_points[j - 1])
@@ -62,10 +60,10 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay, groun
                     next.map(|(x, _, z)| (x, z)),
                 );
 
-                editor.set_block(rail_block, bx, ground_level + 1, bz, None, None);
+                editor.set_block(rail_block, bx, 1, bz, None, None);
 
                 if bx % 4 == 0 {
-                    editor.set_block(OAK_LOG, bx, ground_level, bz, None, None);
+                    editor.set_block(OAK_LOG, bx, 0, bz, None, None);
                 }
             }
         }

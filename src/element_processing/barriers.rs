@@ -1,11 +1,9 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::cartesian::XZPoint;
-use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, ground: &Ground) {
+pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
     // Default values
     let mut barrier_material: Block = COBBLESTONE_WALL;
     let mut barrier_height: i32 = 2;
@@ -13,15 +11,8 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
     match element.tags().get("barrier").map(|s| s.as_str()) {
         Some("bollard") => {
             if let ProcessedElement::Node(node) = element {
-                editor.set_block(
-                    COBBLESTONE_WALL,
-                    node.x,
-                    ground.level(node.xz()) + 1,
-                    node.z,
-                    None,
-                    None,
-                );
-                // Place bollard
+                editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
+                // Place bollard one above ground
             }
             return;
         }
@@ -95,23 +86,14 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement, g
             let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2);
 
             for (bx, _, bz) in bresenham_points {
-                // Build the barrier wall to the specified height
-                let ground_level = ground.level(XZPoint::new(bx, bz));
-                for y in (ground_level + 1)..=(ground_level + wall_height) {
+                // Build the barrier wall to the specified height using relative offsets
+                for y in 1..=wall_height {
                     editor.set_block(barrier_material, bx, y, bz, None, None);
-                    // Barrier wall
                 }
 
                 // Add an optional top to the barrier if the height is more than 1
                 if wall_height > 1 {
-                    editor.set_block(
-                        STONE_BRICK_SLAB,
-                        bx,
-                        ground_level + wall_height + 1,
-                        bz,
-                        None,
-                        None,
-                    ); // Top of the barrier
+                    editor.set_block(STONE_BRICK_SLAB, bx, wall_height + 1, bz, None, None);
                 }
             }
         }
