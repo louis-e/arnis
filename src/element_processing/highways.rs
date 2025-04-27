@@ -302,7 +302,6 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay, ground:
                     bx,
                     ground_level - 1,
                     bz,
-                    None,
                     Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
                 ) {
                     editor.set_block(siding_block, bx, ground_level, bz, None, None);

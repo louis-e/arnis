@@ -56,7 +56,7 @@ impl Block {
             26 => "glowstone",
             27 => "granite",
             28 => "grass_block",
-            29 => "tall_grass",
+            29 => "short_grass",
             30 => "gravel",
             31 => "gray_concrete",
             32 => "gray_terracotta",
@@ -154,6 +154,8 @@ impl Block {
             133 => "ice",
             134 => "packed_ice",
             135 => "mud",
+            136 => "dead_bush",
+            137..=138 => "tall_grass",
             _ => panic!("Invalid id"),
         }
     }
@@ -277,6 +279,16 @@ impl Block {
             125 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("shape".to_string(), Value::String("south_west".to_string()));
+                map
+            })),
+            137 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            138 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
             _ => None,
@@ -425,6 +437,9 @@ pub const DIRT_PATH: Block = Block::new(132);
 pub const ICE: Block = Block::new(133);
 pub const PACKED_ICE: Block = Block::new(134);
 pub const MUD: Block = Block::new(135);
+pub const DEAD_BUSH: Block = Block::new(136);
+pub const TALL_GRASS_BOTTOM: Block = Block::new(137);
+pub const TALL_GRASS_TOP: Block = Block::new(138);
 
 // Variations for building corners
 pub static BUILDING_CORNER_VARIATIONS: [Block; 20] = [

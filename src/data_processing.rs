@@ -143,77 +143,35 @@ pub fn generate_world(
 
     let groundlayer_block = GRASS_BLOCK;
 
-    // Differentiate between terrain and non-terrain generation
-    if ground.elevation_enabled {
-        // Pre-calculate ground levels for all points
-        let mut ground_levels: Vec<Vec<i32>> = Vec::with_capacity(scale_factor_x as usize + 1);
-        for x in 0..=(scale_factor_x as i32) {
-            let mut row = Vec::with_capacity(scale_factor_z as usize + 1);
-            for z in 0..=(scale_factor_z as i32) {
-                row.push(ground.level(XZPoint::new(x, z)));
+    for x in 0..=(scale_factor_x as i32) {
+        for z in 0..=(scale_factor_z as i32) {
+            let ground_level = ground.level(XZPoint::new(x, z));
+            // Find the highest block in this column
+            let max_y = (MIN_Y..ground_level)
+                .find(|y: &i32| editor.block_at(x, *y, z))
+                .unwrap_or(ground_level)
+                .min(ground_level);
+            // Add default dirt and grass layer if there isn't a stone layer already
+            if !editor.check_for_block(x, max_y, z, Some(&[STONE])) {
+                editor.set_block(groundlayer_block, x, max_y, z, None, None);
+                editor.set_block(DIRT, x, max_y - 1, z, None, None);
+                editor.set_block(DIRT, x, max_y - 2, z, None, None);
             }
-            ground_levels.push(row);
-        }
-
-        // Process blocks in larger batches
-        for x in 0..=(scale_factor_x as i32) {
-            for z in 0..=(scale_factor_z as i32) {
-                let ground_level = ground_levels[x as usize][z as usize];
-
-                // Find the highest block in this column
-                let max_y = (MIN_Y..ground_level)
-                    .find(|y: &i32| editor.block_at(x, *y, z))
-                    .unwrap_or(ground_level)
-                    .min(ground_level);
-
-                // Add default dirt and grass layer if there isn't a stone layer already
-                if !editor.check_for_block(x, max_y, z, Some(&[STONE]), None) {
-                    editor.set_block(groundlayer_block, x, max_y, z, None, None);
-                    editor.set_block(DIRT, x, max_y - 1, z, None, None);
-                    editor.set_block(DIRT, x, max_y - 2, z, None, None);
-                }
-                // Fill underground with stone
-                if args.fillground {
-                    editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, max_y - 1, z, None, None);
-                    editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
-                }
-
-                block_counter += 1;
-                if block_counter % batch_size == 0 {
-                    ground_pb.inc(batch_size);
-                }
-
-                gui_progress_grnd += progress_increment_grnd;
-                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                    emit_gui_progress_update(gui_progress_grnd, "");
-                    last_emitted_progress = gui_progress_grnd;
-                }
+            // Fill underground with stone
+            if args.fillground {
+                editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, max_y - 1, z, None, None);
             }
-        }
+            editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
-        // Set blocks at spawn location
-        for x in 0..=20 {
-            for z in 0..=20 {
-                editor.set_block(groundlayer_block, x, -62, z, None, None);
+            block_counter += 1;
+            if block_counter % batch_size == 0 {
+                ground_pb.inc(batch_size);
             }
-        }
-    } else {
-        for x in 0..=(scale_factor_x as i32) {
-            for z in 0..=(scale_factor_z as i32) {
-                let ground_level = ground.level(XZPoint::new(x, z));
-                editor.set_block(groundlayer_block, x, ground_level, z, None, None);
-                editor.set_block(DIRT, x, ground_level - 1, z, None, None);
 
-                block_counter += 1;
-                if block_counter % batch_size == 0 {
-                    ground_pb.inc(batch_size);
-                }
-
-                gui_progress_grnd += progress_increment_grnd;
-                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                    emit_gui_progress_update(gui_progress_grnd, "");
-                    last_emitted_progress = gui_progress_grnd;
-                }
+            gui_progress_grnd += progress_increment_grnd;
+            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                emit_gui_progress_update(gui_progress_grnd, "");
+                last_emitted_progress = gui_progress_grnd;
             }
         }
     }

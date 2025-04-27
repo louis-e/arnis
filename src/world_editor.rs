@@ -398,35 +398,18 @@ impl WorldEditor {
     }
 
     /// Checks for a block at the given coordinates.
-    pub fn check_for_block(
-        &self,
-        x: i32,
-        y: i32,
-        z: i32,
-        whitelist: Option<&[Block]>,
-        blacklist: Option<&[Block]>,
-    ) -> bool {
-        // Retrieve the chunk modification map
+    pub fn check_for_block(&self, x: i32, y: i32, z: i32, whitelist: Option<&[Block]>) -> bool {
+        // Check if a block exists on given coordinates
         if let Some(existing_block) = self.world.get_block(x, y, z) {
-            // Check against whitelist and blacklist
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
                     .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
                 {
-                    return true; // Block is in whitelist
-                }
-            }
-            if let Some(blacklist) = blacklist {
-                if blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-                {
-                    return true; // Block is in blacklist
+                    return true; // Block is in the list
                 }
             }
         }
-
         false
     }
 
