@@ -129,9 +129,9 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, y, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let random_choice = rng.gen_range(0..100);
-                            if random_choice < 15 {
-                                if random_choice <= 3 {
+                            let random_choice = rng.gen_range(0..500);
+                            if random_choice < 30 {
+                                if random_choice < 3 {
                                     editor.set_block(OAK_LEAVES, x, y + 1, z, None, None);
                                 } else {
                                     editor.set_block(GRASS, x, y + 1, z, None, None);
