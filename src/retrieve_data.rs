@@ -234,10 +234,7 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
         lat, lon
     );
 
-    let resp = client
-        .get(&url)
-        .header("User-Agent", "arnis-rust")
-        .send()?;
+    let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
 
     if !resp.status().is_success() {
         return Ok(None);
