@@ -157,33 +157,35 @@ pub fn generate_world(
                     editor.set_block(DIRT, x, -2, z, None, None);
                 }
 
-                // Fill underground with stone
+                // Fill underground with stone and place bedrock at bottom
                 if args.fillground {
-                    // Convert relative MIN_Y to absolute Y for this column
-                    let absolute_min_y =
-                        editor.relative_to_absolute_y(x, MIN_Y - args.ground_level, z);
-                    let absolute_ground_base = editor.relative_to_absolute_y(x, -1, z);
+                    // Set bedrock at the absolute Y = MIN_Y
+                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
-                    // Use absolute coordinates for bedrock (always at bottom) and stone fill
+                    // Fill from bedrock+1 to 3 blocks below ground with stone
                     editor.fill_blocks_absolute(
                         STONE,
                         x,
-                        absolute_min_y + 1,
+                        MIN_Y + 1,
                         z,
                         x,
-                        absolute_ground_base,
+                        editor.relative_to_absolute_y(x, -3, z),
                         z,
                         None,
                         None,
                     );
 
-                    editor.set_block_absolute(
-                        BEDROCK,
+                    // Fill from stone top to ground bottom with dirt
+                    editor.fill_blocks_absolute(
+                        DIRT,
                         x,
-                        absolute_min_y,
+                        editor.relative_to_absolute_y(x, -3, z) + 1,
+                        z,
+                        x,
+                        editor.relative_to_absolute_y(x, -1, z),
                         z,
                         None,
-                        Some(&[BEDROCK]),
+                        None,
                     );
                 }
 
@@ -206,15 +208,30 @@ pub fn generate_world(
                 editor.set_block(DIRT, x, -1, z, None, None);
 
                 if args.fillground {
+                    // Set bedrock at the absolute bottom level
                     editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
+                    // Fill from bedrock+1 to ground_level-3 with stone
                     editor.fill_blocks_absolute(
                         STONE,
                         x,
                         MIN_Y + 1,
                         z,
                         x,
-                        args.ground_level - 2,
+                        args.ground_level - 3,
+                        z,
+                        None,
+                        None,
+                    );
+
+                    // Fill from stone top to ground bottom with dirt
+                    editor.fill_blocks_absolute(
+                        DIRT,
+                        x,
+                        args.ground_level - 3 + 1,
+                        z,
+                        x,
+                        args.ground_level - 1,
                         z,
                         None,
                         None,
