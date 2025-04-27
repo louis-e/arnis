@@ -409,14 +409,12 @@ fn add_localized_world_name(world_path_str: &str, bbox: &bbox::BBox) -> String {
             let mut decoder = GzDecoder::new(level_data.as_slice());
             let mut decompressed_data = Vec::new();
             if decoder.read_to_end(&mut decompressed_data).is_ok() {
-                if let Ok(nbt_data) = fastnbt::from_bytes::<Value>(&decompressed_data) {
-                    if let Value::Compound(ref root) = nbt_data {
-                        if let Some(Value::Compound(ref data)) = root.get("Data") {
-                            if let Some(Value::String(name)) = data.get("LevelName") {
-                                name.clone()
-                            } else {
-                                return world_path_str.to_string();
-                            }
+                if let Ok(Value::Compound(ref root)) =
+                    fastnbt::from_bytes::<Value>(&decompressed_data)
+                {
+                    if let Some(Value::Compound(ref data)) = root.get("Data") {
+                        if let Some(Value::String(name)) = data.get("LevelName") {
+                            name.clone()
                         } else {
                             return world_path_str.to_string();
                         }
@@ -455,7 +453,7 @@ fn add_localized_world_name(world_path_str: &str, bbox: &bbox::BBox) -> String {
     let truncated_area_name = if area_name.len() > max_area_name_len && max_area_name_len > 0 {
         // Truncate the area name to fit within the 30 character limit
         area_name[..max_area_name_len].to_string()
-    } else if max_area_name_len <= 0 {
+    } else if max_area_name_len == 0 {
         // If base name is already too long, don't add area name
         return world_path_str.to_string();
     } else {
