@@ -1,5 +1,5 @@
-use crate::coordinate_system::cartesian::XZPoint;
 use crate::bbox::BBox;
+use crate::coordinate_system::cartesian::XZPoint;
 use image::{Rgb, RgbImage};
 
 /// Maximum Y coordinate in Minecraft (build height limit)

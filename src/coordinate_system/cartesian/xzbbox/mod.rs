@@ -1,4 +1,4 @@
 mod rectangle;
-mod xzbbox;
+mod xzbbox_enum;
 
-pub use xzbbox::XZBBox;
+pub use xzbbox_enum::XZBBox;

@@ -150,6 +150,7 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
 // Water areas are absolutely huge. We can't easily flood fill the entire thing.
 // Instead, we'll iterate over all the blocks in our MC world, and check if each
 // one is in the river or not
+#[allow(clippy::too_many_arguments)]
 fn inverse_floodfill(
     min_x: i32,
     min_z: i32,
