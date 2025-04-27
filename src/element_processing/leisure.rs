@@ -22,8 +22,8 @@ pub fn generate_leisure(
 
         // Determine block type based on leisure type
         let block_type: Block = match leisure_type.as_str() {
-            "park" => GRASS_BLOCK,
-            "playground" | "recreation_ground" | "pitch" => {
+            "park" | "nature_preserve" | "garden" => GRASS_BLOCK,
+            "playground" | "recreation_ground" | "pitch" | "beach_resort"=> {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
                         "clay" => TERRACOTTA,
@@ -35,9 +35,12 @@ pub fn generate_leisure(
                     GREEN_STAINED_HARDENED_CLAY
                 }
             }
-            "garden" => GRASS_BLOCK,
-            "swimming_pool" => WATER,
-            _ => GRASS_BLOCK,
+            "swimming_pool" | "swimming_area" | "marina" => WATER,  //Add swimming area and marina
+            "bathing_place" => SMOOTH_SANDSTONE,                    // Could be sand or concrete
+            "water_park" | "slipway" => LIGHT_GRAY_CONCRETE,        // Water park area, not the pool. Usually is concrete
+            "ice_rink" => PACKED_ICE,                               // Ice for Ice Rink, may need edge defined
+            _ => GRASS_BLOCK
+               
         };
 
         // Process leisure area nodes
