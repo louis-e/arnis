@@ -157,7 +157,7 @@ pub fn generate_world(
                     editor.set_block(DIRT, x, -2, z, None, None);
                 }
 
-                // Fill underground with stone - using absolute Y values for consistent bedrock layer
+                // Fill underground with stone
                 if args.fillground {
                     // Convert relative MIN_Y to absolute Y for this column
                     let absolute_min_y =

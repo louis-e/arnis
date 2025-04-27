@@ -66,8 +66,8 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
 
                     // Set ground block and fences
                     editor.set_block(ground_block, x, 0, z, None, None);
-                    for y_offset in 1..=4 {
-                        editor.set_block(OAK_FENCE, x, y_offset, z, None, None);
+                    for y in 1..=4 {
+                        editor.set_block(OAK_FENCE, x, y, z, None, None);
                     }
                     editor.set_block(roof_block, x, 5, z, None, None);
                 }

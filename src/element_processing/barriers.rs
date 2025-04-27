@@ -11,8 +11,8 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
     match element.tags().get("barrier").map(|s| s.as_str()) {
         Some("bollard") => {
             if let ProcessedElement::Node(node) = element {
-                editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
                 // Place bollard one above ground
+                editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
             }
             return;
         }
@@ -86,7 +86,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
             let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2);
 
             for (bx, _, bz) in bresenham_points {
-                // Build the barrier wall to the specified height using relative offsets
+                // Build the barrier wall to the specified height
                 for y in 1..=wall_height {
                     editor.set_block(barrier_material, bx, y, bz, None, None);
                 }
