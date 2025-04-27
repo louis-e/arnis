@@ -395,6 +395,43 @@ impl WorldEditor {
         }
     }
 
+    /// Sets a block of the specified type at the given coordinates with absolute Y value.
+    pub fn set_block_absolute(
+        &mut self,
+        block: Block,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+    ) {
+        // Check if coordinates are within bounds
+        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+            return;
+        }
+
+        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
+            // Check against whitelist and blacklist
+            if let Some(whitelist) = override_whitelist {
+                whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+            } else if let Some(blacklist) = override_blacklist {
+                !blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+
+        if should_insert {
+            self.world.set_block(x, absolute_y, z, block);
+        }
+    }
+
     /// Fills a cuboid area with the specified block between two coordinates.
     #[allow(clippy::too_many_arguments)]
     pub fn fill_blocks(
@@ -420,6 +457,44 @@ impl WorldEditor {
                         block,
                         x,
                         y_offset,
+                        z,
+                        override_whitelist,
+                        override_blacklist,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Fills a cuboid area with the specified block between two coordinates using absolute Y values.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fill_blocks_absolute(
+        &mut self,
+        block: Block,
+        x1: i32,
+        y1_absolute: i32,
+        z1: i32,
+        x2: i32,
+        y2_absolute: i32,
+        z2: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+    ) {
+        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
+        let (min_y, max_y) = if y1_absolute < y2_absolute {
+            (y1_absolute, y2_absolute)
+        } else {
+            (y2_absolute, y1_absolute)
+        };
+        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
+
+        for x in min_x..=max_x {
+            for absolute_y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    self.set_block_absolute(
+                        block,
+                        x,
+                        absolute_y,
                         z,
                         override_whitelist,
                         override_blacklist,
@@ -462,6 +537,61 @@ impl WorldEditor {
         }
 
         false
+    }
+
+    /// Checks for a block at the given coordinates with absolute Y value.
+    pub fn check_for_block_absolute(
+        &self,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        whitelist: Option<&[Block]>,
+        blacklist: Option<&[Block]>,
+    ) -> bool {
+        // Retrieve the chunk modification map
+        if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
+            // Check against whitelist and blacklist
+            if let Some(whitelist) = whitelist {
+                if whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                {
+                    return true; // Block is in whitelist
+                }
+                return false;
+            }
+            if let Some(blacklist) = blacklist {
+                if blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                {
+                    return true; // Block is in blacklist
+                }
+            }
+            return whitelist.is_none() && blacklist.is_none();
+        }
+
+        false
+    }
+
+    /// Checks if a block exists at the given coordinates with absolute Y value.
+    /// Unlike check_for_block_absolute, this doesn't filter by block type.
+    pub fn block_at_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
+        self.world.get_block(x, absolute_y, z).is_some()
+    }
+
+    /// Converts a relative Y coordinate to an absolute Y coordinate
+    pub fn relative_to_absolute_y(&self, x: i32, y_relative: i32, z: i32) -> i32 {
+        self.get_absolute_y(x, y_relative, z)
+    }
+
+    /// Converts an absolute Y coordinate to a ground-relative Y coordinate
+    pub fn absolute_to_relative_y(&self, x: i32, y_absolute: i32, z: i32) -> i32 {
+        if let Some(ground) = &self.ground {
+            y_absolute - ground.level(XZPoint::new(x, z))
+        } else {
+            y_absolute // If no ground reference, absolute and relative are the same
+        }
     }
 
     /// Helper function to create a base chunk with grass blocks at Y -62

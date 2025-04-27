@@ -164,23 +164,29 @@ pub fn generate_world(
                     editor.set_block(DIRT, x, -2, z, None, None);
                 }
 
-                // Fill underground with stone - using relative Y offsets from ground level
+                // Fill underground with stone - using absolute Y values for consistent bedrock layer
                 if args.fillground {
-                    editor.fill_blocks(
+                    // Convert relative MIN_Y to absolute Y for this column
+                    let absolute_min_y = editor.relative_to_absolute_y(x, MIN_Y - args.ground_level, z);
+                    let absolute_ground_base = editor.relative_to_absolute_y(x, -1, z);
+
+                    // Use absolute coordinates for bedrock (always at bottom) and stone fill
+                    editor.fill_blocks_absolute(
                         STONE,
                         x,
-                        MIN_Y - args.ground_level + 1,
+                        absolute_min_y + 1,
                         z,
                         x,
-                        -1,
+                        absolute_ground_base,
                         z,
                         None,
                         None,
                     );
-                    editor.set_block(
+
+                    editor.set_block_absolute(
                         BEDROCK,
                         x,
-                        MIN_Y - args.ground_level,
+                        absolute_min_y,
                         z,
                         None,
                         Some(&[BEDROCK]),
@@ -202,10 +208,31 @@ pub fn generate_world(
     } else {
         for x in 0..=(scale_factor_x as i32) {
             for z in 0..=(scale_factor_z as i32) {
-                // Since ground level is already handled by WorldEditor, we simply use 0 for the surface
-                // and negative values for blocks below the surface
                 editor.set_block(groundlayer_block, x, 0, z, None, None);
                 editor.set_block(DIRT, x, -1, z, None, None);
+
+                if args.fillground {
+                    editor.set_block_absolute(
+                        BEDROCK,
+                        x,
+                        MIN_Y,
+                        z,
+                        None,
+                        Some(&[BEDROCK])
+                    );
+
+                    editor.fill_blocks_absolute(
+                        STONE,
+                        x,
+                        MIN_Y + 1,
+                        z,
+                        x,
+                        args.ground_level - 2,
+                        z,
+                        None,
+                        None
+                    );
+                }
 
                 block_counter += 1;
                 if block_counter % batch_size == 0 {
