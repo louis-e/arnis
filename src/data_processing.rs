@@ -152,7 +152,7 @@ pub fn generate_world(
                 .unwrap_or(ground_level)
                 .min(ground_level);
             // Add default dirt and grass layer if there isn't a stone layer already
-            if !editor.check_for_block(x, max_y, z, Some(&[STONE]), None) {
+            if !editor.check_for_block(x, max_y, z, Some(&[STONE])) {
                 editor.set_block(groundlayer_block, x, max_y, z, None, None);
                 editor.set_block(DIRT, x, max_y - 1, z, None, None);
                 editor.set_block(DIRT, x, max_y - 2, z, None, None);

@@ -105,7 +105,7 @@ pub fn generate_natural(
 
                     // Generate elements for "wood" and "tree_row"
                     if natural_type == "wood" || natural_type == "tree_row" {
-                        if editor.check_for_block(x, y, z, None, Some(&[WATER])) {
+                        if editor.check_for_block(x, y, z, Some(&[WATER])) {
                             continue;
                         }
 

@@ -88,7 +88,7 @@ pub fn generate_leisure(
 
                 // Add decorative elements for parks and gardens
                 if matches!(leisure_type.as_str(), "park" | "garden")
-                    && editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]), None)
+                    && editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]))
                 {
                     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                     let random_choice: i32 = rng.gen_range(0..1000);
