@@ -23,7 +23,6 @@ pub fn generate_landuse(
         "farmland" => FARMLAND,
         "forest" => GRASS_BLOCK,
         "cemetery" => PODZOL,
-        "beach" => SAND,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
         "residential" => {

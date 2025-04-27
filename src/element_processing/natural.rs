@@ -23,6 +23,14 @@ pub fn generate_natural(
 
                 Tree::create(editor, (x, ground.level(node.xz()) + 1, z));
             }
+        } else if natural_type == "shrub" {
+            if let ProcessedElement::Node(node) = element {
+                let x: i32 = node.x;
+                let z: i32 = node.z;
+                let y: i32 = ground.level(node.xz());
+                editor.set_block(OAK_LEAVES, x, y, z, None, None);
+                editor.set_block(OAK_LEAVES, x, y + 1, z, None, None);
+            }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
             let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -30,9 +38,16 @@ pub fn generate_natural(
 
             // Determine block type based on natural tag
             let block_type: Block = match natural_type.as_str() {
-                "scrub" | "grassland" | "wood" => GRASS_BLOCK,
-                "beach" | "sand" | "dune" => SAND,
-                "tree_row" => GRASS_BLOCK,
+                "scrub" | "grassland" | "wood" | "heath" | "tree_row" => GRASS_BLOCK,
+                "sand" | "dune" => SAND,
+                "beach" => {
+                    let binding: String = "".to_string();
+                    let surface = element.tags().get("surface").unwrap_or(&binding);
+                    match surface.as_str() {
+                        "gravel" => GRAVEL,
+                        _ => SAND,
+                    }
+                }
                 "wetland" | "water" => WATER,
                 "bare_rock" => STONE,
                 "glacier" => PACKED_ICE,
@@ -86,7 +101,7 @@ pub fn generate_natural(
                 for (x, z) in filled_area {
                     let y = ground.level(XZPoint::new(x, z));
                     editor.set_block(block_type, x, y, z, None, None);
-                    // Make custom layer instead of dirt
+                    // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
                         "beach" | "sand" | "dune" => {
                             editor.set_block(SAND, x, y - 1, z, None, None);
@@ -102,27 +117,71 @@ pub fn generate_natural(
                         }
                         _ => {}
                     }
-
-                    // Generate elements for "wood" and "tree_row"
-                    if natural_type == "wood" || natural_type == "tree_row" {
-                        if editor.check_for_block(x, y, z, Some(&[WATER])) {
-                            continue;
+                    // Generate surface elements
+                    match natural_type.as_str() {
+                        "grassland" => {
+                            if !editor.check_for_block(x, y, z, Some(&[GRASS_BLOCK])) {
+                                continue;
+                            }
+                            let random_choice = rng.gen_range(0..50);
+                            if random_choice < 40 {
+                                if random_choice < 5 {
+                                    editor.set_block(TALL_GRASS_BOTTOM, x, y + 1, z, None, None);
+                                    editor.set_block(TALL_GRASS_TOP, x, y + 2, z, None, None);
+                                } else {
+                                    editor.set_block(GRASS, x, y + 1, z, None, None);
+                                }
+                            }
                         }
-
-                        let random_choice: i32 = rng.gen_range(0..26);
-                        if random_choice == 25 {
-                            Tree::create(editor, (x, y + 1, z));
-                        } else if random_choice == 2 {
-                            let flower_block = match rng.gen_range(1..=4) {
-                                1 => RED_FLOWER,
-                                2 => BLUE_FLOWER,
-                                3 => YELLOW_FLOWER,
-                                _ => WHITE_FLOWER,
-                            };
-                            editor.set_block(flower_block, x, y + 1, z, None, None);
-                        } else if random_choice <= 1 {
-                            editor.set_block(GRASS, x, y + 1, z, None, None);
+                        "scrub" => {
+                            if !editor.check_for_block(x, y, z, Some(&[GRASS_BLOCK])) {
+                                continue;
+                            }
+                            let random_choice = rng.gen_range(0..100);
+                            if random_choice == 0 {
+                                Tree::create(editor, (x, y + 1, z));
+                            } else if random_choice < 30 {
+                                editor.set_block(OAK_LEAVES, x, y + 1, z, None, None);
+                                if random_choice < 10 {
+                                    editor.set_block(OAK_LEAVES, x, y + 2, z, None, None);
+                                }
+                            } else if random_choice < 80 {
+                                if random_choice < 60 {
+                                    editor.set_block(TALL_GRASS_BOTTOM, x, y + 1, z, None, None);
+                                    editor.set_block(TALL_GRASS_TOP, x, y + 2, z, None, None);
+                                }
+                                else {
+                                    editor.set_block(GRASS, x, y + 1, z, None, None);
+                                }
+                            } 
                         }
+                        "tree_row" | "wood" => {
+                            if editor.check_for_block(x, y, z, Some(&[WATER])) {
+                                continue;
+                            }
+                            let random_choice: i32 = rng.gen_range(0..40);
+                            if random_choice == 1 {
+                                Tree::create(editor, (x, y + 1, z));
+                            } else if random_choice == 2 {
+                                let flower_block = match rng.gen_range(1..=4) {
+                                    1 => RED_FLOWER,
+                                    2 => BLUE_FLOWER,
+                                    3 => YELLOW_FLOWER,
+                                    _ => WHITE_FLOWER,
+                                };
+                                editor.set_block(flower_block, x, y + 1, z, None, None);
+                            } else if random_choice <= 15 {
+                                editor.set_block(GRASS, x, y + 1, z, None, None);
+                            }
+                        }
+                        "sand" => {
+                            if editor.check_for_block(x, y, z, Some(&[SAND]))
+                                && rng.gen_range(0..100) == 1
+                            {
+                                editor.set_block(DEAD_BUSH, x, y + 1, z, None, None);
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
