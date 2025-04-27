@@ -160,7 +160,8 @@ pub fn generate_world(
                 // Fill underground with stone - using absolute Y values for consistent bedrock layer
                 if args.fillground {
                     // Convert relative MIN_Y to absolute Y for this column
-                    let absolute_min_y = editor.relative_to_absolute_y(x, MIN_Y - args.ground_level, z);
+                    let absolute_min_y =
+                        editor.relative_to_absolute_y(x, MIN_Y - args.ground_level, z);
                     let absolute_ground_base = editor.relative_to_absolute_y(x, -1, z);
 
                     // Use absolute coordinates for bedrock (always at bottom) and stone fill
@@ -205,14 +206,7 @@ pub fn generate_world(
                 editor.set_block(DIRT, x, -1, z, None, None);
 
                 if args.fillground {
-                    editor.set_block_absolute(
-                        BEDROCK,
-                        x,
-                        MIN_Y,
-                        z,
-                        None,
-                        Some(&[BEDROCK])
-                    );
+                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
                     editor.fill_blocks_absolute(
                         STONE,
@@ -223,7 +217,7 @@ pub fn generate_world(
                         args.ground_level - 2,
                         z,
                         None,
-                        None
+                        None,
                     );
                 }
 

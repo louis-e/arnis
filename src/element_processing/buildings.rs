@@ -342,7 +342,8 @@ pub fn generate_buildings(
 
         if let Some(prev) = previous_node {
             // Calculate walls and corners using Bresenham line
-            let bresenham_points = bresenham_line(prev.0, start_y_offset, prev.1, x, start_y_offset, z);
+            let bresenham_points =
+                bresenham_line(prev.0, start_y_offset, prev.1, x, start_y_offset, z);
             for (bx, _, bz) in bresenham_points {
                 for h in (start_y_offset + 1)..=(start_y_offset + building_height) {
                     if element.nodes[0].x == bx && element.nodes[0].x == bz {
@@ -400,7 +401,14 @@ pub fn generate_buildings(
                         }
                     }
                 } else if x % 6 == 0 && z % 6 == 0 {
-                    editor.set_block(GLOWSTONE, x, start_y_offset + building_height, z, None, None);
+                    editor.set_block(
+                        GLOWSTONE,
+                        x,
+                        start_y_offset + building_height,
+                        z,
+                        None,
+                        None,
+                    );
                 }
 
                 // Set ceiling at proper height
@@ -505,11 +513,7 @@ fn generate_bridge(
     }
 
     // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
+    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
 
     let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
 
