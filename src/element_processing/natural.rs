@@ -125,6 +125,19 @@ pub fn generate_natural(
                                 }
                             }
                         }
+                        "heath" => {
+                            if !editor.check_for_block(x, y, z, Some(&[GRASS_BLOCK])) {
+                                continue;
+                            }
+                            let random_choice = rng.gen_range(0..100);
+                            if random_choice < 15 {
+                                if random_choice <= 3 {
+                                    editor.set_block(OAK_LEAVES, x, y + 1, z, None, None);
+                                } else {
+                                    editor.set_block(GRASS, x, y + 1, z, None, None);
+                                }
+                            }
+                        }
                         "scrub" => {
                             if !editor.check_for_block(x, y, z, Some(&[GRASS_BLOCK])) {
                                 continue;
@@ -141,11 +154,10 @@ pub fn generate_natural(
                                 if random_choice < 250 {
                                     editor.set_block(TALL_GRASS_BOTTOM, x, y + 1, z, None, None);
                                     editor.set_block(TALL_GRASS_TOP, x, y + 2, z, None, None);
-                                }
-                                else {
+                                } else {
                                     editor.set_block(GRASS, x, y + 1, z, None, None);
                                 }
-                            } 
+                            }
                         }
                         "tree_row" | "wood" => {
                             if editor.check_for_block(x, y, z, Some(&[WATER])) {

@@ -19,9 +19,8 @@ pub fn generate_landuse(
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
 
     let block_type = match landuse_tag.as_str() {
-        "greenfield" | "meadow" | "grass" => GRASS_BLOCK,
+        "greenfield" | "meadow" | "grass" | "orchard" | "forest" => GRASS_BLOCK,
         "farmland" => FARMLAND,
-        "forest" => GRASS_BLOCK,
         "cemetery" => PODZOL,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
@@ -279,6 +278,13 @@ pub fn generate_landuse(
                     } else if random_choice < 800 {
                         editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                     }
+                }
+            }
+            "orchard" => {
+                println!("Generating orchard...");
+                if x % 18 == 0 && z % 10 == 0 {
+                    println!("Placing tree...");
+                    Tree::create(editor, (x, ground_level + 1, z));
                 }
             }
             "quarry" => {
