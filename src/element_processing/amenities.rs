@@ -6,7 +6,11 @@ use crate::floodfill::flood_fill_area;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+pub fn generate_amenities(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    args: &Args,
+) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -46,31 +50,28 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                     .nodes()
                     .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
                     .collect();
-                let floor_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
-                let pts: Vec<_> = floor_area.iter().map(|c| XZPoint::new(c.0, c.1)).collect();
-
-                if pts.is_empty() {
+                if polygon_coords.is_empty() {
                     return;
                 }
+
+                let floor_area: Vec<(i32, i32)> =
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
                     editor.set_block(ground_block, *x, 0, *z, None, None);
                 }
 
-                // Place fences and roof slabs at each corner node directly
+                // Place fences and roof slabs at each corner node
                 for node in element.nodes() {
                     let x: i32 = node.x;
                     let z: i32 = node.z;
 
-                    let pt = XZPoint::new(x, z);
-
+                    // Set ground block and fences
                     editor.set_block(ground_block, x, 0, z, None, None);
-
-                    for cur_y in (1)..5 {
-                        editor.set_block(OAK_FENCE, x, cur_y, z, None, None);
+                    for y_offset in 1..=4 {
+                        editor.set_block(OAK_FENCE, x, y_offset, z, None, None);
                     }
                     editor.set_block(roof_block, x, 5, z, None, None);
                 }
@@ -110,10 +111,6 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                     let x: i32 = node.x;
                     let z: i32 = node.z;
 
-                    /*let Some(y) = ground.min_level(element.nodes().map(|n| n.xz())) else {
-                        return;
-                    };*/
-
                     for fence_height in 1..=4 {
                         editor.set_block(OAK_FENCE, x, fence_height, z, None, None);
                     }
@@ -121,10 +118,6 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                 }
 
                 // Flood fill the roof area
-                /*let Some(y) = ground.min_level(element.nodes().map(|n| n.xz())) else {
-                    return;
-                };*/
-
                 for (x, z) in roof_area.iter() {
                     editor.set_block(roof_block, *x, 5, *z, None, None);
                 }
@@ -143,12 +136,13 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
 
                 for node in element.nodes() {
                     let pt: XZPoint = node.xz();
+
                     if let Some(prev) = previous_node {
                         // Create borders for fountain or parking area
                         let bresenham_points: Vec<(i32, i32, i32)> =
                             bresenham_line(prev.x, 0, prev.z, pt.x, 0, pt.z);
-                        for (bx, by, bz) in bresenham_points {
-                            editor.set_block(block_type, bx, by, bz, Some(&[BLACK_CONCRETE]), None);
+                        for (bx, _, bz) in bresenham_points {
+                            editor.set_block(block_type, bx, 0, bz, Some(&[BLACK_CONCRETE]), None);
 
                             // Decorative border around fountains
                             if amenity_type == "fountain" {
@@ -158,7 +152,7 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                                             editor.set_block(
                                                 LIGHT_GRAY_CONCRETE,
                                                 bx + dx,
-                                                by,
+                                                0,
                                                 bz + dz,
                                                 None,
                                                 None,
@@ -184,7 +178,6 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                         flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                     for (x, z) in flood_area {
-                        let pt = XZPoint::new(x, z);
                         editor.set_block(
                             block_type,
                             x,
