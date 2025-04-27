@@ -22,13 +22,7 @@ pub fn generate_leisure(
 
         // Determine block type based on leisure type
         let block_type: Block = match leisure_type.as_str() {
-            "park" => {
-                if args.winter {
-                    SNOW_BLOCK
-                } else {
-                    GRASS_BLOCK
-                }
-            }
+            "park" => GRASS_BLOCK,
             "playground" | "recreation_ground" | "pitch" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
@@ -41,21 +35,9 @@ pub fn generate_leisure(
                     GREEN_STAINED_HARDENED_CLAY
                 }
             }
-            "garden" => {
-                if args.winter {
-                    SNOW_BLOCK
-                } else {
-                    GRASS_BLOCK
-                }
-            }
+            "garden" => GRASS_BLOCK,
             "swimming_pool" => WATER,
-            _ => {
-                if args.winter {
-                    SNOW_BLOCK
-                } else {
-                    GRASS_BLOCK
-                }
-            }
+            _ => GRASS_BLOCK,
         };
 
         // Process leisure area nodes
@@ -112,13 +94,7 @@ pub fn generate_leisure(
                     let random_choice: i32 = rng.gen_range(0..1000);
 
                     match random_choice {
-                        0 => {
-                            // Benches
-                            editor.set_block(OAK_LOG, x, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
-                            editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
-                        }
-                        1..40 => {
+                        0..40 => {
                             // Flowers
                             let flower_choice = match random_choice {
                                 0..10 => RED_FLOWER,
@@ -134,7 +110,7 @@ pub fn generate_leisure(
                         }
                         80..90 => {
                             // Tree
-                            Tree::create(editor, (x, ground_level + 1, z), args.winter);
+                            Tree::create(editor, (x, ground_level + 1, z));
                         }
                         _ => {}
                     }

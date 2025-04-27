@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
+use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::*;
 use crate::ground::Ground;
@@ -140,7 +140,7 @@ pub fn generate_world(
     let total_iterations_grnd: f64 = total_blocks as f64;
     let progress_increment_grnd: f64 = 20.0 / total_iterations_grnd;
 
-    let groundlayer_block = if args.winter { SNOW_BLOCK } else { GRASS_BLOCK };
+    let groundlayer_block = GRASS_BLOCK;
 
     let min_x = xzbbox.min_x();
     let max_x = xzbbox.max_x();
@@ -175,6 +175,7 @@ pub fn generate_world(
                 if !editor.check_for_block(x, max_y, z, Some(&[STONE]), None) {
                     editor.set_block(groundlayer_block, x, max_y, z, None, None);
                     editor.set_block(DIRT, x, max_y - 1, z, None, None);
+                    editor.set_block(DIRT, x, max_y - 2, z, None, None);
                 }
                 // Fill underground with stone
                 if args.fillground {

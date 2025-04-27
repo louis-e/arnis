@@ -23,6 +23,8 @@ Choose your area using the rectangle tool and select your Minecraft world - then
 Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4 or above.
 If you choose to select an own world, be aware that Arnis will overwrite certain areas.
 
+[[Arch Linux AUR package](https://aur.archlinux.org/packages/arnis)]
+
 ## :floppy_disk: How it works
 ![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
 
@@ -57,7 +59,6 @@ Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16
 Make sure to teleport to the generation starting point (/tp 0 0 0). If there is still nothing, you might need to travel a bit further into the positive X and positive Z direction.
 - *What features are in the world generation settings?*<br>
 **Terrain:** Make sure to enable this feature to generate your world with elevation data included.<br>
-**Winter Mode:** This setting changes the generation style to a snowy theme and adds snow layers to the ground.<br>
 **Scale Factor:** The scale factor determines the size of the generated world.<br>
 **Custom BBOX Input:** This setting allows you to manually input the bounding box coordinates for the area you want to generate.<br>
 **Floodfill-Timeout (Sec):** This setting determines the maximum time the floodfill algorithm is allowed to run before being terminated. Increasing this value may improve the generation of large water areas but may also increase processing time.<br>

@@ -21,7 +21,7 @@ pub fn generate_natural(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                Tree::create(editor, (x, ground.level(node.xz()) + 1, z), args.winter);
+                Tree::create(editor, (x, ground.level(node.xz()) + 1, z));
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -30,38 +30,14 @@ pub fn generate_natural(
 
             // Determine block type based on natural tag
             let block_type: Block = match natural_type.as_str() {
-                "scrub" | "grassland" | "wood" => {
-                    if args.winter {
-                        SNOW_BLOCK
-                    } else {
-                        GRASS_BLOCK
-                    }
-                }
+                "scrub" | "grassland" | "wood" => GRASS_BLOCK,
                 "beach" | "sand" | "dune" => SAND,
-                "tree_row" => {
-                    if args.winter {
-                        SNOW_BLOCK
-                    } else {
-                        GRASS_BLOCK
-                    }
-                }
-                "wetland" | "water" => {
-                    if args.winter {
-                        ICE
-                    } else {
-                        WATER
-                    }
-                }
+                "tree_row" => GRASS_BLOCK,
+                "wetland" | "water" => WATER,
                 "bare_rock" => STONE,
                 "glacier" => PACKED_ICE,
                 "mud" => MUD,
-                _ => {
-                    if args.winter {
-                        SNOW_BLOCK
-                    } else {
-                        GRASS_BLOCK
-                    }
-                }
+                _ => GRASS_BLOCK,
             };
 
             let ProcessedElement::Way(way) = element else {
@@ -135,7 +111,7 @@ pub fn generate_natural(
 
                         let random_choice: i32 = rng.gen_range(0..26);
                         if random_choice == 25 {
-                            Tree::create(editor, (x, y + 1, z), args.winter);
+                            Tree::create(editor, (x, y + 1, z));
                         } else if random_choice == 2 {
                             let flower_block = match rng.gen_range(1..=4) {
                                 1 => RED_FLOWER,

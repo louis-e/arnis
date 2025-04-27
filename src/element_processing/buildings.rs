@@ -395,17 +395,6 @@ pub fn generate_buildings(
                     None,
                 );
 
-                if args.winter {
-                    editor.set_block(
-                        SNOW_LAYER,
-                        bx,
-                        start_level + building_height + 2,
-                        bz,
-                        None,
-                        None,
-                    );
-                }
-
                 current_building.push((bx, bz));
                 corner_addup = (corner_addup.0 + bx, corner_addup.1 + bz, corner_addup.2 + 1);
             }
@@ -451,17 +440,6 @@ pub fn generate_buildings(
                     None,
                     None,
                 );
-
-                if args.winter {
-                    editor.set_block(
-                        SNOW_LAYER,
-                        x,
-                        start_level + building_height + 2,
-                        z,
-                        None,
-                        None,
-                    );
-                }
             }
         }
     }
