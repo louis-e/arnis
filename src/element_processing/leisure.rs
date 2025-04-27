@@ -122,7 +122,7 @@ pub fn generate_leisure(
                     let random_choice: i32 = rng.gen_range(0..5000);
 
                     match random_choice {
-                        0..=10 => {
+                        0..10 => {
                             // Swing set
                             for y in 1..=4 {
                                 editor.set_block(OAK_FENCE, x - 1, ground_level + y, z, None, None);
@@ -131,7 +131,7 @@ pub fn generate_leisure(
                             editor.set_block(OAK_FENCE, x, ground_level + 4, z, None, None);
                             editor.set_block(STONE_BLOCK_SLAB, x, ground_level + 2, z, None, None);
                         }
-                        11..=20 => {
+                        10..20 => {
                             // Slide
                             editor.set_block(OAK_SLAB, x, ground_level + 1, z, None, None);
                             editor.set_block(OAK_SLAB, x + 1, ground_level + 2, z, None, None);
@@ -143,7 +143,7 @@ pub fn generate_leisure(
                             editor.set_block(LADDER, x + 2, ground_level + 2, z - 1, None, None);
                             editor.set_block(LADDER, x + 2, ground_level + 1, z - 1, None, None);
                         }
-                        21..=30 => {
+                        20..30 => {
                             // Sandpit
                             editor.fill_blocks(
                                 SAND,

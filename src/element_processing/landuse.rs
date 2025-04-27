@@ -266,7 +266,7 @@ pub fn generate_landuse(
                 }
             }
             "grass" => {
-                if rng.gen_range(1..=7) != 1
+                if rng.gen_range(1..8) != 1
                     && editor.check_for_block(x, ground_level, z, Some(&[GRASS_BLOCK]))
                 {
                     editor.set_block(GRASS, x, ground_level + 1, z, None, None);
