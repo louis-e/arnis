@@ -185,7 +185,7 @@ pub fn generate_world(
                     None,
                 );
             } else {
-                editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+                editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
             }
 
             block_counter += 1;
