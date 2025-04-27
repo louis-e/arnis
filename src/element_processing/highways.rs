@@ -280,8 +280,7 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
             );
 
             for (bx, _, bz) in bresenham_points {
-                if !editor.check_for_block(bx, 0, bz, Some(&[BLACK_CONCRETE, WHITE_CONCRETE]))
-                {
+                if !editor.check_for_block(bx, 0, bz, Some(&[BLACK_CONCRETE, WHITE_CONCRETE])) {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
             }
