@@ -8,10 +8,7 @@ use crate::{
     world_editor::WorldEditor,
 };
 
-pub fn generate_water_areas(
-    editor: &mut WorldEditor,
-    element: &ProcessedRelation,
-) {
+pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelation) {
     let start_time = Instant::now();
 
     if !element.tags.contains_key("water") {

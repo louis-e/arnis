@@ -7,11 +7,7 @@ use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_landuse(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-) {
+pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
@@ -74,71 +70,15 @@ pub fn generate_landuse(
                         // Place graves
                         if editor.check_for_block(x, 0, z, Some(&[PODZOL]), None) {
                             if rng.gen_bool(0.5) {
-                                editor.set_block(
-                                    COBBLESTONE,
-                                    x - 1,
-                                    1,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block(
-                                    STONE_BRICK_SLAB,
-                                    x - 1,
-                                    2,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block(
-                                    STONE_BRICK_SLAB,
-                                    x,
-                                    1,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block(
-                                    STONE_BRICK_SLAB,
-                                    x + 1,
-                                    1,
-                                    z,
-                                    None,
-                                    None,
-                                );
+                                editor.set_block(COBBLESTONE, x - 1, 1, z, None, None);
+                                editor.set_block(STONE_BRICK_SLAB, x - 1, 2, z, None, None);
+                                editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
+                                editor.set_block(STONE_BRICK_SLAB, x + 1, 1, z, None, None);
                             } else {
-                                editor.set_block(
-                                    COBBLESTONE,
-                                    x,
-                                    1,
-                                    z - 1,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block(
-                                    STONE_BRICK_SLAB,
-                                    x,
-                                    2,
-                                    z - 1,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block(
-                                    STONE_BRICK_SLAB,
-                                    x,
-                                    1,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                                editor.set_block(
-                                    STONE_BRICK_SLAB,
-                                    x,
-                                    1,
-                                    z + 1,
-                                    None,
-                                    None,
-                                );
+                                editor.set_block(COBBLESTONE, x, 1, z - 1, None, None);
+                                editor.set_block(STONE_BRICK_SLAB, x, 2, z - 1, None, None);
+                                editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
+                                editor.set_block(STONE_BRICK_SLAB, x, 1, z + 1, None, None);
                             }
                         }
                     } else if random_choice < 30 {
@@ -177,23 +117,9 @@ pub fn generate_landuse(
                     } else if rng.gen_range(0..76) == 0 {
                         let special_choice: i32 = rng.gen_range(1..=10);
                         if special_choice <= 4 {
-                            editor.set_block(
-                                HAY_BALE,
-                                x,
-                                1,
-                                z,
-                                None,
-                                Some(&[SPONGE]),
-                            );
+                            editor.set_block(HAY_BALE, x, 1, z, None, Some(&[SPONGE]));
                         } else {
-                            editor.set_block(
-                                OAK_LEAVES,
-                                x,
-                                1,
-                                z,
-                                None,
-                                Some(&[SPONGE]),
-                            );
+                            editor.set_block(OAK_LEAVES, x, 1, z, None, Some(&[SPONGE]));
                         }
                     } else {
                         // Set crops only if the block below is farmland

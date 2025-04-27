@@ -8,11 +8,7 @@ use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_natural(
-    editor: &mut WorldEditor,
-    element: &ProcessedElement,
-    args: &Args,
-) {
+pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
@@ -52,14 +48,7 @@ pub fn generate_natural(
                     let bresenham_points: Vec<(i32, i32, i32)> =
                         bresenham_line(prev.0, 0, prev.1, x, 0, z);
                     for (bx, _, bz) in bresenham_points {
-                        editor.set_block(
-                            block_type,
-                            bx,
-                            0,
-                            bz,
-                            None,
-                            None,
-                        );
+                        editor.set_block(block_type, bx, 0, bz, None, None);
                     }
 
                     current_natural.push((x, z));

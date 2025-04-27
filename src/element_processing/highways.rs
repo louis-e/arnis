@@ -6,11 +6,7 @@ use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 
-pub fn generate_highways(
-    editor: &mut WorldEditor,
-    element: &ProcessedElement,
-    args: &Args,
-) {
+pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
             // Handle street lamps
@@ -90,14 +86,7 @@ pub fn generate_highways(
                 flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for (x, z) in filled_area {
-                editor.set_block(
-                    surface_block,
-                    x,
-                    0,
-                    z,
-                    None,
-                    None,
-                );
+                editor.set_block(surface_block, x, 0, z, None, None);
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -291,13 +280,8 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
             );
 
             for (bx, _, bz) in bresenham_points {
-                if !editor.check_for_block(
-                    bx,
-                    0,
-                    bz,
-                    None,
-                    Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
-                ) {
+                if !editor.check_for_block(bx, 0, bz, None, Some(&[BLACK_CONCRETE, WHITE_CONCRETE]))
+                {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
             }

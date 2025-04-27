@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
-use crate::progress::emit_gui_progress_update;
 use crate::cartesian::XZPoint;
 use crate::ground::Ground;
+use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
@@ -416,7 +416,14 @@ impl WorldEditor {
         for x in min_x..=max_x {
             for y_offset in min_y..=max_y {
                 for z in min_z..=max_z {
-                    self.set_block(block, x, y_offset, z, override_whitelist, override_blacklist);
+                    self.set_block(
+                        block,
+                        x,
+                        y_offset,
+                        z,
+                        override_whitelist,
+                        override_blacklist,
+                    );
                 }
             }
         }
@@ -432,7 +439,7 @@ impl WorldEditor {
         blacklist: Option<&[Block]>,
     ) -> bool {
         let absolute_y = self.get_absolute_y(x, y, z);
-        
+
         // Retrieve the chunk modification map
         if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist

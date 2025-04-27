@@ -25,7 +25,7 @@ pub fn generate_world(
         emit_gui_progress_update(10.0, "Fetching elevation...");
     }
     let ground: Ground = Ground::new(args);
-    
+
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
@@ -163,11 +163,28 @@ pub fn generate_world(
                     editor.set_block(DIRT, x, -1, z, None, None);
                     editor.set_block(DIRT, x, -2, z, None, None);
                 }
-                
+
                 // Fill underground with stone - using relative Y offsets from ground level
                 if args.fillground {
-                    editor.fill_blocks(STONE, x, MIN_Y - args.ground_level + 1, z, x, -1, z, None, None);
-                    editor.set_block(BEDROCK, x, MIN_Y - args.ground_level, z, None, Some(&[BEDROCK]));
+                    editor.fill_blocks(
+                        STONE,
+                        x,
+                        MIN_Y - args.ground_level + 1,
+                        z,
+                        x,
+                        -1,
+                        z,
+                        None,
+                        None,
+                    );
+                    editor.set_block(
+                        BEDROCK,
+                        x,
+                        MIN_Y - args.ground_level,
+                        z,
+                        None,
+                        Some(&[BEDROCK]),
+                    );
                 }
 
                 block_counter += 1;
