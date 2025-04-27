@@ -154,7 +154,7 @@ pub fn generate_landuse(
             }
             "forest" => {
                 if !editor.check_for_block(x, ground_level, z, Some(&[WATER])) {
-                    let random_choice: i32 = rng.gen_range(0..21);
+                    let random_choice: i32 = rng.gen_range(0..30);
                     if random_choice == 20 {
                         Tree::create(editor, (x, ground_level + 1, z));
                     } else if random_choice == 2 {
@@ -165,7 +165,7 @@ pub fn generate_landuse(
                             _ => WHITE_FLOWER,
                         };
                         editor.set_block(flower_block, x, ground_level + 1, z, None, None);
-                    } else if random_choice <= 1 {
+                    } else if random_choice <= 12 {
                         editor.set_block(GRASS, x, ground_level + 1, z, None, None);
                     }
                 }

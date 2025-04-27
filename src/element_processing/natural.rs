@@ -23,14 +23,6 @@ pub fn generate_natural(
 
                 Tree::create(editor, (x, ground.level(node.xz()) + 1, z));
             }
-        } else if natural_type == "shrub" {
-            if let ProcessedElement::Node(node) = element {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
-                let y: i32 = ground.level(node.xz());
-                editor.set_block(OAK_LEAVES, x, y, z, None, None);
-                editor.set_block(OAK_LEAVES, x, y + 1, z, None, None);
-            }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
             let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -123,7 +115,7 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, y, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let random_choice = rng.gen_range(0..50);
+                            let random_choice = rng.gen_range(0..100);
                             if random_choice < 40 {
                                 if random_choice < 5 {
                                     editor.set_block(TALL_GRASS_BOTTOM, x, y + 1, z, None, None);
@@ -137,16 +129,16 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, y, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let random_choice = rng.gen_range(0..100);
+                            let random_choice = rng.gen_range(0..500);
                             if random_choice == 0 {
                                 Tree::create(editor, (x, y + 1, z));
-                            } else if random_choice < 30 {
+                            } else if random_choice < 40 {
                                 editor.set_block(OAK_LEAVES, x, y + 1, z, None, None);
-                                if random_choice < 10 {
+                                if random_choice < 15 {
                                     editor.set_block(OAK_LEAVES, x, y + 2, z, None, None);
                                 }
-                            } else if random_choice < 80 {
-                                if random_choice < 60 {
+                            } else if random_choice < 300 {
+                                if random_choice < 250 {
                                     editor.set_block(TALL_GRASS_BOTTOM, x, y + 1, z, None, None);
                                     editor.set_block(TALL_GRASS_TOP, x, y + 2, z, None, None);
                                 }
@@ -159,10 +151,10 @@ pub fn generate_natural(
                             if editor.check_for_block(x, y, z, Some(&[WATER])) {
                                 continue;
                             }
-                            let random_choice: i32 = rng.gen_range(0..40);
-                            if random_choice == 1 {
+                            let random_choice: i32 = rng.gen_range(0..30);
+                            if random_choice == 0 {
                                 Tree::create(editor, (x, y + 1, z));
-                            } else if random_choice == 2 {
+                            } else if random_choice == 1 {
                                 let flower_block = match rng.gen_range(1..=4) {
                                     1 => RED_FLOWER,
                                     2 => BLUE_FLOWER,
@@ -170,7 +162,7 @@ pub fn generate_natural(
                                     _ => WHITE_FLOWER,
                                 };
                                 editor.set_block(flower_block, x, y + 1, z, None, None);
-                            } else if random_choice <= 15 {
+                            } else if random_choice <= 12 {
                                 editor.set_block(GRASS, x, y + 1, z, None, None);
                             }
                         }
