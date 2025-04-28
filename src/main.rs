@@ -25,6 +25,8 @@ mod progress {
     }
 }
 mod retrieve_data;
+#[cfg(test)]
+mod test_utilities;
 mod version_check;
 mod world_editor;
 
@@ -114,7 +116,7 @@ fn main() {
 
         // Parse raw data
         let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-            osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
+            osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
         parsed_elements.sort_by_key(|element: &osm_parser::ProcessedElement| {
             osm_parser::get_priority(element)
         });
@@ -438,7 +440,7 @@ fn gui_start_generation(
             match retrieve_data::fetch_data(args.bbox, None, args.debug, "requests") {
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-                        osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
+                        osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));

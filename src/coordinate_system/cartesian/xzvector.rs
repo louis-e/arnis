@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 /// Vector between two points in minecraft xz space.
@@ -9,6 +10,12 @@ pub struct XZVector {
 
     /// Increment in z direction
     pub dz: i32,
+}
+
+impl fmt::Display for XZVector {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "XZVector({}, {})", self.dx, self.dz)
+    }
 }
 
 // below are associated +- operators

@@ -1,5 +1,6 @@
 use super::xzvector::XZVector;
 use serde::Deserialize;
+use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 #[derive(Debug, Deserialize, Copy, Clone, PartialEq)]
@@ -11,6 +12,12 @@ pub struct XZPoint {
 impl XZPoint {
     pub fn new(x: i32, z: i32) -> Self {
         Self { x, z }
+    }
+}
+
+impl fmt::Display for XZPoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "XZPoint({}, {})", self.x, self.z)
     }
 }
 

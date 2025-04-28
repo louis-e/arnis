@@ -1,4 +1,5 @@
 use crate::coordinate_system::cartesian::{XZPoint, XZVector};
+use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 /// An underlying shape of XZBBox enum.
@@ -13,18 +14,24 @@ pub struct XZBBoxRect {
 
 impl XZBBoxRect {
     pub fn new(point1: XZPoint, point2: XZPoint) -> Result<Self, String> {
-        let obj = Self { point1, point2 };
+        let blockx_ge_1 = point2.x - point1.x >= 0;
+        let blockz_ge_1 = point2.z - point1.z >= 0;
 
-        let blockx_ge_1 = obj.total_blocks_x() >= 1;
-        let blockz_ge_1 = obj.total_blocks_z() >= 1;
-
-        if !blockx_ge_1 || !blockz_ge_1 {
-            return Err(
-                "Invalid XZBBox: Total number of blocks in x and z should both > 1".to_string(),
-            );
+        if !blockx_ge_1 {
+            return Err(format!(
+                "Invalid XZBBox::Rect: point2.x should >= point1.x, but encountered {} -> {}",
+                point1.x, point2.x
+            ));
         }
 
-        Ok(obj)
+        if !blockz_ge_1 {
+            return Err(format!(
+                "Invalid XZBBox::Rect: point2.z should >= point1.z, but encountered {} -> {}",
+                point1.z, point2.z
+            ));
+        }
+
+        Ok(Self { point1, point2 })
     }
 
     pub fn point1(&self) -> XZPoint {
@@ -58,6 +65,12 @@ impl XZBBoxRect {
             && xzpoint.x <= self.point2.x
             && xzpoint.z >= self.point1.z
             && xzpoint.z <= self.point2.z
+    }
+}
+
+impl fmt::Display for XZBBoxRect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Rect({} -> {})", self.point1, self.point2)
     }
 }
 

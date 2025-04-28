@@ -5,7 +5,7 @@ use crate::osm_parser::ProcessedElement;
 use serde::Deserialize;
 
 // move the map so that start goes to end
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 pub struct StartEndTranslator {
     pub start: XZPoint,
     pub end: XZPoint,
@@ -17,6 +17,6 @@ impl Operator for StartEndTranslator {
     }
 
     fn repr(&self) -> String {
-        "translate by start and end points".to_string()
+        format!("translate {} to {}", self.start, self.end)
     }
 }

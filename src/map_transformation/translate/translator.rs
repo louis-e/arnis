@@ -61,3 +61,64 @@ pub fn translate_by_vector(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZVector;
+    use crate::test_utilities::generate_default_example;
+
+    // this ensures translate_by_vector function is correct
+    #[test]
+    fn test_translate_by_vector() {
+        let dx: i32 = 123;
+        let dz: i32 = -234;
+        let vector = XZVector { dx, dz };
+
+        let (xzbbox1, elements1) = generate_default_example();
+
+        let mut xzbbox2 = xzbbox1.clone();
+        let mut elements2 = elements1.clone();
+
+        translate_by_vector(vector, &mut elements2, &mut xzbbox2);
+
+        // 1. Elem type should not change
+        // 2. For node,
+        //      2.1 id and tags should not change
+        //      2.2 x, z should be displaced as required
+        // 3. For way,
+        //      3.1 id and tags should not change
+        //      3.2 For every node included, satisfies (2)
+        // 4. For relation, everything is unchanged
+        for (original, translated) in elements1.iter().zip(elements2.iter()) {
+            match (original, translated) {
+                (ProcessedElement::Node(a), ProcessedElement::Node(b)) => {
+                    assert_eq!(a.id, b.id);
+                    assert_eq!(a.tags, b.tags);
+                    assert_eq!(b.x, a.x + dx);
+                    assert_eq!(b.z, a.z + dz);
+                }
+                (ProcessedElement::Way(a), ProcessedElement::Way(b)) => {
+                    assert_eq!(a.id, b.id);
+                    assert_eq!(a.tags, b.tags);
+                    for (nodea, nodeb) in a.nodes.iter().zip(b.nodes.iter()) {
+                        assert_eq!(nodea.id, nodeb.id);
+                        assert_eq!(nodea.tags, nodeb.tags);
+                        assert_eq!(nodeb.x, nodea.x + dx);
+                        assert_eq!(nodeb.z, nodea.z + dz);
+                    }
+                }
+                (ProcessedElement::Relation(a), ProcessedElement::Relation(b)) => {
+                    assert_eq!(a, b);
+                }
+                _ => {
+                    panic!(
+                        "Element type changed: original {} to {}",
+                        original.kind(),
+                        translated.kind()
+                    );
+                }
+            }
+        }
+    }
+}

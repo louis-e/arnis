@@ -5,7 +5,7 @@ use crate::osm_parser::ProcessedElement;
 use serde::Deserialize;
 
 /// Translate by directly specifying displacement on x, z directions
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 pub struct VectorTranslator {
     pub vector: XZVector,
 }
@@ -16,6 +16,6 @@ impl Operator for VectorTranslator {
     }
 
     fn repr(&self) -> String {
-        "translate by vector".to_string()
+        format!("translate diaplacement {}", self.vector)
     }
 }

@@ -44,17 +44,55 @@ pub fn operator_vec_from_json(list: &serde_json::Value) -> Result<Vec<Box<dyn Op
         .collect()
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::{XZPoint, XZVector};
+    use crate::map_transformation::translate;
+    use std::fs;
 
-//     #[test]
-//     fn test_valid_input() {
-//         assert!(BBox::new(0., 0., 1., 1.).is_ok());
+    // this ensures json can be correctly read into the specific operator struct
+    #[test]
+    fn test_read_valid_formats() {
+        let opjson = serde_json::from_str(
+            &fs::read_to_string("tests/map_transformation/all_valid_examples.json").unwrap(),
+        )
+        .unwrap();
 
-//         assert!(BBox::new(1., 2., 3., 4.).is_ok());
+        let ops = operator_vec_from_json(&opjson);
 
-//         // Arnis, Germany
-//         assert!(BBox::new(9.927928, 54.627053, 9.937563, 54.634902).is_ok());
-//     }
-// }
+        assert!(ops.is_ok());
+
+        let ops = ops.unwrap();
+
+        // total number of operations
+        assert_eq!(ops.len(), 2);
+
+        // below tests the operators one by one by comparing repr description
+
+        let testop = translate::VectorTranslator {
+            vector: XZVector { dx: 2000, dz: 1000 },
+        };
+        assert_eq!(ops[0].repr(), testop.repr());
+
+        let testop = translate::StartEndTranslator {
+            start: XZPoint { x: 0, z: 0 },
+            end: XZPoint { x: -1000, z: -2000 },
+        };
+        assert_eq!(ops[1].repr(), testop.repr());
+    }
+
+    // this ensures json format error can be handled as Err
+    #[test]
+    fn test_read_invalid_formats() {
+        let opjson = serde_json::from_str(
+            &fs::read_to_string("tests/map_transformation/invalid_example_missing_field.json")
+                .unwrap(),
+        )
+        .unwrap();
+
+        let ops = operator_vec_from_json(&opjson);
+
+        assert!(ops.is_err());
+    }
+}
