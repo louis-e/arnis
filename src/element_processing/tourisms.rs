@@ -1,10 +1,8 @@
 use crate::block_definitions::*;
-use crate::coordinate_system::cartesian::XZPoint;
-use crate::ground::Ground;
 use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, ground: &Ground) {
+pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -22,15 +20,14 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
         let x: i32 = element.x;
         let z: i32 = element.z;
 
-        // Calculate the dynamic ground level
-        let ground_level = ground.level(XZPoint::new(x, z));
-
         if tourism_type == "information" {
-            if let Some("board") = element.tags.get("information").map(|x: &String| x.as_str()) {
-                // Draw an information board
-                // TODO draw a sign with text
-                editor.set_block(COBBLESTONE_WALL, x, ground_level + 1, z, None, None);
-                editor.set_block(OAK_PLANKS, x, ground_level + 2, z, None, None);
+            if let Some(info_type) = element.tags.get("information").map(|x: &String| x.as_str()) {
+                if info_type != "office" && info_type != "visitor_centre" {
+                    // Draw an information board
+                    // TODO draw a sign with text if provided
+                    editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                    editor.set_block(OAK_PLANKS, x, 2, z, None, None);
+                }
             }
         }
     }

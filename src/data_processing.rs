@@ -25,6 +25,9 @@ pub fn generate_world(
     }
     let ground: Ground = Ground::new(args);
 
+    // Set ground reference in the editor to enable elevation-aware block placement
+    editor.set_ground(&ground);
+
     emit_gui_progress_update(31.0, "Processing terrain...");
 
     // Process data
@@ -60,56 +63,56 @@ pub fn generate_world(
         match element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    buildings::generate_buildings(&mut editor, way, &ground, args, None);
+                    buildings::generate_buildings(&mut editor, way, args, None);
                 } else if way.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, &ground, args);
+                    highways::generate_highways(&mut editor, element, args);
                 } else if way.tags.contains_key("landuse") {
-                    landuse::generate_landuse(&mut editor, way, &ground, args);
+                    landuse::generate_landuse(&mut editor, way, args);
                 } else if way.tags.contains_key("natural") {
-                    natural::generate_natural(&mut editor, element, &ground, args);
+                    natural::generate_natural(&mut editor, element, args);
                 } else if way.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, element, &ground, args);
+                    amenities::generate_amenities(&mut editor, element, args);
                 } else if way.tags.contains_key("leisure") {
-                    leisure::generate_leisure(&mut editor, way, &ground, args);
+                    leisure::generate_leisure(&mut editor, way, args);
                 } else if way.tags.contains_key("barrier") {
-                    barriers::generate_barriers(&mut editor, element, &ground);
+                    barriers::generate_barriers(&mut editor, element);
                 } else if way.tags.contains_key("waterway") {
-                    waterways::generate_waterways(&mut editor, way, &ground);
+                    waterways::generate_waterways(&mut editor, way);
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way, &ground);
+                    railways::generate_railways(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
-                    highways::generate_aeroway(&mut editor, way, &ground);
+                    highways::generate_aeroway(&mut editor, way);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
-                    highways::generate_siding(&mut editor, way, &ground);
+                    highways::generate_siding(&mut editor, way);
                 }
             }
             ProcessedElement::Node(node) => {
                 if node.tags.contains_key("door") || node.tags.contains_key("entrance") {
-                    doors::generate_doors(&mut editor, node, &ground);
+                    doors::generate_doors(&mut editor, node);
                 } else if node.tags.contains_key("natural")
                     && node.tags.get("natural") == Some(&"tree".to_string())
                 {
-                    natural::generate_natural(&mut editor, element, &ground, args);
+                    natural::generate_natural(&mut editor, element, args);
                 } else if node.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, element, &ground, args);
+                    amenities::generate_amenities(&mut editor, element, args);
                 } else if node.tags.contains_key("barrier") {
-                    barriers::generate_barriers(&mut editor, element, &ground);
+                    barriers::generate_barriers(&mut editor, element);
                 } else if node.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, &ground, args);
+                    highways::generate_highways(&mut editor, element, args);
                 } else if node.tags.contains_key("tourism") {
-                    tourisms::generate_tourisms(&mut editor, node, &ground);
+                    tourisms::generate_tourisms(&mut editor, node);
                 }
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
-                    buildings::generate_building_from_relation(&mut editor, rel, &ground, args);
+                    buildings::generate_building_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("water") {
-                    water_areas::generate_water_areas(&mut editor, rel, &ground);
+                    water_areas::generate_water_areas(&mut editor, rel);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
-                    leisure::generate_leisure_from_relation(&mut editor, rel, &ground, args);
+                    leisure::generate_leisure_from_relation(&mut editor, rel, args);
                 }
             }
         }
@@ -147,78 +150,58 @@ pub fn generate_world(
     let min_z = xzbbox.min_z();
     let max_z = xzbbox.max_z();
 
-    // Differentiate between terrain and non-terrain generation
-    if ground.elevation_enabled {
-        // Pre-calculate ground levels for all points
-        let mut ground_levels: Vec<Vec<i32>> =
-            Vec::with_capacity(xzbbox.circumscribed_rect().total_blocks_x() as usize);
-        for x in min_x..=max_x {
-            let mut row = Vec::with_capacity(xzbbox.circumscribed_rect().total_blocks_z() as usize);
-            for z in min_z..=max_z {
-                row.push(ground.level(XZPoint::new(x, z)));
+    for x in min_x..=max_x {
+        for z in min_z..=max_z {
+            // Add default dirt and grass layer if there isn't a stone layer already
+            if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
+                editor.set_block(groundlayer_block, x, 0, z, None, None);
+                editor.set_block(DIRT, x, -1, z, None, None);
+                editor.set_block(DIRT, x, -2, z, None, None);
             }
-            ground_levels.push(row);
-        }
 
-        // Process blocks in larger batches
-        for x in min_x..=max_x {
-            for z in min_z..=max_z {
-                let ground_level = ground_levels[(x - min_x) as usize][(z - min_z) as usize];
+            // Fill underground with stone
+            if args.fillground {
+                // Set bedrock at the absolute Y = MIN_Y
+                editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
-                // Find the highest block in this column
-                let max_y = (MIN_Y..ground_level)
-                    .find(|y: &i32| editor.block_at(x, *y, z))
-                    .unwrap_or(ground_level)
-                    .min(ground_level);
+                // Fill from bedrock+1 to 3 blocks below ground with stone
+                editor.fill_blocks_absolute(
+                    STONE,
+                    x,
+                    MIN_Y + 1,
+                    z,
+                    x,
+                    editor.relative_to_absolute_y(x, -3, z),
+                    z,
+                    None,
+                    None,
+                );
 
-                // Add default dirt and grass layer if there isn't a stone layer already
-                if !editor.check_for_block(x, max_y, z, Some(&[STONE]), None) {
-                    editor.set_block(groundlayer_block, x, max_y, z, None, None);
-                    editor.set_block(DIRT, x, max_y - 1, z, None, None);
-                    editor.set_block(DIRT, x, max_y - 2, z, None, None);
-                }
-                // Fill underground with stone
-                if args.fillground {
-                    editor.fill_blocks(STONE, x, MIN_Y + 1, z, x, max_y - 1, z, None, None);
-                    editor.set_block(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
-                }
-
-                block_counter += 1;
-                if block_counter % batch_size == 0 {
-                    ground_pb.inc(batch_size);
-                }
-
-                gui_progress_grnd += progress_increment_grnd;
-                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                    emit_gui_progress_update(gui_progress_grnd, "");
-                    last_emitted_progress = gui_progress_grnd;
-                }
+                // Fill from stone top to ground bottom with dirt
+                editor.fill_blocks_absolute(
+                    DIRT,
+                    x,
+                    editor.relative_to_absolute_y(x, -3, z) + 1,
+                    z,
+                    x,
+                    editor.relative_to_absolute_y(x, -1, z),
+                    z,
+                    None,
+                    None,
+                );
+            } else {
+                editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
             }
-        }
 
-        // Set blocks at spawn location
-        for x in min_x..=max_x + 20 {
-            for z in min_z..=max_z + 20 {
-                editor.set_block(groundlayer_block, x, -62, z, None, None);
+            block_counter += 1;
+            if block_counter % batch_size == 0 {
+                ground_pb.inc(batch_size);
             }
-        }
-    } else {
-        for x in min_x..=max_x {
-            for z in min_z..=max_z {
-                let ground_level = ground.level(XZPoint::new(x, z));
-                editor.set_block(groundlayer_block, x, ground_level, z, None, None);
-                editor.set_block(DIRT, x, ground_level - 1, z, None, None);
 
-                block_counter += 1;
-                if block_counter % batch_size == 0 {
-                    ground_pb.inc(batch_size);
-                }
-
-                gui_progress_grnd += progress_increment_grnd;
-                if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                    emit_gui_progress_update(gui_progress_grnd, "");
-                    last_emitted_progress = gui_progress_grnd;
-                }
+            gui_progress_grnd += progress_increment_grnd;
+            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                emit_gui_progress_update(gui_progress_grnd, "");
+                last_emitted_progress = gui_progress_grnd;
             }
         }
     }

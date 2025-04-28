@@ -16,6 +16,7 @@ const MIN_ZOOM: u8 = 10;
 const MAX_ZOOM: u8 = 15;
 
 /// Represents terrain data and elevation settings
+#[derive(Clone)]
 pub struct Ground {
     pub elevation_enabled: bool,
     ground_level: i32,
@@ -73,6 +74,7 @@ impl Ground {
         self.interpolate_height(x_ratio, z_ratio, data)
     }
 
+    #[allow(unused)]
     #[inline(always)]
     pub fn min_level<I: Iterator<Item = XZPoint>>(&self, coords: I) -> Option<i32> {
         if !self.elevation_enabled {
@@ -81,6 +83,7 @@ impl Ground {
         coords.map(|c: XZPoint| self.level(c)).min()
     }
 
+    #[allow(unused)]
     #[inline(always)]
     pub fn max_level<I: Iterator<Item = XZPoint>>(&self, coords: I) -> Option<i32> {
         if !self.elevation_enabled {

@@ -1,11 +1,10 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
-use crate::ground::Ground;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, ground: &Ground) {
+pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(_waterway_type) = element.tags.get("waterway") {
         let mut previous_node: Option<XZPoint> = None;
         let mut waterway_width: i32 = 4; // Default waterway width
@@ -35,17 +34,15 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay, grou
                         bresenham_line(prev.x, 0, prev.z, current_node.x, 0, current_node.z);
 
                     for (bx, _, bz) in bresenham_points {
-                        let ground_level = ground.level(XZPoint::new(bx, bz));
-
                         for x in (bx - waterway_width / 2)..=(bx + waterway_width / 2) {
                             for z in (bz - waterway_width / 2)..=(bz + waterway_width / 2) {
                                 // Set water block at the ground level
-                                editor.set_block(WATER, x, ground_level, z, None, None);
+                                editor.set_block(WATER, x, 0, z, None, None);
                                 // Clear vegetation above the water
                                 editor.set_block(
                                     AIR,
                                     x,
-                                    ground_level + 1,
+                                    1,
                                     z,
                                     Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
                                     None,
