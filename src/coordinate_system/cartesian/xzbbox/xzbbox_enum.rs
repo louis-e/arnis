@@ -191,6 +191,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::excessive_precision)]
     fn test_invalid_inputs() {
         assert!(XZBBox::rect_from_xz_lengths(-1.0, 1.5).is_err());
         assert!(XZBBox::rect_from_xz_lengths(1323.5, -3287238791.395).is_err());
