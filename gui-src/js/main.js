@@ -415,11 +415,14 @@ function displayBboxInfoText(bboxText) {
 }
 
 let worldPath = "";
+let isNewWorld = false;
+
 async function selectWorld(generate_new_world) {
   try {
     const worldName = await invoke('gui_select_world', { generateNew: generate_new_world } );
     if (worldName) {
       worldPath = worldName;
+      isNewWorld = generate_new_world;
       const lastSegment = worldName.split(/[\\/]/).pop();
       document.getElementById('selected-world').textContent = lastSegment;
       document.getElementById('selected-world').style.color = "#fecc44";
@@ -495,7 +498,8 @@ async function startGeneration() {
         groundLevel: ground_level,
         floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
-        fillgroundEnabled: fill_ground
+        fillgroundEnabled: fill_ground,
+        isNewWorld: isNewWorld
     });
 
     console.log("Generation process started.");

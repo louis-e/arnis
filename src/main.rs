@@ -272,12 +272,28 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
 
 #[cfg(feature = "gui")]
 fn create_new_world(base_path: &Path) -> Result<String, String> {
-    // Generate a unique world name
+    // Generate a unique world name with proper counter
+    // Check for both "Arnis World X" and "Arnis World X: Location" patterns
     let mut counter: i32 = 1;
     let unique_name: String = loop {
         let candidate_name: String = format!("Arnis World {}", counter);
         let candidate_path: PathBuf = base_path.join(&candidate_name);
-        if !candidate_path.exists() {
+
+        // Check for exact match (no location suffix)
+        let exact_match_exists = candidate_path.exists();
+
+        // Check for worlds with location suffix (Arnis World X: Location)
+        let location_pattern = format!("Arnis World {}: ", counter);
+        let location_match_exists = fs::read_dir(base_path)
+            .map(|entries| {
+                entries
+                    .filter_map(Result::ok)
+                    .filter_map(|entry| entry.file_name().into_string().ok())
+                    .any(|name| name.starts_with(&location_pattern))
+            })
+            .unwrap_or(false);
+
+        if !exact_match_exists && !location_match_exists {
             break candidate_name;
         }
         counter += 1;
@@ -371,6 +387,120 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
 }
 
 #[cfg(feature = "gui")]
+/// Adds localized area name to the world name in level.dat
+fn add_localized_world_name(world_path_str: &str, bbox: &bbox::BBox) -> String {
+    let world_path = PathBuf::from(world_path_str);
+
+    // Only proceed if the path exists
+    if !world_path.exists() {
+        return world_path_str.to_string();
+    }
+
+    // Check the level.dat file first to get the current name
+    let level_path = world_path.join("level.dat");
+
+    if !level_path.exists() {
+        return world_path_str.to_string();
+    }
+
+    // Try to read the current world name from level.dat
+    let current_name = match std::fs::read(&level_path) {
+        Ok(level_data) => {
+            let mut decoder = GzDecoder::new(level_data.as_slice());
+            let mut decompressed_data = Vec::new();
+            if decoder.read_to_end(&mut decompressed_data).is_ok() {
+                if let Ok(Value::Compound(ref root)) =
+                    fastnbt::from_bytes::<Value>(&decompressed_data)
+                {
+                    if let Some(Value::Compound(ref data)) = root.get("Data") {
+                        if let Some(Value::String(name)) = data.get("LevelName") {
+                            name.clone()
+                        } else {
+                            return world_path_str.to_string();
+                        }
+                    } else {
+                        return world_path_str.to_string();
+                    }
+                } else {
+                    return world_path_str.to_string();
+                }
+            } else {
+                return world_path_str.to_string();
+            }
+        }
+        Err(_) => return world_path_str.to_string(),
+    };
+
+    // Only modify if it's an Arnis world and doesn't already have an area name
+    if !current_name.starts_with("Arnis World ") || current_name.contains(": ") {
+        return world_path_str.to_string();
+    }
+
+    // Calculate center coordinates of bbox
+    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+
+    // Try to fetch the area name
+    let area_name = match retrieve_data::fetch_area_name(center_lat, center_lon) {
+        Ok(Some(name)) => name,
+        _ => return world_path_str.to_string(), // Keep original name if no area name found
+    };
+
+    // Create new name with localized area name, ensuring total length doesn't exceed 30 characters
+    let base_name = current_name.clone();
+    let max_area_name_len = 30 - base_name.len() - 2; // 2 chars for ": "
+
+    let truncated_area_name = if area_name.len() > max_area_name_len && max_area_name_len > 0 {
+        // Truncate the area name to fit within the 30 character limit
+        area_name[..max_area_name_len].to_string()
+    } else if max_area_name_len == 0 {
+        // If base name is already too long, don't add area name
+        return world_path_str.to_string();
+    } else {
+        area_name
+    };
+
+    let new_name = format!("{}: {}", base_name, truncated_area_name);
+
+    // Update the level.dat file with the new name
+    if let Ok(level_data) = std::fs::read(&level_path) {
+        let mut decoder = GzDecoder::new(level_data.as_slice());
+        let mut decompressed_data = Vec::new();
+        if decoder.read_to_end(&mut decompressed_data).is_ok() {
+            if let Ok(mut nbt_data) = fastnbt::from_bytes::<Value>(&decompressed_data) {
+                // Update the level name in NBT data
+                if let Value::Compound(ref mut root) = nbt_data {
+                    if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
+                        data.insert("LevelName".to_string(), Value::String(new_name));
+
+                        // Save the updated NBT data
+                        if let Ok(serialized_data) = fastnbt::to_bytes(&nbt_data) {
+                            let mut encoder = flate2::write::GzEncoder::new(
+                                Vec::new(),
+                                flate2::Compression::default(),
+                            );
+                            if encoder.write_all(&serialized_data).is_ok() {
+                                if let Ok(compressed_data) = encoder.finish() {
+                                    if let Err(e) = std::fs::write(&level_path, compressed_data) {
+                                        eprintln!(
+                                            "Failed to update level.dat with area name: {}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Return the original path since we didn't change the directory name
+    world_path_str.to_string()
+}
+
+#[cfg(feature = "gui")]
 #[tauri::command]
 fn gui_get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -396,6 +526,7 @@ fn gui_start_generation(
     floodfill_timeout: u64,
     terrain_enabled: bool,
     fillground_enabled: bool,
+    is_new_world: bool,
 ) -> Result<(), String> {
     use bbox::BBox;
     use progress::emit_gui_error;
@@ -413,11 +544,18 @@ fn gui_start_generation(
                 }
             };
 
+            // Add localized name to the world if user generated a new world
+            let updated_world_path = if is_new_world {
+                add_localized_world_name(&selected_world, &bbox)
+            } else {
+                selected_world
+            };
+
             // Create an Args instance with the chosen bounding box and world directory path
             let args: Args = Args {
                 bbox,
                 file: None,
-                path: selected_world,
+                path: updated_world_path,
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,

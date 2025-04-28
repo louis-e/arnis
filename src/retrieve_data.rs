@@ -224,3 +224,32 @@ pub fn fetch_data(
         Ok(data)
     }
 }
+
+/// Fetches a short area name using Nominatim for the given lat/lon
+pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
+
+    let url = format!(
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={}&lon={}&addressdetails=1",
+        lat, lon
+    );
+
+    let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
+
+    if !resp.status().is_success() {
+        return Ok(None);
+    }
+
+    let json: Value = resp.json()?;
+
+    if let Some(address) = json.get("address") {
+        let fields = ["city", "town", "village", "county", "borough", "suburb"];
+        for field in fields.iter() {
+            if let Some(name) = address.get(*field).and_then(|v| v.as_str()) {
+                return Ok(Some(name.to_string()));
+            }
+        }
+    }
+
+    Ok(None)
+}
