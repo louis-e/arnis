@@ -81,16 +81,16 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
                         "beach" | "sand" | "dune" => {
-                            editor.set_block(SAND, x, 1, z, None, None);
-                            editor.set_block(STONE, x, 2, z, None, None);
+                            editor.set_block(SAND, x, -1, z, None, None);
+                            editor.set_block(STONE, x, -2, z, None, None);
                         }
                         "glacier" => {
-                            editor.set_block(PACKED_ICE, x, 1, z, None, None);
-                            editor.set_block(STONE, x, 2, z, None, None);
+                            editor.set_block(PACKED_ICE, x, -1, z, None, None);
+                            editor.set_block(STONE, x, -2, z, None, None);
                         }
                         "bare_rock" => {
-                            editor.set_block(STONE, x, 1, z, None, None);
-                            editor.set_block(STONE, x, 2, z, None, None);
+                            editor.set_block(STONE, x, -1, z, None, None);
+                            editor.set_block(STONE, x, -2, z, None, None);
                         }
                         _ => {}
                     }
