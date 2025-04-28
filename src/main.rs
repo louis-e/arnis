@@ -450,9 +450,12 @@ fn add_localized_world_name(world_path_str: &str, bbox: &bbox::BBox) -> String {
     let base_name = current_name.clone();
     let max_area_name_len = 30 - base_name.len() - 2; // 2 chars for ": "
 
-    let truncated_area_name = if area_name.chars().count() > max_area_name_len && max_area_name_len > 0 {
+    let truncated_area_name = if area_name.chars().count()  > max_area_name_len && max_area_name_len > 0 {
         // Truncate the area name to fit within the 30 character limit
-        area_name.chars().take(max_area_name_len).collect::<String>()
+        area_name
+                .chars()
+                .take(max_area_name_len)
+                .collect::<String>()
     } else if max_area_name_len == 0 {
         // If base name is already too long, don't add area name
         return world_path_str.to_string();
