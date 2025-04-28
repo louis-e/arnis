@@ -54,7 +54,7 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         .collect();
 
     inverse_floodfill(
-        min_x, min_z, max_x, max_z, outers, inners, editor, ground, start_time,
+        min_x, min_z, max_x, max_z, outers, inners, editor, start_time,
     );
 }
 

@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -145,13 +145,8 @@ pub fn generate_world(
 
     let groundlayer_block = GRASS_BLOCK;
 
-    let min_x = xzbbox.min_x();
-    let max_x = xzbbox.max_x();
-    let min_z = xzbbox.min_z();
-    let max_z = xzbbox.max_z();
-
-    for x in min_x..=max_x {
-        for z in min_z..=max_z {
+    for x in xzbbox.min_x()..=xzbbox.max_x() {
+        for z in xzbbox.min_z()..=xzbbox.max_z() {
             // Add default dirt and grass layer if there isn't a stone layer already
             if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
                 editor.set_block(groundlayer_block, x, 0, z, None, None);

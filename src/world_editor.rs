@@ -262,7 +262,10 @@ impl<'a> WorldEditor<'a> {
     #[inline(always)]
     fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {
         if let Some(ground) = &self.ground {
-            ground.level(XZPoint::new(x, z)) + y_offset
+            ground.level(XZPoint::new(
+                x - self.xzbbox.min_x(),
+                z - self.xzbbox.min_z(),
+            )) + y_offset
         } else {
             y_offset // If no ground reference, use y_offset as absolute Y
         }
@@ -418,7 +421,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
 
