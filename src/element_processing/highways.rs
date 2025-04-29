@@ -131,6 +131,22 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                     block_type = GRAY_CONCRETE;
                     block_range = 2;
                 }
+                "secondary_link" | "tertiary_link" => {
+                    block_type = BLACK_CONCRETE;
+                    block_range = 1;
+                }
+                "escape" => {
+                    block_type = SAND;
+                    block_range = 1;
+                }
+                "steps" => {
+                    block_type = OAK_SLAB;
+                    block_range = 1;
+                }
+                "ladder" => {
+                    block_type = LADDER;
+                    block_range = 1;
+                }
                 _ => {
                     if let Some(lanes) = element.tags().get("lanes") {
                         if lanes == "2" {

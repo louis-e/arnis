@@ -28,8 +28,8 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     GREEN_STAINED_HARDENED_CLAY
                 }
             }
-            "swimming_pool" | "swimming_area" | "marina" => WATER, //Add swimming area and marina
-            "bathing_place" => SMOOTH_SANDSTONE,                   // Could be sand or concrete
+            "swimming_pool" | "swimming_area" => WATER, //Add swimming area and marina
+            "bathing_place" => SMOOTH_SANDSTONE,        // Could be sand or concrete
             "water_park" | "slipway" => LIGHT_GRAY_CONCRETE, // Water park area, not the pool. Usually is concrete
             "ice_rink" => PACKED_ICE, // Ice for Ice Rink, may need edge defined
             _ => GRASS_BLOCK,
