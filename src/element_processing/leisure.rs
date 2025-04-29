@@ -15,13 +15,16 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 
         // Determine block type based on leisure type
         let block_type: Block = match leisure_type.as_str() {
-            "park" | "nature_preserve" | "garden" => GRASS_BLOCK,
-            "playground" | "recreation_ground" | "pitch" | "beach_resort" => {
+            "park" | "nature_reserve" | "garden" | "disc_golf_course" | "golf_course"
+            | "soccer_golf" => GRASS_BLOCK,
+            "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
                         "clay" => TERRACOTTA,
                         "sand" => SAND,
                         "tartan" => RED_TERRACOTTA,
+                        "grass" => GRASS,
+                        "pebblestone" | "cobblestone" | "unhewn_cobblestone" => COBBLESTONE,
                         _ => GREEN_STAINED_HARDENED_CLAY,
                     }
                 } else {
@@ -30,6 +33,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             }
             "swimming_pool" | "swimming_area" => WATER, //Add swimming area and marina
             "bathing_place" => SMOOTH_SANDSTONE,        // Could be sand or concrete
+            "outdoor_seating" => SMOOTH_STONE,
             "water_park" | "slipway" => LIGHT_GRAY_CONCRETE, // Water park area, not the pool. Usually is concrete
             "ice_rink" => PACKED_ICE, // Ice for Ice Rink, may need edge defined
             _ => GRASS_BLOCK,
@@ -81,7 +85,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens
-                if matches!(leisure_type.as_str(), "park" | "garden")
+                if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
                     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
