@@ -8,17 +8,16 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
         if [
             "proposed",
             "abandoned",
-            "subway",
+            //"subway",
             "construction",
-            "razed",
-            "turntable",
+            "razed", // "turntable",
         ]
         .contains(&railway_type.as_str())
         {
             return;
         }
 
-        if let Some(subway) = element.tags.get("subway") {
+        /*  if let Some(subway) = element.tags.get("subway") {
             if subway == "yes" {
                 return;
             }
@@ -28,41 +27,147 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
             if tunnel == "yes" {
                 return;
             }
-        }
+        } */
 
-        for i in 1..element.nodes.len() {
-            let prev_node = element.nodes[i - 1].xz();
-            let cur_node = element.nodes[i].xz();
+        if ["station", "halt", "stop", "platform"].contains(&railway_type.as_str()) {
+            for i in 1..element.nodes.len() {
+                let prev_node = element.nodes[i - 1].xz();
+                let cur_node = element.nodes[i].xz();
 
-            let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
-            let smoothed_points = smooth_diagonal_rails(&points);
+                let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
+                let smoothed_points = smooth_diagonal_rails(&points);
 
-            for j in 0..smoothed_points.len() {
-                let (bx, _, bz) = smoothed_points[j];
+                for j in 0..smoothed_points.len() {
+                    let (bx, _, bz) = smoothed_points[j];
+                    let mut ground_level = 0;
+                    if let Some(level_str) = element.tags.get("layer") {
+                        if let Ok(level) = level_str.parse::<i32>() {
+                            ground_level = level * 3;
+                        }
+                    }
 
-                editor.set_block(GRAVEL, bx, 0, bz, None, None);
+                    editor.set_block(
+                        SMOOTH_STONE,
+                        bx,
+                        ground_level,
+                        bz,
+                        Some(&[DIRT, STONE]),
+                        None,
+                    );
+                    editor.set_block(AIR, bx, ground_level + 1, bz, Some(&[DIRT, STONE]), None);
+                    editor.set_block(AIR, bx, ground_level + 2, bz, Some(&[DIRT, STONE]), None);
 
-                let prev = if j > 0 {
-                    Some(smoothed_points[j - 1])
-                } else {
-                    None
-                };
-                let next = if j < smoothed_points.len() - 1 {
-                    Some(smoothed_points[j + 1])
-                } else {
-                    None
-                };
+                    editor.set_block(
+                        AIR,
+                        bx,
+                        ground_level + 1,
+                        bz + 1,
+                        Some(&[DIRT, STONE]),
+                        None,
+                    );
+                    editor.set_block(
+                        AIR,
+                        bx + 1,
+                        ground_level + 1,
+                        bz,
+                        Some(&[DIRT, STONE]),
+                        None,
+                    );
+                    editor.set_block(
+                        AIR,
+                        bx,
+                        ground_level + 2,
+                        bz + 1,
+                        Some(&[DIRT, STONE]),
+                        None,
+                    );
+                    editor.set_block(
+                        AIR,
+                        bx + 1,
+                        ground_level + 2,
+                        bz,
+                        Some(&[DIRT, STONE]),
+                        None,
+                    );
 
-                let rail_block = determine_rail_direction(
-                    (bx, bz),
-                    prev.map(|(x, _, z)| (x, z)),
-                    next.map(|(x, _, z)| (x, z)),
-                );
+                    if ground_level > 0 {
+                        // If in the air, add block below stone
+                        editor.set_block(
+                            GRAY_CONCRETE,
+                            bx,
+                            ground_level - 1,
+                            bz,
+                            Some(&[DIRT, STONE]),
+                            None,
+                        );
+                    }
+                }
+            }
+        } else {
+            for i in 1..element.nodes.len() {
+                let prev_node = element.nodes[i - 1].xz();
+                let cur_node = element.nodes[i].xz();
 
-                editor.set_block(rail_block, bx, 1, bz, None, None);
+                let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
+                let smoothed_points = smooth_diagonal_rails(&points);
 
-                if bx % 4 == 0 {
-                    editor.set_block(OAK_LOG, bx, 0, bz, None, None);
+                for j in 0..smoothed_points.len() {
+                    let (bx, _, bz) = smoothed_points[j];
+                    let mut ground_level = 0;
+                    if let Some(level_str) = element.tags.get("layer") {
+                        if let Ok(level) = level_str.parse::<i32>() {
+                            ground_level = level * 3;
+                        }
+                    }
+
+                    if (bx + bz) % 4 == 0 {
+                        editor.set_block(OAK_PLANKS, bx, ground_level, bz, None, None);
+                    } else {
+                        editor.set_block(GRAVEL, bx, ground_level, bz, None, None);
+                    }
+
+                    let prev = if j > 0 {
+                        Some(smoothed_points[j - 1])
+                    } else {
+                        None
+                    };
+                    let next = if j < smoothed_points.len() - 1 {
+                        Some(smoothed_points[j + 1])
+                    } else {
+                        None
+                    };
+
+                    let rail_block = determine_rail_direction(
+                        (bx, bz),
+                        prev.map(|(x, _, z)| (x, z)),
+                        next.map(|(x, _, z)| (x, z)),
+                    );
+
+                    editor.set_block(
+                        rail_block,
+                        bx,
+                        ground_level + 1,
+                        bz,
+                        Some(&[DIRT, STONE]),
+                        None,
+                    );
+                    if ground_level < -1 {
+                        // If underground, add air block above rails.
+                        //&& args.fillground {
+                        editor.set_block(AIR, bx, ground_level + 2, bz, Some(&[DIRT, STONE]), None);
+                        //editor.set_block(GRASS_BLOCK, bx, ground_level + 3, bz, None, None);
+                    }
+                    if ground_level > 0 {
+                        // If in the air, add block below gravel
+                        editor.set_block(
+                            GRAY_CONCRETE,
+                            bx,
+                            ground_level - 1,
+                            bz,
+                            Some(&[DIRT, STONE]),
+                            None,
+                        );
+                    }
                 }
             }
         }

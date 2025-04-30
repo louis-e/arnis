@@ -40,8 +40,74 @@ pub fn generate_world(
 
     let progress_increment_prcs: f64 = 49.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 11.0;
-    let mut last_emitted_progress: f64 = current_progress_prcs;
+    let  _last_emitted_progress: f64 = current_progress_prcs;
 
+    process_pb.finish();
+
+    // Generate ground layer
+    let total_blocks: u64 = (scale_factor_x as i32 + 1) as u64 * (scale_factor_z as i32 + 1) as u64;
+    let desired_updates: u64 = 1500;
+    let batch_size: u64 = (total_blocks / desired_updates).max(1);
+
+    let mut block_counter: u64 = 0;
+
+    println!("{} Generating ground...", "[4/5]".bold());
+    emit_gui_progress_update(60.0, "Generating ground...");
+
+    let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
+    ground_pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} blocks ({eta})")
+            .unwrap()
+            .progress_chars("█▓░"),
+    );
+
+    let mut gui_progress_grnd: f64 = 60.0;
+    let mut last_emitted_progress: f64 = gui_progress_grnd;
+    let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
+    let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
+
+    let groundlayer_block = GRASS_BLOCK;
+
+    for x in 0..=(scale_factor_x as i32) {
+        for z in 0..=(scale_factor_z as i32) {
+            // Add default dirt and grass layer if there isn't a stone layer already
+            if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
+                editor.set_block(groundlayer_block, x, 0, z, None, None);
+                editor.set_block(DIRT, x, -1, z, None, None);
+                editor.set_block(DIRT, x, -2, z, None, None);
+            }
+
+            // Fill underground with stone
+            if args.fillground {
+                // Fill from bedrock+1 to 3 blocks below ground with stone
+                editor.fill_blocks_absolute(
+                    STONE,
+                    x,
+                    MIN_Y + 1,
+                    z,
+                    x,
+                    editor.get_absolute_y(x, -3, z),
+                    z,
+                    None,
+                    None,
+                );
+            }
+            // Generate a bedrock level at MIN_Y
+            editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+
+            block_counter += 1;
+            if block_counter % batch_size == 0 {
+                ground_pb.inc(batch_size);
+            }
+
+            gui_progress_grnd += progress_increment_grnd;
+            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                emit_gui_progress_update(gui_progress_grnd, "");
+                last_emitted_progress = gui_progress_grnd;
+            }
+        }
+    }
     for element in &elements {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
@@ -117,74 +183,6 @@ pub fn generate_world(
             }
         }
     }
-
-    process_pb.finish();
-
-    // Generate ground layer
-    let total_blocks: u64 = (scale_factor_x as i32 + 1) as u64 * (scale_factor_z as i32 + 1) as u64;
-    let desired_updates: u64 = 1500;
-    let batch_size: u64 = (total_blocks / desired_updates).max(1);
-
-    let mut block_counter: u64 = 0;
-
-    println!("{} Generating ground...", "[4/5]".bold());
-    emit_gui_progress_update(60.0, "Generating ground...");
-
-    let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
-    ground_pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} blocks ({eta})")
-            .unwrap()
-            .progress_chars("█▓░"),
-    );
-
-    let mut gui_progress_grnd: f64 = 60.0;
-    let mut last_emitted_progress: f64 = gui_progress_grnd;
-    let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
-    let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
-
-    let groundlayer_block = GRASS_BLOCK;
-
-    for x in 0..=(scale_factor_x as i32) {
-        for z in 0..=(scale_factor_z as i32) {
-            // Add default dirt and grass layer if there isn't a stone layer already
-            if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
-                editor.set_block(groundlayer_block, x, 0, z, None, None);
-                editor.set_block(DIRT, x, -1, z, None, None);
-                editor.set_block(DIRT, x, -2, z, None, None);
-            }
-
-            // Fill underground with stone
-            if args.fillground {
-                // Fill from bedrock+1 to 3 blocks below ground with stone
-                editor.fill_blocks_absolute(
-                    STONE,
-                    x,
-                    MIN_Y + 1,
-                    z,
-                    x,
-                    editor.get_absolute_y(x, -3, z),
-                    z,
-                    None,
-                    None,
-                );
-            }
-            // Generate a bedrock level at MIN_Y
-            editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
-
-            block_counter += 1;
-            if block_counter % batch_size == 0 {
-                ground_pb.inc(batch_size);
-            }
-
-            gui_progress_grnd += progress_increment_grnd;
-            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                emit_gui_progress_update(gui_progress_grnd, "");
-                last_emitted_progress = gui_progress_grnd;
-            }
-        }
-    }
-
     // Set sign for player orientation
     /*editor.set_sign(
         "↑".to_string(),
