@@ -23,7 +23,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         "clay" => TERRACOTTA,
                         "sand" => SAND,
                         "tartan" => RED_TERRACOTTA,
-                        "grass" => GRASS,
+                        "grass" => GRASS_BLOCK,
                         "pebblestone" | "cobblestone" | "unhewn_cobblestone" => COBBLESTONE,
                         _ => GREEN_STAINED_HARDENED_CLAY,
                     }
