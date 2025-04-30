@@ -244,6 +244,20 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                                 SAND,
                                             ]),
                                         );
+                                        editor.set_block(
+                                            AIR,
+                                            set_x,
+                                            road_level + 2,
+                                            set_z,
+                                            None,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                WHITE_CONCRETE,
+                                                GRAY_CONCRETE,
+                                                DIRT_PATH,
+                                                SAND,
+                                            ]),
+                                        );
                                     }
                                 }
                             }

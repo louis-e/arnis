@@ -54,41 +54,27 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
                         Some(&[DIRT, STONE]),
                         None,
                     );
-                    editor.set_block(AIR, bx, ground_level + 1, bz, Some(&[DIRT, STONE]), None);
-                    editor.set_block(AIR, bx, ground_level + 2, bz, Some(&[DIRT, STONE]), None);
 
-                    editor.set_block(
-                        AIR,
-                        bx,
-                        ground_level + 1,
-                        bz + 1,
-                        Some(&[DIRT, STONE]),
-                        None,
-                    );
-                    editor.set_block(
-                        AIR,
-                        bx + 1,
-                        ground_level + 1,
-                        bz,
-                        Some(&[DIRT, STONE]),
-                        None,
-                    );
-                    editor.set_block(
-                        AIR,
-                        bx,
-                        ground_level + 2,
-                        bz + 1,
-                        Some(&[DIRT, STONE]),
-                        None,
-                    );
-                    editor.set_block(
-                        AIR,
-                        bx + 1,
-                        ground_level + 2,
-                        bz,
-                        Some(&[DIRT, STONE]),
-                        None,
-                    );
+                    for dx in -2..=2 {
+                        for dz in -2..=2 {
+                            editor.set_block(
+                                AIR,
+                                bx + dx,
+                                ground_level + 1,
+                                bz + dz,
+                                Some(&[DIRT, STONE, COBBLESTONE_WALL]),
+                                None,
+                            );
+                            editor.set_block(
+                                AIR,
+                                bx + dx,
+                                ground_level + 2,
+                                bz + dz,
+                                Some(&[DIRT, STONE, COBBLESTONE_WALL]),
+                                None,
+                            );
+                        }
+                    }
 
                     if ground_level > 0 {
                         // If in the air, add block below stone
@@ -121,9 +107,23 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
                     }
 
                     if (bx + bz) % 4 == 0 {
-                        editor.set_block(OAK_PLANKS, bx, ground_level, bz, None, None);
+                        editor.set_block(
+                            OAK_PLANKS,
+                            bx,
+                            ground_level,
+                            bz,
+                            Some(&[DIRT, STONE, GRASS_BLOCK]),
+                            None,
+                        );
                     } else {
-                        editor.set_block(GRAVEL, bx, ground_level, bz, None, None);
+                        editor.set_block(
+                            GRAVEL,
+                            bx,
+                            ground_level,
+                            bz,
+                            Some(&[DIRT, STONE, GRASS_BLOCK]),
+                            None,
+                        );
                     }
 
                     let prev = if j > 0 {
@@ -151,11 +151,10 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
                         Some(&[DIRT, STONE]),
                         None,
                     );
-                    if ground_level < -1 {
+                    if ground_level < 0 {
                         // If underground, add air block above rails.
                         //&& args.fillground {
                         editor.set_block(AIR, bx, ground_level + 2, bz, Some(&[DIRT, STONE]), None);
-                        //editor.set_block(GRASS_BLOCK, bx, ground_level + 3, bz, None, None);
                     }
                     if ground_level > 0 {
                         // If in the air, add block below gravel
