@@ -7,21 +7,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
   <script type="module" src="./js/main.js" defer></script>
+  <script type="module" src="./js/license.js" defer></script>
 </head>
 
 <body>
   <main class="container">
     <div class="row">
       <a href="https://github.com/louis-e/arnis" target="_blank">
-        <img src="./images/logo.png" class="logo arnis" alt="Arnis Logo" />
+        <img src="./images/logo.png" id="arnis-logo" class="logo arnis" alt="Arnis Logo" style="width: 35%; height: auto;" />
       </a>
     </div>
 
     <div class="flex-container">
       <!-- Left Box: Map and BBox Input -->
       <section class="section map-box" style="margin-bottom: 0; padding-bottom: 0;">
-        <h2>Select Location</h2>
-        <span id="bbox-text" style="font-size: 1.0em; display: block; margin-top: -8px; margin-bottom: 3px;">
+        <h2 data-localize="select_location">Select Location</h2>
+        <span id="bbox-text" style="font-size: 1.0em; display: block; margin-top: -8px; margin-bottom: 3px;" data-localize="zoom_in_and_choose">
           Zoom in and choose your area using the rectangle tool
         </span>
         <iframe src="maps.html" width="100%" height="300" class="map-container" title="Map Picker"></iframe>
@@ -33,24 +34,21 @@
       <!-- Right Box: Directory Selection, Start Button, and Progress Bar -->
       <section class="section controls-box">
         <div class="controls-content">
-          <h2>Select World</h2>
+          <h2 data-localize="select_world">Select World</h2>
 
           <!-- Updated Tooltip Structure -->
           <div class="tooltip" style="width: 100%;">
             <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;">
-              Choose World
+              <span id="choose_world">Choose World</span>
               <br>
-              <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;">
+              <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
                 No world selected
               </span>
             </button>
-            <span class="tooltiptext" style="font-size: 0.8em; line-height: 1.2;">
-              Please select a Minecraft world that can be overwritten, as the generation process will replace existing structures in the chosen world!
-            </span>
           </div>
           
           <div class="button-container">
-            <button type="button" id="start-button" class="start-button" onclick="startGeneration()">Start Generation</button>
+            <button type="button" id="start-button" class="start-button" onclick="startGeneration()" data-localize="start_generation">Start Generation</button>
             <button type="button" class="settings-button" onclick="openSettings()">
                 <i class="gear-icon"></i>
             </button>
@@ -58,7 +56,7 @@
           <br><br>
 
           <div class="progress-section">
-            <h2>Progress</h2>
+            <h2 data-localize="progress">Progress</h2>
             <div class="progress-bar-container">
               <div class="progress-bar" id="progress-bar"></div>
             </div>
@@ -75,10 +73,10 @@
     <div id="world-modal" class="modal" style="display: none;">
       <div class="modal-content">
         <span class="close-button" onclick="closeWorldPicker()">&times;</span>
-        <h2>Choose World</h2>
+        <h2 data-localize="choose_world_modal_title">Choose World</h2>
 
-        <button type="button" id="select-world-button" class="select-world-button" onclick="selectWorld(false)">Select existing world</button>
-        <button type="button" id="generate-world-button" class="generate-world-button" onclick="selectWorld(true)">Generate new world</button>
+        <button type="button" id="select-world-button" class="select-world-button" onclick="selectWorld(false)" data-localize="select_existing_world">Select existing world</button>
+        <button type="button" id="generate-world-button" class="generate-world-button" onclick="selectWorld(true)" data-localize="generate_new_world">Generate new world</button>
       </div>
     </div>
 
@@ -86,45 +84,64 @@
     <div id="settings-modal" class="modal" style="display: none;">
       <div class="modal-content">
         <span class="close-button" onclick="closeSettings()">&times;</span>
-        <h2>Customization Settings</h2>
+        <h2 data-localize="customization_settings">Customization Settings</h2>
 
-        <!-- Winter Mode Toggle Button -->
-        <div class="winter-toggle-container">
-          <label for="winter-toggle">Winter Mode:</label>
-          <input type="checkbox" id="winter-toggle" name="winter-toggle">
+        <!-- Terrain Toggle Button -->
+        <div class="terrain-toggle-container">
+          <label for="terrain-toggle" data-localize="terrain">Terrain:</label>
+          <input type="checkbox" id="terrain-toggle" name="terrain-toggle" checked>
+        </div>
+        <!-- Fill ground Toggle Button -->
+        <div class="fillground-toggle-container">
+          <label for="fillground-toggle" data-localize="fillground">Fill Ground:</label>
+          <input type="checkbox" id="fillground-toggle" name="fillground-toggle">
         </div>
 
         <!-- World Scale Slider -->
         <div class="scale-slider-container">
-          <label for="scale-value-slider">World Scale:</label>
-          <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.50" max="2.5" step="0.25" value="1">
+          <label for="scale-value-slider" data-localize="world_scale">World Scale:</label>
+          <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
           <span id="slider-value">1.00</span>
         </div>
         
         <!-- Bounding Box Input -->
         <div class="bbox-input-container">
-          <label for="bbox-coords">Custom Bounding Box:</label>
-          <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" style="width: 280px;" autocomplete="one-time-code" placeholder="Format: lat,lng,lat,lng">
+          <label for="bbox-coords" data-localize="custom_bounding_box">Custom Bounding Box:</label>
+          <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" style="width: 280px;" placeholder="Format: lat,lng,lat,lng">
         </div>
 
         <!-- Floodfill Timeout Input -->
         <div class="timeout-input-container">
-          <label for="floodfill-timeout">Floodfill Timeout (sec):</label>
+          <label for="floodfill-timeout" data-localize="floodfill_timeout">Floodfill Timeout (sec):</label>
           <input type="number" id="floodfill-timeout" name="floodfill-timeout" min="0" step="1" value="20" style="width: 100px;" placeholder="Seconds">
         </div><br>
 
         <!-- Ground Level Input -->
         <div class="ground-level-input-container">
-          <label for="ground-level">Ground Level:</label>
+          <label for="ground-level" data-localize="ground_level">Ground Level:</label>
           <input type="number" id="ground-level" name="ground-level" min="-64" max="290" value="-62" style="width: 100px;" placeholder="Ground Level">
+        </div>
+
+        <!-- License and Credits Button -->
+        <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
+      </div>
+    </div>
+
+    <!-- License Modal -->
+    <div id="license-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="closeLicense()">&times;</span>
+        <h2 data-localize="license_and_credits">License and Credits</h2>
+        <div id="license-content" style="overflow-y: auto; max-height: 300px; font-size: 0.85em; line-height: 1.3; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+          Loading...
         </div>
       </div>
     </div>
 
     <!-- Footer -->
     <footer class="footer">
-      <a href="https://github.com/louis-e/arnis" target="_blank" class="footer-link">
-        © <span id="current-year"></span> Arnis v<span id="version-placeholder">x.x.x</span> by louis-e
+      <a href="https://github.com/louis-e/arnis" target="_blank" class="footer-link" data-localize="footer_text">
+        © {year} Arnis v{version} by louis-e
       </a>
     </footer>
   </main>

@@ -1,16 +1,12 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_amenities(
-    editor: &mut WorldEditor,
-    element: &ProcessedElement,
-    ground_level: i32,
-    args: &Args,
-) {
+pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -25,21 +21,21 @@ pub fn generate_amenities(
     }
 
     if let Some(amenity_type) = element.tags().get("amenity") {
-        let first_node: Option<(i32, i32)> = element
+        let first_node: Option<XZPoint> = element
             .nodes()
-            .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+            .map(|n: &crate::osm_parser::ProcessedNode| XZPoint::new(n.x, n.z))
             .next();
         match amenity_type.as_str() {
             "waste_disposal" | "waste_basket" => {
                 // Place a cauldron for waste disposal or waste basket
-                if let Some((x, z)) = first_node {
-                    editor.set_block(CAULDRON, x, ground_level + 1, z, None, None);
+                if let Some(pt) = first_node {
+                    editor.set_block(CAULDRON, pt.x, 1, pt.z, None, None);
                 }
             }
             "vending_machine" | "atm" => {
-                if let Some((x, z)) = first_node {
-                    editor.set_block(IRON_BLOCK, x, ground_level + 1, z, None, None);
-                    editor.set_block(IRON_BLOCK, x, ground_level + 2, z, None, None);
+                if let Some(pt) = first_node {
+                    editor.set_block(IRON_BLOCK, pt.x, 1, pt.z, None, None);
+                    editor.set_block(IRON_BLOCK, pt.x, 2, pt.z, None, None);
                 }
             }
             "bicycle_parking" => {
@@ -50,50 +46,81 @@ pub fn generate_amenities(
                     .nodes()
                     .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
                     .collect();
+
+                if polygon_coords.is_empty() {
+                    return;
+                }
+
                 let floor_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
-                    editor.set_block(ground_block, *x, ground_level, *z, None, None);
+                    editor.set_block(ground_block, *x, 0, *z, None, None);
                 }
+
+                // Place fences and roof slabs at each corner node
+                for node in element.nodes() {
+                    let x: i32 = node.x;
+                    let z: i32 = node.z;
+
+                    // Set ground block and fences
+                    editor.set_block(ground_block, x, 0, z, None, None);
+                    for y in 1..=4 {
+                        editor.set_block(OAK_FENCE, x, y, z, None, None);
+                    }
+                    editor.set_block(roof_block, x, 5, z, None, None);
+                }
+
+                // Flood fill the roof area
+                for (x, z) in floor_area.iter() {
+                    editor.set_block(roof_block, *x, 5, *z, None, None);
+                }
+            }
+            "bench" => {
+                // Place a bench
+                if let Some(pt) = first_node {
+                    editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
+                    editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
+                    editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
+                }
+            }
+            "vending" => {
+                // Place vending machine blocks
+                if let Some(pt) = first_node {
+                    editor.set_block(IRON_BLOCK, pt.x, 1, pt.z, None, None);
+                    editor.set_block(IRON_BLOCK, pt.x, 2, pt.z, None, None);
+                }
+            }
+            "shelter" => {
+                let roof_block: Block = STONE_BRICK_SLAB;
+
+                let polygon_coords: Vec<(i32, i32)> = element
+                    .nodes()
+                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
+                    .collect();
+                let roof_area: Vec<(i32, i32)> =
+                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 // Place fences and roof slabs at each corner node directly
                 for node in element.nodes() {
                     let x: i32 = node.x;
                     let z: i32 = node.z;
 
-                    for y in 1..=4 {
-                        editor.set_block(ground_block, x, ground_level, z, None, None);
-                        editor.set_block(OAK_FENCE, x, ground_level + y, z, None, None);
+                    for fence_height in 1..=4 {
+                        editor.set_block(OAK_FENCE, x, fence_height, z, None, None);
                     }
-                    editor.set_block(roof_block, x, ground_level + 5, z, None, None);
+                    editor.set_block(roof_block, x, 5, z, None, None);
                 }
 
                 // Flood fill the roof area
-                let roof_height: i32 = ground_level + 5;
-                for (x, z) in floor_area.iter() {
-                    editor.set_block(roof_block, *x, roof_height, *z, None, None);
-                }
-            }
-            "bench" => {
-                // Place a bench
-                if let Some((x, z)) = first_node {
-                    editor.set_block(SMOOTH_STONE, x, ground_level + 1, z, None, None);
-                    editor.set_block(OAK_LOG, x + 1, ground_level + 1, z, None, None);
-                    editor.set_block(OAK_LOG, x - 1, ground_level + 1, z, None, None);
-                }
-            }
-            "vending" => {
-                // Place vending machine blocks
-                if let Some((x, z)) = first_node {
-                    editor.set_block(IRON_BLOCK, x, ground_level + 1, z, None, None);
-                    editor.set_block(IRON_BLOCK, x, ground_level + 2, z, None, None);
+                for (x, z) in roof_area.iter() {
+                    editor.set_block(roof_block, *x, 5, *z, None, None);
                 }
             }
             "parking" | "fountain" => {
                 // Process parking or fountain areas
-                let mut previous_node: Option<(i32, i32)> = None;
+                let mut previous_node: Option<XZPoint> = None;
                 let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
                 let mut current_amenity: Vec<(i32, i32)> = vec![];
 
@@ -102,23 +129,16 @@ pub fn generate_amenities(
                     "parking" => GRAY_CONCRETE,
                     _ => GRAY_CONCRETE,
                 };
+
                 for node in element.nodes() {
-                    let x: i32 = node.x;
-                    let z: i32 = node.z;
+                    let pt: XZPoint = node.xz();
 
                     if let Some(prev) = previous_node {
                         // Create borders for fountain or parking area
                         let bresenham_points: Vec<(i32, i32, i32)> =
-                            bresenham_line(prev.0, ground_level, prev.1, x, ground_level, z);
+                            bresenham_line(prev.x, 0, prev.z, pt.x, 0, pt.z);
                         for (bx, _, bz) in bresenham_points {
-                            editor.set_block(
-                                block_type,
-                                bx,
-                                ground_level,
-                                bz,
-                                Some(&[BLACK_CONCRETE]),
-                                None,
-                            );
+                            editor.set_block(block_type, bx, 0, bz, Some(&[BLACK_CONCRETE]), None);
 
                             // Decorative border around fountains
                             if amenity_type == "fountain" {
@@ -128,7 +148,7 @@ pub fn generate_amenities(
                                             editor.set_block(
                                                 LIGHT_GRAY_CONCRETE,
                                                 bx + dx,
-                                                ground_level,
+                                                0,
                                                 bz + dz,
                                                 None,
                                                 None,
@@ -144,7 +164,7 @@ pub fn generate_amenities(
                             corner_addup.2 += 1;
                         }
                     }
-                    previous_node = Some((x, z));
+                    previous_node = Some(pt);
                 }
 
                 // Flood-fill the interior area for parking or fountains
@@ -157,7 +177,7 @@ pub fn generate_amenities(
                         editor.set_block(
                             block_type,
                             x,
-                            ground_level,
+                            0,
                             z,
                             Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
                             None,
@@ -168,7 +188,7 @@ pub fn generate_amenities(
                             editor.set_block(
                                 LIGHT_GRAY_CONCRETE,
                                 x,
-                                ground_level,
+                                0,
                                 z,
                                 Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
                                 None,

@@ -21,6 +21,13 @@
               openssl.dev
               pkg-config
               fenixPkgs.toolchain
+              wayland
+              glib
+              gdk-pixbuf
+              pango
+              gtk3
+              libsoup_3.dev
+              webkitgtk_4_1.dev
             ];
           };
       });

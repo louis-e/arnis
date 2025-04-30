@@ -2,7 +2,7 @@ use crate::block_definitions::*;
 use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, ground_level: i32) {
+pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -21,9 +21,13 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode, grou
         let z: i32 = element.z;
 
         if tourism_type == "information" {
-            if let Some("board") = element.tags.get("information").map(|x: &String| x.as_str()) {
-                // TODO draw a sign
-                editor.set_block(OAK_PLANKS, x, ground_level + 1, z, None, None);
+            if let Some(info_type) = element.tags.get("information").map(|x: &String| x.as_str()) {
+                if info_type != "office" && info_type != "visitor_centre" {
+                    // Draw an information board
+                    // TODO draw a sign with text if provided
+                    editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                    editor.set_block(OAK_PLANKS, x, 2, z, None, None);
+                }
             }
         }
     }

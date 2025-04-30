@@ -1,21 +1,21 @@
 use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
+use std::time::Instant;
 
 use crate::{
     block_definitions::WATER,
+    cartesian::XZPoint,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
     world_editor::WorldEditor,
 };
 
-pub fn generate_water_areas(
-    editor: &mut WorldEditor,
-    element: &ProcessedRelation,
-    ground_level: i32,
-) {
+pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelation) {
+    let start_time = Instant::now();
+
     if !element.tags.contains_key("water") {
         return;
     }
 
-    // don't handle water below layer 0
+    // Don't handle water below layer 0
     if let Some(layer) = element.tags.get("layer") {
         if layer.parse::<i32>().map(|x| x < 0).unwrap_or(false) {
             return;
@@ -43,24 +43,16 @@ pub fn generate_water_areas(
     }
 
     let (max_x, max_z) = editor.get_max_coords();
-    let outers: Vec<Vec<(f64, f64)>> = outers
+    let outers: Vec<Vec<XZPoint>> = outers
         .iter()
-        .map(|x: &Vec<ProcessedNode>| {
-            x.iter()
-                .map(|y: &ProcessedNode| (y.x as f64, y.z as f64))
-                .collect()
-        })
+        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
-    let inners: Vec<Vec<(f64, f64)>> = inners
+    let inners: Vec<Vec<XZPoint>> = inners
         .iter()
-        .map(|x: &Vec<ProcessedNode>| {
-            x.iter()
-                .map(|y: &ProcessedNode| (y.x as f64, y.z as f64))
-                .collect()
-        })
+        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    inverse_floodfill(max_x, max_z, outers, inners, editor, ground_level);
+    inverse_floodfill(max_x, max_z, outers, inners, editor, start_time);
 }
 
 // Merges ways that share nodes into full loops
@@ -153,42 +145,65 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
 fn inverse_floodfill(
     max_x: i32,
     max_z: i32,
-    outers: Vec<Vec<(f64, f64)>>,
-    inners: Vec<Vec<(f64, f64)>>,
+    outers: Vec<Vec<XZPoint>>,
+    inners: Vec<Vec<XZPoint>>,
     editor: &mut WorldEditor,
-    ground_level: i32,
+    start_time: Instant,
 ) {
     let min_x: i32 = 0;
     let min_z: i32 = 0;
 
     let inners: Vec<_> = inners
         .into_iter()
-        .map(|x: Vec<(f64, f64)>| Polygon::new(LineString::from(x), vec![]))
+        .map(|x| {
+            Polygon::new(
+                LineString::from(
+                    x.iter()
+                        .map(|pt| (pt.x as f64, pt.z as f64))
+                        .collect::<Vec<_>>(),
+                ),
+                vec![],
+            )
+        })
         .collect();
 
     let outers: Vec<_> = outers
         .into_iter()
-        .map(|x: Vec<(f64, f64)>| Polygon::new(LineString::from(x), vec![]))
+        .map(|x| {
+            Polygon::new(
+                LineString::from(
+                    x.iter()
+                        .map(|pt| (pt.x as f64, pt.z as f64))
+                        .collect::<Vec<_>>(),
+                ),
+                vec![],
+            )
+        })
         .collect();
 
     inverse_floodfill_recursive(
         (min_x, min_z),
         (max_x, max_z),
-        ground_level,
         &outers,
         &inners,
         editor,
+        start_time,
     );
 }
 
 fn inverse_floodfill_recursive(
     min: (i32, i32),
     max: (i32, i32),
-    ground_level: i32,
     outers: &[Polygon],
     inners: &[Polygon],
     editor: &mut WorldEditor,
+    start_time: Instant,
 ) {
+    // Check if we've exceeded 25 seconds
+    if start_time.elapsed().as_secs() > 25 {
+        println!("Water area generation exceeded 25 seconds, continuing anyway");
+    }
+
     const ITERATIVE_THRES: i32 = 10_000;
 
     if min.0 > max.0 || min.1 > max.1 {
@@ -196,8 +211,7 @@ fn inverse_floodfill_recursive(
     }
 
     if (max.0 - min.0) * (max.1 - min.1) < ITERATIVE_THRES {
-        inverse_floodfill_iterative(min, max, ground_level, outers, inners, editor);
-
+        inverse_floodfill_iterative(min, max, 0, outers, inners, editor);
         return;
     }
 
@@ -219,40 +233,29 @@ fn inverse_floodfill_recursive(
         if outers.iter().any(|outer: &Polygon| outer.contains(&rect))
             && !inners.iter().any(|inner: &Polygon| inner.intersects(&rect))
         {
-            // every block in rect is water
-            // so we can safely just set the whole thing to water
-
-            rect_fill(min_x, max_x, min_z, max_z, ground_level, editor);
-
+            rect_fill(min_x, max_x, min_z, max_z, 0, editor);
             continue;
         }
 
-        // When we recurse, we only really need the polygons we potentially intersect with
-        // This saves on processing time
         let outers_intersects: Vec<_> = outers
             .iter()
-            .filter(|poly: &&Polygon| poly.intersects(&rect))
+            .filter(|poly| poly.intersects(&rect))
             .cloned()
             .collect();
-
-        // Moving this inside the below `if` statement makes it slower for some reason.
-        // I assume it changes how the compiler is able to optimize it
         let inners_intersects: Vec<_> = inners
             .iter()
-            .filter(|poly: &&Polygon| poly.intersects(&rect))
+            .filter(|poly| poly.intersects(&rect))
             .cloned()
             .collect();
 
         if !outers_intersects.is_empty() {
-            // recurse
-
             inverse_floodfill_recursive(
                 (min_x, min_z),
                 (max_x, max_z),
-                ground_level,
                 &outers_intersects,
                 &inners_intersects,
                 editor,
+                start_time,
             );
         }
     }
