@@ -183,11 +183,30 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             }
                         }
                         "wetland" => {
-                            if rng.gen_bool(0.3) {
-                                editor.set_block(WATER, x, 0, z, Some(&[MUD]), None);
-                                continue;
-                            }
                             if let Some(wetland_type) = element.tags().get("wetland") {
+                                // Wetland without water blocks
+                                if matches!(wetland_type.as_str(), "wet_meadow" | "fen") {
+                                    if rng.gen_bool(0.3) {
+                                        editor.set_block(GRASS_BLOCK, x, 0, z, Some(&[MUD]), None);
+                                    }
+                                    editor.set_block(GRASS, x, 1, z, None, None);
+                                    continue;
+                                }
+                                // All the other types of wetland
+                                if rng.gen_bool(0.3) {
+                                    editor.set_block(
+                                        WATER,
+                                        x,
+                                        0,
+                                        z,
+                                        Some(&[MUD, GRASS_BLOCK]),
+                                        None,
+                                    );
+                                    continue;
+                                }
+                                if !editor.check_for_block(x, 0, z, Some(&[MUD, MOSS_BLOCK])) {
+                                    continue;
+                                }
                                 match wetland_type.as_str() {
                                     "reedbed" => {
                                         editor.set_block(TALL_GRASS_BOTTOM, x, 1, z, None, None);
@@ -203,8 +222,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                         }
                                     }
                                     "bog" => {
-                                        let random_choice: i32 = rng.gen_range(0..30);
-                                        if random_choice == 0 {
+                                        if rng.gen_bool(0.2) {
                                             editor.set_block(
                                                 MOSS_BLOCK,
                                                 x,
@@ -214,7 +232,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                                 None,
                                             );
                                         }
-                                        if random_choice < 3 {
+                                        if rng.gen_bool(0.15) {
                                             editor.set_block(GRASS, x, 1, z, None, None);
                                         }
                                     }
@@ -226,6 +244,11 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                     }
                                 }
                             } else {
+                                // Generic natural=wetland without wetland=... tag
+                                if rng.gen_bool(0.3) {
+                                    editor.set_block(WATER, x, 0, z, Some(&[MUD]), None);
+                                    continue;
+                                }
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }

@@ -186,8 +186,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 }
             }
             "grass" => {
-                if rng.gen_bool(0.85) && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
-                {
+                if rng.gen_bool(0.85) && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     editor.set_block(GRASS, x, 1, z, None, None);
                 }
             }
