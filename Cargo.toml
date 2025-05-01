@@ -24,7 +24,7 @@ colored = "2.1.0"
 dirs = {version = "6.0.0", optional = true }
 fastanvil = "0.31.0"
 fastnbt = "2.5.0"
-flate2 = "1.0"
+flate2 = "1.1"
 fnv = "1.0.7"
 fs2 = "0.4"
 geo = "0.29.3"
