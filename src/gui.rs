@@ -9,9 +9,9 @@ use fastnbt::Value;
 use flate2::read::GzDecoder;
 use log::{error, LevelFilter};
 use rfd::FileDialog;
-use std::{env, fs, io::Write, panic};
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::{env, fs, io::Write, panic};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
 pub fn run_gui() {
