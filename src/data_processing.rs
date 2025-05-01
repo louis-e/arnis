@@ -27,7 +27,6 @@ pub fn generate_world(
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
-
     emit_gui_progress_update(11.0, "Processing terrain...");
 
     // Process data
