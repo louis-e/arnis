@@ -34,7 +34,7 @@ jobs:
 
       - name: Run benchmark command
         run: |
-          cargo run --release --no-default-features -- --path="./world" --bbox="48.117861,11.541996,48.154520,11.604824"
+          cargo run --release --no-default-features -- --path="./world" --terrain --bbox="48.117861,11.541996,48.154520,11.604824"
 
       - name: End timer and calculate duration
         id: end_time
