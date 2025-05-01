@@ -57,9 +57,9 @@ jobs:
           seconds=$((duration % 60))
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
 
-          baseline=130
-          diff=$((duration - baseline))
-          abs_diff=${diff#-}  # absolute value
+          baseline_time=130
+          diff=$((duration - baseline_time))
+          abs_diff=${diff#-}
 
           if [ "$diff" -lt -10 ]; then
             verdict="✅ This PR **improves generation time**."
@@ -71,12 +71,20 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
+          baseline_mem=1960
+          mem_annotation=""
+          if [ "$peak_mem" -gt 2000 ]; then
+            mem_diff=$((peak_mem - baseline_mem))
+            mem_percent=$((mem_diff * 100 / baseline_mem))
+            mem_annotation=" (↗ ${mem_percent}% more)"
+          fi
+
           {
             echo "summary<<EOF"
             echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**"
-            echo "🧠 Peak memory usage: **${peak_mem} MB**"
+            echo "🧠 Peak memory usage: **${peak_mem} MB**${mem_annotation}"
             echo ""
-            echo "📈 Compared against baseline: **${baseline}s**"
+            echo "📈 Compared against baseline: **${baseline_time}s**"
             echo "🧮 Delta: **${diff}s**"
             echo "🔢 Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
             echo ""
