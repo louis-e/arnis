@@ -3,9 +3,16 @@ name: PR Benchmark
 on:
   pull_request:
     types: [opened, reopened]
+  issue_comment:
+    types: [created]
 
 jobs:
   benchmark:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, 'retrigger-benchmark'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -17,27 +24,60 @@ jobs:
           toolchain: stable
           components: clippy
 
+      - name: Create dummy Minecraft world directory
+        run: |
+          mkdir -p "./world/region"
+
       - name: Start timer
-        id: timer_start
+        id: start_time
         run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
 
-      - name: Run benchmark build
+      - name: Run benchmark command
         run: |
-          cargo build --release --features benchmark
+          cargo run --release --no-default-features -- --path="./world" --terrain --bbox="48.117861,11.541996,48.154520,11.604824"
 
       - name: End timer and calculate duration
-        id: timer_end
+        id: end_time
         run: |
           end_time=$(date +%s)
-          start_time=${{ steps.timer_start.outputs.start_time }}
+          start_time=${{ steps.start_time.outputs.start_time }}
           duration=$((end_time - start_time))
           echo "duration=$duration" >> $GITHUB_OUTPUT
+
+      - name: Format duration and generate summary
+        id: comment_body
+        run: |
+          duration=${{ steps.end_time.outputs.duration }}
+          minutes=$((duration / 60))
+          seconds=$((duration % 60))
+
+          baseline=125
+          diff=$((duration - baseline))
+          abs_diff=${diff#-}  # absolute value
+
+          if [ "$diff" -lt -10 ]; then
+            summary="✅ This PR **improves generation time**."
+          elif [ "$abs_diff" -le 10 ]; then
+            summary="➖ Generation time is unchanged."
+          elif [ "$diff" -le 25 ]; then
+            summary="⚠️ This PR **slightly worsens generation time**."
+          else
+            summary="🚨 This PR **drastically worsens generation time**."
+          fi
+
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "${summary}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Comment build time on PR
         uses: thollander/actions-comment-pull-request@v3
         with:
           message: |
-            🕒 Benchmark build completed in **${{ steps.timer_end.outputs.duration }} seconds**.
+            ${{ steps.comment_body.outputs.summary }}
+            
+            _You can retrigger the benchmark by commenting `retrigger-benchmark`._
           comment-tag: benchmark-report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
