@@ -3,9 +3,16 @@ name: PR Benchmark
 on:
   pull_request:
     types: [opened, reopened]
+  issue_comment:
+    types: [created]
 
 jobs:
   benchmark:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, 'retrigger-benchmark'))
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -18,18 +25,18 @@ jobs:
           components: clippy
 
       - name: Start timer
-        id: timer_start
+        id: start_time
         run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
 
-      - name: Run benchmark build
+      - name: Run benchmark command
         run: |
-          cargo build --release --features benchmark
+          cargo run --release --no-default-features -- --path="." --bbox="11.571651,48.133946,11.581306,48.139359"
 
       - name: End timer and calculate duration
-        id: timer_end
+        id: end_time
         run: |
           end_time=$(date +%s)
-          start_time=${{ steps.timer_start.outputs.start_time }}
+          start_time=${{ steps.start_time.outputs.start_time }}
           duration=$((end_time - start_time))
           echo "duration=$duration" >> $GITHUB_OUTPUT
 
@@ -37,7 +44,11 @@ jobs:
         uses: thollander/actions-comment-pull-request@v3
         with:
           message: |
-            🕒 Benchmark build completed in **${{ steps.timer_end.outputs.duration }} seconds**.
+            ⏱️ Benchmark run finished in **${{ steps.end_time.outputs.duration }} seconds**  
+            Command:  
+            ```bash
+            cargo run --release --no-default-features -- --path="." --bbox="11.571651,48.133946,11.581306,48.139359"
+            ```
           comment-tag: benchmark-report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
