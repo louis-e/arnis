@@ -24,13 +24,17 @@ jobs:
           toolchain: stable
           components: clippy
 
+      - name: Create dummy Minecraft world directory
+        run: |
+          mkdir -p "./world/region"
+
       - name: Start timer
         id: start_time
         run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
 
       - name: Run benchmark command
         run: |
-          cargo run --release --no-default-features -- --path="." --bbox="11.571651,48.133946,11.581306,48.139359"
+          cargo run --release --no-default-features -- --path="./world" --bbox="11.571651,48.133946,11.581306,48.139359"
 
       - name: End timer and calculate duration
         id: end_time
