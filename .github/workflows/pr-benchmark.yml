@@ -51,7 +51,7 @@ jobs:
           minutes=$((duration / 60))
           seconds=$((duration % 60))
 
-          baseline=100
+          baseline=113
           diff=$((duration - baseline))
           abs_diff=${diff#-}  # absolute value
 
@@ -65,7 +65,11 @@ jobs:
             summary="🚨 This PR **drastically worsens generation time**."
           fi
 
-          echo "summary=⏱️ Benchmark run finished in **${minutes}m ${seconds}s**%0A%0A${summary}" >> $GITHUB_OUTPUT
+          echo "summary<<EOF" >> $GITHUB_OUTPUT
+          echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "${summary}" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Comment build time on PR
         uses: thollander/actions-comment-pull-request@v3
