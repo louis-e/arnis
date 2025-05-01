@@ -25,7 +25,8 @@ jobs:
           components: clippy
 
       - name: Create dummy Minecraft world directory
-        run: mkdir -p "./world/region"
+        run: |
+          mkdir -p "./world/region"
 
       - name: Start timer
         id: start_time
@@ -41,13 +42,18 @@ jobs:
           end_time=$(date +%s)
           start_time=${{ steps.start_time.outputs.start_time }}
           duration=$((end_time - start_time))
+          echo "duration=$duration" >> $GITHUB_OUTPUT
 
+      - name: Format duration and generate summary
+        id: comment_body
+        run: |
+          duration=${{ steps.end_time.outputs.duration }}
           minutes=$((duration / 60))
           seconds=$((duration % 60))
 
           baseline=100
           diff=$((duration - baseline))
-          abs_diff=${diff#-}
+          abs_diff=${diff#-}  # absolute value
 
           if [ "$diff" -lt -10 ]; then
             summary="✅ This PR significantly **improves generation time**."
@@ -56,24 +62,18 @@ jobs:
           elif [ "$diff" -le 25 ]; then
             summary="⚠️ This PR **slightly worsens generation time**."
           else
-            summary="🚨 This PR **drastically increases generation time**."
+            summary="🚨 This PR **drastically worsens generation time**."
           fi
 
-          full_message="⏱️ Benchmark run finished in **${minutes}m ${seconds}s**
-
-${summary}
-
-_You can retrigger the benchmark by commenting \`retrigger-benchmark\`._"
-
-          # Write to GitHub environment for later use
-          echo "comment_body<<EOF" >> $GITHUB_ENV
-          echo "$full_message" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          echo "summary=⏱️ Benchmark run finished in **${minutes}m ${seconds}s**%0A%0A${summary}" >> $GITHUB_OUTPUT
 
       - name: Comment build time on PR
         uses: thollander/actions-comment-pull-request@v3
         with:
-          message: ${{ env.comment_body }}
+          message: |
+            ${{ steps.comment_body.outputs.summary }}
+            
+            _You can retrigger the benchmark by commenting `retrigger-benchmark`._
           comment-tag: benchmark-report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
