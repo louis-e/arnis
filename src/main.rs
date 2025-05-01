@@ -22,8 +22,10 @@ use args::Args;
 use clap::Parser;
 use colored::*;
 use std::{env, fs, io::Write};
+
 #[cfg(feature = "gui")]
 mod gui;
+
 // If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
 #[cfg(not(feature = "gui"))]
 mod progress {
@@ -115,7 +117,7 @@ fn main() {
     // Only run CLI mode if the user supplied args.
     #[cfg(feature = "gui")]
     {
-        let gui_mode = std::env::args().len() == 1; // just "arnis" with no args
+        let gui_mode = std::env::args().len() == 1; // Just "arnis" with no args
         if gui_mode {
             gui::run_gui();
         }
