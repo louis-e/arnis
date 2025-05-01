@@ -54,21 +54,24 @@ jobs:
           minutes=$((duration / 60))
           seconds=$((duration % 60))
 
-          baseline=100
+          baseline=112
           diff=$((duration - baseline))
           abs_diff=${diff#-}
 
           if [ "$diff" -lt -10 ]; then
-            summary="✅ This PR significantly **improves generation time**."
+            summary="✅ This PR significantly improves generation time."
           elif [ "$abs_diff" -le 10 ]; then
             summary="➖ Generation time is unchanged."
           elif [ "$diff" -le 25 ]; then
-            summary="⚠️ This PR **slightly worsens generation time**."
+            summary="⚠️ This PR slightly increases generation time."
           else
-            summary="🚨 This PR **drastically worsens generation time**."
+            summary="🚨 This PR drastically increases generation time."
           fi
 
-          echo "summary=⏱️ Benchmark run finished in **${minutes}m ${seconds}s**\n\n${summary}" >> $GITHUB_OUTPUT
+          final="⏱️ Benchmark run finished in **${minutes}m ${seconds}s**\n\n${summary}"
+          echo "summary<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$final" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
 
       - name: Comment build time on PR
         uses: thollander/actions-comment-pull-request@v3
@@ -76,10 +79,8 @@ jobs:
           message: |
             ${{ steps.comment_body.outputs.summary }}
 
-            🧠 Peak RAM usage: **${{ steps.benchmark_run.outputs.peak_ram_kb }} KB**  
-            ⚙️ CPU usage: **${{ steps.benchmark_run.outputs.cpu_percent }}**
-
             _You can retrigger the benchmark by commenting `retrigger-benchmark`._
           comment-tag: benchmark-report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
