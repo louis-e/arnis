@@ -32,9 +32,14 @@ jobs:
         id: start_time
         run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
 
-      - name: Run benchmark command
+      - name: Run benchmark command with memory tracking
+        id: benchmark
         run: |
-          cargo run --release --no-default-features -- --path="./world" --terrain --bbox="48.117861,11.541996,48.154520,11.604824"
+          /usr/bin/time -v cargo run --release --no-default-features -- --path="./world" --terrain --bbox="48.117861,11.541996,48.154520,11.604824" 2> benchmark_log.txt
+          grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
+          peak_kb=$(cat peak_mem_kb.txt)
+          peak_mb=$((peak_kb / 1024))
+          echo "peak_memory=${peak_mb}" >> $GITHUB_OUTPUT
 
       - name: End timer and calculate duration
         id: end_time
@@ -50,34 +55,41 @@ jobs:
           duration=${{ steps.end_time.outputs.duration }}
           minutes=$((duration / 60))
           seconds=$((duration % 60))
+          peak_mem=${{ steps.benchmark.outputs.peak_memory }}
 
           baseline=130
           diff=$((duration - baseline))
           abs_diff=${diff#-}  # absolute value
 
           if [ "$diff" -lt -10 ]; then
-            summary="✅ This PR **improves generation time**."
+            verdict="✅ This PR **improves generation time**."
           elif [ "$abs_diff" -le 7 ]; then
-            summary="➖ Generation time is unchanged."
+            verdict="🟢 Generation time is unchanged."
           elif [ "$diff" -le 25 ]; then
-            summary="⚠️ This PR **slightly worsens generation time**."
+            verdict="⚠️ This PR **slightly worsens generation time**."
           else
-            summary="🚨 This PR **drastically worsens generation time**."
+            verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          echo "summary<<EOF" >> $GITHUB_OUTPUT
-          echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**" >> $GITHUB_OUTPUT
-          echo "" >> $GITHUB_OUTPUT
-          echo "${summary}" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "summary<<EOF"
+            echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**"
+            echo "🧠 Peak memory usage: **${peak_mem} MB**"
+            echo ""
+            echo "📈 Compared against baseline: **${baseline}s**"
+            echo "🧮 Delta: **${diff}s**"
+            echo "🔢 Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
+            echo ""
+            echo "${verdict}"
+            echo ""
+            echo "_You can retrigger the benchmark by commenting \`retrigger-benchmark\`._"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Comment build time on PR
         uses: thollander/actions-comment-pull-request@v3
         with:
-          message: |
-            ${{ steps.comment_body.outputs.summary }}
-            
-            _You can retrigger the benchmark by commenting `retrigger-benchmark`._
+          message: ${{ steps.comment_body.outputs.summary }}
           comment-tag: benchmark-report
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
