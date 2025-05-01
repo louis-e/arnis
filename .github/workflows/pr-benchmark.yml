@@ -1,0 +1,43 @@
+name: PR Benchmark
+
+on:
+  pull_request:
+    types: [opened, reopened]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Start timer
+        id: timer_start
+        run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Run benchmark build
+        run: |
+          cargo build --release --features benchmark
+
+      - name: End timer and calculate duration
+        id: timer_end
+        run: |
+          end_time=$(date +%s)
+          start_time=${{ steps.timer_start.outputs.start_time }}
+          duration=$((end_time - start_time))
+          echo "duration=$duration" >> $GITHUB_OUTPUT
+
+      - name: Comment build time on PR
+        uses: thollander/actions-comment-pull-request@v3
+        with:
+          message: |
+            🕒 Benchmark build completed in **${{ steps.timer_end.outputs.duration }} seconds**.
+          comment-tag: benchmark-report
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
