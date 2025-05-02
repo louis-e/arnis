@@ -15,8 +15,9 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 
         // Determine block type based on leisure type
         let block_type: Block = match leisure_type.as_str() {
-            "park" | "nature_reserve" | "garden" | "disc_golf_course" | "golf_course"
-            | "soccer_golf" => GRASS_BLOCK,
+            "park" | "nature_reserve" | "garden" | "disc_golf_course" | "golf_course" => {
+                GRASS_BLOCK
+            }
             "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {

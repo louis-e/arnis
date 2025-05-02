@@ -140,7 +140,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                     block_range = 1;
                 }
                 "steps" => {
-                    block_type = OAK_SLAB;
+                    block_type = GRAY_CONCRETE;
                     block_range = 1;
                 }
 
