@@ -1,5 +1,4 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::data_processing;
 use crate::ground;
@@ -437,7 +436,7 @@ fn gui_start_generation(
             // Run data fetch and world generation
             match retrieve_data::fetch_data(args.bbox, None, args.debug, "requests") {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, scale_factor_x, scale_factor_z) =
+                    let (mut parsed_elements, mut xzbbox) =
                         osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
@@ -453,9 +452,6 @@ fn gui_start_generation(
                     });
 
                     let mut ground = ground::generate_ground_data(&args);
-
-                    let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
-                        .expect("Parsed world lengths < 0");
 
                     // Transform map (parsed_elements). Operations are defined in a json file
                     map_transformation::transform_map(

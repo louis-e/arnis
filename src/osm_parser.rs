@@ -1,4 +1,4 @@
-use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
@@ -146,7 +146,7 @@ pub fn parse_osm_data(
     bbox: LLBBox,
     scale: f64,
     debug: bool,
-) -> (Vec<ProcessedElement>, f64, f64) {
+) -> (Vec<ProcessedElement>, XZBBox) {
     println!("{} Parsing data...", "[2/6]".bold());
     emit_gui_progress_update(10.0, "Parsing data...");
 
@@ -163,6 +163,9 @@ pub fn parse_osm_data(
         println!("Scale factor X: {}", scale_factor_x);
         println!("Scale factor Z: {}", scale_factor_z);
     }
+
+    let xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
+        .expect("Parsed world lengths < 0");
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
     let mut ways_map: HashMap<u64, ProcessedWay> = HashMap::new();
@@ -271,7 +274,7 @@ pub fn parse_osm_data(
 
     emit_gui_progress_update(20.0, "");
 
-    (processed_elements, scale_factor_x, scale_factor_z)
+    (processed_elements, xzbbox)
 }
 
 const PRIORITY_ORDER: [&str; 6] = [
