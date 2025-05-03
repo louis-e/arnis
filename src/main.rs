@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
-mod bbox;
 mod block_definitions;
 mod bresenham;
 mod colors;
@@ -9,7 +8,6 @@ mod coordinate_system;
 mod data_processing;
 mod element_processing;
 mod floodfill;
-mod geo_coord;
 mod ground;
 mod map_transformation;
 mod osm_parser;

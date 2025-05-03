@@ -1,4 +1,4 @@
-use crate::bbox::BBox;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 use colored::Colorize;
 use rand::seq::SliceRandom;
@@ -81,7 +81,7 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
 
 /// Main function to fetch data
 pub fn fetch_data(
-    bbox: BBox,
+    bbox: LLBBox,
     file: Option<&str>,
     debug: bool,
     download_method: &str,

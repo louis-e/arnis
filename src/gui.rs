@@ -1,6 +1,6 @@
 use crate::args::Args;
-use crate::bbox;
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::data_processing;
 use crate::ground;
 use crate::map_transformation;
@@ -257,7 +257,7 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
 }
 
 /// Adds localized area name to the world name in level.dat
-fn add_localized_world_name(world_path_str: &str, bbox: &bbox::BBox) -> String {
+fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
     let world_path = PathBuf::from(world_path_str);
 
     // Only proceed if the path exists
@@ -397,13 +397,13 @@ fn gui_start_generation(
     fillground_enabled: bool,
     is_new_world: bool,
 ) -> Result<(), String> {
-    use bbox::BBox;
     use progress::emit_gui_error;
+    use LLBBox;
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
             // Parse the bounding box from the text with proper error handling
-            let bbox = match BBox::from_str(&bbox_text) {
+            let bbox = match LLBBox::from_str(&bbox_text) {
                 Ok(bbox) => bbox,
                 Err(e) => {
                     let error_msg = format!("Failed to parse bounding box: {}", e);

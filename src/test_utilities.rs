@@ -1,11 +1,11 @@
-use crate::bbox::BBox;
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::osm_parser;
 use crate::osm_parser::ProcessedElement;
 use crate::retrieve_data;
 
 // this is copied from main.rs
-pub fn generate_example(llbbox: BBox) -> (XZBBox, Vec<ProcessedElement>) {
+pub fn generate_example(llbbox: LLBBox) -> (XZBBox, Vec<ProcessedElement>) {
     // Fetch data
     let raw_data: serde_json::Value =
         retrieve_data::fetch_data(llbbox, None, false, "requests").expect("Failed to fetch data");
@@ -24,5 +24,5 @@ pub fn generate_example(llbbox: BBox) -> (XZBBox, Vec<ProcessedElement>) {
 
 pub fn generate_default_example() -> (XZBBox, Vec<ProcessedElement>) {
     // Arnis, Germany
-    generate_example(BBox::new(54.627053, 9.927928, 54.634902, 9.937563).unwrap())
+    generate_example(LLBBox::new(54.627053, 9.927928, 54.634902, 9.937563).unwrap())
 }

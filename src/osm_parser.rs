@@ -1,7 +1,6 @@
-use crate::{
-    bbox::BBox, coordinate_system::cartesian::XZPoint, geo_coord::GeoCoord,
-    progress::emit_gui_progress_update,
-};
+use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;
@@ -127,7 +126,7 @@ impl ProcessedElement {
 fn lat_lon_to_minecraft_coords(
     lat: f64,
     lon: f64,
-    bbox: BBox, // (min_lon, min_lat, max_lon, max_lat)
+    bbox: LLBBox, // (min_lon, min_lat, max_lon, max_lat)
     scale_factor_z: f64,
     scale_factor_x: f64,
 ) -> (i32, i32) {
@@ -144,7 +143,7 @@ fn lat_lon_to_minecraft_coords(
 
 pub fn parse_osm_data(
     json_data: &Value,
-    bbox: BBox,
+    bbox: LLBBox,
     scale: f64,
     debug: bool,
 ) -> (Vec<ProcessedElement>, f64, f64) {
@@ -293,7 +292,7 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
 
 // (lat meters, lon meters)
 #[inline]
-pub fn geo_distance(a: GeoCoord, b: GeoCoord) -> (f64, f64) {
+pub fn geo_distance(a: LLPoint, b: LLPoint) -> (f64, f64) {
     let z: f64 = lat_distance(a.lat(), b.lat());
 
     // distance between two lons depends on their latitude. In this case we'll just average them
