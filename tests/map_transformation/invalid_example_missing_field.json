@@ -1,0 +1,31 @@
+[
+    {
+        "operation": "translate",
+        "config": {
+            "type": "vector",
+            "config": {
+                "vector": {
+                    "dx": 23892,
+                    "dz": -89720
+                }
+            }
+        }
+    },
+    {
+        "operation": "translate",
+        "config": {
+            "type": "startend",
+            "config": {
+                "start": {
+                    "x": 198498,
+                    "z": 394290
+                },
+                "end": {
+                    "x": 1000,
+                    "y": -2000,
+                    "comments": "this should be a 'z', but it is likely to be mistaken as y"
+                }
+            }
+        }
+    }
+]

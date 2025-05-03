@@ -4,17 +4,20 @@ mod args;
 mod bbox;
 mod block_definitions;
 mod bresenham;
-mod cartesian;
 mod colors;
+mod coordinate_system;
 mod data_processing;
 mod element_processing;
 mod floodfill;
 mod geo_coord;
 mod ground;
+mod map_transformation;
 mod osm_parser;
 #[cfg(feature = "gui")]
 mod progress;
 mod retrieve_data;
+#[cfg(test)]
+mod test_utilities;
 mod version_check;
 mod world_editor;
 
@@ -35,7 +38,7 @@ mod progress {
         false
     }
 }
-
+use coordinate_system::cartesian::XZBBox;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
@@ -79,9 +82,11 @@ fn run_cli() {
         retrieve_data::fetch_data(args.bbox, args.file.as_deref(), args.debug, "requests")
             .expect("Failed to fetch data");
 
+    let mut ground = ground::generate_ground_data(&args);
+
     // Parse raw data
     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-        osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
+        osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
 
@@ -101,8 +106,14 @@ fn run_cli() {
         }
     }
 
+    let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
+        .expect("Parsed world lengths < 0");
+
+    // Transform map (parsed_elements). Operations are defined in a json file
+    map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
+
     // Generate world
-    let _ = data_processing::generate_world(parsed_elements, &args, scale_factor_x, scale_factor_z);
+    let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
 }
 
 fn main() {

@@ -1,5 +1,5 @@
 use crate::block_definitions::*;
-use crate::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
@@ -229,22 +229,26 @@ impl WorldToModify {
     }
 }
 
-pub struct WorldEditor {
+// Notes for someone not familiar with lifetime parameter:
+// The follwing is like a C++ template:
+// template<lifetime A>
+// struct WorldEditor {const XZBBox<A>& xzbbox;}
+pub struct WorldEditor<'a> {
     region_dir: String,
     world: WorldToModify,
-    scale_factor_x: f64,
-    scale_factor_z: f64,
+    xzbbox: &'a XZBBox,
     ground: Option<Box<Ground>>,
 }
 
-impl WorldEditor {
-    /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64) -> Self {
+// template<lifetime A>
+// impl for struct WorldEditor<A> {...}
+impl<'a> WorldEditor<'a> {
+    // Initializes the WorldEditor with the region directory and template region path.
+    pub fn new(region_dir: &str, xzbbox: &'a XZBBox) -> Self {
         Self {
             region_dir: region_dir.to_string(),
             world: WorldToModify::default(),
-            scale_factor_x,
-            scale_factor_z,
+            xzbbox,
             ground: None,
         }
     }
@@ -258,7 +262,10 @@ impl WorldEditor {
     #[inline(always)]
     pub fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {
         if let Some(ground) = &self.ground {
-            ground.level(XZPoint::new(x, z)) + y_offset
+            ground.level(XZPoint::new(
+                x - self.xzbbox.min_x(),
+                z - self.xzbbox.min_z(),
+            )) + y_offset
         } else {
             y_offset // If no ground reference, use y_offset as absolute Y
         }
@@ -285,8 +292,12 @@ impl WorldEditor {
         Region::from_stream(region_file).expect("Failed to load region")
     }
 
+    pub fn get_min_coords(&self) -> (i32, i32) {
+        (self.xzbbox.min_x(), self.xzbbox.min_z())
+    }
+
     pub fn get_max_coords(&self) -> (i32, i32) {
-        (self.scale_factor_x as i32, self.scale_factor_x as i32)
+        (self.xzbbox.max_x(), self.xzbbox.max_z())
     }
 
     #[allow(unused)]
@@ -369,7 +380,7 @@ impl WorldEditor {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
 
@@ -410,7 +421,7 @@ impl WorldEditor {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
 
@@ -656,7 +667,7 @@ impl WorldEditor {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("{} Saving world...", "[5/5]".bold());
+        println!("{} Saving world...", "[6/6]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
         let total_regions = self.world.regions.len() as u64;

@@ -1,4 +1,7 @@
-use crate::{bbox::BBox, cartesian::XZPoint};
+use crate::args::Args;
+use crate::bbox::BBox;
+use crate::coordinate_system::cartesian::XZPoint;
+use crate::progress::emit_gui_progress_update;
 use image::{Rgb, RgbImage};
 
 /// Maximum Y coordinate in Minecraft (build height limit)
@@ -410,4 +413,12 @@ impl Ground {
             eprintln!("Failed to save debug image: {}", e);
         }
     }
+}
+
+pub fn generate_ground_data(args: &Args) -> Ground {
+    if args.terrain {
+        emit_gui_progress_update(5.0, "Fetching elevation...");
+    }
+
+    Ground::new(args)
 }
