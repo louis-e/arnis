@@ -21,10 +21,10 @@ pub fn is_running_with_gui() -> bool {
 /// This code manages a multi-step process with a progress bar indicating the overall completion.
 /// The progress updates are mapped to specific steps in the pipeline:
 ///
-/// [1/6] Fetching data... - Starts at: 0% / Completes at: 5%
-/// [2/6] Parsing data... - Starts at: 5% / Completes at: 10%
-/// [3/6] Transforming map... - Starts at: 10% / Completes at: 30%
-/// [4/6] Processing data... - Starts at: 30% / Completes at: 70%
+/// [1/6] Fetching data... - Starts at: 0% / Completes at: 10%
+/// [2/6] Parsing data... - Starts at: 10% / Completes at: 20%
+/// [3/6] Transforming map... - Starts at: 20% / Completes at: 40%
+/// [4/6] Processing data... - Starts at: 40% / Completes at: 70%
 /// [5/6] Generating ground layer... - Starts at: 70% / Completes at: 90%
 /// [6/6] Saving world... - Starts at: 90% / Completes at: 100%
 ///

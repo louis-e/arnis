@@ -1,11 +1,17 @@
 use super::translate::translator_from_json;
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 
 /// An Operator does transformation on the map, modifying Vec<ProcessedElement> and XZBBox
 pub trait Operator {
     /// Apply the operation
-    fn operate(&self, elements: &mut Vec<ProcessedElement>, xzbbox: &mut XZBBox);
+    fn operate(
+        &self,
+        elements: &mut Vec<ProcessedElement>,
+        xzbbox: &mut XZBBox,
+        ground: &mut Ground,
+    );
 
     /// Return a string describing the current specific operator
     fn repr(&self) -> String;

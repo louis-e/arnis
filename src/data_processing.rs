@@ -14,21 +14,18 @@ pub const MIN_Y: i32 = -64;
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
     xzbbox: XZBBox,
+    ground: Ground,
     args: &Args,
 ) -> Result<(), String> {
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, &xzbbox);
 
     println!("{} Processing data...", "[4/6]".bold());
-    if args.terrain {
-        emit_gui_progress_update(30.0, "Fetching elevation...");
-    }
-    let ground: Ground = Ground::new(args);
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
-    emit_gui_progress_update(31.0, "Processing terrain...");
+    emit_gui_progress_update(41.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -38,8 +35,8 @@ pub fn generate_world(
         .unwrap()
         .progress_chars("█▓░"));
 
-    let progress_increment_prcs: f64 = 39.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 31.0;
+    let progress_increment_prcs: f64 = 29.0 / elements_count as f64;
+    let mut current_progress_prcs: f64 = 41.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {

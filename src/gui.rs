@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::bbox;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::data_processing;
+use crate::ground;
 use crate::map_transformation;
 use crate::osm_parser;
 use crate::progress;
@@ -451,13 +452,19 @@ fn gui_start_generation(
                         }
                     });
 
+                    let mut ground = ground::generate_ground_data(&args);
+
                     let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
                         .expect("Parsed world lengths < 0");
 
                     // Transform map (parsed_elements). Operations are defined in a json file
-                    map_transformation::transform_map(&mut parsed_elements, &mut xzbbox);
+                    map_transformation::transform_map(
+                        &mut parsed_elements,
+                        &mut xzbbox,
+                        &mut ground,
+                    );
 
-                    let _ = data_processing::generate_world(parsed_elements, xzbbox, &args);
+                    let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
                     Ok(())
                 }
                 Err(e) => {

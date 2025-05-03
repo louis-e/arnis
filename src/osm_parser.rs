@@ -149,7 +149,7 @@ pub fn parse_osm_data(
     debug: bool,
 ) -> (Vec<ProcessedElement>, f64, f64) {
     println!("{} Parsing data...", "[2/6]".bold());
-    emit_gui_progress_update(5.0, "Parsing data...");
+    emit_gui_progress_update(10.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
     let data: OsmData =
@@ -270,7 +270,7 @@ pub fn parse_osm_data(
         }));
     }
 
-    emit_gui_progress_update(10.0, "");
+    emit_gui_progress_update(20.0, "");
 
     (processed_elements, scale_factor_x, scale_factor_z)
 }

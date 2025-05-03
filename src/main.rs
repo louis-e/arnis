@@ -82,6 +82,8 @@ fn run_cli() {
         retrieve_data::fetch_data(args.bbox, args.file.as_deref(), args.debug, "requests")
             .expect("Failed to fetch data");
 
+    let mut ground = ground::generate_ground_data(&args);
+
     // Parse raw data
     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
         osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
@@ -108,10 +110,10 @@ fn run_cli() {
         .expect("Parsed world lengths < 0");
 
     // Transform map (parsed_elements). Operations are defined in a json file
-    map_transformation::transform_map(&mut parsed_elements, &mut xzbbox);
+    map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
     // Generate world
-    let _ = data_processing::generate_world(parsed_elements, xzbbox, &args);
+    let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
 }
 
 fn main() {
