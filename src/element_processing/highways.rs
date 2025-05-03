@@ -132,6 +132,22 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                     block_type = GRAY_CONCRETE;
                     block_range = 2;
                 }
+                "secondary_link" | "tertiary_link" => {
+                    //Exit ramps, sliproads
+                    block_type = BLACK_CONCRETE;
+                    block_range = 1;
+                }
+                "escape" => {
+                    // Sand trap for vehicles on mountainous roads
+                    block_type = SAND;
+                    block_range = 1;
+                }
+                "steps" => {
+                    //TODO: Add correct stairs respecting height, step_count, etc.
+                    block_type = GRAY_CONCRETE;
+                    block_range = 1;
+                }
+
                 _ => {
                     if let Some(lanes) = element.tags().get("lanes") {
                         if lanes == "2" {
