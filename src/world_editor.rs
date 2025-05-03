@@ -260,7 +260,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Calculate the absolute Y position from a ground-relative offset
     #[inline(always)]
-    fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {
+    pub fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {
         if let Some(ground) = &self.ground {
             ground.level(XZPoint::new(
                 x - self.xzbbox.min_x(),
@@ -581,12 +581,6 @@ impl<'a> WorldEditor<'a> {
     #[allow(unused)]
     pub fn block_at_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
         self.world.get_block(x, absolute_y, z).is_some()
-    }
-
-    /// Converts a relative Y coordinate to an absolute Y coordinate
-    #[inline]
-    pub fn relative_to_absolute_y(&self, x: i32, y_relative: i32, z: i32) -> i32 {
-        self.get_absolute_y(x, y_relative, z)
     }
 
     /// Helper function to create a base chunk with grass blocks at Y -62

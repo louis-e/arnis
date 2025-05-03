@@ -88,7 +88,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 }
             }
             "forest" => {
-                if !editor.check_for_block(x, 0, z, Some(&[WATER])) {
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..30);
                     if random_choice == 20 {
                         Tree::create(editor, (x, 1, z));
@@ -186,8 +186,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 }
             }
             "grass" => {
-                if rng.gen_range(1..8) != 1 && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
-                {
+                if rng.gen_bool(0.85) && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     editor.set_block(GRASS, x, 1, z, None, None);
                 }
             }
@@ -208,8 +207,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             }
             "quarry" => {
                 // Add stone layer under it
-                editor.set_block(STONE, x, 1, z, Some(&[STONE]), None);
-                editor.set_block(STONE, x, 2, z, Some(&[STONE]), None);
+                editor.set_block(STONE, x, -1, z, Some(&[STONE]), None);
+                editor.set_block(STONE, x, -2, z, Some(&[STONE]), None);
                 // Generate ore blocks
                 if let Some(resource) = element.tags.get("resource") {
                     let ore_block = match resource.as_str() {
@@ -220,7 +219,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         "clay" | "kaolinite" => CLAY,
                         _ => STONE,
                     };
-                    let random_choice: i32 = rng.gen_range(0..100); // With more depth there's more resources
+                    let random_choice: i32 = rng.gen_range(0..100 + editor.get_absolute_y(x, 0, z)); // The deeper it is the more resources are there
                     if random_choice < 5 {
                         editor.set_block(ore_block, x, 0, z, Some(&[STONE]), None);
                     }

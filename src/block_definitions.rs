@@ -22,7 +22,7 @@ impl Block {
     }
 
     pub fn namespace(&self) -> &str {
-        "mincraft"
+        "minecraft"
     }
 
     pub fn name(&self) -> &str {
