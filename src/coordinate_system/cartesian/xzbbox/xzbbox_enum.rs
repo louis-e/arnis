@@ -62,7 +62,7 @@ impl XZBBox {
     }
 
     /// Return the circumscribed rectangle of the current XZBBox shape
-    pub fn circumscribed_rect(&self) -> XZBBoxRect {
+    pub fn bounding_rect(&self) -> XZBBoxRect {
         match self {
             Self::Rect(r) => *r,
         }
@@ -70,22 +70,22 @@ impl XZBBox {
 
     /// Return the min x in all covered blocks
     pub fn min_x(&self) -> i32 {
-        self.circumscribed_rect().point1().x
+        self.bounding_rect().min().x
     }
 
     /// Return the max x in all covered blocks
     pub fn max_x(&self) -> i32 {
-        self.circumscribed_rect().point2().x
+        self.bounding_rect().max().x
     }
 
     /// Return the min z in all covered blocks
     pub fn min_z(&self) -> i32 {
-        self.circumscribed_rect().point1().z
+        self.bounding_rect().min().z
     }
 
     /// Return the max z in all covered blocks
     pub fn max_z(&self) -> i32 {
-        self.circumscribed_rect().point2().z
+        self.bounding_rect().max().z
     }
 }
 
@@ -144,9 +144,9 @@ mod test {
         let obj = XZBBox::rect_from_xz_lengths(1.0, 1.0);
         assert!(obj.is_ok());
         let obj = obj.unwrap();
-        assert_eq!(obj.circumscribed_rect().total_blocks_x(), 2);
-        assert_eq!(obj.circumscribed_rect().total_blocks_z(), 2);
-        assert_eq!(obj.circumscribed_rect().total_blocks(), 4);
+        assert_eq!(obj.bounding_rect().total_blocks_x(), 2);
+        assert_eq!(obj.bounding_rect().total_blocks_z(), 2);
+        assert_eq!(obj.bounding_rect().total_blocks(), 4);
         assert_eq!(obj.min_x(), 0);
         assert_eq!(obj.max_x(), 1);
         assert_eq!(obj.min_z(), 0);
@@ -157,9 +157,9 @@ mod test {
         let obj = XZBBox::rect_from_xz_lengths(0.0, 1.0);
         assert!(obj.is_ok());
         let obj = obj.unwrap();
-        assert_eq!(obj.circumscribed_rect().total_blocks_x(), 1);
-        assert_eq!(obj.circumscribed_rect().total_blocks_z(), 2);
-        assert_eq!(obj.circumscribed_rect().total_blocks(), 2);
+        assert_eq!(obj.bounding_rect().total_blocks_x(), 1);
+        assert_eq!(obj.bounding_rect().total_blocks_z(), 2);
+        assert_eq!(obj.bounding_rect().total_blocks(), 2);
         assert_eq!(obj.min_x(), 0);
         assert_eq!(obj.max_x(), 0);
         assert_eq!(obj.min_z(), 0);
@@ -169,9 +169,9 @@ mod test {
         let obj = XZBBox::rect_from_xz_lengths(1.0, 0.0);
         assert!(obj.is_ok());
         let obj = obj.unwrap();
-        assert_eq!(obj.circumscribed_rect().total_blocks_x(), 2);
-        assert_eq!(obj.circumscribed_rect().total_blocks_z(), 1);
-        assert_eq!(obj.circumscribed_rect().total_blocks(), 2);
+        assert_eq!(obj.bounding_rect().total_blocks_x(), 2);
+        assert_eq!(obj.bounding_rect().total_blocks_z(), 1);
+        assert_eq!(obj.bounding_rect().total_blocks(), 2);
         assert_eq!(obj.min_x(), 0);
         assert_eq!(obj.max_x(), 1);
         assert_eq!(obj.min_z(), 0);
@@ -181,9 +181,9 @@ mod test {
         let obj = XZBBox::rect_from_xz_lengths(123.4, 322.5);
         assert!(obj.is_ok());
         let obj = obj.unwrap();
-        assert_eq!(obj.circumscribed_rect().total_blocks_x(), 124);
-        assert_eq!(obj.circumscribed_rect().total_blocks_z(), 323);
-        assert_eq!(obj.circumscribed_rect().total_blocks(), 124 * 323);
+        assert_eq!(obj.bounding_rect().total_blocks_x(), 124);
+        assert_eq!(obj.bounding_rect().total_blocks_z(), 323);
+        assert_eq!(obj.bounding_rect().total_blocks(), 124 * 323);
         assert_eq!(obj.min_x(), 0);
         assert_eq!(obj.max_x(), 123);
         assert_eq!(obj.min_z(), 0);

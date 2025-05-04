@@ -118,7 +118,7 @@ pub fn generate_world(
     process_pb.finish();
 
     // Generate ground layer
-    let total_blocks: u64 = xzbbox.circumscribed_rect().total_blocks();
+    let total_blocks: u64 = xzbbox.bounding_rect().total_blocks();
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 
