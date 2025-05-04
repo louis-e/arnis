@@ -1,5 +1,6 @@
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
@@ -122,25 +123,6 @@ impl ProcessedElement {
     }
 }
 
-// Function to convert latitude and longitude to Minecraft coordinates.
-fn lat_lon_to_minecraft_coords(
-    lat: f64,
-    lon: f64,
-    bbox: LLBBox, // (min_lon, min_lat, max_lon, max_lat)
-    scale_factor_z: f64,
-    scale_factor_x: f64,
-) -> (i32, i32) {
-    // Calculate the relative position within the bounding box
-    let rel_x: f64 = (lon - bbox.min().lng()) / (bbox.max().lng() - bbox.min().lng());
-    let rel_z: f64 = 1.0 - (lat - bbox.min().lat()) / (bbox.max().lat() - bbox.min().lat());
-
-    // Apply scaling factors for each dimension and convert to Minecraft coordinates
-    let x: i32 = (rel_x * scale_factor_x) as i32;
-    let z: i32 = (rel_z * scale_factor_z) as i32;
-
-    (x, z)
-}
-
 pub fn parse_osm_data(
     json_data: &Value,
     bbox: LLBBox,
@@ -154,18 +136,16 @@ pub fn parse_osm_data(
     let data: OsmData =
         serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
 
-    // Determine which dimension is larger and assign scale factors accordingly
-    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
-    let scale_factor_z: f64 = scale_factor_z.floor() * scale;
-    let scale_factor_x: f64 = scale_factor_x.floor() * scale;
+    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
+        .unwrap_or_else(|e| {
+            eprintln!("Error in defining coordinate transformation:\n{}", e);
+            panic!();
+        });
 
     if debug {
-        println!("Scale factor X: {}", scale_factor_x);
-        println!("Scale factor Z: {}", scale_factor_z);
+        println!("Scale factor X: {}", coord_transformer.scale_factor_x());
+        println!("Scale factor Z: {}", coord_transformer.scale_factor_z());
     }
-
-    let xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
-        .expect("Parsed world lengths < 0");
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
     let mut ways_map: HashMap<u64, ProcessedWay> = HashMap::new();
@@ -176,14 +156,18 @@ pub fn parse_osm_data(
     for element in &data.elements {
         if element.r#type == "node" {
             if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
-                let (x, z) =
-                    lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_z, scale_factor_x);
+                let llpoint = LLPoint::new(lat, lon).unwrap_or_else(|e| {
+                    eprintln!("Encountered invalid node element:\n{}", e);
+                    panic!();
+                });
+
+                let xzpoint = coord_transformer.transform_point(llpoint);
 
                 let processed: ProcessedNode = ProcessedNode {
                     id: element.id,
                     tags: element.tags.clone().unwrap_or_default(),
-                    x,
-                    z,
+                    x: xzpoint.x,
+                    z: xzpoint.z,
                 };
 
                 nodes_map.insert(element.id, processed.clone());
@@ -291,38 +275,4 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     }
     // Return a default priority if none of the tags match
     PRIORITY_ORDER.len()
-}
-
-// (lat meters, lon meters)
-#[inline]
-pub fn geo_distance(a: LLPoint, b: LLPoint) -> (f64, f64) {
-    let z: f64 = lat_distance(a.lat(), b.lat());
-
-    // distance between two lons depends on their latitude. In this case we'll just average them
-    let x: f64 = lon_distance((a.lat() + b.lat()) / 2.0, a.lng(), b.lng());
-
-    (z, x)
-}
-
-// Haversine but optimized for a latitude delta of 0
-// returns meters
-fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
-    const R: f64 = 6_371_000.0;
-    let d_lon: f64 = (lon2 - lon1).to_radians();
-    let a: f64 =
-        lat.to_radians().cos() * lat.to_radians().cos() * (d_lon / 2.0).sin() * (d_lon / 2.0).sin();
-    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    R * c
-}
-
-// Haversine but optimized for a longitude delta of 0
-// returns meters
-fn lat_distance(lat1: f64, lat2: f64) -> f64 {
-    const R: f64 = 6_371_000.0;
-    let d_lat: f64 = (lat2 - lat1).to_radians();
-    let a: f64 = (d_lat / 2.0).sin() * (d_lat / 2.0).sin();
-    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    R * c
 }

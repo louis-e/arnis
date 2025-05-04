@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::coordinate_system::transformation::geo_distance;
 use crate::progress::emit_gui_progress_update;
 use image::{Rgb, RgbImage};
 
@@ -132,8 +133,7 @@ impl Ground {
         args: &crate::args::Args,
     ) -> Result<ElevationData, Box<dyn std::error::Error>> {
         // Use OSM parser's scale calculation and apply user scale factor
-        let (scale_factor_z, scale_factor_x) =
-            crate::osm_parser::geo_distance(args.bbox.min(), args.bbox.max());
+        let (scale_factor_z, scale_factor_x) = geo_distance(args.bbox.min(), args.bbox.max());
         let scale_factor_x: f64 = scale_factor_x * args.scale;
         let scale_factor_z: f64 = scale_factor_z * args.scale;
 

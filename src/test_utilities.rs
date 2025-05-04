@@ -20,5 +20,9 @@ pub fn generate_example(llbbox: LLBBox) -> (XZBBox, Vec<ProcessedElement>) {
 
 pub fn generate_default_example() -> (XZBBox, Vec<ProcessedElement>) {
     // Arnis, Germany
-    generate_example(LLBBox::new(54.627053, 9.927928, 54.634902, 9.937563).unwrap())
+    generate_example(get_llbbox_arnis())
+}
+
+pub fn get_llbbox_arnis() -> LLBBox {
+    LLBBox::new(54.627053, 9.927928, 54.634902, 9.937563).unwrap()
 }
