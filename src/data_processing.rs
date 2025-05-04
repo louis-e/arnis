@@ -80,8 +80,7 @@ pub fn generate_world(
                     waterways::generate_waterways(&mut editor, way);
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
-                } else if way.tags.contains_key("railway") || way.tags.contains_key("subway")
-                {
+                } else if way.tags.contains_key("railway") || way.tags.contains_key("subway") {
                     railways::generate_railways(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {

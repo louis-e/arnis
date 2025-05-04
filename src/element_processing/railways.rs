@@ -6,14 +6,20 @@ use crate::world_editor::WorldEditor;
 pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(railway_type) = element.tags.get("railway") {
         // Check for underground railways (negative level or layer)
-        let is_underground = element.tags.get("level").map_or(false, |level| {
-            level.parse::<i32>().map_or(false, |l| l < 0)
-        }) || element.tags.get("layer").map_or(false, |layer| {
-            layer.parse::<i32>().map_or(false, |l| l < 0)
-        });
+        let is_underground = element
+            .tags
+            .get("level")
+            .map_or(false, |level| level.parse::<i32>().map_or(false, |l| l < 0))
+            || element
+                .tags
+                .get("layer")
+                .map_or(false, |layer| layer.parse::<i32>().map_or(false, |l| l < 0));
 
         // Also check for tunnel=yes tag
-        let is_tunnel = element.tags.get("tunnel").map_or(false, |tunnel| tunnel == "yes");
+        let is_tunnel = element
+            .tags
+            .get("tunnel")
+            .map_or(false, |tunnel| tunnel == "yes");
 
         // Skip certain railway types
         if [
@@ -99,7 +105,14 @@ fn generate_subway(editor: &mut WorldEditor, element: &ProcessedWay) {
                     if dx == 0 && dz == 0 && j % 4 == 0 {
                         editor.set_block(GLOWSTONE, bx, -4, bz, None, None);
                     } else {
-                        editor.set_block(SMOOTH_STONE, bx + dx, -4, bz + dz, None, Some(&[GLOWSTONE]));
+                        editor.set_block(
+                            SMOOTH_STONE,
+                            bx + dx,
+                            -4,
+                            bz + dz,
+                            None,
+                            Some(&[GLOWSTONE]),
+                        );
                     }
                 }
             }
@@ -143,29 +156,29 @@ fn generate_subway(editor: &mut WorldEditor, element: &ProcessedWay) {
                     // For north-south rails, place dirt two blocks east and west
                     place_wall(bx + 3, -8, bz);
                     place_wall(bx - 3, -8, bz);
-                },
+                }
                 RAIL_EAST_WEST => {
                     // For east-west rails, place dirt two blocks north and south
                     place_wall(bx, -8, bz + 3);
                     place_wall(bx, -8, bz - 3);
-                },
+                }
                 RAIL_NORTH_EAST => {
                     // For curves, place dirt two blocks away at appropriate positions
                     place_wall(bx - 3, -8, bz);
                     place_wall(bx, -8, bz + 3);
-                },
+                }
                 RAIL_NORTH_WEST => {
                     place_wall(bx + 3, -8, bz);
                     place_wall(bx, -8, bz + 3);
-                },
+                }
                 RAIL_SOUTH_EAST => {
                     place_wall(bx - 3, -8, bz);
                     place_wall(bx, -8, bz - 3);
-                },
+                }
                 RAIL_SOUTH_WEST => {
                     place_wall(bx + 3, -8, bz);
                     place_wall(bx, -8, bz - 3);
-                },
+                }
                 _ => {
                     // Default for any other rail blocks
                     place_wall(bx + 3, -8, bz);
