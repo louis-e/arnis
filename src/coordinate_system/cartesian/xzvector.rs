@@ -1,3 +1,4 @@
+use super::xzpoint::XZPoint;
 use serde::Deserialize;
 use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
@@ -11,6 +12,18 @@ pub struct XZVector {
     /// Increment in z direction
     pub dz: i32,
 }
+
+// impl XZVector {
+//     /// convert point to vector starting from origin
+//     pub fn from_point(xzpoint: XZPoint) -> Self {
+//         Self {dx: xzpoint.x, dz: xzpoint.z}
+//     }
+
+//     /// convert to point by applying the vector at origin
+//     pub fn to_point(&self) -> XZPoint {
+//         XZPoint {x: self.dx, z: self.dz}
+//     }
+// }
 
 impl fmt::Display for XZVector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

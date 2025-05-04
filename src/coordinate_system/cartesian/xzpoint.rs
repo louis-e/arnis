@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-#[derive(Debug, Deserialize, Copy, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Copy, Clone, PartialEq, Hash)]
 pub struct XZPoint {
     pub x: i32,
     pub z: i32,
@@ -13,6 +13,21 @@ impl XZPoint {
     pub fn new(x: i32, z: i32) -> Self {
         Self { x, z }
     }
+
+    // pub fn origin() -> Self {
+    //     Self {x: 0, z: 0}
+    // }
+
+    pub fn to_relative(&self, relorigin: XZPoint) -> XZPoint {
+        Self {
+            x: self.x - relorigin.x,
+            z: self.z - relorigin.z,
+        }
+    }
+
+    // pub fn to_absolute(&self, relorigin: XZPoint) -> XZPoint {
+    //     Self {x: self.x + relorigin.x, z: self.z + relorigin.z}
+    // }
 }
 
 impl fmt::Display for XZPoint {
