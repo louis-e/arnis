@@ -116,6 +116,9 @@ pub fn fetch_data(
         nwr["tourism"];
         nwr["bridge"];
         nwr["railway"];
+        nwr["subway"="yes"];
+        nwr["tunnel"="yes"];
+        nwr["public_transport"="station"];
         nwr["barrier"];
         nwr["entrance"];
         nwr["door"];

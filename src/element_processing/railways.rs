@@ -5,10 +5,20 @@ use crate::world_editor::WorldEditor;
 
 pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(railway_type) = element.tags.get("railway") {
+        // Check for underground railways (negative level or layer)
+        let is_underground = element.tags.get("level").map_or(false, |level| {
+            level.parse::<i32>().map_or(false, |l| l < 0)
+        }) || element.tags.get("layer").map_or(false, |layer| {
+            layer.parse::<i32>().map_or(false, |l| l < 0)
+        });
+
+        // Also check for tunnel=yes tag
+        let is_tunnel = element.tags.get("tunnel").map_or(false, |tunnel| tunnel == "yes");
+
+        // Skip certain railway types
         if [
             "proposed",
             "abandoned",
-            "subway",
             "construction",
             "razed",
             "turntable",
@@ -18,18 +28,13 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
             return;
         }
 
-        if let Some(subway) = element.tags.get("subway") {
-            if subway == "yes" {
-                return;
-            }
+        // Process as subway if it's a subway, underground by level/layer tag, or a tunnel
+        if element.tags.get("subway").map_or(false, |v| v == "yes") || is_underground || is_tunnel {
+            generate_subway(editor, element);
+            return;
         }
 
-        if let Some(tunnel) = element.tags.get("tunnel") {
-            if tunnel == "yes" {
-                return;
-            }
-        }
-
+        // Regular surface railways
         for i in 1..element.nodes.len() {
             let prev_node = element.nodes[i - 1].xz();
             let cur_node = element.nodes[i].xz();
@@ -63,6 +68,108 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
 
                 if bx % 4 == 0 {
                     editor.set_block(OAK_LOG, bx, 0, bz, None, None);
+                }
+            }
+        }
+    }
+}
+
+fn generate_subway(editor: &mut WorldEditor, element: &ProcessedWay) {
+    for i in 1..element.nodes.len() {
+        let prev_node = element.nodes[i - 1].xz();
+        let cur_node = element.nodes[i].xz();
+
+        let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
+        let smoothed_points = smooth_diagonal_rails(&points);
+
+        for j in 0..smoothed_points.len() {
+            let (bx, _, bz) = smoothed_points[j];
+
+            // Create a 4-block wide floor
+            for dx in -2..=1 {
+                for dz in -2..=1 {
+                    editor.set_block(SMOOTH_STONE, bx + dx, -9, bz + dz, None, None);
+                }
+            }
+
+            // Create a 4-block wide ceiling 3 blocks above the floor
+            for dx in -2..=1 {
+                for dz in -2..=1 {
+                    // Add occasional glowstone for lighting
+                    if dx == 0 && dz == 0 && j % 4 == 0 {
+                        editor.set_block(GLOWSTONE, bx, -4, bz, None, None);
+                    } else {
+                        editor.set_block(SMOOTH_STONE, bx + dx, -4, bz + dz, None, Some(&[GLOWSTONE]));
+                    }
+                }
+            }
+
+            // Get previous and next points for direction
+            let prev = if j > 0 {
+                Some(smoothed_points[j - 1])
+            } else {
+                None
+            };
+            let next = if j < smoothed_points.len() - 1 {
+                Some(smoothed_points[j + 1])
+            } else {
+                None
+            };
+
+            let rail_block = determine_rail_direction(
+                (bx, bz),
+                prev.map(|(x, _, z)| (x, z)),
+                next.map(|(x, _, z)| (x, z)),
+            );
+
+            // Place the rail on top of the floor
+            editor.set_block(rail_block, bx, -8, bz, None, None);
+
+            // Helper function to place wall only if block below is not SMOOTH_STONE
+            let mut place_wall = |x: i32, y: i32, z: i32| {
+                if !editor.check_for_block(x, y - 1, z, Some(&[SMOOTH_STONE])) {
+                    editor.set_block(POLISHED_ANDESITE, x, y, z, None, None);
+                    editor.set_block(POLISHED_ANDESITE, x, y + 1, z, None, None);
+                    editor.set_block(POLISHED_ANDESITE, x, y + 2, z, None, None);
+                    editor.set_block(POLISHED_ANDESITE, x, y + 3, z, None, None);
+                    editor.set_block(POLISHED_ANDESITE, x, y + 4, z, None, None);
+                }
+            };
+
+            // Place dirt blocks two blocks away from the rail
+            // Determine orientation based on rail block
+            match rail_block {
+                RAIL_NORTH_SOUTH => {
+                    // For north-south rails, place dirt two blocks east and west
+                    place_wall(bx + 3, -8, bz);
+                    place_wall(bx - 3, -8, bz);
+                },
+                RAIL_EAST_WEST => {
+                    // For east-west rails, place dirt two blocks north and south
+                    place_wall(bx, -8, bz + 3);
+                    place_wall(bx, -8, bz - 3);
+                },
+                RAIL_NORTH_EAST => {
+                    // For curves, place dirt two blocks away at appropriate positions
+                    place_wall(bx - 3, -8, bz);
+                    place_wall(bx, -8, bz + 3);
+                },
+                RAIL_NORTH_WEST => {
+                    place_wall(bx + 3, -8, bz);
+                    place_wall(bx, -8, bz + 3);
+                },
+                RAIL_SOUTH_EAST => {
+                    place_wall(bx - 3, -8, bz);
+                    place_wall(bx, -8, bz - 3);
+                },
+                RAIL_SOUTH_WEST => {
+                    place_wall(bx + 3, -8, bz);
+                    place_wall(bx, -8, bz - 3);
+                },
+                _ => {
+                    // Default for any other rail blocks
+                    place_wall(bx + 3, -8, bz);
+                    place_wall(bx - 3, -8, bz);
                 }
             }
         }
