@@ -96,19 +96,19 @@ jobs:
       uses: actions/checkout@v3
 
     - name: Download Windows build artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: windows-latest-build
         path: ./builds/windows
 
     - name: Download Linux build artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: ubuntu-latest-build
         path: ./builds/linux
 
     - name: Download macOS build artifact
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: macos-latest-build
         path: ./builds/macos
