@@ -37,14 +37,28 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
                         for x in (bx - waterway_width / 2)..=(bx + waterway_width / 2) {
                             for z in (bz - waterway_width / 2)..=(bz + waterway_width / 2) {
                                 // Set water block at the ground level
-                                editor.set_block(WATER, x, 0, z, None, None);
+                                editor.set_block(
+                                    WATER,
+                                    x,
+                                    0,
+                                    z,
+                                    Some(&[DIRT, STONE, GRASS_BLOCK]),
+                                    None,
+                                );
                                 // Clear vegetation above the water
                                 editor.set_block(
                                     AIR,
                                     x,
                                     1,
                                     z,
-                                    Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
+                                    Some(&[
+                                        GRASS,
+                                        WHEAT,
+                                        CARROTS,
+                                        POTATOES,
+                                        DEAD_BUSH,
+                                        TALL_GRASS_BOTTOM,
+                                    ]),
                                     None,
                                 );
                             }
