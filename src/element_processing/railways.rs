@@ -8,7 +8,6 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
         if [
             "proposed",
             "abandoned",
-            //"subway",
             "construction",
             "razed", // "turntable",
         ]

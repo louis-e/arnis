@@ -40,7 +40,7 @@ pub fn generate_world(
 
     let progress_increment_prcs: f64 = 49.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 11.0;
-    let  _last_emitted_progress: f64 = current_progress_prcs;
+    let _last_emitted_progress: f64 = current_progress_prcs;
 
     process_pb.finish();
 
@@ -145,7 +145,7 @@ pub fn generate_world(
                 } else if way.tags.contains_key("waterway") {
                     waterways::generate_waterways(&mut editor, way);
                 } else if way.tags.contains_key("bridge") {
-                    //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
+                    // bridges::generate_bridges(&mut editor, way); // TODO FIX
                 } else if way.tags.contains_key("railway") {
                     railways::generate_railways(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")

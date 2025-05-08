@@ -86,7 +86,14 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                 flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for (x, z) in filled_area {
-                editor.set_block(surface_block, x, 0, z, None, None);
+                editor.set_block(
+                    surface_block,
+                    x,
+                    0,
+                    z,
+                    Some(&[DIRT, STONE, GRASS_BLOCK]),
+                    None,
+                );
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -212,7 +219,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                                 set_x,
                                                 0,
                                                 set_z,
-                                                None,
+                                                Some(&[DIRT, STONE, GRASS_BLOCK]),
                                                 None,
                                             );
                                         }
