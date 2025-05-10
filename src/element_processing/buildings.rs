@@ -23,7 +23,8 @@ pub fn generate_buildings(
     };
 
     // Calculate starting y-offset from min_level
-    let start_y_offset = min_level * 4;
+    let scale_factor = args.scale;
+    let start_y_offset = modname::multiply_scale(min_level * 4, scale_factor);
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -76,7 +77,6 @@ pub fn generate_buildings(
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
-    let scale_factor = args.scale;
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
 
     // Skip if 'layer' or 'level' is negative in the tags
@@ -98,7 +98,7 @@ pub fn generate_buildings(
             let lev = levels - min_level;
 
             if lev >= 1 {
-                building_height = ((lev * 4 + 2) as f64 * scale_factor) as i32;
+                building_height = modname::multiply_scale(levels * 4 + 2, scale_factor);
                 building_height = building_height.max(3);
             }
         }
@@ -112,7 +112,7 @@ pub fn generate_buildings(
     }
 
     if let Some(levels) = relation_levels {
-        building_height = ((levels * 4 + 2) as f64 * scale_factor) as i32;
+        building_height = modname::multiply_scale(levels * 4 + 2, scale_factor);
         building_height = building_height.max(3);
     }
 
@@ -133,7 +133,7 @@ pub fn generate_buildings(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                for shelter_y in 1..=4 {
+                for shelter_y in 1..=modname::multiply_scale(4, scale_factor) {
                     editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
                 }
                 editor.set_block(roof_block, x, 5, z, None, None);
@@ -422,6 +422,13 @@ pub fn generate_buildings(
                 );
             }
         }
+    }
+}
+
+mod modname {
+    pub(crate) fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
+        let result = (value as f64) * (scale_factor);
+        result.floor() as i32
     }
 }
 

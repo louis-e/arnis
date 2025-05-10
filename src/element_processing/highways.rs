@@ -93,6 +93,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             let mut block_type = BLACK_CONCRETE;
             let mut block_range: i32 = 2;
             let mut add_stripe = false;
+            let scale_factor = args.scale;
 
             // Skip if 'layer' or 'level' is negative in the tags
             if let Some(layer) = element.tags().get("layer") {
@@ -163,6 +164,10 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             let ProcessedElement::Way(way) = element else {
                 return;
             };
+
+            if scale_factor < 1.0 {
+                block_range = ((block_range as f64) * scale_factor).floor() as i32;
+            }
 
             // Iterate over nodes to create the highway
             for node in &way.nodes {
