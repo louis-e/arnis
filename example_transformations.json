@@ -1,0 +1,32 @@
+[
+    {
+        "comment": "this make all elements x+=2000, z+=2000",
+        "operation": "translate",
+        "config": {
+            "type": "vector",
+            "config": {
+                "vector": {
+                    "dx": 2000,
+                    "dz": 2000
+                }
+            }
+        }
+    },
+    {
+        "comment": "This drags the map at point 2000,2000 to 100,100",
+        "operation": "translate",
+        "config": {
+            "type": "startend",
+            "config": {
+                "start": {
+                    "x": 2000,
+                    "z": 2000
+                },
+                "end": {
+                    "x": 100,
+                    "z": 100
+                }
+            }
+        }
+    }
+]
