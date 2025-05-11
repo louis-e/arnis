@@ -184,8 +184,8 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
 
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
-                    let dash_length: i32 = 5; // Length of the solid part of the stripe
-                    let gap_length: i32 = 5; // Length of the gap part of the stripe
+                    let dash_length: i32 = (5.0 * scale_factor).ceil() as i32; // Length of the solid part of the stripe
+                    let gap_length: i32 = (5.0 * scale_factor).ceil() as i32; // Length of the gap part of the stripe
 
                     for (x, _, z) in bresenham_points {
                         // Draw the road surface for the entire width
@@ -312,7 +312,7 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
 }
 
 /// Generates an aeroway
-pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay) {
+pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Args) {
     let mut previous_node: Option<(i32, i32)> = None;
     let surface_block = LIGHT_GRAY_CONCRETE;
 
@@ -322,10 +322,11 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay) {
             let x2 = node.x;
             let z2 = node.z;
             let points = bresenham_line(x1, 0, z1, x2, 0, z2);
+            let way_width: i32 = (12.0 * args.scale).ceil() as i32;
 
             for (x, _, z) in points {
-                for dx in -12..=12 {
-                    for dz in -12..=12 {
+                for dx in -way_width..=way_width {
+                    for dz in -way_width..=way_width {
                         let set_x = x + dx;
                         let set_z = z + dz;
                         editor.set_block(surface_block, set_x, 0, set_z, None, None);

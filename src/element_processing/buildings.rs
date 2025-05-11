@@ -24,7 +24,7 @@ pub fn generate_buildings(
 
     // Calculate starting y-offset from min_level
     let scale_factor = args.scale;
-    let start_y_offset = modname::multiply_scale(min_level * 4, scale_factor);
+    let start_y_offset = multiply_scale(min_level * 4, scale_factor);
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -98,7 +98,7 @@ pub fn generate_buildings(
             let lev = levels - min_level;
 
             if lev >= 1 {
-                building_height = modname::multiply_scale(levels * 4 + 2, scale_factor);
+                building_height = multiply_scale(levels * 4 + 2, scale_factor);
                 building_height = building_height.max(3);
             }
         }
@@ -112,7 +112,7 @@ pub fn generate_buildings(
     }
 
     if let Some(levels) = relation_levels {
-        building_height = modname::multiply_scale(levels * 4 + 2, scale_factor);
+        building_height = multiply_scale(levels * 4 + 2, scale_factor);
         building_height = building_height.max(3);
     }
 
@@ -133,7 +133,7 @@ pub fn generate_buildings(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                for shelter_y in 1..=modname::multiply_scale(4, scale_factor) {
+                for shelter_y in 1..=multiply_scale(4, scale_factor) {
                     editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
                 }
                 editor.set_block(roof_block, x, 5, z, None, None);
@@ -425,11 +425,9 @@ pub fn generate_buildings(
     }
 }
 
-mod modname {
-    pub(crate) fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
-        let result = (value as f64) * (scale_factor);
-        result.floor() as i32
-    }
+fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
+    let result = (value as f64) * (scale_factor);
+    result.floor() as i32
 }
 
 pub fn generate_building_from_relation(
