@@ -86,7 +86,7 @@ pub fn fetch_data(
     debug: bool,
     download_method: &str,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} Fetching data...", "[1/5]".bold());
+    println!("{} Fetching data...", "[1/6]".bold());
     emit_gui_progress_update(1.0, "Fetching data...");
 
     // List of Overpass API servers

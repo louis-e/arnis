@@ -1,5 +1,5 @@
 use crate::{
-    args::Args, bbox::BBox, cartesian::XZPoint, geo_coord::GeoCoord,
+    bbox::BBox, coordinate_system::cartesian::XZPoint, geo_coord::GeoCoord,
     progress::emit_gui_progress_update,
 };
 use colored::Colorize;
@@ -37,7 +37,7 @@ struct OsmData {
 
 // Normalized data that we can use
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedNode {
     pub id: u64,
     pub tags: HashMap<String, String>,
@@ -56,33 +56,33 @@ impl ProcessedNode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedWay {
     pub id: u64,
     pub nodes: Vec<ProcessedNode>,
     pub tags: HashMap<String, String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ProcessedMemberRole {
     Outer,
     Inner,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedMember {
     pub role: ProcessedMemberRole,
     pub way: ProcessedWay,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedRelation {
     pub id: u64,
     pub tags: HashMap<String, String>,
     pub members: Vec<ProcessedMember>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProcessedElement {
     Node(ProcessedNode),
     Way(ProcessedWay),
@@ -145,10 +145,11 @@ fn lat_lon_to_minecraft_coords(
 pub fn parse_osm_data(
     json_data: &Value,
     bbox: BBox,
-    args: &Args,
+    scale: f64,
+    debug: bool,
 ) -> (Vec<ProcessedElement>, f64, f64) {
-    println!("{} Parsing data...", "[2/5]".bold());
-    emit_gui_progress_update(5.0, "Parsing data...");
+    println!("{} Parsing data...", "[2/6]".bold());
+    emit_gui_progress_update(10.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
     let data: OsmData =
@@ -156,10 +157,10 @@ pub fn parse_osm_data(
 
     // Determine which dimension is larger and assign scale factors accordingly
     let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
-    let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
-    let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
+    let scale_factor_z: f64 = scale_factor_z.floor() * scale;
+    let scale_factor_x: f64 = scale_factor_x.floor() * scale;
 
-    if args.debug {
+    if debug {
         println!("Scale factor X: {}", scale_factor_x);
         println!("Scale factor Z: {}", scale_factor_z);
     }
@@ -269,7 +270,7 @@ pub fn parse_osm_data(
         }));
     }
 
-    emit_gui_progress_update(10.0, "");
+    emit_gui_progress_update(20.0, "");
 
     (processed_elements, scale_factor_x, scale_factor_z)
 }
