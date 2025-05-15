@@ -98,11 +98,12 @@ fn run_cli() {
 
     // Write the parsed OSM data to a file for inspection
     if args.debug {
-        let mut output_file: fs::File =
-            fs::File::create("parsed_osm_data.txt").expect("Failed to create output file");
+        let mut buf = std::io::BufWriter::new(
+            fs::File::create("parsed_osm_data.txt").expect("Failed to create output file"),
+        );
         for element in &parsed_elements {
             writeln!(
-                output_file,
+                buf,
                 "Element ID: {}, Type: {}, Tags: {:?}",
                 element.id(),
                 element.kind(),
