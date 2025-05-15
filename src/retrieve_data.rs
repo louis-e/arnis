@@ -227,12 +227,6 @@ pub fn fetch_data_from_overpass(
             }
         }
 
-        // If debug is enabled, write data to file
-        if debug {
-            let mut file: File = File::create("export.json")?;
-            file.write_all(response.as_bytes())?;
-        }
-
         emit_gui_progress_update(5.0, "");
 
         Ok(data)
