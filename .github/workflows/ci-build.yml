@@ -19,12 +19,8 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
+  lint:
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -33,11 +29,9 @@ jobs:
       uses: dtolnay/rust-toolchain@v1
       with:
         toolchain: stable
-        targets: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' || 'x86_64-apple-darwin' }}
         components: clippy
 
     - name: Install Linux dependencies
-      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt update
         sudo apt install -y software-properties-common
@@ -55,8 +49,34 @@ jobs:
     - name: Check clippy lints
       run: cargo clippy --all-targets --all-features -- -D warnings
 
-    - name: Install Rust dependencies
-      run: cargo fetch
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@v1
+      with:
+        toolchain: stable
+        targets: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' || 'x86_64-apple-darwin' }}
+
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt update
+        sudo apt install -y software-properties-common
+        sudo add-apt-repository universe
+        echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc)-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
+        sudo apt update
+        sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
+        echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+
+    - uses: Swatinem/rust-cache@v2
 
     - name: Build (all targets, all features)
       run: cargo build --all-targets --all-features --release
