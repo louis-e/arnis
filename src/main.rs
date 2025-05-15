@@ -75,7 +75,6 @@ fn run_cli() {
 
     // Parse input arguments
     let args: Args = Args::parse();
-    args.run();
 
     // Fetch data
     let raw_data: serde_json::Value =
