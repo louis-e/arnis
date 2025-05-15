@@ -166,6 +166,7 @@ impl Ground {
             );
 
             let response: reqwest::blocking::Response = client.get(&url).send()?;
+            response.error_for_status_ref()?;
             let img: image::DynamicImage = image::load_from_memory(&response.bytes()?)?;
             let rgb_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = img.to_rgb8();
 
