@@ -57,7 +57,7 @@ jobs:
           seconds=$((duration % 60))
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
 
-          baseline_time=130
+          baseline_time=124
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
