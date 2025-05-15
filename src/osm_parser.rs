@@ -143,7 +143,7 @@ fn lat_lon_to_minecraft_coords(
 }
 
 pub fn parse_osm_data(
-    json_data: &Value,
+    json_data: Value,
     bbox: BBox,
     scale: f64,
     debug: bool,
@@ -153,7 +153,7 @@ pub fn parse_osm_data(
 
     // Deserialize the JSON data into the OSMData structure
     let data: OsmData =
-        serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
+        serde_json::from_value(json_data).expect("Failed to parse OSM data");
 
     // Determine which dimension is larger and assign scale factors accordingly
     let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
