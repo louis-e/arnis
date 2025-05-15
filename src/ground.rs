@@ -37,30 +37,21 @@ struct ElevationData {
 }
 
 impl Ground {
-    pub fn new(args: &crate::args::Args) -> Self {
-        let mut elevation_enabled: bool = args.terrain;
-        let elevation_data: Option<ElevationData> = if elevation_enabled {
-            match Self::fetch_elevation_data(args) {
-                Ok(data) => {
-                    if args.debug {
-                        Self::save_debug_image(&data.heights, "elevation_debug");
-                    }
-                    Some(data)
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to fetch elevation data: {}", e);
-                    elevation_enabled = false;
-                    None
-                }
-            }
-        } else {
-            None
-        };
-
+    pub fn new_flat(ground_level: i32) -> Self {
         Self {
-            elevation_enabled,
-            ground_level: args.ground_level,
-            elevation_data,
+            elevation_enabled: false,
+            ground_level,
+            elevation_data: None,
+        }
+    }
+
+    pub fn new_enabled(bbox: &BBox, scale: f64, ground_level: i32) -> Self {
+        let elevation_data = Self::fetch_elevation_data(bbox, scale, ground_level)
+            .expect("Failed to fetch elevation data");
+        Self {
+            elevation_enabled: true,
+            ground_level,
+            elevation_data: Some(elevation_data),
         }
     }
 
@@ -111,7 +102,7 @@ impl Ground {
     }
 
     /// Calculates appropriate zoom level for the given bounding box
-    fn calculate_zoom_level(bbox: BBox) -> u8 {
+    fn calculate_zoom_level(bbox: &BBox) -> u8 {
         let lat_diff: f64 = (bbox.max().lat() - bbox.min().lat()).abs();
         let lng_diff: f64 = (bbox.max().lng() - bbox.min().lng()).abs();
         let max_diff: f64 = lat_diff.max(lng_diff);
@@ -129,17 +120,19 @@ impl Ground {
     }
 
     fn fetch_elevation_data(
-        args: &crate::args::Args,
+        bbox: &BBox,
+        scale: f64,
+        ground_level: i32,
     ) -> Result<ElevationData, Box<dyn std::error::Error>> {
         // Use OSM parser's scale calculation and apply user scale factor
         let (scale_factor_z, scale_factor_x) =
-            crate::osm_parser::geo_distance(args.bbox.min(), args.bbox.max());
-        let scale_factor_x: f64 = scale_factor_x * args.scale;
-        let scale_factor_z: f64 = scale_factor_z * args.scale;
+            crate::osm_parser::geo_distance(bbox.min(), bbox.max());
+        let scale_factor_x: f64 = scale_factor_x * scale;
+        let scale_factor_z: f64 = scale_factor_z * scale;
 
         // Calculate zoom and tiles
-        let zoom: u8 = Self::calculate_zoom_level(args.bbox);
-        let tiles: Vec<(u32, u32)> = Self::get_tile_coordinates(args.bbox, zoom);
+        let zoom: u8 = Self::calculate_zoom_level(bbox);
+        let tiles: Vec<(u32, u32)> = Self::get_tile_coordinates(bbox, zoom);
 
         // Calculate tile boundaries
         let x_min: &u32 = tiles.iter().map(|(x, _)| x).min().unwrap();
@@ -221,7 +214,7 @@ impl Ground {
 
         let height_range: f64 = max_height - min_height;
         // Apply scale factor to height scaling
-        let height_scale: f64 = BASE_HEIGHT_SCALE * args.scale.sqrt(); // sqrt to make height scaling less extreme
+        let height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
         let scaled_range: f64 = height_range * height_scale;
 
         // Convert to scaled Minecraft Y coordinates
@@ -233,8 +226,8 @@ impl Ground {
                     let relative_height: f64 = (h - min_height) / height_range;
                     let scaled_height: f64 = relative_height * scaled_range;
                     // With terrain enabled, ground_level is used as the MIN_Y for terrain
-                    ((args.ground_level as f64 + scaled_height).round() as i32)
-                        .clamp(args.ground_level, MAX_Y)
+                    ((ground_level as f64 + scaled_height).round() as i32)
+                        .clamp(ground_level, MAX_Y)
                 })
                 .collect();
             mc_heights.push(mc_row);
@@ -247,7 +240,7 @@ impl Ground {
         })
     }
 
-    fn get_tile_coordinates(bbox: BBox, zoom: u8) -> Vec<(u32, u32)> {
+    fn get_tile_coordinates(bbox: &BBox, zoom: u8) -> Vec<(u32, u32)> {
         // Convert lat/lng to tile coordinates
         let (x1, y1) = Self::lat_lng_to_tile(bbox.min().lat(), bbox.min().lng(), zoom);
         let (x2, y2) = Self::lat_lng_to_tile(bbox.max().lat(), bbox.max().lng(), zoom);
@@ -370,7 +363,12 @@ impl Ground {
         }
     }
 
-    fn save_debug_image(heights: &Vec<Vec<i32>>, filename: &str) {
+    fn save_debug_image(&self, filename: &str) {
+        let heights = &self
+            .elevation_data
+            .as_ref()
+            .expect("Elevation data not available")
+            .heights;
         if heights.is_empty() || heights[0].is_empty() {
             return;
         }
@@ -418,7 +416,10 @@ impl Ground {
 pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
         emit_gui_progress_update(5.0, "Fetching elevation...");
+        let ground = Ground::new_enabled(&args.bbox, args.scale, args.ground_level);
+        if args.debug {
+            ground.save_debug_image("elevation_debug");
+        }
     }
-
-    Ground::new(args)
+    Ground::new_flat(args.ground_level)
 }
