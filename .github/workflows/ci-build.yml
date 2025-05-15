@@ -1,21 +1,16 @@
 name: CI Build
 
-# Trigger CI on pull requests and pushes to main, when relevant files change
+# Trigger CI on pull requests when relevant files change, and pushes to main
 on:
   pull_request:
-    branches:
-      - main
     paths:
+      - '.github/**'
       - 'src/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
   push:
     branches:
       - main
-    paths:
-      - 'src/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
   workflow_dispatch:
 
 jobs:
