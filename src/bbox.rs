@@ -12,10 +12,17 @@ pub struct BBox {
 
 impl BBox {
     pub fn new(min_lat: f64, min_lng: f64, max_lat: f64, max_lng: f64) -> Result<Self, String> {
-        let vals_in_order = min_lng < max_lng && min_lat < max_lat;
-
-        if !vals_in_order {
-            return Err("Invalid BBox".to_string());
+        if min_lng >= max_lng {
+            return Err(format!(
+                "Invalid BBox: min_lng {} >= max_lng {} ",
+                min_lng, max_lng
+            ));
+        }
+        if min_lat >= max_lat {
+            return Err(format!(
+                "Invalid BBox: min_lat {} >= max_lat {}",
+                min_lat, max_lat
+            ));
         }
 
         let min = GeoCoord::new(min_lat, min_lng)?;

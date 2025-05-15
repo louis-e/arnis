@@ -424,6 +424,7 @@ fn gui_start_generation(
             let args: Args = Args {
                 bbox,
                 file: None,
+                save_json_file: None,
                 path: updated_world_path,
                 downloader: "requests".to_string(),
                 scale: world_scale,
@@ -435,7 +436,7 @@ fn gui_start_generation(
             };
 
             // Run data fetch and world generation
-            match retrieve_data::fetch_data(args.bbox, None, args.debug, "requests") {
+            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
                         osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
