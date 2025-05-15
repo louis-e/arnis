@@ -59,7 +59,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
         .output()?;
 
     if !output.status.success() {
-        Err(io::Error::new(io::ErrorKind::Other, "Curl command failed"))
+        Err(io::Error::other("Curl command failed"))
     } else {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
@@ -73,7 +73,7 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
         .output()?;
 
     if !output.status.success() {
-        Err(io::Error::new(io::ErrorKind::Other, "Wget command failed"))
+        Err(io::Error::other("Wget command failed"))
     } else {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
