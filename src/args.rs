@@ -15,6 +15,10 @@ pub struct Args {
     #[arg(long, group = "location")]
     pub file: Option<String>,
 
+    /// JSON file to save OSM data to (optional)
+    #[arg(long, group = "location")]
+    pub save_json_file: Option<String>,
+
     /// Path to the Minecraft world (required)
     #[arg(long, value_parser = validate_minecraft_world_path)]
     pub path: String,

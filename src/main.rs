@@ -77,9 +77,16 @@ fn run_cli() {
     let args: Args = Args::parse();
 
     // Fetch data
-    let raw_data: serde_json::Value =
-        retrieve_data::fetch_data(args.bbox, args.file.as_deref(), args.debug, "requests")
-            .expect("Failed to fetch data");
+    let raw_data = match &args.file {
+        Some(file) => retrieve_data::fetch_data_from_file(file),
+        None => retrieve_data::fetch_data_from_overpass(
+            args.bbox,
+            args.debug,
+            args.downloader.as_str(),
+            args.save_json_file.as_deref(),
+        ),
+    }
+    .expect("Failed to fetch data");
 
     let mut ground = ground::generate_ground_data(&args);
 
