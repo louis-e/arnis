@@ -5,9 +5,6 @@ use image::Rgb;
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
 const BASE_HEIGHT_SCALE: f64 = 0.72;
-/// Mapbox API access token for terrain data
-const MAPBOX_PUBKEY: &str =
-    "pk.eyJ1IjoiY3Vnb3MiLCJhIjoiY2p4Nm43MzA3MDFmZDQwcGxsMjB4Z3hnNiJ9.SQbnMASwdqZe6G4n6OMvVw";
 /// Minimum zoom level for terrain tiles
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
@@ -45,6 +42,7 @@ pub fn fetch_elevation_data(
     bbox: &BBox,
     scale: f64,
     ground_level: i32,
+    mapbox_access_token: &str,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     // Use OSM parser's scale calculation and apply user scale factor
     let (scale_factor_z, scale_factor_x) = crate::osm_parser::geo_distance(bbox.min(), bbox.max());
@@ -77,13 +75,12 @@ pub fn fetch_elevation_data(
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
 
     let client: reqwest::blocking::Client = reqwest::blocking::Client::new();
-    let access_token: &str = MAPBOX_PUBKEY;
 
     // Fetch and process each tile
     for (tile_x, tile_y) in &tiles {
         let url: String = format!(
             "https://api.mapbox.com/v4/mapbox.terrain-rgb/{}/{}/{}.pngraw?access_token={}",
-            zoom, tile_x, tile_y, access_token
+            zoom, tile_x, tile_y, mapbox_access_token
         );
 
         let response: reqwest::blocking::Response = client.get(&url).send()?;
