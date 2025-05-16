@@ -13,7 +13,7 @@ pub fn generate_example(llbbox: BBox) -> (XZBBox, Vec<ProcessedElement>) {
 
     // Parse raw data
     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-        osm_parser::parse_osm_data(&raw_data, llbbox, 1.0, false);
+        osm_parser::parse_osm_data(raw_data, llbbox, 1.0, false);
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
 

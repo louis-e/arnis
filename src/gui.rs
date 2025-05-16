@@ -439,7 +439,7 @@ fn gui_start_generation(
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-                        osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
+                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
