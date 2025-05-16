@@ -81,7 +81,7 @@ pub fn generate_world(
                     railways::generate_railways(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
-                    highways::generate_aeroway(&mut editor, way);
+                    highways::generate_aeroway(&mut editor, way, args);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way);
                 }
