@@ -155,6 +155,8 @@ pub fn fetch_elevation_data(
         }
     }
 
+    eprintln!("Height data range: {min_height} to {max_height} m");
+
     let height_range: f64 = max_height - min_height;
     // Apply scale factor to height scaling
     let height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
@@ -174,6 +176,16 @@ pub fn fetch_elevation_data(
             .collect();
         mc_heights.push(mc_row);
     }
+
+    let mut min_block_height: i32 = i32::MAX;
+    let mut max_block_height: i32 = i32::MIN;
+    for row in &mc_heights {
+        for &height in row {
+            min_block_height = min_block_height.min(height);
+            max_block_height = max_block_height.max(height);
+        }
+    }
+    eprintln!("Minecraft height data range: {min_block_height} to {max_block_height} blocks");
 
     Ok(ElevationData {
         heights: mc_heights,
