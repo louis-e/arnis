@@ -184,7 +184,10 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                         );
 
                         // Add parking spot markings
-                        if amenity_type == "parking" && (x + z) % 8 == 0 && (x * z) % 32 != 0 {
+                        if amenity_type == "parking"
+                            && (x + z) % 8 == 0
+                            && x.wrapping_mul(z) % 32 != 0
+                        {
                             editor.set_block(
                                 LIGHT_GRAY_CONCRETE,
                                 x,

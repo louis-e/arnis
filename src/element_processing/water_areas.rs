@@ -207,13 +207,15 @@ fn inverse_floodfill_recursive(
         println!("Water area generation exceeded 25 seconds, continuing anyway");
     }
 
-    const ITERATIVE_THRES: i32 = 10_000;
+    const ITERATIVE_THRES: i64 = 10_000;
 
     if min.0 > max.0 || min.1 > max.1 {
         return;
     }
 
-    if (max.0 - min.0) * (max.1 - min.1) < ITERATIVE_THRES {
+    // Multiply as i64 to avoid overflow; in release builds where unchecked math is
+    // enabled, this could cause the rest of this code to end up in an infinite loop.
+    if ((max.0 - min.0) as i64) * ((max.1 - min.1) as i64) < ITERATIVE_THRES {
         inverse_floodfill_iterative(min, max, 0, outers, inners, editor);
         return;
     }
