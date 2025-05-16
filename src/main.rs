@@ -26,6 +26,7 @@ use clap::Parser;
 use colored::*;
 use std::{env, fs, io::Write};
 
+mod elevation_data;
 #[cfg(feature = "gui")]
 mod gui;
 
