@@ -38,6 +38,11 @@ pub struct Args {
     /// Enable terrain (optional)
     #[arg(long)]
     pub terrain: bool,
+
+    /// Mapbox access token (required if terrain is enabled)
+    #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
+    pub mapbox_access_token: Option<String>,
+
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
     pub fillground: bool,
