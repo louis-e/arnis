@@ -1,5 +1,6 @@
 use crate::bbox::BBox;
 use image::Rgb;
+use std::path::Path;
 
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
@@ -42,7 +43,7 @@ pub fn fetch_elevation_data(
     bbox: &BBox,
     scale: f64,
     ground_level: i32,
-    mapbox_access_token: &str,
+    mapbox_access_token: &Option<String>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     // Use OSM parser's scale calculation and apply user scale factor
     let (scale_factor_z, scale_factor_x) = crate::osm_parser::geo_distance(bbox.min(), bbox.max());
@@ -76,17 +77,40 @@ pub fn fetch_elevation_data(
 
     let client: reqwest::blocking::Client = reqwest::blocking::Client::new();
 
+    let tile_cache_dir = Path::new("./terrain-tile-cache");
+    if !tile_cache_dir.exists() {
+        std::fs::create_dir_all(tile_cache_dir)?;
+    }
+
     // Fetch and process each tile
     for (tile_x, tile_y) in &tiles {
-        let url: String = format!(
-            "https://api.mapbox.com/v4/mapbox.terrain-rgb/{}/{}/{}.pngraw?access_token={}",
-            zoom, tile_x, tile_y, mapbox_access_token
-        );
+        // Check if tile is already cached
+        let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
 
-        let response: reqwest::blocking::Response = client.get(&url).send()?;
-        response.error_for_status_ref()?;
-        let img: image::DynamicImage = image::load_from_memory(&response.bytes()?)?;
-        let rgb_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = img.to_rgb8();
+        let rgb_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = if tile_path.exists() {
+            println!(
+                "Loading tile x={tile_x},y={tile_y},z={zoom} from {}",
+                tile_path.display()
+            );
+            let img: image::DynamicImage = image::open(&tile_path)?;
+            img.to_rgb8()
+        } else {
+            let mapbox_access_token = mapbox_access_token
+                .as_ref()
+                .expect("Mapbox access token is required to fetch tokens from the Mapbox API");
+            println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from Mapbox API");
+            let url: String = format!(
+                "https://api.mapbox.com/v4/mapbox.terrain-rgb/{}/{}/{}.pngraw?access_token={}",
+                zoom, tile_x, tile_y, mapbox_access_token
+            );
+
+            let response: reqwest::blocking::Response = client.get(&url).send()?;
+            response.error_for_status_ref()?;
+            let bytes = response.bytes()?;
+            std::fs::write(&tile_path, &bytes)?;
+            let img: image::DynamicImage = image::load_from_memory(&bytes)?;
+            img.to_rgb8()
+        };
 
         // Calculate position in the scaled grid
         let base_x: f64 = ((*tile_x - x_min) * 256) as f64;

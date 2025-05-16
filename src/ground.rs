@@ -26,7 +26,7 @@ impl Ground {
         bbox: &BBox,
         scale: f64,
         ground_level: i32,
-        mapbox_access_token: &str,
+        mapbox_access_token: &Option<String>,
     ) -> Self {
         let elevation_data = fetch_elevation_data(bbox, scale, ground_level, mapbox_access_token)
             .expect("Failed to fetch elevation data");
@@ -135,16 +135,12 @@ impl Ground {
 
 pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
-        let mapbox_access_token = args
-            .mapbox_access_token
-            .as_ref()
-            .expect("Mapbox access token is required");
         emit_gui_progress_update(5.0, "Fetching elevation...");
         let ground = Ground::new_enabled(
             &args.bbox,
             args.scale,
             args.ground_level,
-            mapbox_access_token,
+            &args.mapbox_access_token,
         );
         if args.debug {
             ground.save_debug_image("elevation_debug");
