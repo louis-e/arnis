@@ -8,7 +8,8 @@ use crate::retrieve_data;
 pub fn generate_example(llbbox: BBox) -> (XZBBox, Vec<ProcessedElement>) {
     // Fetch data
     let raw_data: serde_json::Value =
-        retrieve_data::fetch_data(llbbox, None, false, "requests").expect("Failed to fetch data");
+        retrieve_data::fetch_data_from_overpass(llbbox, false, "requests", None)
+            .expect("Failed to fetch data");
 
     // Parse raw data
     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
