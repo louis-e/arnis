@@ -61,12 +61,12 @@ jobs:
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
-          if [ "$diff" -lt -10 ]; then
+          if [ "$diff" -lt -5 ]; then
             verdict="✅ This PR **improves generation time**."
-          elif [ "$abs_diff" -le 7 ]; then
+          elif [ "$abs_diff" -le 4 ]; then
             verdict="🟢 Generation time is unchanged."
-          elif [ "$diff" -le 25 ]; then
-            verdict="⚠️ This PR **slightly worsens generation time**."
+          elif [ "$diff" -le 15 ]; then
+            verdict="⚠️ This PR **worsens generation time**."
           else
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
