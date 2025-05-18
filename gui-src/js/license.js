@@ -10,7 +10,7 @@ RedAuburn<br>
 daniil2327<br>
 benjamin051000<br>
 
-<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">Github page</a>. Logo made by nxfx21.</p>
+<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">Github page</a>. Logo made by nxfx21. Map data from <a href="https://www.openstreetmap.org/copyright" style="color: inherit;" target="_blank">OpenStreetMap</a>.</p>
 
 <p style="color: #ff7070;"><b>Download Arnis only from the official source:</b> <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">https://github.com/louis-e/arnis/</a>. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.</p>
 
