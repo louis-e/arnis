@@ -1,5 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
+use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -12,23 +13,19 @@ pub const MIN_Y: i32 = -64;
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
+    ground: Ground,
     args: &Args,
-    scale_factor_x: f64,
-    scale_factor_z: f64,
 ) -> Result<(), String> {
     let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor = WorldEditor::new(&region_dir, scale_factor_x, scale_factor_z);
+    let mut editor: WorldEditor = WorldEditor::new(&region_dir, &xzbbox);
 
-    println!("{} Processing data...", "[3/5]".bold());
-    if args.terrain {
-        emit_gui_progress_update(10.0, "Fetching elevation...");
-    }
-    let ground: Ground = Ground::new(args);
+    println!("{} Processing data...", "[4/6]".bold());
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
-    emit_gui_progress_update(11.0, "Processing terrain...");
+    emit_gui_progress_update(41.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -38,8 +35,8 @@ pub fn generate_world(
         .unwrap()
         .progress_chars("█▓░"));
 
-    let progress_increment_prcs: f64 = 49.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 11.0;
+    let progress_increment_prcs: f64 = 29.0 / elements_count as f64;
+    let mut current_progress_prcs: f64 = 41.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {
@@ -84,7 +81,7 @@ pub fn generate_world(
                     railways::generate_railways(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
-                    highways::generate_aeroway(&mut editor, way);
+                    highways::generate_aeroway(&mut editor, way, args);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way);
                 }
@@ -121,14 +118,14 @@ pub fn generate_world(
     process_pb.finish();
 
     // Generate ground layer
-    let total_blocks: u64 = (scale_factor_x as i32 + 1) as u64 * (scale_factor_z as i32 + 1) as u64;
+    let total_blocks: u64 = xzbbox.circumscribed_rect().total_blocks();
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 
     let mut block_counter: u64 = 0;
 
-    println!("{} Generating ground...", "[4/5]".bold());
-    emit_gui_progress_update(60.0, "Generating ground...");
+    println!("{} Generating ground...", "[5/6]".bold());
+    emit_gui_progress_update(70.0, "Generating ground...");
 
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
     ground_pb.set_style(
@@ -138,15 +135,15 @@ pub fn generate_world(
             .progress_chars("█▓░"),
     );
 
-    let mut gui_progress_grnd: f64 = 60.0;
+    let mut gui_progress_grnd: f64 = 70.0;
     let mut last_emitted_progress: f64 = gui_progress_grnd;
-    let total_iterations_grnd: f64 = (scale_factor_x + 1.0) * (scale_factor_z + 1.0);
-    let progress_increment_grnd: f64 = 30.0 / total_iterations_grnd;
+    let total_iterations_grnd: f64 = total_blocks as f64;
+    let progress_increment_grnd: f64 = 20.0 / total_iterations_grnd;
 
     let groundlayer_block = GRASS_BLOCK;
 
-    for x in 0..=(scale_factor_x as i32) {
-        for z in 0..=(scale_factor_z as i32) {
+    for x in xzbbox.min_x()..=xzbbox.max_x() {
+        for z in xzbbox.min_z()..=xzbbox.max_z() {
             // Add default dirt and grass layer if there isn't a stone layer already
             if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
                 editor.set_block(groundlayer_block, x, 0, z, None, None);

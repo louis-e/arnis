@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use crate::{
     block_definitions::WATER,
-    cartesian::XZPoint,
+    coordinate_system::cartesian::XZPoint,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
     world_editor::WorldEditor,
 };
@@ -42,6 +42,7 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         return;
     }
 
+    let (min_x, min_z) = editor.get_min_coords();
     let (max_x, max_z) = editor.get_max_coords();
     let outers: Vec<Vec<XZPoint>> = outers
         .iter()
@@ -52,7 +53,9 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    inverse_floodfill(max_x, max_z, outers, inners, editor, start_time);
+    inverse_floodfill(
+        min_x, min_z, max_x, max_z, outers, inners, editor, start_time,
+    );
 }
 
 // Merges ways that share nodes into full loops
@@ -142,7 +145,10 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
 // Water areas are absolutely huge. We can't easily flood fill the entire thing.
 // Instead, we'll iterate over all the blocks in our MC world, and check if each
 // one is in the river or not
+#[allow(clippy::too_many_arguments)]
 fn inverse_floodfill(
+    min_x: i32,
+    min_z: i32,
     max_x: i32,
     max_z: i32,
     outers: Vec<Vec<XZPoint>>,
@@ -150,9 +156,6 @@ fn inverse_floodfill(
     editor: &mut WorldEditor,
     start_time: Instant,
 ) {
-    let min_x: i32 = 0;
-    let min_z: i32 = 0;
-
     let inners: Vec<_> = inners
         .into_iter()
         .map(|x| {

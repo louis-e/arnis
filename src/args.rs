@@ -1,8 +1,6 @@
 use crate::bbox::BBox;
 use clap::Parser;
-use colored::Colorize;
 use std::path::Path;
-use std::process::exit;
 use std::time::Duration;
 
 /// Command-line arguments parser
@@ -17,8 +15,12 @@ pub struct Args {
     #[arg(long, group = "location")]
     pub file: Option<String>,
 
+    /// JSON file to save OSM data to (optional)
+    #[arg(long, group = "location")]
+    pub save_json_file: Option<String>,
+
     /// Path to the Minecraft world (required)
-    #[arg(long)]
+    #[arg(long, value_parser = validate_minecraft_world_path)]
     pub path: String,
 
     /// Downloader method (requests/curl/wget) (optional)
@@ -48,20 +50,19 @@ pub struct Args {
     pub timeout: Option<Duration>,
 }
 
-impl Args {
-    pub fn run(&self) {
-        // Validating the world path
-        let mc_world_path: &Path = Path::new(&self.path);
-        if !mc_world_path.join("region").exists() {
-            eprintln!(
-                "{}",
-                "Error! No Minecraft world found at the given path"
-                    .red()
-                    .bold()
-            );
-            exit(1);
-        }
+fn validate_minecraft_world_path(path: &str) -> Result<String, String> {
+    let mc_world_path = Path::new(path);
+    if !mc_world_path.exists() {
+        return Err(format!("Path does not exist: {}", path));
     }
+    if !mc_world_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path));
+    }
+    let region = mc_world_path.join("region");
+    if !region.is_dir() {
+        return Err(format!("No Minecraft world found at {:?}", region));
+    }
+    Ok(path.to_string())
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
@@ -73,13 +74,23 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 mod tests {
     use super::*;
 
+    fn minecraft_tmpdir() -> tempfile::TempDir {
+        let tmpdir = tempfile::tempdir().unwrap();
+        // create a `region` directory in the tempdir
+        let region_path = tmpdir.path().join("region");
+        std::fs::create_dir(&region_path).unwrap();
+        tmpdir
+    }
     #[test]
     fn test_flags() {
+        let tmpdir = minecraft_tmpdir();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
         // Test that terrain/debug are SetTrue
         let cmd = [
             "arnis",
             "--path",
-            "",
+            tmp_path,
             "--bbox",
             "1,2,3,4",
             "--terrain",
@@ -89,7 +100,7 @@ mod tests {
         assert!(args.debug);
         assert!(args.terrain);
 
-        let cmd = ["arnis", "--path", "", "--bbox", "1,2,3,4"];
+        let cmd = ["arnis", "--path", tmp_path, "--bbox", "1,2,3,4"];
         let args = Args::parse_from(cmd.iter());
         assert!(!args.debug);
         assert!(!args.terrain);
@@ -97,13 +108,16 @@ mod tests {
 
     #[test]
     fn test_required_options() {
+        let tmpdir = minecraft_tmpdir();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
         let cmd = ["arnis"];
         assert!(Args::try_parse_from(cmd.iter()).is_err());
 
-        let cmd = ["arnis", "--path", "", "--bbox", "1,2,3,4"];
+        let cmd = ["arnis", "--path", tmp_path, "--bbox", "1,2,3,4"];
         assert!(Args::try_parse_from(cmd.iter()).is_ok());
 
-        let cmd = ["arnis", "--path", "", "--file", ""];
+        let cmd = ["arnis", "--path", tmp_path, "--file", ""];
         assert!(Args::try_parse_from(cmd.iter()).is_err());
 
         // The --gui flag isn't used here, ugh. TODO clean up main.rs and its argparse usage.

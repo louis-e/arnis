@@ -12,10 +12,17 @@ pub struct BBox {
 
 impl BBox {
     pub fn new(min_lat: f64, min_lng: f64, max_lat: f64, max_lng: f64) -> Result<Self, String> {
-        let vals_in_order = min_lng < max_lng && min_lat < max_lat;
-
-        if !vals_in_order {
-            return Err("Invalid BBox".to_string());
+        if min_lng >= max_lng {
+            return Err(format!(
+                "Invalid BBox: min_lng {} >= max_lng {} ",
+                min_lng, max_lng
+            ));
+        }
+        if min_lat >= max_lat {
+            return Err(format!(
+                "Invalid BBox: min_lat {} >= max_lat {}",
+                min_lat, max_lat
+            ));
         }
 
         let min = GeoCoord::new(min_lat, min_lng)?;
@@ -58,7 +65,19 @@ mod tests {
         assert!(BBox::new(1., 2., 3., 4.).is_ok());
 
         // Arnis, Germany
-        assert!(BBox::new(9.927928, 54.627053, 9.937563, 54.634902).is_ok());
+        assert!(BBox::new(54.627053, 9.927928, 54.634902, 9.937563).is_ok());
+
+        // Royal Observatory Greenwich, London, UK
+        assert!(BBox::new(51.470000, -0.015000, 51.480000, 0.015000).is_ok());
+
+        // The Bund, Shanghai, China
+        assert!(BBox::new(31.23256, 121.46768, 31.24993, 121.50394).is_ok());
+
+        // Santa Monica, Los Angeles, US
+        assert!(BBox::new(34.00348, -118.51226, 34.02033, -118.47600).is_ok());
+
+        // Sydney Opera House, Sydney, Australia
+        assert!(BBox::new(-33.861035, 151.204137, -33.852597, 151.222268).is_ok());
     }
 
     #[test]

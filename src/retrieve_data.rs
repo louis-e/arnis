@@ -59,7 +59,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
         .output()?;
 
     if !output.status.success() {
-        Err(io::Error::new(io::ErrorKind::Other, "Curl command failed"))
+        Err(io::Error::other("Curl command failed"))
     } else {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
@@ -73,20 +73,30 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
         .output()?;
 
     if !output.status.success() {
-        Err(io::Error::new(io::ErrorKind::Other, "Wget command failed"))
+        Err(io::Error::other("Wget command failed"))
     } else {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 }
 
+pub fn fetch_data_from_file(file: &str) -> Result<Value, Box<dyn std::error::Error>> {
+    println!("{} Loading data from file...", "[1/6]".bold());
+    emit_gui_progress_update(1.0, "Loading data from file...");
+
+    let file: File = File::open(file)?;
+    let reader: BufReader<File> = BufReader::new(file);
+    let data: Value = serde_json::from_reader(reader)?;
+    Ok(data)
+}
+
 /// Main function to fetch data
-pub fn fetch_data(
+pub fn fetch_data_from_overpass(
     bbox: BBox,
-    file: Option<&str>,
     debug: bool,
     download_method: &str,
+    save_file: Option<&str>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} Fetching data...", "[1/5]".bold());
+    println!("{} Fetching data...", "[1/6]".bold());
     emit_gui_progress_update(1.0, "Fetching data...");
 
     // List of Overpass API servers
@@ -137,17 +147,15 @@ pub fn fetch_data(
         bbox.max().lng(),
     );
 
-    if let Some(file) = file {
-        // Load data from file
-        let file: File = File::open(file)?;
-        let reader: BufReader<File> = BufReader::new(file);
-        let data: Value = serde_json::from_reader(reader)?;
-        Ok(data)
-    } else {
+    {
         // Fetch data from Overpass API
         let mut attempt = 0;
         let max_attempts = 1;
         let response: String = loop {
+            println!(
+                "Downloading from {} with method {}...",
+                url, download_method
+            );
             let result = match download_method {
                 "requests" => download_with_reqwest(url, &query),
                 "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
@@ -170,6 +178,12 @@ pub fn fetch_data(
                 }
             }
         };
+
+        if let Some(save_file) = save_file {
+            let mut file: File = File::create(save_file)?;
+            file.write_all(response.as_bytes())?;
+            println!("API response saved to: {}", save_file);
+        }
 
         let data: Value = serde_json::from_str(&response)?;
 
@@ -211,12 +225,6 @@ pub fn fetch_data(
             } else {
                 return Err("Data fetch failed".into());
             }
-        }
-
-        // If debug is enabled, write data to file
-        if debug {
-            let mut file: File = File::create("export.json")?;
-            file.write_all(response.as_bytes())?;
         }
 
         emit_gui_progress_update(5.0, "");
