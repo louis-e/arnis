@@ -23,6 +23,8 @@ jobs:
         with:
           toolchain: stable
 
+      - uses: Swatinem/rust-cache@v2
+
       - name: Create dummy Minecraft world directory
         run: |
           mkdir -p "./world/region"
