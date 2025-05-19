@@ -28,6 +28,9 @@ jobs:
         run: |
           mkdir -p "./world/region"
 
+      - name: Build for release
+        run: cargo build --release --no-default-features
+
       - name: Start timer
         id: start_time
         run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
@@ -35,7 +38,7 @@ jobs:
       - name: Run benchmark command with memory tracking
         id: benchmark
         run: |
-          /usr/bin/time -v cargo run --release --no-default-features -- --path="./world" --terrain --bbox="48.117861,11.541996,48.154520,11.604824" 2> benchmark_log.txt
+          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --bbox="48.117861,11.541996,48.154520,11.604824" 2> benchmark_log.txt
           grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
