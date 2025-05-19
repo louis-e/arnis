@@ -6,6 +6,9 @@ use std::path::Path;
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
 const BASE_HEIGHT_SCALE: f64 = 0.72;
+/// Default Mapbox API access token for terrain data
+const MAPBOX_PUBKEY: &str =
+    "pk.eyJ1IjoibG91aXMtZSIsImEiOiJjbWF0cWlycjEwYWNvMmtxeHFwdDQ5NnJoIn0.6A0AKg0iucvoGhYuCkeOjA";
 /// Minimum zoom level for terrain tiles
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
@@ -45,6 +48,7 @@ pub fn fetch_elevation_data(
     ground_level: i32,
     mapbox_access_token: &Option<String>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
+    let default_mapbox_access_token = MAPBOX_PUBKEY.to_string();
     // Use OSM parser's scale calculation and apply user scale factor
     let (scale_factor_z, scale_factor_x) = crate::osm_parser::geo_distance(bbox.min(), bbox.max());
     let scale_factor_x: f64 = scale_factor_x * scale;
@@ -97,7 +101,7 @@ pub fn fetch_elevation_data(
         } else {
             let mapbox_access_token = mapbox_access_token
                 .as_ref()
-                .expect("Mapbox access token is required to fetch tokens from the Mapbox API");
+                .unwrap_or_else(|| &default_mapbox_access_token);
             println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from Mapbox API");
             let url: String = format!(
                 "https://api.mapbox.com/v4/mapbox.terrain-rgb/{}/{}/{}.pngraw?access_token={}",

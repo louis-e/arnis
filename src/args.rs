@@ -39,7 +39,7 @@ pub struct Args {
     #[arg(long)]
     pub terrain: bool,
 
-    /// Mapbox access token (required if terrain is enabled)
+    /// Mapbox access token (defaults to a built-in one)
     #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
     pub mapbox_access_token: Option<String>,
 
