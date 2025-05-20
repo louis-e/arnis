@@ -1,6 +1,6 @@
 [package]
 name = "arnis"
-version = "2.2.0"
+version = "2.2.1"
 edition = "2021"
 description = "Arnis - Generate real life cities in Minecraft"
 homepage = "https://github.com/louis-e/arnis"
@@ -47,3 +47,6 @@ tokio = { version = "1.44.2", features = ["full"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.1", features = ["Win32_System_Console"] }
+
+[dev-dependencies]
+tempfile = "3.20.0"

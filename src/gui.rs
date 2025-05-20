@@ -1,6 +1,9 @@
 use crate::args::Args;
 use crate::bbox;
+use crate::coordinate_system::cartesian::XZBBox;
 use crate::data_processing;
+use crate::ground;
+use crate::map_transformation;
 use crate::osm_parser;
 use crate::progress;
 use crate::retrieve_data;
@@ -421,6 +424,7 @@ fn gui_start_generation(
             let args: Args = Args {
                 bbox,
                 file: None,
+                save_json_file: None,
                 path: updated_world_path,
                 downloader: "requests".to_string(),
                 scale: world_scale,
@@ -432,10 +436,10 @@ fn gui_start_generation(
             };
 
             // Run data fetch and world generation
-            match retrieve_data::fetch_data(args.bbox, None, args.debug, "requests") {
+            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
                     let (mut parsed_elements, scale_factor_x, scale_factor_z) =
-                        osm_parser::parse_osm_data(&raw_data, args.bbox, &args);
+                        osm_parser::parse_osm_data(&raw_data, args.bbox, args.scale, args.debug);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
@@ -449,12 +453,19 @@ fn gui_start_generation(
                         }
                     });
 
-                    let _ = data_processing::generate_world(
-                        parsed_elements,
-                        &args,
-                        scale_factor_x,
-                        scale_factor_z,
+                    let mut ground = ground::generate_ground_data(&args);
+
+                    let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
+                        .expect("Parsed world lengths < 0");
+
+                    // Transform map (parsed_elements). Operations are defined in a json file
+                    map_transformation::transform_map(
+                        &mut parsed_elements,
+                        &mut xzbbox,
+                        &mut ground,
                     );
+
+                    let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
                     Ok(())
                 }
                 Err(e) => {

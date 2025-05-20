@@ -1,4 +1,7 @@
-use crate::{bbox::BBox, cartesian::XZPoint};
+use crate::args::Args;
+use crate::bbox::BBox;
+use crate::coordinate_system::cartesian::XZPoint;
+use crate::progress::emit_gui_progress_update;
 use image::{Rgb, RgbImage};
 
 /// Maximum Y coordinate in Minecraft (build height limit)
@@ -8,7 +11,7 @@ const BASE_HEIGHT_SCALE: f64 = 0.72;
 
 /// Mapbox API access token for terrain data
 const MAPBOX_PUBKEY: &str =
-    "pk.eyJ1IjoiY3Vnb3MiLCJhIjoiY2p4Nm43MzA3MDFmZDQwcGxsMjB4Z3hnNiJ9.SQbnMASwdqZe6G4n6OMvVw";
+    "pk.eyJ1IjoibG91aXMtZSIsImEiOiJjbWF0cWlycjEwYWNvMmtxeHFwdDQ5NnJoIn0.6A0AKg0iucvoGhYuCkeOjA";
 /// Minimum zoom level for terrain tiles
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
@@ -410,4 +413,12 @@ impl Ground {
             eprintln!("Failed to save debug image: {}", e);
         }
     }
+}
+
+pub fn generate_ground_data(args: &Args) -> Ground {
+    if args.terrain {
+        emit_gui_progress_update(5.0, "Fetching elevation...");
+    }
+
+    Ground::new(args)
 }
