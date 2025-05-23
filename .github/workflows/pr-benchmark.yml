@@ -104,4 +104,4 @@ jobs:
           message: ${{ steps.comment_body.outputs.summary }}
           comment-tag: benchmark-report
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.BENCHMARK_TOKEN }}
