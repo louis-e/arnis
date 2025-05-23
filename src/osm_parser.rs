@@ -28,9 +28,48 @@ struct OsmElement {
     pub members: Vec<OsmMember>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct OsmData {
     pub elements: Vec<OsmElement>,
+}
+
+struct SplitOsmData {
+    pub nodes: Vec<OsmElement>,
+    pub ways: Vec<OsmElement>,
+    pub relations: Vec<OsmElement>,
+    #[allow(dead_code)]
+    pub others: Vec<OsmElement>,
+}
+
+impl SplitOsmData {
+    fn total_count(&self) -> usize {
+        self.nodes.len() + self.ways.len() + self.relations.len() + self.others.len()
+    }
+    fn from_raw_osm_data(osm_data: OsmData) -> Self {
+        let mut nodes = Vec::new();
+        let mut ways = Vec::new();
+        let mut relations = Vec::new();
+        let mut others = Vec::new();
+        for element in osm_data.elements {
+            match element.r#type.as_str() {
+                "node" => nodes.push(element),
+                "way" => ways.push(element),
+                "relation" => relations.push(element),
+                _ => others.push(element),
+            }
+        }
+        SplitOsmData {
+            nodes,
+            ways,
+            relations,
+            others,
+        }
+    }
+}
+
+fn parse_raw_osm_data(json_data: Value) -> Result<SplitOsmData, serde_json::Error> {
+    let osm_data: OsmData = serde_json::from_value(json_data)?;
+    Ok(SplitOsmData::from_raw_osm_data(osm_data))
 }
 
 // End raw data
@@ -143,7 +182,7 @@ fn lat_lon_to_minecraft_coords(
 }
 
 pub fn parse_osm_data(
-    json_data: &Value,
+    json_data: Value,
     bbox: BBox,
     scale: f64,
     debug: bool,
@@ -152,8 +191,7 @@ pub fn parse_osm_data(
     emit_gui_progress_update(10.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
-    let data: OsmData =
-        serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
+    let data = parse_raw_osm_data(json_data).expect("Failed to parse OSM data");
 
     // Determine which dimension is larger and assign scale factors accordingly
     let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
@@ -161,6 +199,7 @@ pub fn parse_osm_data(
     let scale_factor_x: f64 = scale_factor_x.floor() * scale;
 
     if debug {
+        println!("Total elements: {}", data.total_count());
         println!("Scale factor X: {}", scale_factor_x);
         println!("Scale factor Z: {}", scale_factor_z);
     }
@@ -171,37 +210,31 @@ pub fn parse_osm_data(
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
     // First pass: store all nodes with Minecraft coordinates and process nodes with tags
-    for element in &data.elements {
-        if element.r#type == "node" {
-            if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
-                let (x, z) =
-                    lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_z, scale_factor_x);
+    for element in data.nodes {
+        if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
+            let (x, z) =
+                lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_z, scale_factor_x);
 
-                let processed: ProcessedNode = ProcessedNode {
-                    id: element.id,
-                    tags: element.tags.clone().unwrap_or_default(),
-                    x,
-                    z,
-                };
+            let processed: ProcessedNode = ProcessedNode {
+                id: element.id,
+                tags: element.tags.clone().unwrap_or_default(),
+                x,
+                z,
+            };
 
-                nodes_map.insert(element.id, processed.clone());
+            nodes_map.insert(element.id, processed.clone());
 
-                // Process nodes with tags
-                if let Some(tags) = &element.tags {
-                    if !tags.is_empty() {
-                        processed_elements.push(ProcessedElement::Node(processed));
-                    }
+            // Process nodes with tags
+            if let Some(tags) = &element.tags {
+                if !tags.is_empty() {
+                    processed_elements.push(ProcessedElement::Node(processed));
                 }
             }
         }
     }
 
     // Second pass: process ways
-    for element in &data.elements {
-        if element.r#type != "way" {
-            continue;
-        }
-
+    for element in data.ways {
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
             for &node_id in node_ids {
@@ -225,11 +258,7 @@ pub fn parse_osm_data(
     }
 
     // Third pass: process relations
-    for element in &data.elements {
-        if element.r#type != "relation" {
-            continue;
-        }
-
+    for element in data.relations {
         let Some(tags) = &element.tags else {
             continue;
         };
@@ -244,7 +273,7 @@ pub fn parse_osm_data(
             .iter()
             .filter_map(|mem: &OsmMember| {
                 if mem.r#type != "way" {
-                    eprintln!("WARN: Unknown relation type {}", mem.r#type);
+                    eprintln!("WARN: Unknown relation member type \"{}\"", mem.r#type);
                     return None;
                 }
 
