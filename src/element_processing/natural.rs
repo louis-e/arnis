@@ -55,7 +55,14 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                     let bresenham_points: Vec<(i32, i32, i32)> =
                         bresenham_line(prev.0, 0, prev.1, x, 0, z);
                     for (bx, _, bz) in bresenham_points {
-                        editor.set_block(block_type, bx, 0, bz, None, None);
+                        editor.set_block(
+                            block_type,
+                            bx,
+                            0,
+                            bz,
+                            Some(&[DIRT, STONE, GRASS_BLOCK]),
+                            None,
+                        );
                     }
 
                     current_natural.push((x, z));
@@ -78,20 +85,62 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
                 for (x, z) in filled_area {
-                    editor.set_block(block_type, x, 0, z, None, None);
+                    editor.set_block(block_type, x, 0, z, Some(&[DIRT, STONE, GRASS_BLOCK]), None);
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
                         "beach" | "sand" | "dune" | "shoal" => {
-                            editor.set_block(SAND, x, -1, z, None, None);
-                            editor.set_block(STONE, x, -2, z, None, None);
+                            editor.set_block(
+                                SAND,
+                                x,
+                                -1,
+                                z,
+                                Some(&[DIRT, STONE, GRASS_BLOCK]),
+                                None,
+                            );
+                            editor.set_block(
+                                STONE,
+                                x,
+                                -2,
+                                z,
+                                Some(&[DIRT, STONE, GRASS_BLOCK]),
+                                None,
+                            );
                         }
                         "glacier" => {
-                            editor.set_block(PACKED_ICE, x, -1, z, None, None);
-                            editor.set_block(STONE, x, -2, z, None, None);
+                            editor.set_block(
+                                PACKED_ICE,
+                                x,
+                                -1,
+                                z,
+                                Some(&[DIRT, STONE, GRASS_BLOCK]),
+                                None,
+                            );
+                            editor.set_block(
+                                STONE,
+                                x,
+                                -2,
+                                z,
+                                Some(&[DIRT, STONE, GRASS_BLOCK]),
+                                None,
+                            );
                         }
                         "bare_rock" => {
-                            editor.set_block(STONE, x, -1, z, None, None);
-                            editor.set_block(STONE, x, -2, z, None, None);
+                            editor.set_block(
+                                STONE,
+                                x,
+                                -1,
+                                z,
+                                Some(&[DIRT, STONE, GRASS_BLOCK]),
+                                None,
+                            );
+                            editor.set_block(
+                                STONE,
+                                x,
+                                -2,
+                                z,
+                                Some(&[DIRT, STONE, GRASS_BLOCK]),
+                                None,
+                            );
                         }
                         _ => {}
                     }
@@ -179,7 +228,14 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         }
                         "shoal" => {
                             if rng.gen_bool(0.05) {
-                                editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
+                                editor.set_block(
+                                    WATER,
+                                    x,
+                                    0,
+                                    z,
+                                    Some(&[SAND, GRAVEL, DIRT, STONE, GRASS_BLOCK]),
+                                    None,
+                                );
                             }
                         }
                         "wetland" => {
@@ -228,7 +284,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                                 x,
                                                 0,
                                                 z,
-                                                Some(&[MUD]),
+                                                Some(&[MUD, DIRT, STONE, GRASS_BLOCK]),
                                                 None,
                                             );
                                         }
@@ -246,7 +302,14 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             } else {
                                 // Generic natural=wetland without wetland=... tag
                                 if rng.gen_bool(0.3) {
-                                    editor.set_block(WATER, x, 0, z, Some(&[MUD]), None);
+                                    editor.set_block(
+                                        WATER,
+                                        x,
+                                        0,
+                                        z,
+                                        Some(&[MUD, DIRT, STONE, GRASS_BLOCK]),
+                                        None,
+                                    );
                                     continue;
                                 }
                                 editor.set_block(GRASS, x, 1, z, None, None);
