@@ -136,7 +136,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             }
             "construction" => {
                 let random_choice: i32 = rng.gen_range(0..1501);
-                if random_choice < 6 {
+                if random_choice < 15 {
                     editor.set_block(SCAFFOLDING, x, 1, z, None, None);
                     if random_choice < 2 {
                         editor.set_block(SCAFFOLDING, x, 2, z, None, None);
@@ -154,8 +154,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         editor.set_block(SCAFFOLDING, x - 1, 1, z, None, None);
                         editor.set_block(SCAFFOLDING, x + 1, 1, z - 1, None, None);
                     }
-                } else if random_choice < 30 {
-                    let construction_items: [Block; 11] = [
+                } else if random_choice < 55 {
+                    let construction_items: [Block; 13] = [
                         OAK_LOG,
                         COBBLESTONE,
                         GRAVEL,
@@ -167,6 +167,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         OAK_PLANKS,
                         DIRT,
                         BRICK,
+                        CRAFTING_TABLE,
+                        FURNACE,
                     ];
                     editor.set_block(
                         construction_items[rng.gen_range(0..construction_items.len())],
@@ -176,8 +178,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         None,
                         None,
                     );
-                } else if random_choice < 35 {
-                    if random_choice < 30 {
+                } else if random_choice < 65 {
+                    if random_choice < 60 {
                         editor.set_block(DIRT, x, 1, z, None, None);
                         editor.set_block(DIRT, x, 2, z, None, None);
                         editor.set_block(DIRT, x + 1, 1, z, None, None);
@@ -188,8 +190,20 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         editor.set_block(DIRT, x - 1, 1, z, None, None);
                         editor.set_block(DIRT, x, 1, z - 1, None, None);
                     }
-                } else if random_choice < 150 {
-                    editor.set_block(AIR, x, 0, z, None, Some(&[SPONGE]));
+                } else if random_choice < 100 {
+                    editor.set_block(GRAVEL, x, 0, z, None, Some(&[SPONGE]));
+                } else if random_choice < 115 {
+                    editor.set_block(SAND, x, 0, z, None, Some(&[SPONGE]));
+                } else if random_choice < 125 {
+                    editor.set_block(DIORITE, x, 0, z, None, Some(&[SPONGE]));
+                } else if random_choice < 145 {
+                    editor.set_block(BRICK, x, 0, z, None, Some(&[SPONGE]));
+                } else if random_choice < 155 {
+                    editor.set_block(GRANITE, x, 0, z, None, Some(&[SPONGE]));
+                } else if random_choice < 180 {
+                    editor.set_block(ANDESITE, x, 0, z, None, Some(&[SPONGE]));
+                } else if random_choice < 565 {
+                    editor.set_block(COBBLESTONE, x, 0, z, None, Some(&[SPONGE]));
                 }
             }
             "grass" => {
