@@ -46,6 +46,7 @@ pub struct Args {
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
     pub fillground: bool,
+
     /// Enable debug mode (optional)
     #[arg(long)]
     pub debug: bool,

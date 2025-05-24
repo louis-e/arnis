@@ -429,7 +429,7 @@ function formatPoint(point, proj) {
             formattedBounds = y + ' ' + x;
         }
     }
-    return formattedBounds
+    return formattedPoint
 }
 
 function validateStringAsBounds(bounds) {
@@ -502,9 +502,26 @@ $(document).ready(function () {
     crosshair = new L.marker(map.getCenter(), { icon: crosshairIcon, clickable: false });
     crosshair.addTo(map);
 
+    // Override default tooltips
+    L.drawLocal = L.drawLocal || {};
+    L.drawLocal.draw = L.drawLocal.draw || {};
+    L.drawLocal.draw.toolbar = L.drawLocal.draw.toolbar || {};
+    L.drawLocal.draw.toolbar.buttons = L.drawLocal.draw.toolbar.buttons || {};
+    L.drawLocal.draw.toolbar.buttons.rectangle = 'Choose area';
+    L.drawLocal.draw.toolbar.buttons.marker = 'Set spawnpoint';
+
     // Initialize the FeatureGroup to store editable layers
     drawnItems = new L.FeatureGroup();
-    map.addLayer(drawnItems);    // Initialize the draw control and pass it the FeatureGroup of editable layers
+    map.addLayer(drawnItems);
+
+    // Custom icon for drawn markers
+    var customMarkerIcon = L.icon({
+        iconUrl: 'images/marker-icon.png',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+        popupAnchor: [0, -10]
+    });
+
     drawControl = new L.Control.Draw({
         edit: {
             featureGroup: drawnItems
@@ -526,7 +543,9 @@ $(document).ready(function () {
             polyline: false,
             polygon: false,
             circle: false,
-            marker: false
+            marker: {
+                icon: customMarkerIcon
+            }
         }
     });
     map.addControl(drawControl);
@@ -567,6 +586,16 @@ $(document).ready(function () {
     map.addLayer(bounds);
 
     map.on('draw:created', function (e) {
+        // If it's a marker, make sure we only have one
+        if (e.layerType === 'marker') {
+            // Remove any existing markers
+            drawnItems.eachLayer(function(layer) {
+                if (layer instanceof L.Marker) {
+                    drawnItems.removeLayer(layer);
+                }
+            });
+        }
+
         // Check if it's a rectangle and set proper styles before adding it to the layer
         if (e.layerType === 'rectangle') {
             e.layer.setStyle({
@@ -580,10 +609,29 @@ $(document).ready(function () {
         }
 
         drawnItems.addLayer(e.layer);
-        bounds.setBounds(drawnItems.getBounds())
-        $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
-        $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
-        notifyBboxUpdate();
+
+        // Only update the bounds based on non-marker layers
+        if (e.layerType !== 'marker') {
+            // Calculate bounds only from non-marker layers
+            const nonMarkerBounds = new L.LatLngBounds();
+            let hasNonMarkerLayers = false;
+            
+            drawnItems.eachLayer(function(layer) {
+                if (!(layer instanceof L.Marker)) {
+                    hasNonMarkerLayers = true;
+                    nonMarkerBounds.extend(layer.getBounds());
+                }
+            });
+            
+            // Only update bounds if there are non-marker layers
+            if (hasNonMarkerLayers) {
+                bounds.setBounds(nonMarkerBounds);
+                $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
+                $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
+                notifyBboxUpdate();
+            }
+        }
+
         if (!e.geojson &&
             !((drawnItems.getLayers().length == 1) && (drawnItems.getLayers()[0] instanceof L.Marker))) {
             map.fitBounds(bounds.getBounds());
@@ -617,7 +665,22 @@ $(document).ready(function () {
     });
 
     map.on('draw:edited', function (e) {
-        bounds.setBounds(drawnItems.getBounds())
+        // Calculate bounds only from non-marker layers
+        const nonMarkerBounds = new L.LatLngBounds();
+        let hasNonMarkerLayers = false;
+        
+        drawnItems.eachLayer(function(layer) {
+            if (!(layer instanceof L.Marker)) {
+                hasNonMarkerLayers = true;
+                nonMarkerBounds.extend(layer.getBounds());
+            }
+        });
+        
+        // Only update bounds if there are non-marker layers
+        if (hasNonMarkerLayers) {
+            bounds.setBounds(nonMarkerBounds);
+        }
+        
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
         notifyBboxUpdate();
@@ -696,3 +759,24 @@ function notifyBboxUpdate() {
     const bboxText = document.getElementById('boxbounds').textContent;
     window.parent.postMessage({ bboxText: bboxText }, '*');
 }
+
+// Expose marker coordinates to the parent window
+function getSpawnPointCoords() {
+    // Check if there are any markers in drawn items
+    const markers = [];
+    drawnItems.eachLayer(function(layer) {
+        if (layer instanceof L.Marker) {
+            const latLng = layer.getLatLng();
+            markers.push({
+                lat: latLng.lat,
+                lng: latLng.lng
+            });
+        }
+    });
+
+    // Return the first marker found or null if none exists
+    return markers.length > 0 ? markers[0] : null;
+}
+
+// Expose the function to the parent window
+window.getSpawnPointCoords = getSpawnPointCoords;

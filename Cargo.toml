@@ -10,6 +10,7 @@ readme = "README.md"
 
 [profile.release]
 lto = "thin"
+overflow-checks = true
 
 [features]
 default = ["gui"]
