@@ -163,7 +163,7 @@ impl ProcessedElement {
 }
 
 // Function to convert latitude and longitude to Minecraft coordinates.
-fn lat_lon_to_minecraft_coords(
+pub fn lat_lon_to_minecraft_coords(
     lat: f64,
     lon: f64,
     bbox: BBox, // (min_lon, min_lat, max_lon, max_lat)

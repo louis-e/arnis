@@ -480,6 +480,18 @@ async function startGeneration() {
       return;
     }
 
+    // Get the map iframe reference
+    const mapFrame = document.querySelector('.map-container');
+    // Get spawn point coordinates if marker exists
+    let spawnPoint = null;
+    if (mapFrame && mapFrame.contentWindow && mapFrame.contentWindow.getSpawnPointCoords) {
+      const coords = mapFrame.contentWindow.getSpawnPointCoords();
+      // Convert object format to tuple format if coordinates exist
+      if (coords) {
+        spawnPoint = [coords.lat, coords.lng];
+      }
+    }
+
     var terrain = document.getElementById("terrain-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
@@ -490,7 +502,7 @@ async function startGeneration() {
     floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
     ground_level = isNaN(ground_level) || ground_level < -62 ? 20 : ground_level;
 
-    // Pass the bounding box and selected world to the Rust backend
+    // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
         selectedWorld: worldPath,
@@ -499,7 +511,8 @@ async function startGeneration() {
         floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
         fillgroundEnabled: fill_ground,
-        isNewWorld: isNewWorld
+        isNewWorld: isNewWorld,
+        spawnPoint: spawnPoint
     });
 
     console.log("Generation process started.");
