@@ -101,7 +101,7 @@ pub fn fetch_elevation_data(
         } else {
             let mapbox_access_token = mapbox_access_token
                 .as_ref()
-                .unwrap_or_else(|| &default_mapbox_access_token);
+                .unwrap_or(&default_mapbox_access_token);
             println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from Mapbox API");
             let url: String = format!(
                 "https://api.mapbox.com/v4/mapbox.terrain-rgb/{}/{}/{}.pngraw?access_token={}",
