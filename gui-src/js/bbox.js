@@ -610,15 +610,26 @@ $(document).ready(function () {
 
         drawnItems.addLayer(e.layer);
 
-        // Only update the bounds in specific cases:
-        // 1. If the new layer is not a marker
-        // 2. If there are already non-marker layers in the feature group
-        // This prevents markers from affecting/extending the bbox
+        // Only update the bounds based on non-marker layers
         if (e.layerType !== 'marker') {
-            bounds.setBounds(drawnItems.getBounds());
-            $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
-            $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
-            notifyBboxUpdate();
+            // Calculate bounds only from non-marker layers
+            const nonMarkerBounds = new L.LatLngBounds();
+            let hasNonMarkerLayers = false;
+            
+            drawnItems.eachLayer(function(layer) {
+                if (!(layer instanceof L.Marker)) {
+                    hasNonMarkerLayers = true;
+                    nonMarkerBounds.extend(layer.getBounds());
+                }
+            });
+            
+            // Only update bounds if there are non-marker layers
+            if (hasNonMarkerLayers) {
+                bounds.setBounds(nonMarkerBounds);
+                $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
+                $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
+                notifyBboxUpdate();
+            }
         }
 
         if (!e.geojson &&

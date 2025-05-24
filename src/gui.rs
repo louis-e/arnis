@@ -378,16 +378,16 @@ fn is_spawn_point_within_bbox(spawn_point: (f64, f64), bbox_text: &str) -> Resul
     use crate::bbox::BBox;
 
     // Parse the bounding box
-    let bbox = BBox::from_str(bbox_text)
-        .map_err(|e| format!("Failed to parse bounding box: {}", e))?;
+    let bbox =
+        BBox::from_str(bbox_text).map_err(|e| format!("Failed to parse bounding box: {}", e))?;
 
     let (lat, lng) = spawn_point;
 
     // Check if the spawn point is within the bounding box
-    let is_within = lat >= bbox.min().lat() && 
-                    lat <= bbox.max().lat() && 
-                    lng >= bbox.min().lng() && 
-                    lng <= bbox.max().lng();
+    let is_within = lat >= bbox.min().lat()
+        && lat <= bbox.max().lat()
+        && lng >= bbox.min().lng()
+        && lng <= bbox.max().lng();
 
     Ok(is_within)
 }
@@ -397,12 +397,12 @@ fn update_player_position(
     world_path: &str,
     spawn_point: Option<(f64, f64)>,
     bbox_text: String,
-    scale: f64
+    scale: f64,
 ) -> Result<(), String> {
     use crate::bbox::BBox;
 
     let Some((lat, lng)) = spawn_point else {
-        return Ok(());  // No spawn point selected, exit early
+        return Ok(()); // No spawn point selected, exit early
     };
 
     // Check if spawn point is within the bbox
@@ -425,13 +425,11 @@ fn update_player_position(
     let scale_factor_x = scale_factor_x.floor() * scale;
 
     // Convert lat/lng to Minecraft coordinates
-    let (x, z) = osm_parser::lat_lon_to_minecraft_coords(lat, lng, bbox, scale_factor_z, scale_factor_x);
+    let (x, z) =
+        osm_parser::lat_lon_to_minecraft_coords(lat, lng, bbox, scale_factor_z, scale_factor_x);
 
-    let x = x + 100;
-    let z = z + 100;
-
-    // Default y position
-    let y = 50.0;
+    // Default y spawn position since terrain elevation cannot be determined yet
+    let y = 150.0;
 
     // Read and update the level.dat file
     let level_path = PathBuf::from(world_path).join("level.dat");
@@ -495,7 +493,12 @@ fn update_player_position(
 
     let compressed_data = match encoder.finish() {
         Ok(data) => data,
-        Err(e) => return Err(format!("Failed to finalize compression for level.dat: {}", e)),
+        Err(e) => {
+            return Err(format!(
+                "Failed to finalize compression for level.dat: {}",
+                e
+            ))
+        }
     };
 
     // Write the updated level.dat file
@@ -542,8 +545,13 @@ fn gui_start_generation(
             match is_spawn_point_within_bbox(coords, &bbox_text) {
                 Ok(true) => {
                     // Spawn point is valid, update the player position
-                    update_player_position(&selected_world, spawn_point, bbox_text.clone(), world_scale)
-                        .map_err(|e| format!("Failed to set spawn point: {}", e))?;
+                    update_player_position(
+                        &selected_world,
+                        spawn_point,
+                        bbox_text.clone(),
+                        world_scale,
+                    )
+                    .map_err(|e| format!("Failed to set spawn point: {}", e))?;
                 }
                 Ok(false) => {}
                 Err(_) => {}
