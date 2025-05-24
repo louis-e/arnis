@@ -411,8 +411,7 @@ fn update_player_position(
             return Err("Spawn point is outside the selected area".to_string());
         }
     } else {
-        // If there's an error checking, continue anyway but log it
-        eprintln!("Warning: Could not verify if spawn point is within bounding box");
+        return Err("Could not verify if spawn point is within bounding box".to_string());
     }
 
     // Parse the bounding box from text
