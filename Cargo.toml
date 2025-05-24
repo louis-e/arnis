@@ -20,7 +20,7 @@ gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "dirs"
 tauri-build = {version = "2", optional = true}
 
 [dependencies]
-clap = { version = "4.1", features = ["derive"] }
+clap = { version = "4.1", features = ["derive", "env"] }
 colored = "3.0.0"
 dirs = {version = "6.0.0", optional = true }
 fastanvil = "0.31.0"
