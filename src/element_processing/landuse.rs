@@ -29,7 +29,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
         "education" => LIGHT_GRAY_CONCRETE,
         "industrial" => COBBLESTONE,
         "military" => GRAY_CONCRETE,
-        "railway" => GRAVEL,
+        //"railway" => GRAVEL,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
             let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);

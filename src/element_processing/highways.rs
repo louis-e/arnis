@@ -106,13 +106,13 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             // Skip if 'layer' or 'level' is negative in the tags
             if let Some(layer_str) = element.tags().get("layer") {
                 if let Ok(layer) = layer_str.parse::<i32>() {
-                    road_level = 3 * layer;
+                    road_level = 4 * layer;
                 }
             }
 
             if let Some(level_str) = element.tags().get("level") {
                 if let Ok(level) = level_str.parse::<i32>() {
-                    road_level = 3 * level;
+                    road_level = 4 * level;
                 }
             }
 
@@ -270,6 +270,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                                 GRAY_CONCRETE,
                                                 DIRT_PATH,
                                                 SAND,
+                                                POLISHED_ANDESITE,
                                             ]),
                                         );
                                         editor.set_block(
@@ -284,6 +285,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                                 GRAY_CONCRETE,
                                                 DIRT_PATH,
                                                 SAND,
+                                                POLISHED_ANDESITE,
                                             ]),
                                         );
                                     }
