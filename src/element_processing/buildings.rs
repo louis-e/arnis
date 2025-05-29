@@ -499,9 +499,10 @@ pub fn generate_buildings(
                         None,
                         None,
                     );
-                }                // Only set ceiling at proper height if we don't use a specific roof shape
-                // (this will become the default flat roof)
-                if !element.tags.contains_key("roof:shape") {
+                }
+
+                // Only set ceiling at proper height if we don't use a specific roof shape
+                if !element.tags.contains_key("roof:shape") || element.tags.get("roof:shape").unwrap() == "flat" {
                     editor.set_block_absolute(
                         floor_block,
                         x,
@@ -524,7 +525,7 @@ pub fn generate_buildings(
             "pyramidal" => RoofType::Pyramidal,
             "dome" | "onion" => RoofType::Dome,
             "cone" | "round" => RoofType::Cone,
-            "flat" | _ => RoofType::Flat,
+            _ => RoofType::Flat,
         };
         
         generate_roof(editor, element, args, start_y_offset, building_height, floor_block, wall_block, roof_type);
@@ -570,8 +571,7 @@ fn generate_roof(
     
     match roof_type {
         RoofType::Flat => {
-            // Simple flat roof - already handled by the building generation code
-            // to be checked: required? or already done in code?
+            // Simple flat roof
             for (x, z) in floor_area {
                 editor.set_block_absolute(floor_block, x, base_height, z, None, None);
             }
@@ -582,21 +582,14 @@ fn generate_roof(
             let width = max_x - min_x;
             let length = max_z - min_z;
             
-            // Make roof height proportional to building size
-            // Taller buildings get taller roofs
+            // Calculate roof height proportionally to building size
             let building_size = width.max(length);
-            let roof_height_boost = if building_size > 25 {
-                5
-            } else if building_size > 15 {
-                4
-            } else {
-                3
-            };
+            // Enhanced logarithmic scaling with increased base values for taller roofs
+            let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
             
             let roof_peak_height = base_height + roof_height_boost;
             
-            // Align ridge with the LONGER dimension (not shorter)
-            // This is the correct orientation for gabled roofs
+            // Align ridge with the longer dimension
             let is_wider_than_long = width > length;
             
             // Create ridge line along the longer dimension
@@ -640,7 +633,7 @@ fn generate_roof(
                 let max_distance = if is_wider_than_long { length / 2 } else { width / 2 };
                 let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
                 
-                // Create a steeper slope (use 1.0 multiplier instead of 3.0)
+                // Create a steep slope
                 let roof_height = roof_peak_height - (slope_ratio * roof_height_boost as f64) as i32;
                 let roof_y = roof_height.max(base_height);
                 
@@ -660,10 +653,10 @@ fn generate_roof(
             let is_rectangular = (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
             let long_axis_is_x = width > length;
             
-            // Make roof taller and more pointy - increase peak height by 2-3 blocks
+            // Make roof taller and more pointy
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
             
-            // Use wall_block for hipped roofs (now passed as a parameter)
+            // Use wall_block for hipped roofs
             let roof_block = wall_block;
             
             // Find the building's approximate center line along the long axis
@@ -706,8 +699,7 @@ fn generate_roof(
                         continue; // Skip - these were already handled as ridge points
                     }
                     
-                    // Calculate height based on distance to ridge - make slope steeper
-                    // by dividing with 1.5 instead of 2
+                    // Calculate height based on distance to ridge
                     let roof_height = roof_peak_height - (distance_to_ridge as f64 / 1.5) as i32;
                     let roof_y = roof_height.max(base_height);
                     

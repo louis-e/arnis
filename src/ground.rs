@@ -7,7 +7,7 @@ use image::{Rgb, RgbImage};
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
-const BASE_HEIGHT_SCALE: f64 = 0.4; // 0.72;
+const BASE_HEIGHT_SCALE: f64 = 0.4;
 
 /// Mapbox API access token for terrain data
 const MAPBOX_PUBKEY: &str =
