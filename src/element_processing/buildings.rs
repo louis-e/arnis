@@ -458,12 +458,11 @@ pub fn generate_buildings(
                 // Create foundation columns for the floor area when using terrain
                 if args.terrain {
                     // Calculate actual ground level at this position
-                    let local_ground_level = if let Some(ground) = editor.get_ground() {
+                    if let Some(ground) = editor.get_ground() {
                         ground.level(XZPoint::new(x - editor.get_min_coords().0, z - editor.get_min_coords().1))
                     } else {
                         args.ground_level
                     };
-
                 }
 
                 // Set floor at start_y_offset
