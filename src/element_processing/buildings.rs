@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
+use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -24,7 +25,31 @@ pub fn generate_buildings(
 
     // Calculate starting y-offset from min_level
     let scale_factor = args.scale;
-    let start_y_offset = multiply_scale(min_level * 4, scale_factor);
+    let min_level_offset = multiply_scale(min_level * 4, scale_factor);
+
+    // Use fixed starting Y coordinate based on maximum ground level when terrain is enabled
+    let start_y_offset = if args.terrain {
+        // Get nodes' XZ points to find maximum elevation
+        let building_points: Vec<XZPoint> = element.nodes.iter()
+            .map(|n| XZPoint::new(n.x - editor.get_min_coords().0, n.z - editor.get_min_coords().1))
+            .collect();
+
+        // Calculate maximum and minimum ground level across all nodes
+        let mut max_ground_level = args.ground_level;
+
+        for point in &building_points {
+            if let Some(ground) = editor.get_ground() {
+                let level = ground.level(*point);
+                max_ground_level = max_ground_level.max(level);
+            }
+        }
+
+        // Use the maximum level + min_level offset as the fixed base for the entire building
+        max_ground_level + min_level_offset
+    } else {
+        // When terrain is disabled, just use min_level_offset
+        min_level_offset
+    };
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -345,21 +370,36 @@ pub fn generate_buildings(
             let bresenham_points =
                 bresenham_line(prev.0, start_y_offset, prev.1, x, start_y_offset, z);
             for (bx, _, bz) in bresenham_points {
+                // Create foundation pillars from ground up to building base if needed
+                if args.terrain {
+                    // Calculate actual ground level at this position
+                    let local_ground_level = if let Some(ground) = editor.get_ground() {
+                        ground.level(XZPoint::new(bx - editor.get_min_coords().0, bz - editor.get_min_coords().1))
+                    } else {
+                        args.ground_level
+                    };
+
+                    // Add foundation blocks from ground to building base
+                    for y in local_ground_level..start_y_offset+1 {
+                        editor.set_block_absolute(wall_block, bx, y, bz, None, None);
+                    }
+                }
+
                 for h in (start_y_offset + 1)..=(start_y_offset + building_height) {
                     if element.nodes[0].x == bx && element.nodes[0].x == bz {
                         // Corner Block
-                        editor.set_block(corner_block, bx, h, bz, None, None);
+                        editor.set_block_absolute(corner_block, bx, h, bz, None, None);
                     } else {
                         // Add windows to the walls at intervals
                         if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
-                            editor.set_block(window_block, bx, h, bz, None, None);
+                            editor.set_block_absolute(window_block, bx, h, bz, None, None);
                         } else {
-                            editor.set_block(wall_block, bx, h, bz, None, None);
+                            editor.set_block_absolute(wall_block, bx, h, bz, None, None);
                         }
                     }
                 }
 
-                editor.set_block(
+                editor.set_block_absolute(
                     COBBLESTONE,
                     bx,
                     start_y_offset + building_height + 1,
@@ -387,21 +427,38 @@ pub fn generate_buildings(
 
         for (x, z) in floor_area {
             if processed_points.insert((x, z)) {
+                // Create foundation columns for the floor area when using terrain
+                if args.terrain {
+                    // Calculate actual ground level at this position
+                    let local_ground_level = if let Some(ground) = editor.get_ground() {
+                        ground.level(XZPoint::new(x - editor.get_min_coords().0, z - editor.get_min_coords().1))
+                    } else {
+                        args.ground_level
+                    };
+
+                    // For foundation, only add pillars at regular intervals for interior areas
+                    if (x + z) % 3 == 0 {
+                        for y in local_ground_level..start_y_offset {
+                            editor.set_block_absolute(COBBLESTONE, x, y, z, None, None);
+                        }
+                    }
+                }
+
                 // Set floor at start_y_offset
-                editor.set_block(floor_block, x, start_y_offset, z, None, None);
+                editor.set_block_absolute(floor_block, x, start_y_offset, z, None, None);
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
                     for h in (start_y_offset + 2 + 4..start_y_offset + building_height).step_by(4) {
                         if x % 6 == 0 && z % 6 == 0 {
                             // Light fixtures
-                            editor.set_block(GLOWSTONE, x, h, z, None, None);
+                            editor.set_block_absolute(GLOWSTONE, x, h, z, None, None);
                         } else {
-                            editor.set_block(floor_block, x, h, z, None, None);
+                            editor.set_block_absolute(floor_block, x, h, z, None, None);
                         }
                     }
                 } else if x % 6 == 0 && z % 6 == 0 {
-                    editor.set_block(
+                    editor.set_block_absolute(
                         GLOWSTONE,
                         x,
                         start_y_offset + building_height,
@@ -412,7 +469,7 @@ pub fn generate_buildings(
                 }
 
                 // Set ceiling at proper height
-                editor.set_block(
+                editor.set_block_absolute(
                     floor_block,
                     x,
                     start_y_offset + building_height + 1,
