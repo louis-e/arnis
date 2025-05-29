@@ -527,7 +527,7 @@ pub fn generate_buildings(
             "flat" | _ => RoofType::Flat,
         };
         
-        generate_roof(editor, element, args, start_y_offset, building_height, floor_block, roof_type);
+        generate_roof(editor, element, args, start_y_offset, building_height, floor_block, wall_block, roof_type);
     } else {
         // Default flat roof - already handled by the building generation code
     }
@@ -546,6 +546,7 @@ fn generate_roof(
     start_y_offset: i32,
     building_height: i32,
     floor_block: Block,
+    wall_block: Block,
     roof_type: RoofType,
 ) {
     let polygon_coords: Vec<(i32, i32)> = element
@@ -570,6 +571,7 @@ fn generate_roof(
     match roof_type {
         RoofType::Flat => {
             // Simple flat roof - already handled by the building generation code
+            // to be checked: required? or already done in code?
             for (x, z) in floor_area {
                 editor.set_block_absolute(floor_block, x, base_height, z, None, None);
             }
@@ -589,20 +591,121 @@ fn generate_roof(
         },
         
         RoofType::Hipped => {
-            // Unified hipped roof implementation for all hip-style roofs
-            // (Hipped, Half-hipped, Mansard, and Gambrel)
-            let roof_peak_height = base_height + 4;
+            // Calculate building dimensions and determine the long axis
+            let width = max_x - min_x;
+            let length = max_z - min_z;
             
-            for (x, z) in floor_area {
-                let distance_x = (x - center_x).abs();
-                let distance_z = (z - center_z).abs();
-                let max_distance = distance_x.max(distance_z);
+            // Determine if building is significantly rectangular or more square-shaped
+            let is_rectangular = (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
+            let long_axis_is_x = width > length;
+            
+            // Make roof taller and more pointy - increase peak height by 2-3 blocks
+            let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
+            
+            // Use wall_block for hipped roofs (now passed as a parameter)
+            let roof_block = wall_block;
+            
+            // Find the building's approximate center line along the long axis
+            if is_rectangular {
+                // For rectangular buildings, create a ridge along the long axis
+                let ridge_points = if long_axis_is_x {
+                    // Ridge runs along X-axis
+                    (min_x..=max_x).map(|x| (x, center_z)).collect::<Vec<_>>()
+                } else {
+                    // Ridge runs along Z-axis
+                    (min_z..=max_z).map(|z| (center_x, z)).collect::<Vec<_>>()
+                };
                 
-                // Calculate roof height based on distance from center
-                let roof_height = roof_peak_height - max_distance / 2;
-                let roof_y = roof_height.max(base_height);
+                // Set the ridge at the peak height
+                for (rx, rz) in &ridge_points {
+                    // Only place ridge points if they're inside the building outline
+                    if floor_area.iter().any(|(fx, fz)| fx == rx && fz == rz) {
+                        // Fill from base height up to peak height
+                        for y in base_height..=roof_peak_height {
+                            editor.set_block_absolute(roof_block, *rx, y, *rz, None, None);
+                        }
+                    }
+                }
                 
-                editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
+                // For each point in the floor area, calculate distance to the nearest ridge point
+                // and create slopes that decrease in height as distance increases
+                for (x, z) in &floor_area {
+                    // Determine shortest distance to ridge
+                    let distance_to_ridge = if long_axis_is_x {
+                        // Distance is primarily in Z direction for X-axis ridge
+                        (z - center_z).abs()
+                    } else {
+                        // Distance is primarily in X direction for Z-axis ridge
+                        (x - center_x).abs()
+                    };
+                    
+                    // Skip points that are on the ridge
+                    if distance_to_ridge == 0 && 
+                       ((long_axis_is_x && *z == center_z) || (!long_axis_is_x && *x == center_x)) {
+                        continue; // Skip - these were already handled as ridge points
+                    }
+                    
+                    // Calculate height based on distance to ridge - make slope steeper
+                    // by dividing with 1.5 instead of 2
+                    let roof_height = roof_peak_height - (distance_to_ridge as f64 / 1.5) as i32;
+                    let roof_y = roof_height.max(base_height);
+                    
+                    // Fill from base to calculated height
+                    for y in base_height..=roof_y {
+                        editor.set_block_absolute(roof_block, *x, y, *z, None, None);
+                    }
+                }
+            } else {
+                // For more complex or square buildings, use distance from edges
+                
+                // First, find the outer perimeter of the building
+                let perimeter_points: HashSet<(i32, i32)> = element.nodes.iter()
+                    .map(|node| (node.x, node.z))
+                    .collect();
+                
+                // Create a map to store the shortest distance from each floor point to the perimeter
+                let mut distance_to_edge = vec![];
+                
+                // For each point in the floor area, calculate the shortest distance to the perimeter
+                for (x, z) in &floor_area {
+                    // Find minimum distance to any perimeter point
+                    let min_distance = perimeter_points.iter()
+                        .map(|(px, pz)| {
+                            let dx = x - px;
+                            let dz = z - pz;
+                            ((dx * dx + dz * dz) as f64).sqrt()
+                        })
+                        .fold(f64::INFINITY, f64::min);
+                    
+                    distance_to_edge.push((*x, *z, min_distance));
+                }
+                
+                // Find maximum distance from edge to determine center ridge area
+                let max_distance = distance_to_edge.iter()
+                    .map(|(_, _, dist)| *dist)
+                    .fold(0.0, f64::max);
+                
+                // Convert distances to heights - make center area higher
+                for (x, z, dist) in distance_to_edge {
+                    // Normalize distance to 0.0-1.0 scale
+                    let norm_dist = dist / max_distance;
+                    
+                    // Calculate height - steeper slope with a higher center point
+                    let height_factor = if norm_dist > 0.6 {
+                        // Central ridge area - more peaked
+                        1.0
+                    } else {
+                        // Sloping area - steeper slope
+                        (norm_dist / 0.6).powf(0.8)
+                    };
+                    
+                    let roof_y = base_height + (height_factor * (roof_peak_height - base_height) as f64) as i32;
+                    
+                    // Fill from base height to calculated roof height
+                    for y in base_height..=roof_y {
+                        editor.set_block_absolute(roof_block, x, y, z, None, None);
+                    }
+                }
             }
         },
         
