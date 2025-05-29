@@ -10,324 +10,16 @@ use rand::Rng;
 use std::collections::HashSet;
 use std::time::Duration;
 
-/// Generates a gabled roof - two sloping sides meeting at a ridge
-fn generate_gabled_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    // Calculate roof peak height
-    let roof_peak_height = start_y_offset + building_height + 4;
-    
-    // Find the center line of the building for the ridge
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let center_x = (min_x + max_x) / 2;
-    
-    for (x, z) in floor_area {
-        let distance_from_center = (x - center_x).abs();
-        let roof_height = roof_peak_height - distance_from_center / 2;
-        let roof_y = roof_height.max(start_y_offset + building_height + 1);
-        
-        editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
-    }
-}
-
-/// Generates a hipped roof - all sides slope downwards to walls
-fn generate_hipped_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    // Find building bounds
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
-    
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
-    let roof_peak_height = start_y_offset + building_height + 3;
-    
-    for (x, z) in floor_area {
-        let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)).max(1);
-        let roof_height = roof_peak_height - (distance_from_center as f64).sqrt() as i32 / 2;
-        let roof_y = roof_height.max(start_y_offset + building_height + 1);
-        
-        editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
-    }
-}
-
-/// Generates a half-hipped roof - combination of gable and hip
-fn generate_half_hipped_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    // Similar to gabled but with truncated ends
-    generate_gabled_roof(editor, element, args, start_y_offset, building_height, floor_block);
-    
-    // Add hip sections at the ends
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-    
-    for (x, z) in floor_area {
-        if x <= min_x + 2 || x >= max_x - 2 {
-            let distance_from_edge = if x <= min_x + 2 { x - min_x } else { max_x - x };
-            let roof_height = start_y_offset + building_height + 1 + distance_from_edge;
-            editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
-        }
-    }
-}
-
-/// Generates a skillion (shed) roof - single sloping surface
-fn generate_skillion_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let width = (max_x - min_x).max(1);
-    
-    for (x, z) in floor_area {
-        let slope_progress = (x - min_x) as f64 / width as f64;
-        let roof_height = start_y_offset + building_height + 1 + (slope_progress * 3.0) as i32;
-        
-        editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
-    }
-}
-
-/// Generates a gambrel roof - two slopes on each side, lower steeper than upper
-fn generate_gambrel_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let center_x = (min_x + max_x) / 2;
-    let half_width = (max_x - min_x) / 2;
-    
-    for (x, z) in floor_area {
-        let distance_from_center = (x - center_x).abs();
-        let roof_height = if distance_from_center < half_width / 2 {
-            // Upper slope (gentler)
-            start_y_offset + building_height + 4 - distance_from_center / 3
-        } else {
-            // Lower slope (steeper)
-            start_y_offset + building_height + 2 - distance_from_center / 2
-        };
-        
-        editor.set_block_absolute(floor_block, x, roof_height.max(start_y_offset + building_height + 1), z, None, None);
-    }
-}
-
-/// Generates a mansard roof - four-sided with two slopes on each side
-fn generate_mansard_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
-    
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
-    let half_width_x = (max_x - min_x) / 2;
-    let half_width_z = (max_z - min_z) / 2;
-    
-    for (x, z) in floor_area {
-        let distance_x = (x - center_x).abs();
-        let distance_z = (z - center_z).abs();
-        let max_distance = distance_x.max(distance_z);
-        
-        let roof_height = if max_distance < half_width_x.min(half_width_z) / 2 {
-            // Upper slope (gentler)
-            start_y_offset + building_height + 5 - max_distance / 4
-        } else {
-            // Lower slope (steeper)
-            start_y_offset + building_height + 3 - max_distance / 2
-        };
-        
-        editor.set_block_absolute(floor_block, x, roof_height.max(start_y_offset + building_height + 1), z, None, None);
-    }
-}
-
-/// Generates a pyramidal roof - all sides come to a point at the top
-fn generate_pyramidal_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
-    
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
-    let roof_peak_height = start_y_offset + building_height + 6;
-    
-    for (x, z) in floor_area {
-        let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)).max(1);
-        let roof_height = roof_peak_height - (distance_from_center as f64).sqrt() as i32 / 2;
-        let roof_y = roof_height.max(start_y_offset + building_height + 1);
-        
-        editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
-    }
-}
-
-/// Generates dome and onion roofs - rounded, hemispherical structures
-fn generate_dome_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
-    
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
-    let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
-    
-    // Fill the entire dome volume, not just the surface
-    for (x, z) in floor_area {
-        let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
-        let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
-        
-        // Use hemisphere equation to determine the height at this distance from center
-        let height_factor = (1.0 - normalized_distance * normalized_distance).sqrt();
-        let surface_height = start_y_offset + building_height + 1 + (height_factor * (radius * 0.8)) as i32;
-        
-        // Fill all blocks from the base level to the surface height
-        for y in (start_y_offset + building_height + 1)..=surface_height {
-            editor.set_block_absolute(floor_block, x, y, z, None, None);
-        }
-    }
-}
-
-/// Generates cone and round roofs - circular structures tapering to a point
-fn generate_cone_roof(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    start_y_offset: i32,
-    building_height: i32,
-    floor_block: Block,
-) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
-    
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
-    let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
-    let cone_height = start_y_offset + building_height + (radius * 1.2) as i32;
-    
-    for (x, z) in floor_area {
-        let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
-        let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
-        
-        // Linear taper for cone
-        let height_factor = 1.0 - normalized_distance;
-        let roof_height = start_y_offset + building_height + 1 + (height_factor * (radius * 1.2)) as i32;
-        
-        if height_factor > 0.0 {
-            editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
-        }
-    }
+/// Enum representing different roof types
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum RoofType {
+    Gabled,       // Two sloping sides meeting at a ridge
+    Hipped,       // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
+    Skillion,     // Single sloping surface
+    Pyramidal,    // All sides come to a point at the top
+    Dome,         // Rounded, hemispherical structure
+    Cone,         // Circular structure tapering to a point
+    Flat,         // Default flat roof
 }
 
 pub fn generate_buildings(
@@ -825,26 +517,159 @@ pub fn generate_buildings(
 
     // Process roof shapes if specified
     if let Some(roof_shape) = element.tags.get("roof:shape") {
-        match roof_shape.as_str() {
-            "gabled" => generate_gabled_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "hipped" => generate_hipped_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "half-hipped" => generate_half_hipped_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "skillion" => generate_skillion_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "gambrel" => generate_gambrel_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "mansard" => generate_mansard_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "pyramidal" => generate_pyramidal_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "dome" | "onion" => generate_dome_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "cone" | "round" => generate_cone_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            // For "flat" roofs or any unrecognized type, we keep the default flat roof
-            // which is already handled by the regular ceiling code
-            _ => {}
-        }
+        let roof_type = match roof_shape.as_str() {
+            "gabled" => RoofType::Gabled,
+            "hipped" | "half-hipped" | "gambrel" | "mansard" => RoofType::Hipped,
+            "skillion" => RoofType::Skillion,
+            "pyramidal" => RoofType::Pyramidal,
+            "dome" | "onion" => RoofType::Dome,
+            "cone" | "round" => RoofType::Cone,
+            "flat" | _ => RoofType::Flat,
+        };
+        
+        generate_roof(editor, element, args, start_y_offset, building_height, floor_block, roof_type);
+    } else {
+        // Default flat roof - already handled by the building generation code
     }
 }
 
 fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
     let result = (value as f64) * (scale_factor);
     result.floor() as i32
+}
+
+/// Unified function to generate various roof types
+fn generate_roof(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    start_y_offset: i32,
+    building_height: i32,
+    floor_block: Block,
+    roof_type: RoofType,
+) {
+    let polygon_coords: Vec<(i32, i32)> = element
+        .nodes
+        .iter()
+        .map(|n| (n.x, n.z))
+        .collect();
+    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+    // Find building bounds
+    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
+    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+    
+    let center_x = (min_x + max_x) / 2;
+    let center_z = (min_z + max_z) / 2;
+    
+    // Set base height for roof to be at least one block above building top
+    let base_height = start_y_offset + building_height + 1;
+    
+    match roof_type {
+        RoofType::Flat => {
+            // Simple flat roof - already handled by the building generation code
+            for (x, z) in floor_area {
+                editor.set_block_absolute(floor_block, x, base_height, z, None, None);
+            }
+        },
+        
+        RoofType::Gabled => {
+            // Gabled roof - two sloping sides meeting at a ridge
+            let roof_peak_height = base_height + 3;
+            
+            for (x, z) in floor_area {
+                let distance_from_center = (x - center_x).abs();
+                let roof_height = roof_peak_height - distance_from_center / 2;
+                let roof_y = roof_height.max(base_height);
+                
+                editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
+            }
+        },
+        
+        RoofType::Hipped => {
+            // Unified hipped roof implementation for all hip-style roofs
+            // (Hipped, Half-hipped, Mansard, and Gambrel)
+            let roof_peak_height = base_height + 4;
+            
+            for (x, z) in floor_area {
+                let distance_x = (x - center_x).abs();
+                let distance_z = (z - center_z).abs();
+                let max_distance = distance_x.max(distance_z);
+                
+                // Calculate roof height based on distance from center
+                let roof_height = roof_peak_height - max_distance / 2;
+                let roof_y = roof_height.max(base_height);
+                
+                editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
+            }
+        },
+        
+        RoofType::Skillion => {
+            // Skillion roof - single sloping surface
+            let width = (max_x - min_x).max(1);
+            
+            for (x, z) in floor_area {
+                let slope_progress = (x - min_x) as f64 / width as f64;
+                let roof_height = base_height + (slope_progress * 3.0) as i32;
+                
+                editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
+            }
+        },
+        
+        RoofType::Pyramidal => {
+            // Pyramidal roof - all sides come to a point at the top
+            let roof_peak_height = base_height + 5;
+            
+            for (x, z) in floor_area {
+                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
+                let normalized_distance = distance_from_center.sqrt() as i32;
+                let roof_height = roof_peak_height - normalized_distance / 2;
+                let roof_y = roof_height.max(base_height);
+                
+                editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
+            }
+        },
+        
+        RoofType::Dome => {
+            // Dome roof - rounded hemispherical structure
+            let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
+            
+            for (x, z) in floor_area {
+                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
+                let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
+                
+                // Use hemisphere equation to determine the height
+                let height_factor = (1.0 - normalized_distance * normalized_distance).sqrt();
+                let surface_height = base_height + (height_factor * (radius * 0.8)) as i32;
+                
+                // Fill from the base to the surface
+                for y in base_height..=surface_height {
+                    editor.set_block_absolute(floor_block, x, y, z, None, None);
+                }
+            }
+        },
+        
+        RoofType::Cone => {
+            // Cone roof - circular structure tapering to a point
+            let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
+            let cone_height = base_height + (radius * 1.2) as i32;
+            
+            for (x, z) in floor_area {
+                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
+                let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
+                
+                // Linear taper for cone
+                let height_factor = 1.0 - normalized_distance;
+                let roof_height = base_height + (height_factor * (radius * 1.2)) as i32;
+                
+                if height_factor > 0.0 {
+                    editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
+                }
+            }
+        },
+    }
 }
 
 pub fn generate_building_from_relation(
