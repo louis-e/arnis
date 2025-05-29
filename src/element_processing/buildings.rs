@@ -436,16 +436,10 @@ pub fn generate_buildings(
                         args.ground_level
                     };
 
-                    // For foundation, only add pillars at regular intervals for interior areas
-                    if (x + z) % 3 == 0 {
-                        for y in local_ground_level..start_y_offset {
-                            editor.set_block_absolute(COBBLESTONE, x, y, z, None, None);
-                        }
-                    }
                 }
 
                 // Set floor at start_y_offset
-                editor.set_block_absolute(floor_block, x, start_y_offset, z, None, None);
+                editor.set_block_absolute(floor_block, x, start_y_offset - 1, z, None, None);
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
