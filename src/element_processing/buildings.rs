@@ -43,23 +43,14 @@ fn generate_gabled_roof(
     }
 }
 
-/// Enum to identify roof types that share similar characteristics
-enum SlopedRoofType {
-    Hipped,
-    HalfHipped,
-    Gambrel,
-    Mansard,
-}
-
-/// Generates various types of sloped roofs - hipped, half-hipped, gambrel and mansard
-fn generate_sloped_roof(
+/// Generates a hipped roof - all sides slope downwards to walls
+fn generate_hipped_roof(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     args: &Args,
     start_y_offset: i32,
     building_height: i32,
     floor_block: Block,
-    roof_type: SlopedRoofType,
 ) {
     let polygon_coords: Vec<(i32, i32)> = element
         .nodes
@@ -76,70 +67,44 @@ fn generate_sloped_roof(
     
     let center_x = (min_x + max_x) / 2;
     let center_z = (min_z + max_z) / 2;
+    let roof_peak_height = start_y_offset + building_height + 3;
     
-    match roof_type {
-        SlopedRoofType::Hipped => {
-            // All sides slope downwards to walls
-            let roof_peak_height = start_y_offset + building_height + 3;
-            
-            for (x, z) in floor_area {
-                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)).max(1);
-                let roof_height = roof_peak_height - (distance_from_center as f64).sqrt() as i32 / 2;
-                let roof_y = roof_height.max(start_y_offset + building_height + 1);
-                
-                editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
-            }
-        },
-        SlopedRoofType::HalfHipped => {
-            // Similar to gabled but with truncated ends
-            generate_gabled_roof(editor, element, args, start_y_offset, building_height, floor_block);
-            
-            // Add hip sections at the ends
-            for (x, z) in &floor_area {
-                if *x <= min_x + 2 || *x >= max_x - 2 {
-                    let distance_from_edge = if *x <= min_x + 2 { *x - min_x } else { max_x - *x };
-                    let roof_height = start_y_offset + building_height + 1 + distance_from_edge;
-                    editor.set_block_absolute(floor_block, *x, roof_height, *z, None, None);
-                }
-            }
-        },
-        SlopedRoofType::Gambrel => {
-            // Two slopes on each side, lower steeper than upper
-            let half_width = (max_x - min_x) / 2;
-            
-            for (x, z) in floor_area {
-                let distance_from_center = (x - center_x).abs();
-                let roof_height = if distance_from_center < half_width / 2 {
-                    // Upper slope (gentler)
-                    start_y_offset + building_height + 4 - distance_from_center / 3
-                } else {
-                    // Lower slope (steeper)
-                    start_y_offset + building_height + 2 - distance_from_center / 2
-                };
-                
-                editor.set_block_absolute(floor_block, x, roof_height.max(start_y_offset + building_height + 1), z, None, None);
-            }
-        },
-        SlopedRoofType::Mansard => {
-            // Four-sided with two slopes on each side
-            let half_width_x = (max_x - min_x) / 2;
-            let half_width_z = (max_z - min_z) / 2;
-            
-            for (x, z) in floor_area {
-                let distance_x = (x - center_x).abs();
-                let distance_z = (z - center_z).abs();
-                let max_distance = distance_x.max(distance_z);
-                
-                let roof_height = if max_distance < half_width_x.min(half_width_z) / 2 {
-                    // Upper slope (gentler)
-                    start_y_offset + building_height + 5 - max_distance / 4
-                } else {
-                    // Lower slope (steeper)
-                    start_y_offset + building_height + 3 - max_distance / 2
-                };
-                
-                editor.set_block_absolute(floor_block, x, roof_height.max(start_y_offset + building_height + 1), z, None, None);
-            }
+    for (x, z) in floor_area {
+        let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)).max(1);
+        let roof_height = roof_peak_height - (distance_from_center as f64).sqrt() as i32 / 2;
+        let roof_y = roof_height.max(start_y_offset + building_height + 1);
+        
+        editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
+    }
+}
+
+/// Generates a half-hipped roof - combination of gable and hip
+fn generate_half_hipped_roof(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    start_y_offset: i32,
+    building_height: i32,
+    floor_block: Block,
+) {
+    // Similar to gabled but with truncated ends
+    generate_gabled_roof(editor, element, args, start_y_offset, building_height, floor_block);
+    
+    // Add hip sections at the ends
+    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+    let polygon_coords: Vec<(i32, i32)> = element
+        .nodes
+        .iter()
+        .map(|n| (n.x, n.z))
+        .collect();
+    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+    
+    for (x, z) in floor_area {
+        if x <= min_x + 2 || x >= max_x - 2 {
+            let distance_from_edge = if x <= min_x + 2 { x - min_x } else { max_x - x };
+            let roof_height = start_y_offset + building_height + 1 + distance_from_edge;
+            editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
         }
     }
 }
@@ -169,6 +134,84 @@ fn generate_skillion_roof(
         let roof_height = start_y_offset + building_height + 1 + (slope_progress * 3.0) as i32;
         
         editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
+    }
+}
+
+/// Generates a gambrel roof - two slopes on each side, lower steeper than upper
+fn generate_gambrel_roof(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    start_y_offset: i32,
+    building_height: i32,
+    floor_block: Block,
+) {
+    let polygon_coords: Vec<(i32, i32)> = element
+        .nodes
+        .iter()
+        .map(|n| (n.x, n.z))
+        .collect();
+    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+    let center_x = (min_x + max_x) / 2;
+    let half_width = (max_x - min_x) / 2;
+    
+    for (x, z) in floor_area {
+        let distance_from_center = (x - center_x).abs();
+        let roof_height = if distance_from_center < half_width / 2 {
+            // Upper slope (gentler)
+            start_y_offset + building_height + 4 - distance_from_center / 3
+        } else {
+            // Lower slope (steeper)
+            start_y_offset + building_height + 2 - distance_from_center / 2
+        };
+        
+        editor.set_block_absolute(floor_block, x, roof_height.max(start_y_offset + building_height + 1), z, None, None);
+    }
+}
+
+/// Generates a mansard roof - four-sided with two slopes on each side
+fn generate_mansard_roof(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    start_y_offset: i32,
+    building_height: i32,
+    floor_block: Block,
+) {
+    let polygon_coords: Vec<(i32, i32)> = element
+        .nodes
+        .iter()
+        .map(|n| (n.x, n.z))
+        .collect();
+    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
+    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+    
+    let center_x = (min_x + max_x) / 2;
+    let center_z = (min_z + max_z) / 2;
+    let half_width_x = (max_x - min_x) / 2;
+    let half_width_z = (max_z - min_z) / 2;
+    
+    for (x, z) in floor_area {
+        let distance_x = (x - center_x).abs();
+        let distance_z = (z - center_z).abs();
+        let max_distance = distance_x.max(distance_z);
+        
+        let roof_height = if max_distance < half_width_x.min(half_width_z) / 2 {
+            // Upper slope (gentler)
+            start_y_offset + building_height + 5 - max_distance / 4
+        } else {
+            // Lower slope (steeper)
+            start_y_offset + building_height + 3 - max_distance / 2
+        };
+        
+        editor.set_block_absolute(floor_block, x, roof_height.max(start_y_offset + building_height + 1), z, None, None);
     }
 }
 
@@ -778,15 +821,17 @@ pub fn generate_buildings(
                 }
             }
         }
-    }    // Process roof shapes if specified
+    }
+
+    // Process roof shapes if specified
     if let Some(roof_shape) = element.tags.get("roof:shape") {
         match roof_shape.as_str() {
             "gabled" => generate_gabled_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "hipped" => generate_sloped_roof(editor, element, args, start_y_offset, building_height, floor_block, SlopedRoofType::Hipped),
-            "half-hipped" => generate_sloped_roof(editor, element, args, start_y_offset, building_height, floor_block, SlopedRoofType::HalfHipped),
+            "hipped" => generate_hipped_roof(editor, element, args, start_y_offset, building_height, floor_block),
+            "half-hipped" => generate_half_hipped_roof(editor, element, args, start_y_offset, building_height, floor_block),
             "skillion" => generate_skillion_roof(editor, element, args, start_y_offset, building_height, floor_block),
-            "gambrel" => generate_sloped_roof(editor, element, args, start_y_offset, building_height, floor_block, SlopedRoofType::Gambrel),
-            "mansard" => generate_sloped_roof(editor, element, args, start_y_offset, building_height, floor_block, SlopedRoofType::Mansard),
+            "gambrel" => generate_gambrel_roof(editor, element, args, start_y_offset, building_height, floor_block),
+            "mansard" => generate_mansard_roof(editor, element, args, start_y_offset, building_height, floor_block),
             "pyramidal" => generate_pyramidal_roof(editor, element, args, start_y_offset, building_height, floor_block),
             "dome" | "onion" => generate_dome_roof(editor, element, args, start_y_offset, building_height, floor_block),
             "cone" | "round" => generate_cone_roof(editor, element, args, start_y_offset, building_height, floor_block),
