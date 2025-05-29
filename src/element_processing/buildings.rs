@@ -578,15 +578,76 @@ fn generate_roof(
         },
         
         RoofType::Gabled => {
-            // Gabled roof - two sloping sides meeting at a ridge
-            let roof_peak_height = base_height + 3;
+            // Determine building dimensions
+            let width = max_x - min_x;
+            let length = max_z - min_z;
             
-            for (x, z) in floor_area {
-                let distance_from_center = (x - center_x).abs();
-                let roof_height = roof_peak_height - distance_from_center / 2;
+            // Make roof height proportional to building size
+            // Taller buildings get taller roofs
+            let building_size = width.max(length);
+            let roof_height_boost = if building_size > 25 {
+                5
+            } else if building_size > 15 {
+                4
+            } else {
+                3
+            };
+            
+            let roof_peak_height = base_height + roof_height_boost;
+            
+            // Align ridge with the LONGER dimension (not shorter)
+            // This is the correct orientation for gabled roofs
+            let is_wider_than_long = width > length;
+            
+            // Create ridge line along the longer dimension
+            let ridge_points = if is_wider_than_long {
+                // If wider in X direction, ridge runs along X axis (along length)
+                (min_x..=max_x).map(|x| (x, center_z)).collect::<Vec<_>>()
+            } else {
+                // If wider in Z direction, ridge runs along Z axis (along length)
+                (min_z..=max_z).map(|z| (center_x, z)).collect::<Vec<_>>()
+            };
+            
+            // Set the ridge at the peak height
+            for (rx, rz) in &ridge_points {
+                // Only place ridge points if they're inside the building outline
+                if floor_area.iter().any(|(fx, fz)| fx == rx && fz == rz) {
+                    // Fill from base height up to peak height
+                    for y in base_height..=roof_peak_height {
+                        editor.set_block_absolute(wall_block, *rx, y, *rz, None, None);
+                    }
+                }
+            }
+            
+            // Calculate slopes from ridge to edges
+            for (x, z) in &floor_area {
+                // Determine distance to ridge based on building orientation
+                let distance_to_ridge = if is_wider_than_long {
+                    // For buildings wider in X, measure distance in Z direction
+                    (z - center_z).abs()
+                } else {
+                    // For buildings wider in Z, measure distance in X direction
+                    (x - center_x).abs()
+                };
+                
+                // Skip points that are on the ridge line
+                if distance_to_ridge == 0 && 
+                   ((is_wider_than_long && *z == center_z) || (!is_wider_than_long && *x == center_x)) {
+                    continue; // Skip - these were already handled as ridge points
+                }
+                
+                // Calculate height based on distance - steeper slope for more dramatic roof
+                let max_distance = if is_wider_than_long { length / 2 } else { width / 2 };
+                let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
+                
+                // Create a steeper slope (use 1.0 multiplier instead of 3.0)
+                let roof_height = roof_peak_height - (slope_ratio * roof_height_boost as f64) as i32;
                 let roof_y = roof_height.max(base_height);
                 
-                editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
+                // Fill from base to calculated height (solid fill)
+                for y in base_height..=roof_y {
+                    editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+                }
             }
         },
         
