@@ -103,6 +103,8 @@ pub fn generate_buildings(
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
+    let mut is_tall_building = false;
+    let use_vertical_windows = rng.gen_bool(0.7);
 
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
@@ -125,6 +127,11 @@ pub fn generate_buildings(
             if lev >= 1 {
                 building_height = multiply_scale(levels * 4 + 2, scale_factor);
                 building_height = building_height.max(3);
+
+                // Mark as tall building if more than 7 stories
+                if levels > 7 {
+                    is_tall_building = true;
+                }
             }
         }
     }
@@ -133,12 +140,22 @@ pub fn generate_buildings(
         if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
             building_height = (height * scale_factor) as i32;
             building_height = building_height.max(3);
+
+            // Mark as tall building if height suggests more than 7 stories
+            if height > 28.0 {
+                is_tall_building = true;
+            }
         }
     }
 
     if let Some(levels) = relation_levels {
         building_height = multiply_scale(levels * 4 + 2, scale_factor);
         building_height = building_height.max(3);
+
+        // Mark as tall building if more than 7 stories
+        if levels > 7 {
+            is_tall_building = true;
+        }
     }
 
     if let Some(amenity_type) = element.tags.get("amenity") {
@@ -391,10 +408,21 @@ pub fn generate_buildings(
                         editor.set_block_absolute(corner_block, bx, h, bz, None, None);
                     } else {
                         // Add windows to the walls at intervals
-                        if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
-                            editor.set_block_absolute(window_block, bx, h, bz, None, None);
+                        // Use different window patterns for tall buildings
+                        if is_tall_building && use_vertical_windows {
+                            // Tall building pattern - narrower windows with continuous vertical strips
+                            if h > start_y_offset + 1 && (bx + bz) % 3 == 0 {
+                                editor.set_block_absolute(window_block, bx, h, bz, None, None);
+                            } else {
+                                editor.set_block_absolute(wall_block, bx, h, bz, None, None);
+                            }
                         } else {
-                            editor.set_block_absolute(wall_block, bx, h, bz, None, None);
+                            // Original pattern for regular buildings
+                            if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
+                                editor.set_block_absolute(window_block, bx, h, bz, None, None);
+                            } else {
+                                editor.set_block_absolute(wall_block, bx, h, bz, None, None);
+                            }
                         }
                     }
                 }
