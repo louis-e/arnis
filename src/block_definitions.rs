@@ -303,7 +303,7 @@ impl Block {
             })),
             141 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map.insert("half".to_string(), Value::String("top".to_string()));
                 map
             })),
             _ => None,
