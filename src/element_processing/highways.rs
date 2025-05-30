@@ -86,25 +86,33 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                 flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
             for (x, z) in filled_area {
-                editor.set_block(surface_block, x, 0, z, None, None);
+                editor.set_block(
+                    surface_block,
+                    x,
+                    0,
+                    z,
+                    Some(&[DIRT, STONE, GRASS_BLOCK]),
+                    None,
+                );
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
             let mut block_type = BLACK_CONCRETE;
             let mut block_range: i32 = 2;
             let mut add_stripe = false;
+            let mut road_level: i32 = 0;
             let scale_factor = args.scale;
 
             // Skip if 'layer' or 'level' is negative in the tags
-            if let Some(layer) = element.tags().get("layer") {
-                if layer.parse::<i32>().unwrap_or(0) < 0 {
-                    return;
+            if let Some(layer_str) = element.tags().get("layer") {
+                if let Ok(layer) = layer_str.parse::<i32>() {
+                    road_level = 4 * layer;
                 }
             }
 
-            if let Some(level) = element.tags().get("level") {
-                if level.parse::<i32>().unwrap_or(0) < 0 {
-                    return;
+            if let Some(level_str) = element.tags().get("level") {
+                if let Ok(level) = level_str.parse::<i32>() {
+                    road_level = 4 * level;
                 }
             }
 
@@ -216,7 +224,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                                 set_x,
                                                 0,
                                                 set_z,
-                                                None,
+                                                Some(&[DIRT, STONE, GRASS_BLOCK]),
                                                 None,
                                             );
                                         }
@@ -243,11 +251,44 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                     editor.set_block(
                                         block_type,
                                         set_x,
-                                        0,
+                                        road_level,
                                         set_z,
                                         None,
                                         Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
                                     );
+                                    if road_level < 0 {
+                                        // If underground, add block below gravel
+                                        editor.set_block(
+                                            AIR,
+                                            set_x,
+                                            road_level + 1,
+                                            set_z,
+                                            None,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                WHITE_CONCRETE,
+                                                GRAY_CONCRETE,
+                                                DIRT_PATH,
+                                                SAND,
+                                                POLISHED_ANDESITE,
+                                            ]),
+                                        );
+                                        editor.set_block(
+                                            AIR,
+                                            set_x,
+                                            road_level + 2,
+                                            set_z,
+                                            None,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                WHITE_CONCRETE,
+                                                GRAY_CONCRETE,
+                                                DIRT_PATH,
+                                                SAND,
+                                                POLISHED_ANDESITE,
+                                            ]),
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -260,7 +301,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                 editor.set_block(
                                     WHITE_CONCRETE,
                                     stripe_x,
-                                    0,
+                                    road_level,
                                     stripe_z,
                                     Some(&[BLACK_CONCRETE]),
                                     None,
