@@ -121,7 +121,13 @@ pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode
                 node.x,
                 1,
                 node.z,
-                Some(&[COBBLESTONE_WALL, OAK_FENCE, STONE_BRICK_WALL]),
+                Some(&[
+                    COBBLESTONE_WALL,
+                    OAK_FENCE,
+                    STONE_BRICK_WALL,
+                    OAK_LEAVES,
+                    STONE_BRICK_SLAB,
+                ]),
                 None,
             );
             editor.set_block(
@@ -129,7 +135,27 @@ pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode
                 node.x,
                 2,
                 node.z,
-                Some(&[COBBLESTONE_WALL, OAK_FENCE, STONE_BRICK_WALL]),
+                Some(&[
+                    COBBLESTONE_WALL,
+                    OAK_FENCE,
+                    STONE_BRICK_WALL,
+                    OAK_LEAVES,
+                    STONE_BRICK_SLAB,
+                ]),
+                None,
+            );
+            editor.set_block(
+                AIR,
+                node.x,
+                3,
+                node.z,
+                Some(&[
+                    COBBLESTONE_WALL,
+                    OAK_FENCE,
+                    STONE_BRICK_WALL,
+                    OAK_LEAVES,
+                    STONE_BRICK_SLAB,
+                ]),
                 None,
             );
         }
