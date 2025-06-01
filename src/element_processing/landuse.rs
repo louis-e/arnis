@@ -25,11 +25,11 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 STONE_BRICKS
             }
         }
-        "commercial" => SMOOTH_STONE,
+        "commercial" | "retail" => SMOOTH_STONE,
         "education" => LIGHT_GRAY_CONCRETE,
         "industrial" => COBBLESTONE,
         "military" => GRAY_CONCRETE,
-        "railway" => GRAVEL,
+        //"railway" => GRAVEL,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
             let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);
@@ -53,9 +53,16 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
         if landuse_tag == "traffic_island" {
             editor.set_block(block_type, x, 1, z, None, None);
         } else if landuse_tag == "construction" || landuse_tag == "railway" {
-            editor.set_block(block_type, x, 0, z, None, Some(&[SPONGE]));
+            editor.set_block(
+                block_type,
+                x,
+                0,
+                z,
+                Some(&[DIRT, STONE, GRASS_BLOCK]),
+                Some(&[SPONGE]),
+            );
         } else {
-            editor.set_block(block_type, x, 0, z, None, None);
+            editor.set_block(block_type, x, 0, z, Some(&[DIRT, STONE, GRASS_BLOCK]), None);
         }
 
         // Add specific features for different landuse types
