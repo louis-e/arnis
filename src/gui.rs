@@ -588,6 +588,7 @@ fn gui_start_generation(
                 scale: world_scale,
                 ground_level,
                 terrain: terrain_enabled,
+                mapbox_access_token: None, // TODO: needs a way to input this
                 fillground: fillground_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
