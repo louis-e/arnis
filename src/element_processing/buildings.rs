@@ -245,6 +245,7 @@ fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Blo
             }
         }
         'J' => Some(JUKEBOX),       // Jukebox
+        'G' => Some(GLOWSTONE),     // Glowstone
         'N' => Some(BREWING_STAND), // Brewing Stand
         'T' => Some(WHITE_CARPET),  // White Carpet
         _ => None,                  // Default case for unknown characters
@@ -876,30 +877,32 @@ pub fn generate_buildings(
         }
 
         // Generate interior features
-        // Only generate interiors for buildings that aren't special types
-        let building_type = element
-            .tags
-            .get("building")
-            .map(|s| s.as_str())
-            .unwrap_or("yes");
-        let skip_interior = matches!(
-            building_type,
-            "garage" | "shed" | "parking" | "roof" | "bridge"
-        );
-
-        if !skip_interior && floor_area.len() > 100 {
-            // Only for buildings with sufficient floor area
-            generate_building_interior(
-                editor,
-                &floor_area,
-                min_x,
-                min_z,
-                max_x,
-                max_z,
-                start_y_offset,
-                building_height,
-                wall_block,
+        if args.interior {
+            // Only generate interiors for buildings that aren't special types
+            let building_type = element
+                .tags
+                .get("building")
+                .map(|s| s.as_str())
+                .unwrap_or("yes");
+            let skip_interior = matches!(
+                building_type,
+                "garage" | "shed" | "parking" | "roof" | "bridge"
             );
+
+            if !skip_interior && floor_area.len() > 100 {
+                // Only for buildings with sufficient floor area
+                generate_building_interior(
+                    editor,
+                    &floor_area,
+                    min_x,
+                    min_z,
+                    max_x,
+                    max_z,
+                    start_y_offset,
+                    building_height,
+                    wall_block,
+                );
+            }
         }
     }
 
