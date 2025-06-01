@@ -13,7 +13,8 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             if let ProcessedElement::Node(first_node) = element {
                 let x: i32 = first_node.x;
                 let z: i32 = first_node.z;
-                for dy in 1..=4 {
+                editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                for dy in 2..=4 {
                     editor.set_block(OAK_FENCE, x, dy, z, None, None);
                 }
                 editor.set_block(GLOWSTONE, x, 5, z, None, None);

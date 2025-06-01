@@ -10,6 +10,60 @@ use rand::Rng;
 use std::collections::HashSet;
 use std::time::Duration;
 
+/// Interior layout for building floors (1st layer above floor)
+const INTERIOR_LAYER1: [[char; 23]; 23] = [
+    ['1','U',' ','W','C',' ',' ',' ','S','S','W','B','T','T','B','W','7','8',' ',' ',' ',' ','W'],
+    ['2',' ',' ','W','F',' ',' ',' ','U','U','W','B','T','T','B','W','7','8',' ',' ',' ','B','W'],
+    [' ',' ',' ','W','F',' ',' ',' ',' ',' ','W','B','T','T','B','W','W','W','D','W','W','W','W'],
+    ['W','W','D','W','L',' ',' ',' ',' ',' ',' ',' ',' ',' ','A','W',' ',' ',' ',' ',' ',' ','W'],
+    [' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','W'],
+    [' ',' ',' ',' ',' ',' ',' ',' ','W','W','W','W','D','W','W','W','W','D','W','W',' ',' ','D'],
+    [' ',' ',' ',' ',' ',' ',' ',' ','W','B','B','B',' ',' ','J','W',' ',' ',' ','B','W','W','W'],
+    ['W','W','W','W','D','W',' ',' ','W','T','S','S','T',' ',' ','W','S','S',' ','B','W','W','W'],
+    [' ',' ',' ',' ',' ','W',' ',' ','W','T','T','T','T',' ',' ','W','U','U',' ','B','W',' ',' '],
+    [' ',' ',' ',' ',' ','W',' ',' ','D','T','T','T','T',' ','B','W',' ',' ',' ','B','W',' ',' '],
+    ['L',' ','A','L','W','W',' ',' ','W','J','U','U',' ',' ','B','W','W','D','W','W','W',' ',' '],
+    ['W','W','W','W','W','W',' ',' ','W','W','W','W','W','D','W','W',' ',' ','W','H','H','W','W'],
+    ['B','B',' ','W',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ','W',' ',' ','W','W'],
+    [' ',' ',' ','D',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','D'],
+    [' ','6',' ','W',' ',' ','W','W','W','W','W','D','W','W','D','W',' ',' ',' ',' ',' ',' ','W'],
+    ['U','5',' ','W',' ',' ','W','C','F','F',' ',' ','W',' ',' ','W','W','D','W','W',' ',' ','W'],
+    ['W','W','W','W',' ',' ','W',' ',' ',' ',' ',' ','W','L',' ','W','A',' ','B','W',' ',' ','W'],
+    ['B',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ','B','W','J',' ','W'],
+    [' ',' ',' ',' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W',' ','W','U',' ',' ','W','B',' ','D'],
+    ['J',' ',' ','C','B','B','W','L','F',' ','W','F',' ','W','L','W','7','8',' ','W','B',' ','W'],
+    ['B',' ',' ','B','W','W','W','W','W',' ','W','A',' ','W','W','W','W','W','W','W','C',' ','W'],
+    ['B',' ',' ','B','W',' ',' ',' ','D',' ','W','C',' ',' ','W','W','B','B','B','B','W','D','W'],
+    ['W','W','D','W','C',' ',' ',' ','W','W','W','B','T','T','B','W',' ',' ',' ',' ',' ',' ','W'],
+];
+
+/// Interior layout for building floors (2nd layer above floor)
+const INTERIOR_LAYER2: [[char; 23]; 23] = [
+    [' ','P',' ','W',' ',' ',' ',' ',' ',' ','W','B',' ',' ','B','W',' ',' ',' ',' ',' ',' ','W'],
+    [' ',' ',' ','W',' ',' ',' ',' ','P','P','W','B',' ',' ','B','W',' ',' ',' ',' ',' ','B','W'],
+    [' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W','B',' ',' ','B','W','W','W','D','W','W','W','W'],
+    ['W','W','D','W',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W'],
+    [' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','W'],
+    [' ',' ',' ',' ',' ',' ',' ',' ','W','W','W','W','D','W','W','W','W','D','W','W',' ',' ','D'],
+    [' ',' ',' ',' ',' ',' ',' ',' ','W','B','B','B',' ',' ',' ','W',' ',' ',' ','B','W','W','W'],
+    ['W','W','W','W','D','W',' ',' ','W',' ',' ',' ',' ',' ',' ','W',' ',' ',' ','B','W','W','W'],
+    [' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ',' ',' ',' ',' ','W','P','P',' ','B','W',' ',' '],
+    [' ',' ',' ',' ',' ','W',' ',' ','D',' ',' ',' ',' ',' ','B','W',' ',' ',' ','B','W',' ',' '],
+    [' ',' ',' ',' ','W','W',' ',' ','W',' ','P','P',' ',' ','B','W','W','D','W','W','W',' ',' '],
+    ['W','W','W','W','W','W',' ',' ','W','W','W','W','W','D','W','W',' ',' ','W','H','H','W','W'],
+    ['B','B',' ','W',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ','W',' ',' ','W','W'],
+    [' ',' ',' ','D',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','D'],
+    [' ',' ',' ','W',' ',' ','W','W','W','W','W','D','W','W','D','W',' ',' ',' ',' ',' ',' ','W'],
+    ['P',' ',' ','W',' ',' ','W','N',' ',' ',' ',' ','W',' ',' ','W','W','D','W','W',' ',' ','W'],
+    ['W','W','W','W',' ',' ','W',' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ','B','W',' ',' ','W'],
+    ['B',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ','H','W',' ',' ','W'],
+    [' ',' ',' ',' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W',' ','W','P',' ',' ','W','B',' ','D'],
+    [' ',' ',' ',' ','B','B','W',' ',' ',' ','W',' ',' ','W','P','W',' ',' ',' ','W','B',' ','W'],
+    ['B',' ',' ','B','W','W','W','W','W',' ','W',' ',' ','W','W','W','W','W','W','W',' ',' ','W'],
+    ['B',' ',' ','B','W',' ',' ',' ','D',' ','W','N',' ',' ','W','W','B','B','B','B','W','D','W'],
+    ['W','W','D','W',' ',' ',' ',' ','W','W','W','B',' ',' ','B','W',' ',' ',' ',' ',' ',' ','W'],
+];
+
 /// Enum representing different roof types
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RoofType {
@@ -20,6 +74,151 @@ enum RoofType {
     Dome,         // Rounded, hemispherical structure
     Cone,         // Circular structure tapering to a point
     Flat,         // Default flat roof
+}
+
+/// Maps interior layout characters to actual block types for different floor layers
+fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Block> {
+    match c {
+        ' ' => None, // Nothing
+        'W' => Some(wall_block), // Use the building's wall block for interior walls
+        'U' => Some(OAK_FENCE), // Oak Fence
+        'S' => Some(OAK_STAIRS), // Oak Stairs
+        'B' => Some(BOOKSHELF), // Bookshelf
+        'C' => Some(CRAFTING_TABLE), // Crafting Table
+        'F' => Some(FURNACE), // Furnace
+        '1' => Some(RED_BED_NORTH_HEAD), // Bed North Head
+        '2' => Some(RED_BED_NORTH_FOOT), // Bed North Foot
+        '3' => Some(RED_BED_EAST_HEAD), // Bed East Head
+        '4' => Some(RED_BED_EAST_FOOT), // Bed East Foot
+        '5' => Some(RED_BED_SOUTH_HEAD), // Bed South Head
+        '6' => Some(RED_BED_SOUTH_FOOT), // Bed South Foot
+        '7' => Some(RED_BED_WEST_HEAD), // Bed West Head
+        '8' => Some(RED_BED_WEST_FOOT), // Bed West Foot
+        'H' => Some(CHEST), // Chest
+        'L' => Some(CAULDRON), // Cauldron
+        'A' => Some(ANVIL), // Anvil
+        'P' => Some(OAK_PRESSURE_PLATE), // Pressure Plate
+        'D' => {
+            // Use different door types for different layers
+            if is_layer2 {
+                Some(DARK_OAK_DOOR_UPPER)
+            } else {
+                Some(DARK_OAK_DOOR_LOWER)
+            }
+        },
+        'J' => Some(JUKEBOX), // Jukebox
+        'N' => Some(BREWING_STAND), // Brewing Stand
+        'T' => Some(WHITE_CARPET), // White Carpet
+        _ => None, // Default case for unknown characters
+    }
+}
+
+/// Generates interior layouts inside buildings at each floor level
+fn generate_building_interior(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+    start_y_offset: i32,
+    building_height: i32,
+    wall_block: Block,
+) {
+    // Skip interior generation for very small buildings
+    let width = max_x - min_x + 1;
+    let depth = max_z - min_z + 1;
+
+    if width < 8 || depth < 8 {
+        return; // Building too small for interior
+    }
+
+    // Get pattern dimensions
+    let pattern_height = INTERIOR_LAYER1.len() as i32;
+    let pattern_width = INTERIOR_LAYER1[0].len() as i32;
+
+    // For efficiency, create a HashSet of floor area coordinates
+    let floor_area_set: HashSet<(i32, i32)> = floor_area.iter().cloned().collect();
+
+    // Floor level is at start_y_offset
+    let floor_y = start_y_offset;
+
+    // Determine if building has multiple floors based on height
+    let has_multiple_floors = building_height > 6; // More than a single floor
+
+    // Calculate ceiling height and extension needed
+    let wall_extension_height = if has_multiple_floors {
+        // For multi-story buildings: extend to floor_y + 5
+        floor_y + 5
+    } else {
+        // For single-story buildings: extend to floor_y + 6
+        floor_y + 6
+    };
+
+    // Store wall and door positions to extend them to the ceiling
+    let mut wall_positions = Vec::new();
+    let mut door_positions = Vec::new();
+
+    // Add buffer around edges to avoid placing furniture too close to walls
+    let buffer = 2;
+    let interior_min_x = min_x + buffer;
+    let interior_min_z = min_z + buffer;
+    let interior_max_x = max_x - buffer;
+    let interior_max_z = max_z - buffer;
+
+    // Create a seamless repeating pattern across the entire interior
+    for z in interior_min_z..=interior_max_z {
+        for x in interior_min_x..=interior_max_x {
+            // Skip if outside the building's floor area
+            if !floor_area_set.contains(&(x, z)) {
+                continue;
+            }
+
+            // Map the world coordinates to pattern coordinates using modulo
+            // This creates a seamless tiling effect across the entire building
+            let pattern_x = ((x - interior_min_x) % pattern_width + pattern_width) % pattern_width;
+            let pattern_z = ((z - interior_min_z) % pattern_height + pattern_height) % pattern_height;
+
+            // Access the pattern arrays safely
+            let cell1 = INTERIOR_LAYER1[pattern_z as usize][pattern_x as usize];
+            let cell2 = INTERIOR_LAYER2[pattern_z as usize][pattern_x as usize];
+
+            // Place first layer blocks
+            if let Some(block) = get_interior_block(cell1, false, wall_block) {
+                editor.set_block_absolute(block, x, floor_y + 1, z, None, None);
+
+                // If this is a wall in layer 1, add to wall positions to extend later
+                if cell1 == 'W' {
+                    wall_positions.push((x, z));
+                }
+                // If this is a door in layer 1, add to door positions to add wall above later
+                else if cell1 == 'D' {
+                    door_positions.push((x, z));
+                }
+            }
+
+            // Place second layer blocks
+            if let Some(block) = get_interior_block(cell2, true, wall_block) {
+                editor.set_block_absolute(block, x, floor_y + 2, z, None, None);
+            }
+        }
+    }
+
+    // Extend walls all the way to the ceiling
+    for (x, z) in &wall_positions {
+        // Start from y=floor_y+3 (above the second layer) and continue to wall_extension_height
+        for y in (floor_y + 3)..=wall_extension_height {
+            editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+        }
+    }
+
+    // Add wall blocks above doors all the way to the ceiling/next floor
+    for (x, z) in &door_positions {
+        // Start above the door (y=floor_y+3) and go up to ceiling
+        for y in (floor_y + 3)..=wall_extension_height {
+            editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+        }
+    }
 }
 
 pub fn generate_buildings(
@@ -62,6 +261,12 @@ pub fn generate_buildings(
         // When terrain is disabled, just use min_level_offset
         min_level_offset
     };
+
+    // Calculate building bounds and floor area before processing interior
+    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
+    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
 
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -465,7 +670,7 @@ pub fn generate_buildings(
             .collect();
         let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
-        for (x, z) in floor_area {
+        for (x, z) in floor_area.iter().cloned() {
             if processed_points.insert((x, z)) {
                 // Create foundation columns for the floor area when using terrain
                 if args.terrain {
@@ -478,7 +683,7 @@ pub fn generate_buildings(
                 }
 
                 // Set floor at start_y_offset
-                editor.set_block_absolute(floor_block, x, start_y_offset - 1, z, None, None);
+                editor.set_block_absolute(floor_block, x, start_y_offset, z, None, None);
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
@@ -513,6 +718,25 @@ pub fn generate_buildings(
                     );
                 }
             }
+        }
+
+        // Generate interior features
+        // Only generate interiors for buildings that aren't special types
+        let building_type = element.tags.get("building").map(|s| s.as_str()).unwrap_or("yes");
+        let skip_interior = matches!(building_type, "garage" | "shed" | "parking" | "roof" | "bridge");
+
+        if !skip_interior && floor_area.len() > 100 {  // Only for buildings with sufficient floor area
+            generate_building_interior(
+                editor,
+                &floor_area,
+                min_x,
+                min_z,
+                max_x,
+                max_z,
+                start_y_offset,
+                building_height,
+                wall_block,
+            );
         }
     }
 
