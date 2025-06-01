@@ -255,12 +255,12 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
         for field in fields.iter() {
             if let Some(name) = address.get(*field).and_then(|v| v.as_str()) {
                 let mut name_str = name.to_string();
-                
+
                 // Remove "City of " prefix
                 if name_str.to_lowercase().starts_with("city of ") {
                     name_str = name_str[name_str.find(" of ").unwrap() + 4..].to_string();
                 }
-                
+
                 return Ok(Some(name_str));
             }
         }

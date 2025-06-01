@@ -12,91 +12,229 @@ use std::time::Duration;
 
 /// Interior layout for building floors (1st layer above floor)
 const INTERIOR_LAYER1: [[char; 23]; 23] = [
-    ['1','U',' ','W','C',' ',' ',' ','S','S','W','B','T','T','B','W','7','8',' ',' ',' ',' ','W'],
-    ['2',' ',' ','W','F',' ',' ',' ','U','U','W','B','T','T','B','W','7','8',' ',' ',' ','B','W'],
-    [' ',' ',' ','W','F',' ',' ',' ',' ',' ','W','B','T','T','B','W','W','W','D','W','W','W','W'],
-    ['W','W','D','W','L',' ',' ',' ',' ',' ',' ',' ',' ',' ','A','W',' ',' ',' ',' ',' ',' ','W'],
-    [' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','W'],
-    [' ',' ',' ',' ',' ',' ',' ',' ','W','W','W','W','D','W','W','W','W','D','W','W',' ',' ','D'],
-    [' ',' ',' ',' ',' ',' ',' ',' ','W','B','B','B',' ',' ','J','W',' ',' ',' ','B','W','W','W'],
-    ['W','W','W','W','D','W',' ',' ','W','T','S','S','T',' ',' ','W','S','S',' ','B','W','W','W'],
-    [' ',' ',' ',' ',' ','W',' ',' ','W','T','T','T','T',' ',' ','W','U','U',' ','B','W',' ',' '],
-    [' ',' ',' ',' ',' ','W',' ',' ','D','T','T','T','T',' ','B','W',' ',' ',' ','B','W',' ',' '],
-    ['L',' ','A','L','W','W',' ',' ','W','J','U','U',' ',' ','B','W','W','D','W','W','W',' ',' '],
-    ['W','W','W','W','W','W',' ',' ','W','W','W','W','W','D','W','W',' ',' ','W','H','H','W','W'],
-    ['B','B',' ','W',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ','W',' ',' ','W','W'],
-    [' ',' ',' ','D',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','D'],
-    [' ','6',' ','W',' ',' ','W','W','W','W','W','D','W','W','D','W',' ',' ',' ',' ',' ',' ','W'],
-    ['U','5',' ','W',' ',' ','W','C','F','F',' ',' ','W',' ',' ','W','W','D','W','W',' ',' ','W'],
-    ['W','W','W','W',' ',' ','W',' ',' ',' ',' ',' ','W','L',' ','W','A',' ','B','W',' ',' ','W'],
-    ['B',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ','B','W','J',' ','W'],
-    [' ',' ',' ',' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W',' ','W','U',' ',' ','W','B',' ','D'],
-    ['J',' ',' ','C','B','B','W','L','F',' ','W','F',' ','W','L','W','7','8',' ','W','B',' ','W'],
-    ['B',' ',' ','B','W','W','W','W','W',' ','W','A',' ','W','W','W','W','W','W','W','C',' ','W'],
-    ['B',' ',' ','B','W',' ',' ',' ','D',' ','W','C',' ',' ','W','W','B','B','B','B','W','D','W'],
-    ['W','W','D','W','C',' ',' ',' ','W','W','W','B','T','T','B','W',' ',' ',' ',' ',' ',' ','W'],
+    [
+        '1', 'U', ' ', 'W', 'C', ' ', ' ', ' ', 'S', 'S', 'W', 'B', 'T', 'T', 'B', 'W', '7', '8',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        '2', ' ', ' ', 'W', 'F', ' ', ' ', ' ', 'U', 'U', 'W', 'B', 'T', 'T', 'B', 'W', '7', '8',
+        ' ', ' ', ' ', 'B', 'W',
+    ],
+    [
+        ' ', ' ', ' ', 'W', 'F', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'T', 'T', 'B', 'W', 'W', 'W',
+        'D', 'W', 'W', 'W', 'W',
+    ],
+    [
+        'W', 'W', 'D', 'W', 'L', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'A', 'W', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'D',
+        'W', 'W', ' ', ' ', 'D',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'B', 'B', ' ', ' ', 'J', 'W', ' ', ' ',
+        ' ', 'B', 'W', 'W', 'W',
+    ],
+    [
+        'W', 'W', 'W', 'W', 'D', 'W', ' ', ' ', 'W', 'T', 'S', 'S', 'T', ' ', ' ', 'W', 'S', 'S',
+        ' ', 'B', 'W', 'W', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'T', 'T', 'T', 'T', ' ', ' ', 'W', 'U', 'U',
+        ' ', 'B', 'W', ' ', ' ',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'D', 'T', 'T', 'T', 'T', ' ', 'B', 'W', ' ', ' ',
+        ' ', 'B', 'W', ' ', ' ',
+    ],
+    [
+        'L', ' ', 'A', 'L', 'W', 'W', ' ', ' ', 'W', 'J', 'U', 'U', ' ', ' ', 'B', 'W', 'W', 'D',
+        'W', 'W', 'W', ' ', ' ',
+    ],
+    [
+        'W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ',
+        'W', 'H', 'H', 'W', 'W',
+    ],
+    [
+        'B', 'B', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',
+        'W', ' ', ' ', 'W', 'W',
+    ],
+    [
+        ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'D',
+    ],
+    [
+        ' ', '6', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'D', 'W', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        'U', '5', ' ', 'W', ' ', ' ', 'W', 'C', 'F', 'F', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'D',
+        'W', 'W', ' ', ' ', 'W',
+    ],
+    [
+        'W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'W', 'L', ' ', 'W', 'A', ' ',
+        'B', 'W', ' ', ' ', 'W',
+    ],
+    [
+        'B', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ',
+        'B', 'W', 'J', ' ', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', 'W', 'U', ' ',
+        ' ', 'W', 'B', ' ', 'D',
+    ],
+    [
+        'J', ' ', ' ', 'C', 'B', 'B', 'W', 'L', 'F', ' ', 'W', 'F', ' ', 'W', 'L', 'W', '7', '8',
+        ' ', 'W', 'B', ' ', 'W',
+    ],
+    [
+        'B', ' ', ' ', 'B', 'W', 'W', 'W', 'W', 'W', ' ', 'W', 'A', ' ', 'W', 'W', 'W', 'W', 'W',
+        'W', 'W', 'C', ' ', 'W',
+    ],
+    [
+        'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', 'D', ' ', 'W', 'C', ' ', ' ', 'W', 'W', 'B', 'B',
+        'B', 'B', 'W', 'D', 'W',
+    ],
+    [
+        'W', 'W', 'D', 'W', 'C', ' ', ' ', ' ', 'W', 'W', 'W', 'B', 'T', 'T', 'B', 'W', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
 ];
 
 /// Interior layout for building floors (2nd layer above floor)
 const INTERIOR_LAYER2: [[char; 23]; 23] = [
-    [' ','P',' ','W',' ',' ',' ',' ',' ',' ','W','B',' ',' ','B','W',' ',' ',' ',' ',' ',' ','W'],
-    [' ',' ',' ','W',' ',' ',' ',' ','P','P','W','B',' ',' ','B','W',' ',' ',' ',' ',' ','B','W'],
-    [' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W','B',' ',' ','B','W','W','W','D','W','W','W','W'],
-    ['W','W','D','W',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W'],
-    [' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','W'],
-    [' ',' ',' ',' ',' ',' ',' ',' ','W','W','W','W','D','W','W','W','W','D','W','W',' ',' ','D'],
-    [' ',' ',' ',' ',' ',' ',' ',' ','W','B','B','B',' ',' ',' ','W',' ',' ',' ','B','W','W','W'],
-    ['W','W','W','W','D','W',' ',' ','W',' ',' ',' ',' ',' ',' ','W',' ',' ',' ','B','W','W','W'],
-    [' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ',' ',' ',' ',' ','W','P','P',' ','B','W',' ',' '],
-    [' ',' ',' ',' ',' ','W',' ',' ','D',' ',' ',' ',' ',' ','B','W',' ',' ',' ','B','W',' ',' '],
-    [' ',' ',' ',' ','W','W',' ',' ','W',' ','P','P',' ',' ','B','W','W','D','W','W','W',' ',' '],
-    ['W','W','W','W','W','W',' ',' ','W','W','W','W','W','D','W','W',' ',' ','W','H','H','W','W'],
-    ['B','B',' ','W',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ','W',' ',' ','W','W'],
-    [' ',' ',' ','D',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ',' ','D'],
-    [' ',' ',' ','W',' ',' ','W','W','W','W','W','D','W','W','D','W',' ',' ',' ',' ',' ',' ','W'],
-    ['P',' ',' ','W',' ',' ','W','N',' ',' ',' ',' ','W',' ',' ','W','W','D','W','W',' ',' ','W'],
-    ['W','W','W','W',' ',' ','W',' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ','B','W',' ',' ','W'],
-    ['B',' ',' ',' ',' ',' ','D',' ',' ',' ',' ',' ','W',' ',' ','W',' ',' ','H','W',' ',' ','W'],
-    [' ',' ',' ',' ',' ',' ','W',' ',' ',' ',' ',' ',' ','W',' ','W','P',' ',' ','W','B',' ','D'],
-    [' ',' ',' ',' ','B','B','W',' ',' ',' ','W',' ',' ','W','P','W',' ',' ',' ','W','B',' ','W'],
-    ['B',' ',' ','B','W','W','W','W','W',' ','W',' ',' ','W','W','W','W','W','W','W',' ',' ','W'],
-    ['B',' ',' ','B','W',' ',' ',' ','D',' ','W','N',' ',' ','W','W','B','B','B','B','W','D','W'],
-    ['W','W','D','W',' ',' ',' ',' ','W','W','W','B',' ',' ','B','W',' ',' ',' ',' ',' ',' ','W'],
+    [
+        ' ', 'P', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'P', 'P', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ',
+        ' ', ' ', ' ', 'B', 'W',
+    ],
+    [
+        ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', 'B', 'W', 'W', 'W',
+        'D', 'W', 'W', 'W', 'W',
+    ],
+    [
+        'W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'D',
+        'W', 'W', ' ', ' ', 'D',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'B', 'B', ' ', ' ', ' ', 'W', ' ', ' ',
+        ' ', 'B', 'W', 'W', 'W',
+    ],
+    [
+        'W', 'W', 'W', 'W', 'D', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ',
+        ' ', 'B', 'W', 'W', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'P', 'P',
+        ' ', 'B', 'W', ' ', ' ',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'B', 'W', ' ', ' ',
+        ' ', 'B', 'W', ' ', ' ',
+    ],
+    [
+        ' ', ' ', ' ', ' ', 'W', 'W', ' ', ' ', 'W', ' ', 'P', 'P', ' ', ' ', 'B', 'W', 'W', 'D',
+        'W', 'W', 'W', ' ', ' ',
+    ],
+    [
+        'W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ',
+        'W', 'H', 'H', 'W', 'W',
+    ],
+    [
+        'B', 'B', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',
+        'W', ' ', ' ', 'W', 'W',
+    ],
+    [
+        ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'D',
+    ],
+    [
+        ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'D', 'W', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
+    [
+        'P', ' ', ' ', 'W', ' ', ' ', 'W', 'N', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'D',
+        'W', 'W', ' ', ' ', 'W',
+    ],
+    [
+        'W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ',
+        'B', 'W', ' ', ' ', 'W',
+    ],
+    [
+        'B', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ',
+        'H', 'W', ' ', ' ', 'W',
+    ],
+    [
+        ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', 'W', 'P', ' ',
+        ' ', 'W', 'B', ' ', 'D',
+    ],
+    [
+        ' ', ' ', ' ', ' ', 'B', 'B', 'W', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'P', 'W', ' ', ' ',
+        ' ', 'W', 'B', ' ', 'W',
+    ],
+    [
+        'B', ' ', ' ', 'B', 'W', 'W', 'W', 'W', 'W', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W',
+        'W', 'W', ' ', ' ', 'W',
+    ],
+    [
+        'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', 'D', ' ', 'W', 'N', ' ', ' ', 'W', 'W', 'B', 'B',
+        'B', 'B', 'W', 'D', 'W',
+    ],
+    [
+        'W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ',
+        ' ', ' ', ' ', ' ', 'W',
+    ],
 ];
 
 /// Enum representing different roof types
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RoofType {
-    Gabled,       // Two sloping sides meeting at a ridge
-    Hipped,       // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
-    Skillion,     // Single sloping surface
-    Pyramidal,    // All sides come to a point at the top
-    Dome,         // Rounded, hemispherical structure
-    Cone,         // Circular structure tapering to a point
-    Flat,         // Default flat roof
+    Gabled,    // Two sloping sides meeting at a ridge
+    Hipped, // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
+    Skillion, // Single sloping surface
+    Pyramidal, // All sides come to a point at the top
+    Dome,   // Rounded, hemispherical structure
+    Cone,   // Circular structure tapering to a point
+    Flat,   // Default flat roof
 }
 
 /// Maps interior layout characters to actual block types for different floor layers
 fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Block> {
     match c {
-        ' ' => None, // Nothing
-        'W' => Some(wall_block), // Use the building's wall block for interior walls
-        'U' => Some(OAK_FENCE), // Oak Fence
-        'S' => Some(OAK_STAIRS), // Oak Stairs
-        'B' => Some(BOOKSHELF), // Bookshelf
-        'C' => Some(CRAFTING_TABLE), // Crafting Table
-        'F' => Some(FURNACE), // Furnace
+        ' ' => None,                     // Nothing
+        'W' => Some(wall_block),         // Use the building's wall block for interior walls
+        'U' => Some(OAK_FENCE),          // Oak Fence
+        'S' => Some(OAK_STAIRS),         // Oak Stairs
+        'B' => Some(BOOKSHELF),          // Bookshelf
+        'C' => Some(CRAFTING_TABLE),     // Crafting Table
+        'F' => Some(FURNACE),            // Furnace
         '1' => Some(RED_BED_NORTH_HEAD), // Bed North Head
         '2' => Some(RED_BED_NORTH_FOOT), // Bed North Foot
-        '3' => Some(RED_BED_EAST_HEAD), // Bed East Head
-        '4' => Some(RED_BED_EAST_FOOT), // Bed East Foot
+        '3' => Some(RED_BED_EAST_HEAD),  // Bed East Head
+        '4' => Some(RED_BED_EAST_FOOT),  // Bed East Foot
         '5' => Some(RED_BED_SOUTH_HEAD), // Bed South Head
         '6' => Some(RED_BED_SOUTH_FOOT), // Bed South Foot
-        '7' => Some(RED_BED_WEST_HEAD), // Bed West Head
-        '8' => Some(RED_BED_WEST_FOOT), // Bed West Foot
-        'H' => Some(CHEST), // Chest
-        'L' => Some(CAULDRON), // Cauldron
-        'A' => Some(ANVIL), // Anvil
+        '7' => Some(RED_BED_WEST_HEAD),  // Bed West Head
+        '8' => Some(RED_BED_WEST_FOOT),  // Bed West Foot
+        'H' => Some(CHEST),              // Chest
+        'L' => Some(CAULDRON),           // Cauldron
+        'A' => Some(ANVIL),              // Anvil
         'P' => Some(OAK_PRESSURE_PLATE), // Pressure Plate
         'D' => {
             // Use different door types for different layers
@@ -105,15 +243,16 @@ fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Blo
             } else {
                 Some(DARK_OAK_DOOR_LOWER)
             }
-        },
-        'J' => Some(JUKEBOX), // Jukebox
+        }
+        'J' => Some(JUKEBOX),       // Jukebox
         'N' => Some(BREWING_STAND), // Brewing Stand
-        'T' => Some(WHITE_CARPET), // White Carpet
-        _ => None, // Default case for unknown characters
+        'T' => Some(WHITE_CARPET),  // White Carpet
+        _ => None,                  // Default case for unknown characters
     }
 }
 
 /// Generates interior layouts inside buildings at each floor level
+#[allow(clippy::too_many_arguments)]
 fn generate_building_interior(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
@@ -177,7 +316,8 @@ fn generate_building_interior(
             // Map the world coordinates to pattern coordinates using modulo
             // This creates a seamless tiling effect across the entire building
             let pattern_x = ((x - interior_min_x) % pattern_width + pattern_width) % pattern_width;
-            let pattern_z = ((z - interior_min_z) % pattern_height + pattern_height) % pattern_height;
+            let pattern_z =
+                ((z - interior_min_z) % pattern_height + pattern_height) % pattern_height;
 
             // Access the pattern arrays safely
             let cell1 = INTERIOR_LAYER1[pattern_z as usize][pattern_x as usize];
@@ -241,8 +381,15 @@ pub fn generate_buildings(
     // Use fixed starting Y coordinate based on maximum ground level when terrain is enabled
     let start_y_offset = if args.terrain {
         // Get nodes' XZ points to find maximum elevation
-        let building_points: Vec<XZPoint> = element.nodes.iter()
-            .map(|n| XZPoint::new(n.x - editor.get_min_coords().0, n.z - editor.get_min_coords().1))
+        let building_points: Vec<XZPoint> = element
+            .nodes
+            .iter()
+            .map(|n| {
+                XZPoint::new(
+                    n.x - editor.get_min_coords().0,
+                    n.z - editor.get_min_coords().1,
+                )
+            })
             .collect();
 
         // Calculate maximum and minimum ground level across all nodes
@@ -608,13 +755,16 @@ pub fn generate_buildings(
                 if args.terrain {
                     // Calculate actual ground level at this position
                     let local_ground_level = if let Some(ground) = editor.get_ground() {
-                        ground.level(XZPoint::new(bx - editor.get_min_coords().0, bz - editor.get_min_coords().1))
+                        ground.level(XZPoint::new(
+                            bx - editor.get_min_coords().0,
+                            bz - editor.get_min_coords().1,
+                        ))
                     } else {
                         args.ground_level
                     };
 
                     // Add foundation blocks from ground to building base
-                    for y in local_ground_level..start_y_offset+1 {
+                    for y in local_ground_level..start_y_offset + 1 {
                         editor.set_block_absolute(wall_block, bx, y, bz, None, None);
                     }
                 }
@@ -676,7 +826,10 @@ pub fn generate_buildings(
                 if args.terrain {
                     // Calculate actual ground level at this position
                     if let Some(ground) = editor.get_ground() {
-                        ground.level(XZPoint::new(x - editor.get_min_coords().0, z - editor.get_min_coords().1))
+                        ground.level(XZPoint::new(
+                            x - editor.get_min_coords().0,
+                            z - editor.get_min_coords().1,
+                        ))
                     } else {
                         args.ground_level
                     };
@@ -707,7 +860,9 @@ pub fn generate_buildings(
                 }
 
                 // Only set ceiling at proper height if we don't use a specific roof shape
-                if !element.tags.contains_key("roof:shape") || element.tags.get("roof:shape").unwrap() == "flat" {
+                if !element.tags.contains_key("roof:shape")
+                    || element.tags.get("roof:shape").unwrap() == "flat"
+                {
                     editor.set_block_absolute(
                         floor_block,
                         x,
@@ -722,10 +877,18 @@ pub fn generate_buildings(
 
         // Generate interior features
         // Only generate interiors for buildings that aren't special types
-        let building_type = element.tags.get("building").map(|s| s.as_str()).unwrap_or("yes");
-        let skip_interior = matches!(building_type, "garage" | "shed" | "parking" | "roof" | "bridge");
+        let building_type = element
+            .tags
+            .get("building")
+            .map(|s| s.as_str())
+            .unwrap_or("yes");
+        let skip_interior = matches!(
+            building_type,
+            "garage" | "shed" | "parking" | "roof" | "bridge"
+        );
 
-        if !skip_interior && floor_area.len() > 100 {  // Only for buildings with sufficient floor area
+        if !skip_interior && floor_area.len() > 100 {
+            // Only for buildings with sufficient floor area
             generate_building_interior(
                 editor,
                 &floor_area,
@@ -751,8 +914,17 @@ pub fn generate_buildings(
             "cone" | "round" => RoofType::Cone,
             _ => RoofType::Flat,
         };
-        
-        generate_roof(editor, element, args, start_y_offset, building_height, floor_block, wall_block, roof_type);
+
+        generate_roof(
+            editor,
+            element,
+            args,
+            start_y_offset,
+            building_height,
+            floor_block,
+            wall_block,
+            roof_type,
+        );
     } else {
         // Default flat roof - already handled by the building generation code
     }
@@ -764,6 +936,7 @@ fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
 }
 
 /// Unified function to generate various roof types
+#[allow(clippy::too_many_arguments)]
 fn generate_roof(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -774,11 +947,7 @@ fn generate_roof(
     wall_block: Block,
     roof_type: RoofType,
 ) {
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
+    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
     let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
     // Find building bounds
@@ -786,36 +955,36 @@ fn generate_roof(
     let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
     let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
     let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
-    
+
     let center_x = (min_x + max_x) / 2;
     let center_z = (min_z + max_z) / 2;
-    
+
     // Set base height for roof to be at least one block above building top
     let base_height = start_y_offset + building_height + 1;
-    
+
     match roof_type {
         RoofType::Flat => {
             // Simple flat roof
             for (x, z) in floor_area {
                 editor.set_block_absolute(floor_block, x, base_height, z, None, None);
             }
-        },
-        
+        }
+
         RoofType::Gabled => {
             // Determine building dimensions
             let width = max_x - min_x;
             let length = max_z - min_z;
-            
+
             // Calculate roof height proportionally to building size
             let building_size = width.max(length);
             // Enhanced logarithmic scaling with increased base values for taller roofs
             let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
-            
+
             let roof_peak_height = base_height + roof_height_boost;
-            
+
             // Align ridge with the longer dimension
             let is_wider_than_long = width > length;
-            
+
             // Create ridge line along the longer dimension
             let ridge_points = if is_wider_than_long {
                 // If wider in X direction, ridge runs along X axis (along length)
@@ -824,7 +993,7 @@ fn generate_roof(
                 // If wider in Z direction, ridge runs along Z axis (along length)
                 (min_z..=max_z).map(|z| (center_x, z)).collect::<Vec<_>>()
             };
-            
+
             // Set the ridge at the peak height
             for (rx, rz) in &ridge_points {
                 // Only place ridge points if they're inside the building outline
@@ -835,7 +1004,7 @@ fn generate_roof(
                     }
                 }
             }
-            
+
             // Calculate slopes from ridge to edges
             for (x, z) in &floor_area {
                 // Determine distance to ridge based on building orientation
@@ -846,43 +1015,51 @@ fn generate_roof(
                     // For buildings wider in Z, measure distance in X direction
                     (x - center_x).abs()
                 };
-                
+
                 // Skip points that are on the ridge line
-                if distance_to_ridge == 0 && 
-                   ((is_wider_than_long && *z == center_z) || (!is_wider_than_long && *x == center_x)) {
+                if distance_to_ridge == 0
+                    && ((is_wider_than_long && *z == center_z)
+                        || (!is_wider_than_long && *x == center_x))
+                {
                     continue; // Skip - these were already handled as ridge points
                 }
-                
+
                 // Calculate height based on distance - steeper slope for more dramatic roof
-                let max_distance = if is_wider_than_long { length / 2 } else { width / 2 };
+                let max_distance = if is_wider_than_long {
+                    length / 2
+                } else {
+                    width / 2
+                };
                 let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
-                
+
                 // Create a steep slope
-                let roof_height = roof_peak_height - (slope_ratio * roof_height_boost as f64) as i32;
+                let roof_height =
+                    roof_peak_height - (slope_ratio * roof_height_boost as f64) as i32;
                 let roof_y = roof_height.max(base_height);
-                
+
                 // Fill from base to calculated height (solid fill)
                 for y in base_height..=roof_y {
                     editor.set_block_absolute(wall_block, *x, y, *z, None, None);
                 }
             }
-        },
-        
+        }
+
         RoofType::Hipped => {
             // Calculate building dimensions and determine the long axis
             let width = max_x - min_x;
             let length = max_z - min_z;
-            
+
             // Determine if building is significantly rectangular or more square-shaped
-            let is_rectangular = (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
+            let is_rectangular =
+                (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
             let long_axis_is_x = width > length;
-            
+
             // Make roof taller and more pointy
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
-            
+
             // Use wall_block for hipped roofs
             let roof_block = wall_block;
-            
+
             // Find the building's approximate center line along the long axis
             if is_rectangular {
                 // For rectangular buildings, create a ridge along the long axis
@@ -893,7 +1070,7 @@ fn generate_roof(
                     // Ridge runs along Z-axis
                     (min_z..=max_z).map(|z| (center_x, z)).collect::<Vec<_>>()
                 };
-                
+
                 // Set the ridge at the peak height
                 for (rx, rz) in &ridge_points {
                     // Only place ridge points if they're inside the building outline
@@ -904,7 +1081,7 @@ fn generate_roof(
                         }
                     }
                 }
-                
+
                 // For each point in the floor area, calculate distance to the nearest ridge point
                 // and create slopes that decrease in height as distance increases
                 for (x, z) in &floor_area {
@@ -916,17 +1093,19 @@ fn generate_roof(
                         // Distance is primarily in X direction for Z-axis ridge
                         (x - center_x).abs()
                     };
-                    
+
                     // Skip points that are on the ridge
-                    if distance_to_ridge == 0 && 
-                       ((long_axis_is_x && *z == center_z) || (!long_axis_is_x && *x == center_x)) {
+                    if distance_to_ridge == 0
+                        && ((long_axis_is_x && *z == center_z)
+                            || (!long_axis_is_x && *x == center_x))
+                    {
                         continue; // Skip - these were already handled as ridge points
                     }
-                    
+
                     // Calculate height based on distance to ridge
                     let roof_height = roof_peak_height - (distance_to_ridge as f64 / 1.5) as i32;
                     let roof_y = roof_height.max(base_height);
-                    
+
                     // Fill from base to calculated height
                     for y in base_height..=roof_y {
                         editor.set_block_absolute(roof_block, *x, y, *z, None, None);
@@ -934,39 +1113,40 @@ fn generate_roof(
                 }
             } else {
                 // For more complex or square buildings, use distance from edges
-                
+
                 // First, find the outer perimeter of the building
-                let perimeter_points: HashSet<(i32, i32)> = element.nodes.iter()
-                    .map(|node| (node.x, node.z))
-                    .collect();
-                
+                let perimeter_points: HashSet<(i32, i32)> =
+                    element.nodes.iter().map(|node| (node.x, node.z)).collect();
+
                 // Create a map to store the shortest distance from each floor point to the perimeter
                 let mut distance_to_edge = vec![];
-                
+
                 // For each point in the floor area, calculate the shortest distance to the perimeter
                 for (x, z) in &floor_area {
                     // Find minimum distance to any perimeter point
-                    let min_distance = perimeter_points.iter()
+                    let min_distance = perimeter_points
+                        .iter()
                         .map(|(px, pz)| {
                             let dx = x - px;
                             let dz = z - pz;
                             ((dx * dx + dz * dz) as f64).sqrt()
                         })
                         .fold(f64::INFINITY, f64::min);
-                    
+
                     distance_to_edge.push((*x, *z, min_distance));
                 }
-                
+
                 // Find maximum distance from edge to determine center ridge area
-                let max_distance = distance_to_edge.iter()
+                let max_distance = distance_to_edge
+                    .iter()
                     .map(|(_, _, dist)| *dist)
                     .fold(0.0, f64::max);
-                
+
                 // Convert distances to heights - make center area higher
                 for (x, z, dist) in distance_to_edge {
                     // Normalize distance to 0.0-1.0 scale
                     let norm_dist = dist / max_distance;
-                    
+
                     // Calculate height - steeper slope with a higher center point
                     let height_factor = if norm_dist > 0.6 {
                         // Central ridge area - more peaked
@@ -975,80 +1155,81 @@ fn generate_roof(
                         // Sloping area - steeper slope
                         (norm_dist / 0.6).powf(0.8)
                     };
-                    
-                    let roof_y = base_height + (height_factor * (roof_peak_height - base_height) as f64) as i32;
-                    
+
+                    let roof_y = base_height
+                        + (height_factor * (roof_peak_height - base_height) as f64) as i32;
+
                     // Fill from base height to calculated roof height
                     for y in base_height..=roof_y {
                         editor.set_block_absolute(roof_block, x, y, z, None, None);
                     }
                 }
             }
-        },
-        
+        }
+
         RoofType::Skillion => {
             // Skillion roof - single sloping surface
             let width = (max_x - min_x).max(1);
-            
+
             for (x, z) in floor_area {
                 let slope_progress = (x - min_x) as f64 / width as f64;
                 let roof_height = base_height + (slope_progress * 3.0) as i32;
-                
+
                 editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
             }
-        },
-        
+        }
+
         RoofType::Pyramidal => {
             // Pyramidal roof - all sides come to a point at the top
             let roof_peak_height = base_height + 5;
-            
+
             for (x, z) in floor_area {
                 let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
                 let normalized_distance = distance_from_center.sqrt() as i32;
                 let roof_height = roof_peak_height - normalized_distance / 2;
                 let roof_y = roof_height.max(base_height);
-                
+
                 editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
             }
-        },
-        
+        }
+
         RoofType::Dome => {
             // Dome roof - rounded hemispherical structure
             let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
-            
+
             for (x, z) in floor_area {
                 let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
                 let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
-                
+
                 // Use hemisphere equation to determine the height
                 let height_factor = (1.0 - normalized_distance * normalized_distance).sqrt();
                 let surface_height = base_height + (height_factor * (radius * 0.8)) as i32;
-                
+
                 // Fill from the base to the surface
                 for y in base_height..=surface_height {
                     editor.set_block_absolute(floor_block, x, y, z, None, None);
                 }
             }
-        },
-        
+        }
+
         RoofType::Cone => {
             // Cone roof - circular structure tapering to a point
             let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
-            let cone_height = base_height + (radius * 1.2) as i32;
-            
+            let _cone_height = base_height + (radius * 1.2) as i32;
+
             for (x, z) in floor_area {
                 let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
                 let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
-                
+
                 // Linear taper for cone
                 let height_factor = 1.0 - normalized_distance;
                 let roof_height = base_height + (height_factor * (radius * 1.2)) as i32;
-                
+
                 if height_factor > 0.0 {
                     editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
                 }
             }
-        },
+        }
     }
 }
 
