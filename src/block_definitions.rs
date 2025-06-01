@@ -158,6 +158,7 @@ impl Block {
             137..=138 => "tall_grass",
             139 => "crafting_table",
             140 => "furnace",
+            141 => "oak_trapdoor",
             _ => panic!("Invalid id"),
         }
     }
@@ -298,6 +299,11 @@ impl Block {
             138 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            141 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("top".to_string()));
                 map
             })),
             _ => None,
@@ -451,6 +457,7 @@ pub const TALL_GRASS_BOTTOM: Block = Block::new(137);
 pub const TALL_GRASS_TOP: Block = Block::new(138);
 pub const CRAFTING_TABLE: Block = Block::new(139);
 pub const FURNACE: Block = Block::new(140);
+pub const OAK_TRAPDOOR: Block = Block::new(141);
 
 // Variations for building corners
 pub static BUILDING_CORNER_VARIATIONS: [Block; 20] = [
@@ -511,7 +518,7 @@ pub static BUILDING_WALL_COLOR_MAP: [(RGBTuple, Block); 21] = [
 
 // Variations for building floors
 pub fn building_floor_variations() -> Vec<Block> {
-    BUILDING_WALL_COLOR_MAP
+    BUILDING_FLOOR_COLOR_MAP
         .into_iter()
         .map(|(_, block)| block)
         .collect()

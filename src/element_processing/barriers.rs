@@ -1,6 +1,6 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::osm_parser::ProcessedElement;
+use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
 
 pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
@@ -10,11 +10,8 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
 
     match element.tags().get("barrier").map(|s| s.as_str()) {
         Some("bollard") => {
-            if let ProcessedElement::Node(node) = element {
-                // Place bollard one above ground
-                editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
-            }
-            return;
+            barrier_material = COBBLESTONE_WALL;
+            barrier_height = 1;
         }
         Some("kerb") => {
             // Ignore kerbs
@@ -31,8 +28,11 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
                     barrier_material = STONE_BRICK_WALL;
                     barrier_height = 1;
                 }
-                Some("chain_link" | "metal" | "wire" | "barbed_wire" | "corrugated_metal") => {
-                    barrier_material = STONE_BRICK_WALL;
+                Some(
+                    "chain_link" | "metal" | "wire" | "barbed_wire" | "corrugated_metal"
+                    | "electric" | "metal_bars",
+                ) => {
+                    barrier_material = IRON_BARS;
                     barrier_height = 2;
                 }
                 Some("slatted" | "paling") => {
@@ -43,7 +43,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
                     barrier_material = OAK_FENCE;
                     barrier_height = 2;
                 }
-                Some("concrete") => {
+                Some("concrete" | "stone") => {
                     barrier_material = ANDESITE_WALL;
                     barrier_height = 2;
                 }
@@ -54,12 +54,22 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
                 _ => {}
             }
         }
+        Some("wall") => {
+            barrier_material = STONE_BRICK_WALL;
+            barrier_height = 3;
+        }
         _ => {}
     }
     // Tagged material takes priority over inferred
     if let Some(barrier_mat) = element.tags().get("material") {
         if barrier_mat == "brick" {
             barrier_material = BRICK;
+        }
+        if barrier_mat == "concrete" {
+            barrier_material = LIGHT_GRAY_CONCRETE;
+        }
+        if barrier_mat == "metal" {
+            barrier_material = IRON_BARS;
         }
     }
 
@@ -69,7 +79,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
             .tags()
             .get("height")
             .and_then(|height: &String| height.parse::<f32>().ok())
-            .map(|height: f32| f32::min(3.0, height).round() as i32)
+            .map(|height: f32| height.round() as i32)
             .unwrap_or(barrier_height);
 
         // Process nodes to create the barrier wall
@@ -97,5 +107,65 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
                 }
             }
         }
+    }
+}
+
+pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode) {
+    match node.tags.get("barrier").map(|s| s.as_str()) {
+        Some("bollard") => {
+            editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
+        }
+        Some("stile" | "gate" | "swing_gate" | "lift_gate") => {
+            editor.set_block(
+                OAK_TRAPDOOR,
+                node.x,
+                1,
+                node.z,
+                Some(&[
+                    COBBLESTONE_WALL,
+                    OAK_FENCE,
+                    STONE_BRICK_WALL,
+                    OAK_LEAVES,
+                    STONE_BRICK_SLAB,
+                ]),
+                None,
+            );
+            editor.set_block(
+                AIR,
+                node.x,
+                2,
+                node.z,
+                Some(&[
+                    COBBLESTONE_WALL,
+                    OAK_FENCE,
+                    STONE_BRICK_WALL,
+                    OAK_LEAVES,
+                    STONE_BRICK_SLAB,
+                ]),
+                None,
+            );
+            editor.set_block(
+                AIR,
+                node.x,
+                3,
+                node.z,
+                Some(&[
+                    COBBLESTONE_WALL,
+                    OAK_FENCE,
+                    STONE_BRICK_WALL,
+                    OAK_LEAVES,
+                    STONE_BRICK_SLAB,
+                ]),
+                None,
+            );
+        }
+        Some("block") => {
+            editor.set_block(STONE, node.x, 1, node.z, None, None);
+        }
+        Some("entrance") => {
+            editor.set_block(AIR, node.x, 1, node.z, None, None);
+        }
+        None => {}
+        _ => {}
     }
 }
