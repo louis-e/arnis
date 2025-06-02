@@ -10,60 +10,117 @@ use rand::Rng;
 use std::collections::HashSet;
 use std::time::Duration;
 
-/// Interior layout for building floors (1st layer above floor)
+/// Interior layout for building ground floors (1st layer above floor)
 #[rustfmt::skip]
-const INTERIOR_LAYER1: [[char; 23]; 23] = [
-    ['1', 'U', ' ', 'W', 'C', ' ', ' ', ' ', 'S', 'S', 'W', 'B', 'T', 'T', 'B', 'W', '7', '8',' ', ' ', ' ', ' ', 'W',],
-    ['2', ' ', ' ', 'W', 'F', ' ', ' ', ' ', 'U', 'U', 'W', 'B', 'T', 'T', 'B', 'W', '7', '8',' ', ' ', ' ', 'B', 'W',],
-    [' ', ' ', ' ', 'W', 'F', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'T', 'T', 'B', 'W', 'W', 'W','D', 'W', 'W', 'W', 'W',],
-    ['W', 'W', 'D', 'W', 'L', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'A', 'W', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'D','W', 'W', ' ', ' ', 'D',],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'B', 'B', ' ', ' ', 'J', 'W', ' ', ' ',' ', 'B', 'W', 'W', 'W',],
-    ['W', 'W', 'W', 'W', 'D', 'W', ' ', ' ', 'W', 'T', 'S', 'S', 'T', ' ', ' ', 'W', 'S', 'S',' ', 'B', 'W', 'W', 'W',],
-    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'T', 'T', 'T', 'T', ' ', ' ', 'W', 'U', 'U',' ', 'B', 'W', ' ', ' ',],
-    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'D', 'T', 'T', 'T', 'T', ' ', 'B', 'W', ' ', ' ',' ', 'B', 'W', ' ', ' ',],
-    ['L', ' ', 'A', 'L', 'W', 'W', ' ', ' ', 'W', 'J', 'U', 'U', ' ', ' ', 'B', 'W', 'W', 'D','W', 'W', 'W', ' ', ' ',],
-    ['W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ','W', 'H', 'H', 'W', 'W',],
-    ['B', 'B', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ','W', ' ', ' ', 'W', 'W',],
-    [' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',' ', ' ', ' ', ' ', 'D',],
-    [' ', '6', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'D', 'W', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
-    ['U', '5', ' ', 'W', ' ', ' ', 'W', 'C', 'F', 'F', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'D','W', 'W', ' ', ' ', 'W',],
-    ['W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'W', 'L', ' ', 'W', 'A', ' ','B', 'W', ' ', ' ', 'W',],
-    ['B', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ','B', 'W', 'J', ' ', 'W',],
-    [' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', 'W', 'U', ' ',' ', 'W', 'B', ' ', 'D',],
-    ['J', ' ', ' ', 'C', 'B', 'B', 'W', 'L', 'F', ' ', 'W', 'F', ' ', 'W', 'L', 'W', '7', '8',' ', 'W', 'B', ' ', 'W',],
-    ['B', ' ', ' ', 'B', 'W', 'W', 'W', 'W', 'W', ' ', 'W', 'A', ' ', 'W', 'W', 'W', 'W', 'W','W', 'W', 'C', ' ', 'W',],
-    ['B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', 'D', ' ', 'W', 'C', ' ', ' ', 'W', 'W', 'B', 'B','B', 'B', 'W', 'D', 'W',],
-    ['W', 'W', 'D', 'W', 'C', ' ', ' ', ' ', 'W', 'W', 'W', 'B', 'T', 'T', 'B', 'W', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
+const INTERIOR1_LAYER1: [[char; 23]; 23] = [
+    ['1', 'U', ' ', 'W', 'C', ' ', ' ', ' ', 'S', 'S', 'W', 'B', 'T', 'T', 'B', 'W', '7', '8', ' ', ' ', ' ', ' ', 'W',],
+    ['2', ' ', ' ', 'W', 'F', ' ', ' ', ' ', 'U', 'U', 'W', 'B', 'T', 'T', 'B', 'W', '7', '8', ' ', ' ', ' ', 'B', 'W',],
+    [' ', ' ', ' ', 'W', 'F', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'T', 'T', 'B', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W',],
+    ['W', 'W', 'D', 'W', 'L', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'A', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ', 'D',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'B', 'B', ' ', ' ', 'J', 'W', ' ', ' ', ' ', 'B', 'W', 'W', 'W',],
+    ['W', 'W', 'W', 'W', 'D', 'W', ' ', ' ', 'W', 'T', 'S', 'S', 'T', ' ', ' ', 'W', 'S', 'S', ' ', 'B', 'W', 'W', 'W',],
+    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'T', 'T', 'T', 'T', ' ', ' ', 'W', 'U', 'U', ' ', 'B', 'W', ' ', ' ',],
+    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'D', 'T', 'T', 'T', 'T', ' ', 'B', 'W', ' ', ' ', ' ', 'B', 'W', ' ', ' ',],
+    ['L', ' ', 'A', 'L', 'W', 'W', ' ', ' ', 'W', 'J', 'U', 'U', ' ', ' ', 'B', 'W', 'W', 'D', 'W', 'W', 'W', ' ', ' ',],
+    ['W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ', 'W', 'H', 'H', 'W', 'W',],
+    ['B', 'B', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', 'W', ' ', ' ', 'W', 'W',],
+    [' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', 'D',],
+    [' ', '6', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    ['U', '5', ' ', 'W', ' ', ' ', 'W', 'C', 'F', 'F', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'D', 'W', 'W', ' ', ' ', 'W',],
+    ['W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'W', 'L', ' ', 'W', 'A', ' ', 'B', 'W', ' ', ' ', 'W',],
+    ['B', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ', 'B', 'W', 'J', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', 'W', 'U', ' ', ' ', 'W', 'B', ' ', 'D',],
+    ['J', ' ', ' ', 'C', 'B', 'B', 'W', 'L', 'F', ' ', 'W', 'F', ' ', 'W', 'L', 'W', '7', '8', ' ', 'W', 'B', ' ', 'W',],
+    ['B', ' ', ' ', 'B', 'W', 'W', 'W', 'W', 'W', ' ', 'W', 'A', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'C', ' ', 'W',],
+    ['B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', 'D', ' ', 'W', 'C', ' ', ' ', 'W', 'W', 'B', 'B', 'B', 'B', 'W', 'D', 'W',],
+    ['W', 'W', 'D', 'W', 'C', ' ', ' ', ' ', 'W', 'W', 'W', 'B', 'T', 'T', 'B', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
 ];
 
-/// Interior layout for building floors (2nd layer above floor)
+/// Interior layout for building ground floors (2nd layer above floor)
 #[rustfmt::skip]
-const INTERIOR_LAYER2: [[char; 23]; 23] = [
-    [' ', 'P', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
-    [' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'P', 'P', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ',' ', ' ', ' ', 'B', 'W',],
-    [' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', 'B', 'W', 'W', 'W','D', 'W', 'W', 'W', 'W',],
-    ['W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'D','W', 'W', ' ', ' ', 'D',],
-    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'B', 'B', ' ', ' ', ' ', 'W', ' ', ' ',' ', 'B', 'W', 'W', 'W',],
-    ['W', 'W', 'W', 'W', 'D', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ',' ', 'B', 'W', 'W', 'W',],
-    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'P', 'P',' ', 'B', 'W', ' ', ' ',],
-    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'B', 'W', ' ', ' ',' ', 'B', 'W', ' ', ' ',],
-    [' ', ' ', ' ', ' ', 'W', 'W', ' ', ' ', 'W', ' ', 'P', 'P', ' ', ' ', 'B', 'W', 'W', 'D','W', 'W', 'W', ' ', ' ',],
-    ['W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ','W', 'H', 'H', 'W', 'W',],
-    ['B', 'B', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ','W', ' ', ' ', 'W', 'W',],
-    [' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ',' ', ' ', ' ', ' ', 'D',],
-    [' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'D', 'W', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
-    ['P', ' ', ' ', 'W', ' ', ' ', 'W', 'N', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'D','W', 'W', ' ', ' ', 'W',],
-    ['W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ','B', 'W', ' ', ' ', 'W',],
-    ['B', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ','H', 'W', ' ', ' ', 'W',],
-    [' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', 'W', 'P', ' ',' ', 'W', 'B', ' ', 'D',],
-    [' ', ' ', ' ', ' ', 'B', 'B', 'W', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'P', 'W', ' ', ' ',' ', 'W', 'B', ' ', 'W',],
-    ['B', ' ', ' ', 'B', 'W', 'W', 'W', 'W', 'W', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W','W', 'W', ' ', ' ', 'W',],
-    ['B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', 'D', ' ', 'W', 'N', ' ', ' ', 'W', 'W', 'B', 'B','B', 'B', 'W', 'D', 'W',],
-    ['W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ',' ', ' ', ' ', ' ', 'W',],
+const INTERIOR1_LAYER2: [[char; 23]; 23] = [
+    [' ', 'P', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'P', 'P', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', 'B', 'W',],
+    [' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', 'B', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W',],
+    ['W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ', 'D',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', 'B', 'B', ' ', ' ', ' ', 'W', ' ', ' ', ' ', 'B', 'W', 'W', 'W',],
+    ['W', 'W', 'W', 'W', 'D', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', 'B', 'W', 'W', 'W',],
+    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'P', 'P', ' ', 'B', 'W', ' ', ' ',],
+    [' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'B', 'W', ' ', ' ', ' ', 'B', 'W', ' ', ' ',],
+    [' ', ' ', ' ', ' ', 'W', 'W', ' ', ' ', 'W', ' ', 'P', 'P', ' ', ' ', 'B', 'W', 'W', 'D', 'W', 'W', 'W', ' ', ' ',],
+    ['W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', ' ', ' ', 'W', 'H', 'H', 'W', 'W',],
+    ['B', 'B', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', 'W', ' ', ' ', 'W', 'W',],
+    [' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', 'D',],
+    [' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    ['P', ' ', ' ', 'W', ' ', ' ', 'W', 'N', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'D', 'W', 'W', ' ', ' ', 'W',],
+    ['W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ', 'B', 'W', ' ', ' ', 'W',],
+    ['B', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ', 'H', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', 'W', 'P', ' ', ' ', 'W', 'B', ' ', 'D',],
+    [' ', ' ', ' ', ' ', 'B', 'B', 'W', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'P', 'W', ' ', ' ', ' ', 'W', 'B', ' ', 'W',],
+    ['B', ' ', ' ', 'B', 'W', 'W', 'W', 'W', 'W', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W',],
+    ['B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', 'D', ' ', 'W', 'N', ' ', ' ', 'W', 'W', 'B', 'B', 'B', 'B', 'W', 'D', 'W',],
+    ['W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+];
+
+
+/// Interior layout for building level floors (1nd layer above floor)
+#[rustfmt::skip]
+const INTERIOR2_LAYER1: [[char; 23]; 23] = [
+    ['W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W',],
+    ['U', ' ', ' ', ' ', ' ', ' ', 'C', 'W', 'L', ' ', ' ', 'L', 'W', 'A', 'A', 'W', ' ', ' ', ' ', ' ', ' ', 'L', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'S', 'S', 'S', ' ', 'W',],
+    [' ', ' ', 'W', 'F', ' ', ' ', ' ', 'W', 'C', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'J', ' ', 'U', 'U', 'U', ' ', 'D',],
+    ['U', ' ', 'W', 'F', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W',],
+    ['U', ' ', 'W', 'F', ' ', ' ', ' ', 'D', ' ', ' ', 'T', 'T', 'W', ' ', ' ', ' ', ' ', ' ', 'U', 'W', ' ', 'L', 'W',],
+    [' ', ' ', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', 'T', 'J', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', ' ', ' ', 'W', 'L', ' ', 'W',],
+    ['J', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'C', ' ', ' ', ' ', 'B', 'W', ' ', ' ', 'W', ' ', ' ', 'W',],
+    ['W', 'W', 'W', 'W', 'W', 'L', ' ', ' ', ' ', ' ', 'W', 'C', ' ', ' ', ' ', 'B', 'W', ' ', ' ', 'W', 'W', 'D', 'W',],
+    [' ', 'A', 'B', 'B', 'W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', 'B', 'W', 'L', ' ', ' ', ' ', ' ', 'W', 'L', ' ', ' ', 'B', 'W', 'W', 'B', 'B', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'D',],
+    [' ', ' ', ' ', ' ', 'D', ' ', ' ', 'U', ' ', ' ', ' ', 'D', ' ', ' ', 'F', 'F', 'W', 'A', 'A', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', 'W', ' ', ' ', 'U', ' ', ' ', 'W', 'W', ' ', ' ', ' ', ' ', 'C', ' ', ' ', 'W', ' ', ' ', 'W',],
+    ['C', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', ' ', ' ', 'L', ' ', ' ', 'W', 'W', 'D', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    ['L', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'L', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    ['W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'U', 'U', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'U', 'U', ' ', 'W', 'B', ' ', 'U', 'U', 'B', ' ', ' ', ' ', ' ', ' ', 'W',],
+    ['S', 'S', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'B', ' ', 'W',],
+    ['U', 'U', ' ', ' ', ' ', 'L', 'B', 'B', 'B', ' ', ' ', 'W', 'B', 'B', 'B', 'B', 'B', 'B', 'B', ' ', 'B', 'D', 'W',],
+];
+
+/// Interior layout for building level floors (2nd layer above floor)
+#[rustfmt::skip]
+const INTERIOR2_LAYER2: [[char; 23]; 23] = [
+    ['W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W',],
+    ['P', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'E', ' ', ' ', 'E', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'E', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', 'W', 'F', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'P', 'P', 'P', ' ', 'D',],
+    ['P', ' ', 'W', 'F', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W',],
+    ['P', ' ', 'W', 'F', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', 'P', 'W', ' ', 'P', 'W',],
+    [' ', ' ', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'P', ' ', ' ', ' ', 'B', 'W', ' ', ' ', 'W', ' ', ' ', 'W',],
+    ['W', 'W', 'W', 'W', 'W', 'E', ' ', ' ', ' ', ' ', 'W', 'P', ' ', ' ', ' ', 'B', 'W', ' ', ' ', 'W', 'W', 'D', 'W',],
+    [' ', ' ', 'B', 'B', 'W', 'W', 'W', 'W', ' ', ' ', 'W', ' ', ' ', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', 'B', 'W', 'E', ' ', ' ', ' ', ' ', 'W', 'E', ' ', ' ', 'B', 'W', 'W', 'B', 'B', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'D',],
+    [' ', ' ', ' ', ' ', 'D', ' ', ' ', 'P', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', 'W', ' ', ' ', 'P', ' ', ' ', 'W', 'W', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', ' ', ' ', 'E', ' ', ' ', 'W', 'W', 'D', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'D', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    ['E', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'E', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
+    ['W', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'P', 'P', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'P', 'P', ' ', 'W', 'B', ' ', 'P', 'P', 'B', ' ', ' ', ' ', ' ', ' ', 'W',],
+    [' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'W', 'B', ' ', ' ', ' ', ' ', ' ', ' ', ' ', 'B', ' ', 'W',],
+    ['P', 'P', ' ', ' ', ' ', 'E', 'B', 'B', 'B', ' ', ' ', 'W', 'B', 'B', 'B', 'B', 'B', 'B', 'B', ' ', 'B', ' ', 'D',],
 ];
 
 /// Enum representing different roof types
@@ -112,6 +169,7 @@ fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Blo
         'G' => Some(GLOWSTONE),     // Glowstone
         'N' => Some(BREWING_STAND), // Brewing Stand
         'T' => Some(WHITE_CARPET),  // White Carpet
+        'E' => Some(OAK_LEAVES),  // White Carpet
         _ => None,                  // Default case for unknown characters
     }
 }
@@ -128,6 +186,7 @@ fn generate_building_interior(
     start_y_offset: i32,
     building_height: i32,
     wall_block: Block,
+    floor_levels: &[i32],
 ) {
     // Skip interior generation for very small buildings
     let width = max_x - min_x + 1;
@@ -137,31 +196,8 @@ fn generate_building_interior(
         return; // Building too small for interior
     }
 
-    // Get pattern dimensions
-    let pattern_height = INTERIOR_LAYER1.len() as i32;
-    let pattern_width = INTERIOR_LAYER1[0].len() as i32;
-
     // For efficiency, create a HashSet of floor area coordinates
     let floor_area_set: HashSet<(i32, i32)> = floor_area.iter().cloned().collect();
-
-    // Floor level is at start_y_offset
-    let floor_y = start_y_offset;
-
-    // Determine if building has multiple floors based on height
-    let has_multiple_floors = building_height > 6; // More than a single floor
-
-    // Calculate ceiling height and extension needed
-    let wall_extension_height = if has_multiple_floors {
-        // For multi-story buildings: extend to floor_y + 5
-        floor_y + 5
-    } else {
-        // For single-story buildings: extend to floor_y + 6
-        floor_y + 6
-    };
-
-    // Store wall and door positions to extend them to the ceiling
-    let mut wall_positions = Vec::new();
-    let mut door_positions = Vec::new();
 
     // Add buffer around edges to avoid placing furniture too close to walls
     let buffer = 2;
@@ -170,58 +206,91 @@ fn generate_building_interior(
     let interior_max_x = max_x - buffer;
     let interior_max_z = max_z - buffer;
 
-    // Create a seamless repeating pattern across the entire interior
-    for z in interior_min_z..=interior_max_z {
-        for x in interior_min_x..=interior_max_x {
-            // Skip if outside the building's floor area
-            if !floor_area_set.contains(&(x, z)) {
-                continue;
-            }
+    // Generate interiors for each floor
+    for (floor_index, &floor_y) in floor_levels.iter().enumerate() {
+        // Store wall and door positions for this floor to extend them to the ceiling
+        let mut wall_positions = Vec::new();
+        let mut door_positions = Vec::new();
 
-            // Map the world coordinates to pattern coordinates using modulo
-            // This creates a seamless tiling effect across the entire building
-            let pattern_x = ((x - interior_min_x) % pattern_width + pattern_width) % pattern_width;
-            let pattern_z =
-                ((z - interior_min_z) % pattern_height + pattern_height) % pattern_height;
+        // Determine the floor extension height (ceiling) - either next floor or roof
+        let current_floor_ceiling = if floor_index < floor_levels.len() - 1 {
+            // For intermediate floors, extend walls all the way up to the next floor
+            floor_levels[floor_index + 1] + 1
+        } else {
+            // Last floor extends to building top + 1
+            start_y_offset + building_height + 1
+        };
 
-            // Access the pattern arrays safely
-            let cell1 = INTERIOR_LAYER1[pattern_z as usize][pattern_x as usize];
-            let cell2 = INTERIOR_LAYER2[pattern_z as usize][pattern_x as usize];
+        // Choose the appropriate interior pattern based on floor number
+        let (layer1, layer2) = if floor_index == 0 {
+            // Ground floor uses INTERIOR1 patterns
+            (&INTERIOR1_LAYER1, &INTERIOR1_LAYER2)
+        } else {
+            // Upper floors use INTERIOR2 patterns
+            (&INTERIOR2_LAYER1, &INTERIOR2_LAYER2)
+        };
 
-            // Place first layer blocks
-            if let Some(block) = get_interior_block(cell1, false, wall_block) {
-                editor.set_block_absolute(block, x, floor_y + 1, z, None, None);
+        // Get dimensions for the selected pattern
+        let pattern_height = layer1.len() as i32;
+        let pattern_width = layer1[0].len() as i32;
 
-                // If this is a wall in layer 1, add to wall positions to extend later
-                if cell1 == 'W' {
-                    wall_positions.push((x, z));
+        // Calculate Y offset
+        let y_offset = if floor_index == 0 {
+            1
+        } else {
+            3
+        };
+
+        // Create a seamless repeating pattern across the interior of this floor
+        for z in interior_min_z..=interior_max_z {
+            for x in interior_min_x..=interior_max_x {
+                // Skip if outside the building's floor area
+                if !floor_area_set.contains(&(x, z)) {
+                    continue;
                 }
-                // If this is a door in layer 1, add to door positions to add wall above later
-                else if cell1 == 'D' {
-                    door_positions.push((x, z));
-                }
-            }
 
-            // Place second layer blocks
-            if let Some(block) = get_interior_block(cell2, true, wall_block) {
-                editor.set_block_absolute(block, x, floor_y + 2, z, None, None);
+                // Map the world coordinates to pattern coordinates using modulo
+                // This creates a seamless tiling effect across the entire building
+                let pattern_x = ((x - interior_min_x) % pattern_width + pattern_width) % pattern_width;
+                let pattern_z = ((z - interior_min_z) % pattern_height + pattern_height) % pattern_height;
+
+                // Access the pattern arrays safely
+                let cell1 = layer1[pattern_z as usize][pattern_x as usize];
+                let cell2 = layer2[pattern_z as usize][pattern_x as usize];
+
+                // Place first layer blocks
+                if let Some(block) = get_interior_block(cell1, false, wall_block) {
+                    editor.set_block_absolute(block, x, floor_y + y_offset, z, None, None);
+
+                    // If this is a wall in layer 1, add to wall positions to extend later
+                    if cell1 == 'W' {
+                        wall_positions.push((x, z));
+                    }
+                    // If this is a door in layer 1, add to door positions to add wall above later
+                    else if cell1 == 'D' {
+                        door_positions.push((x, z));
+                    }
+                }
+
+                // Place second layer blocks
+                if let Some(block) = get_interior_block(cell2, true, wall_block) {
+                    editor.set_block_absolute(block, x, floor_y + y_offset + 1, z, None, None);
+                }
             }
         }
-    }
 
-    // Extend walls all the way to the ceiling
-    for (x, z) in &wall_positions {
-        // Start from y=floor_y+3 (above the second layer) and continue to wall_extension_height
-        for y in (floor_y + 3)..=wall_extension_height {
-            editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+        // Extend walls all the way to the next floor ceiling or roof
+        for (x, z) in &wall_positions {
+            for y in (floor_y + y_offset + 2)..=current_floor_ceiling {
+                editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+            }
         }
-    }
 
-    // Add wall blocks above doors all the way to the ceiling/next floor
-    for (x, z) in &door_positions {
-        // Start above the door (y=floor_y+3) and go up to ceiling
-        for y in (floor_y + 3)..=wall_extension_height {
-            editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+        // Add wall blocks above doors all the way to the ceiling/next floor
+        for (x, z) in &door_positions {
+            for y in (floor_y + y_offset + 2)..=current_floor_ceiling {
+                editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+            }
         }
     }
 }
@@ -685,6 +754,23 @@ pub fn generate_buildings(
             .collect();
         let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
+        // Calculate floor heights for each level based on building height
+        let mut floor_levels = Vec::new();
+
+        // Always add the ground floor
+        floor_levels.push(start_y_offset);
+
+        // Calculate additional floors if building has sufficient height
+        if building_height > 6 {
+            // Determine number of floors (approximately 1 floor per 4 blocks of height)
+            let num_upper_floors = (building_height / 4).max(1);
+
+            // Add Y coordinates for each upper floor
+            for floor in 1..num_upper_floors {
+                floor_levels.push(start_y_offset + (floor * 4));
+            }
+        }
+
         for (x, z) in floor_area.iter().cloned() {
             if processed_points.insert((x, z)) {
                 // Create foundation columns for the floor area when using terrain
@@ -765,6 +851,7 @@ pub fn generate_buildings(
                     start_y_offset,
                     building_height,
                     wall_block,
+                    &floor_levels,
                 );
             }
         }
