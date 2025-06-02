@@ -531,6 +531,7 @@ fn gui_start_generation(
     floodfill_timeout: u64,
     terrain_enabled: bool,
     fillground_enabled: bool,
+    interior_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
 ) -> Result<(), String> {
@@ -589,6 +590,7 @@ fn gui_start_generation(
                 ground_level,
                 terrain: terrain_enabled,
                 fillground: fillground_enabled,
+                interior: interior_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
             };

@@ -258,6 +258,11 @@ impl<'a> WorldEditor<'a> {
         self.ground = Some(Box::new(ground.clone()));
     }
 
+    /// Gets a reference to the ground data if available
+    pub fn get_ground(&self) -> Option<&Ground> {
+        self.ground.as_ref().map(|g| g.as_ref())
+    }
+
     /// Calculate the absolute Y position from a ground-relative offset
     #[inline(always)]
     pub fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {

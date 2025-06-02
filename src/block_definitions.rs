@@ -158,6 +158,24 @@ impl Block {
             137..=138 => "tall_grass",
             139 => "crafting_table",
             140 => "furnace",
+            141 => "white_carpet",
+            142 => "bookshelf",
+            143 => "oak_pressure_plate",
+            144 => "oak_stairs",
+            155 => "chest",
+            156 => "red_carpet",
+            157 => "anvil",
+            158 => "jukebox",
+            159 => "oak_door",
+            160 => "brewing_stand",
+            161 => "red_bed", // North head
+            162 => "red_bed", // North foot
+            163 => "red_bed", // East head
+            164 => "red_bed", // East foot
+            165 => "red_bed", // South head
+            166 => "red_bed", // South foot
+            167 => "red_bed", // West head
+            168 => "red_bed", // West foot
             _ => panic!("Invalid id"),
         }
     }
@@ -300,6 +318,57 @@ impl Block {
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
+
+            // Red bed variations by direction and part
+            161 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map.insert("part".to_string(), Value::String("head".to_string()));
+                map
+            })),
+            162 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map.insert("part".to_string(), Value::String("foot".to_string()));
+                map
+            })),
+            163 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map.insert("part".to_string(), Value::String("head".to_string()));
+                map
+            })),
+            164 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map.insert("part".to_string(), Value::String("foot".to_string()));
+                map
+            })),
+            165 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map.insert("part".to_string(), Value::String("head".to_string()));
+                map
+            })),
+            166 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map.insert("part".to_string(), Value::String("foot".to_string()));
+                map
+            })),
+            167 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
+                map.insert("part".to_string(), Value::String("head".to_string()));
+                map
+            })),
+            168 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
+                map.insert("part".to_string(), Value::String("foot".to_string()));
+                map
+            })),
+
             _ => None,
         }
     }
@@ -416,15 +485,12 @@ pub const SNOW_LAYER: Block = Block::new(112);
 pub const SIGN: Block = Block::new(113);
 pub const ANDESITE_WALL: Block = Block::new(114);
 pub const STONE_BRICK_WALL: Block = Block::new(115);
-
 pub const CARROTS: Block = Block::new(105);
 pub const DARK_OAK_DOOR_LOWER: Block = Block::new(106);
 pub const DARK_OAK_DOOR_UPPER: Block = Block::new(107);
 pub const POTATOES: Block = Block::new(108);
 pub const WHEAT: Block = Block::new(109);
-
 pub const BEDROCK: Block = Block::new(110);
-
 pub const RAIL_NORTH_SOUTH: Block = Block::new(116);
 pub const RAIL_EAST_WEST: Block = Block::new(117);
 pub const RAIL_ASCENDING_EAST: Block = Block::new(118);
@@ -435,7 +501,6 @@ pub const RAIL_NORTH_EAST: Block = Block::new(122);
 pub const RAIL_NORTH_WEST: Block = Block::new(123);
 pub const RAIL_SOUTH_EAST: Block = Block::new(124);
 pub const RAIL_SOUTH_WEST: Block = Block::new(125);
-
 pub const COARSE_DIRT: Block = Block::new(126);
 pub const IRON_ORE: Block = Block::new(127);
 pub const COAL_ORE: Block = Block::new(128);
@@ -451,6 +516,24 @@ pub const TALL_GRASS_BOTTOM: Block = Block::new(137);
 pub const TALL_GRASS_TOP: Block = Block::new(138);
 pub const CRAFTING_TABLE: Block = Block::new(139);
 pub const FURNACE: Block = Block::new(140);
+pub const WHITE_CARPET: Block = Block::new(141);
+pub const BOOKSHELF: Block = Block::new(142);
+pub const OAK_PRESSURE_PLATE: Block = Block::new(143);
+pub const OAK_STAIRS: Block = Block::new(144);
+pub const CHEST: Block = Block::new(155);
+pub const RED_CARPET: Block = Block::new(156);
+pub const ANVIL: Block = Block::new(157);
+pub const JUKEBOX: Block = Block::new(158);
+pub const OAK_DOOR: Block = Block::new(159);
+pub const BREWING_STAND: Block = Block::new(160);
+pub const RED_BED_NORTH_HEAD: Block = Block::new(161);
+pub const RED_BED_NORTH_FOOT: Block = Block::new(162);
+pub const RED_BED_EAST_HEAD: Block = Block::new(163);
+pub const RED_BED_EAST_FOOT: Block = Block::new(164);
+pub const RED_BED_SOUTH_HEAD: Block = Block::new(165);
+pub const RED_BED_SOUTH_FOOT: Block = Block::new(166);
+pub const RED_BED_WEST_HEAD: Block = Block::new(167);
+pub const RED_BED_WEST_FOOT: Block = Block::new(168);
 
 // Variations for building corners
 pub static BUILDING_CORNER_VARIATIONS: [Block; 20] = [
