@@ -2,6 +2,7 @@ pub mod amenities;
 pub mod barriers;
 pub mod bridges;
 pub mod buildings;
+pub mod buildings_interior;
 pub mod doors;
 pub mod highways;
 pub mod landuse;
