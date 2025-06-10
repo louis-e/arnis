@@ -52,6 +52,13 @@ impl LLBBox {
     pub fn max(&self) -> LLPoint {
         self.max
     }
+
+    pub fn contains(&self, llpoint: &LLPoint) -> bool {
+        llpoint.lat() >= self.min().lat()
+            && llpoint.lat() <= self.max().lat()
+            && llpoint.lng() >= self.min().lng()
+            && llpoint.lng() <= self.max().lng()
+    }
 }
 
 #[cfg(test)]

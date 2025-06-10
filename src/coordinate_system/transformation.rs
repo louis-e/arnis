@@ -99,6 +99,7 @@ fn lat_distance(lat1: f64, lat2: f64) -> f64 {
 
 // copied legacy code
 // Function to convert latitude and longitude to Minecraft coordinates.
+// Function to convert latitude and longitude to Minecraft coordinates.
 #[cfg(test)]
 pub fn lat_lon_to_minecraft_coords(
     lat: f64,
@@ -123,11 +124,15 @@ mod test {
     use super::*;
     use crate::test_utilities::get_llbbox_arnis;
 
-    fn test_llxztransform_one_scale(scale: f64) {
+    fn test_llxztransform_one_scale_one_factor(
+        scale: f64,
+        test_latfactor: f64,
+        test_lngfactor: f64,
+    ) {
         let llbbox = get_llbbox_arnis();
         let llpoint = LLPoint::new(
-            (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
-            (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
+            llbbox.min().lat() + (llbbox.max().lat() - llbbox.min().lat()) * test_latfactor,
+            llbbox.min().lng() + (llbbox.max().lng() - llbbox.min().lng()) * test_lngfactor,
         )
         .unwrap();
         let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale).unwrap();
@@ -160,11 +165,11 @@ mod test {
     // this ensures that transformer.transform_point == legacy lat_lon_to_minecraft_coords
     #[test]
     pub fn test_llxztransform() {
-        test_llxztransform_one_scale(1.0);
-        test_llxztransform_one_scale(3.0);
-        test_llxztransform_one_scale(10.0);
-        test_llxztransform_one_scale(0.4);
-        test_llxztransform_one_scale(0.1);
+        test_llxztransform_one_scale_one_factor(1.0, 0.5, 0.5);
+        test_llxztransform_one_scale_one_factor(3.0, 0.1, 0.2);
+        test_llxztransform_one_scale_one_factor(10.0, -1.2, 2.0);
+        test_llxztransform_one_scale_one_factor(0.4, 0.3, -0.2);
+        test_llxztransform_one_scale_one_factor(0.1, 0.2, 0.7);
     }
 
     // this ensures that invalid inputs can be handled correctly

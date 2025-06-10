@@ -322,7 +322,7 @@ function addLayer(layer, name, title, zIndex, on) {
     }
     link.innerHTML = name;
     link.title = title;
-    link.onclick = function(e) {
+    link.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
 
@@ -429,7 +429,7 @@ function formatPoint(point, proj) {
             formattedBounds = y + ' ' + x;
         }
     }
-    return formattedBounds
+    return formattedPoint
 }
 
 function validateStringAsBounds(bounds) {
@@ -456,13 +456,19 @@ $(document).ready(function () {
     **  on top of your DOM
     **
     */
-    $('input[type="textarea"]').on('click', function (evt) { this.select() });
 
-    // Have to init the projection input box as it is used to format the initial values
+    // init the projection input box as it is used to format the initial values
+    $('input[type="textarea"]').on('click', function (evt) { this.select() });
     $("#projection").val(currentproj);
 
-    L.mapbox.accessToken = 'pk.eyJ1IjoibG91aXMtZSIsImEiOiJjbWF0cWlycjEwYWNvMmtxeHFwdDQ5NnJoIn0.6A0AKg0iucvoGhYuCkeOjA';
-    map = L.mapbox.map('map').setView([50.114768, 8.687322], 4).addLayer(L.mapbox.styleLayer('mapbox://styles/mapbox/streets-v11'));
+    // Initialize map with OpenStreetMap tiles
+    map = L.map('map').setView([50.114768, 8.687322], 4);
+
+    // Add OpenStreetMap tile layer (free to use with attribution)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; Map data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+        maxZoom: 19
+    }).addTo(map);
 
     rsidebar = L.control.sidebar('rsidebar', {
         position: 'right',
@@ -496,24 +502,53 @@ $(document).ready(function () {
     crosshair = new L.marker(map.getCenter(), { icon: crosshairIcon, clickable: false });
     crosshair.addTo(map);
 
+    // Override default tooltips
+    L.drawLocal = L.drawLocal || {};
+    L.drawLocal.draw = L.drawLocal.draw || {};
+    L.drawLocal.draw.toolbar = L.drawLocal.draw.toolbar || {};
+    L.drawLocal.draw.toolbar.buttons = L.drawLocal.draw.toolbar.buttons || {};
+    L.drawLocal.draw.toolbar.buttons.rectangle = 'Choose area';
+    L.drawLocal.draw.toolbar.buttons.marker = 'Set spawnpoint';
+
     // Initialize the FeatureGroup to store editable layers
     drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
 
-    // Initialize the draw control and pass it the FeatureGroup of editable layers
+    // Custom icon for drawn markers
+    var customMarkerIcon = L.icon({
+        iconUrl: 'images/marker-icon.png',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+        popupAnchor: [0, -10]
+    });
+
     drawControl = new L.Control.Draw({
         edit: {
             featureGroup: drawnItems
         },
         draw: {
+            rectangle: {
+                shapeOptions: {
+                    color: '#fe57a1',
+                    opacity: 0.6,
+                    weight: 3,
+                    fillColor: '#fe57a1',
+                    fillOpacity: 0.1,
+                    dashArray: '10, 10',
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                },
+                repeatMode: false
+            },
             polyline: false,
             polygon: false,
             circle: false,
-            marker: false
+            marker: {
+                icon: customMarkerIcon
+            }
         }
     });
     map.addControl(drawControl);
-
     /*
     **
     **  create bounds layer
@@ -523,17 +558,22 @@ $(document).ready(function () {
     **
     */
     startBounds = new L.LatLngBounds([0.0, 0.0], [0.0, 0.0]);
-    var bounds = new L.Rectangle(startBounds,
-        {
-            fill: false,
-            opacity: 1.0,
-            color: '#000'
-        }
-    );
+    var bounds = new L.Rectangle(startBounds, {
+        color: '#3778d4',
+        opacity: 1.0,
+        weight: 3,
+        fill: '#3778d4',
+        lineCap: 'round',
+        lineJoin: 'round'
+    });
+
     bounds.on('bounds-set', function (e) {
-        // move it to the end of the parent
-        var parent = e.target._renderer._container.parentElement;
-        $(parent).append(e.target._renderer._container);
+        // move it to the end of the parent if renderer exists
+        if (e.target._renderer && e.target._renderer._container) {
+            var parent = e.target._renderer._container.parentElement;
+            $(parent).append(e.target._renderer._container);
+        }
+
         // Set the hash
         var southwest = this.getBounds().getSouthWest();
         var northeast = this.getBounds().getNorthEast();
@@ -543,13 +583,55 @@ $(document).ready(function () {
         var ymax = northeast.lat.toFixed(6);
         location.hash = ymin + ',' + xmin + ',' + ymax + ',' + xmax;
     });
-    map.addLayer(bounds)
+    map.addLayer(bounds);
+
     map.on('draw:created', function (e) {
+        // If it's a marker, make sure we only have one
+        if (e.layerType === 'marker') {
+            // Remove any existing markers
+            drawnItems.eachLayer(function(layer) {
+                if (layer instanceof L.Marker) {
+                    drawnItems.removeLayer(layer);
+                }
+            });
+        }
+
+        // Check if it's a rectangle and set proper styles before adding it to the layer
+        if (e.layerType === 'rectangle') {
+            e.layer.setStyle({
+                color: '#3778d4',
+                opacity: 1.0,
+                weight: 3,
+                fill: '#3778d4',
+                lineCap: 'round',
+                lineJoin: 'round'
+            });
+        }
+
         drawnItems.addLayer(e.layer);
-        bounds.setBounds(drawnItems.getBounds())
-        $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
-        $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
-        notifyBboxUpdate();
+
+        // Only update the bounds based on non-marker layers
+        if (e.layerType !== 'marker') {
+            // Calculate bounds only from non-marker layers
+            const nonMarkerBounds = new L.LatLngBounds();
+            let hasNonMarkerLayers = false;
+            
+            drawnItems.eachLayer(function(layer) {
+                if (!(layer instanceof L.Marker)) {
+                    hasNonMarkerLayers = true;
+                    nonMarkerBounds.extend(layer.getBounds());
+                }
+            });
+            
+            // Only update bounds if there are non-marker layers
+            if (hasNonMarkerLayers) {
+                bounds.setBounds(nonMarkerBounds);
+                $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
+                $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
+                notifyBboxUpdate();
+            }
+        }
+
         if (!e.geojson &&
             !((drawnItems.getLayers().length == 1) && (drawnItems.getLayers()[0] instanceof L.Marker))) {
             map.fitBounds(bounds.getBounds());
@@ -583,7 +665,22 @@ $(document).ready(function () {
     });
 
     map.on('draw:edited', function (e) {
-        bounds.setBounds(drawnItems.getBounds())
+        // Calculate bounds only from non-marker layers
+        const nonMarkerBounds = new L.LatLngBounds();
+        let hasNonMarkerLayers = false;
+        
+        drawnItems.eachLayer(function(layer) {
+            if (!(layer instanceof L.Marker)) {
+                hasNonMarkerLayers = true;
+                nonMarkerBounds.extend(layer.getBounds());
+            }
+        });
+        
+        // Only update bounds if there are non-marker layers
+        if (hasNonMarkerLayers) {
+            bounds.setBounds(nonMarkerBounds);
+        }
+        
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
         notifyBboxUpdate();
@@ -629,7 +726,14 @@ $(document).ready(function () {
             var splitBounds = initialBBox.split(',');
             startBounds = new L.LatLngBounds([splitBounds[0], splitBounds[1]],
                 [splitBounds[2], splitBounds[3]]);
-            var lyr = new L.Rectangle(startBounds);
+            var lyr = new L.Rectangle(startBounds, {
+                color: '#3778d4',
+                opacity: 1.0,
+                weight: 3,
+                fill: '#3778d4',
+                lineCap: 'round',
+                lineJoin: 'round'
+            });
             var evt = {
                 layer: lyr,
                 layerType: "polygon",
@@ -655,3 +759,24 @@ function notifyBboxUpdate() {
     const bboxText = document.getElementById('boxbounds').textContent;
     window.parent.postMessage({ bboxText: bboxText }, '*');
 }
+
+// Expose marker coordinates to the parent window
+function getSpawnPointCoords() {
+    // Check if there are any markers in drawn items
+    const markers = [];
+    drawnItems.eachLayer(function(layer) {
+        if (layer instanceof L.Marker) {
+            const latLng = layer.getLatLng();
+            markers.push({
+                lat: latLng.lat,
+                lng: latLng.lng
+            });
+        }
+    });
+
+    // Return the first marker found or null if none exists
+    return markers.length > 0 ? markers[0] : null;
+}
+
+// Expose the function to the parent window
+window.getSpawnPointCoords = getSpawnPointCoords;

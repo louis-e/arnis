@@ -156,6 +156,8 @@ impl Block {
             135 => "mud",
             136 => "dead_bush",
             137..=138 => "tall_grass",
+            139 => "crafting_table",
+            140 => "furnace",
             _ => panic!("Invalid id"),
         }
     }
@@ -447,6 +449,8 @@ pub const MUD: Block = Block::new(135);
 pub const DEAD_BUSH: Block = Block::new(136);
 pub const TALL_GRASS_BOTTOM: Block = Block::new(137);
 pub const TALL_GRASS_TOP: Block = Block::new(138);
+pub const CRAFTING_TABLE: Block = Block::new(139);
+pub const FURNACE: Block = Block::new(140);
 
 // Variations for building corners
 pub static BUILDING_CORNER_VARIATIONS: [Block; 20] = [
