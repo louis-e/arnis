@@ -1,4 +1,4 @@
-use crate::bbox::BBox;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 use colored::Colorize;
 use rand::seq::SliceRandom;
@@ -91,7 +91,7 @@ pub fn fetch_data_from_file(file: &str) -> Result<Value, Box<dyn std::error::Err
 
 /// Main function to fetch data
 pub fn fetch_data_from_overpass(
-    bbox: BBox,
+    bbox: LLBBox,
     debug: bool,
     download_method: &str,
     save_file: Option<&str>,

@@ -1,6 +1,7 @@
 use crate::args::Args;
-use crate::bbox::BBox;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::geographic::LLBBox;
+use crate::coordinate_system::transformation::geo_distance;
 use crate::progress::emit_gui_progress_update;
 use image::{Rgb, RgbImage};
 
@@ -111,7 +112,7 @@ impl Ground {
     }
 
     /// Calculates appropriate zoom level for the given bounding box
-    fn calculate_zoom_level(bbox: BBox) -> u8 {
+    fn calculate_zoom_level(bbox: LLBBox) -> u8 {
         let lat_diff: f64 = (bbox.max().lat() - bbox.min().lat()).abs();
         let lng_diff: f64 = (bbox.max().lng() - bbox.min().lng()).abs();
         let max_diff: f64 = lat_diff.max(lng_diff);
@@ -132,8 +133,7 @@ impl Ground {
         args: &crate::args::Args,
     ) -> Result<ElevationData, Box<dyn std::error::Error>> {
         // Use OSM parser's scale calculation and apply user scale factor
-        let (scale_factor_z, scale_factor_x) =
-            crate::osm_parser::geo_distance(args.bbox.min(), args.bbox.max());
+        let (scale_factor_z, scale_factor_x) = geo_distance(args.bbox.min(), args.bbox.max());
         let scale_factor_x: f64 = scale_factor_x * args.scale;
         let scale_factor_z: f64 = scale_factor_z * args.scale;
 
@@ -247,7 +247,7 @@ impl Ground {
         })
     }
 
-    fn get_tile_coordinates(bbox: BBox, zoom: u8) -> Vec<(u32, u32)> {
+    fn get_tile_coordinates(bbox: LLBBox, zoom: u8) -> Vec<(u32, u32)> {
         // Convert lat/lng to tile coordinates
         let (x1, y1) = Self::lat_lng_to_tile(bbox.min().lat(), bbox.min().lng(), zoom);
         let (x2, y2) = Self::lat_lng_to_tile(bbox.max().lat(), bbox.max().lng(), zoom);

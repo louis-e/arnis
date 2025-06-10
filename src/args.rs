@@ -1,4 +1,4 @@
-use crate::bbox::BBox;
+use crate::coordinate_system::geographic::LLBBox;
 use clap::Parser;
 use std::path::Path;
 use std::time::Duration;
@@ -8,8 +8,8 @@ use std::time::Duration;
 #[command(author, version, about)]
 pub struct Args {
     /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true, value_parser = BBox::from_str)]
-    pub bbox: BBox,
+    #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
+    pub bbox: LLBBox,
 
     /// JSON file containing OSM data (optional)
     #[arg(long, group = "location")]
