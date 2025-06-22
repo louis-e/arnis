@@ -145,6 +145,7 @@ pub fn generate_ground_data(args: &Args) -> Ground {
         if args.debug {
             ground.save_debug_image("elevation_debug");
         }
+        return ground;
     }
     Ground::new_flat(args.ground_level)
 }
