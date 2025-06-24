@@ -25,71 +25,9 @@ If you choose to select an own world, be aware that Arnis will overwrite certain
 
 [[Arch Linux AUR package](https://aur.archlinux.org/packages/arnis)]
 
-## :floppy_disk: How it works
-![CLI Generation](https://github.com/louis-e/arnis/blob/main/gitassets/cli.gif?raw=true)
+## 📚 Documentation
 
-The raw data obtained from the API *[(see FAQ)](#question-faq)* includes each element (buildings, walls, fountains, farmlands, etc.) with its respective corner coordinates (nodes) and descriptive tags. When you run Arnis, the following steps are performed automatically to generate a Minecraft world:
-
-#### Processing Pipeline
-1. **Fetching Data from the Overpass API:** The script retrieves geospatial data for the desired bounding box from the Overpass API.
-2. **Parsing Raw Data:** The raw data is parsed to extract essential information like nodes, ways, and relations. Nodes are converted into Minecraft coordinates, and relations are handled similarly to ways, ensuring all relevant elements are processed correctly. Relations and ways cluster several nodes into one specific object.
-3. **Prioritizing and Sorting Elements:** The elements (nodes, ways, relations) are sorted by priority to establish a layering system, which ensures that certain types of elements (e.g., entrances and buildings) are generated in the correct order to avoid conflicts and overlapping structures.
-4. **Generating Minecraft World:** The Minecraft world is generated using a series of element processors (generate_buildings, generate_highways, generate_landuse, etc.) that interpret the tags and nodes of each element to place the appropriate blocks in the Minecraft world. These processors handle the logic for creating 3D structures, roads, natural formations, and more, as specified by the processed data.
-5. **Generating Ground Layer:** A ground layer is generated based on the provided scale factors to provide a base for the entire Minecraft world. This step ensures all areas have an appropriate foundation (e.g., grass and dirt layers).
-6. **Saving the Minecraft World:** All the modified chunks are saved back to the Minecraft region files.
-
-## :question: FAQ
-- *Wasn't this written in Python before?*<br>
-Yes! Arnis was initially developed in Python, which benefited from Python's open-source friendliness and ease of readability. This is why we strive for clear, well-documented code in the Rust port of this project to find the right balance. I decided to port the project to Rust to learn more about the language and push the algorithm's performance further. We were nearing the limits of optimization in Python, and Rust's capabilities allow for even better performance and efficiency. The old Python implementation is still available in the python-legacy branch.
-- *Where does the data come from?*<br>
-The geographic data is sourced from OpenStreetMap (OSM)[^1], a free, collaborative mapping project that serves as an open-source alternative to commercial mapping services. The data is accessed via the Overpass API, which queries OSM's database. Other services like Google Maps do not provide data like this, which makes OSM perfect for this project.
-- *How does the Minecraft world generation work?*<br>
-The script uses the [fastnbt](https://github.com/owengage/fastnbt) cargo package to interact with Minecraft's world format. This library allows Arnis to manipulate Minecraft region files, enabling the generation of real-world locations. The section 'Processing Pipeline' goes a bit further into the details and steps of the generation process itself.
-- *Where does the name come from?*<br>
-The project is named after the smallest city in Germany, Arnis[^2]. The city's small size made it an ideal test case for developing and debugging the algorithm efficiently.
-- *I don't have Minecraft installed but want to generate a world for my kids. How?*<br>
-When selecting a world, click on 'Select existing world' and choose a directory. The world will be generated there.
-- *Arnis instantly closes again or the window is empty!*<br>
-  If you're on Windows, please install the [Evergreen Bootstrapper from Microsoft](https://developer.microsoft.com/en-us/microsoft-edge/webview2/?form=MA13LH#download).
-
-  If you're on Linux, your system might be missing the webkit2gtk-4.1 library, install the corresponding package using your distro's package manager.
-- *What Minecraft version should I use?*<br>
-Please use Minecraft version 1.21.4 for the best results. Minecraft version 1.16.5 and below is currently not supported, but we are working on it!
-- *The generation did finish, but there's nothing in the world!*<br>
-Make sure to teleport to the generation starting point (/tp 0 0 0). If there is still nothing, you might need to travel a bit further into the positive X and positive Z direction.
-- *What features are in the world generation settings?*<br>
-**Terrain:** Make sure to enable this feature to generate your world with elevation data included.<br>
-**Scale Factor:** The scale factor determines the size of the generated world.<br>
-**Custom BBOX Input:** This setting allows you to manually input the bounding box coordinates for the area you want to generate.<br>
-**Floodfill-Timeout (Sec):** This setting determines the maximum time the floodfill algorithm is allowed to run before being terminated. Increasing this value may improve the generation of large water areas but may also increase processing time.<br>
-**Ground Height:** This setting determines the base height of the generated world and can be adjusted to create different terrain types.
-
-## :memo: ToDo and Known Bugs
-Feel free to choose an item from the To-Do or Known Bugs list, or bring your own idea to the table. Bug reports shall be raised as a Github issue. Contributions are highly welcome and appreciated!
-- [ ] Fix compilation for Linux and Mac
-- [ ] Fix coastal cities generation duration time (water_areas.rs)
-- [ ] Rotate maps (https://github.com/louis-e/arnis/issues/97)
-- [ ] Add support for older Minecraft versions (<=1.16.5) (https://github.com/louis-e/arnis/issues/124, https://github.com/louis-e/arnis/issues/137)
-- [ ] Mapping real coordinates to Minecraft coordinates (https://github.com/louis-e/arnis/issues/29)
-- [ ] Add interior to buildings
-- [ ] Implement house roof types
-- [ ] Add street names as signs
-- [ ] Add support for inner attribute in multipolygons and multipolygon elements other than buildings
-- [ ] Refactor bridges implementation
-- [ ] Better code documentation
-- [ ] Refactor fountain structure implementation
-- [ ] Luanti Support (https://github.com/louis-e/arnis/issues/120)
-- [ ] Minecraft Bedrock Edition Support (https://github.com/louis-e/arnis/issues/148)
-- [x] Evaluate and implement elevation (https://github.com/louis-e/arnis/issues/66)
-- [x] Refactor railway implementation
-- [x] Evaluate and implement faster region saving
-- [x] Support multipolygons (https://github.com/louis-e/arnis/issues/112, https://github.com/louis-e/arnis/issues/114)
-- [x] Memory optimization
-- [x] Fix Github Action Workflow for releasing MacOS Binary
-- [x] Design and implement a GUI
-- [x] Automatic new world creation instead of using an existing world
-- [x] Fix faulty empty chunks ([https://github.com/owengage/fastnbt/issues/120](https://github.com/owengage/fastnbt/issues/120)) (workaround found)
-- [x] Setup fork of [https://github.com/aaronr/bboxfinder.com](https://github.com/aaronr/bboxfinder.com) for easy bbox picking
+Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/arnis/wiki/), covering topics such as technical explanations, FAQs, contribution guidelines and roadmaps.
 
 ## :trophy: Open Source
 #### Key objectives of this project
