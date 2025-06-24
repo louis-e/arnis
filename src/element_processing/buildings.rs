@@ -112,7 +112,7 @@ pub fn generate_buildings(
     }
 
     if let Some(levels) = relation_levels {
-        building_height = multiply_scale(levels * 4 + 2, scale_factor);
+        building_height = multiply_scale(levels * 4 + 1, scale_factor);
         building_height = building_height.max(3);
     }
 
@@ -133,10 +133,17 @@ pub fn generate_buildings(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                for shelter_y in 1..=multiply_scale(4, scale_factor) {
+                for shelter_y in 1..=multiply_scale(building_height - 1, scale_factor) {
                     editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
                 }
-                editor.set_block(roof_block, x, 5, z, None, None);
+                editor.set_block(
+                    roof_block,
+                    x,
+                    multiply_scale(building_height, scale_factor),
+                    z,
+                    None,
+                    None,
+                );
             }
 
             // Flood fill the roof area
@@ -176,15 +183,15 @@ pub fn generate_buildings(
                     let x: i32 = node.x;
                     let z: i32 = node.z;
 
-                    for dy in 1..=4 {
+                    for dy in 1..=building_height - 1 {
                         editor.set_block(OAK_FENCE, x, dy, z, None, None);
                     }
-                    editor.set_block(roof_block, x, 5, z, None, None);
+                    editor.set_block(roof_block, x, building_height, z, None, None);
                 }
 
                 // Flood fill the roof area
                 for (x, z) in floor_area.iter() {
-                    editor.set_block(roof_block, *x, 5, *z, None, None);
+                    editor.set_block(roof_block, *x, building_height, *z, None, None);
                 }
 
                 return;
@@ -280,7 +287,7 @@ pub fn generate_buildings(
 
             return;
         } else if building_type == "roof" {
-            let roof_height: i32 = 5;
+            let roof_height: i32 = building_height;
 
             // Iterate through the nodes to create the roof edges using Bresenham's line algorithm
             for node in &element.nodes {
