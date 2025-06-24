@@ -355,7 +355,7 @@ fn generate_subway(editor: &mut WorldEditor, element: &ProcessedWay) {
                             bx + dx,
                             ground_level + 1,
                             bz + dz,
-                            Some(&[DIRT, STONE]),
+                            Some(&[DIRT, STONE,POLISHED_ANDESITE]),
                             None,
                         );
                         editor.set_block(
@@ -363,7 +363,7 @@ fn generate_subway(editor: &mut WorldEditor, element: &ProcessedWay) {
                             bx + dx,
                             ground_level + 2,
                             bz + dz,
-                            Some(&[DIRT, STONE]),
+                            Some(&[DIRT, STONE,POLISHED_ANDESITE]),
                             None,
                         );
                         editor.set_block(
@@ -371,7 +371,7 @@ fn generate_subway(editor: &mut WorldEditor, element: &ProcessedWay) {
                             bx + dx,
                             ground_level + 3,
                             bz + dz,
-                            Some(&[DIRT, STONE]),
+                            Some(&[DIRT, STONE,POLISHED_ANDESITE]),
                             None,
                         );
                     }
@@ -402,7 +402,7 @@ fn generate_subway(editor: &mut WorldEditor, element: &ProcessedWay) {
                 bx,
                 ground_level + 1,
                 bz,
-                Some(&[DIRT, STONE]),
+                Some(&[DIRT, STONE,POLISHED_ANDESITE]),
                 None,
             );
             editor.set_block(AIR, bx, ground_level + 2, bz, Some(&[DIRT, STONE]), None);
