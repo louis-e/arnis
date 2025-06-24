@@ -44,7 +44,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
                     barrier_height = 2;
                 }
                 Some("concrete" | "stone") => {
-                    barrier_material = ANDESITE_WALL;
+                    barrier_material = STONE_BRICK_WALL;
                     barrier_height = 2;
                 }
                 Some("glass") => {
