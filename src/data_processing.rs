@@ -96,7 +96,7 @@ pub fn generate_world(
                 } else if node.tags.contains_key("amenity") {
                     amenities::generate_amenities(&mut editor, element, args);
                 } else if node.tags.contains_key("barrier") {
-                    barriers::generate_barriers(&mut editor, element);
+                    barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, args);
                 } else if node.tags.contains_key("tourism") {
