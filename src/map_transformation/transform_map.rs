@@ -23,9 +23,9 @@ pub fn transform_map(
                 .expect("Failed to parse map transformations config json");
 
             let ops = operator_vec_from_json(&opjson)
-                .map_err(|e| format!("Map transformations json format error:\n{}", e))
+                .map_err(|e| format!("Map transformations json format error:\n{e}"))
                 .unwrap_or_else(|e| {
-                    eprintln!("{}", e);
+                    eprintln!("{e}");
                     panic!();
                 });
 

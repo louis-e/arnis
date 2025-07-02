@@ -104,8 +104,7 @@ pub fn fetch_elevation_data(
                 .unwrap_or(&default_mapbox_access_token);
             println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from Mapbox API");
             let url: String = format!(
-                "https://api.mapbox.com/v4/mapbox.terrain-rgb/{}/{}/{}.pngraw?access_token={}",
-                zoom, tile_x, tile_y, mapbox_access_token
+                "https://api.mapbox.com/v4/mapbox.terrain-rgb/{zoom}/{tile_x}/{tile_y}.pngraw?access_token={mapbox_access_token}"
             );
 
             let response: reqwest::blocking::Response = client.get(&url).send()?;

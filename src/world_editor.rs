@@ -328,10 +328,10 @@ impl<'a> WorldEditor<'a> {
         let mut block_entities = HashMap::new();
 
         let messages = vec![
-            Value::String(format!("\"{}\"", line1)),
-            Value::String(format!("\"{}\"", line2)),
-            Value::String(format!("\"{}\"", line3)),
-            Value::String(format!("\"{}\"", line4)),
+            Value::String(format!("\"{line1}\"")),
+            Value::String(format!("\"{line2}\"")),
+            Value::String(format!("\"{line3}\"")),
+            Value::String(format!("\"{line4}\"")),
         ];
 
         let mut text_data = HashMap::new();

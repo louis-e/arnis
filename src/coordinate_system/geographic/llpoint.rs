@@ -11,11 +11,11 @@ impl LLPoint {
         let lng_in_range = (-180.0..=180.0).contains(&lng) && (-180.0..=180.0).contains(&lng);
 
         if !lat_in_range {
-            return Err(format!("Latitude {} not in range -90.0..=90.0", lat));
+            return Err(format!("Latitude {lat} not in range -90.0..=90.0"));
         }
 
         if !lng_in_range {
-            return Err(format!("Longitude {} not in range -180.0..=180.0", lng));
+            return Err(format!("Longitude {lng} not in range -180.0..=180.0"));
         }
 
         Ok(Self { lat, lng })

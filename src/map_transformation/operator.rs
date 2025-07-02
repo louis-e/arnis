@@ -29,10 +29,10 @@ pub fn operator_from_json(config: &serde_json::Value) -> Result<Box<dyn Operator
 
     let operator_result: Result<Box<dyn Operator>, String> = match operation_str {
         "translate" => translator_from_json(operator_config),
-        _ => Err(format!("Unrecognized operation type '{}'", operation_str)),
+        _ => Err(format!("Unrecognized operation type '{operation_str}'")),
     };
 
-    operator_result.map_err(|e| format!("Operator config format error:\n{}", e))
+    operator_result.map_err(|e| format!("Operator config format error:\n{e}"))
 }
 
 pub fn operator_vec_from_json(list: &serde_json::Value) -> Result<Vec<Box<dyn Operator>>, String> {
@@ -45,7 +45,7 @@ pub fn operator_vec_from_json(list: &serde_json::Value) -> Result<Vec<Box<dyn Op
         .enumerate()
         .map(|(i, v)| {
             operator_from_json(v)
-                .map_err(|e| format!("Operator dict at index {} format error:\n{}", i, e))
+                .map_err(|e| format!("Operator dict at index {i} format error:\n{e}"))
         })
         .collect()
 }

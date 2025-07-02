@@ -31,10 +31,10 @@ pub fn translator_from_json(config: &serde_json::Value) -> Result<Box<dyn Operat
                     .map_err(|e| e.to_string());
             upper_result.map(|o| o as Box<dyn Operator>)
         }
-        _ => Err(format!("Unrecognized translator type '{}'", type_str)),
+        _ => Err(format!("Unrecognized translator type '{type_str}'")),
     };
 
-    translator_result.map_err(|e| format!("Translator config format error:\n{}", e))
+    translator_result.map_err(|e| format!("Translator config format error:\n{e}"))
 }
 
 /// Translate elements and bounding box by a vector

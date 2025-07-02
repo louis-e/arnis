@@ -176,7 +176,7 @@ pub fn parse_osm_data(
 
     let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
         .unwrap_or_else(|e| {
-            eprintln!("Error in defining coordinate transformation:\n{}", e);
+            eprintln!("Error in defining coordinate transformation:\n{e}");
             panic!();
         });
 
@@ -195,7 +195,7 @@ pub fn parse_osm_data(
     for element in data.nodes {
         if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
             let llpoint = LLPoint::new(lat, lon).unwrap_or_else(|e| {
-                eprintln!("Encountered invalid node element:\n{}", e);
+                eprintln!("Encountered invalid node element:\n{e}");
                 panic!();
             });
 

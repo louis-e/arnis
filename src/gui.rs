@@ -22,8 +22,8 @@ pub fn run_gui() {
 
     // Set a custom panic hook to log panic information
     panic::set_hook(Box::new(|panic_info| {
-        let message = format!("Application panicked: {:?}", panic_info);
-        error!("{}", message);
+        let message = format!("Application panicked: {panic_info:?}");
+        error!("{message}");
         std::process::exit(1);
     }));
 
@@ -145,14 +145,14 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
     // Check for both "Arnis World X" and "Arnis World X: Location" patterns
     let mut counter: i32 = 1;
     let unique_name: String = loop {
-        let candidate_name: String = format!("Arnis World {}", counter);
+        let candidate_name: String = format!("Arnis World {counter}");
         let candidate_path: PathBuf = base_path.join(&candidate_name);
 
         // Check for exact match (no location suffix)
         let exact_match_exists = candidate_path.exists();
 
         // Check for worlds with location suffix (Arnis World X: Location)
-        let location_pattern = format!("Arnis World {}: ", counter);
+        let location_pattern = format!("Arnis World {counter}: ");
         let location_match_exists = fs::read_dir(base_path)
             .map(|entries| {
                 entries
@@ -172,13 +172,13 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
 
     // Create the new world directory structure
     fs::create_dir_all(new_world_path.join("region"))
-        .map_err(|e| format!("Failed to create world directory: {}", e))?;
+        .map_err(|e| format!("Failed to create world directory: {e}"))?;
 
     // Copy the region template file
     const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
     let region_path = new_world_path.join("region").join("r.0.0.mca");
     fs::write(&region_path, REGION_TEMPLATE)
-        .map_err(|e| format!("Failed to create region file: {}", e))?;
+        .map_err(|e| format!("Failed to create region file: {e}"))?;
 
     // Add the level.dat file
     const LEVEL_TEMPLATE: &[u8] = include_bytes!("../mcassets/level.dat");
@@ -188,11 +188,11 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
     let mut decompressed_data = Vec::new();
     decoder
         .read_to_end(&mut decompressed_data)
-        .map_err(|e| format!("Failed to decompress level.template: {}", e))?;
+        .map_err(|e| format!("Failed to decompress level.template: {e}"))?;
 
     // Parse the decompressed NBT data
     let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
-        .map_err(|e| format!("Failed to parse level.dat template: {}", e))?;
+        .map_err(|e| format!("Failed to parse level.dat template: {e}"))?;
 
     // Modify the LevelName, LastPlayed and player position fields
     if let Value::Compound(ref mut root) = level_data {
@@ -203,7 +203,7 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
             // Update LastPlayed to the current Unix time in milliseconds
             let current_time = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| format!("Failed to get current time: {}", e))?;
+                .map_err(|e| format!("Failed to get current time: {e}"))?;
             let current_time_millis = current_time.as_millis() as i64;
             data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
 
@@ -232,25 +232,25 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
 
     // Serialize the updated NBT data back to bytes
     let serialized_level_data: Vec<u8> = fastnbt::to_bytes(&level_data)
-        .map_err(|e| format!("Failed to serialize updated level.dat: {}", e))?;
+        .map_err(|e| format!("Failed to serialize updated level.dat: {e}"))?;
 
     // Compress the serialized data back to gzip
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     encoder
         .write_all(&serialized_level_data)
-        .map_err(|e| format!("Failed to compress updated level.dat: {}", e))?;
+        .map_err(|e| format!("Failed to compress updated level.dat: {e}"))?;
     let compressed_level_data = encoder
         .finish()
-        .map_err(|e| format!("Failed to finalize compression for level.dat: {}", e))?;
+        .map_err(|e| format!("Failed to finalize compression for level.dat: {e}"))?;
 
     // Write the level.dat file
     fs::write(new_world_path.join("level.dat"), compressed_level_data)
-        .map_err(|e| format!("Failed to create level.dat file: {}", e))?;
+        .map_err(|e| format!("Failed to create level.dat file: {e}"))?;
 
     // Add the icon.png file
     const ICON_TEMPLATE: &[u8] = include_bytes!("../mcassets/icon.png");
     fs::write(new_world_path.join("icon.png"), ICON_TEMPLATE)
-        .map_err(|e| format!("Failed to create icon.png file: {}", e))?;
+        .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
 
     Ok(new_world_path.display().to_string())
 }
@@ -332,7 +332,7 @@ fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
             area_name
         };
 
-    let new_name = format!("{}: {}", base_name, truncated_area_name);
+    let new_name = format!("{base_name}: {truncated_area_name}");
 
     // Update the level.dat file with the new name
     if let Ok(level_data) = std::fs::read(&level_path) {
@@ -354,10 +354,7 @@ fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
                             if encoder.write_all(&serialized_data).is_ok() {
                                 if let Ok(compressed_data) = encoder.finish() {
                                     if let Err(e) = std::fs::write(&level_path, compressed_data) {
-                                        eprintln!(
-                                            "Failed to update level.dat with area name: {}",
-                                            e
-                                        );
+                                        eprintln!("Failed to update level.dat with area name: {e}");
                                     }
                                 }
                             }
@@ -387,9 +384,9 @@ fn update_player_position(
 
     // Parse geometrical point and bounding box
     let llpoint =
-        LLPoint::new(lat, lng).map_err(|e| format!("Failed to parse spawn point:\n{}", e))?;
+        LLPoint::new(lat, lng).map_err(|e| format!("Failed to parse spawn point:\n{e}"))?;
     let llbbox = LLBBox::from_str(&bbox_text)
-        .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{}", e))?;
+        .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{e}"))?;
 
     // Check if spawn point is within the bbox
     if !llbbox.contains(&llpoint) {
@@ -398,10 +395,7 @@ fn update_player_position(
 
     // Convert lat/lng to Minecraft coordinates
     let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale).map_err(|e| {
-        format!(
-            "Failed to build transformation on coordinate systems:\n{}",
-            e
-        )
+        format!("Failed to build transformation on coordinate systems:\n{e}")
     })?;
 
     let xzpoint = transformer.transform_point(llpoint);
@@ -412,25 +406,25 @@ fn update_player_position(
     // Read and update the level.dat file
     let level_path = PathBuf::from(world_path).join("level.dat");
     if !level_path.exists() {
-        return Err(format!("Level.dat not found at {:?}", level_path));
+        return Err(format!("Level.dat not found at {level_path:?}"));
     }
 
     // Read the level.dat file
     let level_data = match std::fs::read(&level_path) {
         Ok(data) => data,
-        Err(e) => return Err(format!("Failed to read level.dat: {}", e)),
+        Err(e) => return Err(format!("Failed to read level.dat: {e}")),
     };
 
     // Decompress and parse the NBT data
     let mut decoder = GzDecoder::new(level_data.as_slice());
     let mut decompressed_data = Vec::new();
     if let Err(e) = decoder.read_to_end(&mut decompressed_data) {
-        return Err(format!("Failed to decompress level.dat: {}", e));
+        return Err(format!("Failed to decompress level.dat: {e}"));
     }
 
     let mut nbt_data = match fastnbt::from_bytes::<Value>(&decompressed_data) {
         Ok(data) => data,
-        Err(e) => return Err(format!("Failed to parse level.dat NBT data: {}", e)),
+        Err(e) => return Err(format!("Failed to parse level.dat NBT data: {e}")),
     };
 
     // Update player position and world spawn point
@@ -461,12 +455,12 @@ fn update_player_position(
     // Serialize and save the updated level.dat
     let serialized_data = match fastnbt::to_bytes(&nbt_data) {
         Ok(data) => data,
-        Err(e) => return Err(format!("Failed to serialize updated level.dat: {}", e)),
+        Err(e) => return Err(format!("Failed to serialize updated level.dat: {e}")),
     };
 
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
     if let Err(e) = encoder.write_all(&serialized_data) {
-        return Err(format!("Failed to compress updated level.dat: {}", e));
+        return Err(format!("Failed to compress updated level.dat: {e}"));
     }
 
     let compressed_data = match encoder.finish() {
@@ -481,7 +475,7 @@ fn update_player_position(
 
     // Write the updated level.dat file
     if let Err(e) = std::fs::write(level_path, compressed_data) {
-        return Err(format!("Failed to write updated level.dat: {}", e));
+        return Err(format!("Failed to write updated level.dat: {e}"));
     }
 
     Ok(())
@@ -496,7 +490,7 @@ fn gui_get_version() -> String {
 fn gui_check_for_updates() -> Result<bool, String> {
     match version_check::check_for_updates() {
         Ok(is_newer) => Ok(is_newer),
-        Err(e) => Err(format!("Error checking for updates: {}", e)),
+        Err(e) => Err(format!("Error checking for updates: {e}")),
     }
 }
 
@@ -524,7 +518,7 @@ fn gui_start_generation(
             let llbbox = match LLBBox::from_str(&bbox_text) {
                 Ok(bbox) => bbox,
                 Err(e) => {
-                    let error_msg = format!("Failed to parse bounding box: {}", e);
+                    let error_msg = format!("Failed to parse bounding box: {e}");
                     eprintln!("{}", error_msg);
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
@@ -532,7 +526,7 @@ fn gui_start_generation(
             };
 
             let llpoint = LLPoint::new(coords.0, coords.1)
-                .map_err(|e| format!("Failed to parse spawn point: {}", e))?;
+                .map_err(|e| format!("Failed to parse spawn point: {e}"))?;
 
             if llbbox.contains(&llpoint) {
                 // Spawn point is valid, update the player position
@@ -542,7 +536,7 @@ fn gui_start_generation(
                     bbox_text.clone(),
                     world_scale,
                 )
-                .map_err(|e| format!("Failed to set spawn point: {}", e))?;
+                .map_err(|e| format!("Failed to set spawn point: {e}"))?;
             }
         }
     }
@@ -553,7 +547,7 @@ fn gui_start_generation(
             let bbox = match LLBBox::from_str(&bbox_text) {
                 Ok(bbox) => bbox,
                 Err(e) => {
-                    let error_msg = format!("Failed to parse bounding box: {}", e);
+                    let error_msg = format!("Failed to parse bounding box: {e}");
                     eprintln!("{}", error_msg);
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
@@ -614,7 +608,7 @@ fn gui_start_generation(
                     Ok(())
                 }
                 Err(e) => {
-                    let error_msg = format!("Failed to fetch data: {}", e);
+                    let error_msg = format!("Failed to fetch data: {e}");
                     emit_gui_error(&error_msg);
                     Err(error_msg)
                 }
@@ -622,7 +616,7 @@ fn gui_start_generation(
         })
         .await
         {
-            let error_msg = format!("Error in blocking task: {}", e);
+            let error_msg = format!("Error in blocking task: {e}");
             eprintln!("{}", error_msg);
             emit_gui_error(&error_msg);
         }

@@ -19,29 +19,25 @@ impl XZBBox {
 
         if !lenx_ge_0 {
             return Err(format!(
-                "Invalid XZBBox::Rect from xz lengths: length x should >=0 , but encountered {}",
-                length_x
+                "Invalid XZBBox::Rect from xz lengths: length x should >=0 , but encountered {length_x}"
             ));
         }
 
         if !lenz_ge_0 {
             return Err(format!(
-                "Invalid XZBBox::Rect from xz lengths: length z should >=0 , but encountered {}",
-                length_x
+                "Invalid XZBBox::Rect from xz lengths: length z should >=0 , but encountered {length_x}"
             ));
         }
 
         if lenx_overflow {
             return Err(format!(
-                "Invalid XZBBox::Rect from xz lengths: length x too large for i32: {}",
-                length_x
+                "Invalid XZBBox::Rect from xz lengths: length x too large for i32: {length_x}"
             ));
         }
 
         if lenz_overflow {
             return Err(format!(
-                "Invalid XZBBox::Rect from xz lengths: length z too large for i32: {}",
-                length_z
+                "Invalid XZBBox::Rect from xz lengths: length z too large for i32: {length_z}"
             ));
         }
 
@@ -92,7 +88,7 @@ impl XZBBox {
 impl fmt::Display for XZBBox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Rect(r) => write!(f, "XZBBox::{}", r),
+            Self::Rect(r) => write!(f, "XZBBox::{r}"),
         }
     }
 }

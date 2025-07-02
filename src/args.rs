@@ -59,14 +59,14 @@ pub struct Args {
 fn validate_minecraft_world_path(path: &str) -> Result<String, String> {
     let mc_world_path = Path::new(path);
     if !mc_world_path.exists() {
-        return Err(format!("Path does not exist: {}", path));
+        return Err(format!("Path does not exist: {path}"));
     }
     if !mc_world_path.is_dir() {
-        return Err(format!("Path is not a directory: {}", path));
+        return Err(format!("Path is not a directory: {path}"));
     }
     let region = mc_world_path.join("region");
     if !region.is_dir() {
-        return Err(format!("No Minecraft world found at {:?}", region));
+        return Err(format!("No Minecraft world found at {region:?}"));
     }
     Ok(path.to_string())
 }

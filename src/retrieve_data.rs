@@ -42,7 +42,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 );
                 emit_gui_error("Request timed out. Try selecting a smaller area.");
             } else {
-                eprintln!("{}", format!("Error! {:.52}", e).red().bold());
+                eprintln!("{}", format!("Error! {e:.52}").red().bold());
                 emit_gui_error(&format!("{:.52}", e.to_string()));
             }
             // Always propagate errors
@@ -55,7 +55,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
 fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("curl")
         .arg("-s") // Add silent mode to suppress output
-        .arg(format!("{}?data={}", url, query))
+        .arg(format!("{url}?data={query}"))
         .output()?;
 
     if !output.status.success() {
@@ -69,7 +69,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
 fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("wget")
         .arg("-qO-") // Use `-qO-` to output the result directly to stdout
-        .arg(format!("{}?data={}", url, query))
+        .arg(format!("{url}?data={query}"))
         .output()?;
 
     if !output.status.success() {
@@ -152,10 +152,7 @@ pub fn fetch_data_from_overpass(
         let mut attempt = 0;
         let max_attempts = 1;
         let response: String = loop {
-            println!(
-                "Downloading from {} with method {}...",
-                url, download_method
-            );
+            println!("Downloading from {url} with method {download_method}...");
             let result = match download_method {
                 "requests" => download_with_reqwest(url, &query),
                 "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
@@ -182,7 +179,7 @@ pub fn fetch_data_from_overpass(
         if let Some(save_file) = save_file {
             let mut file: File = File::create(save_file)?;
             file.write_all(response.as_bytes())?;
-            println!("API response saved to: {}", save_file);
+            println!("API response saved to: {save_file}");
         }
 
         let data: Value = serde_json::from_str(&response)?;
@@ -201,9 +198,9 @@ pub fn fetch_data_from_overpass(
                     // Handle other Overpass API errors if present in the remark field
                     eprintln!(
                         "{}",
-                        format!("Error! API returned: {}", remark).red().bold()
+                        format!("Error! API returned: {remark}").red().bold()
                     );
-                    emit_gui_error(&format!("API returned: {}", remark));
+                    emit_gui_error(&format!("API returned: {remark}"));
                 }
             } else {
                 // General case for when there are no elements and no specific remark
@@ -217,7 +214,7 @@ pub fn fetch_data_from_overpass(
             }
 
             if debug {
-                println!("Additional debug information: {}", data);
+                println!("Additional debug information: {data}");
             }
 
             if !is_running_with_gui() {
@@ -237,10 +234,7 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
 
-    let url = format!(
-        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={}&lon={}&addressdetails=1",
-        lat, lon
-    );
+    let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
 
     let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
 

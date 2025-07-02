@@ -121,13 +121,13 @@ impl Ground {
 
         // Ensure filename has .png extension
         let filename: String = if !filename.ends_with(".png") {
-            format!("{}.png", filename)
+            format!("{filename}.png")
         } else {
             filename.to_string()
         };
 
         if let Err(e) = img.save(&filename) {
-            eprintln!("Failed to save debug image: {}", e);
+            eprintln!("Failed to save debug image: {e}");
         }
     }
 }

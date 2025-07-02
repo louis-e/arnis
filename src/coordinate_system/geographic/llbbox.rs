@@ -14,14 +14,12 @@ impl LLBBox {
     pub fn new(min_lat: f64, min_lng: f64, max_lat: f64, max_lng: f64) -> Result<Self, String> {
         if min_lng >= max_lng {
             return Err(format!(
-                "Invalid LLBBox: min_lng {} >= max_lng {} ",
-                min_lng, max_lng
+                "Invalid LLBBox: min_lng {min_lng} >= max_lng {max_lng}"
             ));
         }
         if min_lat >= max_lat {
             return Err(format!(
-                "Invalid LLBBox: min_lat {} >= max_lat {}",
-                min_lat, max_lat
+                "Invalid LLBBox: min_lat {min_lat} >= max_lat {max_lat}"
             ));
         }
 
