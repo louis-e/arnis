@@ -1,10 +1,3 @@
-// Function to handle language selection
-function handleLanguageSelection(selectElement) {
-    const selectedValue = selectElement.value;
-    // No flag-related styling is needed anymore
-    // This function remains as a placeholder in case we need to add functionality later
-}
-
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function () {
     // Get language selector
@@ -24,8 +17,6 @@ document.addEventListener('DOMContentLoaded', function () {
         else if (availableOptions.includes(currentLang.split('-')[0])) {
             languageSelect.value = currentLang.split('-')[0];
         }
-        // Initialize language selection
-        handleLanguageSelection(languageSelect);
 
         // Handle language change
         languageSelect.addEventListener('change', function () {
