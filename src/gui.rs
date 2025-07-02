@@ -394,9 +394,8 @@ fn update_player_position(
     }
 
     // Convert lat/lng to Minecraft coordinates
-    let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale).map_err(|e| {
-        format!("Failed to build transformation on coordinate systems:\n{e}")
-    })?;
+    let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale)
+        .map_err(|e| format!("Failed to build transformation on coordinate systems:\n{e}"))?;
 
     let xzpoint = transformer.transform_point(llpoint);
 
@@ -465,12 +464,7 @@ fn update_player_position(
 
     let compressed_data = match encoder.finish() {
         Ok(data) => data,
-        Err(e) => {
-            return Err(format!(
-                "Failed to finalize compression for level.dat: {}",
-                e
-            ))
-        }
+        Err(e) => return Err(format!("Failed to finalize compression for level.dat: {e}")),
     };
 
     // Write the updated level.dat file
@@ -519,7 +513,7 @@ fn gui_start_generation(
                 Ok(bbox) => bbox,
                 Err(e) => {
                     let error_msg = format!("Failed to parse bounding box: {e}");
-                    eprintln!("{}", error_msg);
+                    eprintln!("{error_msg}");
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
                 }
@@ -548,7 +542,7 @@ fn gui_start_generation(
                 Ok(bbox) => bbox,
                 Err(e) => {
                     let error_msg = format!("Failed to parse bounding box: {e}");
-                    eprintln!("{}", error_msg);
+                    eprintln!("{error_msg}");
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
                 }
@@ -617,7 +611,7 @@ fn gui_start_generation(
         .await
         {
             let error_msg = format!("Error in blocking task: {e}");
-            eprintln!("{}", error_msg);
+            eprintln!("{error_msg}");
             emit_gui_error(&error_msg);
         }
     });

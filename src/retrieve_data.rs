@@ -196,10 +196,7 @@ pub fn fetch_data_from_overpass(
                     emit_gui_error("Try using a smaller area.");
                 } else {
                     // Handle other Overpass API errors if present in the remark field
-                    eprintln!(
-                        "{}",
-                        format!("Error! API returned: {remark}").red().bold()
-                    );
+                    eprintln!("{}", format!("Error! API returned: {remark}").red().bold());
                     emit_gui_error(&format!("API returned: {remark}"));
                 }
             } else {
