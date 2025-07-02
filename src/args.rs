@@ -1,4 +1,4 @@
-use crate::bbox::BBox;
+use crate::coordinate_system::geographic::LLBBox;
 use clap::Parser;
 use std::path::Path;
 use std::time::Duration;
@@ -8,8 +8,8 @@ use std::time::Duration;
 #[command(author, version, about)]
 pub struct Args {
     /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true, value_parser = BBox::from_str)]
-    pub bbox: BBox,
+    #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
+    pub bbox: LLBBox,
 
     /// JSON file containing OSM data (optional)
     #[arg(long, group = "location")]
@@ -59,14 +59,14 @@ pub struct Args {
 fn validate_minecraft_world_path(path: &str) -> Result<String, String> {
     let mc_world_path = Path::new(path);
     if !mc_world_path.exists() {
-        return Err(format!("Path does not exist: {}", path));
+        return Err(format!("Path does not exist: {path}"));
     }
     if !mc_world_path.is_dir() {
-        return Err(format!("Path is not a directory: {}", path));
+        return Err(format!("Path is not a directory: {path}"));
     }
     let region = mc_world_path.join("region");
     if !region.is_dir() {
-        return Err(format!("No Minecraft world found at {:?}", region));
+        return Err(format!("No Minecraft world found at {region:?}"));
     }
     Ok(path.to_string())
 }

@@ -1,6 +1,5 @@
 use crate::args::Args;
-use crate::bbox::BBox;
-use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::progress::emit_gui_progress_update;
 use image::{Rgb, RgbImage};
@@ -23,7 +22,7 @@ impl Ground {
     }
 
     pub fn new_enabled(
-        bbox: &BBox,
+        bbox: &LLBBox,
         scale: f64,
         ground_level: i32,
         mapbox_access_token: &Option<String>,
@@ -122,13 +121,13 @@ impl Ground {
 
         // Ensure filename has .png extension
         let filename: String = if !filename.ends_with(".png") {
-            format!("{}.png", filename)
+            format!("{filename}.png")
         } else {
             filename.to_string()
         };
 
         if let Err(e) = img.save(&filename) {
-            eprintln!("Failed to save debug image: {}", e);
+            eprintln!("Failed to save debug image: {e}");
         }
     }
 }
