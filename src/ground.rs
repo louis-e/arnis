@@ -1,6 +1,10 @@
+
 use crate::args::Args;
-use crate::bbox::BBox;
-use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::{
+    cartesian::XZPoint,
+    geographic::LLBBox,
+    transformation::geo_distance,
+};
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::progress::emit_gui_progress_update;
 use image::{Rgb, RgbImage};
@@ -23,7 +27,7 @@ impl Ground {
     }
 
     pub fn new_enabled(
-        bbox: &BBox,
+        bbox: &LLBBox,
         scale: f64,
         ground_level: i32,
         mapbox_access_token: &Option<String>,

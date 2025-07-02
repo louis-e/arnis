@@ -1,6 +1,5 @@
 use crate::args::Args;
-use crate::bbox;
-use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::data_processing;
 use crate::ground;
 use crate::map_transformation;
@@ -257,7 +256,7 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
 }
 
 /// Adds localized area name to the world name in level.dat
-fn add_localized_world_name(world_path_str: &str, bbox: &bbox::BBox) -> String {
+fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
     let world_path = PathBuf::from(world_path_str);
 
     // Only proceed if the path exists
@@ -373,59 +372,59 @@ fn add_localized_world_name(world_path_str: &str, bbox: &bbox::BBox) -> String {
     world_path_str.to_string()
 }
 
-// Function to check if a spawn point is within the bounding box
-fn is_spawn_point_within_bbox(spawn_point: (f64, f64), bbox_text: &str) -> Result<bool, String> {
-    use crate::bbox::BBox;
+// // Function to check if a spawn point is within the bounding box
+// fn is_spawn_point_within_bbox(spawn_point: (f64, f64), bbox_text: &str) -> Result<bool, String> {
+//     use crate::coordinate_system::geographic::LLBBox;
 
-    // Parse the bounding box
-    let bbox =
-        BBox::from_str(bbox_text).map_err(|e| format!("Failed to parse bounding box: {}", e))?;
+//     // Parse the bounding box
+//     let bbox =
+//         LLBBox::from_str(bbox_text).map_err(|e| format!("Failed to parse bounding box: {}", e))?;
 
-    let (lat, lng) = spawn_point;
+//     let (lat, lng) = spawn_point;
 
-    // Check if the spawn point is within the bounding box
-    let is_within = lat >= bbox.min().lat()
-        && lat <= bbox.max().lat()
-        && lng >= bbox.min().lng()
-        && lng <= bbox.max().lng();
+//     // Check if the spawn point is within the bounding box
+//     let is_within = lat >= bbox.min().lat()
+//         && lat <= bbox.max().lat()
+//         && lng >= bbox.min().lng()
+//         && lng <= bbox.max().lng();
 
-    Ok(is_within)
-}
+//     Ok(is_within)
+// }
 
 // Function to update player position in level.dat based on spawn point coordinates
+#[allow(dead_code)]
 fn update_player_position(
     world_path: &str,
     spawn_point: Option<(f64, f64)>,
     bbox_text: String,
     scale: f64,
 ) -> Result<(), String> {
-    use crate::bbox::BBox;
+    use crate::coordinate_system::transformation::CoordTransformer;
 
     let Some((lat, lng)) = spawn_point else {
         return Ok(()); // No spawn point selected, exit early
     };
 
+    // Parse geometrical point and bounding box
+    let llpoint =
+        LLPoint::new(lat, lng).map_err(|e| format!("Failed to parse spawn point:\n{}", e))?;
+    let llbbox = LLBBox::from_str(&bbox_text)
+        .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{}", e))?;
+
     // Check if spawn point is within the bbox
-    if let Ok(is_within) = is_spawn_point_within_bbox((lat, lng), &bbox_text) {
-        if !is_within {
-            return Err("Spawn point is outside the selected area".to_string());
-        }
-    } else {
-        return Err("Could not verify if spawn point is within bounding box".to_string());
+    if !llbbox.contains(&llpoint) {
+        return Err("Spawn point is outside the selected area".to_string());
     }
 
-    // Parse the bounding box from text
-    let bbox = BBox::from_str(&bbox_text)
-        .map_err(|e| format!("Failed to parse bounding box for spawn point: {}", e))?;
-
-    // Calculate map scale factors
-    let (scale_factor_z, scale_factor_x) = crate::osm_parser::geo_distance(bbox.min(), bbox.max());
-    let scale_factor_z = scale_factor_z.floor() * scale;
-    let scale_factor_x = scale_factor_x.floor() * scale;
-
     // Convert lat/lng to Minecraft coordinates
-    let (x, z) =
-        osm_parser::lat_lon_to_minecraft_coords(lat, lng, bbox, scale_factor_z, scale_factor_x);
+    let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale).map_err(|e| {
+        format!(
+            "Failed to build transformation on coordinate systems:\n{}",
+            e
+        )
+    })?;
+
+    let xzpoint = transformer.transform_point(llpoint);
 
     // Default y spawn position since terrain elevation cannot be determined yet
     let y = 150.0;
@@ -458,21 +457,21 @@ fn update_player_position(
     if let Value::Compound(ref mut root) = nbt_data {
         if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
             // Set world spawn point
-            data.insert("SpawnX".to_string(), Value::Int(x));
+            data.insert("SpawnX".to_string(), Value::Int(xzpoint.x));
             data.insert("SpawnY".to_string(), Value::Int(y as i32));
-            data.insert("SpawnZ".to_string(), Value::Int(z));
+            data.insert("SpawnZ".to_string(), Value::Int(xzpoint.z));
 
             // Update player position
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
                     if let Value::Double(ref mut pos_x) = pos.get_mut(0).unwrap() {
-                        *pos_x = x as f64;
+                        *pos_x = xzpoint.x as f64;
                     }
                     if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
                         *pos_y = y;
                     }
                     if let Value::Double(ref mut pos_z) = pos.get_mut(2).unwrap() {
-                        *pos_z = z as f64;
+                        *pos_z = xzpoint.z as f64;
                     }
                 }
             }
@@ -523,6 +522,7 @@ fn gui_check_for_updates() -> Result<bool, String> {
 
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
+#[allow(unused_variables)]
 fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
@@ -534,34 +534,13 @@ fn gui_start_generation(
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
 ) -> Result<(), String> {
-    use bbox::BBox;
     use progress::emit_gui_error;
-
-    // If spawn point was chosen and the world is new, check and set the spawn point
-    if is_new_world && spawn_point.is_some() {
-        // Verify the spawn point is within bounds
-        if let Some(coords) = spawn_point {
-            match is_spawn_point_within_bbox(coords, &bbox_text) {
-                Ok(true) => {
-                    // Spawn point is valid, update the player position
-                    update_player_position(
-                        &selected_world,
-                        spawn_point,
-                        bbox_text.clone(),
-                        world_scale,
-                    )
-                    .map_err(|e| format!("Failed to set spawn point: {}", e))?;
-                }
-                Ok(false) => {}
-                Err(_) => {}
-            }
-        }
-    }
+    use LLBBox;
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
             // Parse the bounding box from the text with proper error handling
-            let bbox = match BBox::from_str(&bbox_text) {
+            let bbox = match LLBBox::from_str(&bbox_text) {
                 Ok(bbox) => bbox,
                 Err(e) => {
                     let error_msg = format!("Failed to parse bounding box: {}", e);
@@ -597,7 +576,7 @@ fn gui_start_generation(
             // Run data fetch and world generation
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, scale_factor_x, scale_factor_z) =
+                    let (mut parsed_elements, mut xzbbox) =
                         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
@@ -613,9 +592,6 @@ fn gui_start_generation(
                     });
 
                     let mut ground = ground::generate_ground_data(&args);
-
-                    let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
-                        .expect("Parsed world lengths < 0");
 
                     // Transform map (parsed_elements). Operations are defined in a json file
                     map_transformation::transform_map(
