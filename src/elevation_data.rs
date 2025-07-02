@@ -1,7 +1,4 @@
-use crate::coordinate_system::{
-    geographic::LLBBox,
-    transformation::geo_distance,
-};
+use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
 use image::Rgb;
 use std::path::Path;
 
