@@ -13,7 +13,7 @@
   "winter_mode": "Téli mód",
   "world_scale": "Világ nagysága",
   "custom_bounding_box": "Egyéni határoló keret",
-  "floodfill_timeout": "Floodfill Timeout (sec):",
+  "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Földszint",
   "choose_world_modal_title": "Világ kiválasztása",
   "select_existing_world": "Már létező világ kiválasztása",

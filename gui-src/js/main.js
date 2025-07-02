@@ -37,26 +37,48 @@ function invalidJSON(response) {
 }
 
 /**
- * Fetches and returns localization data based on user's language
- * Falls back to English if requested language is not available
+ * Fetches a specific language file
+ * @param {string} languageCode - The language code to fetch
  * @returns {Promise<Object>} The localization JSON object
  */
-async function getLocalization() {
-  const lang = navigator.language;
-  let response = await fetch(`./locales/${lang}.json`);
+async function fetchLanguage(languageCode) {
+  let response = await fetch(`./locales/${languageCode}.json`);
 
-  // Try with only first part of language code
+  // Try with only first part of language code if not found
   if (invalidJSON(response)) {
-    response = await fetch(`./locales/${lang.split('-')[0]}.json`);
+    response = await fetch(`./locales/${languageCode.split('-')[0]}.json`);
 
     // Fallback to default English localization
     if (invalidJSON(response)) {
       response = await fetch(DEFAULT_LOCALE_PATH);
     }
   }
-
   const localization = await response.json();
   return localization;
+}
+
+// Expose language functions to window for use by language-selector.js
+window.fetchLanguage = fetchLanguage;
+window.applyLocalization = applyLocalization;
+window.initFooter = initFooter;
+
+/**
+ * Fetches and returns localization data based on user's language
+ * Falls back to English if requested language is not available
+ * @returns {Promise<Object>} The localization JSON object
+ */
+async function getLocalization() {
+  // Check if user has a saved language preference
+  const savedLanguage = localStorage.getItem('arnis-language');
+  
+  // If there's a saved preference, use it
+  if (savedLanguage) {
+    return await fetchLanguage(savedLanguage);
+  }
+  
+  // Otherwise use the browser's language
+  const lang = navigator.language;
+  return await fetchLanguage(lang);
 }
 
 /**
@@ -100,6 +122,9 @@ async function applyLocalization(localization) {
     "label[data-localize='custom_bounding_box']": "custom_bounding_box",
     "label[data-localize='floodfill_timeout']": "floodfill_timeout",
     "label[data-localize='ground_level']": "ground_level",
+    "label[data-localize='language']": "language",
+    "label[data-localize='terrain']": "terrain",
+    "label[data-localize='fillground']": "fillground",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -131,10 +156,18 @@ async function initFooter() {
 
   const footerElement = document.querySelector(".footer-link");
   if (footerElement) {
-    footerElement.textContent =
-      footerElement.textContent
-        .replace("{year}", currentYear)
-        .replace("{version}", version);
+    // Get the original text from localization if available, or use the current text
+    let footerText = footerElement.textContent;
+
+    // Check if the text is from localization and contains placeholders
+    if (window.localization && window.localization.footer_text) {
+      footerText = window.localization.footer_text;
+    }
+
+    // Replace placeholders with actual values
+    footerElement.textContent = footerText
+      .replace("{year}", currentYear)
+      .replace("{version}", version);
   }
 }
 
@@ -224,10 +257,40 @@ function initSettings() {
   
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
-
   // Update slider value display
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
+  });
+
+  // Language selector
+  const languageSelect = document.getElementById("language-select");
+  // Set initial value based on current language
+  const currentLang = navigator.language;
+  const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
+  
+  // Try to match the exact language code first
+  if (availableOptions.includes(currentLang)) {
+    languageSelect.value = currentLang;
+  } 
+  // Try to match just the base language code
+  else if (availableOptions.includes(currentLang.split('-')[0])) {
+    languageSelect.value = currentLang.split('-')[0];
+  }
+  // Default to English
+  else {
+    languageSelect.value = "en";
+  }
+
+  // Handle language change
+  languageSelect.addEventListener("change", async () => {
+    const selectedLanguage = languageSelect.value;
+    
+    // Store the selected language in localStorage for persistence
+    localStorage.setItem('arnis-language', selectedLanguage);
+    
+    // Reload localization with the new language
+    const localization = await fetchLanguage(selectedLanguage);
+    await applyLocalization(localization);
   });
 
 
