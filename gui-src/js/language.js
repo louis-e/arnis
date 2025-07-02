@@ -1,4 +1,3 @@
-
 const DEFAULT_LOCALE_PATH = `./locales/en.json`;
 
 /**

@@ -1,4 +1,3 @@
-
 // Function to handle language selection
 function handleLanguageSelection(selectElement) {
     const selectedValue = selectElement.value;

@@ -5,7 +5,7 @@ let invoke;
 if (window.__TAURI__) {
   invoke = window.__TAURI__.core.invoke;
 } else {
-  function dummyFunc() {}
+  function dummyFunc() { }
   window.__TAURI__ = { event: { listen: dummyFunc } };
   invoke = dummyFunc;
 }
@@ -40,12 +40,12 @@ window.initFooter = initFooter;
 async function getLocalization() {
   // Check if user has a saved language preference
   const savedLanguage = localStorage.getItem('arnis-language');
-  
+
   // If there's a saved preference, use it
   if (savedLanguage) {
     return await fetchLanguage(savedLanguage);
   }
-  
+
   // Otherwise use the browser's language
   const lang = navigator.language;
   return await fetchLanguage(lang);
@@ -60,7 +60,7 @@ async function getLocalization() {
 async function localizeElement(json, elementObject, localizedStringKey) {
   const element =
     (!elementObject.element || elementObject.element === "")
-    ? document.querySelector(elementObject.selector) : elementObject.element;
+      ? document.querySelector(elementObject.selector) : elementObject.element;
   const attribute = localizedStringKey.startsWith("placeholder_") ? "placeholder" : "textContent";
 
   if (element) {
@@ -211,7 +211,7 @@ function initSettings() {
   const settingsModal = document.getElementById("settings-modal");
   const slider = document.getElementById("scale-value-slider");
   const sliderValue = document.getElementById("slider-value");
-  
+
   // Open settings modal
   function openSettings() {
     settingsModal.style.display = "flex";
@@ -223,9 +223,10 @@ function initSettings() {
   function closeSettings() {
     settingsModal.style.display = "none";
   }
-  
+
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
+
   // Update slider value display
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
@@ -236,11 +237,11 @@ function initSettings() {
   // Set initial value based on current language
   const currentLang = navigator.language;
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
-  
+
   // Try to match the exact language code first
   if (availableOptions.includes(currentLang)) {
     languageSelect.value = currentLang;
-  } 
+  }
   // Try to match just the base language code
   else if (availableOptions.includes(currentLang.split('-')[0])) {
     languageSelect.value = currentLang.split('-')[0];
@@ -253,10 +254,10 @@ function initSettings() {
   // Handle language change
   languageSelect.addEventListener("change", async () => {
     const selectedLanguage = languageSelect.value;
-    
+
     // Store the selected language in localStorage for persistence
     localStorage.setItem('arnis-language', selectedLanguage);
-    
+
     // Reload localization with the new language
     const localization = await fetchLanguage(selectedLanguage);
     await applyLocalization(localization);
@@ -289,7 +290,7 @@ function initSettings() {
 function initWorldPicker() {
   // World Picker
   const worldPickerModal = document.getElementById("world-modal");
-  
+
   // Open world picker modal
   function openWorldPicker() {
     worldPickerModal.style.display = "flex";
@@ -301,7 +302,7 @@ function initWorldPicker() {
   function closeWorldPicker() {
     worldPickerModal.style.display = "none";
   }
-  
+
   window.openWorldPicker = openWorldPicker;
   window.closeWorldPicker = closeWorldPicker;
 }
@@ -316,58 +317,58 @@ function handleBboxInput() {
   const bboxInfo = document.getElementById("bbox-info");
 
   inputBox.addEventListener("input", function () {
-      const input = inputBox.value.trim();
+    const input = inputBox.value.trim();
 
-      if (input === "") {
-          bboxInfo.textContent = "";
-          bboxInfo.style.color = "";
-          selectedBBox = "";
-          return;
-      }
+    if (input === "") {
+      bboxInfo.textContent = "";
+      bboxInfo.style.color = "";
+      selectedBBox = "";
+      return;
+    }
 
-      // Regular expression to validate bbox input (supports both comma and space-separated formats)
-      const bboxPattern = /^(-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)$/;
+    // Regular expression to validate bbox input (supports both comma and space-separated formats)
+    const bboxPattern = /^(-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)[,\s](-?\d+(\.\d+)?)$/;
 
-      if (bboxPattern.test(input)) {
-          const matches = input.match(bboxPattern);
+    if (bboxPattern.test(input)) {
+      const matches = input.match(bboxPattern);
 
-          // Extract coordinates (Lat / Lng order expected)
-          const lat1 = parseFloat(matches[1]);
-          const lng1 = parseFloat(matches[3]);
-          const lat2 = parseFloat(matches[5]);
-          const lng2 = parseFloat(matches[7]);
+      // Extract coordinates (Lat / Lng order expected)
+      const lat1 = parseFloat(matches[1]);
+      const lng1 = parseFloat(matches[3]);
+      const lat2 = parseFloat(matches[5]);
+      const lng2 = parseFloat(matches[7]);
 
-          // Validate latitude and longitude ranges in the expected Lat / Lng order
-          if (
-              lat1 >= -90 && lat1 <= 90 &&
-              lng1 >= -180 && lng1 <= 180 &&
-              lat2 >= -90 && lat2 <= 90 &&
-              lng2 >= -180 && lng2 <= 180
-          ) {
-              // Input is valid; trigger the event with consistent comma-separated format
-              const bboxText = `${lat1},${lng1},${lat2},${lng2}`;
-              window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
+      // Validate latitude and longitude ranges in the expected Lat / Lng order
+      if (
+        lat1 >= -90 && lat1 <= 90 &&
+        lng1 >= -180 && lng1 <= 180 &&
+        lat2 >= -90 && lat2 <= 90 &&
+        lng2 >= -180 && lng2 <= 180
+      ) {
+        // Input is valid; trigger the event with consistent comma-separated format
+        const bboxText = `${lat1},${lng1},${lat2},${lng2}`;
+        window.dispatchEvent(new MessageEvent('message', { data: { bboxText } }));
 
-              // Show custom bbox on the map
-              let map_container = document.querySelector('.map-container');
-              map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
-              map_container.contentWindow.location.reload();
+        // Show custom bbox on the map
+        let map_container = document.querySelector('.map-container');
+        map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
+        map_container.contentWindow.location.reload();
 
-              // Update the info text
-              localizeElement(window.localization, { element: bboxInfo }, "custom_selection_confirmed");
-              bboxInfo.style.color = "#7bd864";
-          } else {
-              // Valid numbers but invalid order or range
-              localizeElement(window.localization, { element: bboxInfo }, "error_coordinates_out_of_range");
-              bboxInfo.style.color = "#fecc44";
-              selectedBBox = "";
-          }
+        // Update the info text
+        localizeElement(window.localization, { element: bboxInfo }, "custom_selection_confirmed");
+        bboxInfo.style.color = "#7bd864";
       } else {
-          // Input doesn't match the required format
-          localizeElement(window.localization, { element: bboxInfo }, "invalid_format");
-          bboxInfo.style.color = "#fecc44";
-          selectedBBox = "";
+        // Valid numbers but invalid order or range
+        localizeElement(window.localization, { element: bboxInfo }, "error_coordinates_out_of_range");
+        bboxInfo.style.color = "#fecc44";
+        selectedBBox = "";
       }
+    } else {
+      // Input doesn't match the required format
+      localizeElement(window.localization, { element: bboxInfo }, "invalid_format");
+      bboxInfo.style.color = "#fecc44";
+      selectedBBox = "";
+    }
   });
 }
 
@@ -451,7 +452,7 @@ let isNewWorld = false;
 
 async function selectWorld(generate_new_world) {
   try {
-    const worldName = await invoke('gui_select_world', { generateNew: generate_new_world } );
+    const worldName = await invoke('gui_select_world', { generateNew: generate_new_world });
     if (worldName) {
       worldPath = worldName;
       isNewWorld = generate_new_world;
@@ -536,15 +537,15 @@ async function startGeneration() {
 
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
-        bboxText: selectedBBox,
-        selectedWorld: worldPath,
-        worldScale: scale,
-        groundLevel: ground_level,
-        floodfillTimeout: floodfill_timeout,
-        terrainEnabled: terrain,
-        fillgroundEnabled: fill_ground,
-        isNewWorld: isNewWorld,
-        spawnPoint: spawnPoint
+      bboxText: selectedBBox,
+      selectedWorld: worldPath,
+      worldScale: scale,
+      groundLevel: ground_level,
+      floodfillTimeout: floodfill_timeout,
+      terrainEnabled: terrain,
+      fillgroundEnabled: fill_ground,
+      isNewWorld: isNewWorld,
+      spawnPoint: spawnPoint
     });
 
     console.log("Generation process started.");
