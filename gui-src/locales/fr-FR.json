@@ -10,11 +10,11 @@
   "error_coordinates_out_of_range": "Erreur: Coordonnées hors de portée ou dans un ordre incorrect (besoin de la latitude avant la longitude).",
   "invalid_format": "Format invalide. Utilisez 'lat,lng,lat,lng' ou 'lat lng lat lng'.",
   "generation_process_started": "Processus de génération commencé.",
-  "winter_mode": "Mode hiver:",
-  "world_scale": "Échelle du monde:",
-  "custom_bounding_box": "Cadre de délimitation personnalisé:",
-  "floodfill_timeout": "Expiration du délai de remplissage (en secondes):",
-  "ground_level": "Niveau du sol:",
+  "winter_mode": "Mode hiver",
+  "world_scale": "Échelle du monde",
+  "custom_bounding_box": "Cadre de délimitation personnalisé",
+  "floodfill_timeout": "Expiration du délai de remplissage (en secondes)",
+  "ground_level": "Niveau du sol",
   "choose_world_modal_title": "Choisir un monde",
   "select_existing_world": "Sélectionner un monde existant",
   "generate_new_world": "Générer un nouveau monde",
@@ -34,5 +34,8 @@
   "license_and_credits": "Licence et crédits",
   "placeholder_bbox": "Format: lat,lng,lat,lng",
   "placeholder_floodfill": "Secondes",
-  "placeholder_ground": "Niveau du sol"
+  "placeholder_ground": "Niveau du sol",
+  "language": "Langue",
+  "terrain": "Terrain",
+  "fillground": "Remplir le sol"
 }
