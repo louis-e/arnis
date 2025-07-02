@@ -1,4 +1,5 @@
 import { licenseText } from './license.js';
+import { fetchLanguage, invalidJSON } from './language.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -25,37 +26,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFooter();
   await checkForUpdates();
 });
-
-/**
- * Checks if a JSON response is invalid or falls back to HTML
- * @param {Response} response - The fetch response object
- * @returns {boolean} True if the response is invalid JSON
- */
-function invalidJSON(response) {
-  // Workaround for Tauri always falling back to index.html for asset loading
-  return !response.ok || response.headers.get("Content-Type") === "text/html";
-}
-
-/**
- * Fetches a specific language file
- * @param {string} languageCode - The language code to fetch
- * @returns {Promise<Object>} The localization JSON object
- */
-async function fetchLanguage(languageCode) {
-  let response = await fetch(`./locales/${languageCode}.json`);
-
-  // Try with only first part of language code if not found
-  if (invalidJSON(response)) {
-    response = await fetch(`./locales/${languageCode.split('-')[0]}.json`);
-
-    // Fallback to default English localization
-    if (invalidJSON(response)) {
-      response = await fetch(DEFAULT_LOCALE_PATH);
-    }
-  }
-  const localization = await response.json();
-  return localization;
-}
 
 // Expose language functions to window for use by language-selector.js
 window.fetchLanguage = fetchLanguage;
@@ -98,8 +68,7 @@ async function localizeElement(json, elementObject, localizedStringKey) {
       element[attribute] = json[localizedStringKey];
     } else {
       // Fallback to default (English) string
-      const response = await fetch(DEFAULT_LOCALE_PATH);
-      const defaultJson = await response.json();
+      const defaultJson = await fetchLanguage('en');
       element[attribute] = defaultJson[localizedStringKey];
     }
   }
