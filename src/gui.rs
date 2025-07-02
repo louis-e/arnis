@@ -372,27 +372,7 @@ fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
     world_path_str.to_string()
 }
 
-// // Function to check if a spawn point is within the bounding box
-// fn is_spawn_point_within_bbox(spawn_point: (f64, f64), bbox_text: &str) -> Result<bool, String> {
-//     use crate::coordinate_system::geographic::LLBBox;
-
-//     // Parse the bounding box
-//     let bbox =
-//         LLBBox::from_str(bbox_text).map_err(|e| format!("Failed to parse bounding box: {}", e))?;
-
-//     let (lat, lng) = spawn_point;
-
-//     // Check if the spawn point is within the bounding box
-//     let is_within = lat >= bbox.min().lat()
-//         && lat <= bbox.max().lat()
-//         && lng >= bbox.min().lng()
-//         && lng <= bbox.max().lng();
-
-//     Ok(is_within)
-// }
-
 // Function to update player position in level.dat based on spawn point coordinates
-#[allow(dead_code)]
 fn update_player_position(
     world_path: &str,
     spawn_point: Option<(f64, f64)>,
@@ -536,6 +516,36 @@ fn gui_start_generation(
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
+
+    // If spawn point was chosen and the world is new, check and set the spawn point
+    if is_new_world && spawn_point.is_some() {
+        // Verify the spawn point is within bounds
+        if let Some(coords) = spawn_point {
+            let llbbox = match LLBBox::from_str(&bbox_text) {
+                Ok(bbox) => bbox,
+                Err(e) => {
+                    let error_msg = format!("Failed to parse bounding box: {}", e);
+                    eprintln!("{}", error_msg);
+                    emit_gui_error(&error_msg);
+                    return Err(error_msg);
+                }
+            };
+
+            let llpoint = LLPoint::new(coords.0, coords.1)
+                .map_err(|e| format!("Failed to parse spawn point: {}", e))?;
+
+            if llbbox.contains(&llpoint) {
+                // Spawn point is valid, update the player position
+                update_player_position(
+                    &selected_world,
+                    spawn_point,
+                    bbox_text.clone(),
+                    world_scale,
+                )
+                .map_err(|e| format!("Failed to set spawn point: {}", e))?;
+            }
+        }
+    }
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {

@@ -1,4 +1,7 @@
-use crate::bbox::BBox;
+use crate::coordinate_system::{
+    geographic::LLBBox,
+    transformation::geo_distance,
+};
 use image::Rgb;
 use std::path::Path;
 
@@ -26,7 +29,7 @@ pub struct ElevationData {
 }
 
 /// Calculates appropriate zoom level for the given bounding box
-fn calculate_zoom_level(bbox: &BBox) -> u8 {
+fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
     let lat_diff: f64 = (bbox.max().lat() - bbox.min().lat()).abs();
     let lng_diff: f64 = (bbox.max().lng() - bbox.min().lng()).abs();
     let max_diff: f64 = lat_diff.max(lng_diff);
@@ -43,14 +46,14 @@ fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
 }
 
 pub fn fetch_elevation_data(
-    bbox: &BBox,
+    bbox: &LLBBox,
     scale: f64,
     ground_level: i32,
     mapbox_access_token: &Option<String>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let default_mapbox_access_token = MAPBOX_PUBKEY.to_string();
     // Use OSM parser's scale calculation and apply user scale factor
-    let (scale_factor_z, scale_factor_x) = crate::osm_parser::geo_distance(bbox.min(), bbox.max());
+    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
     let scale_factor_x: f64 = scale_factor_x * scale;
     let scale_factor_z: f64 = scale_factor_z * scale;
 
@@ -198,7 +201,7 @@ pub fn fetch_elevation_data(
     })
 }
 
-fn get_tile_coordinates(bbox: &BBox, zoom: u8) -> Vec<(u32, u32)> {
+fn get_tile_coordinates(bbox: &LLBBox, zoom: u8) -> Vec<(u32, u32)> {
     // Convert lat/lng to tile coordinates
     let (x1, y1) = lat_lng_to_tile(bbox.min().lat(), bbox.min().lng(), zoom);
     let (x2, y2) = lat_lng_to_tile(bbox.max().lat(), bbox.max().lng(), zoom);
