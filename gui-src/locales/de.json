@@ -34,5 +34,8 @@
   "license_and_credits": "License and Credits",
   "placeholder_bbox": "Format: lat,lng,lat,lng",
   "placeholder_floodfill": "Sekunden",
-  "placeholder_ground": "Bodenhöhe"
+  "placeholder_ground": "Bodenhöhe",
+  "language": "Sprache",
+  "terrain": "Terrain",
+  "fillground": "Boden füllen"
 }

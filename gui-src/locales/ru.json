@@ -35,5 +35,7 @@
   "license_and_credits": "Лицензия и авторы",
   "placeholder_bbox": "Формат: широта,долгота,широта,долгота",
   "placeholder_floodfill": "Секунды",
-  "placeholder_ground": "Уровень земли"
+  "placeholder_ground": "Уровень земли",
+  "language": "Язык",
+  "fillground": "Заполнить землю"
 }

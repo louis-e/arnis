@@ -34,5 +34,8 @@
   "license_and_credits": "Licenc és elismerés.",
   "placeholder_bbox": "Formátum: lat,lng,lat,lng",
   "placeholder_floodfill": "Másodpercek",
-  "placeholder_ground": "Földszint"
+  "placeholder_ground": "Földszint",
+  "language": "Nyelv",
+  "terrain": "Terep",
+  "fillground": "Talaj feltöltése"
 }

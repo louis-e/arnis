@@ -35,5 +35,7 @@
   "license_and_credits": "Licencija ir padėkos",
   "placeholder_bbox": "Formatas: plat,lyg,plat,lyg",
   "placeholder_floodfill": "Sekundės",
-  "placeholder_ground": "Žemės lygis"
+  "placeholder_ground": "Žemės lygis",
+  "language": "Kalba",
+  "fillground": "Užpildyti pagrindą"
 }

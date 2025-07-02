@@ -34,5 +34,8 @@
   "license_and_credits": "许可证和致谢",
   "placeholder_bbox": "格式: lat,lng,lat,lng",
   "placeholder_floodfill": "秒",
-  "placeholder_ground": "地面高度"
+  "placeholder_ground": "地面高度",
+  "language": "语言",
+  "terrain": "地形",
+  "fillground": "填充地面"
 }

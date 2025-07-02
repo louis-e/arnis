@@ -34,5 +34,8 @@
   "license_and_credits": "الرخصة والمساهمون",
   "placeholder_bbox": "الصيغة: lat,lng,lat,lng",
   "placeholder_floodfill": "ثوانٍ",
-  "placeholder_ground": "مستوى الأرض"
+  "placeholder_ground": "مستوى الأرض",
+  "language": "اللغة",
+  "terrain": "التضاريس",
+  "fillground": "ملء الأرض"
 }

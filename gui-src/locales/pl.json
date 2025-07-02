@@ -35,5 +35,7 @@
   "license_and_credits": "Licencja i autorzy",
   "placeholder_bbox": "Format: szer,dł,szer,dł",
   "placeholder_floodfill": "Sekundy",
-  "placeholder_ground": "Wysokość"
+  "placeholder_ground": "Wysokość",
+  "language": "Język",
+  "fillground": "Wypełnij podłoże"
 }

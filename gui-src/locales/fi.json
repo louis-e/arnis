@@ -34,5 +34,8 @@
   "license_and_credits": "Lisenssi ja krediitit",
   "placeholder_bbox": "Formaatti: lat,lng,lat,lng",
   "placeholder_floodfill": "Sekuntia",
-  "placeholder_ground": "Maataso"
+  "placeholder_ground": "Maataso",
+  "language": "Kieli",
+  "terrain": "Maasto",
+  "fillground": "Täytä maa"
 }

@@ -34,5 +34,8 @@
   "license_and_credits": "License and Credits",
   "placeholder_bbox": "Format: lat,lng,lat,lng",
   "placeholder_floodfill": "Seconds",
-  "placeholder_ground": "Ground Level"
+  "placeholder_ground": "Ground Level",
+  "language": "Мова",
+  "terrain": "Рельєф",
+  "fillground": "Заповнити землю"
 }
