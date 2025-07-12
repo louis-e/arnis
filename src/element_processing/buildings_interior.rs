@@ -231,8 +231,9 @@ pub fn generate_building_interior(
 
                 // Map the world coordinates to pattern coordinates using modulo
                 // This creates a seamless tiling effect across the entire building
-                let pattern_x = ((x - interior_min_x) % pattern_width + pattern_width) % pattern_width;
-                let pattern_z = ((z - interior_min_z) % pattern_height + pattern_height) % pattern_height;
+                // Add floor_index offset to create variation between floors
+                let pattern_x = ((x - interior_min_x + floor_index as i32) % pattern_width + pattern_width) % pattern_width;
+                let pattern_z = ((z - interior_min_z + floor_index as i32) % pattern_height + pattern_height) % pattern_height;
 
                 // Access the pattern arrays safely
                 let cell1 = layer1[pattern_z as usize][pattern_x as usize];
