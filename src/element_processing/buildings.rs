@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
 use crate::coordinate_system::cartesian::XZPoint;
-use crate::element_processing::buildings_interior::generate_building_interior;
+use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -139,6 +139,12 @@ pub fn generate_buildings(
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
     let mut is_tall_building = false;
     let use_vertical_windows = rng.gen_bool(0.7);
+    let use_accent_lines = rng.gen_bool(0.3); // 30% chance for accent block lines on this building
+    let use_vertical_accent = !use_accent_lines && rng.gen_bool(0.2); // 20% chance for vertical accent block between windows if no horizontal lines
+    
+    // Random accent block selection for this building
+    let accent_blocks = [POLISHED_ANDESITE, SMOOTH_STONE, STONE_BRICKS];
+    let accent_block = accent_blocks[rng.gen_range(0..accent_blocks.len())];
 
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer") {
@@ -454,18 +460,27 @@ pub fn generate_buildings(
                                 editor.set_block_absolute(wall_block, bx, h, bz, None, None);
                             }
                         } else {
-                            // Original pattern for regular buildings
+                            // Original pattern for regular buildings (non-vertical windows)
                             if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
                                 editor.set_block_absolute(window_block, bx, h, bz, None, None);
                             } else {
-                                editor.set_block_absolute(wall_block, bx, h, bz, None, None);
+                                // Use accent block line between windows if enabled for this building
+                                let use_accent_line = use_accent_lines && h > start_y_offset + 1 && h % 4 == 0;
+                                // Use vertical accent block pattern (where windows would be, but on non-window Y levels) if enabled
+                                let use_vertical_accent_here = use_vertical_accent && h > start_y_offset + 1 && h % 4 == 0 && (bx + bz) % 6 < 3;
+                                
+                                if use_accent_line || use_vertical_accent_here {
+                                    editor.set_block_absolute(accent_block, bx, h, bz, None, None);
+                                } else {
+                                    editor.set_block_absolute(wall_block, bx, h, bz, None, None);
+                                }
                             }
                         }
                     }
                 }
 
                 editor.set_block_absolute(
-                    COBBLESTONE,
+                    accent_block,
                     bx,
                     start_y_offset + building_height + 1,
                     bz,
@@ -528,14 +543,14 @@ pub fn generate_buildings(
                 // Set level ceilings if height > 4
                 if building_height > 4 {
                     for h in (start_y_offset + 2 + 4..start_y_offset + building_height).step_by(4) {
-                        if x % 6 == 0 && z % 6 == 0 {
+                        if x % 5 == 0 && z % 5 == 0 {
                             // Light fixtures
                             editor.set_block_absolute(GLOWSTONE, x, h, z, None, None);
                         } else {
                             editor.set_block_absolute(floor_block, x, h, z, None, None);
                         }
                     }
-                } else if x % 6 == 0 && z % 6 == 0 {
+                } else if x % 5 == 0 && z % 5 == 0 {
                     editor.set_block_absolute(
                         GLOWSTONE,
                         x,
@@ -873,15 +888,25 @@ fn generate_roof(
 
         RoofType::Pyramidal => {
             // Pyramidal roof - all sides come to a point at the top
-            let roof_peak_height = base_height + 5;
+            let building_size = (max_x - min_x).max(max_z - min_z);
+            let roof_peak_height = base_height + (building_size / 3).max(4); // Scale height with building size
 
-            for (x, z) in floor_area {
-                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
-                let normalized_distance = distance_from_center.sqrt() as i32;
-                let roof_height = roof_peak_height - normalized_distance / 2;
+            // Calculate maximum distance from center to edge for normalization
+            let max_distance = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
+
+            for (x, z) in &floor_area {
+                let distance_from_center = ((*x - center_x).pow(2) + (*z - center_z).pow(2)) as f64;
+                let normalized_distance = (distance_from_center.sqrt() / max_distance).min(1.0);
+                
+                // Calculate height with steeper slope - closer to center = higher
+                let height_factor = 1.0 - normalized_distance;
+                let roof_height = base_height + (height_factor * (roof_peak_height - base_height) as f64) as i32;
                 let roof_y = roof_height.max(base_height);
 
-                editor.set_block_absolute(floor_block, x, roof_y, z, None, None);
+                // Fill from base to calculated height to create solid pyramid
+                for y in base_height..=roof_y {
+                    editor.set_block_absolute(floor_block, *x, y, *z, None, None);
+                }
             }
         }
 
