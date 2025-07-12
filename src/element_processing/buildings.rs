@@ -546,8 +546,8 @@ pub fn generate_buildings(
                     );
                 }
 
-                // Only set ceiling at proper height if we don't use a specific roof shape
-                if !element.tags.contains_key("roof:shape")
+                // Only set ceiling at proper height if we don't use a specific roof shape or roof generation is disabled
+                if !args.roof || !element.tags.contains_key("roof:shape")
                     || element.tags.get("roof:shape").unwrap() == "flat"
                 {
                     editor.set_block_absolute(
@@ -593,28 +593,30 @@ pub fn generate_buildings(
         }
     }
 
-    // Process roof shapes if specified
-    if let Some(roof_shape) = element.tags.get("roof:shape") {
-        let roof_type = match roof_shape.as_str() {
-            "gabled" => RoofType::Gabled,
-            "hipped" | "half-hipped" | "gambrel" | "mansard" => RoofType::Hipped,
-            "skillion" => RoofType::Skillion,
-            "pyramidal" => RoofType::Pyramidal,
-            "dome" | "onion" => RoofType::Dome,
-            "cone" | "round" => RoofType::Cone,
-            _ => RoofType::Flat,
-        };
+    // Process roof shapes if specified and roof generation is enabled
+    if args.roof {
+        if let Some(roof_shape) = element.tags.get("roof:shape") {
+            let roof_type = match roof_shape.as_str() {
+                "gabled" => RoofType::Gabled,
+                "hipped" | "half-hipped" | "gambrel" | "mansard" => RoofType::Hipped,
+                "skillion" => RoofType::Skillion,
+                "pyramidal" => RoofType::Pyramidal,
+                "dome" | "onion" => RoofType::Dome,
+                "cone" | "round" => RoofType::Cone,
+                _ => RoofType::Flat,
+            };
 
-        generate_roof(
-            editor,
-            element,
-            args,
-            start_y_offset,
-            building_height,
-            floor_block,
-            wall_block,
-            roof_type,
-        );
+            generate_roof(
+                editor,
+                element,
+                args,
+                start_y_offset,
+                building_height,
+                floor_block,
+                wall_block,
+                roof_type,
+            );
+        }
     } else {
         // Default flat roof - already handled by the building generation code
     }

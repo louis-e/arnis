@@ -498,8 +498,9 @@ fn gui_start_generation(
     ground_level: i32,
     floodfill_timeout: u64,
     terrain_enabled: bool,
-    fillground_enabled: bool,
     interior_enabled: bool,
+    roof_enabled: bool,
+    fillground_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
 ) -> Result<(), String> {
@@ -567,8 +568,9 @@ fn gui_start_generation(
                 ground_level,
                 terrain: terrain_enabled,
                 mapbox_access_token: None, // TODO: needs a way to input this
-                fillground: fillground_enabled,
                 interior: interior_enabled,
+                roof: roof_enabled,
+                fillground: fillground_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
             };

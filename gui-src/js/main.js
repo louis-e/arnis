@@ -526,8 +526,9 @@ async function startGeneration() {
     }
 
     var terrain = document.getElementById("terrain-toggle").checked;
-    var fill_ground = document.getElementById("fillground-toggle").checked;
     var interior = document.getElementById("interior-toggle").checked;
+    var roof = document.getElementById("roof-toggle").checked;
+    var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     var ground_level = parseInt(document.getElementById("ground-level").value, 10);
@@ -544,8 +545,9 @@ async function startGeneration() {
         groundLevel: ground_level,
         floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
-        fillgroundEnabled: fill_ground,
         interiorEnabled: interior,
+        roofEnabled: roof,
+        fillgroundEnabled: fill_ground,
         isNewWorld: isNewWorld,
         spawnPoint: spawnPoint
     });

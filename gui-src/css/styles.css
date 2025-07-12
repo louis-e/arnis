@@ -267,6 +267,14 @@ button:hover {
   margin: 15px 0;
 }
 
+#roof-toggle {
+  accent-color: #fecc44;
+}
+
+.roof-toggle-container, .scale-slider-container {
+  margin: 15px 0;
+}
+
 .scale-slider-container label {
   display: block;
   margin-bottom: 5px;
