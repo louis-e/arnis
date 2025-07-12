@@ -180,6 +180,7 @@ impl Block {
             170 => "light_gray_stained_glass",
             171 => "brown_stained_glass",
             172 => "tinted_glass",
+            173 => "oak_trapdoor",
             _ => panic!("Invalid id"),
         }
     }
@@ -373,6 +374,11 @@ impl Block {
                 map
             })),
 
+            173 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
             _ => None,
         }
     }
@@ -542,6 +548,7 @@ pub const GRAY_STAINED_GLASS: Block = Block::new(169);
 pub const LIGHT_GRAY_STAINED_GLASS: Block = Block::new(170);
 pub const BROWN_STAINED_GLASS: Block = Block::new(171);
 pub const TINTED_GLASS: Block = Block::new(172);
+pub const OAK_TRAPDOOR: Block = Block::new(173);
 
 // Window variations for different building types
 pub static WINDOW_VARIATIONS: [Block; 7] = [
@@ -641,7 +648,7 @@ pub static BUILDING_WALL_COLOR_MAP: [(RGBTuple, Block); 21] = [
 
 // Variations for building floors
 pub fn building_floor_variations() -> Vec<Block> {
-    BUILDING_WALL_COLOR_MAP
+    BUILDING_FLOOR_COLOR_MAP
         .into_iter()
         .map(|(_, block)| block)
         .collect()

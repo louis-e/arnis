@@ -37,11 +37,11 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         });
 
         if let Err(e) = window.emit("progress-update", payload) {
-            eprintln!("Failed to emit progress event: {}", e);
+            eprintln!("Failed to emit progress event: {e}");
         }
     }
 }
 
 pub fn emit_gui_error(message: &str) {
-    emit_gui_progress_update(0.0, &format!("Error! {}", message));
+    emit_gui_progress_update(0.0, &format!("Error! {message}"));
 }

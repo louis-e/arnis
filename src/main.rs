@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
-mod bbox;
 mod block_definitions;
 mod bresenham;
 mod colors;
@@ -9,7 +8,6 @@ mod coordinate_system;
 mod data_processing;
 mod element_processing;
 mod floodfill;
-mod geo_coord;
 mod ground;
 mod map_transformation;
 mod osm_parser;
@@ -26,6 +24,7 @@ use clap::Parser;
 use colored::*;
 use std::{env, fs, io::Write};
 
+mod elevation_data;
 #[cfg(feature = "gui")]
 mod gui;
 
@@ -38,7 +37,6 @@ mod progress {
         false
     }
 }
-use coordinate_system::cartesian::XZBBox;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
@@ -91,7 +89,7 @@ fn run_cli() {
     let mut ground = ground::generate_ground_data(&args);
 
     // Parse raw data
-    let (mut parsed_elements, scale_factor_x, scale_factor_z) =
+    let (mut parsed_elements, mut xzbbox) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
@@ -112,9 +110,6 @@ fn run_cli() {
             .expect("Failed to write to output file");
         }
     }
-
-    let mut xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
-        .expect("Parsed world lengths < 0");
 
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
