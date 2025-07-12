@@ -568,24 +568,32 @@ pub fn get_window_block_for_building_type(building_type: &str) -> Block {
 
     match building_type {
         "residential" | "house" | "apartment" => {
-            let residential_windows = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS, BROWN_STAINED_GLASS];
+            let residential_windows = [
+                GLASS,
+                WHITE_STAINED_GLASS,
+                LIGHT_GRAY_STAINED_GLASS,
+                BROWN_STAINED_GLASS,
+            ];
             residential_windows[rng.gen_range(0..residential_windows.len())]
-        },
+        }
         "hospital" | "school" | "university" => {
             let institutional_windows = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
             institutional_windows[rng.gen_range(0..institutional_windows.len())]
-        },
+        }
         "hotel" | "restaurant" => {
             let hospitality_windows = [GLASS, WHITE_STAINED_GLASS];
             hospitality_windows[rng.gen_range(0..hospitality_windows.len())]
-        },
-        "industrial" | "warehouse" => {
-            let industrial_windows = [GLASS, GRAY_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS, BROWN_STAINED_GLASS];
-            industrial_windows[rng.gen_range(0..industrial_windows.len())]
-        },
-        _ => {
-            WINDOW_VARIATIONS[rng.gen_range(0..WINDOW_VARIATIONS.len())]
         }
+        "industrial" | "warehouse" => {
+            let industrial_windows = [
+                GLASS,
+                GRAY_STAINED_GLASS,
+                LIGHT_GRAY_STAINED_GLASS,
+                BROWN_STAINED_GLASS,
+            ];
+            industrial_windows[rng.gen_range(0..industrial_windows.len())]
+        }
+        _ => WINDOW_VARIATIONS[rng.gen_range(0..WINDOW_VARIATIONS.len())],
     }
 }
 

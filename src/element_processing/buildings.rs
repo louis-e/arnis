@@ -15,12 +15,12 @@ use std::time::Duration;
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RoofType {
     Gabled,    // Two sloping sides meeting at a ridge
-    Hipped,    // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
-    Skillion,  // Single sloping surface
+    Hipped, // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
+    Skillion, // Single sloping surface
     Pyramidal, // All sides come to a point at the top
-    Dome,      // Rounded, hemispherical structure
-    Cone,      // Circular structure tapering to a point
-    Flat,      // Default flat roof
+    Dome,   // Rounded, hemispherical structure
+    Cone,   // Circular structure tapering to a point
+    Flat,   // Default flat roof
 }
 
 pub fn generate_buildings(

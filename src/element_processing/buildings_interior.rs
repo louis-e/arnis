@@ -58,7 +58,6 @@ const INTERIOR1_LAYER2: [[char; 23]; 23] = [
     ['W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
 ];
 
-
 /// Interior layout for building level floors (1nd layer above floor)
 #[rustfmt::skip]
 const INTERIOR2_LAYER1: [[char; 23]; 23] = [
@@ -215,11 +214,7 @@ pub fn generate_building_interior(
         let pattern_width = layer1[0].len() as i32;
 
         // Calculate Y offset
-        let y_offset = if floor_index == 0 {
-            1
-        } else {
-            3
-        };
+        let y_offset = if floor_index == 0 { 1 } else { 3 };
 
         // Create a seamless repeating pattern across the interior of this floor
         for z in interior_min_z..=interior_max_z {
@@ -232,8 +227,12 @@ pub fn generate_building_interior(
                 // Map the world coordinates to pattern coordinates using modulo
                 // This creates a seamless tiling effect across the entire building
                 // Add floor_index offset to create variation between floors
-                let pattern_x = ((x - interior_min_x + floor_index as i32) % pattern_width + pattern_width) % pattern_width;
-                let pattern_z = ((z - interior_min_z + floor_index as i32) % pattern_height + pattern_height) % pattern_height;
+                let pattern_x = ((x - interior_min_x + floor_index as i32) % pattern_width
+                    + pattern_width)
+                    % pattern_width;
+                let pattern_z = ((z - interior_min_z + floor_index as i32) % pattern_height
+                    + pattern_height)
+                    % pattern_height;
 
                 // Access the pattern arrays safely
                 let cell1 = layer1[pattern_z as usize][pattern_x as usize];
