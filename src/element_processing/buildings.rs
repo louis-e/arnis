@@ -124,7 +124,15 @@ pub fn generate_buildings(
             }
             LIGHT_GRAY_CONCRETE
         });
-    let window_block: Block = WHITE_STAINED_GLASS;
+
+    // Select window type based on building type
+    let building_type = element
+        .tags
+        .get("building")
+        .or_else(|| element.tags.get("building:part"))
+        .map(|s| s.as_str())
+        .unwrap_or("yes");
+    let window_block: Block = get_window_block_for_building_type(building_type);
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
