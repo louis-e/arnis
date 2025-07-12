@@ -5,7 +5,7 @@ use std::path::Path;
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
-const BASE_HEIGHT_SCALE: f64 = 0.72;
+const BASE_HEIGHT_SCALE: f64 = 0.4;
 /// Default Mapbox API access token for terrain data
 const MAPBOX_PUBKEY: &str =
     "pk.eyJ1IjoibG91aXMtZSIsImEiOiJjbWF0cWlycjEwYWNvMmtxeHFwdDQ5NnJoIn0.6A0AKg0iucvoGhYuCkeOjA";
@@ -144,7 +144,7 @@ pub fn fetch_elevation_data(
     fill_nan_values(&mut height_grid);
 
     // Continue with the existing blur and conversion to Minecraft heights...
-    let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, 1.0);
+    let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, 1.5);
 
     let mut mc_heights: Vec<Vec<i32>> = Vec::with_capacity(blurred_heights.len());
 
