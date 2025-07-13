@@ -19,7 +19,6 @@ enum RoofType {
     Skillion, // Single sloping surface
     Pyramidal, // All sides come to a point at the top
     Dome,   // Rounded, hemispherical structure
-    Cone,   // Circular structure tapering to a point
     Flat,   // Default flat roof
 }
 
@@ -599,11 +598,10 @@ pub fn generate_buildings(
         if let Some(roof_shape) = element.tags.get("roof:shape") {
             let roof_type = match roof_shape.as_str() {
                 "gabled" => RoofType::Gabled,
-                "hipped" | "half-hipped" | "gambrel" | "mansard" => RoofType::Hipped,
+                "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" => RoofType::Hipped,
                 "skillion" => RoofType::Skillion,
                 "pyramidal" => RoofType::Pyramidal,
-                "dome" | "onion" => RoofType::Dome,
-                "cone" | "round" => RoofType::Cone,
+                "dome" | "onion" | "cone" => RoofType::Dome,
                 _ => RoofType::Flat,
             };
 
@@ -1026,25 +1024,6 @@ fn generate_roof(
                 // Fill from the base to the surface
                 for y in base_height..=surface_height {
                     editor.set_block_absolute(floor_block, x, y, z, None, None);
-                }
-            }
-        }
-
-        RoofType::Cone => {
-            // Cone roof - circular structure tapering to a point
-            let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
-            let _cone_height = base_height + (radius * 1.2) as i32;
-
-            for (x, z) in floor_area {
-                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
-                let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
-
-                // Linear taper for cone
-                let height_factor = 1.0 - normalized_distance;
-                let roof_height = base_height + (height_factor * (radius * 1.2)) as i32;
-
-                if height_factor > 0.0 {
-                    editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
                 }
             }
         }
