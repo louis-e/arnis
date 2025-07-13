@@ -93,13 +93,10 @@ pub fn generate_buildings(
         .tags
         .get("building:colour")
         .and_then(|building_colour: &String| {
-            color_text_to_rgb_tuple(building_colour).map(|rgb: (u8, u8, u8)| {
-                get_building_wall_block_for_color(rgb)
-            })
+            color_text_to_rgb_tuple(building_colour)
+                .map(|rgb: (u8, u8, u8)| get_building_wall_block_for_color(rgb))
         })
-        .unwrap_or_else(|| {
-            get_fallback_building_block()
-        });
+        .unwrap_or_else(get_fallback_building_block);
 
     let floor_block: Block = get_random_floor_block();
 
@@ -115,9 +112,16 @@ pub fn generate_buildings(
     let use_accent_lines = rng.gen_bool(0.2);
     let use_vertical_accent = !use_accent_lines && rng.gen_bool(0.1);
     let use_accent_roof_line = rng.gen_bool(0.25);
-    
+
     // Random accent block selection for this building
-    let accent_blocks = [POLISHED_ANDESITE, SMOOTH_STONE, STONE_BRICKS, MUD_BRICKS, ANDESITE, CHISELED_STONE_BRICKS];
+    let accent_blocks = [
+        POLISHED_ANDESITE,
+        SMOOTH_STONE,
+        STONE_BRICKS,
+        MUD_BRICKS,
+        ANDESITE,
+        CHISELED_STONE_BRICKS,
+    ];
     let accent_block = accent_blocks[rng.gen_range(0..accent_blocks.len())];
 
     // Skip if 'layer' or 'level' is negative in the tags
@@ -435,9 +439,13 @@ pub fn generate_buildings(
                             editor.set_block_absolute(window_block, bx, h, bz, None, None);
                         } else {
                             // Use accent block line between windows if enabled for this building
-                            let use_accent_line = use_accent_lines && h > start_y_offset + 1 && h % 4 == 0;
+                            let use_accent_line =
+                                use_accent_lines && h > start_y_offset + 1 && h % 4 == 0;
                             // Use vertical accent block pattern (where windows would be, but on non-window Y levels) if enabled
-                            let use_vertical_accent_here = use_vertical_accent && h > start_y_offset + 1 && h % 4 == 0 && (bx + bz) % 6 < 3;
+                            let use_vertical_accent_here = use_vertical_accent
+                                && h > start_y_offset + 1
+                                && h % 4 == 0
+                                && (bx + bz) % 6 < 3;
 
                             if use_accent_line || use_vertical_accent_here {
                                 editor.set_block_absolute(accent_block, bx, h, bz, None, None);
@@ -448,7 +456,11 @@ pub fn generate_buildings(
                     }
                 }
 
-                let roof_line_block = if use_accent_roof_line { accent_block } else { wall_block };
+                let roof_line_block = if use_accent_roof_line {
+                    accent_block
+                } else {
+                    wall_block
+                };
                 editor.set_block_absolute(
                     roof_line_block,
                     bx,
@@ -532,7 +544,8 @@ pub fn generate_buildings(
                 }
 
                 // Only set ceiling at proper height if we don't use a specific roof shape or roof generation is disabled
-                if !args.roof || !element.tags.contains_key("roof:shape")
+                if !args.roof
+                    || !element.tags.contains_key("roof:shape")
                     || element.tags.get("roof:shape").unwrap() == "flat"
                 {
                     editor.set_block_absolute(
@@ -867,10 +880,11 @@ fn generate_roof(
             for (x, z) in &floor_area {
                 let distance_from_center = ((*x - center_x).pow(2) + (*z - center_z).pow(2)) as f64;
                 let normalized_distance = (distance_from_center.sqrt() / max_distance).min(1.0);
-                
+
                 // Calculate height with steeper slope - closer to center = higher
                 let height_factor = 1.0 - normalized_distance;
-                let roof_height = base_height + (height_factor * (roof_peak_height - base_height) as f64) as i32;
+                let roof_height =
+                    base_height + (height_factor * (roof_peak_height - base_height) as f64) as i32;
                 let roof_y = roof_height.max(base_height);
 
                 // Fill from base to calculated height to create solid pyramid

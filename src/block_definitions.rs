@@ -7,6 +7,11 @@ use std::collections::HashMap;
 
 use crate::colors::RGBTuple;
 
+// Type definitions for better readability
+type ColorTuple = (u8, u8, u8);
+type BlockOptions = &'static [Block];
+type ColorBlockMapping = (ColorTuple, BlockOptions);
+
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
     id: u8,
@@ -613,27 +618,131 @@ pub fn get_random_floor_block() -> Block {
 }
 
 // Define all predefined colors with their blocks
-static DEFINED_COLORS: &[((u8, u8, u8), &[Block])] = &[
+static DEFINED_COLORS: &[ColorBlockMapping] = &[
     ((233, 107, 57), &[BRICK, NETHER_BRICK]),
-    ((18, 12, 13), &[POLISHED_BLACKSTONE_BRICKS, BLACKSTONE, DEEPSLATE_BRICKS]),
+    (
+        (18, 12, 13),
+        &[POLISHED_BLACKSTONE_BRICKS, BLACKSTONE, DEEPSLATE_BRICKS],
+    ),
     ((76, 127, 153), &[LIGHT_BLUE_TERRACOTTA]),
-    ((0, 0, 0), &[DEEPSLATE_BRICKS, BLACKSTONE, POLISHED_BLACKSTONE]),
-    ((186, 195, 142), &[END_STONE_BRICKS, SANDSTONE, SMOOTH_SANDSTONE, LIGHT_GRAY_CONCRETE]),
-    ((57, 41, 35), &[BROWN_TERRACOTTA, BROWN_CONCRETE, MUD_BRICKS, BRICK]),
-    ((112, 108, 138), &[LIGHT_BLUE_TERRACOTTA, GRAY_TERRACOTTA, GRAY_CONCRETE]),
-    ((122, 92, 66), &[MUD_BRICKS, BROWN_TERRACOTTA, SANDSTONE, BRICK]),
+    (
+        (0, 0, 0),
+        &[DEEPSLATE_BRICKS, BLACKSTONE, POLISHED_BLACKSTONE],
+    ),
+    (
+        (186, 195, 142),
+        &[
+            END_STONE_BRICKS,
+            SANDSTONE,
+            SMOOTH_SANDSTONE,
+            LIGHT_GRAY_CONCRETE,
+        ],
+    ),
+    (
+        (57, 41, 35),
+        &[BROWN_TERRACOTTA, BROWN_CONCRETE, MUD_BRICKS, BRICK],
+    ),
+    (
+        (112, 108, 138),
+        &[LIGHT_BLUE_TERRACOTTA, GRAY_TERRACOTTA, GRAY_CONCRETE],
+    ),
+    (
+        (122, 92, 66),
+        &[MUD_BRICKS, BROWN_TERRACOTTA, SANDSTONE, BRICK],
+    ),
     ((24, 13, 14), &[NETHER_BRICK, BLACKSTONE, DEEPSLATE_BRICKS]),
-    ((159, 82, 36), &[BROWN_TERRACOTTA, BRICK, POLISHED_GRANITE, BROWN_CONCRETE, NETHERITE_BLOCK, POLISHED_DEEPSLATE]),
-    ((128, 128, 128), &[POLISHED_ANDESITE, LIGHT_GRAY_CONCRETE, SMOOTH_STONE, STONE_BRICKS]),
-    ((174, 173, 174), &[POLISHED_ANDESITE, LIGHT_GRAY_CONCRETE, SMOOTH_STONE, STONE_BRICKS]),
+    (
+        (159, 82, 36),
+        &[
+            BROWN_TERRACOTTA,
+            BRICK,
+            POLISHED_GRANITE,
+            BROWN_CONCRETE,
+            NETHERITE_BLOCK,
+            POLISHED_DEEPSLATE,
+        ],
+    ),
+    (
+        (128, 128, 128),
+        &[
+            POLISHED_ANDESITE,
+            LIGHT_GRAY_CONCRETE,
+            SMOOTH_STONE,
+            STONE_BRICKS,
+        ],
+    ),
+    (
+        (174, 173, 174),
+        &[
+            POLISHED_ANDESITE,
+            LIGHT_GRAY_CONCRETE,
+            SMOOTH_STONE,
+            STONE_BRICKS,
+        ],
+    ),
     ((141, 101, 142), &[STONE_BRICKS, BRICK, MUD_BRICKS]),
-    ((142, 60, 46), &[BLACK_TERRACOTTA, NETHERITE_BLOCK, NETHER_BRICK, POLISHED_GRANITE, POLISHED_DEEPSLATE, BROWN_TERRACOTTA]),
-    ((153, 83, 28), &[BLACK_TERRACOTTA, POLISHED_GRANITE, BROWN_CONCRETE, BROWN_TERRACOTTA, STONE_BRICKS]),
-    ((224, 216, 175), &[SMOOTH_SANDSTONE, LIGHT_GRAY_CONCRETE, POLISHED_ANDESITE, SMOOTH_STONE]),
-    ((188, 182, 179), &[SMOOTH_SANDSTONE, LIGHT_GRAY_CONCRETE, QUARTZ_BRICKS, POLISHED_ANDESITE, SMOOTH_STONE]),
-    ((35, 86, 85), &[POLISHED_BLACKSTONE_BRICKS, BLUE_TERRACOTTA, LIGHT_BLUE_TERRACOTTA]),
-    ((255, 255, 255), &[WHITE_CONCRETE, QUARTZ_BRICKS, QUARTZ_BLOCK]),
-    ((209, 177, 161), &[WHITE_TERRACOTTA, SMOOTH_SANDSTONE, SMOOTH_STONE, SANDSTONE, LIGHT_GRAY_CONCRETE]),
+    (
+        (142, 60, 46),
+        &[
+            BLACK_TERRACOTTA,
+            NETHERITE_BLOCK,
+            NETHER_BRICK,
+            POLISHED_GRANITE,
+            POLISHED_DEEPSLATE,
+            BROWN_TERRACOTTA,
+        ],
+    ),
+    (
+        (153, 83, 28),
+        &[
+            BLACK_TERRACOTTA,
+            POLISHED_GRANITE,
+            BROWN_CONCRETE,
+            BROWN_TERRACOTTA,
+            STONE_BRICKS,
+        ],
+    ),
+    (
+        (224, 216, 175),
+        &[
+            SMOOTH_SANDSTONE,
+            LIGHT_GRAY_CONCRETE,
+            POLISHED_ANDESITE,
+            SMOOTH_STONE,
+        ],
+    ),
+    (
+        (188, 182, 179),
+        &[
+            SMOOTH_SANDSTONE,
+            LIGHT_GRAY_CONCRETE,
+            QUARTZ_BRICKS,
+            POLISHED_ANDESITE,
+            SMOOTH_STONE,
+        ],
+    ),
+    (
+        (35, 86, 85),
+        &[
+            POLISHED_BLACKSTONE_BRICKS,
+            BLUE_TERRACOTTA,
+            LIGHT_BLUE_TERRACOTTA,
+        ],
+    ),
+    (
+        (255, 255, 255),
+        &[WHITE_CONCRETE, QUARTZ_BRICKS, QUARTZ_BLOCK],
+    ),
+    (
+        (209, 177, 161),
+        &[
+            WHITE_TERRACOTTA,
+            SMOOTH_SANDSTONE,
+            SMOOTH_STONE,
+            SANDSTONE,
+            LIGHT_GRAY_CONCRETE,
+        ],
+    ),
     ((191, 147, 42), &[SMOOTH_SANDSTONE, SANDSTONE, SMOOTH_STONE]),
 ];
 
@@ -641,7 +750,7 @@ static DEFINED_COLORS: &[((u8, u8, u8), &[Block])] = &[
 pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
     use rand::Rng;
     let mut rng = rand::thread_rng();
-    
+
     // Find the closest color match
     let closest_color = DEFINED_COLORS
         .iter()

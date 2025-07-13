@@ -265,20 +265,16 @@ impl Tree<'_> {
         vec![
             // Fences
             OAK_FENCE,
-            
             // Walls
             COBBLESTONE_WALL,
             ANDESITE_WALL,
             STONE_BRICK_WALL,
-            
             // Stairs
             OAK_STAIRS,
-            
             // Slabs
             OAK_SLAB,
             STONE_BLOCK_SLAB,
             STONE_BRICK_SLAB,
-            
             // Rails
             RAIL,
             RAIL_NORTH_SOUTH,
@@ -291,13 +287,11 @@ impl Tree<'_> {
             RAIL_NORTH_WEST,
             RAIL_SOUTH_EAST,
             RAIL_SOUTH_WEST,
-            
             // Doors and trapdoors
             OAK_DOOR,
             DARK_OAK_DOOR_LOWER,
             DARK_OAK_DOOR_UPPER,
             OAK_TRAPDOOR,
-            
             // Ladders
             LADDER,
         ]
@@ -315,7 +309,6 @@ impl Tree<'_> {
             JUKEBOX,
             BOOKSHELF,
             CAULDRON,
-            
             // Beds
             RED_BED_NORTH_HEAD,
             RED_BED_NORTH_FOOT,
@@ -325,11 +318,9 @@ impl Tree<'_> {
             RED_BED_SOUTH_FOOT,
             RED_BED_WEST_HEAD,
             RED_BED_WEST_FOOT,
-            
             // Pressure plates and signs
             OAK_PRESSURE_PLATE,
             SIGN,
-            
             // Glass blocks (windows)
             GLASS,
             WHITE_STAINED_GLASS,
@@ -337,11 +328,9 @@ impl Tree<'_> {
             LIGHT_GRAY_STAINED_GLASS,
             BROWN_STAINED_GLASS,
             TINTED_GLASS,
-            
             // Carpets
             WHITE_CARPET,
             RED_CARPET,
-            
             // Other structural/building blocks
             IRON_BARS,
             IRON_BLOCK,
