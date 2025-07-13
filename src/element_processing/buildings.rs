@@ -863,12 +863,45 @@ fn generate_roof(
         RoofType::Skillion => {
             // Skillion roof - single sloping surface
             let width = (max_x - min_x).max(1);
+            let building_size = (max_x - min_x).max(max_z - min_z);
+            
+            // Scale roof height based on building size (4-10 blocks)
+            let max_roof_height = (building_size / 3).clamp(4, 10);
 
-            for (x, z) in floor_area {
-                let slope_progress = (x - min_x) as f64 / width as f64;
-                let roof_height = base_height + (slope_progress * 3.0) as i32;
+            // First pass: calculate all roof heights
+            let mut roof_heights = std::collections::HashMap::new();
+            for (x, z) in &floor_area {
+                let slope_progress = (*x - min_x) as f64 / width as f64;
+                let roof_height = base_height + (slope_progress * max_roof_height as f64) as i32;
+                roof_heights.insert((*x, *z), roof_height);
+            }
 
-                editor.set_block_absolute(floor_block, x, roof_height, z, None, None);
+            // Second pass: place blocks with stairs only where height increases
+            for (x, z) in &floor_area {
+                let roof_height = roof_heights[&(*x, *z)];
+
+                // Fill from base height to calculated roof height to create solid roof
+                for y in base_height..=roof_height {
+                    if y == roof_height {
+                        // Check if this is a height transition point by looking at neighboring blocks
+                        let has_lower_neighbor = [
+                            (*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)
+                        ].iter().any(|(nx, nz)| {
+                            roof_heights.get(&(*nx, *nz)).map_or(false, |&nh| nh < roof_height)
+                        });
+
+                        if has_lower_neighbor {
+                            // Place stairs at height transitions for a stepped appearance
+                            editor.set_block_absolute(STONE_BRICK_STAIRS_EAST, *x, y, *z, None, None);
+                        } else {
+                            // Use regular floor block where height doesn't change
+                            editor.set_block_absolute(floor_block, *x, y, *z, None, None);
+                        }
+                    } else {
+                        // Fill interior with solid blocks
+                        editor.set_block_absolute(floor_block, *x, y, *z, None, None);
+                    }
+                }
             }
         }
 

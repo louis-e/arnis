@@ -189,6 +189,10 @@ impl Block {
             174 => "brown_concrete",
             175 => "black_terracotta",
             176 => "brown_terracotta",
+            177 => "stone_brick_stairs",
+            178 => "stone_brick_stairs",
+            179 => "stone_brick_stairs",
+            180 => "stone_brick_stairs",
             _ => panic!("Invalid id"),
         }
     }
@@ -381,10 +385,29 @@ impl Block {
                 map.insert("part".to_string(), Value::String("foot".to_string()));
                 map
             })),
-
             173 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            177 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map
+            })),
+            178 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map
+            })),
+            179 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map
+            })),
+            180 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
                 map
             })),
             _ => None,
@@ -560,6 +583,10 @@ pub const OAK_TRAPDOOR: Block = Block::new(173);
 pub const BROWN_CONCRETE: Block = Block::new(174);
 pub const BLACK_TERRACOTTA: Block = Block::new(175);
 pub const BROWN_TERRACOTTA: Block = Block::new(176);
+pub const STONE_BRICK_STAIRS_NORTH: Block = Block::new(177);
+pub const STONE_BRICK_STAIRS_EAST: Block = Block::new(178);
+pub const STONE_BRICK_STAIRS_SOUTH: Block = Block::new(179);
+pub const STONE_BRICK_STAIRS_WEST: Block = Block::new(180);
 
 // Window variations for different building types
 pub static WINDOW_VARIATIONS: [Block; 7] = [
