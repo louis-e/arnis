@@ -193,6 +193,14 @@ impl Block {
             178 => "stone_brick_stairs",
             179 => "stone_brick_stairs",
             180 => "stone_brick_stairs",
+            181 => "stone_brick_stairs",
+            182 => "stone_brick_stairs",
+            183 => "stone_brick_stairs",
+            184 => "stone_brick_stairs",
+            185 => "stone_brick_stairs",
+            186 => "stone_brick_stairs",
+            187 => "stone_brick_stairs",
+            188 => "stone_brick_stairs",
             _ => panic!("Invalid id"),
         }
     }
@@ -410,6 +418,54 @@ impl Block {
                 map.insert("facing".to_string(), Value::String("west".to_string()));
                 map
             })),
+            181 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
+                map
+            })),
+            182 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
+                map
+            })),
+            183 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
+                map
+            })),
+            184 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
+                map
+            })),
+            185 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
+                map
+            })),
+            186 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
+                map
+            })),
+            187 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
+                map
+            })),
+            188 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
+                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
+                map
+            })),
             _ => None,
         }
     }
@@ -587,6 +643,14 @@ pub const STONE_BRICK_STAIRS_NORTH: Block = Block::new(177);
 pub const STONE_BRICK_STAIRS_EAST: Block = Block::new(178);
 pub const STONE_BRICK_STAIRS_SOUTH: Block = Block::new(179);
 pub const STONE_BRICK_STAIRS_WEST: Block = Block::new(180);
+pub const STONE_BRICK_STAIRS_NORTH_OUTER_RIGHT: Block = Block::new(181);
+pub const STONE_BRICK_STAIRS_EAST_OUTER_RIGHT: Block = Block::new(182);
+pub const STONE_BRICK_STAIRS_SOUTH_OUTER_RIGHT: Block = Block::new(183);
+pub const STONE_BRICK_STAIRS_WEST_OUTER_RIGHT: Block = Block::new(184);
+pub const STONE_BRICK_STAIRS_NORTH_OUTER_LEFT: Block = Block::new(185);
+pub const STONE_BRICK_STAIRS_EAST_OUTER_LEFT: Block = Block::new(186);
+pub const STONE_BRICK_STAIRS_SOUTH_OUTER_LEFT: Block = Block::new(187);
+pub const STONE_BRICK_STAIRS_WEST_OUTER_LEFT: Block = Block::new(188);
 
 // Window variations for different building types
 pub static WINDOW_VARIATIONS: [Block; 7] = [

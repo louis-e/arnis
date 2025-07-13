@@ -906,26 +906,107 @@ fn generate_roof(
         }
 
         RoofType::Pyramidal => {
-            // Pyramidal roof - all sides come to a point at the top
+            // Pyramidal roof - all sides slope to a single central peak point
             let building_size = (max_x - min_x).max(max_z - min_z);
-            let roof_peak_height = base_height + (building_size / 3).max(4); // Scale height with building size
+            
+            // Calculate peak height based on building size (taller peak for larger buildings)
+            let peak_height = base_height + (building_size / 3).clamp(3, 8);
 
-            // Calculate maximum distance from center to edge for normalization
-            let max_distance = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
-
+            // First pass: calculate all roof heights
+            let mut roof_heights = std::collections::HashMap::new();
             for (x, z) in &floor_area {
-                let distance_from_center = ((*x - center_x).pow(2) + (*z - center_z).pow(2)) as f64;
-                let normalized_distance = (distance_from_center.sqrt() / max_distance).min(1.0);
+                // Calculate distance from this point to the center
+                let dx = (*x - center_x).abs() as f64;
+                let dz = (*z - center_z).abs() as f64;
+                
+                // Use the maximum distance to either edge to determine slope
+                // This creates the pyramid effect where all sides slope equally
+                let distance_to_edge = dx.max(dz);
+                
+                // Calculate maximum distance from center to any edge
+                let max_distance = ((max_x - min_x) / 2).max((max_z - min_z) / 2) as f64;
+                
+                // Calculate height based on distance from center
+                // Points closer to center are higher, creating the pyramid slope
+                let height_factor = if max_distance > 0.0 {
+                    (1.0 - (distance_to_edge / max_distance)).max(0.0)
+                } else {
+                    1.0
+                };
+                
+                let roof_height = base_height + (height_factor * (peak_height - base_height) as f64) as i32;
+                roof_heights.insert((*x, *z), roof_height);
+            }
 
-                // Calculate height with steeper slope - closer to center = higher
-                let height_factor = 1.0 - normalized_distance;
-                let roof_height =
-                    base_height + (height_factor * (roof_peak_height - base_height) as f64) as i32;
-                let roof_y = roof_height.max(base_height);
-
-                // Fill from base to calculated height to create solid pyramid
-                for y in base_height..=roof_y {
-                    editor.set_block_absolute(floor_block, *x, y, *z, None, None);
+            // Second pass: place blocks with stairs at the surface
+            for (x, z) in floor_area {
+                let roof_height = roof_heights[&(x, z)];
+                
+                // Fill from base height to calculated roof height to create solid pyramid
+                for y in base_height..=roof_height {
+                    if y == roof_height {
+                        // Place stairs at the surface with correct facing direction
+                        // Determine which direction the stairs should face based on the slope
+                        let dx = x - center_x;
+                        let dz = z - center_z;
+                        
+                        // Check if there are higher neighbors to determine stair orientation
+                        let north_height = roof_heights.get(&(x, z - 1)).copied().unwrap_or(base_height);
+                        let south_height = roof_heights.get(&(x, z + 1)).copied().unwrap_or(base_height);
+                        let west_height = roof_heights.get(&(x - 1, z)).copied().unwrap_or(base_height);
+                        let east_height = roof_heights.get(&(x + 1, z)).copied().unwrap_or(base_height);
+                        
+                        // Check for corner situations where two directions have lower neighbors
+                        let has_lower_north = north_height < roof_height;
+                        let has_lower_south = south_height < roof_height;
+                        let has_lower_west = west_height < roof_height;
+                        let has_lower_east = east_height < roof_height;
+                        
+                        // Check for corner situations (two adjacent directions are lower)
+                        let stair_block = if has_lower_north && has_lower_west {
+                            STONE_BRICK_STAIRS_EAST_OUTER_RIGHT
+                        } else if has_lower_north && has_lower_east {
+                            STONE_BRICK_STAIRS_SOUTH_OUTER_RIGHT
+                        } else if has_lower_south && has_lower_west {
+                            STONE_BRICK_STAIRS_EAST_OUTER_LEFT
+                        } else if has_lower_south && has_lower_east {
+                            STONE_BRICK_STAIRS_NORTH_OUTER_LEFT
+                        } else {
+                            // Single direction
+                            if dx.abs() > dz.abs() {
+                                // Primary slope is in X direction
+                                if dx > 0 && east_height < roof_height {
+                                    STONE_BRICK_STAIRS_WEST  // Facing west (stairs face toward center)
+                                } else if dx < 0 && west_height < roof_height {
+                                    STONE_BRICK_STAIRS_EAST  // Facing east (stairs face toward center)
+                                } else if dz > 0 && south_height < roof_height {
+                                    STONE_BRICK_STAIRS_NORTH // Facing north (stairs face toward center)
+                                } else if dz < 0 && north_height < roof_height {
+                                    STONE_BRICK_STAIRS_SOUTH // Facing south (stairs face toward center)
+                                } else {
+                                    floor_block // Use regular block if no clear slope direction
+                                }
+                            } else {
+                                // Primary slope is in Z direction
+                                if dz > 0 && south_height < roof_height {
+                                    STONE_BRICK_STAIRS_NORTH // Facing north (stairs face toward center)
+                                } else if dz < 0 && north_height < roof_height {
+                                    STONE_BRICK_STAIRS_SOUTH // Facing south (stairs face toward center)
+                                } else if dx > 0 && east_height < roof_height {
+                                    STONE_BRICK_STAIRS_WEST  // Facing west (stairs face toward center)
+                                } else if dx < 0 && west_height < roof_height {
+                                    STONE_BRICK_STAIRS_EAST  // Facing east (stairs face toward center)
+                                } else {
+                                    floor_block // Use regular block if no clear slope direction
+                                }
+                            }
+                        };
+                        
+                        editor.set_block_absolute(stair_block, x, y, z, None, None);
+                    } else {
+                        // Fill interior with solid blocks
+                        editor.set_block_absolute(floor_block, x, y, z, None, None);
+                    }
                 }
             }
         }
