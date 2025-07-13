@@ -676,27 +676,8 @@ fn generate_roof(
             // Align ridge with the longer dimension
             let is_wider_than_long = width > length;
 
-            // Create ridge line along the longer dimension
-            let ridge_points = if is_wider_than_long {
-                // If wider in X direction, ridge runs along X axis (along length)
-                (min_x..=max_x).map(|x| (x, center_z)).collect::<Vec<_>>()
-            } else {
-                // If wider in Z direction, ridge runs along Z axis (along length)
-                (min_z..=max_z).map(|z| (center_x, z)).collect::<Vec<_>>()
-            };
-
-            // Set the ridge at the peak height
-            for (rx, rz) in &ridge_points {
-                // Only place ridge points if they're inside the building outline
-                if floor_area.iter().any(|(fx, fz)| fx == rx && fz == rz) {
-                    // Fill from base height up to peak height
-                    for y in base_height..=roof_peak_height {
-                        editor.set_block_absolute(wall_block, *rx, y, *rz, None, None);
-                    }
-                }
-            }
-
-            // Calculate slopes from ridge to edges
+            // First pass: calculate all roof heights
+            let mut roof_heights = std::collections::HashMap::new();
             for (x, z) in &floor_area {
                 // Determine distance to ridge based on building orientation
                 let distance_to_ridge = if is_wider_than_long {
@@ -707,30 +688,68 @@ fn generate_roof(
                     (x - center_x).abs()
                 };
 
-                // Skip points that are on the ridge line
-                if distance_to_ridge == 0
-                    && ((is_wider_than_long && *z == center_z)
-                        || (!is_wider_than_long && *x == center_x))
-                {
-                    continue; // Skip - these were already handled as ridge points
-                }
-
                 // Calculate height based on distance - steeper slope for more dramatic roof
                 let max_distance = if is_wider_than_long {
                     length / 2
                 } else {
                     width / 2
                 };
-                let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
 
-                // Create a steep slope
-                let roof_height =
-                    roof_peak_height - (slope_ratio * roof_height_boost as f64) as i32;
-                let roof_y = roof_height.max(base_height);
+                if distance_to_ridge == 0
+                    && ((is_wider_than_long && *z == center_z)
+                        || (!is_wider_than_long && *x == center_x))
+                {
+                    // Ridge points get peak height
+                    roof_heights.insert((*x, *z), roof_peak_height);
+                } else {
+                    let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
+                    let roof_height =
+                        roof_peak_height - (slope_ratio * roof_height_boost as f64) as i32;
+                    let roof_y = roof_height.max(base_height);
+                    roof_heights.insert((*x, *z), roof_y);
+                }
+            }
 
-                // Fill from base to calculated height (solid fill)
-                for y in base_height..=roof_y {
-                    editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+            // Second pass: place blocks with stairs at the surface
+            for (x, z) in &floor_area {
+                let roof_height = roof_heights[&(*x, *z)];
+
+                // Fill from base height to calculated roof height
+                for y in base_height..=roof_height {
+                    if y == roof_height {
+                        // Check if this is a height transition point by looking at neighboring blocks
+                        let has_lower_neighbor = [
+                            (*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)
+                        ].iter().any(|(nx, nz)| {
+                            roof_heights.get(&(*nx, *nz)).map_or(false, |&nh| nh < roof_height)
+                        });
+
+                        if has_lower_neighbor {
+                            // Determine stair direction based on ridge orientation and position
+                            let stair_block = if is_wider_than_long {
+                                // Ridge runs along X, slopes in Z direction
+                                if *z < center_z {
+                                    STONE_BRICK_STAIRS_SOUTH // Facing toward center (south)
+                                } else {
+                                    STONE_BRICK_STAIRS_NORTH // Facing toward center (north)
+                                }
+                            } else {
+                                // Ridge runs along Z, slopes in X direction
+                                if *x < center_x {
+                                    STONE_BRICK_STAIRS_EAST // Facing toward center (east)
+                                } else {
+                                    STONE_BRICK_STAIRS_WEST // Facing toward center (west)
+                                }
+                            };
+                            editor.set_block_absolute(stair_block, *x, y, *z, None, None);
+                        } else {
+                            // Use regular wall block where height doesn't change (ridge area)
+                            editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+                        }
+                    } else {
+                        // Fill interior with solid blocks
+                        editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+                    }
                 }
             }
         }

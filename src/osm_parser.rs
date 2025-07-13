@@ -285,7 +285,7 @@ pub fn parse_osm_data(
         }));
     }
 
-    emit_gui_progress_update(20.0, "");
+    emit_gui_progress_update(15.0, "");
 
     (processed_elements, xzbbox)
 }
