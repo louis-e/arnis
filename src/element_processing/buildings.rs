@@ -1,7 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::colors::{color_text_to_rgb_tuple, rgb_distance, RGBTuple};
+use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill::flood_fill_area;
@@ -81,69 +81,43 @@ pub fn generate_buildings(
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
     let mut current_building: Vec<(i32, i32)> = vec![];
 
-    // Randomly select block variations for corners, walls, and floors
-    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-    let variation_index_corner: usize = rng.gen_range(0..BUILDING_CORNER_VARIATIONS.len());
-    let variation_index_wall: usize = rng.gen_range(0..building_wall_variations().len());
-    let variation_index_floor: usize = rng.gen_range(0..building_floor_variations().len());
-
-    let corner_block: Block = BUILDING_CORNER_VARIATIONS[variation_index_corner];
-    let wall_block: Block = element
-        .tags
-        .get("building:colour")
-        .and_then(|building_colour: &String| {
-            color_text_to_rgb_tuple(building_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, &BUILDING_WALL_COLOR_MAP)
-            })
-        })
-        .flatten()
-        .unwrap_or_else(|| building_wall_variations()[variation_index_wall]);
-    let floor_block: Block = element
-        .tags
-        .get("roof:colour")
-        .and_then(|roof_colour: &String| {
-            color_text_to_rgb_tuple(roof_colour).map(|rgb: (u8, u8, u8)| {
-                find_nearest_block_in_color_map(&rgb, &BUILDING_FLOOR_COLOR_MAP)
-            })
-        })
-        .flatten()
-        .unwrap_or_else(|| {
-            if let Some(building_type) = element
-                .tags
-                .get("building")
-                .or_else(|| element.tags.get("building:part"))
-            {
-                //Random roof color only for single houses
-                match building_type.as_str() {
-                    "yes" | "house" | "detached" | "static_caravan" | "semidetached_house"
-                    | "bungalow" | "manor" | "villa" => {
-                        return building_floor_variations()[variation_index_floor];
-                    }
-                    _ => return LIGHT_GRAY_CONCRETE,
-                }
-            }
-            LIGHT_GRAY_CONCRETE
-        });
-
-    // Select window type based on building type
+    // Get building type for type-specific block selection
     let building_type = element
         .tags
         .get("building")
         .or_else(|| element.tags.get("building:part"))
         .map(|s| s.as_str())
         .unwrap_or("yes");
+
+    let wall_block: Block = element
+        .tags
+        .get("building:colour")
+        .and_then(|building_colour: &String| {
+            color_text_to_rgb_tuple(building_colour).map(|rgb: (u8, u8, u8)| {
+                get_building_wall_block_for_color(rgb)
+            })
+        })
+        .unwrap_or_else(|| {
+            get_fallback_building_block()
+        });
+
+    let floor_block: Block = get_random_floor_block();
+
+    // Select window type based on building type
     let window_block: Block = get_window_block_for_building_type(building_type);
 
     // Set to store processed flood fill points
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
     let mut is_tall_building = false;
+    let mut rng = rand::thread_rng();
     let use_vertical_windows = rng.gen_bool(0.7);
-    let use_accent_lines = rng.gen_bool(0.3); // 30% chance for accent block lines on this building
-    let use_vertical_accent = !use_accent_lines && rng.gen_bool(0.2); // 20% chance for vertical accent block between windows if no horizontal lines
+    let use_accent_lines = rng.gen_bool(0.2);
+    let use_vertical_accent = !use_accent_lines && rng.gen_bool(0.1);
+    let use_accent_roof_line = rng.gen_bool(0.25);
     
     // Random accent block selection for this building
-    let accent_blocks = [POLISHED_ANDESITE, SMOOTH_STONE, STONE_BRICKS];
+    let accent_blocks = [POLISHED_ANDESITE, SMOOTH_STONE, STONE_BRICKS, MUD_BRICKS, ANDESITE, CHISELED_STONE_BRICKS];
     let accent_block = accent_blocks[rng.gen_range(0..accent_blocks.len())];
 
     // Skip if 'layer' or 'level' is negative in the tags
@@ -446,41 +420,37 @@ pub fn generate_buildings(
                 }
 
                 for h in (start_y_offset + 1)..=(start_y_offset + building_height) {
-                    if element.nodes[0].x == bx && element.nodes[0].x == bz {
-                        // Corner Block
-                        editor.set_block_absolute(corner_block, bx, h, bz, None, None);
+                    // Add windows to the walls at intervals
+                    // Use different window patterns for tall buildings
+                    if is_tall_building && use_vertical_windows {
+                        // Tall building pattern - narrower windows with continuous vertical strips
+                        if h > start_y_offset + 1 && (bx + bz) % 3 == 0 {
+                            editor.set_block_absolute(window_block, bx, h, bz, None, None);
+                        } else {
+                            editor.set_block_absolute(wall_block, bx, h, bz, None, None);
+                        }
                     } else {
-                        // Add windows to the walls at intervals
-                        // Use different window patterns for tall buildings
-                        if is_tall_building && use_vertical_windows {
-                            // Tall building pattern - narrower windows with continuous vertical strips
-                            if h > start_y_offset + 1 && (bx + bz) % 3 == 0 {
-                                editor.set_block_absolute(window_block, bx, h, bz, None, None);
+                        // Original pattern for regular buildings (non-vertical windows)
+                        if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
+                            editor.set_block_absolute(window_block, bx, h, bz, None, None);
+                        } else {
+                            // Use accent block line between windows if enabled for this building
+                            let use_accent_line = use_accent_lines && h > start_y_offset + 1 && h % 4 == 0;
+                            // Use vertical accent block pattern (where windows would be, but on non-window Y levels) if enabled
+                            let use_vertical_accent_here = use_vertical_accent && h > start_y_offset + 1 && h % 4 == 0 && (bx + bz) % 6 < 3;
+
+                            if use_accent_line || use_vertical_accent_here {
+                                editor.set_block_absolute(accent_block, bx, h, bz, None, None);
                             } else {
                                 editor.set_block_absolute(wall_block, bx, h, bz, None, None);
-                            }
-                        } else {
-                            // Original pattern for regular buildings (non-vertical windows)
-                            if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
-                                editor.set_block_absolute(window_block, bx, h, bz, None, None);
-                            } else {
-                                // Use accent block line between windows if enabled for this building
-                                let use_accent_line = use_accent_lines && h > start_y_offset + 1 && h % 4 == 0;
-                                // Use vertical accent block pattern (where windows would be, but on non-window Y levels) if enabled
-                                let use_vertical_accent_here = use_vertical_accent && h > start_y_offset + 1 && h % 4 == 0 && (bx + bz) % 6 < 3;
-                                
-                                if use_accent_line || use_vertical_accent_here {
-                                    editor.set_block_absolute(accent_block, bx, h, bz, None, None);
-                                } else {
-                                    editor.set_block_absolute(wall_block, bx, h, bz, None, None);
-                                }
                             }
                         }
                     }
                 }
 
+                let roof_line_block = if use_accent_roof_line { accent_block } else { wall_block };
                 editor.set_block_absolute(
-                    accent_block,
+                    roof_line_block,
                     bx,
                     start_y_offset + building_height + 1,
                     bz,
@@ -983,17 +953,6 @@ pub fn generate_building_from_relation(
             }
         }
     }*/
-}
-
-fn find_nearest_block_in_color_map(
-    rgb: &RGBTuple,
-    color_map: &[(RGBTuple, Block)],
-) -> Option<Block> {
-    color_map
-        .iter()
-        .min_by_key(|(entry_rgb, _)| rgb_distance(entry_rgb, rgb))
-        .map(|(_, block)| block)
-        .copied()
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.

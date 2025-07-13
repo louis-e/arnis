@@ -41,7 +41,7 @@ impl Block {
             11 => "chiseled_stone_bricks",
             12 => "cobblestone_wall",
             13 => "cobblestone",
-            14 => "cracked_polished_blackstone_bricks",
+            14 => "polished_blackstone_bricks",
             15 => "cracked_stone_bricks",
             16 => "crimson_planks",
             17 => "cut_sandstone",
@@ -74,7 +74,7 @@ impl Block {
             44 => "mossy_cobblestone",
             45 => "mud_bricks",
             46 => "nether_bricks",
-            47 => "nether_bricks",
+            47 => "netherite_block",
             48 => "oak_fence",
             49 => "oak_leaves",
             50 => "oak_log",
@@ -84,7 +84,7 @@ impl Block {
             54 => "podzol",
             55 => "polished_andesite",
             56 => "polished_basalt",
-            57 => "polished_blackstone_bricks",
+            57 => "quartz_block",
             58 => "polished_blackstone",
             59 => "polished_deepslate",
             60 => "polished_diorite",
@@ -181,6 +181,9 @@ impl Block {
             171 => "brown_stained_glass",
             172 => "tinted_glass",
             173 => "oak_trapdoor",
+            174 => "brown_concrete",
+            175 => "black_terracotta",
+            176 => "brown_terracotta",
             _ => panic!("Invalid id"),
         }
     }
@@ -399,7 +402,7 @@ pub const CAULDRON: Block = Block::new(10);
 pub const CHISELED_STONE_BRICKS: Block = Block::new(11);
 pub const COBBLESTONE_WALL: Block = Block::new(12);
 pub const COBBLESTONE: Block = Block::new(13);
-pub const CRACKED_POLISHED_BLACKSTONE_BRICKS: Block = Block::new(14);
+pub const POLISHED_BLACKSTONE_BRICKS: Block = Block::new(14);
 pub const CRACKED_STONE_BRICKS: Block = Block::new(15);
 pub const CRIMSON_PLANKS: Block = Block::new(16);
 pub const CUT_SANDSTONE: Block = Block::new(17);
@@ -432,7 +435,7 @@ pub const MOSS_BLOCK: Block = Block::new(43);
 pub const MOSSY_COBBLESTONE: Block = Block::new(44);
 pub const MUD_BRICKS: Block = Block::new(45);
 pub const NETHER_BRICK: Block = Block::new(46);
-pub const NETHER_BRICKS: Block = Block::new(47);
+pub const NETHERITE_BLOCK: Block = Block::new(47);
 pub const OAK_FENCE: Block = Block::new(48);
 pub const OAK_LEAVES: Block = Block::new(49);
 pub const OAK_LOG: Block = Block::new(50);
@@ -442,7 +445,7 @@ pub const ORANGE_TERRACOTTA: Block = Block::new(53);
 pub const PODZOL: Block = Block::new(54);
 pub const POLISHED_ANDESITE: Block = Block::new(55);
 pub const POLISHED_BASALT: Block = Block::new(56);
-pub const POLISHED_BLACKSTONE_BRICKS: Block = Block::new(57);
+pub const QUARTZ_BLOCK: Block = Block::new(57);
 pub const POLISHED_BLACKSTONE: Block = Block::new(58);
 pub const POLISHED_DEEPSLATE: Block = Block::new(59);
 pub const POLISHED_DIORITE: Block = Block::new(60);
@@ -453,7 +456,7 @@ pub const PURPUR_PILLAR: Block = Block::new(64);
 pub const QUARTZ_BRICKS: Block = Block::new(65);
 pub const RAIL: Block = Block::new(66);
 pub const RED_FLOWER: Block = Block::new(67);
-pub const RED_NETHER_BRICKS: Block = Block::new(68);
+pub const RED_NETHER_BRICK: Block = Block::new(68);
 pub const RED_TERRACOTTA: Block = Block::new(69);
 pub const RED_WOOL: Block = Block::new(70);
 pub const SAND: Block = Block::new(71);
@@ -549,6 +552,9 @@ pub const LIGHT_GRAY_STAINED_GLASS: Block = Block::new(170);
 pub const BROWN_STAINED_GLASS: Block = Block::new(171);
 pub const TINTED_GLASS: Block = Block::new(172);
 pub const OAK_TRAPDOOR: Block = Block::new(173);
+pub const BROWN_CONCRETE: Block = Block::new(174);
+pub const BLACK_TERRACOTTA: Block = Block::new(175);
+pub const BROWN_TERRACOTTA: Block = Block::new(176);
 
 // Window variations for different building types
 pub static WINDOW_VARIATIONS: [Block; 7] = [
@@ -597,90 +603,91 @@ pub fn get_window_block_for_building_type(building_type: &str) -> Block {
     }
 }
 
-// Variations for building corners
-pub static BUILDING_CORNER_VARIATIONS: [Block; 20] = [
-    STONE_BRICKS,
-    COBBLESTONE,
-    BRICK,
-    MOSSY_COBBLESTONE,
-    SANDSTONE,
-    RED_NETHER_BRICKS,
-    BLACKSTONE,
-    SMOOTH_QUARTZ,
-    CHISELED_STONE_BRICKS,
-    POLISHED_BASALT,
-    CUT_SANDSTONE,
-    POLISHED_BLACKSTONE_BRICKS,
-    ANDESITE,
-    GRANITE,
-    DIORITE,
-    CRACKED_STONE_BRICKS,
-    PRISMARINE,
-    BLUE_TERRACOTTA,
-    NETHER_BRICK,
-    QUARTZ_BRICKS,
-];
+// Random floor block selection
+pub fn get_random_floor_block() -> Block {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
 
-// Variations for building walls
-pub fn building_wall_variations() -> Vec<Block> {
-    BUILDING_WALL_COLOR_MAP
-        .into_iter()
-        .map(|(_, block)| block)
-        .collect()
+    let floor_options = [GRAY_CONCRETE, LIGHT_GRAY_CONCRETE]; // TODO: add more
+    floor_options[rng.gen_range(0..floor_options.len())]
 }
 
-// https://wiki.openstreetmap.org/wiki/Key:building:colour
-pub static BUILDING_WALL_COLOR_MAP: [(RGBTuple, Block); 21] = [
-    ((233, 107, 57), BRICK),
-    ((18, 12, 13), CRACKED_POLISHED_BLACKSTONE_BRICKS),
-    ((76, 127, 153), CYAN_CONCRETE),
-    ((0, 0, 0), DEEPSLATE_BRICKS),
-    ((186, 195, 142), END_STONE_BRICKS),
-    ((57, 41, 35), GRAY_TERRACOTTA),
-    ((112, 108, 138), LIGHT_BLUE_TERRACOTTA),
-    ((122, 92, 66), MUD_BRICKS),
-    ((24, 13, 14), NETHER_BRICKS),
-    ((159, 82, 36), ORANGE_TERRACOTTA),
-    ((128, 128, 128), POLISHED_ANDESITE),
-    ((174, 173, 174), POLISHED_DIORITE),
-    ((141, 101, 142), PURPUR_PILLAR),
-    ((142, 60, 46), RED_TERRACOTTA),
-    ((153, 83, 28), SMOOTH_RED_SANDSTONE),
-    ((224, 216, 175), SMOOTH_SANDSTONE),
-    ((188, 182, 179), SMOOTH_STONE),
-    ((35, 86, 85), WARPED_PLANKS),
-    ((255, 255, 255), WHITE_CONCRETE),
-    ((209, 177, 161), WHITE_TERRACOTTA),
-    ((191, 147, 42), YELLOW_TERRACOTTA),
+// Define all predefined colors with their blocks
+static DEFINED_COLORS: &[((u8, u8, u8), &[Block])] = &[
+    ((233, 107, 57), &[BRICK, NETHER_BRICK]),
+    ((18, 12, 13), &[POLISHED_BLACKSTONE_BRICKS, BLACKSTONE, DEEPSLATE_BRICKS]),
+    ((76, 127, 153), &[LIGHT_BLUE_TERRACOTTA]),
+    ((0, 0, 0), &[DEEPSLATE_BRICKS, BLACKSTONE, POLISHED_BLACKSTONE]),
+    ((186, 195, 142), &[END_STONE_BRICKS, SANDSTONE, SMOOTH_SANDSTONE, LIGHT_GRAY_CONCRETE]),
+    ((57, 41, 35), &[BROWN_TERRACOTTA, BROWN_CONCRETE, MUD_BRICKS, BRICK]),
+    ((112, 108, 138), &[LIGHT_BLUE_TERRACOTTA, GRAY_TERRACOTTA, GRAY_CONCRETE]),
+    ((122, 92, 66), &[MUD_BRICKS, BROWN_TERRACOTTA, SANDSTONE, BRICK]),
+    ((24, 13, 14), &[NETHER_BRICK, BLACKSTONE, DEEPSLATE_BRICKS]),
+    ((159, 82, 36), &[BROWN_TERRACOTTA, BRICK, POLISHED_GRANITE, BROWN_CONCRETE, NETHERITE_BLOCK, POLISHED_DEEPSLATE]),
+    ((128, 128, 128), &[POLISHED_ANDESITE, LIGHT_GRAY_CONCRETE, SMOOTH_STONE, STONE_BRICKS]),
+    ((174, 173, 174), &[POLISHED_ANDESITE, LIGHT_GRAY_CONCRETE, SMOOTH_STONE, STONE_BRICKS]),
+    ((141, 101, 142), &[STONE_BRICKS, BRICK, MUD_BRICKS]),
+    ((142, 60, 46), &[BLACK_TERRACOTTA, NETHERITE_BLOCK, NETHER_BRICK, POLISHED_GRANITE, POLISHED_DEEPSLATE, BROWN_TERRACOTTA]),
+    ((153, 83, 28), &[BLACK_TERRACOTTA, POLISHED_GRANITE, BROWN_CONCRETE, BROWN_TERRACOTTA, STONE_BRICKS]),
+    ((224, 216, 175), &[SMOOTH_SANDSTONE, LIGHT_GRAY_CONCRETE, POLISHED_ANDESITE, SMOOTH_STONE]),
+    ((188, 182, 179), &[SMOOTH_SANDSTONE, LIGHT_GRAY_CONCRETE, QUARTZ_BRICKS, POLISHED_ANDESITE, SMOOTH_STONE]),
+    ((35, 86, 85), &[POLISHED_BLACKSTONE_BRICKS, BLUE_TERRACOTTA, LIGHT_BLUE_TERRACOTTA]),
+    ((255, 255, 255), &[WHITE_CONCRETE, QUARTZ_BRICKS, QUARTZ_BLOCK]),
+    ((209, 177, 161), &[WHITE_TERRACOTTA, SMOOTH_SANDSTONE, SMOOTH_STONE, SANDSTONE, LIGHT_GRAY_CONCRETE]),
+    ((191, 147, 42), &[SMOOTH_SANDSTONE, SANDSTONE, SMOOTH_STONE]),
 ];
 
-// Variations for building floors
-pub fn building_floor_variations() -> Vec<Block> {
-    BUILDING_FLOOR_COLOR_MAP
-        .into_iter()
-        .map(|(_, block)| block)
-        .collect()
+// Function to randomly select building wall block with alternatives
+pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    
+    // Find the closest color match
+    let closest_color = DEFINED_COLORS
+        .iter()
+        .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
+
+    if let Some((_, options)) = closest_color {
+        options[rng.gen_range(0..options.len())]
+    } else {
+        // This should never happen, but fallback just in case
+        get_fallback_building_block()
+    }
 }
 
-pub static BUILDING_FLOOR_COLOR_MAP: [(RGBTuple, Block); 20] = [
-    ((181, 101, 59), ACACIA_PLANKS),
-    ((22, 15, 16), BLACKSTONE),
-    ((104, 51, 74), CRIMSON_PLANKS),
-    ((82, 55, 26), DARK_OAK_PLANKS),
-    ((182, 133, 99), JUNGLE_PLANKS),
-    ((33, 128, 185), LIGHT_BLUE_CONCRETE),
-    ((78, 103, 43), MOSS_BLOCK),
-    ((171, 138, 88), OAK_PLANKS),
-    ((0, 128, 0), OXIDIZED_COPPER),
-    ((18, 12, 13), POLISHED_BLACKSTONE),
-    ((64, 64, 64), POLISHED_DEEPSLATE),
-    ((255, 255, 255), POLISHED_DIORITE),
-    ((143, 96, 79), POLISHED_GRANITE),
-    ((141, 101, 142), PURPUR_BLOCK),
-    ((128, 0, 0), RED_NETHER_BRICKS),
-    ((153, 83, 28), SMOOTH_RED_SANDSTONE),
-    ((128, 96, 57), SPRUCE_PLANKS),
-    ((128, 128, 128), STONE_BRICKS),
-    ((150, 93, 68), TERRACOTTA),
-    ((35, 86, 85), WARPED_PLANKS),
-];
+// Function to get a random fallback building block when no color attribute is specified
+pub fn get_fallback_building_block() -> Block {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    let fallback_options = [
+        BLACKSTONE,
+        BLACK_TERRACOTTA,
+        BRICK,
+        BROWN_CONCRETE,
+        BROWN_TERRACOTTA,
+        DEEPSLATE_BRICKS,
+        END_STONE_BRICKS,
+        GRAY_CONCRETE,
+        GRAY_TERRACOTTA,
+        LIGHT_BLUE_TERRACOTTA,
+        LIGHT_GRAY_CONCRETE,
+        MUD_BRICKS,
+        NETHER_BRICK,
+        NETHERITE_BLOCK,
+        POLISHED_ANDESITE,
+        POLISHED_BLACKSTONE,
+        POLISHED_BLACKSTONE_BRICKS,
+        POLISHED_DEEPSLATE,
+        POLISHED_GRANITE,
+        QUARTZ_BLOCK,
+        QUARTZ_BRICKS,
+        SANDSTONE,
+        SMOOTH_SANDSTONE,
+        SMOOTH_STONE,
+        STONE_BRICKS,
+        WHITE_CONCRETE,
+        WHITE_TERRACOTTA,
+    ];
+    fallback_options[rng.gen_range(0..fallback_options.len())]
+}
