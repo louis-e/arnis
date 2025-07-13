@@ -109,8 +109,6 @@ pub fn generate_buildings(
     let mut is_tall_building = false;
     let mut rng = rand::thread_rng();
     let use_vertical_windows = rng.gen_bool(0.7);
-    let use_accent_lines = rng.gen_bool(0.2);
-    let use_vertical_accent = !use_accent_lines && rng.gen_bool(0.1);
     let use_accent_roof_line = rng.gen_bool(0.25);
 
     // Random accent block selection for this building
@@ -175,6 +173,11 @@ pub fn generate_buildings(
             is_tall_building = true;
         }
     }
+
+    // Determine accent line usage based on whether building has multiple floors
+    let has_multiple_floors = building_height > 6;
+    let use_accent_lines = has_multiple_floors && rng.gen_bool(0.2);
+    let use_vertical_accent = has_multiple_floors && !use_accent_lines && rng.gen_bool(0.1);
 
     if let Some(amenity_type) = element.tags.get("amenity") {
         if amenity_type == "shelter" {

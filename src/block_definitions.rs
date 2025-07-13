@@ -613,7 +613,7 @@ pub fn get_random_floor_block() -> Block {
     use rand::Rng;
     let mut rng = rand::thread_rng();
 
-    let floor_options = [GRAY_CONCRETE, LIGHT_GRAY_CONCRETE]; // TODO: add more
+    let floor_options = [WHITE_CONCRETE, GRAY_CONCRETE, LIGHT_GRAY_CONCRETE, POLISHED_ANDESITE, SMOOTH_STONE, STONE_BRICKS, MUD_BRICKS, OAK_PLANKS];
     floor_options[rng.gen_range(0..floor_options.len())]
 }
 
