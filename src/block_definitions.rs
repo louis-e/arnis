@@ -69,9 +69,12 @@ impl BlockWithProperties {
     pub fn new(block: Block, properties: Option<Value>) -> Self {
         Self { block, properties }
     }
-    
+
     pub fn simple(block: Block) -> Self {
-        Self { block, properties: None }
+        Self {
+            block,
+            properties: None,
+        }
     }
 }
 
@@ -462,13 +465,18 @@ impl Block {
 // Cache for stair blocks with properties
 use std::sync::Mutex;
 
-static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), BlockWithProperties>>> = 
+#[allow(clippy::type_complexity)]
+static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), BlockWithProperties>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 // General function to create any stair block with facing and shape properties
-pub fn create_stair_with_properties(base_stair_block: Block, facing: StairFacing, shape: StairShape) -> BlockWithProperties {
+pub fn create_stair_with_properties(
+    base_stair_block: Block,
+    facing: StairFacing,
+    shape: StairShape,
+) -> BlockWithProperties {
     let cache_key = (base_stair_block.id(), facing, shape);
-    
+
     // Check cache first
     {
         let cache = STAIR_CACHE.lock().unwrap();
@@ -476,25 +484,31 @@ pub fn create_stair_with_properties(base_stair_block: Block, facing: StairFacing
             return cached_block.clone();
         }
     }
-    
+
     // Create properties
     let mut map = HashMap::new();
-    map.insert("facing".to_string(), Value::String(facing.as_str().to_string()));
-    
+    map.insert(
+        "facing".to_string(),
+        Value::String(facing.as_str().to_string()),
+    );
+
     // Only add shape if it's not straight (default)
     if !matches!(shape, StairShape::Straight) {
-        map.insert("shape".to_string(), Value::String(shape.as_str().to_string()));
+        map.insert(
+            "shape".to_string(),
+            Value::String(shape.as_str().to_string()),
+        );
     }
-    
+
     let properties = Value::Compound(map);
     let block_with_props = BlockWithProperties::new(base_stair_block, Some(properties));
-    
+
     // Cache the result
     {
         let mut cache = STAIR_CACHE.lock().unwrap();
         cache.insert(cache_key, block_with_props.clone());
     }
-    
+
     block_with_props
 }
 
@@ -767,7 +781,16 @@ pub fn get_random_floor_block() -> Block {
     use rand::Rng;
     let mut rng = rand::thread_rng();
 
-    let floor_options = [WHITE_CONCRETE, GRAY_CONCRETE, LIGHT_GRAY_CONCRETE, POLISHED_ANDESITE, SMOOTH_STONE, STONE_BRICKS, MUD_BRICKS, OAK_PLANKS];
+    let floor_options = [
+        WHITE_CONCRETE,
+        GRAY_CONCRETE,
+        LIGHT_GRAY_CONCRETE,
+        POLISHED_ANDESITE,
+        SMOOTH_STONE,
+        STONE_BRICKS,
+        MUD_BRICKS,
+        OAK_PLANKS,
+    ];
     floor_options[rng.gen_range(0..floor_options.len())]
 }
 

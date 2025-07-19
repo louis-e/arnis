@@ -71,10 +71,16 @@ impl SectionToModify {
         self.blocks[Self::index(x, y, z)] = block;
     }
 
-    fn set_block_with_properties(&mut self, x: u8, y: u8, z: u8, block_with_props: BlockWithProperties) {
+    fn set_block_with_properties(
+        &mut self,
+        x: u8,
+        y: u8,
+        z: u8,
+        block_with_props: BlockWithProperties,
+    ) {
         let index = Self::index(x, y, z);
         self.blocks[index] = block_with_props.block;
-        
+
         // Store properties if they exist
         if let Some(props) = block_with_props.properties {
             self.properties.insert(index, props);
@@ -92,22 +98,22 @@ impl SectionToModify {
         // Create a map of unique block+properties combinations to palette indices
         let mut unique_blocks: Vec<(Block, Option<Value>)> = Vec::new();
         let mut palette_lookup: FnvHashMap<(Block, Option<String>), usize> = FnvHashMap::default();
-        
+
         // Build unique block combinations and lookup table
         for (i, &block) in self.blocks.iter().enumerate() {
             let properties = self.properties.get(&i).cloned();
-            
+
             // Create a key for the lookup (block + properties hash)
             let props_key = properties.as_ref().map(|p| format!("{:?}", p));
             let lookup_key = (block, props_key);
-            
-            if !palette_lookup.contains_key(&lookup_key) {
+
+            if let std::collections::hash_map::Entry::Vacant(e) = palette_lookup.entry(lookup_key) {
                 let palette_index = unique_blocks.len();
-                palette_lookup.insert(lookup_key, palette_index);
+                e.insert(palette_index);
                 unique_blocks.push((block, properties));
             }
         }
-        
+
         let mut bits_per_block = 4; // minimum allowed
         while (1 << bits_per_block) < unique_blocks.len() {
             bits_per_block += 1;
@@ -116,7 +122,7 @@ impl SectionToModify {
         let mut data = vec![];
         let mut cur = 0;
         let mut cur_idx = 0;
-        
+
         for (i, &block) in self.blocks.iter().enumerate() {
             let properties = self.properties.get(&i).cloned();
             let props_key = properties.as_ref().map(|p| format!("{:?}", p));
@@ -189,7 +195,13 @@ impl ChunkToModify {
         section.set_block(x, (y & 15).try_into().unwrap(), z, block);
     }
 
-    fn set_block_with_properties(&mut self, x: u8, y: i32, z: u8, block_with_props: BlockWithProperties) {
+    fn set_block_with_properties(
+        &mut self,
+        x: u8,
+        y: i32,
+        z: u8,
+        block_with_props: BlockWithProperties,
+    ) {
         let section_idx: i8 = (y >> 4).try_into().unwrap();
 
         let section = self.sections.entry(section_idx).or_default();
@@ -264,7 +276,13 @@ impl WorldToModify {
         );
     }
 
-    fn set_block_with_properties(&mut self, x: i32, y: i32, z: i32, block_with_props: BlockWithProperties) {
+    fn set_block_with_properties(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_with_props: BlockWithProperties,
+    ) {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
@@ -539,7 +557,8 @@ impl<'a> WorldEditor<'a> {
         };
 
         if should_insert {
-            self.world.set_block_with_properties(x, absolute_y, z, block_with_props);
+            self.world
+                .set_block_with_properties(x, absolute_y, z, block_with_props);
         }
     }
 

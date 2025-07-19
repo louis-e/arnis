@@ -756,11 +756,14 @@ fn generate_roof(
                 for y in base_height..=roof_height {
                     if y == roof_height {
                         // Check if this is a height transition point by looking at neighboring blocks
-                        let has_lower_neighbor = [
-                            (*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)
-                        ].iter().any(|(nx, nz)| {
-                            roof_heights.get(&(*nx, *nz)).map_or(false, |&nh| nh < roof_height)
-                        });
+                        let has_lower_neighbor =
+                            [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
+                                .iter()
+                                .any(|(nx, nz)| {
+                                    roof_heights
+                                        .get(&(*nx, *nz))
+                                        .map_or(false, |&nh| nh < roof_height)
+                                });
 
                         if has_lower_neighbor {
                             // Determine stair direction based on ridge orientation and position
@@ -768,19 +771,42 @@ fn generate_roof(
                             let stair_block_with_props = if is_wider_than_long {
                                 // Ridge runs along X, slopes in Z direction
                                 if *z < center_z {
-                                    create_stair_with_properties(stair_block_material, StairFacing::South, StairShape::Straight)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::South,
+                                        StairShape::Straight,
+                                    )
                                 } else {
-                                    create_stair_with_properties(stair_block_material, StairFacing::North, StairShape::Straight)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::North,
+                                        StairShape::Straight,
+                                    )
                                 }
                             } else {
                                 // Ridge runs along Z, slopes in X direction
                                 if *x < center_x {
-                                    create_stair_with_properties(stair_block_material, StairFacing::East, StairShape::Straight)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::East,
+                                        StairShape::Straight,
+                                    )
                                 } else {
-                                    create_stair_with_properties(stair_block_material, StairFacing::West, StairShape::Straight)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::West,
+                                        StairShape::Straight,
+                                    )
                                 }
                             };
-                            editor.set_block_with_properties_absolute(stair_block_with_props, *x, y, *z, None, None);
+                            editor.set_block_with_properties_absolute(
+                                stair_block_with_props,
+                                *x,
+                                y,
+                                *z,
+                                None,
+                                None,
+                            );
                         } else {
                             // Use regular wall block where height doesn't change (ridge area)
                             editor.set_block_absolute(roof_material, *x, y, *z, None, None);
@@ -827,7 +853,7 @@ fn generate_roof(
 
                 // First pass: calculate all roof heights
                 let mut roof_heights = std::collections::HashMap::new();
-                
+
                 for (x, z) in &floor_area {
                     // Calculate distance to the ridge line
                     let distance_to_ridge = if long_axis_is_x {
@@ -853,7 +879,8 @@ fn generate_roof(
                     };
 
                     // Ridge gets peak height, edges get base height
-                    let roof_height = roof_peak_height - (slope_factor * (roof_peak_height - base_height) as f64) as i32;
+                    let roof_height = roof_peak_height
+                        - (slope_factor * (roof_peak_height - base_height) as f64) as i32;
                     let roof_y = roof_height.max(base_height);
                     roof_heights.insert((*x, *z), roof_y);
                 }
@@ -866,11 +893,14 @@ fn generate_roof(
                     for y in base_height..=roof_height {
                         if y == roof_height {
                             // Check if this is a height transition point by looking at neighboring blocks
-                            let has_lower_neighbor = [
-                                (*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)
-                            ].iter().any(|(nx, nz)| {
-                                roof_heights.get(&(*nx, *nz)).map_or(false, |&nh| nh < roof_height)
-                            });
+                            let has_lower_neighbor =
+                                [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
+                                    .iter()
+                                    .any(|(nx, nz)| {
+                                        roof_heights
+                                            .get(&(*nx, *nz))
+                                            .map_or(false, |&nh| nh < roof_height)
+                                    });
 
                             if has_lower_neighbor {
                                 // Determine stair direction based on ridge orientation and position
@@ -906,7 +936,14 @@ fn generate_roof(
                                         ) // Facing toward center (west)
                                     }
                                 };
-                                editor.set_block_with_properties_absolute(stair_block_with_props, *x, y, *z, None, None);
+                                editor.set_block_with_properties_absolute(
+                                    stair_block_with_props,
+                                    *x,
+                                    y,
+                                    *z,
+                                    None,
+                                    None,
+                                );
                             } else {
                                 // Use regular roof block where height doesn't change (ridge area)
                                 editor.set_block_absolute(roof_block, *x, y, *z, None, None);
@@ -919,16 +956,16 @@ fn generate_roof(
                 }
             } else {
                 // For more complex or square buildings, use distance from center approach
-                
+
                 // First pass: calculate all roof heights based on distance from center
                 let mut roof_heights = std::collections::HashMap::new();
-                
+
                 for (x, z) in &floor_area {
                     // Calculate distance from center point
                     let dx = (*x - center_x) as f64;
                     let dz = (*z - center_z) as f64;
                     let distance_from_center = (dx * dx + dz * dz).sqrt();
-                    
+
                     // Calculate maximum possible distance from center to any corner
                     let max_distance = {
                         let corner_distances = [
@@ -937,18 +974,22 @@ fn generate_roof(
                             ((max_x - center_x).pow(2) + (min_z - center_z).pow(2)) as f64,
                             ((max_x - center_x).pow(2) + (max_z - center_z).pow(2)) as f64,
                         ];
-                        corner_distances.iter().fold(0.0f64, |a, &b| a.max(b)).sqrt()
+                        corner_distances
+                            .iter()
+                            .fold(0.0f64, |a, &b| a.max(b))
+                            .sqrt()
                     };
-                    
+
                     // Create slope from center (high) to edges (low)
                     let distance_factor = if max_distance > 0.0 {
                         (distance_from_center / max_distance).min(1.0)
                     } else {
                         0.0
                     };
-                    
+
                     // Center gets peak height, edges get base height
-                    let roof_height = roof_peak_height - (distance_factor * (roof_peak_height - base_height) as f64) as i32;
+                    let roof_height = roof_peak_height
+                        - (distance_factor * (roof_peak_height - base_height) as f64) as i32;
                     let roof_y = roof_height.max(base_height);
                     roof_heights.insert((*x, *z), roof_y);
                 }
@@ -961,17 +1002,20 @@ fn generate_roof(
                     for y in base_height..=roof_height {
                         if y == roof_height {
                             // Check if this is a height transition point by looking at neighboring blocks
-                            let has_lower_neighbor = [
-                                (*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)
-                            ].iter().any(|(nx, nz)| {
-                                roof_heights.get(&(*nx, *nz)).map_or(false, |&nh| nh < roof_height)
-                            });
+                            let has_lower_neighbor =
+                                [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
+                                    .iter()
+                                    .any(|(nx, nz)| {
+                                        roof_heights
+                                            .get(&(*nx, *nz))
+                                            .map_or(false, |&nh| nh < roof_height)
+                                    });
 
                             if has_lower_neighbor {
                                 // For complex buildings, determine stair direction based on slope toward center
                                 let center_dx = *x - center_x;
                                 let center_dz = *z - center_z;
-                                
+
                                 let stair_block_material = get_stair_block_for_material(roof_block);
                                 let stair_block = if center_dx.abs() > center_dz.abs() {
                                     // Primary slope is in X direction
@@ -980,13 +1024,13 @@ fn generate_roof(
                                             stair_block_material,
                                             StairFacing::West,
                                             StairShape::Straight,
-                                        )  // Facing toward center
+                                        ) // Facing toward center
                                     } else {
                                         create_stair_with_properties(
                                             stair_block_material,
                                             StairFacing::East,
                                             StairShape::Straight,
-                                        )  // Facing toward center
+                                        ) // Facing toward center
                                     }
                                 } else {
                                     // Primary slope is in Z direction
@@ -995,17 +1039,24 @@ fn generate_roof(
                                             stair_block_material,
                                             StairFacing::North,
                                             StairShape::Straight,
-                                        )  // Facing toward center
+                                        ) // Facing toward center
                                     } else {
                                         create_stair_with_properties(
                                             stair_block_material,
                                             StairFacing::South,
                                             StairShape::Straight,
-                                        )  // Facing toward center
+                                        ) // Facing toward center
                                     }
                                 };
-                                
-                                editor.set_block_with_properties_absolute(stair_block, *x, y, *z, None, None);
+
+                                editor.set_block_with_properties_absolute(
+                                    stair_block,
+                                    *x,
+                                    y,
+                                    *z,
+                                    None,
+                                    None,
+                                );
                             } else {
                                 // Use regular roof block where height doesn't change
                                 editor.set_block_absolute(roof_block, *x, y, *z, None, None);
@@ -1023,7 +1074,7 @@ fn generate_roof(
             // Skillion roof - single sloping surface
             let width = (max_x - min_x).max(1);
             let building_size = (max_x - min_x).max(max_z - min_z);
-            
+
             // Scale roof height based on building size (4-10 blocks)
             let max_roof_height = (building_size / 3).clamp(4, 10);
 
@@ -1051,17 +1102,31 @@ fn generate_roof(
                 for y in base_height..=roof_height {
                     if y == roof_height {
                         // Check if this is a height transition point by looking at neighboring blocks
-                        let has_lower_neighbor = [
-                            (*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)
-                        ].iter().any(|(nx, nz)| {
-                            roof_heights.get(&(*nx, *nz)).map_or(false, |&nh| nh < roof_height)
-                        });
+                        let has_lower_neighbor =
+                            [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
+                                .iter()
+                                .any(|(nx, nz)| {
+                                    roof_heights
+                                        .get(&(*nx, *nz))
+                                        .map_or(false, |&nh| nh < roof_height)
+                                });
 
                         if has_lower_neighbor {
                             // Place stairs at height transitions for a stepped appearance
                             let stair_block_material = get_stair_block_for_material(roof_material);
-                            let stair_block_with_props = create_stair_with_properties(stair_block_material, StairFacing::East, StairShape::Straight);
-                            editor.set_block_with_properties_absolute(stair_block_with_props, *x, y, *z, None, None);
+                            let stair_block_with_props = create_stair_with_properties(
+                                stair_block_material,
+                                StairFacing::East,
+                                StairShape::Straight,
+                            );
+                            editor.set_block_with_properties_absolute(
+                                stair_block_with_props,
+                                *x,
+                                y,
+                                *z,
+                                None,
+                                None,
+                            );
                         } else {
                             // Use regular roof material where height doesn't change
                             editor.set_block_absolute(roof_material, *x, y, *z, None, None);
@@ -1077,7 +1142,7 @@ fn generate_roof(
         RoofType::Pyramidal => {
             // Pyramidal roof - all sides slope to a single central peak point
             let building_size = (max_x - min_x).max(max_z - min_z);
-            
+
             // Calculate peak height based on building size (taller peak for larger buildings)
             let peak_height = base_height + (building_size / 3).clamp(3, 8);
 
@@ -1095,14 +1160,14 @@ fn generate_roof(
                 // Calculate distance from this point to the center
                 let dx = (*x - center_x).abs() as f64;
                 let dz = (*z - center_z).abs() as f64;
-                
+
                 // Use the maximum distance to either edge to determine slope
                 // This creates the pyramid effect where all sides slope equally
                 let distance_to_edge = dx.max(dz);
-                
+
                 // Calculate maximum distance from center to any edge
                 let max_distance = ((max_x - min_x) / 2).max((max_z - min_z) / 2) as f64;
-                
+
                 // Calculate height based on distance from center
                 // Points closer to center are higher, creating the pyramid slope
                 let height_factor = if max_distance > 0.0 {
@@ -1110,15 +1175,16 @@ fn generate_roof(
                 } else {
                     1.0
                 };
-                
-                let roof_height = base_height + (height_factor * (peak_height - base_height) as f64) as i32;
+
+                let roof_height =
+                    base_height + (height_factor * (peak_height - base_height) as f64) as i32;
                 roof_heights.insert((*x, *z), roof_height);
             }
 
             // Second pass: place blocks with stairs at the surface
             for (x, z) in floor_area {
                 let roof_height = roof_heights[&(x, z)];
-                
+
                 // Fill from base height to calculated roof height to create solid pyramid
                 for y in base_height..=roof_height {
                     if y == roof_height {
@@ -1126,19 +1192,31 @@ fn generate_roof(
                         // Determine which direction the stairs should face based on the slope
                         let dx = x - center_x;
                         let dz = z - center_z;
-                        
+
                         // Check if there are higher neighbors to determine stair orientation
-                        let north_height = roof_heights.get(&(x, z - 1)).copied().unwrap_or(base_height);
-                        let south_height = roof_heights.get(&(x, z + 1)).copied().unwrap_or(base_height);
-                        let west_height = roof_heights.get(&(x - 1, z)).copied().unwrap_or(base_height);
-                        let east_height = roof_heights.get(&(x + 1, z)).copied().unwrap_or(base_height);
-                        
+                        let north_height = roof_heights
+                            .get(&(x, z - 1))
+                            .copied()
+                            .unwrap_or(base_height);
+                        let south_height = roof_heights
+                            .get(&(x, z + 1))
+                            .copied()
+                            .unwrap_or(base_height);
+                        let west_height = roof_heights
+                            .get(&(x - 1, z))
+                            .copied()
+                            .unwrap_or(base_height);
+                        let east_height = roof_heights
+                            .get(&(x + 1, z))
+                            .copied()
+                            .unwrap_or(base_height);
+
                         // Check for corner situations where two directions have lower neighbors
                         let has_lower_north = north_height < roof_height;
                         let has_lower_south = south_height < roof_height;
                         let has_lower_west = west_height < roof_height;
                         let has_lower_east = east_height < roof_height;
-                        
+
                         // Check for corner situations (two adjacent directions are lower)
                         let stair_block_material = get_stair_block_for_material(roof_material);
                         let stair_block = if has_lower_north && has_lower_west {
@@ -1174,25 +1252,25 @@ fn generate_roof(
                                         stair_block_material,
                                         StairFacing::West,
                                         StairShape::Straight,
-                                    )  // Facing west (stairs face toward center)
+                                    ) // Facing west (stairs face toward center)
                                 } else if dx < 0 && west_height < roof_height {
                                     create_stair_with_properties(
                                         stair_block_material,
                                         StairFacing::East,
                                         StairShape::Straight,
-                                    )  // Facing east (stairs face toward center)
+                                    ) // Facing east (stairs face toward center)
                                 } else if dz > 0 && south_height < roof_height {
                                     create_stair_with_properties(
                                         stair_block_material,
                                         StairFacing::North,
                                         StairShape::Straight,
-                                    )  // Facing north (stairs face toward center)
+                                    ) // Facing north (stairs face toward center)
                                 } else if dz < 0 && north_height < roof_height {
                                     create_stair_with_properties(
                                         stair_block_material,
                                         StairFacing::South,
                                         StairShape::Straight,
-                                    )  // Facing south (stairs face toward center)
+                                    ) // Facing south (stairs face toward center)
                                 } else {
                                     BlockWithProperties::simple(roof_material) // Use regular block if no clear slope direction
                                 }
@@ -1215,19 +1293,19 @@ fn generate_roof(
                                         stair_block_material,
                                         StairFacing::West,
                                         StairShape::Straight,
-                                    )  // Facing west (stairs face toward center)
+                                    ) // Facing west (stairs face toward center)
                                 } else if dx < 0 && west_height < roof_height {
                                     create_stair_with_properties(
                                         stair_block_material,
                                         StairFacing::East,
                                         StairShape::Straight,
-                                    )  // Facing east (stairs face toward center)
+                                    ) // Facing east (stairs face toward center)
                                 } else {
                                     BlockWithProperties::simple(roof_material) // Use regular block if no clear slope direction
                                 }
                             }
                         };
-                        
+
                         editor.set_block_with_properties_absolute(stair_block, x, y, z, None, None);
                     } else {
                         // Fill interior with solid blocks
