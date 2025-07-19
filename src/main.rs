@@ -72,7 +72,20 @@ fn run_cli() {
     }
 
     // Parse input arguments
-    let args: Args = Args::parse();
+    let mut args: Args = Args::parse();
+
+    // Calculate bbox size and conditionally disable terrain for large areas
+    let lat_diff = (args.bbox.max().lat() - args.bbox.min().lat()).abs();
+    let lng_diff = (args.bbox.max().lng() - args.bbox.min().lng()).abs();
+    let bbox_size = lat_diff * lng_diff;
+    println!("Bbox size: {:.6} square degrees", bbox_size);
+    
+    if bbox_size > 0.01300 {
+        if args.terrain {
+            println!("Area too large for terrain generation ({}), disabling terrain", bbox_size);
+        }
+        args.terrain = false;
+    }
 
     // Fetch data
     let raw_data = match &args.file {
