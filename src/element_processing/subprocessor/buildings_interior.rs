@@ -115,6 +115,7 @@ const INTERIOR2_LAYER2: [[char; 23]; 23] = [
 ];
 
 /// Maps interior layout characters to actual block types for different floor layers
+#[inline(always)]
 pub fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option<Block> {
     match c {
         ' ' => None,                     // Nothing

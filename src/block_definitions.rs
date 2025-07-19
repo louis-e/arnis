@@ -26,6 +26,7 @@ pub enum StairShape {
 }
 
 impl StairFacing {
+    #[inline(always)]
     pub fn as_str(&self) -> &'static str {
         match self {
             StairFacing::North => "north",
@@ -37,6 +38,7 @@ impl StairFacing {
 }
 
 impl StairShape {
+    #[inline(always)]
     pub fn as_str(&self) -> &'static str {
         match self {
             StairShape::Straight => "straight",
@@ -79,14 +81,17 @@ impl BlockWithProperties {
 }
 
 impl Block {
+    #[inline(always)]
     const fn new(id: u8) -> Self {
         Self { id }
     }
 
+    #[inline(always)]
     pub fn id(&self) -> u8 {
         self.id
     }
 
+    #[inline(always)]
     pub fn namespace(&self) -> &str {
         "minecraft"
     }
@@ -260,6 +265,7 @@ impl Block {
             184 => "smooth_sandstone_stairs",
             185 => "quartz_stairs",
             186 => "polished_andesite_stairs",
+            187 => "nether_brick_stairs",
             _ => panic!("Invalid id"),
         }
     }
@@ -690,8 +696,10 @@ pub const POLISHED_DIORITE_STAIRS: Block = Block::new(183);
 pub const SMOOTH_SANDSTONE_STAIRS: Block = Block::new(184);
 pub const QUARTZ_STAIRS: Block = Block::new(185);
 pub const POLISHED_ANDESITE_STAIRS: Block = Block::new(186);
+pub const NETHER_BRICK_STAIRS: Block = Block::new(187);
 
 /// Maps a block to its corresponding stair variant
+#[inline]
 pub fn get_stair_block_for_material(material: Block) -> Block {
     match material {
         STONE_BRICKS => STONE_BRICK_STAIRS,
@@ -714,7 +722,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         GRAY_TERRACOTTA => MUD_BRICK_STAIRS,
         LIGHT_BLUE_TERRACOTTA => STONE_BRICK_STAIRS,
         LIGHT_GRAY_CONCRETE => STONE_BRICK_STAIRS,
-        NETHER_BRICK => POLISHED_GRANITE_STAIRS,
+        NETHER_BRICK => NETHER_BRICK_STAIRS,
         POLISHED_BLACKSTONE => POLISHED_BLACKSTONE_BRICK_STAIRS,
         POLISHED_BLACKSTONE_BRICKS => POLISHED_BLACKSTONE_BRICK_STAIRS,
         POLISHED_DEEPSLATE => STONE_BRICK_STAIRS,

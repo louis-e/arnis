@@ -22,6 +22,7 @@ enum RoofType {
     Flat,   // Default flat roof
 }
 
+#[inline]
 pub fn generate_buildings(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -621,14 +622,25 @@ pub fn generate_buildings(
             let building_type = element
                 .tags
                 .get("building")
-                .or_else(|| element.tags.get("building:part"))
                 .map(|s| s.as_str())
                 .unwrap_or("yes");
 
-            // For apartments, give 70% chance to generate a gabled roof
-            if building_type == "apartments" {
+            // For apartments, give 80% chance to generate a gabled roof only if building footprint is not too large
+            if building_type == "apartments" || building_type == "residential" || building_type == "house" || building_type == "yes" {
+                // Calculate building footprint area for roof decision
+                let polygon_coords: Vec<(i32, i32)> = element
+                    .nodes
+                    .iter()
+                    .map(|n| (n.x, n.z))
+                    .collect();
+                let footprint_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                let footprint_size = footprint_area.len();
+                
+                // Maximum footprint size threshold for gabled roofs
+                let max_footprint_for_gabled = 800;
+                
                 let mut rng = rand::thread_rng();
-                if rng.gen_bool(0.7) {
+                if footprint_size <= max_footprint_for_gabled && rng.gen_bool(0.9) {
                     generate_roof(
                         editor,
                         element,
@@ -641,7 +653,7 @@ pub fn generate_buildings(
                         RoofType::Gabled,
                     );
                 }
-                // If not selected for gabled roof, apartment gets default flat roof (no action needed)
+                // If footprint too large or not selected for gabled roof, building gets default flat roof (no action needed)
             }
             // Other building types without roof:shape get default flat roof (no action needed)
         }
@@ -651,12 +663,22 @@ pub fn generate_buildings(
 }
 
 fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
-    let result = (value as f64) * (scale_factor);
-    result.floor() as i32
+    // Use bit operations for faster multiplication when possible
+    if scale_factor == 1.0 {
+        value
+    } else if scale_factor == 2.0 {
+        value << 1
+    } else if scale_factor == 4.0 {
+        value << 2
+    } else {
+        let result = (value as f64) * scale_factor;
+        result.floor() as i32
+    }
 }
 
 /// Unified function to generate various roof types
 #[allow(clippy::too_many_arguments)]
+#[inline]
 fn generate_roof(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -671,14 +693,16 @@ fn generate_roof(
     let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
     let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
-    // Find building bounds
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+    // Pre-calculate building bounds once
+    let (min_x, max_x, min_z, max_z) = element.nodes.iter().fold(
+        (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
+        |(min_x, max_x, min_z, max_z), n| {
+            (min_x.min(n.x), max_x.max(n.x), min_z.min(n.z), max_z.max(n.z))
+        }
+    );
 
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
+    let center_x = (min_x + max_x) >> 1; // Bit shift is faster than division
+    let center_z = (min_z + max_z) >> 1;
 
     // Set base height for roof to be at least one block above building top
     let base_height = start_y_offset + building_height + 1;
@@ -692,129 +716,88 @@ fn generate_roof(
         }
 
         RoofType::Gabled => {
-            // Determine building dimensions
+            // Pre-calculate building dimensions once
             let width = max_x - min_x;
             let length = max_z - min_z;
-
-            // Calculate roof height proportionally to building size
             let building_size = width.max(length);
+            
             // Enhanced logarithmic scaling with increased base values for taller roofs
             let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
-
             let roof_peak_height = base_height + roof_height_boost;
+
+            // Pre-determine orientation and material
+            let is_wider_than_long = width > length;
+            let max_distance = if is_wider_than_long { length >> 1 } else { width >> 1 };
 
             // 75% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let roof_material = if rng.gen_bool(0.75) {
-                accent_block
-            } else {
-                wall_block
-            };
+            let roof_material = if rng.gen_bool(0.75) { accent_block } else { wall_block };
 
-            // Align ridge with the longer dimension
-            let is_wider_than_long = width > length;
+            // Pre-allocate with capacity hint for better performance
+            let mut roof_heights = Vec::with_capacity(floor_area.len());
+            let mut blocks_to_place = Vec::with_capacity(floor_area.len() * 4);
 
-            // First pass: calculate all roof heights
-            let mut roof_heights = std::collections::HashMap::new();
-            for (x, z) in &floor_area {
-                // Determine distance to ridge based on building orientation
+            // First pass: calculate all roof heights using vectorized operations
+            for &(x, z) in &floor_area {
                 let distance_to_ridge = if is_wider_than_long {
-                    // For buildings wider in X, measure distance in Z direction
                     (z - center_z).abs()
                 } else {
-                    // For buildings wider in Z, measure distance in X direction
                     (x - center_x).abs()
                 };
 
-                // Calculate height based on distance - steeper slope for more dramatic roof
-                let max_distance = if is_wider_than_long {
-                    length / 2
-                } else {
-                    width / 2
-                };
-
-                if distance_to_ridge == 0
-                    && ((is_wider_than_long && *z == center_z)
-                        || (!is_wider_than_long && *x == center_x))
-                {
-                    // Ridge points get peak height
-                    roof_heights.insert((*x, *z), roof_peak_height);
+                let roof_height = if distance_to_ridge == 0 && 
+                    ((is_wider_than_long && z == center_z) || (!is_wider_than_long && x == center_x)) {
+                    roof_peak_height
                 } else {
                     let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
-                    let roof_height =
-                        roof_peak_height - (slope_ratio * roof_height_boost as f64) as i32;
-                    let roof_y = roof_height.max(base_height);
-                    roof_heights.insert((*x, *z), roof_y);
-                }
+                    (roof_peak_height as f64 - (slope_ratio * roof_height_boost as f64)) as i32
+                }.max(base_height);
+
+                roof_heights.push(((x, z), roof_height));
             }
 
-            // Second pass: place blocks with stairs at the surface
-            for (x, z) in &floor_area {
-                let roof_height = roof_heights[&(*x, *z)];
+            // Second pass: batch process blocks with pre-computed stair materials
+            let stair_block_material = get_stair_block_for_material(roof_material);
+            
+            for &((x, z), roof_height) in &roof_heights {
+                // Check neighboring heights efficiently using iterator
+                let has_lower_neighbor = roof_heights.iter()
+                    .filter_map(|&((nx, nz), nh)| {
+                        if (nx - x).abs() + (nz - z).abs() == 1 { Some(nh) } else { None }
+                    })
+                    .any(|nh| nh < roof_height);
 
                 // Fill from base height to calculated roof height
                 for y in base_height..=roof_height {
-                    if y == roof_height {
-                        // Check if this is a height transition point by looking at neighboring blocks
-                        let has_lower_neighbor =
-                            [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
-                                .iter()
-                                .any(|(nx, nz)| {
-                                    roof_heights
-                                        .get(&(*nx, *nz))
-                                        .map_or(false, |&nh| nh < roof_height)
-                                });
-
-                        if has_lower_neighbor {
-                            // Determine stair direction based on ridge orientation and position
-                            let stair_block_material = get_stair_block_for_material(roof_material);
-                            let stair_block_with_props = if is_wider_than_long {
-                                // Ridge runs along X, slopes in Z direction
-                                if *z < center_z {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::South,
-                                        StairShape::Straight,
-                                    )
-                                } else {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::North,
-                                        StairShape::Straight,
-                                    )
-                                }
+                    if y == roof_height && has_lower_neighbor {
+                        // Pre-compute stair direction
+                        let stair_block_with_props = if is_wider_than_long {
+                            if z < center_z {
+                                create_stair_with_properties(stair_block_material, StairFacing::South, StairShape::Straight)
                             } else {
-                                // Ridge runs along Z, slopes in X direction
-                                if *x < center_x {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::East,
-                                        StairShape::Straight,
-                                    )
-                                } else {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::West,
-                                        StairShape::Straight,
-                                    )
-                                }
-                            };
-                            editor.set_block_with_properties_absolute(
-                                stair_block_with_props,
-                                *x,
-                                y,
-                                *z,
-                                None,
-                                None,
-                            );
+                                create_stair_with_properties(stair_block_material, StairFacing::North, StairShape::Straight)
+                            }
                         } else {
-                            // Use regular wall block where height doesn't change (ridge area)
-                            editor.set_block_absolute(roof_material, *x, y, *z, None, None);
-                        }
+                            if x < center_x {
+                                create_stair_with_properties(stair_block_material, StairFacing::East, StairShape::Straight)
+                            } else {
+                                create_stair_with_properties(stair_block_material, StairFacing::West, StairShape::Straight)
+                            }
+                        };
+                        
+                        blocks_to_place.push((x, y, z, roof_material, Some(stair_block_with_props)));
                     } else {
-                        // Fill interior with solid blocks
-                        editor.set_block_absolute(roof_material, *x, y, *z, None, None);
+                        blocks_to_place.push((x, y, z, roof_material, None));
                     }
+                }
+            }
+
+            // Batch place all blocks to reduce function call overhead
+            for (x, y, z, block, stair_props) in blocks_to_place {
+                if let Some(stair_block) = stair_props {
+                    editor.set_block_with_properties_absolute(stair_block, x, y, z, None, None);
+                } else {
+                    editor.set_block_absolute(block, x, y, z, None, None);
                 }
             }
         }
@@ -1146,9 +1129,9 @@ fn generate_roof(
             // Calculate peak height based on building size (taller peak for larger buildings)
             let peak_height = base_height + (building_size / 3).clamp(3, 8);
 
-            // 75% accent block, otherwise wall block for roof
+            // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let roof_material = if rng.gen_bool(0.75) {
+            let roof_material = if rng.gen_bool(0.5) {
                 accent_block
             } else {
                 wall_block
