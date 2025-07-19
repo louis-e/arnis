@@ -37,108 +37,67 @@ pub fn flood_fill_area(
         .iter()
         .map(|&(x, z)| (x as f64, z as f64))
         .collect::<Vec<_>>();
-    let exterior: LineString = LineString::from(exterior_coords);
-    let polygon: Polygon<f64> = Polygon::new(exterior, vec![]);
+    let exterior: LineString = LineString::from(exterior_coords); // Create LineString from coordinates
+    let polygon: Polygon<f64> = Polygon::new(exterior, vec![]); // Create Polygon using LineString
 
-    // Optimized step size calculation - use adaptive grid based on polygon area
-    let width = max_x - min_x;
-    let height = max_z - min_z;
-    let area_estimate = width * height;
-    
-    // Use smaller steps for smaller polygons, larger for bigger ones
-    let step_x: i32 = if area_estimate < 100 { 1 } 
-                     else if area_estimate < 10000 { (width / 20).max(1) }
-                     else { (width / 10).max(1) };
-    let step_z: i32 = if area_estimate < 100 { 1 }
-                     else if area_estimate < 10000 { (height / 20).max(1) }
-                     else { (height / 10).max(1) };
+    // Determine safe step sizes for grid sampling
+    let step_x: i32 = ((max_x - min_x) / 10).max(1); // Ensure step is at least 1
+    let step_z: i32 = ((max_z - min_z) / 10).max(1); // Ensure step is at least 1
 
-    // Find a good starting point using smarter sampling
-    let start_point = find_interior_point(&polygon, min_x, max_x, min_z, max_z, step_x, step_z);
-    
-    if let Some((start_x, start_z)) = start_point {
-        // Pre-allocate vectors with estimated capacity
-        let estimated_capacity = ((width * height) / 4).min(10000) as usize;
-        filled_area.reserve(estimated_capacity);
-        visited.reserve(estimated_capacity);
-        
-        // Single flood-fill from the found interior point
-        let mut queue: VecDeque<(i32, i32)> = VecDeque::with_capacity(1000);
-        queue.push_back((start_x, start_z));
-        visited.insert((start_x, start_z));
+    // Sample multiple starting points within the bounding box
+    let mut candidate_points: VecDeque<(i32, i32)> = VecDeque::new();
+    for x in (min_x..=max_x).step_by(step_x as usize) {
+        for z in (min_z..=max_z).step_by(step_z as usize) {
+            candidate_points.push_back((x, z));
+        }
+    }
 
-        // Batch timeout checking to reduce overhead
-        let mut iteration_count = 0u32;
-        const TIMEOUT_CHECK_INTERVAL: u32 = 1000;
+    // Attempt flood-fill from each candidate point
+    while let Some((start_x, start_z)) = candidate_points.pop_front() {
+        if let Some(timeout) = timeout {
+            if &start_time.elapsed() > timeout {
+                eprintln!("Floodfill timeout");
+                break;
+            }
+        }
 
-        while let Some((x, z)) = queue.pop_front() {
-            // Check timeout only every N iterations to reduce overhead
-            iteration_count += 1;
-            if iteration_count % TIMEOUT_CHECK_INTERVAL == 0 {
+        if polygon.contains(&Point::new(start_x as f64, start_z as f64)) {
+            // Start flood-fill from the valid interior point
+            let mut queue: VecDeque<(i32, i32)> = VecDeque::new();
+            queue.push_back((start_x, start_z));
+            visited.insert((start_x, start_z));
+
+            while let Some((x, z)) = queue.pop_front() {
                 if let Some(timeout) = timeout {
                     if &start_time.elapsed() > timeout {
                         eprintln!("Floodfill timeout");
                         break;
                     }
                 }
-            }
 
-            // Pre-create point once for the containment check
-            let point = Point::new(x as f64, z as f64);
-            if polygon.contains(&point) {
-                filled_area.push((x, z));
+                if polygon.contains(&Point::new(x as f64, z as f64)) {
+                    filled_area.push((x, z));
 
-                // Check adjacent points with bounds checking first
-                for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                    let nx = x + dx;
-                    let nz = z + dz;
-                    
-                    if nx >= min_x && nx <= max_x && nz >= min_z && nz <= max_z {
-                        let coord = (nx, nz);
-                        if !visited.contains(&coord) {
-                            visited.insert(coord);
-                            queue.push_back(coord);
+                    // Check adjacent points
+                    for (nx, nz) in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)].iter() {
+                        if *nx >= min_x
+                            && *nx <= max_x
+                            && *nz >= min_z
+                            && *nz <= max_z
+                            && !visited.contains(&(*nx, *nz))
+                        {
+                            visited.insert((*nx, *nz));
+                            queue.push_back((*nx, *nz));
                         }
                     }
                 }
+            }
+
+            if !filled_area.is_empty() {
+                break; // Exit if a valid area has been flood-filled
             }
         }
     }
 
     filled_area
-}
-
-/// Find a good interior point for starting the flood fill
-fn find_interior_point(
-    polygon: &Polygon<f64>,
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    step_x: i32,
-    step_z: i32,
-) -> Option<(i32, i32)> {
-    // Start from center and work outward
-    let center_x = (min_x + max_x) / 2;
-    let center_z = (min_z + max_z) / 2;
-    
-    // Check center first
-    if polygon.contains(&Point::new(center_x as f64, center_z as f64)) {
-        return Some((center_x, center_z));
-    }
-    
-    // Spiral search from center
-    for radius in 1..=(((max_x - min_x).max(max_z - min_z)) / (step_x.min(step_z))) {
-        for x in (center_x - radius * step_x..=center_x + radius * step_x).step_by(step_x as usize) {
-            for z in (center_z - radius * step_z..=center_z + radius * step_z).step_by(step_z as usize) {
-                if x >= min_x && x <= max_x && z >= min_z && z <= max_z {
-                    if polygon.contains(&Point::new(x as f64, z as f64)) {
-                        return Some((x, z));
-                    }
-                }
-            }
-        }
-    }
-    
-    None
 }
