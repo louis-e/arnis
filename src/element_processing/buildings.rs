@@ -40,6 +40,15 @@ pub fn generate_buildings(
     let scale_factor = args.scale;
     let min_level_offset = multiply_scale(min_level * 4, scale_factor);
 
+    // CACHE FLOOD FILL RESULT - compute once and reuse throughout
+    let polygon_coords: Vec<(i32, i32)> = element
+        .nodes
+        .iter()
+        .map(|n| (n.x, n.z))
+        .collect();
+    let cached_floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+    let cached_footprint_size = cached_floor_area.len();
+
     // Use fixed starting Y coordinate based on maximum ground level when terrain is enabled
     let start_y_offset = if args.terrain {
         // Get nodes' XZ points to find maximum elevation
@@ -183,13 +192,8 @@ pub fn generate_buildings(
         if amenity_type == "shelter" {
             let roof_block: Block = STONE_BRICK_SLAB;
 
-            let polygon_coords: Vec<(i32, i32)> = element
-                .nodes
-                .iter()
-                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                .collect();
-            let roof_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+            // Use cached floor area instead of recalculating
+            let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
 
             // Place fences and roof slabs at each corner node directly
             for node in &element.nodes {
@@ -221,13 +225,8 @@ pub fn generate_buildings(
                 let ground_block: Block = OAK_PLANKS;
                 let roof_block: Block = STONE_BLOCK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> = element
-                    .nodes
-                    .iter()
-                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                    .collect();
-                let floor_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                // Use cached floor area instead of recalculating
+                let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
 
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
@@ -263,13 +262,8 @@ pub fn generate_buildings(
             // Ensure minimum height
             building_height = building_height.max(16);
 
-            let polygon_coords: Vec<(i32, i32)> = element
-                .nodes
-                .iter()
-                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                .collect();
-            let floor_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+            // Use cached floor area instead of recalculating
+            let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
 
             for level in 0..=(building_height / 4) {
                 let current_level_y = level * 4;
@@ -286,7 +280,7 @@ pub fn generate_buildings(
                 }
 
                 // Fill the floor area for each level
-                for (x, z) in &floor_area {
+                for (x, z) in floor_area {
                     if level == 0 {
                         editor.set_block(SMOOTH_STONE, *x, current_level_y, *z, None, None);
                     } else {
@@ -366,14 +360,8 @@ pub fn generate_buildings(
                 previous_node = Some((x, z));
             }
 
-            // Use flood-fill to fill the interior of the roof
-            let polygon_coords: Vec<(i32, i32)> = element
-                .nodes
-                .iter()
-                .map(|node: &crate::osm_parser::ProcessedNode| (node.x, node.z))
-                .collect();
-            let roof_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref()); // Use flood-fill to determine the area
+            // Use cached floor area instead of recalculating for roof interior
+            let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
             for (x, z) in roof_area.iter() {
@@ -484,12 +472,8 @@ pub fn generate_buildings(
 
     // Flood-fill interior with floor variation
     if corner_addup != (0, 0, 0) {
-        let polygon_coords: Vec<(i32, i32)> = element
-            .nodes
-            .iter()
-            .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-            .collect();
-        let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+        // Use cached floor area instead of recalculating
+        let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
 
         // Calculate floor heights for each level based on building height
         let mut floor_levels = Vec::new();
@@ -617,6 +601,7 @@ pub fn generate_buildings(
                 wall_block,
                 accent_block,
                 roof_type,
+                &cached_floor_area, // Pass cached floor area
             );
         } else {
             // Handle buildings without explicit roof:shape tag
@@ -632,11 +617,8 @@ pub fn generate_buildings(
                 || building_type == "house"
                 || building_type == "yes"
             {
-                // Calculate building footprint area for roof decision
-                let polygon_coords: Vec<(i32, i32)> =
-                    element.nodes.iter().map(|n| (n.x, n.z)).collect();
-                let footprint_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
-                let footprint_size = footprint_area.len();
+                // Use cached footprint area and size instead of recalculating
+                let footprint_size = cached_footprint_size;
 
                 // Maximum footprint size threshold for gabled roofs
                 let max_footprint_for_gabled = 800;
@@ -653,6 +635,7 @@ pub fn generate_buildings(
                         wall_block,
                         accent_block,
                         RoofType::Gabled,
+                        &cached_floor_area, // Pass cached floor area
                     );
                 }
                 // If footprint too large or not selected for gabled roof, building gets default flat roof (no action needed)
@@ -691,9 +674,10 @@ fn generate_roof(
     wall_block: Block,
     accent_block: Block,
     roof_type: RoofType,
+    cached_floor_area: &[(i32, i32)], // Accept cached floor area instead of recalculating
 ) {
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
-    let floor_area = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+    // Use the provided cached floor area instead of recalculating
+    let floor_area = cached_floor_area;
 
     // Pre-calculate building bounds once
     let (min_x, max_x, min_z, max_z) = element.nodes.iter().fold(
@@ -717,7 +701,7 @@ fn generate_roof(
     match roof_type {
         RoofType::Flat => {
             // Simple flat roof
-            for (x, z) in floor_area {
+            for &(x, z) in floor_area {
                 editor.set_block_absolute(floor_block, x, base_height, z, None, None);
             }
         }
@@ -753,7 +737,7 @@ fn generate_roof(
             let mut blocks_to_place = Vec::with_capacity(floor_area.len() * 4);
 
             // First pass: calculate all roof heights using vectorized operations
-            for &(x, z) in &floor_area {
+            for &(x, z) in floor_area {
                 let distance_to_ridge = if is_wider_than_long {
                     (z - center_z).abs()
                 } else {
@@ -865,7 +849,7 @@ fn generate_roof(
                 // First pass: calculate all roof heights
                 let mut roof_heights = std::collections::HashMap::new();
 
-                for (x, z) in &floor_area {
+                for &(x, z) in floor_area {
                     // Calculate distance to the ridge line
                     let distance_to_ridge = if long_axis_is_x {
                         // Distance in Z direction for X-axis ridge
@@ -893,19 +877,19 @@ fn generate_roof(
                     let roof_height = roof_peak_height
                         - (slope_factor * (roof_peak_height - base_height) as f64) as i32;
                     let roof_y = roof_height.max(base_height);
-                    roof_heights.insert((*x, *z), roof_y);
+                    roof_heights.insert((x, z), roof_y);
                 }
 
                 // Second pass: place blocks with stairs at height transitions
-                for (x, z) in &floor_area {
-                    let roof_height = roof_heights[&(*x, *z)];
+                for &(x, z) in floor_area {
+                    let roof_height = roof_heights[&(x, z)];
 
                     // Fill from base to calculated height
                     for y in base_height..=roof_height {
                         if y == roof_height {
                             // Check if this is a height transition point by looking at neighboring blocks
                             let has_lower_neighbor =
-                                [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
+                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
                                     .iter()
                                     .any(|(nx, nz)| {
                                         roof_heights
@@ -918,7 +902,7 @@ fn generate_roof(
                                 let stair_block_material = get_stair_block_for_material(roof_block);
                                 let stair_block_with_props = if long_axis_is_x {
                                     // Ridge runs along X, slopes in Z direction
-                                    if *z < center_z {
+                                    if z < center_z {
                                         create_stair_with_properties(
                                             stair_block_material,
                                             StairFacing::South,
@@ -933,7 +917,7 @@ fn generate_roof(
                                     }
                                 } else {
                                     // Ridge runs along Z, slopes in X direction
-                                    if *x < center_x {
+                                    if x < center_x {
                                         create_stair_with_properties(
                                             stair_block_material,
                                             StairFacing::East,
@@ -949,19 +933,19 @@ fn generate_roof(
                                 };
                                 editor.set_block_with_properties_absolute(
                                     stair_block_with_props,
-                                    *x,
+                                    x,
                                     y,
-                                    *z,
+                                    z,
                                     None,
                                     None,
                                 );
                             } else {
                                 // Use regular roof block where height doesn't change (ridge area)
-                                editor.set_block_absolute(roof_block, *x, y, *z, None, None);
+                                editor.set_block_absolute(roof_block, x, y, z, None, None);
                             }
                         } else {
                             // Fill interior with solid blocks
-                            editor.set_block_absolute(roof_block, *x, y, *z, None, None);
+                            editor.set_block_absolute(roof_block, x, y, z, None, None);
                         }
                     }
                 }
@@ -971,10 +955,10 @@ fn generate_roof(
                 // First pass: calculate all roof heights based on distance from center
                 let mut roof_heights = std::collections::HashMap::new();
 
-                for (x, z) in &floor_area {
+                for &(x, z) in floor_area {
                     // Calculate distance from center point
-                    let dx = (*x - center_x) as f64;
-                    let dz = (*z - center_z) as f64;
+                    let dx = (x - center_x) as f64;
+                    let dz = (z - center_z) as f64;
                     let distance_from_center = (dx * dx + dz * dz).sqrt();
 
                     // Calculate maximum possible distance from center to any corner
@@ -1002,19 +986,19 @@ fn generate_roof(
                     let roof_height = roof_peak_height
                         - (distance_factor * (roof_peak_height - base_height) as f64) as i32;
                     let roof_y = roof_height.max(base_height);
-                    roof_heights.insert((*x, *z), roof_y);
+                    roof_heights.insert((x, z), roof_y);
                 }
 
                 // Second pass: place blocks with stairs at height transitions
-                for (x, z) in &floor_area {
-                    let roof_height = roof_heights[&(*x, *z)];
+                for &(x, z) in floor_area {
+                    let roof_height = roof_heights[&(x, z)];
 
                     // Fill from base height to calculated roof height
                     for y in base_height..=roof_height {
                         if y == roof_height {
                             // Check if this is a height transition point by looking at neighboring blocks
                             let has_lower_neighbor =
-                                [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
+                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
                                     .iter()
                                     .any(|(nx, nz)| {
                                         roof_heights
@@ -1024,8 +1008,8 @@ fn generate_roof(
 
                             if has_lower_neighbor {
                                 // For complex buildings, determine stair direction based on slope toward center
-                                let center_dx = *x - center_x;
-                                let center_dz = *z - center_z;
+                                let center_dx = x - center_x;
+                                let center_dz = z - center_z;
 
                                 let stair_block_material = get_stair_block_for_material(roof_block);
                                 let stair_block = if center_dx.abs() > center_dz.abs() {
@@ -1062,19 +1046,19 @@ fn generate_roof(
 
                                 editor.set_block_with_properties_absolute(
                                     stair_block,
-                                    *x,
+                                    x,
                                     y,
-                                    *z,
+                                    z,
                                     None,
                                     None,
                                 );
                             } else {
                                 // Use regular roof block where height doesn't change
-                                editor.set_block_absolute(roof_block, *x, y, *z, None, None);
+                                editor.set_block_absolute(roof_block, x, y, z, None, None);
                             }
                         } else {
                             // Fill interior with solid blocks
-                            editor.set_block_absolute(roof_block, *x, y, *z, None, None);
+                            editor.set_block_absolute(roof_block, x, y, z, None, None);
                         }
                     }
                 }
@@ -1099,22 +1083,22 @@ fn generate_roof(
 
             // First pass: calculate all roof heights
             let mut roof_heights = std::collections::HashMap::new();
-            for (x, z) in &floor_area {
-                let slope_progress = (*x - min_x) as f64 / width as f64;
+            for &(x, z) in floor_area {
+                let slope_progress = (x - min_x) as f64 / width as f64;
                 let roof_height = base_height + (slope_progress * max_roof_height as f64) as i32;
-                roof_heights.insert((*x, *z), roof_height);
+                roof_heights.insert((x, z), roof_height);
             }
 
             // Second pass: place blocks with stairs only where height increases
-            for (x, z) in &floor_area {
-                let roof_height = roof_heights[&(*x, *z)];
+            for &(x, z) in floor_area {
+                let roof_height = roof_heights[&(x, z)];
 
                 // Fill from base height to calculated roof height to create solid roof
                 for y in base_height..=roof_height {
                     if y == roof_height {
                         // Check if this is a height transition point by looking at neighboring blocks
                         let has_lower_neighbor =
-                            [(*x - 1, *z), (*x + 1, *z), (*x, *z - 1), (*x, *z + 1)]
+                            [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
                                 .iter()
                                 .any(|(nx, nz)| {
                                     roof_heights
@@ -1132,19 +1116,19 @@ fn generate_roof(
                             );
                             editor.set_block_with_properties_absolute(
                                 stair_block_with_props,
-                                *x,
+                                x,
                                 y,
-                                *z,
+                                z,
                                 None,
                                 None,
                             );
                         } else {
                             // Use regular roof material where height doesn't change
-                            editor.set_block_absolute(roof_block, *x, y, *z, None, None);
+                            editor.set_block_absolute(roof_block, x, y, z, None, None);
                         }
                     } else {
                         // Fill interior with solid blocks
-                        editor.set_block_absolute(roof_block, *x, y, *z, None, None);
+                        editor.set_block_absolute(roof_block, x, y, z, None, None);
                     }
                 }
             }
@@ -1167,10 +1151,10 @@ fn generate_roof(
 
             // First pass: calculate all roof heights
             let mut roof_heights = std::collections::HashMap::new();
-            for (x, z) in &floor_area {
+            for &(x, z) in floor_area {
                 // Calculate distance from this point to the center
-                let dx = (*x - center_x).abs() as f64;
-                let dz = (*z - center_z).abs() as f64;
+                let dx = (x - center_x).abs() as f64;
+                let dz = (z - center_z).abs() as f64;
 
                 // Use the maximum distance to either edge to determine slope
                 // This creates the pyramid effect where all sides slope equally
@@ -1182,18 +1166,18 @@ fn generate_roof(
                 // Calculate height based on distance from center
                 // Points closer to center are higher, creating the pyramid slope
                 let height_factor = if max_distance > 0.0 {
-                    (1.0 - (distance_to_edge / max_distance)).max(0.0)
+                    (1.0 - (distance_to_edge / max_distance)).max(0.0f64)
                 } else {
                     1.0
                 };
 
                 let roof_height =
                     base_height + (height_factor * (peak_height - base_height) as f64) as i32;
-                roof_heights.insert((*x, *z), roof_height);
+                roof_heights.insert((x, z), roof_height);
             }
 
             // Second pass: place blocks with stairs at the surface
-            for (x, z) in floor_area {
+            for &(x, z) in floor_area {
                 let roof_height = roof_heights[&(x, z)];
 
                 // Fill from base height to calculated roof height to create solid pyramid
@@ -1338,7 +1322,7 @@ fn generate_roof(
                 wall_block
             };
 
-            for (x, z) in floor_area {
+            for &(x, z) in floor_area {
                 let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
                 let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
 
