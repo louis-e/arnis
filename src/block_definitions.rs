@@ -7,6 +7,47 @@ use std::collections::HashMap;
 
 use crate::colors::RGBTuple;
 
+// Enums for stair properties
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum StairFacing {
+    North,
+    East,
+    South,
+    West,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum StairShape {
+    Straight,
+    InnerLeft,
+    InnerRight,
+    OuterLeft,
+    OuterRight,
+}
+
+impl StairFacing {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StairFacing::North => "north",
+            StairFacing::East => "east",
+            StairFacing::South => "south",
+            StairFacing::West => "west",
+        }
+    }
+}
+
+impl StairShape {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            StairShape::Straight => "straight",
+            StairShape::InnerLeft => "inner_left",
+            StairShape::InnerRight => "inner_right",
+            StairShape::OuterLeft => "outer_left",
+            StairShape::OuterRight => "outer_right",
+        }
+    }
+}
+
 // Type definitions for better readability
 type ColorTuple = (u8, u8, u8);
 type BlockOptions = &'static [Block];
@@ -15,6 +56,23 @@ type ColorBlockMapping = (ColorTuple, BlockOptions);
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
     id: u8,
+}
+
+// Extended block with dynamic properties
+#[derive(Clone, Debug)]
+pub struct BlockWithProperties {
+    pub block: Block,
+    pub properties: Option<Value>,
+}
+
+impl BlockWithProperties {
+    pub fn new(block: Block, properties: Option<Value>) -> Self {
+        Self { block, properties }
+    }
+    
+    pub fn simple(block: Block) -> Self {
+        Self { block, properties: None }
+    }
 }
 
 impl Block {
@@ -190,17 +248,15 @@ impl Block {
             175 => "black_terracotta",
             176 => "brown_terracotta",
             177 => "stone_brick_stairs",
-            178 => "stone_brick_stairs",
-            179 => "stone_brick_stairs",
-            180 => "stone_brick_stairs",
-            181 => "stone_brick_stairs",
-            182 => "stone_brick_stairs",
-            183 => "stone_brick_stairs",
-            184 => "stone_brick_stairs",
-            185 => "stone_brick_stairs",
-            186 => "stone_brick_stairs",
-            187 => "stone_brick_stairs",
-            188 => "stone_brick_stairs",
+            178 => "mud_brick_stairs",
+            179 => "polished_blackstone_brick_stairs",
+            180 => "brick_stairs",
+            181 => "polished_granite_stairs",
+            182 => "end_stone_brick_stairs",
+            183 => "polished_diorite_stairs",
+            184 => "smooth_sandstone_stairs",
+            185 => "quartz_stairs",
+            186 => "polished_andesite_stairs",
             _ => panic!("Invalid id"),
         }
     }
@@ -398,77 +454,48 @@ impl Block {
                 map.insert("half".to_string(), Value::String("top".to_string()));
                 map
             })),
-            177 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("north".to_string()));
-                map
-            })),
-            178 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
-                map
-            })),
-            179 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("south".to_string()));
-                map
-            })),
-            180 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("west".to_string()));
-                map
-            })),
-            181 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("north".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
-                map
-            })),
-            182 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
-                map
-            })),
-            183 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("south".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
-                map
-            })),
-            184 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("west".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_right".to_string()));
-                map
-            })),
-            185 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("north".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
-                map
-            })),
-            186 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
-                map
-            })),
-            187 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("south".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
-                map
-            })),
-            188 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("west".to_string()));
-                map.insert("shape".to_string(), Value::String("outer_left".to_string()));
-                map
-            })),
             _ => None,
         }
     }
+}
+
+// Cache for stair blocks with properties
+use std::sync::Mutex;
+
+static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), BlockWithProperties>>> = 
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+// General function to create any stair block with facing and shape properties
+pub fn create_stair_with_properties(base_stair_block: Block, facing: StairFacing, shape: StairShape) -> BlockWithProperties {
+    let cache_key = (base_stair_block.id(), facing, shape);
+    
+    // Check cache first
+    {
+        let cache = STAIR_CACHE.lock().unwrap();
+        if let Some(cached_block) = cache.get(&cache_key) {
+            return cached_block.clone();
+        }
+    }
+    
+    // Create properties
+    let mut map = HashMap::new();
+    map.insert("facing".to_string(), Value::String(facing.as_str().to_string()));
+    
+    // Only add shape if it's not straight (default)
+    if !matches!(shape, StairShape::Straight) {
+        map.insert("shape".to_string(), Value::String(shape.as_str().to_string()));
+    }
+    
+    let properties = Value::Compound(map);
+    let block_with_props = BlockWithProperties::new(base_stair_block, Some(properties));
+    
+    // Cache the result
+    {
+        let mut cache = STAIR_CACHE.lock().unwrap();
+        cache.insert(cache_key, block_with_props.clone());
+    }
+    
+    block_with_props
 }
 
 // Lazy static blocks
@@ -639,18 +666,54 @@ pub const OAK_TRAPDOOR: Block = Block::new(173);
 pub const BROWN_CONCRETE: Block = Block::new(174);
 pub const BLACK_TERRACOTTA: Block = Block::new(175);
 pub const BROWN_TERRACOTTA: Block = Block::new(176);
-pub const STONE_BRICK_STAIRS_NORTH: Block = Block::new(177);
-pub const STONE_BRICK_STAIRS_EAST: Block = Block::new(178);
-pub const STONE_BRICK_STAIRS_SOUTH: Block = Block::new(179);
-pub const STONE_BRICK_STAIRS_WEST: Block = Block::new(180);
-pub const STONE_BRICK_STAIRS_NORTH_OUTER_RIGHT: Block = Block::new(181);
-pub const STONE_BRICK_STAIRS_EAST_OUTER_RIGHT: Block = Block::new(182);
-pub const STONE_BRICK_STAIRS_SOUTH_OUTER_RIGHT: Block = Block::new(183);
-pub const STONE_BRICK_STAIRS_WEST_OUTER_RIGHT: Block = Block::new(184);
-pub const STONE_BRICK_STAIRS_NORTH_OUTER_LEFT: Block = Block::new(185);
-pub const STONE_BRICK_STAIRS_EAST_OUTER_LEFT: Block = Block::new(186);
-pub const STONE_BRICK_STAIRS_SOUTH_OUTER_LEFT: Block = Block::new(187);
-pub const STONE_BRICK_STAIRS_WEST_OUTER_LEFT: Block = Block::new(188);
+pub const STONE_BRICK_STAIRS: Block = Block::new(177);
+pub const MUD_BRICK_STAIRS: Block = Block::new(178);
+pub const POLISHED_BLACKSTONE_BRICK_STAIRS: Block = Block::new(179);
+pub const BRICK_STAIRS: Block = Block::new(180);
+pub const POLISHED_GRANITE_STAIRS: Block = Block::new(181);
+pub const END_STONE_BRICK_STAIRS: Block = Block::new(182);
+pub const POLISHED_DIORITE_STAIRS: Block = Block::new(183);
+pub const SMOOTH_SANDSTONE_STAIRS: Block = Block::new(184);
+pub const QUARTZ_STAIRS: Block = Block::new(185);
+pub const POLISHED_ANDESITE_STAIRS: Block = Block::new(186);
+
+/// Maps a block to its corresponding stair variant
+pub fn get_stair_block_for_material(material: Block) -> Block {
+    match material {
+        STONE_BRICKS => STONE_BRICK_STAIRS,
+        MUD_BRICKS => MUD_BRICK_STAIRS,
+        OAK_PLANKS => OAK_STAIRS,
+        POLISHED_ANDESITE => STONE_BRICK_STAIRS,
+        SMOOTH_STONE => POLISHED_ANDESITE_STAIRS,
+        OAK_PLANKS => OAK_STAIRS,
+        ANDESITE => STONE_BRICK_STAIRS,
+        CHISELED_STONE_BRICKS => STONE_BRICK_STAIRS,
+        BLACK_TERRACOTTA => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        BLACKSTONE => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        BLUE_TERRACOTTA => MUD_BRICK_STAIRS,
+        BRICK => BRICK_STAIRS,
+        BROWN_CONCRETE => OAK_STAIRS,
+        BROWN_TERRACOTTA => MUD_BRICK_STAIRS,
+        DEEPSLATE_BRICKS => STONE_BRICK_STAIRS,
+        END_STONE_BRICKS => END_STONE_BRICK_STAIRS,
+        GRAY_CONCRETE => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        GRAY_TERRACOTTA => MUD_BRICK_STAIRS,
+        LIGHT_BLUE_TERRACOTTA => STONE_BRICK_STAIRS,
+        LIGHT_GRAY_CONCRETE => STONE_BRICK_STAIRS,
+        NETHER_BRICK => POLISHED_GRANITE_STAIRS,
+        POLISHED_BLACKSTONE => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        POLISHED_BLACKSTONE_BRICKS => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        POLISHED_DEEPSLATE => STONE_BRICK_STAIRS,
+        POLISHED_GRANITE => POLISHED_GRANITE_STAIRS,
+        QUARTZ_BLOCK => POLISHED_DIORITE_STAIRS,
+        QUARTZ_BRICKS => POLISHED_DIORITE_STAIRS,
+        SANDSTONE => SMOOTH_SANDSTONE_STAIRS,
+        SMOOTH_SANDSTONE => SMOOTH_SANDSTONE_STAIRS,
+        WHITE_CONCRETE => QUARTZ_STAIRS,
+        WHITE_TERRACOTTA => MUD_BRICK_STAIRS,
+        _ => STONE_BRICK_STAIRS,
+    }
+}
 
 // Window variations for different building types
 pub static WINDOW_VARIATIONS: [Block; 7] = [
@@ -874,7 +937,6 @@ pub fn get_fallback_building_block() -> Block {
         LIGHT_GRAY_CONCRETE,
         MUD_BRICKS,
         NETHER_BRICK,
-        NETHERITE_BLOCK,
         POLISHED_ANDESITE,
         POLISHED_BLACKSTONE,
         POLISHED_BLACKSTONE_BRICKS,
@@ -888,6 +950,7 @@ pub fn get_fallback_building_block() -> Block {
         STONE_BRICKS,
         WHITE_CONCRETE,
         WHITE_TERRACOTTA,
+        OAK_PLANKS,
     ];
     fallback_options[rng.gen_range(0..fallback_options.len())]
 }

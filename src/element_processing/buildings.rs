@@ -616,6 +616,34 @@ pub fn generate_buildings(
                 accent_block,
                 roof_type,
             );
+        } else {
+            // Handle buildings without explicit roof:shape tag
+            let building_type = element
+                .tags
+                .get("building")
+                .or_else(|| element.tags.get("building:part"))
+                .map(|s| s.as_str())
+                .unwrap_or("yes");
+
+            // For apartments, give 70% chance to generate a gabled roof
+            if building_type == "apartments" {
+                let mut rng = rand::thread_rng();
+                if rng.gen_bool(0.7) {
+                    generate_roof(
+                        editor,
+                        element,
+                        args,
+                        start_y_offset,
+                        building_height,
+                        floor_block,
+                        wall_block,
+                        accent_block,
+                        RoofType::Gabled,
+                    );
+                }
+                // If not selected for gabled roof, apartment gets default flat roof (no action needed)
+            }
+            // Other building types without roof:shape get default flat roof (no action needed)
         }
     } else {
         // Default flat roof - already handled by the building generation code
@@ -675,13 +703,12 @@ fn generate_roof(
 
             let roof_peak_height = base_height + roof_height_boost;
 
-            // 33% STONE_BRICKS, 33% accent block, 33% wall_block for roof
+            // 75% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let random_value = rng.gen_range(0..3);
-            let roof_material = match random_value {
-                0 => STONE_BRICKS,
-                1 => accent_block,
-                _ => wall_block,
+            let roof_material = if rng.gen_bool(0.75) {
+                accent_block
+            } else {
+                wall_block
             };
 
             // Align ridge with the longer dimension
@@ -737,22 +764,23 @@ fn generate_roof(
 
                         if has_lower_neighbor {
                             // Determine stair direction based on ridge orientation and position
-                            let stair_block = if is_wider_than_long {
+                            let stair_block_material = get_stair_block_for_material(roof_material);
+                            let stair_block_with_props = if is_wider_than_long {
                                 // Ridge runs along X, slopes in Z direction
                                 if *z < center_z {
-                                    STONE_BRICK_STAIRS_SOUTH // Facing toward center (south)
+                                    create_stair_with_properties(stair_block_material, StairFacing::South, StairShape::Straight)
                                 } else {
-                                    STONE_BRICK_STAIRS_NORTH // Facing toward center (north)
+                                    create_stair_with_properties(stair_block_material, StairFacing::North, StairShape::Straight)
                                 }
                             } else {
                                 // Ridge runs along Z, slopes in X direction
                                 if *x < center_x {
-                                    STONE_BRICK_STAIRS_EAST // Facing toward center (east)
+                                    create_stair_with_properties(stair_block_material, StairFacing::East, StairShape::Straight)
                                 } else {
-                                    STONE_BRICK_STAIRS_WEST // Facing toward center (west)
+                                    create_stair_with_properties(stair_block_material, StairFacing::West, StairShape::Straight)
                                 }
                             };
-                            editor.set_block_absolute(stair_block, *x, y, *z, None, None);
+                            editor.set_block_with_properties_absolute(stair_block_with_props, *x, y, *z, None, None);
                         } else {
                             // Use regular wall block where height doesn't change (ridge area)
                             editor.set_block_absolute(roof_material, *x, y, *z, None, None);
@@ -778,13 +806,12 @@ fn generate_roof(
             // Make roof taller and more pointy
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
 
-            // 33% STONE_BRICKS, 33% accent block, 33% wall_block for roof
+            // 75% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let random_value = rng.gen_range(0..3);
-            let roof_block = match random_value {
-                0 => STONE_BRICKS,
-                1 => accent_block,
-                _ => wall_block,
+            let roof_block = if rng.gen_bool(0.75) {
+                accent_block
+            } else {
+                wall_block
             };
 
             // Find the building's approximate center line along the long axis
@@ -847,22 +874,39 @@ fn generate_roof(
 
                             if has_lower_neighbor {
                                 // Determine stair direction based on ridge orientation and position
-                                let stair_block = if long_axis_is_x {
+                                let stair_block_material = get_stair_block_for_material(roof_block);
+                                let stair_block_with_props = if long_axis_is_x {
                                     // Ridge runs along X, slopes in Z direction
                                     if *z < center_z {
-                                        STONE_BRICK_STAIRS_SOUTH // Facing toward center (south)
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::South,
+                                            StairShape::Straight,
+                                        ) // Facing toward center (south)
                                     } else {
-                                        STONE_BRICK_STAIRS_NORTH // Facing toward center (north)
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::North,
+                                            StairShape::Straight,
+                                        ) // Facing toward center (north)
                                     }
                                 } else {
                                     // Ridge runs along Z, slopes in X direction
                                     if *x < center_x {
-                                        STONE_BRICK_STAIRS_EAST // Facing toward center (east)
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::East,
+                                            StairShape::Straight,
+                                        ) // Facing toward center (east)
                                     } else {
-                                        STONE_BRICK_STAIRS_WEST // Facing toward center (west)
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::West,
+                                            StairShape::Straight,
+                                        ) // Facing toward center (west)
                                     }
                                 };
-                                editor.set_block_absolute(stair_block, *x, y, *z, None, None);
+                                editor.set_block_with_properties_absolute(stair_block_with_props, *x, y, *z, None, None);
                             } else {
                                 // Use regular roof block where height doesn't change (ridge area)
                                 editor.set_block_absolute(roof_block, *x, y, *z, None, None);
@@ -928,23 +972,40 @@ fn generate_roof(
                                 let center_dx = *x - center_x;
                                 let center_dz = *z - center_z;
                                 
+                                let stair_block_material = get_stair_block_for_material(roof_block);
                                 let stair_block = if center_dx.abs() > center_dz.abs() {
                                     // Primary slope is in X direction
                                     if center_dx > 0 {
-                                        STONE_BRICK_STAIRS_WEST  // Facing toward center
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::West,
+                                            StairShape::Straight,
+                                        )  // Facing toward center
                                     } else {
-                                        STONE_BRICK_STAIRS_EAST  // Facing toward center
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::East,
+                                            StairShape::Straight,
+                                        )  // Facing toward center
                                     }
                                 } else {
                                     // Primary slope is in Z direction
                                     if center_dz > 0 {
-                                        STONE_BRICK_STAIRS_NORTH // Facing toward center
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::North,
+                                            StairShape::Straight,
+                                        )  // Facing toward center
                                     } else {
-                                        STONE_BRICK_STAIRS_SOUTH // Facing toward center
+                                        create_stair_with_properties(
+                                            stair_block_material,
+                                            StairFacing::South,
+                                            StairShape::Straight,
+                                        )  // Facing toward center
                                     }
                                 };
                                 
-                                editor.set_block_absolute(stair_block, *x, y, *z, None, None);
+                                editor.set_block_with_properties_absolute(stair_block, *x, y, *z, None, None);
                             } else {
                                 // Use regular roof block where height doesn't change
                                 editor.set_block_absolute(roof_block, *x, y, *z, None, None);
@@ -965,6 +1026,14 @@ fn generate_roof(
             
             // Scale roof height based on building size (4-10 blocks)
             let max_roof_height = (building_size / 3).clamp(4, 10);
+
+            // 75% accent block, otherwise wall block for roof
+            let mut rng = rand::thread_rng();
+            let roof_material = if rng.gen_bool(0.75) {
+                accent_block
+            } else {
+                wall_block
+            };
 
             // First pass: calculate all roof heights
             let mut roof_heights = std::collections::HashMap::new();
@@ -990,14 +1059,16 @@ fn generate_roof(
 
                         if has_lower_neighbor {
                             // Place stairs at height transitions for a stepped appearance
-                            editor.set_block_absolute(STONE_BRICK_STAIRS_EAST, *x, y, *z, None, None);
+                            let stair_block_material = get_stair_block_for_material(roof_material);
+                            let stair_block_with_props = create_stair_with_properties(stair_block_material, StairFacing::East, StairShape::Straight);
+                            editor.set_block_with_properties_absolute(stair_block_with_props, *x, y, *z, None, None);
                         } else {
-                            // Use regular floor block where height doesn't change
-                            editor.set_block_absolute(floor_block, *x, y, *z, None, None);
+                            // Use regular roof material where height doesn't change
+                            editor.set_block_absolute(roof_material, *x, y, *z, None, None);
                         }
                     } else {
                         // Fill interior with solid blocks
-                        editor.set_block_absolute(floor_block, *x, y, *z, None, None);
+                        editor.set_block_absolute(roof_material, *x, y, *z, None, None);
                     }
                 }
             }
@@ -1009,6 +1080,14 @@ fn generate_roof(
             
             // Calculate peak height based on building size (taller peak for larger buildings)
             let peak_height = base_height + (building_size / 3).clamp(3, 8);
+
+            // 75% accent block, otherwise wall block for roof
+            let mut rng = rand::thread_rng();
+            let roof_material = if rng.gen_bool(0.75) {
+                accent_block
+            } else {
+                wall_block
+            };
 
             // First pass: calculate all roof heights
             let mut roof_heights = std::collections::HashMap::new();
@@ -1061,49 +1140,98 @@ fn generate_roof(
                         let has_lower_east = east_height < roof_height;
                         
                         // Check for corner situations (two adjacent directions are lower)
+                        let stair_block_material = get_stair_block_for_material(roof_material);
                         let stair_block = if has_lower_north && has_lower_west {
-                            STONE_BRICK_STAIRS_EAST_OUTER_RIGHT
+                            create_stair_with_properties(
+                                stair_block_material,
+                                StairFacing::East,
+                                StairShape::OuterRight,
+                            )
                         } else if has_lower_north && has_lower_east {
-                            STONE_BRICK_STAIRS_SOUTH_OUTER_RIGHT
+                            create_stair_with_properties(
+                                stair_block_material,
+                                StairFacing::South,
+                                StairShape::OuterRight,
+                            )
                         } else if has_lower_south && has_lower_west {
-                            STONE_BRICK_STAIRS_EAST_OUTER_LEFT
+                            create_stair_with_properties(
+                                stair_block_material,
+                                StairFacing::East,
+                                StairShape::OuterLeft,
+                            )
                         } else if has_lower_south && has_lower_east {
-                            STONE_BRICK_STAIRS_NORTH_OUTER_LEFT
+                            create_stair_with_properties(
+                                stair_block_material,
+                                StairFacing::North,
+                                StairShape::OuterLeft,
+                            )
                         } else {
                             // Single direction
                             if dx.abs() > dz.abs() {
                                 // Primary slope is in X direction
                                 if dx > 0 && east_height < roof_height {
-                                    STONE_BRICK_STAIRS_WEST  // Facing west (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::West,
+                                        StairShape::Straight,
+                                    )  // Facing west (stairs face toward center)
                                 } else if dx < 0 && west_height < roof_height {
-                                    STONE_BRICK_STAIRS_EAST  // Facing east (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::East,
+                                        StairShape::Straight,
+                                    )  // Facing east (stairs face toward center)
                                 } else if dz > 0 && south_height < roof_height {
-                                    STONE_BRICK_STAIRS_NORTH // Facing north (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::North,
+                                        StairShape::Straight,
+                                    )  // Facing north (stairs face toward center)
                                 } else if dz < 0 && north_height < roof_height {
-                                    STONE_BRICK_STAIRS_SOUTH // Facing south (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::South,
+                                        StairShape::Straight,
+                                    )  // Facing south (stairs face toward center)
                                 } else {
-                                    floor_block // Use regular block if no clear slope direction
+                                    BlockWithProperties::simple(roof_material) // Use regular block if no clear slope direction
                                 }
                             } else {
                                 // Primary slope is in Z direction
                                 if dz > 0 && south_height < roof_height {
-                                    STONE_BRICK_STAIRS_NORTH // Facing north (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::North,
+                                        StairShape::Straight,
+                                    ) // Facing north (stairs face toward center)
                                 } else if dz < 0 && north_height < roof_height {
-                                    STONE_BRICK_STAIRS_SOUTH // Facing south (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::South,
+                                        StairShape::Straight,
+                                    ) // Facing south (stairs face toward center)
                                 } else if dx > 0 && east_height < roof_height {
-                                    STONE_BRICK_STAIRS_WEST  // Facing west (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::West,
+                                        StairShape::Straight,
+                                    )  // Facing west (stairs face toward center)
                                 } else if dx < 0 && west_height < roof_height {
-                                    STONE_BRICK_STAIRS_EAST  // Facing east (stairs face toward center)
+                                    create_stair_with_properties(
+                                        stair_block_material,
+                                        StairFacing::East,
+                                        StairShape::Straight,
+                                    )  // Facing east (stairs face toward center)
                                 } else {
-                                    floor_block // Use regular block if no clear slope direction
+                                    BlockWithProperties::simple(roof_material) // Use regular block if no clear slope direction
                                 }
                             }
                         };
                         
-                        editor.set_block_absolute(stair_block, x, y, z, None, None);
+                        editor.set_block_with_properties_absolute(stair_block, x, y, z, None, None);
                     } else {
                         // Fill interior with solid blocks
-                        editor.set_block_absolute(floor_block, x, y, z, None, None);
+                        editor.set_block_absolute(roof_material, x, y, z, None, None);
                     }
                 }
             }
@@ -1112,6 +1240,14 @@ fn generate_roof(
         RoofType::Dome => {
             // Dome roof - rounded hemispherical structure
             let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
+
+            // 75% accent block, otherwise wall block for roof
+            let mut rng = rand::thread_rng();
+            let roof_material = if rng.gen_bool(0.75) {
+                accent_block
+            } else {
+                wall_block
+            };
 
             for (x, z) in floor_area {
                 let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
@@ -1123,7 +1259,7 @@ fn generate_roof(
 
                 // Fill from the base to the surface
                 for y in base_height..=surface_height {
-                    editor.set_block_absolute(floor_block, x, y, z, None, None);
+                    editor.set_block_absolute(roof_material, x, y, z, None, None);
                 }
             }
         }

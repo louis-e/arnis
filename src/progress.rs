@@ -25,7 +25,7 @@ pub fn is_running_with_gui() -> bool {
 /// [2/8] Parsing data... - Starts at: 5% / Completes at: 15%
 /// [3/8] Fetching elevation... - Starts at: 15% / Completes at: 20%
 /// [5/8] Transforming map... - Starts at: 20% / Completes at: 25%
-/// [6/8] Processing data... - Starts at: 25% / Completes at: 70%
+/// [6/8] Processing terrain... - Starts at: 25% / Completes at: 70%
 /// [7/8] Generating ground layer... - Starts at: 70% / Completes at: 90%
 /// [8/8] Saving world... - Starts at: 90% / Completes at: 100%
 ///
