@@ -42,8 +42,6 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         return;
     }
 
-    let (min_x, min_z) = editor.get_min_coords();
-    let (max_x, max_z) = editor.get_max_coords();
     let outers: Vec<Vec<XZPoint>> = outers
         .iter()
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
@@ -52,6 +50,38 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         .iter()
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
+
+    // Calculate the actual bounding box of the water area instead of using world bounds
+    let (water_min_x, water_max_x, water_min_z, water_max_z) = calculate_water_area_bounds(&outers, &inners);
+
+    // Get world bounds for intersection
+    let (world_min_x, world_min_z) = editor.get_min_coords();
+    let (world_max_x, world_max_z) = editor.get_max_coords();
+
+    // Calculate intersection of water area with world bounds
+    let min_x = water_min_x.max(world_min_x);
+    let max_x = water_max_x.min(world_max_x);
+    let min_z = water_min_z.max(world_min_z);
+    let max_z = water_max_z.min(world_max_z);
+
+    // Skip if no intersection or invalid bounds
+    if min_x >= max_x || min_z >= max_z {
+        println!("Water area does not intersect with world bounds, skipping");
+        return;
+    }
+
+    // Skip processing if the intersected area is too large (> 10M blocks)
+    let area_blocks = ((max_x - min_x) as i64) * ((max_z - min_z) as i64);
+    if area_blocks > 10_000_000 {
+        println!("Skipping large water area with {} blocks (exceeds 10M limit)", area_blocks);
+        return;
+    }
+
+    // Show performance improvement info
+    let world_area = ((world_max_x - world_min_x) as i64) * ((world_max_z - world_min_z) as i64);
+    if world_area > 0 {
+        let reduction_pct = 100.0 * (1.0 - (area_blocks as f64 / world_area as f64));
+    }
 
     inverse_floodfill(
         min_x, min_z, max_x, max_z, outers, inners, editor, start_time,
@@ -142,6 +172,41 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
     valid
 }
 
+// Calculate the actual bounding box of the water area from its coordinates
+fn calculate_water_area_bounds(outers: &[Vec<XZPoint>], inners: &[Vec<XZPoint>]) -> (i32, i32, i32, i32) {
+    let mut min_x = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut min_z = i32::MAX;
+    let mut max_z = i32::MIN;
+
+    // Process outer boundaries
+    for outer in outers {
+        for point in outer {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_z = min_z.min(point.z);
+            max_z = max_z.max(point.z);
+        }
+    }
+
+    // Process inner boundaries (holes)
+    for inner in inners {
+        for point in inner {
+            min_x = min_x.min(point.x);
+            max_x = max_x.max(point.x);
+            min_z = min_z.min(point.z);
+            max_z = max_z.max(point.z);
+        }
+    }
+
+    // If no coordinates found, return zero bounds
+    if min_x == i32::MAX {
+        return (0, 0, 0, 0);
+    }
+
+    (min_x, max_x, min_z, max_z)
+}
+
 // Water areas are absolutely huge. We can't easily flood fill the entire thing.
 // Instead, we'll iterate over all the blocks in our MC world, and check if each
 // one is in the river or not
@@ -213,9 +278,17 @@ fn inverse_floodfill_recursive(
         return;
     }
 
+    let area_size = ((max.0 - min.0) as i64) * ((max.1 - min.1) as i64);
+    
+    // Skip processing if this sub-area is excessively large (> 1M blocks)
+    if area_size > 1_000_000 {
+        println!("Skipping large water sub-area with {} blocks", area_size);
+        return;
+    }
+
     // Multiply as i64 to avoid overflow; in release builds where unchecked math is
     // enabled, this could cause the rest of this code to end up in an infinite loop.
-    if ((max.0 - min.0) as i64) * ((max.1 - min.1) as i64) < ITERATIVE_THRES {
+    if area_size < ITERATIVE_THRES {
         inverse_floodfill_iterative(min, max, 0, outers, inners, editor);
         return;
     }
@@ -275,14 +348,42 @@ fn inverse_floodfill_iterative(
     inners: &[Polygon],
     editor: &mut WorldEditor,
 ) {
-    for x in min.0..max.0 {
-        for z in min.1..max.1 {
+    let area_size = ((max.0 - min.0) as i64) * ((max.1 - min.1) as i64);
+    
+    // Use sampling for very large areas to avoid performance issues
+    let step = if area_size > 100_000 {
+        // For areas > 100k blocks, use every 4th block
+        4
+    } else if area_size > 10_000 {
+        // For areas > 10k blocks, use every 2nd block
+        2
+    } else {
+        // For smaller areas, process every block
+        1
+    };
+
+    for x in (min.0..max.0).step_by(step as usize) {
+        for z in (min.1..max.1).step_by(step as usize) {
             let p: Point = Point::new(x as f64, z as f64);
 
             if outers.iter().any(|poly: &Polygon| poly.contains(&p))
                 && inners.iter().all(|poly: &Polygon| !poly.contains(&p))
             {
-                editor.set_block(WATER, x, ground_level, z, None, None);
+                if step == 1 {
+                    // Normal processing for small areas
+                    editor.set_block(WATER, x, ground_level, z, None, None);
+                } else {
+                    // Fill a small area for sampled processing
+                    for dx in 0..step {
+                        for dz in 0..step {
+                            let fill_x = x + dx;
+                            let fill_z = z + dz;
+                            if fill_x < max.0 && fill_z < max.1 {
+                                editor.set_block(WATER, fill_x, ground_level, fill_z, None, None);
+                            }
+                        }
+                    }
+                }
             }
         }
     }
