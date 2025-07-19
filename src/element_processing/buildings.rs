@@ -862,15 +862,6 @@ fn generate_roof(
 
             // Find the building's approximate center line along the long axis
             if is_rectangular {
-                // For rectangular buildings, create a ridge along the long axis
-                let ridge_points = if long_axis_is_x {
-                    // Ridge runs along X-axis
-                    (min_x..=max_x).map(|x| (x, center_z)).collect::<Vec<_>>()
-                } else {
-                    // Ridge runs along Z-axis
-                    (min_z..=max_z).map(|z| (center_x, z)).collect::<Vec<_>>()
-                };
-
                 // First pass: calculate all roof heights
                 let mut roof_heights = std::collections::HashMap::new();
 
@@ -1373,7 +1364,7 @@ pub fn generate_building_from_relation(
     let relation_levels = relation
         .tags
         .get("building:levels")
-        .and_then(|l| l.parse::<i32>().ok())
+        .and_then(|l: &String| l.parse::<i32>().ok())
         .unwrap_or(2); // Default to 2 levels
 
     // Process the outer way to create the building walls

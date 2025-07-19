@@ -81,12 +81,6 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         return;
     }
 
-    // Show performance improvement info
-    let world_area = ((world_max_x - world_min_x) as i64) * ((world_max_z - world_min_z) as i64);
-    if world_area > 0 {
-        let reduction_pct = 100.0 * (1.0 - (area_blocks as f64 / world_area as f64));
-    }
-
     inverse_floodfill(
         min_x, min_z, max_x, max_z, outers, inners, editor, start_time,
     );

@@ -78,7 +78,6 @@ fn run_cli() {
     let lat_diff = (args.bbox.max().lat() - args.bbox.min().lat()).abs();
     let lng_diff = (args.bbox.max().lng() - args.bbox.min().lng()).abs();
     let bbox_size = lat_diff * lng_diff;
-    println!("Bbox size: {:.6} square degrees", bbox_size);
 
     if bbox_size > 0.01300 {
         if args.terrain {

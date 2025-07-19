@@ -164,10 +164,10 @@ pub fn fetch_elevation_data(
         SMALL_SIGMA_REF + t * (LARGE_SIGMA_REF - SMALL_SIGMA_REF)
     };
 
-    eprintln!(
+    /* eprintln!(
         "Grid: {}x{}, Blur sigma: {:.2}",
         grid_width, grid_height, sigma
-    );
+    ); */
 
     // Continue with the existing blur and conversion to Minecraft heights...
     let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, sigma);

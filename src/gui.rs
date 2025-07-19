@@ -561,7 +561,6 @@ fn gui_start_generation(
             let lat_diff = (bbox.max().lat() - bbox.min().lat()).abs();
             let lng_diff = (bbox.max().lng() - bbox.min().lng()).abs();
             let bbox_size = lat_diff * lng_diff;
-            println!("Bbox size: {:.6} square degrees", bbox_size);
 
             let conditional_terrain_enabled = if bbox_size > 0.01300 {
                 if terrain_enabled {
