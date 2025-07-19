@@ -730,9 +730,9 @@ fn generate_roof(
             let is_wider_than_long = width > length;
             let max_distance = if is_wider_than_long { length >> 1 } else { width >> 1 };
 
-            // 75% accent block, otherwise wall block for roof
+            // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let roof_material = if rng.gen_bool(0.75) { accent_block } else { wall_block };
+            let roof_material = if rng.gen_bool(0.5) { accent_block } else { wall_block };
 
             // Pre-allocate with capacity hint for better performance
             let mut roof_heights = Vec::with_capacity(floor_area.len());
@@ -816,13 +816,9 @@ fn generate_roof(
             // Make roof taller and more pointy
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
 
-            // 75% accent block, otherwise wall block for roof
+            // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.75) {
-                accent_block
-            } else {
-                wall_block
-            };
+            let roof_material = if rng.gen_bool(0.5) { accent_block } else { wall_block };
 
             // Find the building's approximate center line along the long axis
             if is_rectangular {
@@ -1062,13 +1058,9 @@ fn generate_roof(
             // Scale roof height based on building size (4-10 blocks)
             let max_roof_height = (building_size / 3).clamp(4, 10);
 
-            // 75% accent block, otherwise wall block for roof
+            // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let roof_material = if rng.gen_bool(0.75) {
-                accent_block
-            } else {
-                wall_block
-            };
+            let roof_material = if rng.gen_bool(0.5) { accent_block } else { wall_block };
 
             // First pass: calculate all roof heights
             let mut roof_heights = std::collections::HashMap::new();
@@ -1132,11 +1124,7 @@ fn generate_roof(
 
             // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let roof_material = if rng.gen_bool(0.5) {
-                accent_block
-            } else {
-                wall_block
-            };
+            let roof_material = if rng.gen_bool(0.5) { accent_block } else { wall_block };
 
             // First pass: calculate all roof heights
             let mut roof_heights = std::collections::HashMap::new();
@@ -1303,13 +1291,9 @@ fn generate_roof(
             // Dome roof - rounded hemispherical structure
             let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
 
-            // 75% accent block, otherwise wall block for roof
+            // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
-            let roof_material = if rng.gen_bool(0.75) {
-                accent_block
-            } else {
-                wall_block
-            };
+            let roof_material = if rng.gen_bool(0.5) { accent_block } else { wall_block };
 
             for (x, z) in floor_area {
                 let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
