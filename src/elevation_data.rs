@@ -47,7 +47,7 @@ pub fn fetch_elevation_data(
     scale: f64,
     ground_level: i32,
     mapbox_access_token: &Option<String>,
-) -> Result<ElevationData, Box<dyn std::error::Error>> {    
+) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let default_mapbox_access_token = MAPBOX_PUBKEY.to_string();
     // Use OSM parser's scale calculation and apply user scale factor
     let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
@@ -145,13 +145,13 @@ pub fn fetch_elevation_data(
 
     // Calculate blur sigma based on grid resolution
     // Reference points for tuning:
-    const SMALL_GRID_REF: f64 = 100.0;   // Reference grid size
-    const SMALL_SIGMA_REF: f64 = 15.0;    // Sigma for 100x100 grid
-    const LARGE_GRID_REF: f64 = 1000.0;  // Reference grid size  
-    const LARGE_SIGMA_REF: f64 = 10.0;    // Sigma for 1000x1000 grid
-    
+    const SMALL_GRID_REF: f64 = 100.0; // Reference grid size
+    const SMALL_SIGMA_REF: f64 = 15.0; // Sigma for 100x100 grid
+    const LARGE_GRID_REF: f64 = 1000.0; // Reference grid size
+    const LARGE_SIGMA_REF: f64 = 10.0; // Sigma for 1000x1000 grid
+
     let grid_size: f64 = (grid_width.min(grid_height) as f64).max(1.0);
-    
+
     let sigma: f64 = if grid_size <= SMALL_GRID_REF {
         // Linear scaling for small grids
         SMALL_SIGMA_REF * (grid_size / SMALL_GRID_REF)
@@ -163,10 +163,12 @@ pub fn fetch_elevation_data(
         let t: f64 = (log_grid_size - ln_small) / (ln_large - ln_small);
         SMALL_SIGMA_REF + t * (LARGE_SIGMA_REF - SMALL_SIGMA_REF)
     };
-    
-    eprintln!("Grid: {}x{}, Blur sigma: {:.2}", 
-              grid_width, grid_height, sigma);
-    
+
+    eprintln!(
+        "Grid: {}x{}, Blur sigma: {:.2}",
+        grid_width, grid_height, sigma
+    );
+
     // Continue with the existing blur and conversion to Minecraft heights...
     let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, sigma);
 

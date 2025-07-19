@@ -562,10 +562,13 @@ fn gui_start_generation(
             let lng_diff = (bbox.max().lng() - bbox.min().lng()).abs();
             let bbox_size = lat_diff * lng_diff;
             println!("Bbox size: {:.6} square degrees", bbox_size);
-            
+
             let conditional_terrain_enabled = if bbox_size > 0.01300 {
                 if terrain_enabled {
-                    println!("Area too large for terrain generation ({}), disabling terrain", bbox_size);
+                    println!(
+                        "Area too large for terrain generation ({}), disabling terrain",
+                        bbox_size
+                    );
                 }
                 false
             } else {
