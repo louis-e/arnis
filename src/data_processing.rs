@@ -8,6 +8,9 @@ use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::time::Instant;
 
 pub const MIN_Y: i32 = -64;
 
@@ -24,6 +27,21 @@ pub fn generate_world(
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
+
+    // Create timing log file
+    let timing_log_path = format!("{}/element_timing.log", args.path);
+    let mut timing_file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&timing_log_path)
+        .map_err(|e| format!("Failed to create timing log file: {}", e))?;
+
+    writeln!(
+        timing_file,
+        "Element ID,Element Type,Processing Time (ms),Element Tags"
+    )
+    .map_err(|e| format!("Failed to write to timing log file: {}", e))?;
 
     emit_gui_progress_update(26.0, "Processing terrain...");
 
@@ -56,6 +74,22 @@ pub fn generate_world(
         } else {
             process_pb.set_message("");
         }
+
+        // Start timing for this element
+        let start_time = Instant::now();
+
+        // Get element tags as a string for logging
+        let tags_string = match element {
+            ProcessedElement::Way(way) => {
+                format!("{:?}", way.tags.keys().collect::<Vec<_>>())
+            }
+            ProcessedElement::Node(node) => {
+                format!("{:?}", node.tags.keys().collect::<Vec<_>>())
+            }
+            ProcessedElement::Relation(rel) => {
+                format!("{:?}", rel.tags.keys().collect::<Vec<_>>())
+            }
+        };
 
         match element {
             ProcessedElement::Way(way) => {
@@ -112,6 +146,26 @@ pub fn generate_world(
                     leisure::generate_leisure_from_relation(&mut editor, rel, args);
                 }
             }
+        }
+
+        // Calculate and log the processing time
+        let processing_time = start_time.elapsed();
+        let processing_time_ms = processing_time.as_millis();
+
+        // Write timing data to the log file
+        if let Err(e) = writeln!(
+            timing_file,
+            "{},{},{},\"{}\"",
+            element.id(),
+            element.kind(),
+            processing_time_ms,
+            tags_string.replace("\"", "\"\"") // Escape quotes for CSV
+        ) {
+            eprintln!(
+                "Warning: Failed to write timing data for element {}: {}",
+                element.id(),
+                e
+            );
         }
     }
 
@@ -199,6 +253,16 @@ pub fn generate_world(
 
     // Save world
     editor.save();
+
+    // Flush and close the timing log file
+    if let Err(e) = timing_file.flush() {
+        eprintln!("Warning: Failed to flush timing log file: {}", e);
+    }
+
+    println!(
+        "{}",
+        format!("Element timing data saved to: {}", timing_log_path).cyan()
+    );
 
     emit_gui_progress_update(100.0, "Done! World generation completed.");
     println!("{}", "Done! World generation completed.".green().bold());

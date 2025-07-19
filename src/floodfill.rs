@@ -26,9 +26,9 @@ pub fn flood_fill_area(
         .minmax()
         .into_option()
         .unwrap();
-    
+
     let area = (max_x - min_x + 1) as i64 * (max_z - min_z + 1) as i64;
-    
+
     // For small and medium areas, use optimized flood fill with span filling
     if area < 50000 {
         return optimized_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z);
@@ -48,10 +48,10 @@ fn optimized_flood_fill_area(
     max_z: i32,
 ) -> Vec<(i32, i32)> {
     let start_time = Instant::now();
-    
+
     let mut filled_area = Vec::new();
     let mut visited = HashSet::new();
-    
+
     // Create polygon for containment testing
     let exterior_coords: Vec<(f64, f64)> = polygon_coords
         .iter()
@@ -59,26 +59,31 @@ fn optimized_flood_fill_area(
         .collect();
     let exterior = LineString::from(exterior_coords);
     let polygon = Polygon::new(exterior, vec![]);
-    
+
     // Smart start point detection - find centroid first
-    let centroid_x = polygon_coords.iter().map(|&(x, _)| x).sum::<i32>() / polygon_coords.len() as i32;
-    let centroid_z = polygon_coords.iter().map(|&(_, z)| z).sum::<i32>() / polygon_coords.len() as i32;
-    
+    let centroid_x =
+        polygon_coords.iter().map(|&(x, _)| x).sum::<i32>() / polygon_coords.len() as i32;
+    let centroid_z =
+        polygon_coords.iter().map(|&(_, z)| z).sum::<i32>() / polygon_coords.len() as i32;
+
     // Try centroid first, then expand search if needed
     let search_points = vec![
         (centroid_x, centroid_z),
         (min_x + (max_x - min_x) / 2, min_z + (max_z - min_z) / 2),
         (min_x + (max_x - min_x) / 3, min_z + (max_z - min_z) / 3),
-        (min_x + 2 * (max_x - min_x) / 3, min_z + 2 * (max_z - min_z) / 3),
+        (
+            min_x + 2 * (max_x - min_x) / 3,
+            min_z + 2 * (max_z - min_z) / 3,
+        ),
     ];
-    
+
     for &(start_x, start_z) in &search_points {
         if polygon.contains(&Point::new(start_x as f64, start_z as f64)) {
             // Found valid start point, begin optimized flood fill
             let mut queue = VecDeque::new();
             queue.push_back((start_x, start_z));
             visited.insert((start_x, start_z));
-            
+
             while let Some((x, z)) = queue.pop_front() {
                 if let Some(timeout) = timeout {
                     if start_time.elapsed() > *timeout {
@@ -86,10 +91,10 @@ fn optimized_flood_fill_area(
                         return filled_area;
                     }
                 }
-                
+
                 // Add current point to filled area
                 filled_area.push((x, z));
-                
+
                 // Check all four directions
                 for (nx, nz) in [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)].iter() {
                     if *nx >= min_x
@@ -105,11 +110,11 @@ fn optimized_flood_fill_area(
                     }
                 }
             }
-            
+
             break; // Found and processed a valid start point
         }
     }
-    
+
     filled_area
 }
 

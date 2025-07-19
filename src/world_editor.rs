@@ -104,7 +104,7 @@ impl SectionToModify {
             let properties = self.properties.get(&i).cloned();
 
             // Create a key for the lookup (block + properties hash)
-            let props_key = properties.as_ref().map(|p| format!("{:?}", p));
+            let props_key = properties.as_ref().map(|p| format!("{p:?}"));
             let lookup_key = (block, props_key);
 
             if let std::collections::hash_map::Entry::Vacant(e) = palette_lookup.entry(lookup_key) {
@@ -125,7 +125,7 @@ impl SectionToModify {
 
         for (i, &block) in self.blocks.iter().enumerate() {
             let properties = self.properties.get(&i).cloned();
-            let props_key = properties.as_ref().map(|p| format!("{:?}", p));
+            let props_key = properties.as_ref().map(|p| format!("{p:?}"));
             let lookup_key = (block, props_key);
             let p = palette_lookup[&lookup_key] as i64;
 

@@ -41,12 +41,9 @@ pub fn generate_buildings(
     let min_level_offset = multiply_scale(min_level * 4, scale_factor);
 
     // CACHE FLOOD FILL RESULT - compute once and reuse throughout
-    let polygon_coords: Vec<(i32, i32)> = element
-        .nodes
-        .iter()
-        .map(|n| (n.x, n.z))
-        .collect();
-    let cached_floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
+    let cached_floor_area: Vec<(i32, i32)> =
+        flood_fill_area(&polygon_coords, args.timeout.as_ref());
     let cached_footprint_size = cached_floor_area.len();
 
     // Use fixed starting Y coordinate based on maximum ground level when terrain is enabled
@@ -889,13 +886,13 @@ fn generate_roof(
                         if y == roof_height {
                             // Check if this is a height transition point by looking at neighboring blocks
                             let has_lower_neighbor =
-                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
-                                    .iter()
-                                    .any(|(nx, nz)| {
+                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)].iter().any(
+                                    |(nx, nz)| {
                                         roof_heights
                                             .get(&(*nx, *nz))
-                                            .map_or(false, |&nh| nh < roof_height)
-                                    });
+                                            .is_some_and(|&nh| nh < roof_height)
+                                    },
+                                );
 
                             if has_lower_neighbor {
                                 // Determine stair direction based on ridge orientation and position
@@ -998,13 +995,13 @@ fn generate_roof(
                         if y == roof_height {
                             // Check if this is a height transition point by looking at neighboring blocks
                             let has_lower_neighbor =
-                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
-                                    .iter()
-                                    .any(|(nx, nz)| {
+                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)].iter().any(
+                                    |(nx, nz)| {
                                         roof_heights
                                             .get(&(*nx, *nz))
-                                            .map_or(false, |&nh| nh < roof_height)
-                                    });
+                                            .is_some_and(|&nh| nh < roof_height)
+                                    },
+                                );
 
                             if has_lower_neighbor {
                                 // For complex buildings, determine stair direction based on slope toward center
@@ -1097,14 +1094,13 @@ fn generate_roof(
                 for y in base_height..=roof_height {
                     if y == roof_height {
                         // Check if this is a height transition point by looking at neighboring blocks
-                        let has_lower_neighbor =
-                            [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
-                                .iter()
-                                .any(|(nx, nz)| {
-                                    roof_heights
-                                        .get(&(*nx, *nz))
-                                        .map_or(false, |&nh| nh < roof_height)
-                                });
+                        let has_lower_neighbor = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
+                            .iter()
+                            .any(|(nx, nz)| {
+                                roof_heights
+                                    .get(&(*nx, *nz))
+                                    .is_some_and(|&nh| nh < roof_height)
+                            });
 
                         if has_lower_neighbor {
                             // Place stairs at height transitions for a stepped appearance

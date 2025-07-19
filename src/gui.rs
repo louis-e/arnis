@@ -565,8 +565,7 @@ fn gui_start_generation(
             let conditional_terrain_enabled = if bbox_size > 0.01300 {
                 if terrain_enabled {
                     println!(
-                        "Area too large for terrain generation ({}), disabling terrain",
-                        bbox_size
+                        "Area too large for terrain generation ({bbox_size}), disabling terrain"
                     );
                 }
                 false

@@ -81,10 +81,7 @@ fn run_cli() {
 
     if bbox_size > 0.01300 {
         if args.terrain {
-            println!(
-                "Area too large for terrain generation ({}), disabling terrain",
-                bbox_size
-            );
+            println!("Area too large for terrain generation ({bbox_size}), disabling terrain");
         }
         args.terrain = false;
     }

@@ -74,10 +74,7 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
     // Skip processing if the intersected area is too large (> 10M blocks)
     let area_blocks = ((max_x - min_x) as i64) * ((max_z - min_z) as i64);
     if area_blocks > 10_000_000 {
-        println!(
-            "Skipping large water area with {} blocks (exceeds 10M limit)",
-            area_blocks
-        );
+        println!("Skipping large water area with {area_blocks} blocks (exceeds 10M limit)");
         return;
     }
 
@@ -283,7 +280,7 @@ fn inverse_floodfill_recursive(
 
     // Skip processing if this sub-area is excessively large (> 1M blocks)
     if area_size > 1_000_000 {
-        println!("Skipping large water sub-area with {} blocks", area_size);
+        println!("Skipping large water sub-area with {area_size} blocks");
         return;
     }
 
