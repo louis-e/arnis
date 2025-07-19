@@ -32,7 +32,7 @@ fn full_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
 fn short_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
     if text.len() != 4
         || !text.starts_with("#")
-        || text.chars().skip(1).all(|c: char| c.is_ascii_hexdigit())
+        || !text.chars().skip(1).all(|c: char| c.is_ascii_hexdigit())
     {
         return None;
     }

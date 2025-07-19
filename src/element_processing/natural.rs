@@ -114,8 +114,10 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                 continue;
                             }
                             let random_choice = rng.gen_range(0..500);
-                            if random_choice < 30 {
-                                if random_choice < 3 {
+                            if random_choice < 33 {
+                                if random_choice <= 2 {
+                                    editor.set_block(COBBLESTONE, x, 0, z, None, None);
+                                } else if random_choice < 6 {
                                     editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                                 } else {
                                     editor.set_block(GRASS, x, 1, z, None, None);

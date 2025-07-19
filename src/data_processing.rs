@@ -25,7 +25,7 @@ pub fn generate_world(
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
-    emit_gui_progress_update(41.0, "Processing terrain...");
+    emit_gui_progress_update(26.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -36,7 +36,7 @@ pub fn generate_world(
         .progress_chars("█▓░"));
 
     let progress_increment_prcs: f64 = 29.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 41.0;
+    let mut current_progress_prcs: f64 = 26.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {

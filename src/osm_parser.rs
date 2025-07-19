@@ -169,7 +169,7 @@ pub fn parse_osm_data(
     debug: bool,
 ) -> (Vec<ProcessedElement>, XZBBox) {
     println!("{} Parsing data...", "[2/6]".bold());
-    emit_gui_progress_update(10.0, "Parsing data...");
+    emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
     let data = parse_raw_osm_data(json_data).expect("Failed to parse OSM data");
@@ -285,7 +285,7 @@ pub fn parse_osm_data(
         }));
     }
 
-    emit_gui_progress_update(20.0, "");
+    emit_gui_progress_update(15.0, "");
 
     (processed_elements, xzbbox)
 }

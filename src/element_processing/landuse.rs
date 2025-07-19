@@ -204,11 +204,24 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     editor.set_block(GRASS, x, 1, z, None, None);
                 }
             }
+            "greenfield" => {
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                    match rng.gen_range(0..200) {
+                        0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
+                        1..=4 => editor.set_block(GRASS, x, 1, z, None, None),
+                        _ => {}
+                    }
+                }
+            }
             "meadow" => {
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
                         Tree::create(editor, (x, 1, z));
+                    } else if random_choice < 6 {
+                        editor.set_block(RED_FLOWER, x, 1, z, None, None);
+                    } else if random_choice < 9 {
+                        editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                     } else if random_choice < 800 {
                         editor.set_block(GRASS, x, 1, z, None, None);
                     }

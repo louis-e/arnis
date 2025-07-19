@@ -526,6 +526,8 @@ async function startGeneration() {
     }
 
     var terrain = document.getElementById("terrain-toggle").checked;
+    var interior = document.getElementById("interior-toggle").checked;
+    var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
@@ -537,15 +539,17 @@ async function startGeneration() {
 
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
-      bboxText: selectedBBox,
-      selectedWorld: worldPath,
-      worldScale: scale,
-      groundLevel: ground_level,
-      floodfillTimeout: floodfill_timeout,
-      terrainEnabled: terrain,
-      fillgroundEnabled: fill_ground,
-      isNewWorld: isNewWorld,
-      spawnPoint: spawnPoint
+        bboxText: selectedBBox,
+        selectedWorld: worldPath,
+        worldScale: scale,
+        groundLevel: ground_level,
+        floodfillTimeout: floodfill_timeout,
+        terrainEnabled: terrain,
+        interiorEnabled: interior,
+        roofEnabled: roof,
+        fillgroundEnabled: fill_ground,
+        isNewWorld: isNewWorld,
+        spawnPoint: spawnPoint
     });
 
     console.log("Generation process started.");
