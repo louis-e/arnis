@@ -409,7 +409,8 @@ pub fn generate_buildings(
                 bresenham_line(prev.0, start_y_offset, prev.1, x, start_y_offset, z);
             for (bx, _, bz) in bresenham_points {
                 // Create foundation pillars from ground up to building base if needed
-                if args.terrain {
+                // Only create foundations for buildings without min_level (elevated buildings shouldn't have foundations)
+                if args.terrain && min_level == 0 {
                     // Calculate actual ground level at this position
                     let local_ground_level = if let Some(ground) = editor.get_ground() {
                         ground.level(XZPoint::new(
