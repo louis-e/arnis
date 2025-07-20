@@ -557,22 +557,6 @@ fn gui_start_generation(
                 selected_world.clone()
             };
 
-            // Calculate bbox size and conditionally disable terrain for large areas
-            let lat_diff = (bbox.max().lat() - bbox.min().lat()).abs();
-            let lng_diff = (bbox.max().lng() - bbox.min().lng()).abs();
-            let bbox_size = lat_diff * lng_diff;
-
-            let conditional_terrain_enabled = if bbox_size > 0.01300 {
-                if terrain_enabled {
-                    println!(
-                        "Area too large for terrain generation ({bbox_size}), disabling terrain"
-                    );
-                }
-                false
-            } else {
-                terrain_enabled
-            };
-
             // Create an Args instance with the chosen bounding box and world directory path
             let args: Args = Args {
                 bbox,
@@ -582,7 +566,7 @@ fn gui_start_generation(
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
-                terrain: conditional_terrain_enabled,
+                terrain: terrain_enabled,
                 mapbox_access_token: None, // Legacy parameter - not needed for AWS Terrain Tiles
                 interior: interior_enabled,
                 roof: roof_enabled,
