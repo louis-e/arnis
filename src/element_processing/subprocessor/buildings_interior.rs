@@ -167,6 +167,8 @@ pub fn generate_building_interior(
     building_height: i32,
     wall_block: Block,
     floor_levels: &[i32],
+    args: &crate::args::Args,
+    element: &crate::osm_parser::ProcessedWay,
 ) {
     // Skip interior generation for very small buildings
     let width = max_x - min_x + 1;
@@ -194,11 +196,17 @@ pub fn generate_building_interior(
 
         // Determine the floor extension height (ceiling) - either next floor or roof
         let current_floor_ceiling = if floor_index < floor_levels.len() - 1 {
-            // For intermediate floors, extend walls all the way up to the next floor
-            floor_levels[floor_index + 1] + 1
+            // For intermediate floors, extend walls up to just below the next floor
+            floor_levels[floor_index + 1] - 1
         } else {
-            // Last floor extends to building top + 1
-            start_y_offset + building_height + 1
+            // Last floor ceiling depends on roof generation
+            if args.roof && element.tags.contains_key("roof:shape") && element.tags.get("roof:shape").unwrap() != "flat" {
+                // When roof generation is enabled with non-flat roofs, stop at building height (no extra ceiling)
+                start_y_offset + building_height
+            } else {
+                // When roof generation is disabled or flat roof, extend to building top + 1 (includes ceiling)
+                start_y_offset + building_height + 1
+            }
         };
 
         // Choose the appropriate interior pattern based on floor number
@@ -214,8 +222,8 @@ pub fn generate_building_interior(
         let pattern_height = layer1.len() as i32;
         let pattern_width = layer1[0].len() as i32;
 
-        // Calculate Y offset
-        let y_offset = if floor_index == 0 { 1 } else { 3 };
+        // Calculate Y offset - place interior 1 block above floor level consistently
+        let y_offset = 1;
 
         // Create a seamless repeating pattern across the interior of this floor
         for z in interior_min_z..=interior_max_z {

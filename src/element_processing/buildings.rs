@@ -483,9 +483,10 @@ pub fn generate_buildings(
             // Determine number of floors (approximately 1 floor per 4 blocks of height)
             let num_upper_floors = (building_height / 4).max(1);
 
-            // Add Y coordinates for each upper floor
+            // Add Y coordinates for each upper floor - match the intermediate floor placement
+            // Main building code places intermediate floors at start_y_offset + 2 + 4, start_y_offset + 2 + 8, etc.
             for floor in 1..num_upper_floors {
-                floor_levels.push(start_y_offset + (floor * 4));
+                floor_levels.push(start_y_offset + 2 + (floor * 4));
             }
         }
 
@@ -571,6 +572,8 @@ pub fn generate_buildings(
                     building_height,
                     wall_block,
                     &floor_levels,
+                    args,
+                    element,
                 );
             }
         }
