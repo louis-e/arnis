@@ -317,19 +317,16 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
 }
 
 /// Clips a way to the bounding box boundaries using Sutherland-Hodgman algorithm
-fn clip_way_to_bbox(
-    nodes: &[ProcessedNode],
-    xzbbox: &XZBBox
-) -> Vec<ProcessedNode> {
+fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
     if nodes.is_empty() {
         return Vec::new();
     }
 
     // For now, let's be conservative and only clip if the way actually extends outside the bbox
     // Check if any nodes are outside the bbox
-    let has_nodes_outside = nodes.iter().any(|node| {
-        !xzbbox.contains(&XZPoint::new(node.x, node.z))
-    });
+    let has_nodes_outside = nodes
+        .iter()
+        .any(|node| !xzbbox.contains(&XZPoint::new(node.x, node.z)));
 
     // If all nodes are inside the bbox, return the original nodes unchanged
     if !has_nodes_outside {
@@ -342,9 +339,7 @@ fn clip_way_to_bbox(
     let max_z = xzbbox.max_z() as f64;
 
     // Convert nodes to a simple coordinate list for easier processing
-    let mut polygon: Vec<(f64, f64)> = nodes.iter()
-        .map(|n| (n.x as f64, n.z as f64))
-        .collect();
+    let mut polygon: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
 
     // Only close polygon if it's already nearly closed (last point close to first)
     let should_close = if polygon.len() > 2 {
@@ -381,13 +376,12 @@ fn clip_way_to_bbox(
 
             let current_inside = point_inside_edge(current, edge_x1, edge_z1, edge_x2, edge_z2);
             let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
-            
+
             if next_inside {
                 if !current_inside {
                     // Entering: add intersection point
                     if let Some(intersection) = line_edge_intersection(
-                        current.0, current.1, next.0, next.1,
-                        edge_x1, edge_z1, edge_x2, edge_z2
+                        current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
                     ) {
                         clipped_polygon.push(intersection);
                     }
@@ -397,8 +391,7 @@ fn clip_way_to_bbox(
             } else if current_inside {
                 // Exiting: add intersection point
                 if let Some(intersection) = line_edge_intersection(
-                    current.0, current.1, next.0, next.1,
-                    edge_x1, edge_z1, edge_x2, edge_z2
+                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
                 ) {
                     clipped_polygon.push(intersection);
                 }
@@ -410,7 +403,8 @@ fn clip_way_to_bbox(
     }
 
     // Convert back to ProcessedNode format
-    polygon.into_iter()
+    polygon
+        .into_iter()
         .enumerate()
         .map(|(i, (x, z))| ProcessedNode {
             id: i as u64, // Use index as synthetic ID
@@ -422,7 +416,13 @@ fn clip_way_to_bbox(
 }
 
 /// Check if a point is on the "inside" side of an edge (using cross product)
-fn point_inside_edge(point: (f64, f64), edge_x1: f64, edge_z1: f64, edge_x2: f64, edge_z2: f64) -> bool {
+fn point_inside_edge(
+    point: (f64, f64),
+    edge_x1: f64,
+    edge_z1: f64,
+    edge_x2: f64,
+    edge_z2: f64,
+) -> bool {
     // Calculate cross product to determine which side of the edge the point is on
     let edge_dx = edge_x2 - edge_x1;
     let edge_dz = edge_z2 - edge_z1;
@@ -435,9 +435,16 @@ fn point_inside_edge(point: (f64, f64), edge_x1: f64, edge_z1: f64, edge_x2: f64
 }
 
 /// Find intersection between a line segment and an edge
+#[allow(clippy::too_many_arguments)]
 fn line_edge_intersection(
-    line_x1: f64, line_z1: f64, line_x2: f64, line_z2: f64,
-    edge_x1: f64, edge_z1: f64, edge_x2: f64, edge_z2: f64
+    line_x1: f64,
+    line_z1: f64,
+    line_x2: f64,
+    line_z2: f64,
+    edge_x1: f64,
+    edge_z1: f64,
+    edge_x2: f64,
+    edge_z2: f64,
 ) -> Option<(f64, f64)> {
     let line_dx = line_x2 - line_x1;
     let line_dz = line_z2 - line_z1;
@@ -456,7 +463,7 @@ fn line_edge_intersection(
     let t = (dx * edge_dz - dz * edge_dx) / denom;
 
     // Only return intersection if it's on the line segment
-    if t >= 0.0 && t <= 1.0 {
+    if (0.0..=1.0).contains(&t) {
         let x = line_x1 + t * line_dx;
         let z = line_z1 + t * line_dz;
         Some((x, z))
