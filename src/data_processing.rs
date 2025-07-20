@@ -25,7 +25,7 @@ pub fn generate_world(
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
-    emit_gui_progress_update(41.0, "Processing terrain...");
+    emit_gui_progress_update(26.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -36,7 +36,7 @@ pub fn generate_world(
         .progress_chars("█▓░"));
 
     let progress_increment_prcs: f64 = 29.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 41.0;
+    let mut current_progress_prcs: f64 = 26.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {
@@ -108,6 +108,8 @@ pub fn generate_world(
                     buildings::generate_building_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("water") {
                     water_areas::generate_water_areas(&mut editor, rel);
+                } else if rel.tags.contains_key("natural") {
+                    natural::generate_natural_from_relation(&mut editor, rel, args);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
                     leisure::generate_leisure_from_relation(&mut editor, rel, args);
                 }
@@ -118,7 +120,7 @@ pub fn generate_world(
     process_pb.finish();
 
     // Generate ground layer
-    let total_blocks: u64 = xzbbox.circumscribed_rect().total_blocks();
+    let total_blocks: u64 = xzbbox.bounding_rect().total_blocks();
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 

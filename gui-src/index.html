@@ -8,6 +8,7 @@
   <title>Arnis</title>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>
+  <script type="module" src="./js/language-selector.js" defer></script>
 </head>
 
 <body>
@@ -87,43 +88,97 @@
         <h2 data-localize="customization_settings">Customization Settings</h2>
 
         <!-- Terrain Toggle Button -->
-        <div class="terrain-toggle-container">
-          <label for="terrain-toggle" data-localize="terrain">Terrain:</label>
-          <input type="checkbox" id="terrain-toggle" name="terrain-toggle" checked>
+        <div class="settings-row">
+          <label for="terrain-toggle" data-localize="terrain">Terrain</label>
+          <div class="settings-control">
+            <input type="checkbox" id="terrain-toggle" name="terrain-toggle" checked>
+          </div>
         </div>
+
+        <!-- Interior Toggle Button -->
+        <div class="settings-row">
+          <label for="interior-toggle" data-localize="interior">Interior Generation</label>
+          <div class="settings-control">
+            <input type="checkbox" id="interior-toggle" name="interior-toggle" checked>
+          </div>
+        </div>
+
+        <!-- Roof Toggle Button -->
+        <div class="settings-row">
+          <label for="roof-toggle" data-localize="roof">Roof Generation</label>
+          <div class="settings-control">
+            <input type="checkbox" id="roof-toggle" name="roof-toggle" checked>
+          </div>
+        </div>
+
         <!-- Fill ground Toggle Button -->
-        <div class="fillground-toggle-container">
-          <label for="fillground-toggle" data-localize="fillground">Fill Ground:</label>
-          <input type="checkbox" id="fillground-toggle" name="fillground-toggle">
+        <div class="settings-row">
+          <label for="fillground-toggle" data-localize="fillground">Fill Ground</label>
+          <div class="settings-control">
+            <input type="checkbox" id="fillground-toggle" name="fillground-toggle">
+          </div>
         </div>
 
         <!-- World Scale Slider -->
-        <div class="scale-slider-container">
-          <label for="scale-value-slider" data-localize="world_scale">World Scale:</label>
-          <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
-          <span id="slider-value">1.00</span>
+        <div class="settings-row">
+          <label for="scale-value-slider" data-localize="world_scale">World Scale</label>
+          <div class="settings-control">
+            <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
+            <span id="slider-value">1.00</span>
+          </div>
         </div>
-        
+
         <!-- Bounding Box Input -->
-        <div class="bbox-input-container">
-          <label for="bbox-coords" data-localize="custom_bounding_box">Custom Bounding Box:</label>
-          <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" style="width: 280px;" placeholder="Format: lat,lng,lat,lng">
+        <div class="settings-row">
+          <label for="bbox-coords" data-localize="custom_bounding_box">Custom Bounding Box</label>
+          <div class="settings-control">
+            <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" placeholder="Format: lat,lng,lat,lng">
+          </div>
         </div>
 
         <!-- Floodfill Timeout Input -->
-        <div class="timeout-input-container">
-          <label for="floodfill-timeout" data-localize="floodfill_timeout">Floodfill Timeout (sec):</label>
-          <input type="number" id="floodfill-timeout" name="floodfill-timeout" min="0" step="1" value="20" style="width: 100px;" placeholder="Seconds">
-        </div><br>
+        <div class="settings-row">
+          <label for="floodfill-timeout" data-localize="floodfill_timeout">Floodfill Timeout (sec)</label>
+          <div class="settings-control">
+            <input type="number" id="floodfill-timeout" name="floodfill-timeout" min="0" step="1" value="20" placeholder="Seconds">
+          </div>
+        </div>
 
         <!-- Ground Level Input -->
-        <div class="ground-level-input-container">
-          <label for="ground-level" data-localize="ground_level">Ground Level:</label>
-          <input type="number" id="ground-level" name="ground-level" min="-64" max="290" value="-62" style="width: 100px;" placeholder="Ground Level">
+        <div class="settings-row">
+          <label for="ground-level" data-localize="ground_level">Ground Level</label>
+          <div class="settings-control">
+            <input type="number" id="ground-level" name="ground-level" min="-64" max="290" value="-62" placeholder="Ground Level">
+          </div>
+        </div>
+
+        <!-- Language Selector -->
+        <div class="settings-row">
+          <label for="language-select" data-localize="language">Language</label>
+          <div class="settings-control">
+            <select id="language-select" name="language-select" class="language-dropdown">
+              <option value="en">English</option>
+              <option value="ar">العربية</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="fi">Suomi</option>
+              <option value="fr-FR">Français</option>
+              <option value="hu">Magyar</option>
+              <option value="ko">한국어</option>
+              <option value="lt">Lietuvių</option>
+              <option value="pl">Polski</option>
+              <option value="ru">Русский</option>
+              <option value="sv">Svenska</option>
+              <option value="ua">Українська</option>
+              <option value="zh-CN">中文 (简体)</option>
+            </select>
+          </div>
         </div>
 
         <!-- License and Credits Button -->
-        <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
+        <div class="settings-row license-button-row">
+          <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
+        </div>
       </div>
     </div>
 

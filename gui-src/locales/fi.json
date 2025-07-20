@@ -10,11 +10,11 @@
   "error_coordinates_out_of_range": "Virhe: Koordinaatit ovat kantaman ulkopuolella tai vääriin aseteltu (Lat ennen Lng vaadittu).",
   "invalid_format": "Väärä formaatti. Käytä 'lat,lng,lat,lng' tai 'lat lng lat lng'.",
   "generation_process_started": "Luontiprosessi aloitettu.",
-  "winter_mode": "Talvitila:",
-  "world_scale": "Maailmanskaalaus:",
-  "custom_bounding_box": "Mukautettu rajoituslaatikko:",
-  "floodfill_timeout": "Täytön aikakatkaisu (sec):",
-  "ground_level": "Maataso:",
+  "winter_mode": "Talvitila",
+  "world_scale": "Maailmanskaalaus",
+  "custom_bounding_box": "Mukautettu rajoituslaatikko",
+  "floodfill_timeout": "Täytön aikakatkaisu (sec)",
+  "ground_level": "Maataso",
   "choose_world_modal_title": "Valitse maailma",
   "select_existing_world": "Valitse olemassa oleva maailma",
   "generate_new_world": "Luo uusi maailma",
@@ -34,5 +34,8 @@
   "license_and_credits": "Lisenssi ja krediitit",
   "placeholder_bbox": "Formaatti: lat,lng,lat,lng",
   "placeholder_floodfill": "Sekuntia",
-  "placeholder_ground": "Maataso"
+  "placeholder_ground": "Maataso",
+  "language": "Kieli",
+  "terrain": "Maasto",
+  "fillground": "Täytä maa"
 }
