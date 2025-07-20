@@ -1,7 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::XZPoint;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -47,11 +46,6 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
             };
 
             let ProcessedElement::Way(way) = element else {
-                println!(
-                    "Warning: Element with natural type '{}' is not a way, skipping.",
-                    natural_type
-                );
-                print!("Element: {element:?}");
                 return;
             };
 
