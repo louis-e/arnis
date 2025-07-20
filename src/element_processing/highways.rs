@@ -13,7 +13,8 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             if let ProcessedElement::Node(first_node) = element {
                 let x: i32 = first_node.x;
                 let z: i32 = first_node.z;
-                for dy in 1..=4 {
+                editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                for dy in 2..=4 {
                     editor.set_block(OAK_FENCE, x, dy, z, None, None);
                 }
                 editor.set_block(GLOWSTONE, x, 5, z, None, None);
@@ -93,6 +94,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             let mut block_type = BLACK_CONCRETE;
             let mut block_range: i32 = 2;
             let mut add_stripe = false;
+            let mut add_outline = false;
             let scale_factor = args.scale;
 
             // Skip if 'layer' or 'level' is negative in the tags
@@ -153,9 +155,11 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                         if lanes == "2" {
                             block_range = 3;
                             add_stripe = true;
+                            add_outline = true;
                         } else if lanes != "1" {
                             block_range = 4;
                             add_stripe = true;
+                            add_outline = true;
                         }
                     }
                 }
@@ -249,6 +253,36 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                         Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
                                     );
                                 }
+                            }
+                        }
+
+                        // Add light gray concrete outline for multi-lane roads
+                        if add_outline {
+                            // Left outline
+                            for dz in -block_range..=block_range {
+                                let outline_x = x - block_range - 1;
+                                let outline_z = z + dz;
+                                editor.set_block(
+                                    LIGHT_GRAY_CONCRETE,
+                                    outline_x,
+                                    0,
+                                    outline_z,
+                                    None,
+                                    None,
+                                );
+                            }
+                            // Right outline
+                            for dz in -block_range..=block_range {
+                                let outline_x = x + block_range + 1;
+                                let outline_z = z + dz;
+                                editor.set_block(
+                                    LIGHT_GRAY_CONCRETE,
+                                    outline_x,
+                                    0,
+                                    outline_z,
+                                    None,
+                                    None,
+                                );
                             }
                         }
 

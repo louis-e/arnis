@@ -12,11 +12,11 @@ pub fn transform_map(
     ground: &mut Ground,
 ) {
     println!("{} Transforming map...", "[3/6]".bold());
-    emit_gui_progress_update(21.0, "Reading map transformation config...");
+    emit_gui_progress_update(20.0, "Transforming map...");
 
     match fs::read_to_string("example_transformations.json") {
         Err(_) => {
-            emit_gui_progress_update(40.0, "No map transformation config, skipped...");
+            emit_gui_progress_update(25.0, "");
         }
         Ok(opjson_string) => {
             let opjson = serde_json::from_str(&opjson_string)
@@ -32,20 +32,19 @@ pub fn transform_map(
             let nop: usize = ops.len();
             let mut iop: usize = 1;
 
-            let progress_increment_prcs: f64 = 19.0 / nop as f64;
-            let mut current_progress_prcs: f64 = 21.0;
+            let progress_increment_prcs: f64 = 5.0 / nop as f64;
 
             for op in ops {
-                current_progress_prcs += progress_increment_prcs;
-                let message = format!("Applying operation: {}, {}/{}", op.repr(), iop, nop);
-                emit_gui_progress_update(current_progress_prcs, &message);
+                let current_progress_prcs = 20.0 + (iop as f64 * progress_increment_prcs);
+                //let message = format!("Applying operation: {}, {}/{}", op.repr(), iop, nop);
+                emit_gui_progress_update(current_progress_prcs, "");
 
                 iop += 1;
 
                 op.operate(elements, xzbbox, ground);
             }
 
-            emit_gui_progress_update(40.0, "Map operations applied...");
+            emit_gui_progress_update(25.0, "");
         }
     }
 }

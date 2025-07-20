@@ -32,7 +32,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
                     "chain_link" | "metal" | "wire" | "barbed_wire" | "corrugated_metal"
                     | "electric" | "metal_bars",
                 ) => {
-                    barrier_material = IRON_BARS;
+                    barrier_material = STONE_BRICK_WALL; // IRON_BARS
                     barrier_height = 2;
                 }
                 Some("slatted" | "paling") => {
@@ -69,7 +69,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
             barrier_material = LIGHT_GRAY_CONCRETE;
         }
         if barrier_mat == "metal" {
-            barrier_material = IRON_BARS;
+            barrier_material = STONE_BRICK_WALL; // IRON_BARS
         }
     }
 

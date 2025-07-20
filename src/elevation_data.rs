@@ -5,7 +5,7 @@ use std::path::Path;
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
-const BASE_HEIGHT_SCALE: f64 = 0.72;
+const BASE_HEIGHT_SCALE: f64 = 0.4;
 /// Default Mapbox API access token for terrain data
 const MAPBOX_PUBKEY: &str =
     "pk.eyJ1IjoibG91aXMtZSIsImEiOiJjbWF0cWlycjEwYWNvMmtxeHFwdDQ5NnJoIn0.6A0AKg0iucvoGhYuCkeOjA";
@@ -143,8 +143,34 @@ pub fn fetch_elevation_data(
     // Fill in any NaN values by interpolating from nearest valid values
     fill_nan_values(&mut height_grid);
 
+    // Calculate blur sigma based on grid resolution
+    // Reference points for tuning:
+    const SMALL_GRID_REF: f64 = 100.0; // Reference grid size
+    const SMALL_SIGMA_REF: f64 = 15.0; // Sigma for 100x100 grid
+    const LARGE_GRID_REF: f64 = 1000.0; // Reference grid size
+    const LARGE_SIGMA_REF: f64 = 10.0; // Sigma for 1000x1000 grid
+
+    let grid_size: f64 = (grid_width.min(grid_height) as f64).max(1.0);
+
+    let sigma: f64 = if grid_size <= SMALL_GRID_REF {
+        // Linear scaling for small grids
+        SMALL_SIGMA_REF * (grid_size / SMALL_GRID_REF)
+    } else {
+        // Logarithmic scaling for larger grids
+        let ln_small: f64 = SMALL_GRID_REF.ln();
+        let ln_large: f64 = LARGE_GRID_REF.ln();
+        let log_grid_size: f64 = grid_size.ln();
+        let t: f64 = (log_grid_size - ln_small) / (ln_large - ln_small);
+        SMALL_SIGMA_REF + t * (LARGE_SIGMA_REF - SMALL_SIGMA_REF)
+    };
+
+    /* eprintln!(
+        "Grid: {}x{}, Blur sigma: {:.2}",
+        grid_width, grid_height, sigma
+    ); */
+
     // Continue with the existing blur and conversion to Minecraft heights...
-    let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, 1.0);
+    let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, sigma);
 
     let mut mc_heights: Vec<Vec<i32>> = Vec::with_capacity(blurred_heights.len());
 

@@ -43,6 +43,14 @@ pub struct Args {
     #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
     pub mapbox_access_token: Option<String>,
 
+    /// Enable interior generation (optional)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
+    pub interior: bool,
+
+    /// Enable roof generation (optional)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
+    pub roof: bool,
+
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
     pub fillground: bool,
