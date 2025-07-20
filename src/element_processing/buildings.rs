@@ -591,7 +591,6 @@ pub fn generate_buildings(
             generate_roof(
                 editor,
                 element,
-                args,
                 start_y_offset,
                 building_height,
                 floor_block,
@@ -625,7 +624,6 @@ pub fn generate_buildings(
                     generate_roof(
                         editor,
                         element,
-                        args,
                         start_y_offset,
                         building_height,
                         floor_block,
@@ -664,7 +662,6 @@ fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
 fn generate_roof(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    args: &Args,
     start_y_offset: i32,
     building_height: i32,
     floor_block: Block,
