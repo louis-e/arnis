@@ -14,12 +14,12 @@ use std::time::Duration;
 /// Enum representing different roof types
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RoofType {
-    Gabled,    // Two sloping sides meeting at a ridge
+    Gabled, // Two sloping sides meeting at a ridge
     Hipped, // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
     Skillion, // Single sloping surface
     Pyramidal, // All sides come to a point at the top
-    Dome,   // Rounded, hemispherical structure
-    Flat,   // Default flat roof
+    Dome, // Rounded, hemispherical structure
+    Flat, // Default flat roof
 }
 
 #[inline]
@@ -40,7 +40,7 @@ pub fn generate_buildings(
     let scale_factor = args.scale;
     let min_level_offset = multiply_scale(min_level * 4, scale_factor);
 
-    // CACHE FLOOD FILL RESULT - compute once and reuse throughout
+    // Cache floodfill result: compute once and reuse throughout
     let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
     let cached_floor_area: Vec<(i32, i32)> =
         flood_fill_area(&polygon_coords, args.timeout.as_ref());
@@ -357,7 +357,7 @@ pub fn generate_buildings(
                 previous_node = Some((x, z));
             }
 
-            // Use cached floor area instead of recalculating for roof interior
+            // Use cached floor area
             let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
@@ -469,7 +469,7 @@ pub fn generate_buildings(
 
     // Flood-fill interior with floor variation
     if corner_addup != (0, 0, 0) {
-        // Use cached floor area instead of recalculating
+        // Use cached floor area
         let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
 
         // Calculate floor heights for each level based on building height
@@ -562,7 +562,7 @@ pub fn generate_buildings(
                 // Only for buildings with sufficient floor area
                 generate_building_interior(
                     editor,
-                    &floor_area,
+                    floor_area,
                     min_x,
                     min_z,
                     max_x,
@@ -597,7 +597,7 @@ pub fn generate_buildings(
                 wall_block,
                 accent_block,
                 roof_type,
-                &cached_floor_area, // Pass cached floor area
+                &cached_floor_area,
             );
         } else {
             // Handle buildings without explicit roof:shape tag
@@ -630,7 +630,7 @@ pub fn generate_buildings(
                         wall_block,
                         accent_block,
                         RoofType::Gabled,
-                        &cached_floor_area, // Pass cached floor area
+                        &cached_floor_area,
                     );
                 }
                 // If footprint too large or not selected for gabled roof, building gets default flat roof (no action needed)
@@ -668,7 +668,7 @@ fn generate_roof(
     wall_block: Block,
     accent_block: Block,
     roof_type: RoofType,
-    cached_floor_area: &[(i32, i32)], // Accept cached floor area instead of recalculating
+    cached_floor_area: &[(i32, i32)],
 ) {
     // Use the provided cached floor area instead of recalculating
     let floor_area = cached_floor_area;
