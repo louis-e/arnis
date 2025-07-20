@@ -219,7 +219,7 @@ pub fn parse_osm_data(
         }
     }
 
-    // Second pass: process ways
+    // Second pass: process ways and clip them to bbox
     for element in data.ways {
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
@@ -230,20 +230,24 @@ pub fn parse_osm_data(
             }
         }
 
-        let processed: ProcessedWay = ProcessedWay {
-            id: element.id,
-            tags: element.tags.clone().unwrap_or_default(),
-            nodes,
-        };
+        if !nodes.is_empty() {
+            // Clip the way to the bounding box
+            let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
 
-        ways_map.insert(element.id, processed.clone());
+            if !clipped_nodes.is_empty() {
+                let processed: ProcessedWay = ProcessedWay {
+                    id: element.id,
+                    tags: element.tags.clone().unwrap_or_default(),
+                    nodes: clipped_nodes,
+                };
 
-        if !processed.nodes.is_empty() {
-            processed_elements.push(ProcessedElement::Way(processed));
+                ways_map.insert(element.id, processed.clone());
+                processed_elements.push(ProcessedElement::Way(processed));
+            }
         }
     }
 
-    // Third pass: process relations
+    // Third pass: process relations and clip member ways
     for element in data.relations {
         let Some(tags) = &element.tags else {
             continue;
@@ -269,20 +273,26 @@ pub fn parse_osm_data(
                     _ => return None,
                 };
 
-                let way: ProcessedWay = ways_map
-                    .get(&mem.r#ref)
-                    .expect("Missing a way referenced by a rel")
-                    .clone();
+                // Check if the way exists in ways_map
+                let way: ProcessedWay = match ways_map.get(&mem.r#ref) {
+                    Some(w) => w.clone(),
+                    None => {
+                        // Way was likely filtered out because it was completely outside the bbox
+                        return None;
+                    }
+                };
 
                 Some(ProcessedMember { role, way })
             })
             .collect();
 
-        processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
-            id: element.id,
-            members,
-            tags: tags.clone(),
-        }));
+        if !members.is_empty() {
+            processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
+                id: element.id,
+                members,
+                tags: tags.clone(),
+            }));
+        }
     }
 
     emit_gui_progress_update(15.0, "");
@@ -304,4 +314,160 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     }
     // Return a default priority if none of the tags match
     PRIORITY_ORDER.len()
+}
+
+/// Clips a way to the bounding box boundaries using Sutherland-Hodgman algorithm
+fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
+    if nodes.is_empty() {
+        return Vec::new();
+    }
+
+    // For now, let's be conservative and only clip if the way actually extends outside the bbox
+    // Check if any nodes are outside the bbox
+    let has_nodes_outside = nodes
+        .iter()
+        .any(|node| !xzbbox.contains(&XZPoint::new(node.x, node.z)));
+
+    // If all nodes are inside the bbox, return the original nodes unchanged
+    if !has_nodes_outside {
+        return nodes.to_vec();
+    }
+
+    let min_x = xzbbox.min_x() as f64;
+    let min_z = xzbbox.min_z() as f64;
+    let max_x = xzbbox.max_x() as f64;
+    let max_z = xzbbox.max_z() as f64;
+
+    // Convert nodes to a simple coordinate list for easier processing
+    let mut polygon: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
+
+    // Only close polygon if it's already nearly closed (last point close to first)
+    let should_close = if polygon.len() > 2 {
+        let first = polygon[0];
+        let last = polygon[polygon.len() - 1];
+        let distance = ((first.0 - last.0).powi(2) + (first.1 - last.1).powi(2)).sqrt();
+        distance < 10.0 // Close if within 10 units
+    } else {
+        false
+    };
+
+    if should_close && polygon.first() != polygon.last() {
+        polygon.push(polygon[0]);
+    }
+
+    // Clip against each edge of the bounding box using Sutherland-Hodgman algorithm
+    let bbox_edges = [
+        (min_x, min_z, max_x, min_z), // Bottom edge
+        (max_x, min_z, max_x, max_z), // Right edge
+        (max_x, max_z, min_x, max_z), // Top edge
+        (min_x, max_z, min_x, min_z), // Left edge
+    ];
+
+    for (edge_x1, edge_z1, edge_x2, edge_z2) in bbox_edges {
+        let mut clipped_polygon = Vec::new();
+
+        if polygon.is_empty() {
+            break;
+        }
+
+        for i in 0..polygon.len() {
+            let current = polygon[i];
+            let next = polygon[(i + 1) % polygon.len()];
+
+            let current_inside = point_inside_edge(current, edge_x1, edge_z1, edge_x2, edge_z2);
+            let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
+
+            if next_inside {
+                if !current_inside {
+                    // Entering: add intersection point
+                    if let Some(intersection) = line_edge_intersection(
+                        current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
+                    ) {
+                        clipped_polygon.push(intersection);
+                    }
+                }
+                // Add the next point since it's inside
+                clipped_polygon.push(next);
+            } else if current_inside {
+                // Exiting: add intersection point
+                if let Some(intersection) = line_edge_intersection(
+                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
+                ) {
+                    clipped_polygon.push(intersection);
+                }
+            }
+            // If both outside, don't add anything
+        }
+
+        polygon = clipped_polygon;
+    }
+
+    // Convert back to ProcessedNode format
+    polygon
+        .into_iter()
+        .enumerate()
+        .map(|(i, (x, z))| ProcessedNode {
+            id: i as u64, // Use index as synthetic ID
+            x: x.round() as i32,
+            z: z.round() as i32,
+            tags: HashMap::new(),
+        })
+        .collect()
+}
+
+/// Check if a point is on the "inside" side of an edge (using cross product)
+fn point_inside_edge(
+    point: (f64, f64),
+    edge_x1: f64,
+    edge_z1: f64,
+    edge_x2: f64,
+    edge_z2: f64,
+) -> bool {
+    // Calculate cross product to determine which side of the edge the point is on
+    let edge_dx = edge_x2 - edge_x1;
+    let edge_dz = edge_z2 - edge_z1;
+    let point_dx = point.0 - edge_x1;
+    let point_dz = point.1 - edge_z1;
+
+    // Cross product: positive means point is on the "left" side (inside for clockwise bbox)
+    let cross_product = edge_dx * point_dz - edge_dz * point_dx;
+    cross_product >= 0.0
+}
+
+/// Find intersection between a line segment and an edge
+#[allow(clippy::too_many_arguments)]
+fn line_edge_intersection(
+    line_x1: f64,
+    line_z1: f64,
+    line_x2: f64,
+    line_z2: f64,
+    edge_x1: f64,
+    edge_z1: f64,
+    edge_x2: f64,
+    edge_z2: f64,
+) -> Option<(f64, f64)> {
+    let line_dx = line_x2 - line_x1;
+    let line_dz = line_z2 - line_z1;
+    let edge_dx = edge_x2 - edge_x1;
+    let edge_dz = edge_z2 - edge_z1;
+
+    let denom = line_dx * edge_dz - line_dz * edge_dx;
+
+    if denom.abs() < 1e-10 {
+        return None; // Lines are parallel
+    }
+
+    let dx = edge_x1 - line_x1;
+    let dz = edge_z1 - line_z1;
+
+    let t = (dx * edge_dz - dz * edge_dx) / denom;
+
+    // Only return intersection if it's on the line segment
+    if (0.0..=1.0).contains(&t) {
+        let x = line_x1 + t * line_dx;
+        let z = line_z1 + t * line_dz;
+        Some((x, z))
+    } else {
+        None
+    }
 }
