@@ -53,6 +53,8 @@ struct PaletteItem {
 
 struct SectionToModify {
     blocks: [Block; 4096],
+    // Store properties for blocks that have them, indexed by the same index as blocks array
+    properties: FnvHashMap<usize, Value>,
 }
 
 impl SectionToModify {
@@ -69,32 +71,63 @@ impl SectionToModify {
         self.blocks[Self::index(x, y, z)] = block;
     }
 
+    fn set_block_with_properties(
+        &mut self,
+        x: u8,
+        y: u8,
+        z: u8,
+        block_with_props: BlockWithProperties,
+    ) {
+        let index = Self::index(x, y, z);
+        self.blocks[index] = block_with_props.block;
+
+        // Store properties if they exist
+        if let Some(props) = block_with_props.properties {
+            self.properties.insert(index, props);
+        } else {
+            // Remove any existing properties for this position
+            self.properties.remove(&index);
+        }
+    }
+
     fn index(x: u8, y: u8, z: u8) -> usize {
         usize::from(y) % 16 * 256 + usize::from(z) * 16 + usize::from(x)
     }
 
     fn to_section(&self, y: i8) -> Section {
-        let mut palette = self.blocks.to_vec();
-        palette.sort();
-        palette.dedup();
+        // Create a map of unique block+properties combinations to palette indices
+        let mut unique_blocks: Vec<(Block, Option<Value>)> = Vec::new();
+        let mut palette_lookup: FnvHashMap<(Block, Option<String>), usize> = FnvHashMap::default();
 
-        let palette_lookup: FnvHashMap<_, _> = palette
-            .iter()
-            .enumerate()
-            .map(|(k, v)| (v, i64::try_from(k).unwrap()))
-            .collect();
+        // Build unique block combinations and lookup table
+        for (i, &block) in self.blocks.iter().enumerate() {
+            let properties = self.properties.get(&i).cloned();
+
+            // Create a key for the lookup (block + properties hash)
+            let props_key = properties.as_ref().map(|p| format!("{p:?}"));
+            let lookup_key = (block, props_key);
+
+            if let std::collections::hash_map::Entry::Vacant(e) = palette_lookup.entry(lookup_key) {
+                let palette_index = unique_blocks.len();
+                e.insert(palette_index);
+                unique_blocks.push((block, properties));
+            }
+        }
 
         let mut bits_per_block = 4; // minimum allowed
-        while (1 << bits_per_block) < palette.len() {
+        while (1 << bits_per_block) < unique_blocks.len() {
             bits_per_block += 1;
         }
 
         let mut data = vec![];
-
         let mut cur = 0;
         let mut cur_idx = 0;
-        for block in &self.blocks {
-            let p = palette_lookup[block];
+
+        for (i, &block) in self.blocks.iter().enumerate() {
+            let properties = self.properties.get(&i).cloned();
+            let props_key = properties.as_ref().map(|p| format!("{p:?}"));
+            let lookup_key = (block, props_key);
+            let p = palette_lookup[&lookup_key] as i64;
 
             if cur_idx + bits_per_block > 64 {
                 data.push(cur);
@@ -110,11 +143,11 @@ impl SectionToModify {
             data.push(cur);
         }
 
-        let palette = palette
+        let palette = unique_blocks
             .iter()
-            .map(|x| PaletteItem {
-                name: x.name().to_string(),
-                properties: x.properties(),
+            .map(|(block, stored_props)| PaletteItem {
+                name: block.name().to_string(),
+                properties: stored_props.clone().or_else(|| block.properties()),
             })
             .collect();
 
@@ -134,6 +167,7 @@ impl Default for SectionToModify {
     fn default() -> Self {
         Self {
             blocks: [AIR; 4096],
+            properties: FnvHashMap::default(),
         }
     }
 }
@@ -159,6 +193,20 @@ impl ChunkToModify {
         let section = self.sections.entry(section_idx).or_default();
 
         section.set_block(x, (y & 15).try_into().unwrap(), z, block);
+    }
+
+    fn set_block_with_properties(
+        &mut self,
+        x: u8,
+        y: i32,
+        z: u8,
+        block_with_props: BlockWithProperties,
+    ) {
+        let section_idx: i8 = (y >> 4).try_into().unwrap();
+
+        let section = self.sections.entry(section_idx).or_default();
+
+        section.set_block_with_properties(x, (y & 15).try_into().unwrap(), z, block_with_props);
     }
 
     fn sections(&self) -> impl Iterator<Item = Section> + '_ {
@@ -227,6 +275,29 @@ impl WorldToModify {
             block,
         );
     }
+
+    fn set_block_with_properties(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_with_props: BlockWithProperties,
+    ) {
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
+        let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        chunk.set_block_with_properties(
+            (x & 15).try_into().unwrap(),
+            y,
+            (z & 15).try_into().unwrap(),
+            block_with_props,
+        );
+    }
 }
 
 // Notes for someone not familiar with lifetime parameter:
@@ -256,6 +327,11 @@ impl<'a> WorldEditor<'a> {
     /// Sets the ground reference for elevation-based block placement
     pub fn set_ground(&mut self, ground: &Ground) {
         self.ground = Some(Box::new(ground.clone()));
+    }
+
+    /// Gets a reference to the ground data if available
+    pub fn get_ground(&self) -> Option<&Ground> {
+        self.ground.as_ref().map(|g| g.as_ref())
     }
 
     /// Calculate the absolute Y position from a ground-relative offset
@@ -328,10 +404,10 @@ impl<'a> WorldEditor<'a> {
         let mut block_entities = HashMap::new();
 
         let messages = vec![
-            Value::String(format!("\"{}\"", line1)),
-            Value::String(format!("\"{}\"", line2)),
-            Value::String(format!("\"{}\"", line3)),
-            Value::String(format!("\"{}\"", line4)),
+            Value::String(format!("\"{line1}\"")),
+            Value::String(format!("\"{line2}\"")),
+            Value::String(format!("\"{line3}\"")),
+            Value::String(format!("\"{line4}\"")),
         ];
 
         let mut text_data = HashMap::new();
@@ -444,6 +520,45 @@ impl<'a> WorldEditor<'a> {
 
         if should_insert {
             self.world.set_block(x, absolute_y, z, block);
+        }
+    }
+
+    /// Sets a block with properties at the given coordinates with absolute Y value.
+    #[inline]
+    pub fn set_block_with_properties_absolute(
+        &mut self,
+        block_with_props: BlockWithProperties,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+    ) {
+        // Check if coordinates are within bounds
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+
+        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
+            // Check against whitelist and blacklist
+            if let Some(whitelist) = override_whitelist {
+                whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+            } else if let Some(blacklist) = override_blacklist {
+                !blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+
+        if should_insert {
+            self.world
+                .set_block_with_properties(x, absolute_y, z, block_with_props);
         }
     }
 

@@ -10,11 +10,11 @@
   "error_coordinates_out_of_range": "خطأ: الإحداثيات خارج النطاق أو مرتبة بشكل غير صحيح (مطلوب خط العرض قبل خط الطول).",
   "invalid_format": "تنسيق غير صالح. استخدم 'lat,lng,lat,lng' أو 'lat lng lat lng'.",
   "generation_process_started": "بدأت عملية البناء.",
-  "winter_mode": "وضع الشتاء:",
-  "world_scale": "مقياس العالم:",
-  "custom_bounding_box": "مربع الحدود المخصص:",
-  "floodfill_timeout": "مهلة ملء الفيضان (ثواني):",
-  "ground_level": "مستوى الأرض:",
+  "winter_mode": "وضع الشتاء",
+  "world_scale": "مقياس العالم",
+  "custom_bounding_box": "مربع الحدود المخصص",
+  "floodfill_timeout": "مهلة ملء الفيضان (ثواني)",
+  "ground_level": "مستوى الأرض",
   "choose_world_modal_title": "اختيار عالم",
   "select_existing_world": "اختيار عالم موجود مسبقًا",
   "generate_new_world": "إنشاء عالم جديد",
@@ -34,5 +34,8 @@
   "license_and_credits": "الرخصة والمساهمون",
   "placeholder_bbox": "الصيغة: lat,lng,lat,lng",
   "placeholder_floodfill": "ثوانٍ",
-  "placeholder_ground": "مستوى الأرض"
+  "placeholder_ground": "مستوى الأرض",
+  "language": "اللغة",
+  "terrain": "التضاريس",
+  "fillground": "ملء الأرض"
 }

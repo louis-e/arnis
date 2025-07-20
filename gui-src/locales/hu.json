@@ -13,7 +13,7 @@
   "winter_mode": "Téli mód",
   "world_scale": "Világ nagysága",
   "custom_bounding_box": "Egyéni határoló keret",
-  "floodfill_timeout": "Floodfill Timeout (sec):",
+  "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Földszint",
   "choose_world_modal_title": "Világ kiválasztása",
   "select_existing_world": "Már létező világ kiválasztása",
@@ -34,5 +34,8 @@
   "license_and_credits": "Licenc és elismerés.",
   "placeholder_bbox": "Formátum: lat,lng,lat,lng",
   "placeholder_floodfill": "Másodpercek",
-  "placeholder_ground": "Földszint"
+  "placeholder_ground": "Földszint",
+  "language": "Nyelv",
+  "terrain": "Terep",
+  "fillground": "Talaj feltöltése"
 }
