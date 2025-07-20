@@ -1,7 +1,7 @@
-use crate::{
-    bbox::BBox, coordinate_system::cartesian::XZPoint, geo_coord::GeoCoord,
-    progress::emit_gui_progress_update,
-};
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::coordinate_system::transformation::CoordTransformer;
+use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;
@@ -162,46 +162,28 @@ impl ProcessedElement {
     }
 }
 
-// Function to convert latitude and longitude to Minecraft coordinates.
-pub fn lat_lon_to_minecraft_coords(
-    lat: f64,
-    lon: f64,
-    bbox: BBox, // (min_lon, min_lat, max_lon, max_lat)
-    scale_factor_z: f64,
-    scale_factor_x: f64,
-) -> (i32, i32) {
-    // Calculate the relative position within the bounding box
-    let rel_x: f64 = (lon - bbox.min().lng()) / (bbox.max().lng() - bbox.min().lng());
-    let rel_z: f64 = 1.0 - (lat - bbox.min().lat()) / (bbox.max().lat() - bbox.min().lat());
-
-    // Apply scaling factors for each dimension and convert to Minecraft coordinates
-    let x: i32 = (rel_x * scale_factor_x) as i32;
-    let z: i32 = (rel_z * scale_factor_z) as i32;
-
-    (x, z)
-}
-
 pub fn parse_osm_data(
     json_data: Value,
-    bbox: BBox,
+    bbox: LLBBox,
     scale: f64,
     debug: bool,
-) -> (Vec<ProcessedElement>, f64, f64) {
+) -> (Vec<ProcessedElement>, XZBBox) {
     println!("{} Parsing data...", "[2/6]".bold());
-    emit_gui_progress_update(10.0, "Parsing data...");
+    emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
     let data = parse_raw_osm_data(json_data).expect("Failed to parse OSM data");
 
-    // Determine which dimension is larger and assign scale factors accordingly
-    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
-    let scale_factor_z: f64 = scale_factor_z.floor() * scale;
-    let scale_factor_x: f64 = scale_factor_x.floor() * scale;
+    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
+        .unwrap_or_else(|e| {
+            eprintln!("Error in defining coordinate transformation:\n{e}");
+            panic!();
+        });
 
     if debug {
         println!("Total elements: {}", data.total_count());
-        println!("Scale factor X: {}", scale_factor_x);
-        println!("Scale factor Z: {}", scale_factor_z);
+        println!("Scale factor X: {}", coord_transformer.scale_factor_x());
+        println!("Scale factor Z: {}", coord_transformer.scale_factor_z());
     }
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
@@ -212,14 +194,18 @@ pub fn parse_osm_data(
     // First pass: store all nodes with Minecraft coordinates and process nodes with tags
     for element in data.nodes {
         if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
-            let (x, z) =
-                lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_z, scale_factor_x);
+            let llpoint = LLPoint::new(lat, lon).unwrap_or_else(|e| {
+                eprintln!("Encountered invalid node element:\n{e}");
+                panic!();
+            });
+
+            let xzpoint = coord_transformer.transform_point(llpoint);
 
             let processed: ProcessedNode = ProcessedNode {
                 id: element.id,
                 tags: element.tags.clone().unwrap_or_default(),
-                x,
-                z,
+                x: xzpoint.x,
+                z: xzpoint.z,
             };
 
             nodes_map.insert(element.id, processed.clone());
@@ -233,7 +219,7 @@ pub fn parse_osm_data(
         }
     }
 
-    // Second pass: process ways
+    // Second pass: process ways and clip them to bbox
     for element in data.ways {
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
@@ -244,20 +230,24 @@ pub fn parse_osm_data(
             }
         }
 
-        let processed: ProcessedWay = ProcessedWay {
-            id: element.id,
-            tags: element.tags.clone().unwrap_or_default(),
-            nodes,
-        };
+        if !nodes.is_empty() {
+            // Clip the way to the bounding box
+            let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
 
-        ways_map.insert(element.id, processed.clone());
+            if !clipped_nodes.is_empty() {
+                let processed: ProcessedWay = ProcessedWay {
+                    id: element.id,
+                    tags: element.tags.clone().unwrap_or_default(),
+                    nodes: clipped_nodes,
+                };
 
-        if !processed.nodes.is_empty() {
-            processed_elements.push(ProcessedElement::Way(processed));
+                ways_map.insert(element.id, processed.clone());
+                processed_elements.push(ProcessedElement::Way(processed));
+            }
         }
     }
 
-    // Third pass: process relations
+    // Third pass: process relations and clip member ways
     for element in data.relations {
         let Some(tags) = &element.tags else {
             continue;
@@ -283,25 +273,31 @@ pub fn parse_osm_data(
                     _ => return None,
                 };
 
-                let way: ProcessedWay = ways_map
-                    .get(&mem.r#ref)
-                    .expect("Missing a way referenced by a rel")
-                    .clone();
+                // Check if the way exists in ways_map
+                let way: ProcessedWay = match ways_map.get(&mem.r#ref) {
+                    Some(w) => w.clone(),
+                    None => {
+                        // Way was likely filtered out because it was completely outside the bbox
+                        return None;
+                    }
+                };
 
                 Some(ProcessedMember { role, way })
             })
             .collect();
 
-        processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
-            id: element.id,
-            members,
-            tags: tags.clone(),
-        }));
+        if !members.is_empty() {
+            processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
+                id: element.id,
+                members,
+                tags: tags.clone(),
+            }));
+        }
     }
 
-    emit_gui_progress_update(20.0, "");
+    emit_gui_progress_update(15.0, "");
 
-    (processed_elements, scale_factor_x, scale_factor_z)
+    (processed_elements, xzbbox)
 }
 
 const PRIORITY_ORDER: [&str; 6] = [
@@ -320,36 +316,158 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     PRIORITY_ORDER.len()
 }
 
-// (lat meters, lon meters)
-#[inline]
-pub fn geo_distance(a: GeoCoord, b: GeoCoord) -> (f64, f64) {
-    let z: f64 = lat_distance(a.lat(), b.lat());
+/// Clips a way to the bounding box boundaries using Sutherland-Hodgman algorithm
+fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
+    if nodes.is_empty() {
+        return Vec::new();
+    }
 
-    // distance between two lons depends on their latitude. In this case we'll just average them
-    let x: f64 = lon_distance((a.lat() + b.lat()) / 2.0, a.lng(), b.lng());
+    // For now, let's be conservative and only clip if the way actually extends outside the bbox
+    // Check if any nodes are outside the bbox
+    let has_nodes_outside = nodes
+        .iter()
+        .any(|node| !xzbbox.contains(&XZPoint::new(node.x, node.z)));
 
-    (z, x)
+    // If all nodes are inside the bbox, return the original nodes unchanged
+    if !has_nodes_outside {
+        return nodes.to_vec();
+    }
+
+    let min_x = xzbbox.min_x() as f64;
+    let min_z = xzbbox.min_z() as f64;
+    let max_x = xzbbox.max_x() as f64;
+    let max_z = xzbbox.max_z() as f64;
+
+    // Convert nodes to a simple coordinate list for easier processing
+    let mut polygon: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
+
+    // Only close polygon if it's already nearly closed (last point close to first)
+    let should_close = if polygon.len() > 2 {
+        let first = polygon[0];
+        let last = polygon[polygon.len() - 1];
+        let distance = ((first.0 - last.0).powi(2) + (first.1 - last.1).powi(2)).sqrt();
+        distance < 10.0 // Close if within 10 units
+    } else {
+        false
+    };
+
+    if should_close && polygon.first() != polygon.last() {
+        polygon.push(polygon[0]);
+    }
+
+    // Clip against each edge of the bounding box using Sutherland-Hodgman algorithm
+    let bbox_edges = [
+        (min_x, min_z, max_x, min_z), // Bottom edge
+        (max_x, min_z, max_x, max_z), // Right edge
+        (max_x, max_z, min_x, max_z), // Top edge
+        (min_x, max_z, min_x, min_z), // Left edge
+    ];
+
+    for (edge_x1, edge_z1, edge_x2, edge_z2) in bbox_edges {
+        let mut clipped_polygon = Vec::new();
+
+        if polygon.is_empty() {
+            break;
+        }
+
+        for i in 0..polygon.len() {
+            let current = polygon[i];
+            let next = polygon[(i + 1) % polygon.len()];
+
+            let current_inside = point_inside_edge(current, edge_x1, edge_z1, edge_x2, edge_z2);
+            let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
+
+            if next_inside {
+                if !current_inside {
+                    // Entering: add intersection point
+                    if let Some(intersection) = line_edge_intersection(
+                        current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
+                    ) {
+                        clipped_polygon.push(intersection);
+                    }
+                }
+                // Add the next point since it's inside
+                clipped_polygon.push(next);
+            } else if current_inside {
+                // Exiting: add intersection point
+                if let Some(intersection) = line_edge_intersection(
+                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
+                ) {
+                    clipped_polygon.push(intersection);
+                }
+            }
+            // If both outside, don't add anything
+        }
+
+        polygon = clipped_polygon;
+    }
+
+    // Convert back to ProcessedNode format
+    polygon
+        .into_iter()
+        .enumerate()
+        .map(|(i, (x, z))| ProcessedNode {
+            id: i as u64, // Use index as synthetic ID
+            x: x.round() as i32,
+            z: z.round() as i32,
+            tags: HashMap::new(),
+        })
+        .collect()
 }
 
-// Haversine but optimized for a latitude delta of 0
-// returns meters
-fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
-    const R: f64 = 6_371_000.0;
-    let d_lon: f64 = (lon2 - lon1).to_radians();
-    let a: f64 =
-        lat.to_radians().cos() * lat.to_radians().cos() * (d_lon / 2.0).sin() * (d_lon / 2.0).sin();
-    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+/// Check if a point is on the "inside" side of an edge (using cross product)
+fn point_inside_edge(
+    point: (f64, f64),
+    edge_x1: f64,
+    edge_z1: f64,
+    edge_x2: f64,
+    edge_z2: f64,
+) -> bool {
+    // Calculate cross product to determine which side of the edge the point is on
+    let edge_dx = edge_x2 - edge_x1;
+    let edge_dz = edge_z2 - edge_z1;
+    let point_dx = point.0 - edge_x1;
+    let point_dz = point.1 - edge_z1;
 
-    R * c
+    // Cross product: positive means point is on the "left" side (inside for clockwise bbox)
+    let cross_product = edge_dx * point_dz - edge_dz * point_dx;
+    cross_product >= 0.0
 }
 
-// Haversine but optimized for a longitude delta of 0
-// returns meters
-fn lat_distance(lat1: f64, lat2: f64) -> f64 {
-    const R: f64 = 6_371_000.0;
-    let d_lat: f64 = (lat2 - lat1).to_radians();
-    let a: f64 = (d_lat / 2.0).sin() * (d_lat / 2.0).sin();
-    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+/// Find intersection between a line segment and an edge
+#[allow(clippy::too_many_arguments)]
+fn line_edge_intersection(
+    line_x1: f64,
+    line_z1: f64,
+    line_x2: f64,
+    line_z2: f64,
+    edge_x1: f64,
+    edge_z1: f64,
+    edge_x2: f64,
+    edge_z2: f64,
+) -> Option<(f64, f64)> {
+    let line_dx = line_x2 - line_x1;
+    let line_dz = line_z2 - line_z1;
+    let edge_dx = edge_x2 - edge_x1;
+    let edge_dz = edge_z2 - edge_z1;
 
-    R * c
+    let denom = line_dx * edge_dz - line_dz * edge_dx;
+
+    if denom.abs() < 1e-10 {
+        return None; // Lines are parallel
+    }
+
+    let dx = edge_x1 - line_x1;
+    let dz = edge_z1 - line_z1;
+
+    let t = (dx * edge_dz - dz * edge_dx) / denom;
+
+    // Only return intersection if it's on the line segment
+    if (0.0..=1.0).contains(&t) {
+        let x = line_x1 + t * line_dx;
+        let z = line_z1 + t * line_dz;
+        Some((x, z))
+    } else {
+        None
+    }
 }
