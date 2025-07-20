@@ -265,8 +265,9 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         "mountain_range" => {
                             // Create block clusters instead of random placement
                             let cluster_chance = rng.gen_range(0..1000);
-                            
-                            if cluster_chance < 50 { // 5% chance to start a new cluster
+
+                            if cluster_chance < 50 {
+                                // 5% chance to start a new cluster
                                 let cluster_block = match rng.gen_range(0..7) {
                                     0 => DIRT,
                                     1 => STONE,
@@ -276,33 +277,52 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                     5 => ANDESITE,
                                     _ => GRASS_BLOCK,
                                 };
-                                
+
                                 // Generate cluster size (5-10 blocks radius)
                                 let cluster_size = rng.gen_range(5..=10);
-                                
+
                                 // Create cluster around current position
                                 for dx in -(cluster_size as i32)..=(cluster_size as i32) {
                                     for dz in -(cluster_size as i32)..=(cluster_size as i32) {
                                         let cluster_x = x + dx;
                                         let cluster_z = z + dz;
-                                        
+
                                         // Use distance to create more natural cluster shape
                                         let distance = ((dx * dx + dz * dz) as f32).sqrt();
                                         if distance <= cluster_size as f32 {
                                             // Probability decreases with distance from center
                                             let place_prob = 1.0 - (distance / cluster_size as f32);
                                             if rng.gen::<f32>() < place_prob {
-                                                editor.set_block(cluster_block, cluster_x, 0, cluster_z, None, None);
-                                                
+                                                editor.set_block(
+                                                    cluster_block,
+                                                    cluster_x,
+                                                    0,
+                                                    cluster_z,
+                                                    None,
+                                                    None,
+                                                );
+
                                                 // Add vegetation on grass blocks
                                                 if cluster_block == GRASS_BLOCK {
                                                     let vegetation_chance = rng.gen_range(0..100);
-                                                    if vegetation_chance == 0 { // 1% chance for rare trees
-                                                        Tree::create(editor, (cluster_x, 1, cluster_z));
-                                                    } else if vegetation_chance < 15 { // 15% chance for grass
-                                                        editor.set_block(GRASS, cluster_x, 1, cluster_z, None, None);
-                                                    } else if vegetation_chance < 25 { // 10% chance for oak leaves
-                                                        editor.set_block(OAK_LEAVES, cluster_x, 1, cluster_z, None, None);
+                                                    if vegetation_chance == 0 {
+                                                        // 1% chance for rare trees
+                                                        Tree::create(
+                                                            editor,
+                                                            (cluster_x, 1, cluster_z),
+                                                        );
+                                                    } else if vegetation_chance < 15 {
+                                                        // 15% chance for grass
+                                                        editor.set_block(
+                                                            GRASS, cluster_x, 1, cluster_z, None,
+                                                            None,
+                                                        );
+                                                    } else if vegetation_chance < 25 {
+                                                        // 10% chance for oak leaves
+                                                        editor.set_block(
+                                                            OAK_LEAVES, cluster_x, 1, cluster_z,
+                                                            None, None,
+                                                        );
                                                     }
                                                 }
                                             }
@@ -314,13 +334,17 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         "saddle" => {
                             // Saddle areas - lowest point between peaks, mix of stone and grass
                             let terrain_chance = rng.gen_range(0..100);
-                            if terrain_chance < 30 { // 30% chance for exposed stone
+                            if terrain_chance < 30 {
+                                // 30% chance for exposed stone
                                 editor.set_block(STONE, x, 0, z, None, None);
-                            } else if terrain_chance < 50 { // 20% chance for gravel/rocky terrain
+                            } else if terrain_chance < 50 {
+                                // 20% chance for gravel/rocky terrain
                                 editor.set_block(GRAVEL, x, 0, z, None, None);
-                            } else { // 50% chance for grass
+                            } else {
+                                // 50% chance for grass
                                 editor.set_block(GRASS_BLOCK, x, 0, z, None, None);
-                                if rng.gen_bool(0.4) { // 40% chance for grass on top
+                                if rng.gen_bool(0.4) {
+                                    // 40% chance for grass on top
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                 }
                             }
@@ -328,7 +352,8 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         "ridge" => {
                             // Ridge areas - elevated crest, mostly rocky with some vegetation
                             let ridge_chance = rng.gen_range(0..100);
-                            if ridge_chance < 60 { // 60% chance for stone/rocky terrain
+                            if ridge_chance < 60 {
+                                // 60% chance for stone/rocky terrain
                                 let rock_type = match rng.gen_range(0..4) {
                                     0 => STONE,
                                     1 => COBBLESTONE,
@@ -336,12 +361,15 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                     _ => ANDESITE,
                                 };
                                 editor.set_block(rock_type, x, 0, z, None, None);
-                            } else { // 40% chance for grass with sparse vegetation
+                            } else {
+                                // 40% chance for grass with sparse vegetation
                                 editor.set_block(GRASS_BLOCK, x, 0, z, None, None);
                                 let vegetation_chance = rng.gen_range(0..100);
-                                if vegetation_chance < 20 { // 20% chance for grass
+                                if vegetation_chance < 20 {
+                                    // 20% chance for grass
                                     editor.set_block(GRASS, x, 1, z, None, None);
-                                } else if vegetation_chance < 25 { // 5% chance for small shrubs
+                                } else if vegetation_chance < 25 {
+                                    // 5% chance for small shrubs
                                     editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                                 }
                             }
@@ -357,11 +385,14 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                 continue;
                             }
                             let tundra_chance = rng.gen_range(0..100);
-                            if tundra_chance < 40 { // 40% chance for grass (sedges, grasses)
+                            if tundra_chance < 40 {
+                                // 40% chance for grass (sedges, grasses)
                                 editor.set_block(GRASS, x, 1, z, None, None);
-                            } else if tundra_chance < 60 { // 20% chance for moss
+                            } else if tundra_chance < 60 {
+                                // 20% chance for moss
                                 editor.set_block(MOSS_BLOCK, x, 0, z, Some(&[GRASS_BLOCK]), None);
-                            } else if tundra_chance < 70 { // 10% chance for dead bush (lichens)
+                            } else if tundra_chance < 70 {
+                                // 10% chance for dead bush (lichens)
                                 editor.set_block(DEAD_BUSH, x, 1, z, None, None);
                             }
                             // 30% chance for bare ground (no surface block)
@@ -369,7 +400,8 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         "cliff" => {
                             // Cliff areas - predominantly stone with minimal vegetation
                             let cliff_chance = rng.gen_range(0..100);
-                            if cliff_chance < 90 { // 90% chance for stone variants
+                            if cliff_chance < 90 {
+                                // 90% chance for stone variants
                                 let stone_type = match rng.gen_range(0..4) {
                                     0 => STONE,
                                     1 => COBBLESTONE,
@@ -377,7 +409,8 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                     _ => DIORITE,
                                 };
                                 editor.set_block(stone_type, x, 0, z, None, None);
-                            } else { // 10% chance for gravel/loose rock
+                            } else {
+                                // 10% chance for gravel/loose rock
                                 editor.set_block(GRAVEL, x, 0, z, None, None);
                             }
                         }
@@ -387,9 +420,11 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                 continue;
                             }
                             let hill_chance = rng.gen_range(0..1000);
-                            if hill_chance == 0 { // 0.1% chance for rare trees
+                            if hill_chance == 0 {
+                                // 0.1% chance for rare trees
                                 Tree::create(editor, (x, 1, z));
-                            } else if hill_chance < 50 { // 5% chance for flowers
+                            } else if hill_chance < 50 {
+                                // 5% chance for flowers
                                 let flower_block = match rng.gen_range(1..=4) {
                                     1 => RED_FLOWER,
                                     2 => BLUE_FLOWER,
@@ -397,9 +432,11 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                     _ => WHITE_FLOWER,
                                 };
                                 editor.set_block(flower_block, x, 1, z, None, None);
-                            } else if hill_chance < 600 { // 55% chance for grass
+                            } else if hill_chance < 600 {
+                                // 55% chance for grass
                                 editor.set_block(GRASS, x, 1, z, None, None);
-                            } else if hill_chance < 650 { // 5% chance for tall grass
+                            } else if hill_chance < 650 {
+                                // 5% chance for tall grass
                                 editor.set_block(TALL_GRASS_BOTTOM, x, 1, z, None, None);
                                 editor.set_block(TALL_GRASS_TOP, x, 2, z, None, None);
                             }
