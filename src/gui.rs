@@ -583,7 +583,7 @@ fn gui_start_generation(
                 scale: world_scale,
                 ground_level,
                 terrain: conditional_terrain_enabled,
-                mapbox_access_token: None, // TODO: needs a way to input this
+                mapbox_access_token: None, // Legacy parameter - not needed for AWS Terrain Tiles
                 interior: interior_enabled,
                 roof: roof_enabled,
                 fillground: fillground_enabled,

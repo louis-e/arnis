@@ -6,9 +6,11 @@ use std::path::Path;
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
 const BASE_HEIGHT_SCALE: f64 = 0.4;
-/// Default Mapbox API access token for terrain data
-const MAPBOX_PUBKEY: &str =
-    "pk.eyJ1IjoibG91aXMtZSIsImEiOiJjbWF0cWlycjEwYWNvMmtxeHFwdDQ5NnJoIn0.6A0AKg0iucvoGhYuCkeOjA";
+/// AWS S3 Terrarium tiles endpoint (no API key required)
+const AWS_TERRARIUM_URL: &str =
+    "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+/// Terrarium format offset for height decoding
+const TERRARIUM_OFFSET: f64 = 32768.0;
 /// Minimum zoom level for terrain tiles
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
@@ -46,9 +48,8 @@ pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
     ground_level: i32,
-    mapbox_access_token: &Option<String>,
+    _mapbox_access_token: &Option<String>, // Kept for API compatibility, not used with AWS
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
-    let default_mapbox_access_token = MAPBOX_PUBKEY.to_string();
     // Use OSM parser's scale calculation and apply user scale factor
     let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
     let scale_factor_x: f64 = scale_factor_x * scale;
@@ -93,19 +94,18 @@ pub fn fetch_elevation_data(
 
         let rgb_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = if tile_path.exists() {
             println!(
-                "Loading tile x={tile_x},y={tile_y},z={zoom} from {}",
+                "Loading cached tile x={tile_x},y={tile_y},z={zoom} from {}",
                 tile_path.display()
             );
             let img: image::DynamicImage = image::open(&tile_path)?;
             img.to_rgb8()
         } else {
-            let mapbox_access_token = mapbox_access_token
-                .as_ref()
-                .unwrap_or(&default_mapbox_access_token);
-            println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from Mapbox API");
-            let url: String = format!(
-                "https://api.mapbox.com/v4/mapbox.terrain-rgb/{zoom}/{tile_x}/{tile_y}.pngraw?access_token={mapbox_access_token}"
-            );
+            // AWS Terrain Tiles don't require an API key
+            println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from AWS Terrain Tiles");
+            let url: String = AWS_TERRARIUM_URL
+                .replace("{z}", &zoom.to_string())
+                .replace("{x}", &tile_x.to_string())
+                .replace("{y}", &tile_y.to_string());
 
             let response: reqwest::blocking::Response = client.get(&url).send()?;
             response.error_for_status_ref()?;
@@ -129,11 +129,10 @@ pub fn fetch_elevation_data(
                     continue;
                 }
 
-                let height: f64 = -10000.0
-                    + ((pixel[0] as f64 * 256.0 * 256.0
-                        + pixel[1] as f64 * 256.0
-                        + pixel[2] as f64)
-                        * 0.1);
+                // Decode Terrarium format: (R * 256 + G + B/256) - 32768
+                let height: f64 =
+                    (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0)
+                        - TERRARIUM_OFFSET;
 
                 height_grid[scaled_y][scaled_x] = height;
             }
@@ -343,5 +342,73 @@ fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_terrarium_height_decoding() {
+        // Test known Terrarium RGB values
+        // Sea level (0m) in Terrarium format should be (128, 0, 0) = 32768 - 32768 = 0
+        let sea_level_pixel = [128, 0, 0];
+        let height = (sea_level_pixel[0] as f64 * 256.0
+            + sea_level_pixel[1] as f64
+            + sea_level_pixel[2] as f64 / 256.0)
+            - TERRARIUM_OFFSET;
+        assert_eq!(height, 0.0);
+
+        // Test simple case: height of 1000m
+        // 1000 + 32768 = 33768 = 131 * 256 + 232
+        let test_pixel = [131, 232, 0];
+        let height =
+            (test_pixel[0] as f64 * 256.0 + test_pixel[1] as f64 + test_pixel[2] as f64 / 256.0)
+                - TERRARIUM_OFFSET;
+        assert_eq!(height, 1000.0);
+
+        // Test below sea level (-100m)
+        // -100 + 32768 = 32668 = 127 * 256 + 156
+        let below_sea_pixel = [127, 156, 0];
+        let height = (below_sea_pixel[0] as f64 * 256.0
+            + below_sea_pixel[1] as f64
+            + below_sea_pixel[2] as f64 / 256.0)
+            - TERRARIUM_OFFSET;
+        assert_eq!(height, -100.0);
+    }
+
+    #[test]
+    fn test_aws_url_generation() {
+        let url = AWS_TERRARIUM_URL
+            .replace("{z}", "15")
+            .replace("{x}", "17436")
+            .replace("{y}", "11365");
+        assert_eq!(
+            url,
+            "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/15/17436/11365.png"
+        );
+    }
+
+    #[test]
+    #[ignore] // This test requires internet connection, run with --ignored
+    fn test_aws_tile_fetch() {
+        use reqwest::blocking::Client;
+
+        let client = Client::new();
+        let url = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/15/17436/11365.png";
+
+        let response = client.get(url).send();
+        assert!(response.is_ok());
+
+        let response = response.unwrap();
+        assert!(response.status().is_success());
+        assert!(response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("image"));
     }
 }
