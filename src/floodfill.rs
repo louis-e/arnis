@@ -31,10 +31,10 @@ pub fn flood_fill_area(
 
     // For small and medium areas, use optimized flood fill with span filling
     if area < 50000 {
-        return optimized_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z);
+        optimized_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z)
     } else {
         // For larger areas, use original flood fill with grid sampling
-        return original_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z);
+        original_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z)
     }
 }
 
@@ -102,11 +102,10 @@ fn optimized_flood_fill_area(
                         && *nz >= min_z
                         && *nz <= max_z
                         && !visited.contains(&(*nx, *nz))
+                        && polygon.contains(&Point::new(*nx as f64, *nz as f64))
                     {
-                        if polygon.contains(&Point::new(*nx as f64, *nz as f64)) {
-                            visited.insert((*nx, *nz));
-                            queue.push_back((*nx, *nz));
-                        }
+                        visited.insert((*nx, *nz));
+                        queue.push_back((*nx, *nz));
                     }
                 }
             }

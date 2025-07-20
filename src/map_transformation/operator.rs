@@ -13,6 +13,7 @@ pub trait Operator {
         ground: &mut Ground,
     );
 
+    #[allow(dead_code)]
     /// Return a string describing the current specific operator
     fn repr(&self) -> String;
 }
