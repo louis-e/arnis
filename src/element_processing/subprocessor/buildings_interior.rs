@@ -200,7 +200,10 @@ pub fn generate_building_interior(
             floor_levels[floor_index + 1] - 1
         } else {
             // Last floor ceiling depends on roof generation
-            if args.roof && element.tags.contains_key("roof:shape") && element.tags.get("roof:shape").unwrap() != "flat" {
+            if args.roof
+                && element.tags.contains_key("roof:shape")
+                && element.tags.get("roof:shape").unwrap() != "flat"
+            {
                 // When roof generation is enabled with non-flat roofs, stop at building height (no extra ceiling)
                 start_y_offset + building_height
             } else {
