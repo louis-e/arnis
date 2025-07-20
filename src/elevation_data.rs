@@ -82,7 +82,7 @@ pub fn fetch_elevation_data(
 
     let client: reqwest::blocking::Client = reqwest::blocking::Client::new();
 
-    let tile_cache_dir = Path::new("./terrain-tile-cache");
+    let tile_cache_dir = Path::new("./arnis-tile-cache");
     if !tile_cache_dir.exists() {
         std::fs::create_dir_all(tile_cache_dir)?;
     }
