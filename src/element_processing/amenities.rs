@@ -80,9 +80,16 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
             "bench" => {
                 // Place a bench
                 if let Some(pt) = first_node {
-                    editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
-                    editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
-                    editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
+                    // 50% chance to 90 degrees rotate the bench using if
+                    if rand::random::<bool>() {
+                        editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
+                        editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
+                        editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
+                    } else {
+                        editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
+                        editor.set_block(OAK_LOG, pt.x, 1, pt.z + 1, None, None);
+                        editor.set_block(OAK_LOG, pt.x, 1, pt.z - 1, None, None);
+                    }
                 }
             }
             "vending" => {

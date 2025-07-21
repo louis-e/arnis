@@ -26,7 +26,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             }
         }
         "commercial" => SMOOTH_STONE,
-        "education" => LIGHT_GRAY_CONCRETE,
+        "education" => POLISHED_ANDESITE,
+        "religious" => POLISHED_ANDESITE,
         "industrial" => COBBLESTONE,
         "military" => GRAY_CONCRETE,
         "railway" => GRAVEL,
