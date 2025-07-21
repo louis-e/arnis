@@ -136,7 +136,7 @@ pub fn fetch_elevation_data(
                         - TERRARIUM_OFFSET;
 
                 // Track extreme values for debugging
-                if height < -1000.0 || height > 10000.0 {
+                if !(-1000.0..=10000.0).contains(&height) {
                     extreme_values_found
                         .push((tile_x, tile_y, x, y, pixel[0], pixel[1], pixel[2], height));
                     if extreme_values_found.len() <= 5 {
@@ -245,10 +245,9 @@ pub fn fetch_elevation_data(
         height_scale *= adjustment_factor;
         scaled_range = height_range * height_scale;
         eprintln!(
-            "Height range too large, applying scaling adjustment factor: {:.3}",
-            adjustment_factor
+            "Height range too large, applying scaling adjustment factor: {adjustment_factor:.3}"
         );
-        eprintln!("Adjusted scaled range: {:.1} blocks", scaled_range);
+        eprintln!("Adjusted scaled range: {scaled_range:.1} blocks");
     }
 
     // Convert to scaled Minecraft Y coordinates
@@ -439,11 +438,11 @@ fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     let mut outliers_filtered = 0;
 
     // Replace outliers with NaN, then fill them using interpolation
-    for y in 0..height {
+    for (y, row) in height_grid.iter_mut().enumerate().take(height) {
         for x in 0..width {
-            let h = height_grid[y][x];
+            let h = row[x];
             if !h.is_nan() && (h < min_reasonable || h > max_reasonable) {
-                height_grid[y][x] = f64::NAN;
+                row[x] = f64::NAN;
                 outliers_filtered += 1;
             }
         }
