@@ -110,6 +110,8 @@ pub fn generate_world(
                     water_areas::generate_water_areas(&mut editor, rel);
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(&mut editor, rel, args);
+                } else if rel.tags.contains_key("landuse") {
+                    landuse::generate_landuse_from_relation(&mut editor, rel, args);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
                     leisure::generate_leisure_from_relation(&mut editor, rel, args);
                 }

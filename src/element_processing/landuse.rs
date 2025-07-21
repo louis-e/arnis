@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::ProcessedWay;
+use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
@@ -26,7 +26,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             }
         }
         "commercial" => SMOOTH_STONE,
-        "education" => LIGHT_GRAY_CONCRETE,
+        "education" => POLISHED_ANDESITE,
+        "religious" => POLISHED_ANDESITE,
         "industrial" => COBBLESTONE,
         "military" => GRAY_CONCRETE,
         "railway" => GRAVEL,
@@ -266,6 +267,42 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 }
             }
             _ => {}
+        }
+    }
+}
+
+pub fn generate_landuse_from_relation(
+    editor: &mut WorldEditor,
+    rel: &ProcessedRelation,
+    args: &Args,
+) {
+    if rel.tags.contains_key("landuse") {
+        // Generate individual ways with their original tags
+        for member in &rel.members {
+            if member.role == ProcessedMemberRole::Outer {
+                generate_landuse(editor, &member.way.clone(), args);
+            }
+        }
+
+        // Combine all outer ways into one with relation tags
+        let mut combined_nodes = Vec::new();
+        for member in &rel.members {
+            if member.role == ProcessedMemberRole::Outer {
+                combined_nodes.extend(member.way.nodes.clone());
+            }
+        }
+
+        // Only process if we have nodes
+        if !combined_nodes.is_empty() {
+            // Create combined way with relation tags
+            let combined_way = ProcessedWay {
+                id: rel.id,
+                nodes: combined_nodes,
+                tags: rel.tags.clone(),
+            };
+
+            // Generate landuse area from combined way
+            generate_landuse(editor, &combined_way, args);
         }
     }
 }

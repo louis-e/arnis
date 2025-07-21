@@ -39,7 +39,7 @@ pub struct Args {
     #[arg(long)]
     pub terrain: bool,
 
-    /// Mapbox access token (defaults to a built-in one)
+    /// Legacy Mapbox access token parameter (no longer used - AWS Terrain Tiles are free)
     #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
     pub mapbox_access_token: Option<String>,
 
