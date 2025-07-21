@@ -72,7 +72,7 @@ fn run_cli() {
     }
 
     // Parse input arguments
-    let mut args: Args = Args::parse();
+    let args: Args = Args::parse();
 
     // Fetch data
     let raw_data = match &args.file {
