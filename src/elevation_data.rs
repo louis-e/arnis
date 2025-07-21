@@ -5,7 +5,7 @@ use std::path::Path;
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
-const BASE_HEIGHT_SCALE: f64 = 0.4;
+const BASE_HEIGHT_SCALE: f64 = 0.6;
 /// AWS S3 Terrarium tiles endpoint (no API key required)
 const AWS_TERRARIUM_URL: &str =
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -147,7 +147,7 @@ pub fn fetch_elevation_data(
     const SMALL_GRID_REF: f64 = 100.0; // Reference grid size
     const SMALL_SIGMA_REF: f64 = 15.0; // Sigma for 100x100 grid
     const LARGE_GRID_REF: f64 = 1000.0; // Reference grid size
-    const LARGE_SIGMA_REF: f64 = 10.0; // Sigma for 1000x1000 grid
+    const LARGE_SIGMA_REF: f64 = 7.0; // Sigma for 1000x1000 grid
 
     let grid_size: f64 = (grid_width.min(grid_height) as f64).max(1.0);
 
