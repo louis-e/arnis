@@ -318,7 +318,7 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
 }
 
 /// Clips a way to the bounding box boundaries using Sutherland-Hodgman algorithm for polygons
-/// or simple line clipping for waterways
+/// or simple line clipping for polylines
 fn clip_way_to_bbox(
     nodes: &[ProcessedNode],
     xzbbox: &XZBBox,
@@ -328,8 +328,11 @@ fn clip_way_to_bbox(
         return Vec::new();
     }
 
-    // For waterways, use simple line clipping instead of polygon clipping
-    if tags.contains_key("waterway") {
+    // For certain tags, use simple line clipping instead of polygon clipping
+    if ["waterway", "highway", "barrier", "railway", "service"]
+        .iter()
+        .any(|key| tags.contains_key(*key))
+    {
         return clip_polyline_to_bbox(nodes, xzbbox);
     }
 
