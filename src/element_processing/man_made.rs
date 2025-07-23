@@ -39,10 +39,12 @@ fn generate_pier(editor: &mut WorldEditor, element: &ProcessedElement) {
         }
 
         // Extract pier dimensions from tags
-        let pier_width = element.tags().get("width")
+        let pier_width = element
+            .tags()
+            .get("width")
             .and_then(|w| w.parse::<i32>().ok())
             .unwrap_or(3); // Default 3 blocks wide
-        
+
         let pier_height = 1; // Pier deck height above ground
         let support_spacing = 4; // Support pillars every 4 blocks
 
@@ -51,10 +53,8 @@ fn generate_pier(editor: &mut WorldEditor, element: &ProcessedElement) {
             let start_node = &nodes[i];
             let end_node = &nodes[i + 1];
 
-            let line_points = bresenham_line(
-                start_node.x, 0, start_node.z, 
-                end_node.x, 0, end_node.z
-            );
+            let line_points =
+                bresenham_line(start_node.x, 0, start_node.z, end_node.x, 0, end_node.z);
 
             for (index, (center_x, _y, center_z)) in line_points.iter().enumerate() {
                 // Create pier deck (3 blocks wide)
@@ -64,7 +64,7 @@ fn generate_pier(editor: &mut WorldEditor, element: &ProcessedElement) {
                         editor.set_block(OAK_SLAB, x, pier_height, z, None, None);
                     }
                 }
-                
+
                 // Add support pillars every few blocks
                 if index % support_spacing == 0 {
                     let half_width = pier_width / 2;
@@ -74,7 +74,7 @@ fn generate_pier(editor: &mut WorldEditor, element: &ProcessedElement) {
                         (center_x - half_width, center_z), // Left side
                         (center_x + half_width, center_z), // Right side
                     ];
-                    
+
                     for (pillar_x, pillar_z) in support_positions {
                         // Support pillars going down from pier level
                         editor.set_block(OAK_LOG, pillar_x, 0, *pillar_z, None, None);
@@ -90,7 +90,7 @@ fn generate_antenna(editor: &mut WorldEditor, element: &ProcessedElement) {
     if let Some(first_node) = element.nodes().next() {
         let x = first_node.x;
         let z = first_node.z;
-        
+
         // Extract antenna configuration from tags
         let height = match element.tags().get("height") {
             Some(h) => h.parse::<i32>().unwrap_or(20).min(40), // Max 40 blocks
@@ -99,7 +99,7 @@ fn generate_antenna(editor: &mut WorldEditor, element: &ProcessedElement) {
                 Some("transmission") => 25,
                 Some("cellular") => 15,
                 _ => 20,
-            }
+            },
         };
 
         // Build the main tower pole
@@ -120,8 +120,12 @@ fn generate_antenna(editor: &mut WorldEditor, element: &ProcessedElement) {
         // Equipment housing at base
         editor.fill_blocks(
             GRAY_CONCRETE,
-            x - 1, 1, z - 1,
-            x + 1, 2, z + 1,
+            x - 1,
+            1,
+            z - 1,
+            x + 1,
+            2,
+            z + 1,
             Some(&[GRAY_CONCRETE]),
             None,
         );
@@ -134,7 +138,7 @@ fn generate_chimney(editor: &mut WorldEditor, element: &ProcessedElement) {
         let x = first_node.x;
         let z = first_node.z;
         let height = 25;
-        
+
         // Build 3x3 brick chimney with hole in the middle
         for y in 0..height {
             for dx in -1..=1 {
@@ -155,7 +159,7 @@ fn generate_water_well(editor: &mut WorldEditor, element: &ProcessedElement) {
     if let Some(first_node) = element.nodes().next() {
         let x = first_node.x;
         let z = first_node.z;
-        
+
         // Build stone well structure (3x3 base with water in center)
         for dx in -1..=1 {
             for dz in -1..=1 {
@@ -170,17 +174,17 @@ fn generate_water_well(editor: &mut WorldEditor, element: &ProcessedElement) {
                 }
             }
         }
-        
+
         // Add wooden well frame structure
         editor.fill_blocks(OAK_LOG, x - 2, 1, z, x - 2, 4, z, None, None);
         editor.fill_blocks(OAK_LOG, x + 2, 1, z, x + 2, 4, z, None, None);
-        
+
         // Crossbeam with pulley system
         editor.set_block(OAK_SLAB, x - 1, 5, z, None, None);
         editor.set_block(OAK_FENCE, x, 4, z, None, None);
         editor.set_block(OAK_SLAB, x, 5, z, None, None);
         editor.set_block(OAK_SLAB, x + 1, 5, z, None, None);
-        
+
         // Bucket hanging from center
         editor.set_block(IRON_BLOCK, x, 3, z, None, None);
     }
@@ -193,7 +197,7 @@ fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
         let z = first_node.z;
         let tower_height = 20;
         let tank_height = 6;
-        
+
         // Build support legs (4 corner pillars)
         let leg_positions = [(-2, -2), (2, -2), (-2, 2), (2, 2)];
         for (dx, dz) in leg_positions {
@@ -201,7 +205,7 @@ fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
                 editor.set_block(IRON_BLOCK, x + dx, y, z + dz, None, None);
             }
         }
-        
+
         // Add cross-bracing every 5 blocks for stability
         for y in (5..tower_height).step_by(5) {
             // Horizontal bracing
@@ -214,16 +218,20 @@ fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
                 editor.set_block(SMOOTH_STONE, x + 2, y, z + dz, None, None);
             }
         }
-        
+
         // Build water tank at the top - simple rectangular tank
         editor.fill_blocks(
             POLISHED_ANDESITE,
-            x - 3, tower_height, z - 3,
-            x + 3, tower_height + tank_height, z + 3,
+            x - 3,
+            tower_height,
+            z - 3,
+            x + 3,
+            tower_height + tank_height,
+            z + 3,
             None,
             None,
         );
-        
+
         // Add polished andesite pipe going down from the tank
         for y in 0..tower_height {
             editor.set_block(POLISHED_ANDESITE, x, y, z, None, None);
@@ -235,7 +243,7 @@ fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
 pub fn generate_man_made_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
     if let Some(man_made_type) = node.tags.get("man_made") {
         let element = ProcessedElement::Node(node.clone());
-        
+
         match man_made_type.as_str() {
             "antenna" => generate_antenna(editor, &element),
             "chimney" => generate_chimney(editor, &element),

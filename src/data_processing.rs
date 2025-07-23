@@ -121,7 +121,11 @@ pub fn generate_world(
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
                     leisure::generate_leisure_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("man_made") {
-                    man_made::generate_man_made(&mut editor, &ProcessedElement::Relation(rel.clone()), args);
+                    man_made::generate_man_made(
+                        &mut editor,
+                        &ProcessedElement::Relation(rel.clone()),
+                        args,
+                    );
                 }
             }
         }
