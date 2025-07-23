@@ -438,11 +438,10 @@ fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     let mut outliers_filtered = 0;
 
     // Replace outliers with NaN, then fill them using interpolation
-    for (y, row) in height_grid.iter_mut().enumerate().take(height) {
-        for x in 0..width {
-            let h = row[x];
-            if !h.is_nan() && (h < min_reasonable || h > max_reasonable) {
-                row[x] = f64::NAN;
+    for row in height_grid.iter_mut().take(height) {
+        for h in row.iter_mut().take(width) {
+            if !h.is_nan() && (*h < min_reasonable || *h > max_reasonable) {
+                *h = f64::NAN;
                 outliers_filtered += 1;
             }
         }
