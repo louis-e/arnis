@@ -79,6 +79,7 @@ pub fn fetch_elevation_data(
 
     // Initialize height grid with proper dimensions
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
+    let mut extreme_values_found = Vec::new(); // Track extreme values for debugging
 
     let client: reqwest::blocking::Client = reqwest::blocking::Client::new();
 
@@ -134,13 +135,36 @@ pub fn fetch_elevation_data(
                     (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0)
                         - TERRARIUM_OFFSET;
 
+                // Track extreme values for debugging
+                if !(-1000.0..=10000.0).contains(&height) {
+                    extreme_values_found
+                        .push((tile_x, tile_y, x, y, pixel[0], pixel[1], pixel[2], height));
+                    if extreme_values_found.len() <= 5 {
+                        // Only log first 5 extreme values
+                        eprintln!("Extreme value found: tile({tile_x},{tile_y}) pixel({x},{y}) RGB({},{},{}) = {height}m", 
+                                 pixel[0], pixel[1], pixel[2]);
+                    }
+                }
+
                 height_grid[scaled_y][scaled_x] = height;
             }
         }
     }
 
+    // Report on extreme values found
+    if !extreme_values_found.is_empty() {
+        eprintln!(
+            "Found {} total extreme elevation values during tile processing",
+            extreme_values_found.len()
+        );
+        eprintln!("This may indicate corrupted tile data or areas with invalid elevation data");
+    }
+
     // Fill in any NaN values by interpolating from nearest valid values
     fill_nan_values(&mut height_grid);
+
+    // Filter extreme outliers that might be due to corrupted tile data
+    filter_elevation_outliers(&mut height_grid);
 
     // Calculate blur sigma based on grid resolution
     // Reference points for tuning:
@@ -176,19 +200,55 @@ pub fn fetch_elevation_data(
     // Find min/max in raw data
     let mut min_height: f64 = f64::MAX;
     let mut max_height: f64 = f64::MIN;
+    let mut extreme_low_count = 0;
+    let mut extreme_high_count = 0;
+
     for row in &blurred_heights {
         for &height in row {
             min_height = min_height.min(height);
             max_height = max_height.max(height);
+
+            // Count extreme values that might indicate data issues
+            if height < -1000.0 {
+                extreme_low_count += 1;
+            }
+            if height > 10000.0 {
+                extreme_high_count += 1;
+            }
         }
     }
 
     eprintln!("Height data range: {min_height} to {max_height} m");
+    if extreme_low_count > 0 {
+        eprintln!(
+            "WARNING: Found {extreme_low_count} pixels with extremely low elevations (< -1000m)"
+        );
+    }
+    if extreme_high_count > 0 {
+        eprintln!(
+            "WARNING: Found {extreme_high_count} pixels with extremely high elevations (> 10000m)"
+        );
+    }
 
     let height_range: f64 = max_height - min_height;
     // Apply scale factor to height scaling
-    let height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
-    let scaled_range: f64 = height_range * height_scale;
+    let mut height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
+    let mut scaled_range: f64 = height_range * height_scale;
+
+    // Adaptive scaling: ensure we don't exceed reasonable Y range
+    let available_y_range = (MAX_Y - ground_level) as f64;
+    let safety_margin = 0.9; // Use 90% of available range
+    let max_allowed_range = available_y_range * safety_margin;
+
+    if scaled_range > max_allowed_range {
+        let adjustment_factor = max_allowed_range / scaled_range;
+        height_scale *= adjustment_factor;
+        scaled_range = height_range * height_scale;
+        eprintln!(
+            "Height range too large, applying scaling adjustment factor: {adjustment_factor:.3}"
+        );
+        eprintln!("Adjusted scaled range: {scaled_range:.1} blocks");
+    }
 
     // Convert to scaled Minecraft Y coordinates
     for row in blurred_heights {
@@ -342,6 +402,55 @@ fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
                 }
             }
         }
+    }
+}
+
+fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
+    let height = height_grid.len();
+    let width = height_grid[0].len();
+
+    // Collect all valid height values to calculate statistics
+    let mut all_heights: Vec<f64> = Vec::new();
+    for row in height_grid.iter() {
+        for &h in row {
+            if !h.is_nan() && h.is_finite() {
+                all_heights.push(h);
+            }
+        }
+    }
+
+    if all_heights.is_empty() {
+        return;
+    }
+
+    // Sort to find percentiles
+    all_heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let len = all_heights.len();
+
+    // Use 1st and 99th percentiles to define reasonable bounds
+    let p1_idx = (len as f64 * 0.01) as usize;
+    let p99_idx = (len as f64 * 0.99) as usize;
+    let min_reasonable = all_heights[p1_idx];
+    let max_reasonable = all_heights[p99_idx];
+
+    eprintln!("Filtering outliers outside range: {min_reasonable:.1}m to {max_reasonable:.1}m");
+
+    let mut outliers_filtered = 0;
+
+    // Replace outliers with NaN, then fill them using interpolation
+    for row in height_grid.iter_mut().take(height) {
+        for h in row.iter_mut().take(width) {
+            if !h.is_nan() && (*h < min_reasonable || *h > max_reasonable) {
+                *h = f64::NAN;
+                outliers_filtered += 1;
+            }
+        }
+    }
+
+    if outliers_filtered > 0 {
+        eprintln!("Filtered {outliers_filtered} elevation outliers, interpolating replacements...");
+        // Re-run the NaN filling to interpolate the filtered values
+        fill_nan_values(height_grid);
     }
 }
 

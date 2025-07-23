@@ -232,7 +232,8 @@ pub fn parse_osm_data(
 
         if !nodes.is_empty() {
             // Clip the way to the bounding box
-            let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
+            let tags = element.tags.clone().unwrap_or_default();
+            let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox, &tags);
 
             if !clipped_nodes.is_empty() {
                 let processed: ProcessedWay = ProcessedWay {
@@ -316,10 +317,23 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     PRIORITY_ORDER.len()
 }
 
-/// Clips a way to the bounding box boundaries using Sutherland-Hodgman algorithm
-fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
+/// Clips a way to the bounding box boundaries using Sutherland-Hodgman algorithm for polygons
+/// or simple line clipping for polylines
+fn clip_way_to_bbox(
+    nodes: &[ProcessedNode],
+    xzbbox: &XZBBox,
+    tags: &HashMap<String, String>,
+) -> Vec<ProcessedNode> {
     if nodes.is_empty() {
         return Vec::new();
+    }
+
+    // For certain tags, use simple line clipping instead of polygon clipping
+    if ["waterway", "highway", "barrier", "railway", "service"]
+        .iter()
+        .any(|key| tags.contains_key(*key))
+    {
+        return clip_polyline_to_bbox(nodes, xzbbox);
     }
 
     // For now, let's be conservative and only clip if the way actually extends outside the bbox
@@ -403,7 +417,7 @@ fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNo
     }
 
     // Convert back to ProcessedNode format
-    polygon
+    let mut result: Vec<ProcessedNode> = polygon
         .into_iter()
         .enumerate()
         .map(|(i, (x, z))| ProcessedNode {
@@ -412,7 +426,25 @@ fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNo
             z: z.round() as i32,
             tags: HashMap::new(),
         })
-        .collect()
+        .collect();
+
+    // For closed polygons, ensure the first and last nodes have the same ID to maintain closure
+    // Check if the original was nearly closed and if so, ensure the clipped result is also closed
+    if nodes.len() > 2 {
+        let original_first = &nodes[0];
+        let original_last = nodes.last().unwrap();
+        let was_closed = original_first.id == original_last.id;
+
+        if was_closed && !result.is_empty() && result.len() > 2 {
+            // Make sure the clipped polygon is also closed by giving the last node the same ID as the first
+            let first_id = result[0].id;
+            if let Some(last_node) = result.last_mut() {
+                last_node.id = first_id;
+            }
+        }
+    }
+
+    result
 }
 
 /// Check if a point is on the "inside" side of an edge (using cross product)
@@ -470,4 +502,101 @@ fn line_edge_intersection(
     } else {
         None
     }
+}
+
+/// Clips a polyline (open line) to the bounding box boundaries
+/// This prevents artificial connections that can occur with polygon clipping algorithms
+fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
+    if nodes.is_empty() {
+        return Vec::new();
+    }
+
+    let min_x = xzbbox.min_x() as f64;
+    let min_z = xzbbox.min_z() as f64;
+    let max_x = xzbbox.max_x() as f64;
+    let max_z = xzbbox.max_z() as f64;
+
+    let mut result = Vec::new();
+
+    for i in 0..nodes.len() {
+        let current = &nodes[i];
+        let current_point = (current.x as f64, current.z as f64);
+
+        // Check if current point is inside bbox
+        let current_inside = current_point.0 >= min_x
+            && current_point.0 <= max_x
+            && current_point.1 >= min_z
+            && current_point.1 <= max_z;
+
+        if current_inside {
+            result.push(current.clone());
+        }
+
+        // If there's a next point, check for intersections with bbox edges
+        if i + 1 < nodes.len() {
+            let next = &nodes[i + 1];
+            let next_point = (next.x as f64, next.z as f64);
+            let next_inside = next_point.0 >= min_x
+                && next_point.0 <= max_x
+                && next_point.1 >= min_z
+                && next_point.1 <= max_z;
+
+            // If line segment crosses bbox boundary, add intersection points
+            if current_inside != next_inside {
+                let intersections =
+                    find_bbox_intersections(current_point, next_point, min_x, min_z, max_x, max_z);
+
+                for intersection in intersections {
+                    result.push(ProcessedNode {
+                        id: 0, // Synthetic ID for intersection points
+                        x: intersection.0.round() as i32,
+                        z: intersection.1.round() as i32,
+                        tags: HashMap::new(),
+                    });
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// Find intersections between a line segment and bounding box edges
+fn find_bbox_intersections(
+    start: (f64, f64),
+    end: (f64, f64),
+    min_x: f64,
+    min_z: f64,
+    max_x: f64,
+    max_z: f64,
+) -> Vec<(f64, f64)> {
+    let mut intersections = Vec::new();
+
+    // Check intersection with each bbox edge
+    let bbox_edges = [
+        (min_x, min_z, max_x, min_z), // Bottom edge
+        (max_x, min_z, max_x, max_z), // Right edge
+        (max_x, max_z, min_x, max_z), // Top edge
+        (min_x, max_z, min_x, min_z), // Left edge
+    ];
+
+    for (edge_x1, edge_z1, edge_x2, edge_z2) in bbox_edges {
+        if let Some(intersection) = line_edge_intersection(
+            start.0, start.1, end.0, end.1, edge_x1, edge_z1, edge_x2, edge_z2,
+        ) {
+            // Check if intersection is actually on the bbox edge
+            let on_edge = (intersection.0 >= min_x
+                && intersection.0 <= max_x
+                && intersection.1 >= min_z
+                && intersection.1 <= max_z)
+                && ((intersection.0 == min_x || intersection.0 == max_x)
+                    || (intersection.1 == min_z || intersection.1 == max_z));
+
+            if on_edge {
+                intersections.push(intersection);
+            }
+        }
+    }
+
+    intersections
 }
