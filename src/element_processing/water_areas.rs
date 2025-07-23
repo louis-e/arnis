@@ -2,7 +2,7 @@ use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 use std::time::Instant;
 
 use crate::{
-    block_definitions::WATER,
+    block_definitions::{OAK_LOG, WATER},
     coordinate_system::cartesian::XZPoint,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
     world_editor::WorldEditor,
