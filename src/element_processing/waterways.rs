@@ -83,7 +83,7 @@ fn create_water_channel(
             if distance_from_center <= half_width {
                 // Main water channel
                 for y in (1 - depth)..=0 {
-                    editor.set_block(WATER, x, y, z, None,  None);
+                    editor.set_block(WATER, x, y, z, None, None);
                 }
 
                 // Place one layer of dirt below the water channel
