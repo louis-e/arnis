@@ -166,6 +166,14 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
                 y.extend(x.iter().skip(1).cloned());
 
                 merged.push(y);
+            } else if x.last().unwrap().id == y[0].id {
+                removed.push(i);
+                removed.push(j);
+
+                let mut x: Vec<ProcessedNode> = x.clone();
+                x.extend(y.iter().skip(1).cloned());
+
+                merged.push(x);
             }
         }
     }

@@ -417,7 +417,7 @@ fn clip_way_to_bbox(
     }
 
     // Convert back to ProcessedNode format
-    polygon
+    let mut result: Vec<ProcessedNode> = polygon
         .into_iter()
         .enumerate()
         .map(|(i, (x, z))| ProcessedNode {
@@ -426,7 +426,25 @@ fn clip_way_to_bbox(
             z: z.round() as i32,
             tags: HashMap::new(),
         })
-        .collect()
+        .collect();
+
+    // For closed polygons, ensure the first and last nodes have the same ID to maintain closure
+    // Check if the original was nearly closed and if so, ensure the clipped result is also closed
+    if nodes.len() > 2 {
+        let original_first = &nodes[0];
+        let original_last = nodes.last().unwrap();
+        let was_closed = original_first.id == original_last.id;
+
+        if was_closed && !result.is_empty() && result.len() > 2 {
+            // Make sure the clipped polygon is also closed by giving the last node the same ID as the first
+            let first_id = result[0].id;
+            if let Some(last_node) = result.last_mut() {
+                last_node.id = first_id;
+            }
+        }
+    }
+
+    result
 }
 
 /// Check if a point is on the "inside" side of an edge (using cross product)
