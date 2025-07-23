@@ -84,6 +84,8 @@ pub fn generate_world(
                     highways::generate_aeroway(&mut editor, way, args);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way);
+                } else if way.tags.contains_key("man_made") {
+                    man_made::generate_man_made(&mut editor, element, args);
                 }
             }
             ProcessedElement::Node(node) => {
@@ -101,6 +103,8 @@ pub fn generate_world(
                     highways::generate_highways(&mut editor, element, args);
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
+                } else if node.tags.contains_key("man_made") {
+                    man_made::generate_man_made_nodes(&mut editor, node);
                 }
             }
             ProcessedElement::Relation(rel) => {
@@ -116,6 +120,12 @@ pub fn generate_world(
                     landuse::generate_landuse_from_relation(&mut editor, rel, args);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
                     leisure::generate_leisure_from_relation(&mut editor, rel, args);
+                } else if rel.tags.contains_key("man_made") {
+                    man_made::generate_man_made(
+                        &mut editor,
+                        &ProcessedElement::Relation(rel.clone()),
+                        args,
+                    );
                 }
             }
         }
