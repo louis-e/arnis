@@ -140,6 +140,7 @@ mod test {
         scale: f64,
         test_latfactor: f64,
         test_lngfactor: f64,
+        test_rotation: f64,
     ) {
         let llbbox = get_llbbox_arnis();
         let llpoint = LLPoint::new(
@@ -147,7 +148,7 @@ mod test {
             llbbox.min().lng() + (llbbox.max().lng() - llbbox.min().lng()) * test_lngfactor,
         )
         .unwrap();
-        let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale).unwrap();
+        let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, test_rotation).unwrap();
 
         // legacy xzbbox creation
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());
@@ -177,21 +178,21 @@ mod test {
     // this ensures that transformer.transform_point == legacy lat_lon_to_minecraft_coords
     #[test]
     pub fn test_llxztransform() {
-        test_llxztransform_one_scale_one_factor(1.0, 0.5, 0.5);
-        test_llxztransform_one_scale_one_factor(3.0, 0.1, 0.2);
-        test_llxztransform_one_scale_one_factor(10.0, -1.2, 2.0);
-        test_llxztransform_one_scale_one_factor(0.4, 0.3, -0.2);
-        test_llxztransform_one_scale_one_factor(0.1, 0.2, 0.7);
+        test_llxztransform_one_scale_one_factor(1.0, 0.5, 0.5, 0.0);
+        test_llxztransform_one_scale_one_factor(3.0, 0.1, 0.2, 0.0);
+        test_llxztransform_one_scale_one_factor(10.0, -1.2, 2.0, 0.0);
+        test_llxztransform_one_scale_one_factor(0.4, 0.3, -0.2, 0.0);
+        test_llxztransform_one_scale_one_factor(0.1, 0.2, 0.7, 0.0);
     }
 
     // this ensures that invalid inputs can be handled correctly
     #[test]
     pub fn test_invalid_construct() {
         let llbbox = get_llbbox_arnis();
-        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, 0.0);
+        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, 0.0, 0.0);
         assert!(obj.is_err());
 
-        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, -1.2);
+        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, -1.2, 0.0);
         assert!(obj.is_err());
     }
 }
