@@ -148,7 +148,8 @@ mod test {
             llbbox.min().lng() + (llbbox.max().lng() - llbbox.min().lng()) * test_lngfactor,
         )
         .unwrap();
-        let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, test_rotation).unwrap();
+        let (transformer, xzbbox_new) =
+            CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, test_rotation).unwrap();
 
         // legacy xzbbox creation
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());
