@@ -213,9 +213,6 @@ function initSettings() {
   const slider = document.getElementById("scale-value-slider");
   const sliderValue = document.getElementById("slider-value");
 
-  const rotationSlider = document.getElementById("rotation-slider");
-  const rotationSliderValue = document.getElementById("rotation-slider-value");
-
   // Open settings modal
   function openSettings() {
     settingsModal.style.display = "flex";
@@ -234,10 +231,6 @@ function initSettings() {
   // Update slider value display
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
-  });
-
-  rotationSlider.addEventListener("input", () => {
-    rotationSliderValue.textContent = parseFloat(rotationSlider.value).toFixed(1);
   });
 
   // Language selector
@@ -538,7 +531,7 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
-    var rotationAngle = parseFloat(document.getElementById("rotation-slider").value);
+    var rotationAngle = parseFloat(document.getElementById("rotation-input").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     var ground_level = parseInt(document.getElementById("ground-level").value, 10);
 
