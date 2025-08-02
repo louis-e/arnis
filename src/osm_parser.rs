@@ -166,6 +166,7 @@ pub fn parse_osm_data(
     json_data: Value,
     bbox: LLBBox,
     scale: f64,
+    rotation_angle: f64,
     debug: bool,
 ) -> (Vec<ProcessedElement>, XZBBox) {
     println!("{} Parsing data...", "[2/6]".bold());
@@ -174,7 +175,7 @@ pub fn parse_osm_data(
     // Deserialize the JSON data into the OSMData structure
     let data = parse_raw_osm_data(json_data).expect("Failed to parse OSM data");
 
-    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
+    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale, rotation_angle)
         .unwrap_or_else(|e| {
             eprintln!("Error in defining coordinate transformation:\n{e}");
             panic!();

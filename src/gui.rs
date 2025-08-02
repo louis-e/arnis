@@ -375,6 +375,7 @@ fn update_player_position(
     spawn_point: Option<(f64, f64)>,
     bbox_text: String,
     scale: f64,
+    rotation_angle: f64,
 ) -> Result<(), String> {
     use crate::coordinate_system::transformation::CoordTransformer;
 
@@ -394,7 +395,7 @@ fn update_player_position(
     }
 
     // Convert lat/lng to Minecraft coordinates
-    let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale)
+    let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, rotation_angle)
         .map_err(|e| format!("Failed to build transformation on coordinate systems:\n{e}"))?;
 
     let xzpoint = transformer.transform_point(llpoint);
@@ -495,6 +496,7 @@ fn gui_start_generation(
     bbox_text: String,
     selected_world: String,
     world_scale: f64,
+    rotation_angle: f64,
     ground_level: i32,
     floodfill_timeout: u64,
     terrain_enabled: bool,
@@ -531,6 +533,7 @@ fn gui_start_generation(
                     spawn_point,
                     bbox_text.clone(),
                     world_scale,
+                    rotation_angle,
                 )
                 .map_err(|e| format!("Failed to set spawn point: {e}"))?;
             }
@@ -565,6 +568,7 @@ fn gui_start_generation(
                 path: updated_world_path,
                 downloader: "requests".to_string(),
                 scale: world_scale,
+                rotation_angle,
                 ground_level,
                 terrain: terrain_enabled,
                 mapbox_access_token: None, // Legacy parameter - not needed for AWS Terrain Tiles
@@ -579,7 +583,7 @@ fn gui_start_generation(
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox) =
-                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.rotation_angle, args.debug);
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));

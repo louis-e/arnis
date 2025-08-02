@@ -90,7 +90,7 @@ fn run_cli() {
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.rotation_angle, args.debug);
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
 
