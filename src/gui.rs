@@ -582,8 +582,13 @@ fn gui_start_generation(
             // Run data fetch and world generation
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox) =
-                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.rotation_angle, args.debug);
+                    let (mut parsed_elements, mut xzbbox) = osm_parser::parse_osm_data(
+                        raw_data,
+                        args.bbox,
+                        args.scale,
+                        args.rotation_angle,
+                        args.debug,
+                    );
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));

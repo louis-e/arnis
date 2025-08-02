@@ -47,7 +47,7 @@ impl CoordTransformer {
                 scale_factor_z,
                 min_lat: llbbox.min().lat(),
                 min_lng: llbbox.min().lng(),
-                rotation_angle
+                rotation_angle,
             },
             xzbbox,
         ))
