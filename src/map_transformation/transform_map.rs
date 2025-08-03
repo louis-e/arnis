@@ -11,7 +11,7 @@ pub fn transform_map(
     xzbbox: &mut XZBBox,
     ground: &mut Ground,
 ) {
-    println!("{} Transforming map...", "[3/6]".bold());
+    println!("{} Transforming map...", "[4/7]".bold());
     emit_gui_progress_update(20.0, "Transforming map...");
 
     match fs::read_to_string("example_transformations.json") {

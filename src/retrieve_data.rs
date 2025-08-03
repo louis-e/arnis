@@ -80,7 +80,7 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
 }
 
 pub fn fetch_data_from_file(file: &str) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} Loading data from file...", "[1/6]".bold());
+    println!("{} Loading data from file...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Loading data from file...");
 
     let file: File = File::open(file)?;
@@ -96,7 +96,7 @@ pub fn fetch_data_from_overpass(
     download_method: &str,
     save_file: Option<&str>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} Fetching data...", "[1/6]".bold());
+    println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Fetching data...");
 
     // List of Overpass API servers

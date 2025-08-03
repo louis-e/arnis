@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::progress::emit_gui_progress_update;
+use colored::Colorize;
 use image::{Rgb, RgbImage};
 
 /// Represents terrain data and elevation settings
@@ -134,6 +135,7 @@ impl Ground {
 
 pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
+        println!("{} Fetching elevation...", "[3/7]".bold());
         emit_gui_progress_update(15.0, "Fetching elevation...");
         let ground = Ground::new_enabled(
             &args.bbox,

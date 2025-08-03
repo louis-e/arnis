@@ -782,7 +782,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("{} Saving world...", "[6/6]".bold());
+        println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
         let total_regions = self.world.regions.len() as u64;
