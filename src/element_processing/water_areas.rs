@@ -19,11 +19,6 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         return;
     }
 
-    println!(
-        "Processing water relation ID: {} with tags: {:?}",
-        element.id, element.tags
-    );
-
     // Don't handle water below layer 0
     if let Some(layer) = element.tags.get("layer") {
         if layer.parse::<i32>().map(|x| x < 0).unwrap_or(false) {
@@ -43,13 +38,6 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
 
     // Process each outer polygon individually
     for (i, outer_nodes) in outers.iter().enumerate() {
-        println!(
-            "Processing outer polygon {} of {} for relation {}",
-            i + 1,
-            outers.len(),
-            element.id
-        );
-
         let mut individual_outers = vec![outer_nodes.clone()];
 
         merge_loopy_loops(&mut individual_outers);

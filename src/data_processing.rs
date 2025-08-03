@@ -20,12 +20,13 @@ pub fn generate_world(
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, &xzbbox);
 
-    println!("{} Processing data...", "[4/6]".bold());
+    println!("{} Processing data...", "[4/7]".bold());
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
-    emit_gui_progress_update(26.0, "Processing terrain...");
+    println!("{} Processing terrain...", "[5/7]".bold());
+    emit_gui_progress_update(25.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -35,8 +36,8 @@ pub fn generate_world(
         .unwrap()
         .progress_chars("█▓░"));
 
-    let progress_increment_prcs: f64 = 29.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 26.0;
+    let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
+    let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {
@@ -140,7 +141,7 @@ pub fn generate_world(
 
     let mut block_counter: u64 = 0;
 
-    println!("{} Generating ground...", "[5/6]".bold());
+    println!("{} Generating ground...", "[6/7]".bold());
     emit_gui_progress_update(70.0, "Generating ground...");
 
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
