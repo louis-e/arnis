@@ -33,18 +33,15 @@
     color: white;
     border: 1px solid #007cbb;
     border-radius: 0 3px 3px 0;
-    padding: 6px 10px;
+    padding: 4.5px 10px;
     cursor: pointer;
     font-size: 12px;
     transition: background-color 0.2s;
 }
 
-#search-btn:hover {
-    background: #fecc44;
-}
-
 #search-results {
     max-height: 200px;
+    max-width: 238px;
     overflow-y: auto;
     border-top: 1px solid #eee;
     display: none;
@@ -59,6 +56,8 @@
     border-bottom: 1px solid #f0f0f0;
     font-size: 13px;
     color: #333;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 .search-result-item:hover {
@@ -72,12 +71,16 @@
 .search-result-name {
     font-weight: bold;
     color: #007cbb;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 .search-result-details {
     color: #666;
     font-size: 11px;
     margin-top: 2px;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 .search-loading {
