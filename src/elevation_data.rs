@@ -50,32 +50,19 @@ pub fn fetch_elevation_data(
     ground_level: i32,
     _mapbox_access_token: &Option<String>, // Kept for API compatibility, not used with AWS
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
-    // Use OSM parser's scale calculation and apply user scale factor
-    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
-    let scale_factor_x: f64 = scale_factor_x * scale;
-    let scale_factor_z: f64 = scale_factor_z * scale;
+    let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
+
+    // Apply same floor() and scale operations as CoordTransformer.llbbox_to_xzbbox()
+    let scale_factor_z: f64 = base_scale_z.floor() * scale;
+    let scale_factor_x: f64 = base_scale_x.floor() * scale;
 
     // Calculate zoom and tiles
     let zoom: u8 = calculate_zoom_level(bbox);
     let tiles: Vec<(u32, u32)> = get_tile_coordinates(bbox, zoom);
 
-    // Calculate tile boundaries
-    let x_min: &u32 = tiles.iter().map(|(x, _)| x).min().unwrap();
-    let x_max: &u32 = tiles.iter().map(|(x, _)| x).max().unwrap();
-    let y_min: &u32 = tiles.iter().map(|(_, y)| y).min().unwrap();
-    let y_max: &u32 = tiles.iter().map(|(_, y)| y).max().unwrap();
-
     // Match grid dimensions with Minecraft world size
-    let grid_width: usize = scale_factor_x.round() as usize;
-    let grid_height: usize = scale_factor_z.round() as usize;
-
-    // Calculate total tile dimensions
-    let total_tile_width: u32 = (x_max - x_min + 1) * 256;
-    let total_tile_height: u32 = (y_max - y_min + 1) * 256;
-
-    // Calculate scaling factors to match the desired grid dimensions
-    let x_scale: f64 = grid_width as f64 / total_tile_width as f64;
-    let y_scale: f64 = grid_height as f64 / total_tile_height as f64;
+    let grid_width: usize = scale_factor_x as usize;
+    let grid_height: usize = scale_factor_z as usize;
 
     // Initialize height grid with proper dimensions
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
@@ -116,15 +103,34 @@ pub fn fetch_elevation_data(
             img.to_rgb8()
         };
 
-        // Calculate position in the scaled grid
-        let base_x: f64 = ((*tile_x - x_min) * 256) as f64;
-        let base_y: f64 = ((*tile_y - y_min) * 256) as f64;
-
-        // Process tile data with scaling
+        // Only process pixels that fall within the requested bbox
         for (y, row) in rgb_img.rows().enumerate() {
             for (x, pixel) in row.enumerate() {
-                let scaled_x: usize = ((base_x + x as f64) * x_scale) as usize;
-                let scaled_y: usize = ((base_y + y as f64) * y_scale) as usize;
+                // Convert tile pixel coordinates back to geographic coordinates
+                let pixel_lng = ((*tile_x as f64 + x as f64 / 256.0) / (2.0_f64.powi(zoom as i32)))
+                    * 360.0
+                    - 180.0;
+                let pixel_lat_rad = std::f64::consts::PI
+                    * (1.0
+                        - 2.0 * (*tile_y as f64 + y as f64 / 256.0) / (2.0_f64.powi(zoom as i32)));
+                let pixel_lat = pixel_lat_rad.sinh().atan().to_degrees();
+
+                // Skip pixels outside the requested bounding box
+                if pixel_lat < bbox.min().lat()
+                    || pixel_lat > bbox.max().lat()
+                    || pixel_lng < bbox.min().lng()
+                    || pixel_lng > bbox.max().lng()
+                {
+                    continue;
+                }
+
+                // Map geographic coordinates to grid coordinates
+                let rel_x = (pixel_lng - bbox.min().lng()) / (bbox.max().lng() - bbox.min().lng());
+                let rel_y =
+                    1.0 - (pixel_lat - bbox.min().lat()) / (bbox.max().lat() - bbox.min().lat());
+
+                let scaled_x = (rel_x * grid_width as f64).round() as usize;
+                let scaled_y = (rel_y * grid_height as f64).round() as usize;
 
                 if scaled_y >= grid_height || scaled_x >= grid_width {
                     continue;
