@@ -10,6 +10,11 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   -webkit-text-size-adjust: 100%;
+  
+  /* CSS Variables for consistent theming */
+  --primary-accent: #fecc44;
+  --primary-accent-dark: #e6b73d;
+  --primary-accent-light: #fff2cc;
 }
 
 p {
@@ -43,12 +48,13 @@ p {
 
 a {
   font-weight: 500;
-  color: #646cff;
+  color: var(--primary-accent);
   text-decoration: inherit;
+  transition: color 0.3s ease;
 }
 
 a:hover {
-  color: #535bf2;
+  color: var(--primary-accent-dark);
 }
 
 .flex-container {
@@ -374,11 +380,6 @@ button:hover {
   font-size: 15px;
 }
 
-/* Language dropdown styling */
-.language-dropdown {
-  /* Base styling already defined elsewhere */
-}
-
 @media (prefers-color-scheme: dark) {
   .language-dropdown {
     background-color: #0f0f0f98;
@@ -428,18 +429,22 @@ button:hover {
   width: 35%;
   height: auto;
   opacity: 0;
-  transform: scale(0);
-  animation: zoomInLogo 1s ease-out forwards;
+  transform: scale(0) rotate(-10deg);
+  animation: zoomInLogo 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
 /* Keyframe Animation */
 @keyframes zoomInLogo {
   0% {
-    transform: scale(0);
+    transform: scale(0) rotate(-10deg);
     opacity: 0;
   }
+  60% {
+    transform: scale(1.05) rotate(2deg);
+    opacity: 0.8;
+  }
   100% {
-    transform: scale(1);
+    transform: scale(1) rotate(0deg);
     opacity: 1;
   }
 }
