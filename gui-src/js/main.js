@@ -320,9 +320,18 @@ function handleBboxInput() {
     const input = inputBox.value.trim();
 
     if (input === "") {
-      bboxInfo.textContent = "";
-      bboxInfo.style.color = "";
-      selectedBBox = "";
+      // Empty input - revert to map selection if available
+      customBBoxValid = false;
+      selectedBBox = mapSelectedBBox;
+      
+      // Clear the info text only if no map selection exists
+      if (!mapSelectedBBox) {
+        bboxInfo.textContent = "";
+        bboxInfo.style.color = "";
+      } else {
+        // Restore map selection display
+        displayBboxInfoText(mapSelectedBBox);
+      }
       return;
     }
 
@@ -354,20 +363,34 @@ function handleBboxInput() {
         map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
         map_container.contentWindow.location.reload();
 
-        // Update the info text
+        // Update the info text and mark custom input as valid
+        customBBoxValid = true;
+        selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         localizeElement(window.localization, { element: bboxInfo }, "custom_selection_confirmed");
         bboxInfo.style.color = "#7bd864";
       } else {
         // Valid numbers but invalid order or range
+        customBBoxValid = false;
+        // Don't clear selectedBBox - keep map selection if available
+        if (!mapSelectedBBox) {
+          selectedBBox = "";
+        } else {
+          selectedBBox = mapSelectedBBox;
+        }
         localizeElement(window.localization, { element: bboxInfo }, "error_coordinates_out_of_range");
         bboxInfo.style.color = "#fecc44";
-        selectedBBox = "";
       }
     } else {
       // Input doesn't match the required format
+      customBBoxValid = false;
+      // Don't clear selectedBBox - keep map selection if available
+      if (!mapSelectedBBox) {
+        selectedBBox = "";
+      } else {
+        selectedBBox = mapSelectedBBox;
+      }
       localizeElement(window.localization, { element: bboxInfo }, "invalid_format");
       bboxInfo.style.color = "#fecc44";
-      selectedBBox = "";
     }
   });
 }
@@ -413,6 +436,8 @@ function normalizeLongitude(lon) {
 const threshold1 = 30000000.00;
 const threshold2 = 45000000.00;
 let selectedBBox = "";
+let mapSelectedBBox = "";  // Tracks bbox from map selection
+let customBBoxValid = false;  // Tracks if custom input is valid
 
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
@@ -421,14 +446,22 @@ function displayBboxInfoText(bboxText) {
   // Normalize longitudes
   lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
   lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
-  selectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
+  mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
+  
+  // Update selectedBBox only if no valid custom input exists
+  if (!customBBoxValid) {
+    selectedBBox = mapSelectedBBox;
+  }
 
   const bboxInfo = document.getElementById("bbox-info");
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
     bboxInfo.textContent = "";
-    selectedBBox = "";
+    mapSelectedBBox = "";
+    if (!customBBoxValid) {
+      selectedBBox = "";
+    }
     return;
   }
 
