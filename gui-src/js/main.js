@@ -234,22 +234,31 @@ function initSettings() {
 
   // Language selector
   const languageSelect = document.getElementById("language-select");
-  // Set initial value based on current language
-  const currentLang = navigator.language;
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
-
-  // Try to match the exact language code first
-  if (availableOptions.includes(currentLang)) {
-    languageSelect.value = currentLang;
+  
+  // Check for saved language preference first (same logic as getLocalization)
+  const savedLanguage = localStorage.getItem('arnis-language');
+  let languageToSet = 'en'; // Default to English
+  
+  if (savedLanguage && availableOptions.includes(savedLanguage)) {
+    // Use saved language if it exists and is available
+    languageToSet = savedLanguage;
+  } else {
+    // Otherwise use browser language
+    const currentLang = navigator.language;
+    
+    // Try to match the exact language code first
+    if (availableOptions.includes(currentLang)) {
+      languageToSet = currentLang;
+    }
+    // Try to match just the base language code
+    else if (availableOptions.includes(currentLang.split('-')[0])) {
+      languageToSet = currentLang.split('-')[0];
+    }
+    // languageToSet remains 'en' as default
   }
-  // Try to match just the base language code
-  else if (availableOptions.includes(currentLang.split('-')[0])) {
-    languageSelect.value = currentLang.split('-')[0];
-  }
-  // Default to English
-  else {
-    languageSelect.value = "en";
-  }
+  
+  languageSelect.value = languageToSet;
 
   // Handle language change
   languageSelect.addEventListener("change", async () => {
