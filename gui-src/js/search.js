@@ -127,6 +127,37 @@ var citySearch = {
     
     goToLocation: function(lat, lon, name) {
         if (typeof map !== 'undefined' && map) {
+            // Clear existing bbox selection and spawn points
+            if (typeof drawnItems !== 'undefined' && drawnItems) {
+                drawnItems.clearLayers();
+            }
+            
+            // Try to access bounds through the map layers or find the bounds rectangle
+            var boundsLayer = null;
+            map.eachLayer(function(layer) {
+                if (layer instanceof L.Rectangle && layer.options.color === '#3778d4') {
+                    boundsLayer = layer;
+                }
+            });
+            
+            if (boundsLayer) {
+                boundsLayer.setBounds(new L.LatLngBounds([0.0, 0.0], [0.0, 0.0]));
+                
+                // Update the bbox display
+                if (typeof formatBounds === 'function') {
+                    $('#boxbounds').text(formatBounds(boundsLayer.getBounds(), '4326'));
+                    
+                    if (typeof currentproj !== 'undefined') {
+                        $('#boxboundsmerc').text(formatBounds(boundsLayer.getBounds(), currentproj));
+                    }
+                }
+                
+                // Notify parent window of bbox update
+                if (typeof notifyBboxUpdate === 'function') {
+                    notifyBboxUpdate();
+                }
+            }
+            
             // Simply zoom to location without adding markers or popups
             map.setView([lat, lon], 12);
             
