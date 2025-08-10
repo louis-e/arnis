@@ -459,10 +459,9 @@ function displayBboxInfoText(bboxText) {
   lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
   mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
   
-  // Update selectedBBox only if no valid custom input exists
-  if (!customBBoxValid) {
-    selectedBBox = mapSelectedBBox;
-  }
+  // Map selection always takes priority - clear custom input and update selectedBBox
+  selectedBBox = mapSelectedBBox;
+  customBBoxValid = false;
 
   const bboxInfo = document.getElementById("bbox-info");
 
