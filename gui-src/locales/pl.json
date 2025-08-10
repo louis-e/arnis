@@ -10,7 +10,6 @@
   "error_coordinates_out_of_range": "Błąd: Współrzędne są poza zakresem lub w złej kolejności (wymagana szerokość przed długością).",
   "invalid_format": "Nieprawidłowy format. Użyj 'szer.,dł.,szer.,dł.' lub 'szer. dł. szer. dł.'.",
   "generation_process_started": "Proces generowania rozpoczęty.",
-  "terrain": "Teren",
   "winter_mode": "Tryb Zimowy",
   "world_scale": "Skala świata",
   "custom_bounding_box": "Niestandardowy obszar",
@@ -37,5 +36,8 @@
   "placeholder_floodfill": "Sekundy",
   "placeholder_ground": "Wysokość",
   "language": "Język",
+  "terrain": "Teren",
+  "interior": "Generowanie wnętrz",
+  "roof": "Generowanie dachów",
   "fillground": "Wypełnij podłoże"
 }

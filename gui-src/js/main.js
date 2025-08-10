@@ -93,6 +93,8 @@ async function applyLocalization(localization) {
     "label[data-localize='ground_level']": "ground_level",
     "label[data-localize='language']": "language",
     "label[data-localize='terrain']": "terrain",
+    "label[data-localize='interior']": "interior",
+    "label[data-localize='roof']": "roof",
     "label[data-localize='fillground']": "fillground",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
@@ -234,22 +236,31 @@ function initSettings() {
 
   // Language selector
   const languageSelect = document.getElementById("language-select");
-  // Set initial value based on current language
-  const currentLang = navigator.language;
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
-
-  // Try to match the exact language code first
-  if (availableOptions.includes(currentLang)) {
-    languageSelect.value = currentLang;
+  
+  // Check for saved language preference first (same logic as getLocalization)
+  const savedLanguage = localStorage.getItem('arnis-language');
+  let languageToSet = 'en'; // Default to English
+  
+  if (savedLanguage && availableOptions.includes(savedLanguage)) {
+    // Use saved language if it exists and is available
+    languageToSet = savedLanguage;
+  } else {
+    // Otherwise use browser language
+    const currentLang = navigator.language;
+    
+    // Try to match the exact language code first
+    if (availableOptions.includes(currentLang)) {
+      languageToSet = currentLang;
+    }
+    // Try to match just the base language code
+    else if (availableOptions.includes(currentLang.split('-')[0])) {
+      languageToSet = currentLang.split('-')[0];
+    }
+    // languageToSet remains 'en' as default
   }
-  // Try to match just the base language code
-  else if (availableOptions.includes(currentLang.split('-')[0])) {
-    languageSelect.value = currentLang.split('-')[0];
-  }
-  // Default to English
-  else {
-    languageSelect.value = "en";
-  }
+  
+  languageSelect.value = languageToSet;
 
   // Handle language change
   languageSelect.addEventListener("change", async () => {
@@ -320,9 +331,18 @@ function handleBboxInput() {
     const input = inputBox.value.trim();
 
     if (input === "") {
-      bboxInfo.textContent = "";
-      bboxInfo.style.color = "";
-      selectedBBox = "";
+      // Empty input - revert to map selection if available
+      customBBoxValid = false;
+      selectedBBox = mapSelectedBBox;
+      
+      // Clear the info text only if no map selection exists
+      if (!mapSelectedBBox) {
+        bboxInfo.textContent = "";
+        bboxInfo.style.color = "";
+      } else {
+        // Restore map selection display
+        displayBboxInfoText(mapSelectedBBox);
+      }
       return;
     }
 
@@ -354,20 +374,34 @@ function handleBboxInput() {
         map_container.setAttribute('src', `maps.html#${lat1},${lng1},${lat2},${lng2}`);
         map_container.contentWindow.location.reload();
 
-        // Update the info text
+        // Update the info text and mark custom input as valid
+        customBBoxValid = true;
+        selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         localizeElement(window.localization, { element: bboxInfo }, "custom_selection_confirmed");
         bboxInfo.style.color = "#7bd864";
       } else {
         // Valid numbers but invalid order or range
+        customBBoxValid = false;
+        // Don't clear selectedBBox - keep map selection if available
+        if (!mapSelectedBBox) {
+          selectedBBox = "";
+        } else {
+          selectedBBox = mapSelectedBBox;
+        }
         localizeElement(window.localization, { element: bboxInfo }, "error_coordinates_out_of_range");
         bboxInfo.style.color = "#fecc44";
-        selectedBBox = "";
       }
     } else {
       // Input doesn't match the required format
+      customBBoxValid = false;
+      // Don't clear selectedBBox - keep map selection if available
+      if (!mapSelectedBBox) {
+        selectedBBox = "";
+      } else {
+        selectedBBox = mapSelectedBBox;
+      }
       localizeElement(window.localization, { element: bboxInfo }, "invalid_format");
       bboxInfo.style.color = "#fecc44";
-      selectedBBox = "";
     }
   });
 }
@@ -413,6 +447,8 @@ function normalizeLongitude(lon) {
 const threshold1 = 30000000.00;
 const threshold2 = 45000000.00;
 let selectedBBox = "";
+let mapSelectedBBox = "";  // Tracks bbox from map selection
+let customBBoxValid = false;  // Tracks if custom input is valid
 
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
@@ -421,14 +457,21 @@ function displayBboxInfoText(bboxText) {
   // Normalize longitudes
   lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
   lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
-  selectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
+  mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
+  
+  // Map selection always takes priority - clear custom input and update selectedBBox
+  selectedBBox = mapSelectedBBox;
+  customBBoxValid = false;
 
   const bboxInfo = document.getElementById("bbox-info");
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
     bboxInfo.textContent = "";
-    selectedBBox = "";
+    mapSelectedBBox = "";
+    if (!customBBoxValid) {
+      selectedBBox = "";
+    }
     return;
   }
 

@@ -1,6 +1,6 @@
 {
   "select_location": "Hely kiválasztása",
-  "zoom_in_and_choose": "Közelíts és válaszd ki a területet a téglalap eszköz segítségével",
+  "zoom_in_and_choose": "Nagyíts és jelöld ki a területet a kijelölő eszközzel",
   "select_world": "Világ kijelölése",
   "choose_world": "Világ kiválasztása",
   "no_world_selected": "Nincs világ kiválasztva",
@@ -37,5 +37,7 @@
   "placeholder_ground": "Földszint",
   "language": "Nyelv",
   "terrain": "Terep",
+  "interior": "Belső generálás",
+  "roof": "Tető generálás",
   "fillground": "Talaj feltöltése"
 }

@@ -37,5 +37,7 @@
   "placeholder_ground": "地面高度",
   "language": "语言",
   "terrain": "地形",
+  "interior": "内部生成",
+  "roof": "屋顶生成",
   "fillground": "填充地面"
 }

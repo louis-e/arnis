@@ -1,6 +1,6 @@
 {
   "select_location": "Обрати локацію",
-  "zoom_in_and_choose": "Збільште масштаб і оберіть область за допомогою прямокутника",
+  "zoom_in_and_choose": "Збільште і оберіть область за допомогою прямокутника",
   "select_world": "Обрати світ",
   "choose_world": "Обрати світ",
   "no_world_selected": "Світ не обрано",
@@ -37,5 +37,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Мова",
   "terrain": "Рельєф",
+  "interior": "Генерація інтер'єру",
+  "roof": "Генерація даху",
   "fillground": "Заповнити землю"
 }

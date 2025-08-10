@@ -10,7 +10,6 @@
   "error_coordinates_out_of_range": "Klaida: Koordinatės yra už ribų arba neteisingai išdėstytos (plat turi būti prieš ilg).",
   "invalid_format": "Neteisingas formatas. Prašome naudoti 'plat,ilg,plat,ilg' arba 'plat ilg plat ilg'.",
   "generation_process_started": "Generacijos procesas pradėtas.",
-  "terrain": "Reljefas",
   "winter_mode": "Žiemos režimas",
   "world_scale": "Pasaulio mastelis",
   "custom_bounding_box": "Pasirinktinis ribos rėmas",
@@ -37,5 +36,8 @@
   "placeholder_floodfill": "Sekundės",
   "placeholder_ground": "Žemės lygis",
   "language": "Kalba",
+  "terrain": "Reljefas",
+  "interior": "Vidaus generavimas",
+  "roof": "Stogo generavimas",
   "fillground": "Užpildyti pagrindą"
 }

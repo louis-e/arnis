@@ -37,5 +37,7 @@
   "placeholder_ground": "Ground Level",
   "language": "언어",
   "terrain": "지형",
+  "interior": "내부 생성",
+  "roof": "지붕 생성",
   "fillground": "지면 채우기"
 }

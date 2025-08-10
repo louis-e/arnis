@@ -37,5 +37,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Language",
   "terrain": "Terrain",
+  "interior": "Interior Generation",
+  "roof": "Roof Generation",
   "fillground": "Fill Ground"
 }

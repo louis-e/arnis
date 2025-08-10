@@ -37,5 +37,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Språk",
   "terrain": "Terräng",
+  "interior": "Interiörgenerering",
+  "roof": "Takgenerering",
   "fillground": "Fyll mark"
 }
