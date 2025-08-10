@@ -37,7 +37,7 @@
   "placeholder_ground": "Bodenhöhe",
   "language": "Sprache",
   "terrain": "Terrain",
-  "interior": "Innenraum-Generierung",
-  "roof": "Dach-Generierung",
+  "interior": "Innenraum Generierung",
+  "roof": "Dach Generierung",
   "fillground": "Boden füllen"
 }
