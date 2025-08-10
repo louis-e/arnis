@@ -33,7 +33,7 @@ pub fn check_for_updates() -> Result<bool, Box<dyn Error>> {
             let local_version: Version = Version::parse(env!("CARGO_PKG_VERSION"))?;
 
             // Compare versions
-            if remote_version > local_version {
+            if remote_version == local_version {
                 println!(
                     "{} {} -> {}",
                     "A new version is available:".yellow().bold(),

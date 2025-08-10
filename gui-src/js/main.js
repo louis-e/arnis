@@ -93,6 +93,8 @@ async function applyLocalization(localization) {
     "label[data-localize='ground_level']": "ground_level",
     "label[data-localize='language']": "language",
     "label[data-localize='terrain']": "terrain",
+    "label[data-localize='interior']": "interior",
+    "label[data-localize='roof']": "roof",
     "label[data-localize='fillground']": "fillground",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",

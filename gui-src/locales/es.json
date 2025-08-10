@@ -37,5 +37,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Idioma",
   "terrain": "Terreno",
+  "interior": "Generación de interiores",
+  "roof": "Generación de techos",
   "fillground": "Rellenar suelo"
 }

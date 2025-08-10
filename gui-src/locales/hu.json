@@ -37,5 +37,7 @@
   "placeholder_ground": "Földszint",
   "language": "Nyelv",
   "terrain": "Terep",
+  "interior": "Belső generálás",
+  "roof": "Tető generálás",
   "fillground": "Talaj feltöltése"
 }

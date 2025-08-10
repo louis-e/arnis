@@ -37,5 +37,7 @@
   "placeholder_ground": "Niveau du sol",
   "language": "Langue",
   "terrain": "Terrain",
+  "interior": "Génération d'intérieur",
+  "roof": "Génération de toit",
   "fillground": "Remplir le sol"
 }

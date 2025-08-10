@@ -37,5 +37,7 @@
   "placeholder_ground": "Ground Level",
   "language": "Мова",
   "terrain": "Рельєф",
+  "interior": "Генерація інтер'єру",
+  "roof": "Генерація даху",
   "fillground": "Заповнити землю"
 }

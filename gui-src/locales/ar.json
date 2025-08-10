@@ -37,5 +37,7 @@
   "placeholder_ground": "مستوى الأرض",
   "language": "اللغة",
   "terrain": "التضاريس",
+  "interior": "توليد الداخلية",
+  "roof": "توليد السقف",
   "fillground": "ملء الأرض"
 }
