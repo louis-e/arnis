@@ -90,7 +90,8 @@ async function applyLocalization(localization) {
     "label[data-localize='world_scale']": "world_scale",
     "label[data-localize='custom_bounding_box']": "custom_bounding_box",
     "label[data-localize='floodfill_timeout']": "floodfill_timeout",
-    "label[data-localize='ground_level']": "ground_level",
+    // DEPRECATED: Ground level localization removed
+    // "label[data-localize='ground_level']": "ground_level",
     "label[data-localize='language']": "language",
     "label[data-localize='terrain']": "terrain",
     "label[data-localize='interior']": "interior",
@@ -103,7 +104,8 @@ async function applyLocalization(localization) {
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
     "input[id='floodfill-timeout']": "placeholder_floodfill",
-    "input[id='ground-level']": "placeholder_ground"
+    // DEPRECATED: Ground level placeholder removed
+    // "input[id='ground-level']": "placeholder_ground"
   };
 
   for (const selector in localizationElements) {
@@ -574,7 +576,9 @@ async function startGeneration() {
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
-    var ground_level = parseInt(document.getElementById("ground-level").value, 10);
+    // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
+    // DEPRECATED: Ground level input removed from UI
+    var ground_level = -62;
 
     // Validate floodfill_timeout and ground_level
     floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
