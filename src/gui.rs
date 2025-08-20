@@ -9,12 +9,53 @@ use crate::retrieve_data;
 use crate::version_check;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
+use fs2::FileExt;
 use log::{error, LevelFilter};
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{env, fs, io::Write, panic};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
+
+/// Manages the session.lock file for a Minecraft world directory
+struct SessionLock {
+    file: fs::File,
+    path: PathBuf,
+}
+
+impl SessionLock {
+    /// Creates and locks a session.lock file in the specified world directory
+    fn acquire(world_path: &Path) -> Result<Self, String> {
+        let session_lock_path = world_path.join("session.lock");
+
+        // Create or open the session.lock file
+        let file = fs::File::create(&session_lock_path)
+            .map_err(|e| format!("Failed to create session.lock file: {e}"))?;
+
+        // Write the snowman character (U+2603) as specified by Minecraft format
+        let snowman_bytes = "☃".as_bytes(); // This is UTF-8 encoded E2 98 83
+        (&file)
+            .write_all(snowman_bytes)
+            .map_err(|e| format!("Failed to write to session.lock file: {e}"))?;
+
+        // Acquire an exclusive lock on the file
+        file.try_lock_exclusive()
+            .map_err(|e| format!("Failed to acquire lock on session.lock file: {e}"))?;
+
+        Ok(SessionLock {
+            file,
+            path: session_lock_path,
+        })
+    }
+}
+
+impl Drop for SessionLock {
+    fn drop(&mut self) {
+        // Release the lock and remove the session.lock file
+        let _ = self.file.unlock();
+        let _ = fs::remove_file(&self.path);
+    }
+}
 
 pub fn run_gui() {
     // Launch the UI
@@ -539,6 +580,18 @@ fn gui_start_generation(
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
+            // Acquire session lock for the world directory before starting generation
+            let world_path = PathBuf::from(&selected_world);
+            let _session_lock = match SessionLock::acquire(&world_path) {
+                Ok(lock) => lock,
+                Err(e) => {
+                    let error_msg = format!("Failed to acquire session lock: {e}");
+                    eprintln!("{error_msg}");
+                    emit_gui_error(&error_msg);
+                    return Err(error_msg);
+                }
+            };
+
             // Parse the bounding box from the text with proper error handling
             let bbox = match LLBBox::from_str(&bbox_text) {
                 Ok(bbox) => bbox,
@@ -603,11 +656,13 @@ fn gui_start_generation(
                     );
 
                     let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
+                    // Session lock will be automatically released when _session_lock goes out of scope
                     Ok(())
                 }
                 Err(e) => {
                     let error_msg = format!("Failed to fetch data: {e}");
                     emit_gui_error(&error_msg);
+                    // Session lock will be automatically released when _session_lock goes out of scope
                     Err(error_msg)
                 }
             }
@@ -617,6 +672,7 @@ fn gui_start_generation(
             let error_msg = format!("Error in blocking task: {e}");
             eprintln!("{error_msg}");
             emit_gui_error(&error_msg);
+            // Session lock will be automatically released when the task fails
         }
     });
 
