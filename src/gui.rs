@@ -9,13 +9,13 @@ use crate::retrieve_data;
 use crate::version_check;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
+use fs2::FileExt;
 use log::{error, LevelFilter};
 use rfd::FileDialog;
+use std::{env, fs, io::Write, panic};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::{env, fs, io::Write, panic};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
-use fs2::FileExt;
 
 /// Manages the session.lock file for a Minecraft world directory
 struct SessionLock {
@@ -34,7 +34,8 @@ impl SessionLock {
 
         // Write the snowman character (U+2603) as specified by Minecraft format
         let snowman_bytes = "☃".as_bytes(); // This is UTF-8 encoded E2 98 83
-        (&file).write_all(snowman_bytes)
+        (&file)
+            .write_all(snowman_bytes)
             .map_err(|e| format!("Failed to write to session.lock file: {e}"))?;
 
         // Acquire an exclusive lock on the file
