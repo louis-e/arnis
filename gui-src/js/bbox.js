@@ -467,7 +467,7 @@ $(document).ready(function () {
     // Define available tile themes
     var tileThemes = {
         'osm': {
-            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             options: {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 maxZoom: 19
