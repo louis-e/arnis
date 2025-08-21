@@ -34,14 +34,10 @@ pub fn generate_buildings(
         min_level_str.parse::<i32>().unwrap_or(0)
     } else {
         0
-        };
+    };
 
     // Calculate y-offset for non-terrain mode for absolute positioning
-    let abs_terrain_offset = if !args.terrain {
-        args.ground_level
-    } else {
-        0
-    };
+    let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
 
     // Calculate starting y-offset from min_level
     let scale_factor = args.scale;
@@ -415,7 +411,14 @@ pub fn generate_buildings(
 
                     // Add foundation blocks from ground to building base
                     for y in local_ground_level..start_y_offset + 1 {
-                        editor.set_block_absolute(wall_block, bx, y + abs_terrain_offset, bz, None, None);
+                        editor.set_block_absolute(
+                            wall_block,
+                            bx,
+                            y + abs_terrain_offset,
+                            bz,
+                            None,
+                            None,
+                        );
                     }
                 }
 
@@ -425,14 +428,35 @@ pub fn generate_buildings(
                     if is_tall_building && use_vertical_windows {
                         // Tall building pattern - narrower windows with continuous vertical strips
                         if h > start_y_offset + 1 && (bx + bz) % 3 == 0 {
-                            editor.set_block_absolute(window_block, bx, h + abs_terrain_offset, bz, None, None);
+                            editor.set_block_absolute(
+                                window_block,
+                                bx,
+                                h + abs_terrain_offset,
+                                bz,
+                                None,
+                                None,
+                            );
                         } else {
-                            editor.set_block_absolute(wall_block, bx, h + abs_terrain_offset, bz, None, None);
+                            editor.set_block_absolute(
+                                wall_block,
+                                bx,
+                                h + abs_terrain_offset,
+                                bz,
+                                None,
+                                None,
+                            );
                         }
                     } else {
                         // Original pattern for regular buildings (non-vertical windows)
                         if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
-                            editor.set_block_absolute(window_block, bx, h + abs_terrain_offset, bz, None, None);
+                            editor.set_block_absolute(
+                                window_block,
+                                bx,
+                                h + abs_terrain_offset,
+                                bz,
+                                None,
+                                None,
+                            );
                         } else {
                             // Use accent block line between windows if enabled for this building
                             let use_accent_line =
@@ -444,9 +468,23 @@ pub fn generate_buildings(
                                 && (bx + bz) % 6 < 3;
 
                             if use_accent_line || use_vertical_accent_here {
-                                editor.set_block_absolute(accent_block, bx, h + abs_terrain_offset, bz, None, None);
+                                editor.set_block_absolute(
+                                    accent_block,
+                                    bx,
+                                    h + abs_terrain_offset,
+                                    bz,
+                                    None,
+                                    None,
+                                );
                             } else {
-                                editor.set_block_absolute(wall_block, bx, h + abs_terrain_offset, bz, None, None);
+                                editor.set_block_absolute(
+                                    wall_block,
+                                    bx,
+                                    h + abs_terrain_offset,
+                                    bz,
+                                    None,
+                                    None,
+                                );
                             }
                         }
                     }
@@ -513,16 +551,37 @@ pub fn generate_buildings(
                 }
 
                 // Set floor at start_y_offset
-                editor.set_block_absolute(floor_block, x, start_y_offset + abs_terrain_offset, z, None, None);
+                editor.set_block_absolute(
+                    floor_block,
+                    x,
+                    start_y_offset + abs_terrain_offset,
+                    z,
+                    None,
+                    None,
+                );
 
                 // Set level ceilings if height > 4
                 if building_height > 4 {
                     for h in (start_y_offset + 2 + 4..start_y_offset + building_height).step_by(4) {
                         if x % 5 == 0 && z % 5 == 0 {
                             // Light fixtures
-                            editor.set_block_absolute(GLOWSTONE, x, h + abs_terrain_offset, z, None, None);
+                            editor.set_block_absolute(
+                                GLOWSTONE,
+                                x,
+                                h + abs_terrain_offset,
+                                z,
+                                None,
+                                None,
+                            );
                         } else {
-                            editor.set_block_absolute(floor_block, x, h + abs_terrain_offset, z, None, None);
+                            editor.set_block_absolute(
+                                floor_block,
+                                x,
+                                h + abs_terrain_offset,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                     }
                 } else if x % 5 == 0 && z % 5 == 0 {
@@ -710,7 +769,14 @@ fn generate_roof(
         RoofType::Flat => {
             // Simple flat roof
             for &(x, z) in floor_area {
-                editor.set_block_absolute(floor_block, x, base_height + abs_terrain_offset, z, None, None);
+                editor.set_block_absolute(
+                    floor_block,
+                    x,
+                    base_height + abs_terrain_offset,
+                    z,
+                    None,
+                    None,
+                );
             }
         }
 
@@ -824,7 +890,14 @@ fn generate_roof(
             // Batch place all blocks to reduce function call overhead
             for (x, y, z, block, stair_props) in blocks_to_place {
                 if let Some(stair_block) = stair_props {
-                    editor.set_block_with_properties_absolute(stair_block, x, y + abs_terrain_offset, z, None, None);
+                    editor.set_block_with_properties_absolute(
+                        stair_block,
+                        x,
+                        y + abs_terrain_offset,
+                        z,
+                        None,
+                        None,
+                    );
                 } else {
                     editor.set_block_absolute(block, x, y + abs_terrain_offset, z, None, None);
                 }
@@ -949,11 +1022,25 @@ fn generate_roof(
                                 );
                             } else {
                                 // Use regular roof block where height doesn't change (ridge area)
-                                editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
+                                editor.set_block_absolute(
+                                    roof_block,
+                                    x,
+                                    y + abs_terrain_offset,
+                                    z,
+                                    None,
+                                    None,
+                                );
                             }
                         } else {
                             // Fill interior with solid blocks
-                            editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
+                            editor.set_block_absolute(
+                                roof_block,
+                                x,
+                                y + abs_terrain_offset,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                     }
                 }
@@ -1062,11 +1149,25 @@ fn generate_roof(
                                 );
                             } else {
                                 // Use regular roof block where height doesn't change
-                                editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
+                                editor.set_block_absolute(
+                                    roof_block,
+                                    x,
+                                    y + abs_terrain_offset,
+                                    z,
+                                    None,
+                                    None,
+                                );
                             }
                         } else {
                             // Fill interior with solid blocks
-                            editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
+                            editor.set_block_absolute(
+                                roof_block,
+                                x,
+                                y + abs_terrain_offset,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                     }
                 }
@@ -1131,11 +1232,25 @@ fn generate_roof(
                             );
                         } else {
                             // Use regular roof material where height doesn't change
-                            editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
+                            editor.set_block_absolute(
+                                roof_block,
+                                x,
+                                y + abs_terrain_offset,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                     } else {
                         // Fill interior with solid blocks
-                        editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
+                        editor.set_block_absolute(
+                            roof_block,
+                            x,
+                            y + abs_terrain_offset,
+                            z,
+                            None,
+                            None,
+                        );
                     }
                 }
             }
@@ -1308,10 +1423,24 @@ fn generate_roof(
                             }
                         };
 
-                        editor.set_block_with_properties_absolute(stair_block, x, y + abs_terrain_offset, z, None, None);
+                        editor.set_block_with_properties_absolute(
+                            stair_block,
+                            x,
+                            y + abs_terrain_offset,
+                            z,
+                            None,
+                            None,
+                        );
                     } else {
                         // Fill interior with solid blocks
-                        editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
+                        editor.set_block_absolute(
+                            roof_block,
+                            x,
+                            y + abs_terrain_offset,
+                            z,
+                            None,
+                            None,
+                        );
                     }
                 }
             }

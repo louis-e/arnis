@@ -169,7 +169,7 @@ pub fn generate_building_interior(
     floor_levels: &[i32],
     args: &crate::args::Args,
     element: &crate::osm_parser::ProcessedWay,
-    abs_terrain_offset: i32
+    abs_terrain_offset: i32,
 ) {
     // Skip interior generation for very small buildings
     let width = max_x - min_x + 1;
@@ -253,7 +253,14 @@ pub fn generate_building_interior(
 
                 // Place first layer blocks
                 if let Some(block) = get_interior_block(cell1, false, wall_block) {
-                    editor.set_block_absolute(block, x, floor_y + y_offset + abs_terrain_offset, z, None, None);
+                    editor.set_block_absolute(
+                        block,
+                        x,
+                        floor_y + y_offset + abs_terrain_offset,
+                        z,
+                        None,
+                        None,
+                    );
 
                     // If this is a wall in layer 1, add to wall positions to extend later
                     if cell1 == 'W' {
@@ -267,7 +274,14 @@ pub fn generate_building_interior(
 
                 // Place second layer blocks
                 if let Some(block) = get_interior_block(cell2, true, wall_block) {
-                    editor.set_block_absolute(block, x, floor_y + y_offset + abs_terrain_offset + 1, z, None, None);
+                    editor.set_block_absolute(
+                        block,
+                        x,
+                        floor_y + y_offset + abs_terrain_offset + 1,
+                        z,
+                        None,
+                        None,
+                    );
                 }
             }
         }

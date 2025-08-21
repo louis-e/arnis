@@ -1,6 +1,6 @@
 use crate::args::Args;
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::data_processing;
 use crate::ground::{self, Ground};
 use crate::map_transformation;
@@ -559,10 +559,18 @@ pub fn update_player_spawn_y_after_generation(
     let (existing_spawn_x, existing_spawn_z) = if let Value::Compound(ref root) = nbt_data {
         if let Some(Value::Compound(ref data)) = root.get("Data") {
             let spawn_x = data.get("SpawnX").and_then(|v| {
-                if let Value::Int(x) = v { Some(*x) } else { None }
+                if let Value::Int(x) = v {
+                    Some(*x)
+                } else {
+                    None
+                }
             });
             let spawn_z = data.get("SpawnZ").and_then(|v| {
-                if let Value::Int(z) = v { Some(*z) } else { None }
+                if let Value::Int(z) = v {
+                    Some(*z)
+                } else {
+                    None
+                }
             });
 
             match (spawn_x, spawn_z) {
@@ -590,7 +598,7 @@ pub fn update_player_spawn_y_after_generation(
         let relative_x = existing_spawn_x - xzbbox.min_x();
         let relative_z = existing_spawn_z - xzbbox.min_z();
         let terrain_point = XZPoint::new(relative_x, relative_z);
-        
+
         ground.level(terrain_point) + 2
     } else {
         -61 // Default Y if no terrain
@@ -600,7 +608,7 @@ pub fn update_player_spawn_y_after_generation(
     if let Value::Compound(ref mut root) = nbt_data {
         if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
             // Only update the Y coordinate, keep existing X and Z
-            data.insert("SpawnY".to_string(), Value::Int(spawn_y as i32));
+            data.insert("SpawnY".to_string(), Value::Int(spawn_y));
 
             // Update player position - only Y coordinate
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
