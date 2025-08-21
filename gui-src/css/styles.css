@@ -323,7 +323,7 @@ button:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 15px;
+  margin-bottom: 10px;
 }
 
 .settings-row label {
@@ -353,11 +353,35 @@ button:hover {
 
 .license-button-row {
   justify-content: center;
-  margin-top: 15px;
+  margin-top: 10px;
 }
 
 .license-button {
   width: 80% !important;
+}
+
+/* Buy Me a Coffee styling */
+.buymeacoffee-row {
+  justify-content: center;
+  margin-top: 10px;
+  margin-bottom: -10px;
+}
+
+.buymeacoffee-link {
+  display: inline-block;
+  transition: transform 0.3s ease, opacity 0.3s ease;
+}
+
+.buymeacoffee-link:hover {
+  transform: scale(1.05);
+  opacity: 0.8;
+}
+
+.buymeacoffee-logo {
+  height: 35px;
+  width: auto;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 /* Language dropdown styling */
