@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Seconds",
   "placeholder_ground": "Ground Level",
   "language": "Мова",
+  "map_theme": "Тема карти",
   "terrain": "Рельєф",
   "interior": "Генерація інтер'єру",
   "roof": "Генерація даху",

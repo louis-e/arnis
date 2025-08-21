@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Másodpercek",
   "placeholder_ground": "Földszint",
   "language": "Nyelv",
+  "map_theme": "Térkép téma",
   "terrain": "Terep",
   "interior": "Belső generálás",
   "roof": "Tető generálás",

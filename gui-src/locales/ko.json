@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Seconds",
   "placeholder_ground": "Ground Level",
   "language": "언어",
+  "map_theme": "지도 테마",
   "terrain": "지형",
   "interior": "내부 생성",
   "roof": "지붕 생성",

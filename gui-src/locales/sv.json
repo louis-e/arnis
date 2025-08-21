@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Seconds",
   "placeholder_ground": "Ground Level",
   "language": "Språk",
+  "map_theme": "Karttema",
   "terrain": "Terräng",
   "interior": "Interiörgenerering",
   "roof": "Takgenerering",

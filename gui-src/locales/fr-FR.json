@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Secondes",
   "placeholder_ground": "Niveau du sol",
   "language": "Langue",
+  "map_theme": "Thème de carte",
   "terrain": "Terrain",
   "interior": "Génération d'intérieur",
   "roof": "Génération de toit",

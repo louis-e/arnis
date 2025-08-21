@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Sekundės",
   "placeholder_ground": "Žemės lygis",
   "language": "Kalba",
+  "map_theme": "Žemėlapio tema",
   "terrain": "Reljefas",
   "interior": "Vidaus generavimas",
   "roof": "Stogo generavimas",
