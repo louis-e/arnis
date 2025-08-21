@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Seconds",
   "placeholder_ground": "Ground Level",
   "language": "Idioma",
+  "map_theme": "Tema del mapa",
   "terrain": "Terreno",
   "interior": "Generación de interiores",
   "roof": "Generación de techos",

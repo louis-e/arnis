@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Sekuntia",
   "placeholder_ground": "Maataso",
   "language": "Kieli",
+  "map_theme": "Karttateema",
   "terrain": "Maasto",
   "interior": "Sisätilan luonti",
   "roof": "Katon luonti",

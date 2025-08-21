@@ -36,6 +36,7 @@
   "placeholder_floodfill": "Секунды",
   "placeholder_ground": "Уровень земли",
   "language": "Язык",
+  "map_theme": "Тема карты",
   "terrain": "Рельеф",
   "interior": "Генерация интерьера",
   "roof": "Генерация крыш",
