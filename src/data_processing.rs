@@ -217,6 +217,28 @@ pub fn generate_world(
     // Save world
     editor.save();
 
+    // Update player spawn Y coordinate based on terrain height after generation
+    if let Some(spawn_coords) = &args.spawn_point {
+        use crate::gui::update_player_spawn_y_after_generation;
+        let bbox_string = format!(
+            "{},{},{},{}",
+            args.bbox.min().lng(),
+            args.bbox.min().lat(),
+            args.bbox.max().lng(),
+            args.bbox.max().lat()
+        );
+
+        if let Err(e) = update_player_spawn_y_after_generation(
+            &args.path,
+            Some(*spawn_coords),
+            bbox_string,
+            args.scale,
+            &ground,
+        ) {
+            eprintln!("Warning: Failed to update spawn point Y coordinate: {e}");
+        }
+    }
+
     emit_gui_progress_update(100.0, "Done! World generation completed.");
     println!("{}", "Done! World generation completed.".green().bold());
     Ok(())

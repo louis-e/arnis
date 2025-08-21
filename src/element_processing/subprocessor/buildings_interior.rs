@@ -169,6 +169,7 @@ pub fn generate_building_interior(
     floor_levels: &[i32],
     args: &crate::args::Args,
     element: &crate::osm_parser::ProcessedWay,
+    abs_terrain_offset: i32,
 ) {
     // Skip interior generation for very small buildings
     let width = max_x - min_x + 1;
@@ -252,7 +253,14 @@ pub fn generate_building_interior(
 
                 // Place first layer blocks
                 if let Some(block) = get_interior_block(cell1, false, wall_block) {
-                    editor.set_block_absolute(block, x, floor_y + y_offset, z, None, None);
+                    editor.set_block_absolute(
+                        block,
+                        x,
+                        floor_y + y_offset + abs_terrain_offset,
+                        z,
+                        None,
+                        None,
+                    );
 
                     // If this is a wall in layer 1, add to wall positions to extend later
                     if cell1 == 'W' {
@@ -266,7 +274,14 @@ pub fn generate_building_interior(
 
                 // Place second layer blocks
                 if let Some(block) = get_interior_block(cell2, true, wall_block) {
-                    editor.set_block_absolute(block, x, floor_y + y_offset + 1, z, None, None);
+                    editor.set_block_absolute(
+                        block,
+                        x,
+                        floor_y + y_offset + abs_terrain_offset + 1,
+                        z,
+                        None,
+                        None,
+                    );
                 }
             }
         }
@@ -274,14 +289,14 @@ pub fn generate_building_interior(
         // Extend walls all the way to the next floor ceiling or roof
         for (x, z) in &wall_positions {
             for y in (floor_y + y_offset + 2)..=current_floor_ceiling {
-                editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+                editor.set_block_absolute(wall_block, *x, y + abs_terrain_offset, *z, None, None);
             }
         }
 
         // Add wall blocks above doors all the way to the ceiling/next floor
         for (x, z) in &door_positions {
             for y in (floor_y + y_offset + 2)..=current_floor_ceiling {
-                editor.set_block_absolute(wall_block, *x, y, *z, None, None);
+                editor.set_block_absolute(wall_block, *x, y + abs_terrain_offset, *z, None, None);
             }
         }
     }
