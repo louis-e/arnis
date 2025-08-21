@@ -218,6 +218,7 @@ pub fn generate_world(
     editor.save();
 
     // Update player spawn Y coordinate based on terrain height after generation
+    #[cfg(feature = "gui")]
     if let Some(spawn_coords) = &args.spawn_point {
         use crate::gui::update_player_spawn_y_after_generation;
         let bbox_string = format!(
