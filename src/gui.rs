@@ -1,7 +1,8 @@
 use crate::args::Args;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::coordinate_system::cartesian::XZPoint;
 use crate::data_processing;
-use crate::ground;
+use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
 use crate::progress;
@@ -516,6 +517,127 @@ fn update_player_position(
     Ok(())
 }
 
+// Function to update player spawn Y coordinate based on terrain height after generation
+pub fn update_player_spawn_y_after_generation(
+    world_path: &str,
+    spawn_point: Option<(f64, f64)>,
+    bbox_text: String,
+    scale: f64,
+    ground: &Ground,
+) -> Result<(), String> {
+    use crate::coordinate_system::transformation::CoordTransformer;
+
+    let Some((_lat, _lng)) = spawn_point else {
+        return Ok(()); // No spawn point selected, exit early
+    };
+
+    // Read the current level.dat file to get existing spawn coordinates
+    let level_path = PathBuf::from(world_path).join("level.dat");
+    if !level_path.exists() {
+        return Err(format!("Level.dat not found at {level_path:?}"));
+    }
+
+    // Read the level.dat file
+    let level_data = match std::fs::read(&level_path) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to read level.dat: {e}")),
+    };
+
+    // Decompress and parse the NBT data
+    let mut decoder = GzDecoder::new(level_data.as_slice());
+    let mut decompressed_data = Vec::new();
+    if let Err(e) = decoder.read_to_end(&mut decompressed_data) {
+        return Err(format!("Failed to decompress level.dat: {e}"));
+    }
+
+    let mut nbt_data = match fastnbt::from_bytes::<Value>(&decompressed_data) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to parse level.dat NBT data: {e}")),
+    };
+
+    // Get existing spawn coordinates and calculate new Y based on terrain
+    let (existing_spawn_x, existing_spawn_z) = if let Value::Compound(ref root) = nbt_data {
+        if let Some(Value::Compound(ref data)) = root.get("Data") {
+            let spawn_x = data.get("SpawnX").and_then(|v| {
+                if let Value::Int(x) = v { Some(*x) } else { None }
+            });
+            let spawn_z = data.get("SpawnZ").and_then(|v| {
+                if let Value::Int(z) = v { Some(*z) } else { None }
+            });
+
+            match (spawn_x, spawn_z) {
+                (Some(x), Some(z)) => (x, z),
+                _ => {
+                    return Err("Spawn coordinates not found in level.dat".to_string());
+                }
+            }
+        } else {
+            return Err("Invalid level.dat structure: no Data compound".to_string());
+        }
+    } else {
+        return Err("Invalid level.dat structure: root is not a compound".to_string());
+    };
+
+    // Calculate terrain-based Y coordinate
+    let spawn_y = if ground.elevation_enabled {
+        // Parse coordinates for terrain lookup
+        let llbbox = LLBBox::from_str(&bbox_text)
+            .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{e}"))?;
+        let (_, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale)
+            .map_err(|e| format!("Failed to build transformation:\n{e}"))?;
+
+        // Calculate relative coordinates for ground system
+        let relative_x = existing_spawn_x - xzbbox.min_x();
+        let relative_z = existing_spawn_z - xzbbox.min_z();
+        let terrain_point = XZPoint::new(relative_x, relative_z);
+        
+        ground.level(terrain_point) + 2
+    } else {
+        -61 // Default Y if no terrain
+    };
+
+    // Update player position and world spawn point
+    if let Value::Compound(ref mut root) = nbt_data {
+        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
+            // Only update the Y coordinate, keep existing X and Z
+            data.insert("SpawnY".to_string(), Value::Int(spawn_y as i32));
+
+            // Update player position - only Y coordinate
+            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+                    // Keep existing X and Z, only update Y
+                    if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
+                        *pos_y = spawn_y as f64;
+                    }
+                }
+            }
+        }
+    }
+
+    // Serialize and save the updated level.dat
+    let serialized_data = match fastnbt::to_bytes(&nbt_data) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to serialize updated level.dat: {e}")),
+    };
+
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    if let Err(e) = encoder.write_all(&serialized_data) {
+        return Err(format!("Failed to compress updated level.dat: {e}"));
+    }
+
+    let compressed_data = match encoder.finish() {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to finalize compression for level.dat: {e}")),
+    };
+
+    // Write the updated level.dat file
+    if let Err(e) = std::fs::write(level_path, compressed_data) {
+        return Err(format!("Failed to write updated level.dat: {e}"));
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 fn gui_get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
@@ -626,6 +748,7 @@ fn gui_start_generation(
                 fillground: fillground_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
+                spawn_point,
             };
 
             // Run data fetch and world generation
