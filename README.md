@@ -51,6 +51,8 @@ After your pull request was merged, I will take care of regularly creating updat
 
 ## :newspaper: Academic & Press Recognition
 
+<img src="https://github.com/louis-e/arnis/blob/main/gitassets/recognition.png?raw=true" width="100%" alt="Banner">
+
 Arnis has been recognized in various academic and press publications after gaining a lot of attention in December 2024.
 
 [Floodcraft: Game-based Interactive Learning Environment using Minecraft for Flood Mitigation and Preparedness for K-12 Education](https://www.researchgate.net/publication/384644535_Floodcraft_Game-based_Interactive_Learning_Environment_using_Minecraft_for_Flood_Mitigation_and_Preparedness_for_K-12_Education)
