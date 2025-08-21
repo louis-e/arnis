@@ -461,14 +461,92 @@ $(document).ready(function () {
     $('input[type="textarea"]').on('click', function (evt) { this.select() });
     $("#projection").val(currentproj);
 
-    // Initialize map with OpenStreetMap tiles
+    // Initialize map
     map = L.map('map').setView([50.114768, 8.687322], 4);
 
-    // Add OpenStreetMap tile layer (free to use with attribution)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; Map data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-        maxZoom: 19
-    }).addTo(map);
+    // Define available tile themes
+    var tileThemes = {
+        'osm': {
+            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            options: {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            }
+        },
+        'esri-imagery': {
+            url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            options: {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+                maxZoom: 18
+            }
+        },
+        'opentopomap': {
+            url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+            options: {
+                attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
+                maxZoom: 17
+            }
+        },
+        'stadia-bright': {
+            url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}.{ext}',
+            options: {
+                minZoom: 0,
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                ext: 'png'
+            }
+        },
+        'stadia-dark': {
+            url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}.{ext}',
+            options: {
+                minZoom: 0,
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                ext: 'png'
+            }
+        }
+    };
+
+    // Global variable to store current tile layer
+    var currentTileLayer = null;
+
+    // Function to change tile theme
+    function changeTileTheme(themeKey) {
+        // Remove current tile layer if it exists
+        if (currentTileLayer) {
+            map.removeLayer(currentTileLayer);
+        }
+
+        // Get the theme configuration
+        var theme = tileThemes[themeKey];
+        if (theme) {
+            // Create and add new tile layer
+            currentTileLayer = L.tileLayer(theme.url, theme.options);
+            currentTileLayer.addTo(map);
+
+            // Save preference to localStorage
+            localStorage.setItem('selectedTileTheme', themeKey);
+        }
+    }
+
+    // Load saved theme or default to OSM
+    var savedTheme = localStorage.getItem('selectedTileTheme') || 'osm';
+    changeTileTheme(savedTheme);
+
+    // Listen for theme changes from parent window (settings modal)
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'changeTileTheme') {
+            changeTileTheme(event.data.theme);
+        }
+    });
+
+    // Set the dropdown value in parent window if it exists
+    if (window.parent && window.parent.document) {
+        var dropdown = window.parent.document.getElementById('tile-theme-select');
+        if (dropdown) {
+            dropdown.value = savedTheme;
+        }
+    }
 
     rsidebar = L.control.sidebar('rsidebar', {
         position: 'right',

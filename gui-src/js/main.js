@@ -97,6 +97,7 @@ async function applyLocalization(localization) {
     "label[data-localize='interior']": "interior",
     "label[data-localize='roof']": "roof",
     "label[data-localize='fillground']": "fillground",
+    "label[data-localize='map_theme']": "map_theme",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -240,7 +241,7 @@ function initSettings() {
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
   
-  // Check for saved language preference first (same logic as getLocalization)
+  // Check for saved language preference first
   const savedLanguage = localStorage.getItem('arnis-language');
   let languageToSet = 'en'; // Default to English
   
@@ -274,6 +275,30 @@ function initSettings() {
     // Reload localization with the new language
     const localization = await fetchLanguage(selectedLanguage);
     await applyLocalization(localization);
+  });
+
+  // Tile theme selector
+  const tileThemeSelect = document.getElementById("tile-theme-select");
+
+  // Load saved tile theme preference
+  const savedTileTheme = localStorage.getItem('selectedTileTheme') || 'osm';
+  tileThemeSelect.value = savedTileTheme;
+
+  // Handle tile theme change
+  tileThemeSelect.addEventListener("change", () => {
+    const selectedTheme = tileThemeSelect.value;
+
+    // Store the selected theme in localStorage for persistence
+    localStorage.setItem('selectedTileTheme', selectedTheme);
+
+    // Send message to map iframe to change tile theme
+    const mapIframe = document.querySelector('iframe[src="maps.html"]');
+    if (mapIframe && mapIframe.contentWindow) {
+      mapIframe.contentWindow.postMessage({
+        type: 'changeTileTheme',
+        theme: selectedTheme
+      }, '*');
+    }
   });
 
 
