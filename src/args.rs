@@ -39,10 +39,6 @@ pub struct Args {
     #[arg(long)]
     pub terrain: bool,
 
-    /// Legacy Mapbox access token parameter (no longer used - AWS Terrain Tiles are free)
-    #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
-    pub mapbox_access_token: Option<String>,
-
     /// Enable interior generation (optional)
     #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
     pub interior: bool,
