@@ -17,11 +17,11 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary_name: arnis
             asset_name: arnis-linux
-          - os: macos-latest
+          - os: macos-13  # Intel runner for x86_64 builds
             target: x86_64-apple-darwin
             binary_name: arnis
             asset_name: arnis-mac-intel
-          - os: macos-latest
+          - os: macos-latest  # ARM64 runner for ARM64 builds
             target: aarch64-apple-darwin
             binary_name: arnis
             asset_name: arnis-mac-arm64
@@ -99,7 +99,7 @@ jobs:
     - name: Download macOS Intel build
       uses: actions/download-artifact@v4
       with:
-        name: macos-latest-x86_64-apple-darwin-build
+        name: macos-13-x86_64-apple-darwin-build
         path: ./intel
 
     - name: Download macOS ARM64 build
