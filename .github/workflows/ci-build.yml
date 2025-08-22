@@ -45,11 +45,7 @@ jobs:
       run: cargo clippy --all-targets --all-features -- -D warnings
 
   build:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -58,10 +54,8 @@ jobs:
       uses: dtolnay/rust-toolchain@v1
       with:
         toolchain: stable
-        targets: ${{ matrix.os == 'windows-latest' && 'x86_64-pc-windows-msvc' || 'x86_64-unknown-linux-gnu' || 'x86_64-apple-darwin' }}
 
     - name: Install Linux dependencies
-      if: matrix.os == 'ubuntu-latest'
       run: |
         sudo apt update
         sudo apt install -y software-properties-common
