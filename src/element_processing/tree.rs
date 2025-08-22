@@ -64,12 +64,13 @@ const OAK_LEAVES_FILL: [(Coord, Coord); 5] = [
     ((0, 9, 0), (0, 10, 0)),
 ];
 
-const SPRUCE_LEAVES_FILL: [(Coord, Coord); 5] = [
+const SPRUCE_LEAVES_FILL: [(Coord, Coord); 6] = [
     ((-1, 3, 0), (-1, 10, 0)),
     ((0, 3, -1), (0, 10, -1)),
     ((1, 3, 0), (1, 10, 0)),
     ((0, 3, -1), (0, 10, -1)),
     ((0, 3, 1), (0, 10, 1)),
+    ((0, 11, 0), (0, 11, 0)),
 ];
 
 const BIRCH_LEAVES_FILL: [(Coord, Coord); 5] = [

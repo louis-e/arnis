@@ -7,8 +7,8 @@ pub struct LLPoint {
 
 impl LLPoint {
     pub fn new(lat: f64, lng: f64) -> Result<Self, String> {
-        let lat_in_range = (-90.0..=90.0).contains(&lat) && (-90.0..=90.0).contains(&lat);
-        let lng_in_range = (-180.0..=180.0).contains(&lng) && (-180.0..=180.0).contains(&lng);
+        let lat_in_range = (-90.0..=90.0).contains(&lat);
+        let lng_in_range = (-180.0..=180.0).contains(&lng);
 
         if !lat_in_range {
             return Err(format!("Latitude {lat} not in range -90.0..=90.0"));

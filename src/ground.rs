@@ -22,13 +22,8 @@ impl Ground {
         }
     }
 
-    pub fn new_enabled(
-        bbox: &LLBBox,
-        scale: f64,
-        ground_level: i32,
-        mapbox_access_token: &Option<String>,
-    ) -> Self {
-        let elevation_data = fetch_elevation_data(bbox, scale, ground_level, mapbox_access_token)
+    pub fn new_enabled(bbox: &LLBBox, scale: f64, ground_level: i32) -> Self {
+        let elevation_data = fetch_elevation_data(bbox, scale, ground_level)
             .expect("Failed to fetch elevation data");
         Self {
             elevation_enabled: true,
@@ -137,12 +132,7 @@ pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
         println!("{} Fetching elevation...", "[3/7]".bold());
         emit_gui_progress_update(15.0, "Fetching elevation...");
-        let ground = Ground::new_enabled(
-            &args.bbox,
-            args.scale,
-            args.ground_level,
-            &args.mapbox_access_token,
-        );
+        let ground = Ground::new_enabled(&args.bbox, args.scale, args.ground_level);
         if args.debug {
             ground.save_debug_image("elevation_debug");
         }

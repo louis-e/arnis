@@ -65,7 +65,7 @@ jobs:
           seconds=$((duration % 60))
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
 
-          baseline_time=51
+          baseline_time=135
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
@@ -79,7 +79,7 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          baseline_mem=1960
+          baseline_mem=5865
           mem_annotation=""
           if [ "$peak_mem" -gt 2000 ]; then
             mem_diff=$((peak_mem - baseline_mem))

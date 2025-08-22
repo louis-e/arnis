@@ -48,7 +48,6 @@ pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
     ground_level: i32,
-    _mapbox_access_token: &Option<String>, // Kept for API compatibility, not used with AWS
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
 
