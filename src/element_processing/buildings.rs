@@ -98,8 +98,7 @@ pub fn generate_buildings(
         .map(|s| s.as_str())
         .unwrap_or("yes");
 
-    let wall_block: Block = if element.tags.get("historic") == Some(&"castle".to_string())
-    {
+    let wall_block: Block = if element.tags.get("historic") == Some(&"castle".to_string()) {
         // Historic forts and castles should use stone/brick materials
         get_castle_wall_block()
     } else {

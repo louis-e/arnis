@@ -193,9 +193,9 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                         // Enhanced parking space markings
                         if amenity_type == "parking" {
                             // Create defined parking spaces with realistic layout
-                            let space_width = 4;  // Width of each parking space
+                            let space_width = 4; // Width of each parking space
                             let space_length = 6; // Length of each parking space
-                            let lane_width = 5;   // Width of driving lanes
+                            let lane_width = 5; // Width of driving lanes
 
                             // Calculate which "zone" this coordinate falls into
                             let zone_x = x / space_width;
@@ -237,7 +237,8 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                                     Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
                                     None,
                                 );
-                            } else if local_z > space_length && local_z < space_length + lane_width {
+                            } else if local_z > space_length && local_z < space_length + lane_width
+                            {
                                 // Driving lane - use darker concrete
                                 editor.set_block(
                                     BLACK_CONCRETE,
