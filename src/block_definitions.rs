@@ -985,3 +985,22 @@ pub fn get_fallback_building_block() -> Block {
     ];
     fallback_options[rng.gen_range(0..fallback_options.len())]
 }
+
+// Function to get a random castle wall block
+pub fn get_castle_wall_block() -> Block {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+
+    let castle_wall_options = [
+        STONE_BRICKS,
+        CHISELED_STONE_BRICKS,
+        CRACKED_STONE_BRICKS,
+        COBBLESTONE,
+        MOSSY_COBBLESTONE,
+        DEEPSLATE_BRICKS,
+        POLISHED_ANDESITE,
+        ANDESITE,
+        SMOOTH_STONE,
+    ];
+    castle_wall_options[rng.gen_range(0..castle_wall_options.len())]
+}
