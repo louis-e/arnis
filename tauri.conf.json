@@ -16,7 +16,8 @@
         "resizable": false,
         "transparent": true,
         "center": true,
-        "theme": "Dark"
+        "theme": "Dark",
+        "additionalBrowserArgs": "--disable-features=VizDisplayCompositor"
       }
     ],
     "security": {
