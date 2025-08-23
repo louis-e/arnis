@@ -360,24 +360,29 @@ button:hover {
   width: 80% !important;
 }
 
-/* Buy Me a Coffee styling */
+/* Buy Me a Coffee and Discord styling */
 .buymeacoffee-row {
   justify-content: center;
+  align-items: center;
+  gap: 15px;
   margin-top: 10px;
   margin-bottom: -10px;
 }
 
-.buymeacoffee-link {
+.buymeacoffee-link,
+.discord-link {
   display: inline-block;
   transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
-.buymeacoffee-link:hover {
+.buymeacoffee-link:hover,
+.discord-link:hover {
   transform: scale(1.05);
   opacity: 0.8;
 }
 
-.buymeacoffee-logo {
+.buymeacoffee-logo,
+.discord-logo {
   height: 35px;
   width: auto;
   border-radius: 8px;
