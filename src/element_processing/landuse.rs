@@ -85,7 +85,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         }
                     } else if random_choice < 33 {
                         Tree::create(editor, (x, 1, z));
-                    } else if random_choice < 3 {
+                    } else if random_choice < 35 {
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                     }
                 }
@@ -216,7 +216,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     match rng.gen_range(0..200) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
-                        1..=4 => editor.set_block(GRASS, x, 1, z, None, None),
+                        1..=17 => editor.set_block(GRASS, x, 1, z, None, None),
                         _ => {}
                     }
                 }
