@@ -7,7 +7,7 @@ use std::time::Duration;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
-    /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
+    /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng) (required)
     #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
     pub bbox: LLBBox,
 
