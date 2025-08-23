@@ -1001,6 +1001,7 @@ pub fn get_castle_wall_block() -> Block {
         POLISHED_ANDESITE,
         ANDESITE,
         SMOOTH_STONE,
+        BRICK,
     ];
     castle_wall_options[rng.gen_range(0..castle_wall_options.len())]
 }
