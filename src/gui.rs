@@ -69,11 +69,20 @@ pub fn run_gui() {
         std::process::exit(1);
     }));
 
-    // Workaround WebKit2GTK issue with NVIDIA drivers (likely explicit sync related?)
-    // Source: https://github.com/tauri-apps/tauri/issues/10702 (TODO: Remove this later)
+    // Workaround WebKit2GTK issue with NVIDIA drivers and graphics issues
+    // Source: https://github.com/tauri-apps/tauri/issues/10702
     #[cfg(target_os = "linux")]
     unsafe {
+        // Disable problematic GPU features that cause map loading issues
         env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        
+        // Force software rendering for better compatibility
+        env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+        env::set_var("GALLIUM_DRIVER", "softpipe");
+        
+        // Note: Removed sandbox disabling for security reasons
+        // Note: Removed Qt WebEngine flags as they don't apply to Tauri
     }
 
     tauri::Builder::default()
