@@ -1,31 +1,25 @@
-<p align="center">
-  <img width="456" height="125" src="https://github.com/louis-e/arnis/blob/main/gui-src/images/logo.png?raw=true">
-</p>
+<img src="https://github.com/louis-e/arnis/blob/main/gitassets/banner.png?raw=true" width="100%" alt="Banner">
 
-# Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases) [![Discord](https://img.shields.io/discord/1326192999738249267?label=Discord&color=%237289da)](https://discord.gg/mA2g69Fhxq)
+# Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases) [![Download here](https://img.shields.io/badge/Download-here-green)](https://github.com/louis-e/arnis/releases) [![Discord](https://img.shields.io/discord/1326192999738249267?label=Discord&color=%237289da)](https://discord.gg/mA2g69Fhxq)
 
-Arnis creates complex and accurate Minecraft Java Edition worlds that reflect real-world geography and architecture using OpenStreetMap.
+Arnis creates complex and accurate Minecraft Java Edition worlds that reflect real-world geography, topography, and architecture.
 
-###### ⚠️ This Github page is the official project website. Do not download Arnis from any other website.
+This free and open source project is designed to handle large-scale geographic data from the real world and generate detailed Minecraft worlds. The algorithm processes geospatial data from OpenStreetMap as well as elevation data to create an accurate Minecraft representation of terrain and architecture.
+Generate your hometown, big cities, and natural landscapes with ease!
 
-## :desktop_computer: Example
-![Minecraft Preview](https://github.com/louis-e/arnis/blob/main/gitassets/mc.gif?raw=true)
-
-Arnis is designed to handle large-scale data and generate rich, immersive environments that bring real-world cities, landmarks, and natural features into Minecraft. Whether you're looking to replicate your hometown, explore urban environments, or simply build something unique and realistic, Arnis generates your vision.
+![Minecraft Preview](https://raw.githubusercontent.com/louis-e/arnis/refs/heads/main/gitassets/preview.jpg)
+<i>This Github page is the official project website. Do not download Arnis from any other website.</i>
 
 ## :keyboard: Usage
 <img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
- 
-Choose your area using the rectangle tool and select your Minecraft world - then simply click on 'Start Generation'!
 
-> The world will always be generated starting from the Minecraft coordinates 0 0 0 (/tp 0 0 0). This is the top left of your selected area.
-Minecraft version 1.16.5 and below is currently not supported, but we are working on it! For the best results, use Minecraft version 1.21.4 or above.
-If you choose to select an own world, be aware that Arnis will overwrite certain areas.
-
-[[Arch Linux AUR package](https://aur.archlinux.org/packages/arnis)]
+Choose your area on the map using the rectangle tool and select your Minecraft world - then simply click on <i>Start Generation</i>!
+Additionally, you can customize various generation settings, such as world scale, spawn point, or building interior generation.
 
 ## 📚 Documentation
+
+<img src="https://github.com/louis-e/arnis/blob/main/gitassets/documentation.png?raw=true" width="100%" alt="Banner">
 
 Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/arnis/wiki/), covering topics such as technical explanations, FAQs, contribution guidelines and roadmaps.
 
@@ -40,10 +34,8 @@ Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/
 #### How to contribute
 This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. Please respect the above mentioned key objectives. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
 
-Build and run it using: ```cargo run --release --no-default-features -- --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lat,min_lng,max_lat,max_lng"```<br>
-For the GUI: ```cargo run --release```<br>
-
-> You can use the parameter --debug to get a more detailed output of the processed values, which can be helpful for debugging and development.
+Command line Build: ```cargo run --no-default-features -- --terrain --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lng,min_lat,max_lng,max_lat"```<br>
+GUI Build: ```cargo run```<br>
 
 After your pull request was merged, I will take care of regularly creating update releases which will include your changes.
 
@@ -56,6 +48,20 @@ After your pull request was merged, I will take care of regularly creating updat
    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=louis-e/arnis&Date&type=Date" />
  </picture>
 </a>
+
+## :newspaper: Academic & Press Recognition
+
+<img src="https://github.com/louis-e/arnis/blob/main/gitassets/recognition.png?raw=true" width="100%" alt="Banner">
+
+Arnis has been recognized in various academic and press publications after gaining a lot of attention in December 2024.
+
+[Floodcraft: Game-based Interactive Learning Environment using Minecraft for Flood Mitigation and Preparedness for K-12 Education](https://www.researchgate.net/publication/384644535_Floodcraft_Game-based_Interactive_Learning_Environment_using_Minecraft_for_Flood_Mitigation_and_Preparedness_for_K-12_Education)
+
+[Hackaday: Bringing OpenStreetMap Data into Minecraft](https://hackaday.com/2024/12/30/bringing-openstreetmap-data-into-minecraft/)
+
+[TomsHardware: Minecraft Tool Lets You Create Scale Replicas of Real-World Locations](https://www.tomshardware.com/video-games/pc-gaming/minecraft-tool-lets-you-create-scale-replicas-of-real-world-locations-arnis-uses-geospatial-data-from-openstreetmap-to-generate-minecraft-maps)
+
+[XDA Developers: Hometown Minecraft Map: Arnis](https://www.xda-developers.com/hometown-minecraft-map-arnis/)
 
 ## :copyright: License Information
 Copyright (c) 2022-2025 Louis Erbkamm (louis-e)
