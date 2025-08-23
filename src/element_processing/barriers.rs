@@ -116,7 +116,7 @@ pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode
             editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
         }
         Some("stile" | "gate" | "swing_gate" | "lift_gate") => {
-            editor.set_block(
+            /*editor.set_block(
                 OAK_TRAPDOOR,
                 node.x,
                 1,
@@ -157,7 +157,7 @@ pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode
                     STONE_BRICK_SLAB,
                 ]),
                 None,
-            );
+            );*/
         }
         Some("block") => {
             editor.set_block(STONE, node.x, 1, node.z, None, None);
