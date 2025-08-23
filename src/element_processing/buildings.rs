@@ -98,14 +98,20 @@ pub fn generate_buildings(
         .map(|s| s.as_str())
         .unwrap_or("yes");
 
-    let wall_block: Block = element
-        .tags
-        .get("building:colour")
-        .and_then(|building_colour: &String| {
-            color_text_to_rgb_tuple(building_colour)
-                .map(|rgb: (u8, u8, u8)| get_building_wall_block_for_color(rgb))
-        })
-        .unwrap_or_else(get_fallback_building_block);
+    let wall_block: Block = if element.tags.get("historic") == Some(&"castle".to_string())
+    {
+        // Historic forts and castles should use stone/brick materials
+        get_castle_wall_block()
+    } else {
+        element
+            .tags
+            .get("building:colour")
+            .and_then(|building_colour: &String| {
+                color_text_to_rgb_tuple(building_colour)
+                    .map(|rgb: (u8, u8, u8)| get_building_wall_block_for_color(rgb))
+            })
+            .unwrap_or_else(get_fallback_building_block)
+    };
 
     let floor_block: Block = get_random_floor_block();
 
