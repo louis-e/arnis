@@ -76,11 +76,11 @@ pub fn run_gui() {
         // Disable problematic GPU features that cause map loading issues
         env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
         env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
-        
+
         // Force software rendering for better compatibility
         env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
         env::set_var("GALLIUM_DRIVER", "softpipe");
-        
+
         // Note: Removed sandbox disabling for security reasons
         // Note: Removed Qt WebEngine flags as they don't apply to Tauri
     }
