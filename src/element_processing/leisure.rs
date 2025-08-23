@@ -128,11 +128,13 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     match random_choice {
                         0..10 => {
                             // Swing set
-                            for y in 1..=4 {
+                            for y in 1..=3 {
                                 editor.set_block(OAK_FENCE, x - 1, y, z, None, None);
                                 editor.set_block(OAK_FENCE, x + 1, y, z, None, None);
                             }
-                            editor.set_block(OAK_FENCE, x, 4, z, None, None);
+                            editor.set_block(OAK_PLANKS, x - 1, 4, z, None, None);
+                            editor.set_block(OAK_SLAB, x, 4, z, None, None);
+                            editor.set_block(OAK_PLANKS, x + 1, 4, z, None, None);
                             editor.set_block(STONE_BLOCK_SLAB, x, 2, z, None, None);
                         }
                         10..20 => {

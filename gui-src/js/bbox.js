@@ -510,7 +510,7 @@ $(document).ready(function () {
     // Global variable to store current tile layer
     var currentTileLayer = null;
 
-    // Function to change tile theme
+    // Function to change tile theme with automatic HTTP fallback
     function changeTileTheme(themeKey) {
         // Remove current tile layer if it exists
         if (currentTileLayer) {
@@ -522,6 +522,31 @@ $(document).ready(function () {
         if (theme) {
             // Create and add new tile layer
             currentTileLayer = L.tileLayer(theme.url, theme.options);
+
+            // Add automatic HTTP fallback for HTTPS failures
+            var failureCount = 0;
+            currentTileLayer.on('tileerror', function(error) {
+                failureCount++;
+
+                // After a few failures, try HTTP fallback
+                if (failureCount >= 3 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
+                    console.log('HTTPS tile loading failed, attempting HTTP fallback for', themeKey);
+                    this._httpFallbackAttempted = true;
+
+                    // Create HTTP version of the URL
+                    var httpUrl = theme.url.replace('https://', 'http://');
+
+                    // Remove the failed HTTPS layer
+                    map.removeLayer(this);
+
+                    // Create new layer with HTTP URL
+                    var httpLayer = L.tileLayer(httpUrl, theme.options);
+                    httpLayer._httpFallbackAttempted = true;
+                    httpLayer.addTo(map);
+                    currentTileLayer = httpLayer;
+                }
+            });
+
             currentTileLayer.addTo(map);
 
             // Save preference to localStorage
