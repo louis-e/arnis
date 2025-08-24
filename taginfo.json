@@ -6,7 +6,6 @@
         "name": "Arnis",
         "description": "Generate real life cities in Minecraft. Creates complex and accurate Minecraft Java Edition worlds that reflect real-world geography, topography, and architecture.",
         "project_url": "https://github.com/louis-e/arnis",
-        "icon_url": "https://raw.githubusercontent.com/louis-e/arnis/main/icons/icon.png",
         "contact_name": "Louis Erbkamm",
         "contact_email": "info@louisdev.de"
     },
