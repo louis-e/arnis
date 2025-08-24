@@ -11,13 +11,13 @@ assignees: ''
 A clear and concise description of what the bug is and what you expected to happen.
 
 **Used bbox area**
-Please provide your input parameters so we can reproduce the issue. *(For example: 48.133444 11.569462 48.142609 11.584740)*
+Please provide your input parameters (BBOX) so we can reproduce the issue. *(For example: 48.133444 11.569462 48.142609 11.584740)*
 
 **Arnis and Minecraft version**
-Please tell us what version of Arnis and Minecraft you used.
+Please tell us what version of Arnis and Minecraft you used, as well as if you are on Windows, Linux or MacOS.
 
 **Screenshots**
 If applicable, add screenshots to help explain your problem.
 
 **Additional context**
-Add any other context about the problem here. If you used any more custom settings, please provide them here too. If you experienced any issue with the application itself like a crash, please provide the log file which can be found at C:\Users\USERNAME\AppData\Local\com.louisdev.arnis\logs
+Add any other context about the problem here. If you used any more custom settings, please provide them here too. Please provide the log file if possible as well, which can be found at C:\Users\USERNAME\AppData\Local\com.louisdev.arnis\logs
