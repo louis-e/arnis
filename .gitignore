@@ -2,7 +2,6 @@
 
 # Environment files
 .env
-.envrc
 /.direnv
 
 # Build artifacts
