@@ -7,7 +7,6 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 /// An underlying shape polygon of XZBBox enum.
 #[derive(Clone, Debug)]
-#[cfg(test)]
 pub struct XZBBoxPoly {
     /// XZPoint list of the polygon
     points: Vec<XZPoint>,
@@ -22,7 +21,6 @@ pub struct XZBBoxPoly {
     total_valid_blocks: u64,
 }
 
-#[cfg(test)]
 impl XZBBoxPoly {
     pub fn new(points: Vec<XZPoint>) -> Result<Self, String> {
         let len_ge_3 = points.len() >= 3;
@@ -113,49 +111,52 @@ impl XZBBoxPoly {
     }
 }
 
-#[cfg(test)]
 impl fmt::Display for XZBBoxPoly {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Poly()")
     }
 }
 
-// // below are associated +- operators
-// impl Add<XZVector> for XZBBoxPoly {
-//     type Output = XZBBoxPoly;
+// below are associated +- operators
+impl Add<XZVector> for XZBBoxPoly {
+    type Output = XZBBoxPoly;
 
-//     fn add(self, other: XZVector) -> Self {
-//         Self {
-//             point1: self.point1 + other,
-//             point2: self.point2 + other,
-//         }
-//     }
-// }
+    fn add(self, other: XZVector) -> Self {
+        Self {
+            points: self.points.iter().map(|p| *p + other).collect(),
+            mask: self.mask.clone(),
+            rect: self.rect + other,
+            total_valid_blocks: self.total_valid_blocks,
+        }
+    }
+}
 
-// impl AddAssign<XZVector> for XZBBoxPoly {
-//     fn add_assign(&mut self, other: XZVector) {
-//         self.point1 += other;
-//         self.point2 += other;
-//     }
-// }
+impl AddAssign<XZVector> for XZBBoxPoly {
+    fn add_assign(&mut self, other: XZVector) {
+        self.points.iter_mut().for_each(|p| *p += other);
+        self.rect += other;
+    }
+}
 
-// impl Sub<XZVector> for XZBBoxPoly {
-//     type Output = XZBBoxPoly;
+impl Sub<XZVector> for XZBBoxPoly {
+    type Output = XZBBoxPoly;
 
-//     fn sub(self, other: XZVector) -> Self {
-//         Self {
-//             point1: self.point1 - other,
-//             point2: self.point2 - other,
-//         }
-//     }
-// }
+    fn sub(self, other: XZVector) -> Self {
+        Self {
+            points: self.points.iter().map(|p| *p - other).collect(),
+            mask: self.mask.clone(),
+            rect: self.rect - other,
+            total_valid_blocks: self.total_valid_blocks,
+        }
+    }
+}
 
-// impl SubAssign<XZVector> for XZBBoxPoly {
-//     fn sub_assign(&mut self, other: XZVector) {
-//         self.point1 -= other;
-//         self.point2 -= other;
-//     }
-// }
+impl SubAssign<XZVector> for XZBBoxPoly {
+    fn sub_assign(&mut self, other: XZVector) {
+        self.points.iter_mut().for_each(|p| *p -= other);
+        self.rect -= other;
+    }
+}
 
 #[cfg(test)]
 mod test {

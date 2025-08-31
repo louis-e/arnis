@@ -1,3 +1,4 @@
+use super::polygon::XZBBoxPoly;
 use super::rectangle::XZBBoxRect;
 use crate::coordinate_system::cartesian::{XZPoint, XZVector};
 use std::fmt;
@@ -7,6 +8,7 @@ use std::ops::{Add, AddAssign, Sub, SubAssign};
 #[derive(Clone, Debug)]
 pub enum XZBBox {
     Rect(XZBBoxRect),
+    Poly(XZBBoxPoly),
 }
 
 impl XZBBox {
@@ -54,10 +56,16 @@ impl XZBBox {
         )?))
     }
 
+    /// Construct polygon shape bbox from the xz coordinate list
+    pub fn poly_from_xz_list(coords: Vec<XZPoint>) -> Result<Self, String> {
+        Ok(Self::Poly(XZBBoxPoly::new(coords)?))
+    }
+
     /// Check whether an XZPoint is covered
     pub fn contains(&self, xzpoint: &XZPoint) -> bool {
         match self {
             Self::Rect(r) => r.contains(xzpoint),
+            Self::Poly(r) => r.contains(xzpoint),
         }
     }
 
@@ -65,6 +73,7 @@ impl XZBBox {
     pub fn circumscribed_rect(&self) -> XZBBoxRect {
         match self {
             Self::Rect(r) => *r,
+            Self::Poly(r) => *r.circumscribed_rect(),
         }
     }
 
@@ -93,6 +102,7 @@ impl fmt::Display for XZBBox {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Rect(r) => write!(f, "XZBBox::{}", r),
+            Self::Poly(p) => write!(f, "XZBBox::{}", p),
         }
     }
 }
@@ -104,6 +114,7 @@ impl Add<XZVector> for XZBBox {
     fn add(self, other: XZVector) -> XZBBox {
         match self {
             Self::Rect(r) => Self::Rect(r + other),
+            Self::Poly(p) => Self::Poly(p + other),
         }
     }
 }
@@ -112,6 +123,7 @@ impl AddAssign<XZVector> for XZBBox {
     fn add_assign(&mut self, other: XZVector) {
         match self {
             Self::Rect(r) => *r += other,
+            Self::Poly(p) => *p += other,
         }
     }
 }
@@ -122,6 +134,7 @@ impl Sub<XZVector> for XZBBox {
     fn sub(self, other: XZVector) -> XZBBox {
         match self {
             Self::Rect(r) => Self::Rect(r - other),
+            Self::Poly(p) => Self::Poly(p - other),
         }
     }
 }
@@ -130,6 +143,7 @@ impl SubAssign<XZVector> for XZBBox {
     fn sub_assign(&mut self, other: XZVector) {
         match self {
             Self::Rect(r) => *r -= other,
+            Self::Poly(p) => *p -= other,
         }
     }
 }
@@ -202,5 +216,64 @@ mod test {
 
         assert!(XZBBox::rect_from_xz_lengths(i32::MAX as f64 + 10.0, -0.5).is_err());
         assert!(XZBBox::rect_from_xz_lengths(0.2, i32::MAX as f64 + 10.0).is_err());
+    }
+
+    #[test]
+    fn test_poly_valid_inputs() {
+        // normal case
+        let obj = XZBBox::poly_from_xz_list(vec![
+            XZPoint::new(0, 0),
+            XZPoint::new(2, 2),
+            XZPoint::new(0, 4),
+            XZPoint::new(-2, 2),
+        ]);
+        assert!(obj.is_ok());
+        let obj = obj.unwrap();
+        assert_eq!(obj.circumscribed_rect().total_blocks_x(), 5);
+        assert_eq!(obj.circumscribed_rect().total_blocks_z(), 5);
+        assert_eq!(obj.circumscribed_rect().total_blocks(), 5 * 5);
+        assert_eq!(obj.min_x(), -2);
+        assert_eq!(obj.max_x(), 2);
+        assert_eq!(obj.min_z(), 0);
+        assert_eq!(obj.max_z(), 4);
+        assert!(obj.contains(&XZPoint::new(0, 0)));
+        assert!(!obj.contains(&XZPoint::new(1, 0)));
+        assert!(obj.contains(&XZPoint::new(0, 1)));
+        assert!(obj.contains(&XZPoint::new(1, 1)));
+        assert!(!obj.contains(&XZPoint::new(2, 1)));
+        assert!(obj.contains(&XZPoint::new(0, 2)));
+        assert!(obj.contains(&XZPoint::new(1, 2)));
+        assert!(obj.contains(&XZPoint::new(2, 2)));
+        assert!(!obj.contains(&XZPoint::new(3, 2)));
+    }
+
+    #[test]
+    fn test_poly_ops() {
+        // normal case
+        let obj = XZBBox::poly_from_xz_list(vec![
+            XZPoint::new(0, 0),
+            XZPoint::new(2, 2),
+            XZPoint::new(0, 4),
+            XZPoint::new(-2, 2),
+        ]);
+        let obj = obj.unwrap();
+        let obj = obj + XZVector { dx: 1, dz: 2 };
+
+        assert_eq!(obj.circumscribed_rect().total_blocks_x(), 5);
+        assert_eq!(obj.circumscribed_rect().total_blocks_z(), 5);
+        assert_eq!(obj.circumscribed_rect().total_blocks(), 5 * 5);
+        assert_eq!(obj.min_x(), -1);
+        assert_eq!(obj.max_x(), 3);
+        assert_eq!(obj.min_z(), 2);
+        assert_eq!(obj.max_z(), 6);
+        assert!(obj.contains(&XZPoint::new(1, 2)));
+        assert!(!obj.contains(&XZPoint::new(2, 2)));
+        assert!(obj.contains(&XZPoint::new(1, 3)));
+        assert!(obj.contains(&XZPoint::new(2, 3)));
+        assert!(!obj.contains(&XZPoint::new(3, 3)));
+        assert!(obj.contains(&XZPoint::new(1, 4)));
+        assert!(obj.contains(&XZPoint::new(2, 4)));
+        assert!(obj.contains(&XZPoint::new(3, 4)));
+        assert!(!obj.contains(&XZPoint::new(4, 4)));
     }
 }
