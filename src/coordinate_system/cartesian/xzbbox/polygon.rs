@@ -11,7 +11,7 @@ pub struct XZBBoxPoly {
     /// XZPoint list of the polygon
     points: Vec<XZPoint>,
 
-    /// Mask on its circumscribed rect
+    /// Mask on its bounding rect
     mask: Array2<bool>,
 
     /// Curcumscribed rect
@@ -72,8 +72,8 @@ impl XZBBoxPoly {
         for i in 0..rect.total_blocks_x() as usize {
             for k in 0..rect.total_blocks_z() as usize {
                 let point = Point::new(
-                    (i as i32 + rect.point1().x) as f64,
-                    (k as i32 + rect.point1().z) as f64,
+                    (i as i32 + rect.min().x) as f64,
+                    (k as i32 + rect.min().z) as f64,
                 );
                 mask[(i, k)] = geopolygon.intersects(&point);
             }
@@ -96,7 +96,7 @@ impl XZBBoxPoly {
         })
     }
 
-    pub fn circumscribed_rect(&self) -> &XZBBoxRect {
+    pub fn bounding_rect(&self) -> &XZBBoxRect {
         &self.rect
     }
 
@@ -106,7 +106,7 @@ impl XZBBoxPoly {
             return false;
         }
 
-        let ikpoint = xzpoint.to_relative(self.rect.point1());
+        let ikpoint = xzpoint.to_relative(self.rect.min());
         self.mask[(ikpoint.x as usize, ikpoint.z as usize)]
     }
 }
@@ -176,10 +176,10 @@ mod test {
         assert!(obj.is_ok());
 
         let poly = obj.unwrap();
-        assert_eq!(poly.rect.point1().x, 0);
-        assert_eq!(poly.rect.point1().z, 0);
-        assert_eq!(poly.rect.point2().x, 1);
-        assert_eq!(poly.rect.point2().z, 1);
+        assert_eq!(poly.rect.min().x, 0);
+        assert_eq!(poly.rect.min().z, 0);
+        assert_eq!(poly.rect.max().x, 1);
+        assert_eq!(poly.rect.max().z, 1);
 
         assert_eq!(poly.mask, Array2::from_elem((2, 2), true));
         assert_eq!(poly.total_valid_blocks, 4);
@@ -195,10 +195,10 @@ mod test {
         assert!(obj.is_ok());
 
         let poly = obj.unwrap();
-        assert_eq!(poly.rect.point1().x, 0);
-        assert_eq!(poly.rect.point1().z, 0);
-        assert_eq!(poly.rect.point2().x, 2);
-        assert_eq!(poly.rect.point2().z, 2);
+        assert_eq!(poly.rect.min().x, 0);
+        assert_eq!(poly.rect.min().z, 0);
+        assert_eq!(poly.rect.max().x, 2);
+        assert_eq!(poly.rect.max().z, 2);
 
         assert_eq!(poly.mask, Array2::from_elem((3, 3), true));
         assert_eq!(poly.total_valid_blocks, 9);
@@ -214,10 +214,10 @@ mod test {
         assert!(obj.is_ok());
 
         let poly = obj.unwrap();
-        assert_eq!(poly.rect.point1().x, -10);
-        assert_eq!(poly.rect.point1().z, -5);
-        assert_eq!(poly.rect.point2().x, 7);
-        assert_eq!(poly.rect.point2().z, 3);
+        assert_eq!(poly.rect.min().x, -10);
+        assert_eq!(poly.rect.min().z, -5);
+        assert_eq!(poly.rect.max().x, 7);
+        assert_eq!(poly.rect.max().z, 3);
 
         assert_eq!(poly.mask, Array2::from_elem((18, 9), true));
         assert_eq!(poly.total_valid_blocks, 162);
@@ -233,10 +233,10 @@ mod test {
         assert!(obj.is_ok());
 
         let poly = obj.unwrap();
-        assert_eq!(poly.rect.point1().x, -1);
-        assert_eq!(poly.rect.point1().z, -1);
-        assert_eq!(poly.rect.point2().x, 1);
-        assert_eq!(poly.rect.point2().z, 1);
+        assert_eq!(poly.rect.min().x, -1);
+        assert_eq!(poly.rect.min().z, -1);
+        assert_eq!(poly.rect.max().x, 1);
+        assert_eq!(poly.rect.max().z, 1);
 
         #[rustfmt::skip]
         assert_eq!(
@@ -259,10 +259,10 @@ mod test {
         assert!(obj.is_ok());
 
         let poly = obj.unwrap();
-        assert_eq!(poly.rect.point1().x, -2);
-        assert_eq!(poly.rect.point1().z, -1);
-        assert_eq!(poly.rect.point2().x, 2);
-        assert_eq!(poly.rect.point2().z, 1);
+        assert_eq!(poly.rect.min().x, -2);
+        assert_eq!(poly.rect.min().z, -1);
+        assert_eq!(poly.rect.max().x, 2);
+        assert_eq!(poly.rect.max().z, 1);
 
         // edges exactly pass the center of (-1, 0) (1, 0)
         #[rustfmt::skip]

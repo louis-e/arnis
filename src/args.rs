@@ -1,4 +1,4 @@
-use crate::bbox::BBox;
+use crate::coordinate_system::geographic::LLBBox;
 use clap::Parser;
 use std::path::Path;
 use std::time::Duration;
@@ -7,9 +7,9 @@ use std::time::Duration;
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
-    /// Bounding box of the area (min_lng,min_lat,max_lng,max_lat) (required)
-    #[arg(long, allow_hyphen_values = true, value_parser = BBox::from_str)]
-    pub bbox: BBox,
+    /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng) (required)
+    #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
+    pub bbox: LLBBox,
 
     /// JSON file containing OSM data (optional)
     #[arg(long, group = "location")]
@@ -38,9 +38,19 @@ pub struct Args {
     /// Enable terrain (optional)
     #[arg(long)]
     pub terrain: bool,
+
+    /// Enable interior generation (optional)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
+    pub interior: bool,
+
+    /// Enable roof generation (optional)
+    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
+    pub roof: bool,
+
     /// Enable filling ground (optional)
     #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
     pub fillground: bool,
+
     /// Enable debug mode (optional)
     #[arg(long)]
     pub debug: bool,
@@ -48,19 +58,23 @@ pub struct Args {
     /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
+
+    /// Spawn point coordinates (lat, lng)
+    #[arg(skip)]
+    pub spawn_point: Option<(f64, f64)>,
 }
 
 fn validate_minecraft_world_path(path: &str) -> Result<String, String> {
     let mc_world_path = Path::new(path);
     if !mc_world_path.exists() {
-        return Err(format!("Path does not exist: {}", path));
+        return Err(format!("Path does not exist: {path}"));
     }
     if !mc_world_path.is_dir() {
-        return Err(format!("Path is not a directory: {}", path));
+        return Err(format!("Path is not a directory: {path}"));
     }
     let region = mc_world_path.join("region");
     if !region.is_dir() {
-        return Err(format!("No Minecraft world found at {:?}", region));
+        return Err(format!("No Minecraft world found at {region:?}"));
     }
     Ok(path.to_string())
 }

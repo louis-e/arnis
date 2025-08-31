@@ -1,4 +1,4 @@
-use crate::bbox::BBox;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 use colored::Colorize;
 use rand::seq::SliceRandom;
@@ -42,7 +42,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 );
                 emit_gui_error("Request timed out. Try selecting a smaller area.");
             } else {
-                eprintln!("{}", format!("Error! {:.52}", e).red().bold());
+                eprintln!("{}", format!("Error! {e:.52}").red().bold());
                 emit_gui_error(&format!("{:.52}", e.to_string()));
             }
             // Always propagate errors
@@ -55,7 +55,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
 fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("curl")
         .arg("-s") // Add silent mode to suppress output
-        .arg(format!("{}?data={}", url, query))
+        .arg(format!("{url}?data={query}"))
         .output()?;
 
     if !output.status.success() {
@@ -69,7 +69,7 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
 fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     let output: std::process::Output = Command::new("wget")
         .arg("-qO-") // Use `-qO-` to output the result directly to stdout
-        .arg(format!("{}?data={}", url, query))
+        .arg(format!("{url}?data={query}"))
         .output()?;
 
     if !output.status.success() {
@@ -80,7 +80,7 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
 }
 
 pub fn fetch_data_from_file(file: &str) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} Loading data from file...", "[1/6]".bold());
+    println!("{} Loading data from file...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Loading data from file...");
 
     let file: File = File::open(file)?;
@@ -91,12 +91,12 @@ pub fn fetch_data_from_file(file: &str) -> Result<Value, Box<dyn std::error::Err
 
 /// Main function to fetch data
 pub fn fetch_data_from_overpass(
-    bbox: BBox,
+    bbox: LLBBox,
     debug: bool,
     download_method: &str,
     save_file: Option<&str>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    println!("{} Fetching data...", "[1/6]".bold());
+    println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Fetching data...");
 
     // List of Overpass API servers
@@ -152,10 +152,7 @@ pub fn fetch_data_from_overpass(
         let mut attempt = 0;
         let max_attempts = 1;
         let response: String = loop {
-            println!(
-                "Downloading from {} with method {}...",
-                url, download_method
-            );
+            println!("Downloading from {url} with method {download_method}...");
             let result = match download_method {
                 "requests" => download_with_reqwest(url, &query),
                 "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
@@ -182,7 +179,7 @@ pub fn fetch_data_from_overpass(
         if let Some(save_file) = save_file {
             let mut file: File = File::create(save_file)?;
             file.write_all(response.as_bytes())?;
-            println!("API response saved to: {}", save_file);
+            println!("API response saved to: {save_file}");
         }
 
         let data: Value = serde_json::from_str(&response)?;
@@ -199,11 +196,8 @@ pub fn fetch_data_from_overpass(
                     emit_gui_error("Try using a smaller area.");
                 } else {
                     // Handle other Overpass API errors if present in the remark field
-                    eprintln!(
-                        "{}",
-                        format!("Error! API returned: {}", remark).red().bold()
-                    );
-                    emit_gui_error(&format!("API returned: {}", remark));
+                    eprintln!("{}", format!("Error! API returned: {remark}").red().bold());
+                    emit_gui_error(&format!("API returned: {remark}"));
                 }
             } else {
                 // General case for when there are no elements and no specific remark
@@ -217,7 +211,7 @@ pub fn fetch_data_from_overpass(
             }
 
             if debug {
-                println!("Additional debug information: {}", data);
+                println!("Additional debug information: {data}");
             }
 
             if !is_running_with_gui() {
@@ -237,10 +231,7 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
 
-    let url = format!(
-        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={}&lon={}&addressdetails=1",
-        lat, lon
-    );
+    let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
 
     let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
 
@@ -254,7 +245,14 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
         let fields = ["city", "town", "village", "county", "borough", "suburb"];
         for field in fields.iter() {
             if let Some(name) = address.get(*field).and_then(|v| v.as_str()) {
-                return Ok(Some(name.to_string()));
+                let mut name_str = name.to_string();
+
+                // Remove "City of " prefix
+                if name_str.to_lowercase().starts_with("city of ") {
+                    name_str = name_str[name_str.find(" of ").unwrap() + 4..].to_string();
+                }
+
+                return Ok(Some(name_str));
             }
         }
     }

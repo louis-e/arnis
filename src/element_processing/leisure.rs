@@ -94,7 +94,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     let random_choice: i32 = rng.gen_range(0..1000);
 
                     match random_choice {
-                        0..40 => {
+                        0..30 => {
                             // Flowers
                             let flower_choice = match random_choice {
                                 0..10 => RED_FLOWER,
@@ -104,11 +104,15 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                             };
                             editor.set_block(flower_choice, x, 1, z, None, None);
                         }
-                        40..80 => {
+                        30..90 => {
                             // Grass
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
-                        80..90 => {
+                        90..105 => {
+                            // Oak leaves
+                            editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                        }
+                        105..120 => {
                             // Tree
                             Tree::create(editor, (x, 1, z));
                         }
@@ -124,11 +128,13 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     match random_choice {
                         0..10 => {
                             // Swing set
-                            for y in 1..=4 {
+                            for y in 1..=3 {
                                 editor.set_block(OAK_FENCE, x - 1, y, z, None, None);
                                 editor.set_block(OAK_FENCE, x + 1, y, z, None, None);
                             }
-                            editor.set_block(OAK_FENCE, x, 4, z, None, None);
+                            editor.set_block(OAK_PLANKS, x - 1, 4, z, None, None);
+                            editor.set_block(OAK_SLAB, x, 4, z, None, None);
+                            editor.set_block(OAK_PLANKS, x + 1, 4, z, None, None);
                             editor.set_block(STONE_BLOCK_SLAB, x, 2, z, None, None);
                         }
                         10..20 => {

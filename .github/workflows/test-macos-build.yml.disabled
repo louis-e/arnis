@@ -1,0 +1,100 @@
+name: Test macOS Build
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/release.yml'
+      - 'src/**'
+      - 'Cargo.toml'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  test-macos-builds:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-apple-darwin
+            asset_name: arnis-mac-intel
+          - target: aarch64-apple-darwin
+            asset_name: arnis-mac-arm64
+
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@v1
+      with:
+        toolchain: stable
+        targets: ${{ matrix.target }}
+
+    - name: Install dependencies
+      run: cargo fetch
+
+    - name: Build for ${{ matrix.target }}
+      run: cargo build --release --target ${{ matrix.target }}
+
+    - name: Rename binary
+      run: mv target/${{ matrix.target }}/release/arnis target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+
+    - name: Check binary architecture
+      run: |
+        file target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+        lipo -info target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+
+    - name: Test binary execution (basic check)
+      run: |
+        chmod +x target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+        # Test that it at least shows help/version (don't run full generation)
+        target/${{ matrix.target }}/release/${{ matrix.asset_name }} --help || echo "Help command completed"
+
+    - name: Upload test artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-${{ matrix.target }}-build
+        path: target/${{ matrix.target }}/release/${{ matrix.asset_name }}
+
+  test-universal-binary:
+    needs: test-macos-builds
+    runs-on: macos-latest
+    steps:
+    - name: Download Intel build
+      uses: actions/download-artifact@v4
+      with:
+        name: test-x86_64-apple-darwin-build
+        path: ./intel
+
+    - name: Download ARM64 build  
+      uses: actions/download-artifact@v4
+      with:
+        name: test-aarch64-apple-darwin-build
+        path: ./arm64
+
+    - name: Create and test universal binary
+      run: |
+        lipo -create -output arnis-mac-universal ./intel/arnis-mac-intel ./arm64/arnis-mac-arm64
+        chmod +x arnis-mac-universal
+        
+        # Verify it's actually universal
+        echo "=== Universal Binary Info ==="
+        file arnis-mac-universal
+        lipo -info arnis-mac-universal
+        
+        # Test execution
+        echo "=== Testing Universal Binary ==="
+        ./arnis-mac-universal --help || echo "Universal binary help command completed"
+        
+        # Check file size (should be sum of both architectures roughly)
+        echo "=== File Sizes ==="
+        ls -lah ./intel/arnis-mac-intel ./arm64/arnis-mac-arm64 arnis-mac-universal
+
+    - name: Upload universal binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-universal-build
+        path: arnis-mac-universal

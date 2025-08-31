@@ -1,6 +1,6 @@
 {
   "select_location": "Hely kiválasztása",
-  "zoom_in_and_choose": "Közelíts és válaszd ki a területet a téglalap eszköz segítségével",
+  "zoom_in_and_choose": "Nagyíts és jelöld ki a területet a kijelölő eszközzel",
   "select_world": "Világ kijelölése",
   "choose_world": "Világ kiválasztása",
   "no_world_selected": "Nincs világ kiválasztva",
@@ -13,7 +13,7 @@
   "winter_mode": "Téli mód",
   "world_scale": "Világ nagysága",
   "custom_bounding_box": "Egyéni határoló keret",
-  "floodfill_timeout": "Floodfill Timeout (sec):",
+  "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Földszint",
   "choose_world_modal_title": "Világ kiválasztása",
   "select_existing_world": "Már létező világ kiválasztása",
@@ -34,5 +34,11 @@
   "license_and_credits": "Licenc és elismerés.",
   "placeholder_bbox": "Formátum: lat,lng,lat,lng",
   "placeholder_floodfill": "Másodpercek",
-  "placeholder_ground": "Földszint"
+  "placeholder_ground": "Földszint",
+  "language": "Nyelv",
+  "map_theme": "Térkép téma",
+  "terrain": "Terep",
+  "interior": "Belső generálás",
+  "roof": "Tető generálás",
+  "fillground": "Talaj feltöltése"
 }

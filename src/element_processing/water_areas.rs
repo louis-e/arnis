@@ -11,7 +11,11 @@ use crate::{
 pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelation) {
     let start_time = Instant::now();
 
-    if !element.tags.contains_key("water") {
+    // Check if this is a water relation (either with water tag or natural=water)
+    let is_water = element.tags.contains_key("water")
+        || element.tags.get("natural") == Some(&"water".to_string());
+
+    if !is_water {
         return;
     }
 
@@ -32,30 +36,70 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         }
     }
 
-    merge_loopy_loops(&mut outers);
-    if !verify_loopy_loops(&outers) {
-        return;
+    // Process each outer polygon individually
+    for (i, outer_nodes) in outers.iter().enumerate() {
+        let mut individual_outers = vec![outer_nodes.clone()];
+
+        merge_loopy_loops(&mut individual_outers);
+        if !verify_loopy_loops(&individual_outers) {
+            println!(
+                "Skipping invalid outer polygon {} for relation {}",
+                i + 1,
+                element.id
+            );
+            continue; // Skip this outer if it's not valid
+        }
+
+        merge_loopy_loops(&mut inners);
+        if !verify_loopy_loops(&inners) {
+            // If inners are invalid, process outer without inners
+            let empty_inners: Vec<Vec<ProcessedNode>> = vec![];
+            let mut temp_inners = empty_inners;
+            merge_loopy_loops(&mut temp_inners);
+
+            let (min_x, min_z) = editor.get_min_coords();
+            let (max_x, max_z) = editor.get_max_coords();
+            let individual_outers_xz: Vec<Vec<XZPoint>> = individual_outers
+                .iter()
+                .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
+                .collect();
+            let empty_inners_xz: Vec<Vec<XZPoint>> = vec![];
+
+            inverse_floodfill(
+                min_x,
+                min_z,
+                max_x,
+                max_z,
+                individual_outers_xz,
+                empty_inners_xz,
+                editor,
+                start_time,
+            );
+            continue;
+        }
+
+        let (min_x, min_z) = editor.get_min_coords();
+        let (max_x, max_z) = editor.get_max_coords();
+        let individual_outers_xz: Vec<Vec<XZPoint>> = individual_outers
+            .iter()
+            .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
+            .collect();
+        let inners_xz: Vec<Vec<XZPoint>> = inners
+            .iter()
+            .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
+            .collect();
+
+        inverse_floodfill(
+            min_x,
+            min_z,
+            max_x,
+            max_z,
+            individual_outers_xz,
+            inners_xz,
+            editor,
+            start_time,
+        );
     }
-
-    merge_loopy_loops(&mut inners);
-    if !verify_loopy_loops(&inners) {
-        return;
-    }
-
-    let (min_x, min_z) = editor.get_min_coords();
-    let (max_x, max_z) = editor.get_max_coords();
-    let outers: Vec<Vec<XZPoint>> = outers
-        .iter()
-        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
-        .collect();
-    let inners: Vec<Vec<XZPoint>> = inners
-        .iter()
-        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
-        .collect();
-
-    inverse_floodfill(
-        min_x, min_z, max_x, max_z, outers, inners, editor, start_time,
-    );
 }
 
 // Merges ways that share nodes into full loops
@@ -110,6 +154,14 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
                 y.extend(x.iter().skip(1).cloned());
 
                 merged.push(y);
+            } else if x.last().unwrap().id == y[0].id {
+                removed.push(i);
+                removed.push(j);
+
+                let mut x: Vec<ProcessedNode> = x.clone();
+                x.extend(y.iter().skip(1).cloned());
+
+                merged.push(x);
             }
         }
     }
@@ -207,13 +259,15 @@ fn inverse_floodfill_recursive(
         println!("Water area generation exceeded 25 seconds, continuing anyway");
     }
 
-    const ITERATIVE_THRES: i32 = 10_000;
+    const ITERATIVE_THRES: i64 = 10_000;
 
     if min.0 > max.0 || min.1 > max.1 {
         return;
     }
 
-    if (max.0 - min.0) * (max.1 - min.1) < ITERATIVE_THRES {
+    // Multiply as i64 to avoid overflow; in release builds where unchecked math is
+    // enabled, this could cause the rest of this code to end up in an infinite loop.
+    if ((max.0 - min.0) as i64) * ((max.1 - min.1) as i64) < ITERATIVE_THRES {
         inverse_floodfill_iterative(min, max, 0, outers, inners, editor);
         return;
     }

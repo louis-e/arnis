@@ -20,12 +20,13 @@ pub fn generate_world(
     let region_dir: String = format!("{}/region", args.path);
     let mut editor: WorldEditor = WorldEditor::new(&region_dir, &xzbbox);
 
-    println!("{} Processing data...", "[4/6]".bold());
+    println!("{} Processing data...", "[4/7]".bold());
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
-    emit_gui_progress_update(41.0, "Processing terrain...");
+    println!("{} Processing terrain...", "[5/7]".bold());
+    emit_gui_progress_update(25.0, "Processing terrain...");
 
     // Process data
     let elements_count: usize = elements.len();
@@ -35,8 +36,8 @@ pub fn generate_world(
         .unwrap()
         .progress_chars("█▓░"));
 
-    let progress_increment_prcs: f64 = 29.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 41.0;
+    let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
+    let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     for element in &elements {
@@ -84,6 +85,8 @@ pub fn generate_world(
                     highways::generate_aeroway(&mut editor, way, args);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way);
+                } else if way.tags.contains_key("man_made") {
+                    man_made::generate_man_made(&mut editor, element, args);
                 }
             }
             ProcessedElement::Node(node) => {
@@ -96,20 +99,34 @@ pub fn generate_world(
                 } else if node.tags.contains_key("amenity") {
                     amenities::generate_amenities(&mut editor, element, args);
                 } else if node.tags.contains_key("barrier") {
-                    barriers::generate_barriers(&mut editor, element);
+                    barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
                     highways::generate_highways(&mut editor, element, args);
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
+                } else if node.tags.contains_key("man_made") {
+                    man_made::generate_man_made_nodes(&mut editor, node);
                 }
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
                     buildings::generate_building_from_relation(&mut editor, rel, args);
-                } else if rel.tags.contains_key("water") {
+                } else if rel.tags.contains_key("water")
+                    || rel.tags.get("natural") == Some(&"water".to_string())
+                {
                     water_areas::generate_water_areas(&mut editor, rel);
+                } else if rel.tags.contains_key("natural") {
+                    natural::generate_natural_from_relation(&mut editor, rel, args);
+                } else if rel.tags.contains_key("landuse") {
+                    landuse::generate_landuse_from_relation(&mut editor, rel, args);
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
                     leisure::generate_leisure_from_relation(&mut editor, rel, args);
+                } else if rel.tags.contains_key("man_made") {
+                    man_made::generate_man_made(
+                        &mut editor,
+                        &ProcessedElement::Relation(rel.clone()),
+                        args,
+                    );
                 }
             }
         }
@@ -118,13 +135,13 @@ pub fn generate_world(
     process_pb.finish();
 
     // Generate ground layer
-    let total_blocks: u64 = xzbbox.circumscribed_rect().total_blocks();
+    let total_blocks: u64 = xzbbox.bounding_rect().total_blocks();
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 
     let mut block_counter: u64 = 0;
 
-    println!("{} Generating ground...", "[5/6]".bold());
+    println!("{} Generating ground...", "[6/7]".bold());
     emit_gui_progress_update(70.0, "Generating ground...");
 
     let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
@@ -199,6 +216,29 @@ pub fn generate_world(
 
     // Save world
     editor.save();
+
+    // Update player spawn Y coordinate based on terrain height after generation
+    #[cfg(feature = "gui")]
+    if let Some(spawn_coords) = &args.spawn_point {
+        use crate::gui::update_player_spawn_y_after_generation;
+        let bbox_string = format!(
+            "{},{},{},{}",
+            args.bbox.min().lng(),
+            args.bbox.min().lat(),
+            args.bbox.max().lng(),
+            args.bbox.max().lat()
+        );
+
+        if let Err(e) = update_player_spawn_y_after_generation(
+            &args.path,
+            Some(*spawn_coords),
+            bbox_string,
+            args.scale,
+            &ground,
+        ) {
+            eprintln!("Warning: Failed to update spawn point Y coordinate: {e}");
+        }
+    }
 
     emit_gui_progress_update(100.0, "Done! World generation completed.");
     println!("{}", "Done! World generation completed.".green().bold());

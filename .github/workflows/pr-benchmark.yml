@@ -1,5 +1,9 @@
 name: PR Benchmark
 
+permissions:
+  contents: read
+  pull-requests: write
+
 on:
   pull_request:
     types: [opened, reopened]
@@ -16,17 +20,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@v1
         with:
           toolchain: stable
-          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Create dummy Minecraft world directory
         run: |
           mkdir -p "./world/region"
+
+      - name: Build for release
+        run: cargo build --release --no-default-features
 
       - name: Start timer
         id: start_time
@@ -35,7 +43,7 @@ jobs:
       - name: Run benchmark command with memory tracking
         id: benchmark
         run: |
-          /usr/bin/time -v cargo run --release --no-default-features -- --path="./world" --terrain --bbox="48.117861,11.541996,48.154520,11.604824" 2> benchmark_log.txt
+          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --bbox="48.101470,11.517792,48.168375,11.626968" 2> benchmark_log.txt
           grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
@@ -57,7 +65,7 @@ jobs:
           seconds=$((duration % 60))
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
 
-          baseline_time=124
+          baseline_time=135
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
@@ -71,7 +79,7 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          baseline_mem=1960
+          baseline_mem=5865
           mem_annotation=""
           if [ "$peak_mem" -gt 2000 ]; then
             mem_diff=$((peak_mem - baseline_mem))
@@ -100,4 +108,4 @@ jobs:
           message: ${{ steps.comment_body.outputs.summary }}
           comment-tag: benchmark-report
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.BENCHMARK_TOKEN }}

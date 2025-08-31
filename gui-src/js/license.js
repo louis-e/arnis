@@ -1,18 +1,25 @@
 export const licenseText = `
-<p><b>Contributors:</b></p>
-louis-e (Louis Erbkamm)<br>
-scd31<br>
-amir16yp<br>
-vfosnar<br>
-TheComputerGuy96<br>
-zer0-dev<br>
-RedAuburn<br>
-daniil2327<br>
-benjamin051000<br>
+<b>Made with ♥️ in Munich by Louis Erbkamm</b>
 
-<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">Github page</a>. Logo made by nxfx21.</p>
+<p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis/graphs/contributors" style="color: inherit;" target="_blank">Github contributors page</a>. Logo made by nxfx21.
 
-<p style="color: #ff7070;"><b>Download Arnis only from the official source:</b> <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">https://github.com/louis-e/arnis/</a>. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.</p>
+<p style="color: #ff8686;"><b>Download Arnis only from the official source:</b> <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">https://github.com/louis-e/arnis/</a>. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.</p>
+
+<p><b>Third-Party Map Data and Tile Services:</b></p>
+<p>This application uses map tiles from multiple providers, each with their own licensing requirements:</p>
+
+<b>OpenStreetMap:</b><br> © <a href="https://www.openstreetmap.org/copyright" style="color: inherit;" target="_blank">OpenStreetMap</a> contributors
+<br><br>
+
+<b>Esri:</b><br> Tiles © Esri — Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community
+<br><br>
+
+<b>OpenTopoMap:</b><br> Map style: © <a href="https://opentopomap.org" style="color: inherit;" target="_blank">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/" style="color: inherit;" target="_blank">CC-BY-SA</a>), Map data: © OpenStreetMap contributors, <a href="http://viewfinderpanoramas.org" style="color: inherit;" target="_blank">SRTM</a>
+<br><br>
+
+<b>Stadia Maps:</b><br> © <a href="https://www.stadiamaps.com/" style="color: inherit;" target="_blank">Stadia Maps</a> © <a href="https://openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a> © OpenStreetMap contributors
+<p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
+
 
 <p><b>License:</b></p>
 <pre style="white-space: pre-wrap; font-family: inherit;">
@@ -26,7 +33,7 @@ TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
 
 "License" shall mean the terms and conditions for use, reproduction,and distribution as defined by Sections 1 through 9 of this document.
 
-"Licensor" shall mean the copyright owner or entity authorized bythe copyright owner that is granting the License.
+"Licensor" shall mean the copyright owner or entity authorized by the copyright owner that is granting the License.
 
 "Legal Entity" shall mean the union of the acting entity and allother entities that control, are controlled by, or are under commoncontrol with that entity. For the purposes of this definition,"control" means (i) the power, direct or indirect, to cause thedirection or management of such entity, whether by contract orotherwise, or (ii) ownership of fifty percent (50%) or more of theoutstanding shares, or (iii) beneficial ownership of such entity.
 

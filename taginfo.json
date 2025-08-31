@@ -1,0 +1,1204 @@
+{
+    "data_format": 1,
+    "data_url": "https://raw.githubusercontent.com/louis-e/arnis/main/taginfo.json",
+    "data_updated": "20250824T120000Z",
+    "project": {
+        "name": "Arnis",
+        "description": "Generate real life cities in Minecraft. Creates complex and accurate Minecraft Java Edition worlds that reflect real-world geography, topography, and architecture.",
+        "project_url": "https://github.com/louis-e/arnis",
+        "contact_name": "Louis Erbkamm",
+        "contact_email": "info@louisdev.de"
+    },
+    "tags": [
+        {
+            "key": "building",
+            "description": "Used to generate various building structures in Minecraft, including houses, apartments, garages, sheds, hospitals, and other building types."
+        },
+        {
+            "key": "building:part",
+            "description": "Used to generate building components and complex building structures."
+        },
+        {
+            "key": "building:levels",
+            "description": "Used to determine the height of buildings by specifying the number of floors."
+        },
+        {
+            "key": "building:min_level",
+            "description": "Used to determine the starting elevation level for elevated buildings."
+        },
+        {
+            "key": "building:colour",
+            "description": "Used to determine the color of building walls and materials."
+        },
+        {
+            "key": "building",
+            "value": "garage",
+            "description": "Generates small garage structures with reduced height."
+        },
+        {
+            "key": "building",
+            "value": "shed",
+            "description": "Generates small shed structures, may include bicycle parking."
+        },
+        {
+            "key": "building",
+            "value": "parking",
+            "description": "Generates multi-level parking structures with parking spaces and ramps."
+        },
+        {
+            "key": "building",
+            "value": "roof",
+            "description": "Generates roof-only structures with support pillars."
+        },
+        {
+            "key": "building",
+            "value": "apartments",
+            "description": "Generates apartment buildings with increased height."
+        },
+        {
+            "key": "building",
+            "value": "hospital",
+            "description": "Generates hospital buildings with increased height."
+        },
+        {
+            "key": "building",
+            "value": "bridge",
+            "description": "Generates bridge structures with elevation-aware placement."
+        },
+        {
+            "key": "building",
+            "value": "house",
+            "description": "Generates residential houses with optional roof generation."
+        },
+        {
+            "key": "building",
+            "value": "residential",
+            "description": "Generates residential buildings with optional roof generation."
+        },
+        {
+            "key": "building",
+            "value": "yes",
+            "description": "Generates generic buildings with optional roof generation."
+        },
+        {
+            "key": "height",
+            "description": "Used to specify the exact height of buildings, towers, and other structures in meters."
+        },
+        {
+            "key": "roof:shape",
+            "description": "Used to determine the roof type for buildings when roof generation is enabled."
+        },
+        {
+            "key": "roof:shape",
+            "value": "gabled",
+            "description": "Generates gabled roofs with two sloping sides meeting at a ridge."
+        },
+        {
+            "key": "roof:shape",
+            "value": "hipped",
+            "description": "Generates hipped roofs where all sides slope downwards to walls."
+        },
+        {
+            "key": "roof:shape",
+            "value": "half-hipped",
+            "description": "Generates half-hipped roof variations."
+        },
+        {
+            "key": "roof:shape",
+            "value": "gambrel",
+            "description": "Generates gambrel roof variations."
+        },
+        {
+            "key": "roof:shape",
+            "value": "mansard",
+            "description": "Generates mansard roof variations."
+        },
+        {
+            "key": "roof:shape",
+            "value": "round",
+            "description": "Generates rounded roof variations."
+        },
+        {
+            "key": "roof:shape",
+            "value": "skillion",
+            "description": "Generates skillion roofs with single sloping surface."
+        },
+        {
+            "key": "roof:shape",
+            "value": "pyramidal",
+            "description": "Generates pyramidal roofs where all sides come to a point at the top."
+        },
+        {
+            "key": "roof:shape",
+            "value": "dome",
+            "description": "Generates dome roofs with rounded, hemispherical structure."
+        },
+        {
+            "key": "roof:shape",
+            "value": "onion",
+            "description": "Generates onion dome roofs."
+        },
+        {
+            "key": "roof:shape",
+            "value": "cone",
+            "description": "Generates cone-shaped roofs."
+        },
+        {
+            "key": "roof:shape",
+            "value": "flat",
+            "description": "Generates flat roofs (default roof type)."
+        },
+        {
+            "key": "historic",
+            "value": "castle",
+            "description": "Used to identify historic castles and forts for appropriate material selection."
+        },
+        {
+            "key": "parking",
+            "value": "multi-storey",
+            "description": "Used to identify multi-level parking structures."
+        },
+        {
+            "key": "bicycle_parking",
+            "description": "Used to identify bicycle parking areas within buildings or structures."
+        },
+        {
+            "key": "highway",
+            "description": "Used to generate roads, paths, and transportation infrastructure. Supports motorways, primary roads, residential streets, footways, pedestrian areas, and various other road types."
+        },
+        {
+            "key": "highway",
+            "value": "motorway",
+            "description": "Generates wide roads with lane markings and outlines."
+        },
+        {
+            "key": "highway",
+            "value": "primary",
+            "description": "Generates wide roads with lane markings and outlines."
+        },
+        {
+            "key": "highway",
+            "value": "secondary",
+            "description": "Generates medium-width roads."
+        },
+        {
+            "key": "highway",
+            "value": "tertiary",
+            "description": "Generates medium-width roads with lane markings."
+        },
+        {
+            "key": "highway",
+            "value": "residential",
+            "description": "Generates standard residential roads."
+        },
+        {
+            "key": "highway",
+            "value": "footway",
+            "description": "Generates narrow pedestrian paths using gray concrete."
+        },
+        {
+            "key": "highway",
+            "value": "path",
+            "description": "Generates dirt paths for walking."
+        },
+        {
+            "key": "highway",
+            "value": "steps",
+            "description": "Generates staircases and stepped paths."
+        },
+        {
+            "key": "highway",
+            "value": "pedestrian",
+            "description": "Generates pedestrian areas and plazas."
+        },
+        {
+            "key": "highway",
+            "value": "track",
+            "description": "Generates rural tracks and farm roads."
+        },
+        {
+            "key": "highway",
+            "value": "service",
+            "description": "Generates service roads and driveways."
+        },
+        {
+            "key": "highway",
+            "value": "secondary_link",
+            "description": "Generates exit ramps and slip roads."
+        },
+        {
+            "key": "highway",
+            "value": "tertiary_link",
+            "description": "Generates exit ramps and slip roads."
+        },
+        {
+            "key": "highway",
+            "value": "street_lamp",
+            "description": "Generates street lighting with glowstone."
+        },
+        {
+            "key": "highway",
+            "value": "crossing",
+            "description": "Generates road crossings and intersections."
+        },
+        {
+            "key": "highway",
+            "value": "bus_stop",
+            "description": "Generates bus stop infrastructure."
+        },
+        {
+            "key": "highway",
+            "value": "escape",
+            "description": "Generates sand trap areas for vehicles on mountainous roads."
+        },
+        {
+            "key": "footway",
+            "value": "crossing",
+            "description": "Generates zebra crossings with alternating white and black stripes."
+        },
+        {
+            "key": "crossing",
+            "value": "traffic_signals",
+            "description": "Generates traffic signal infrastructure at crossings."
+        },
+        {
+            "key": "surface",
+            "description": "Used to determine the appropriate block type for surfaces (concrete, asphalt, gravel, etc.)."
+        },
+        {
+            "key": "surface",
+            "value": "paving_stones",
+            "description": "Generates stone brick surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "sett",
+            "description": "Generates stone brick surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "bricks",
+            "description": "Generates brick surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "wood",
+            "description": "Generates wooden plank surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "asphalt",
+            "description": "Generates black concrete surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "gravel",
+            "description": "Generates gravel surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "fine_gravel",
+            "description": "Generates gravel surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "grass",
+            "description": "Generates grass block surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "dirt",
+            "description": "Generates dirt surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "ground",
+            "description": "Generates dirt surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "earth",
+            "description": "Generates dirt surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "sand",
+            "description": "Generates sand surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "concrete",
+            "description": "Generates light gray concrete surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "clay",
+            "description": "Generates terracotta surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "tartan",
+            "description": "Generates red terracotta surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "pebblestone",
+            "description": "Generates cobblestone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "cobblestone",
+            "description": "Generates cobblestone surfaces."
+        },
+        {
+            "key": "surface",
+            "value": "unhewn_cobblestone",
+            "description": "Generates cobblestone surfaces."
+        },
+        {
+            "key": "lanes",
+            "description": "Used to determine road width and lane markings."
+        },
+        {
+            "key": "lanes",
+            "value": "1",
+            "description": "Generates single-lane roads without center markings."
+        },
+        {
+            "key": "lanes",
+            "value": "2",
+            "description": "Generates two-lane roads with center stripe and outline."
+        },
+        {
+            "key": "area",
+            "value": "yes",
+            "description": "Used to identify area features like pedestrian plazas."
+        },
+        {
+            "key": "landuse",
+            "description": "Used to generate different ground surfaces and land use patterns including residential areas, farmland, forests, commercial zones, and industrial areas."
+        },
+        {
+            "key": "landuse",
+            "value": "greenfield",
+            "description": "Generates grass block surfaces with sparse vegetation."
+        },
+        {
+            "key": "landuse",
+            "value": "meadow",
+            "description": "Generates grass block surfaces with vegetation and occasional trees."
+        },
+        {
+            "key": "landuse",
+            "value": "grass",
+            "description": "Generates grass block surfaces with grass vegetation."
+        },
+        {
+            "key": "landuse",
+            "value": "orchard",
+            "description": "Generates grass block surfaces with regular tree placement."
+        },
+        {
+            "key": "landuse",
+            "value": "forest",
+            "description": "Generates grass block surfaces with frequent trees and vegetation."
+        },
+        {
+            "key": "landuse",
+            "value": "farmland",
+            "description": "Generates agricultural areas with farmland blocks, crops, and irrigation."
+        },
+        {
+            "key": "landuse",
+            "value": "cemetery",
+            "description": "Generates cemetery areas with podzol, graves, and flowers."
+        },
+        {
+            "key": "landuse",
+            "value": "construction",
+            "description": "Generates construction sites with coarse dirt, scaffolding, and building materials."
+        },
+        {
+            "key": "landuse",
+            "value": "traffic_island",
+            "description": "Generates elevated traffic islands with stone block slabs."
+        },
+        {
+            "key": "landuse",
+            "value": "residential",
+            "description": "Generates residential area surfaces with stone bricks or grass depending on rural/urban setting."
+        },
+        {
+            "key": "landuse",
+            "value": "commercial",
+            "description": "Generates commercial zones with smooth stone surfaces."
+        },
+        {
+            "key": "landuse",
+            "value": "education",
+            "description": "Generates educational area surfaces with polished andesite."
+        },
+        {
+            "key": "landuse",
+            "value": "religious",
+            "description": "Generates religious area surfaces with polished andesite."
+        },
+        {
+            "key": "landuse",
+            "value": "industrial",
+            "description": "Generates industrial areas with cobblestone surfaces."
+        },
+        {
+            "key": "landuse",
+            "value": "military",
+            "description": "Generates military areas with gray concrete surfaces."
+        },
+        {
+            "key": "landuse",
+            "value": "railway",
+            "description": "Generates railway areas with gravel surfaces."
+        },
+        {
+            "key": "landuse",
+            "value": "landfill",
+            "description": "Generates landfill areas with coarse dirt or gravel depending on spoil heap presence."
+        },
+        {
+            "key": "landuse",
+            "value": "quarry",
+            "description": "Generates quarry areas with stone surfaces and resource deposits."
+        },
+        {
+            "key": "residential",
+            "value": "rural",
+            "description": "Used to distinguish rural residential areas (grass blocks) from urban ones (stone bricks)."
+        },
+        {
+            "key": "man_made",
+            "value": "spoil_heap",
+            "description": "Used to determine material type for landfill areas (generates gravel instead of coarse dirt)."
+        },
+        {
+            "key": "man_made",
+            "value": "heap",
+            "description": "Used to determine material type for landfill areas (generates gravel instead of coarse dirt)."
+        },
+        {
+            "key": "resource",
+            "description": "Used to determine ore types in quarry areas."
+        },
+        {
+            "key": "resource",
+            "value": "iron_ore",
+            "description": "Generates iron ore blocks in quarries."
+        },
+        {
+            "key": "resource",
+            "value": "coal",
+            "description": "Generates coal ore blocks in quarries."
+        },
+        {
+            "key": "resource",
+            "value": "copper",
+            "description": "Generates copper ore blocks in quarries."
+        },
+        {
+            "key": "resource",
+            "value": "gold",
+            "description": "Generates gold ore blocks in quarries."
+        },
+        {
+            "key": "resource",
+            "value": "clay",
+            "description": "Generates clay blocks in quarries."
+        },
+        {
+            "key": "resource",
+            "value": "kaolinite",
+            "description": "Generates clay blocks in quarries."
+        },
+        {
+            "key": "natural",
+            "description": "Used to generate natural features including trees, water bodies, wetlands, beaches, and terrain features."
+        },
+        {
+            "key": "natural",
+            "value": "tree",
+            "description": "Generates individual trees with various wood types."
+        },
+        {
+            "key": "natural",
+            "value": "water",
+            "description": "Generates water bodies and aquatic areas."
+        },
+        {
+            "key": "natural",
+            "value": "scrub",
+            "description": "Generates scrubland areas with grass blocks and shrub vegetation."
+        },
+        {
+            "key": "natural",
+            "value": "grassland",
+            "description": "Generates grassland areas with frequent grass vegetation."
+        },
+        {
+            "key": "natural",
+            "value": "wood",
+            "description": "Generates woodland areas with trees and forest vegetation."
+        },
+        {
+            "key": "natural",
+            "value": "heath",
+            "description": "Generates heath areas with grass blocks and heath vegetation."
+        },
+        {
+            "key": "natural",
+            "value": "tree_row",
+            "description": "Generates tree rows with frequent trees and vegetation."
+        },
+        {
+            "key": "natural",
+            "value": "sand",
+            "description": "Generates sandy terrain with occasional dead bushes."
+        },
+        {
+            "key": "natural",
+            "value": "dune",
+            "description": "Generates sand dune terrain."
+        },
+        {
+            "key": "natural",
+            "value": "beach",
+            "description": "Generates sandy beach areas."
+        },
+        {
+            "key": "natural",
+            "value": "shoal",
+            "description": "Generates shallow water areas with sand/gravel base."
+        },
+        {
+            "key": "natural",
+            "value": "reef",
+            "description": "Generates reef areas with water blocks."
+        },
+        {
+            "key": "natural",
+            "value": "bare_rock",
+            "description": "Generates exposed rock terrain with stone blocks."
+        },
+        {
+            "key": "natural",
+            "value": "blockfield",
+            "description": "Generates rocky terrain with cobblestone blocks."
+        },
+        {
+            "key": "natural",
+            "value": "glacier",
+            "description": "Generates glacial terrain with packed ice blocks."
+        },
+        {
+            "key": "natural",
+            "value": "mud",
+            "description": "Generates muddy terrain with mud blocks."
+        },
+        {
+            "key": "natural",
+            "value": "wetland",
+            "description": "Generates wetland areas with appropriate vegetation and water features."
+        },
+        {
+            "key": "natural",
+            "value": "mountain_range",
+            "description": "Generates mountainous terrain with rock clusters and varied materials."
+        },
+        {
+            "key": "natural",
+            "value": "saddle",
+            "description": "Generates saddle areas (low points between peaks) with mixed stone and grass."
+        },
+        {
+            "key": "natural",
+            "value": "ridge",
+            "description": "Generates ridge areas (elevated crests) with predominantly rocky terrain."
+        },
+        {
+            "key": "natural",
+            "value": "shrubbery",
+            "description": "Generates decorative shrub areas with oak leaves."
+        },
+        {
+            "key": "natural",
+            "value": "tundra",
+            "description": "Generates tundra terrain with low vegetation and moss."
+        },
+        {
+            "key": "natural",
+            "value": "hill",
+            "description": "Generates hilly terrain with grass and sparse trees."
+        },
+        {
+            "key": "natural",
+            "value": "cliff",
+            "description": "Generates cliff areas with predominantly stone terrain."
+        },
+        {
+            "key": "wetland",
+            "description": "Used to specify the type of wetland for appropriate vegetation generation."
+        },
+        {
+            "key": "wetland",
+            "value": "wet_meadow",
+            "description": "Generates wet meadow areas without standing water."
+        },
+        {
+            "key": "wetland",
+            "value": "fen",
+            "description": "Generates fen areas without standing water."
+        },
+        {
+            "key": "wetland",
+            "value": "reedbed",
+            "description": "Generates reedbed areas with tall grass vegetation."
+        },
+        {
+            "key": "wetland",
+            "value": "swamp",
+            "description": "Generates swamp areas with trees and water."
+        },
+        {
+            "key": "wetland",
+            "value": "mangrove",
+            "description": "Generates mangrove areas with trees and water."
+        },
+        {
+            "key": "wetland",
+            "value": "bog",
+            "description": "Generates bog areas with moss blocks and sparse vegetation."
+        },
+        {
+            "key": "wetland",
+            "value": "tidalflat",
+            "description": "Generates tidal flat areas without vegetation."
+        },
+        {
+            "key": "amenity",
+            "description": "Used to generate various amenities and facilities including parking areas, fountains, waste disposal, shelters, and bicycle parking."
+        },
+        {
+            "key": "amenity",
+            "value": "waste_disposal",
+            "description": "Generates waste disposal facilities using cauldrons."
+        },
+        {
+            "key": "amenity",
+            "value": "waste_basket",
+            "description": "Generates waste baskets using cauldrons."
+        },
+        {
+            "key": "amenity",
+            "value": "vending_machine",
+            "description": "Generates vending machines using iron blocks."
+        },
+        {
+            "key": "amenity",
+            "value": "atm",
+            "description": "Generates ATM machines using iron blocks."
+        },
+        {
+            "key": "amenity",
+            "value": "bicycle_parking",
+            "description": "Generates bicycle parking areas with oak planks and roof coverage."
+        },
+        {
+            "key": "amenity",
+            "value": "bench",
+            "description": "Generates benches using smooth stone and oak logs."
+        },
+        {
+            "key": "amenity",
+            "value": "vending",
+            "description": "Generates vending facilities using iron blocks."
+        },
+        {
+            "key": "amenity",
+            "value": "shelter",
+            "description": "Generates shelter structures with roofs and fencing."
+        },
+        {
+            "key": "amenity",
+            "value": "parking",
+            "description": "Generates parking lots with marked spaces, driving lanes, and lighting."
+        },
+        {
+            "key": "amenity",
+            "value": "fountain",
+            "description": "Generates decorative fountains with water and borders."
+        },
+        {
+            "key": "leisure",
+            "description": "Used to generate recreational areas including parks, playgrounds, sports facilities, and gardens."
+        },
+        {
+            "key": "leisure",
+            "value": "park",
+            "description": "Generates park areas with grass surfaces and recreational features."
+        },
+        {
+            "key": "leisure",
+            "value": "nature_reserve",
+            "description": "Generates nature reserve areas with grass and vegetation."
+        },
+        {
+            "key": "leisure",
+            "value": "garden",
+            "description": "Generates garden areas with grass and landscaping."
+        },
+        {
+            "key": "leisure",
+            "value": "disc_golf_course",
+            "description": "Generates disc golf course areas with grass surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "golf_course",
+            "description": "Generates golf course areas with grass surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "playground",
+            "description": "Generates playground areas with play equipment and safety surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "recreation_ground",
+            "description": "Generates recreation areas with play equipment and appropriate surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "pitch",
+            "description": "Generates sports pitch areas with appropriate surface materials."
+        },
+        {
+            "key": "leisure",
+            "value": "beach_resort",
+            "description": "Generates beach resort areas with appropriate surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "dog_park",
+            "description": "Generates dog park areas with appropriate surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "swimming_pool",
+            "description": "Generates swimming pool areas with water blocks."
+        },
+        {
+            "key": "leisure",
+            "value": "swimming_area",
+            "description": "Generates swimming areas in larger water bodies."
+        },
+        {
+            "key": "leisure",
+            "value": "bathing_place",
+            "description": "Generates bathing areas with smooth sandstone surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "outdoor_seating",
+            "description": "Generates outdoor seating areas with smooth stone surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "water_park",
+            "description": "Generates water park areas with concrete surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "slipway",
+            "description": "Generates boat launch areas with concrete surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "ice_rink",
+            "description": "Generates ice rink areas with packed ice surfaces."
+        },
+        {
+            "key": "waterway",
+            "description": "Used to generate rivers, streams, and other waterways with appropriate depths and banks."
+        },
+        {
+            "key": "waterway",
+            "value": "river",
+            "description": "Generates large rivers 8 blocks wide and 3 blocks deep."
+        },
+        {
+            "key": "waterway",
+            "value": "canal",
+            "description": "Generates canals 6 blocks wide and 2 blocks deep."
+        },
+        {
+            "key": "waterway",
+            "value": "stream",
+            "description": "Generates streams 3 blocks wide and 2 blocks deep."
+        },
+        {
+            "key": "waterway",
+            "value": "fairway",
+            "description": "Generates shipping fairways 12 blocks wide and 3 blocks deep."
+        },
+        {
+            "key": "waterway",
+            "value": "flowline",
+            "description": "Generates water flow lines 2 blocks wide and 1 block deep."
+        },
+        {
+            "key": "waterway",
+            "value": "brook",
+            "description": "Generates small brooks 2 blocks wide and 1 block deep."
+        },
+        {
+            "key": "waterway",
+            "value": "ditch",
+            "description": "Generates ditches 2 blocks wide and 1 block deep."
+        },
+        {
+            "key": "waterway",
+            "value": "drain",
+            "description": "Generates drainage channels 1 block wide and 1 block deep."
+        },
+        {
+            "key": "width",
+            "description": "Used to determine the width of waterways and other linear features."
+        },
+        {
+            "key": "railway",
+            "description": "Used to generate railway infrastructure including tracks and railway facilities."
+        },
+        {
+            "key": "railway",
+            "value": "proposed",
+            "description": "Proposed railways are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "abandoned",
+            "description": "Abandoned railways are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "subway",
+            "description": "Subway railways are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "construction",
+            "description": "Railways under construction are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "razed",
+            "description": "Razed railways are ignored during generation."
+        },
+        {
+            "key": "railway",
+            "value": "turntable",
+            "description": "Railway turntables are ignored during generation."
+        },
+        {
+            "key": "subway",
+            "value": "yes",
+            "description": "Railways marked as subway are ignored during generation."
+        },
+        {
+            "key": "tunnel",
+            "value": "yes",
+            "description": "Railways in tunnels are ignored during generation."
+        },
+        {
+            "key": "barrier",
+            "description": "Used to generate various barriers including fences, walls, and other boundary structures."
+        },
+        {
+            "key": "barrier",
+            "value": "bollard",
+            "description": "Generates bollard barriers using cobblestone walls."
+        },
+        {
+            "key": "barrier",
+            "value": "kerb",
+            "description": "Kerb barriers are ignored during generation."
+        },
+        {
+            "key": "barrier",
+            "value": "hedge",
+            "description": "Generates hedge barriers using oak leaves."
+        },
+        {
+            "key": "barrier",
+            "value": "fence",
+            "description": "Generates fence barriers with material determined by fence_type."
+        },
+        {
+            "key": "barrier",
+            "value": "wall",
+            "description": "Generates wall barriers using stone brick walls."
+        },
+        {
+            "key": "barrier",
+            "value": "stile",
+            "description": "Generates stile barrier openings."
+        },
+        {
+            "key": "barrier",
+            "value": "gate",
+            "description": "Generates gate barrier openings."
+        },
+        {
+            "key": "barrier",
+            "value": "swing_gate",
+            "description": "Generates swing gate barrier openings."
+        },
+        {
+            "key": "barrier",
+            "value": "lift_gate",
+            "description": "Generates lift gate barrier openings."
+        },
+        {
+            "key": "barrier",
+            "value": "block",
+            "description": "Generates block barriers using stone blocks."
+        },
+        {
+            "key": "barrier",
+            "value": "entrance",
+            "description": "Generates barrier entrances with air blocks."
+        },
+        {
+            "key": "fence_type",
+            "description": "Used to determine the type of fence material for barrier generation."
+        },
+        {
+            "key": "fence_type",
+            "value": "railing",
+            "description": "Generates railing fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "bars",
+            "description": "Generates bar fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "krest",
+            "description": "Generates krest fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "chain_link",
+            "description": "Generates chain link fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "metal",
+            "description": "Generates metal fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "wire",
+            "description": "Generates wire fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "barbed_wire",
+            "description": "Generates barbed wire fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "corrugated_metal",
+            "description": "Generates corrugated metal fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "electric",
+            "description": "Generates electric fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "metal_bars",
+            "description": "Generates metal bar fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "slatted",
+            "description": "Generates slatted fences using oak fences."
+        },
+        {
+            "key": "fence_type",
+            "value": "paling",
+            "description": "Generates paling fences using oak fences."
+        },
+        {
+            "key": "fence_type",
+            "value": "wood",
+            "description": "Generates wooden fences using oak fences."
+        },
+        {
+            "key": "fence_type",
+            "value": "split_rail",
+            "description": "Generates split rail fences using oak fences."
+        },
+        {
+            "key": "fence_type",
+            "value": "panel",
+            "description": "Generates panel fences using oak fences."
+        },
+        {
+            "key": "fence_type",
+            "value": "pole",
+            "description": "Generates pole fences using oak fences."
+        },
+        {
+            "key": "fence_type",
+            "value": "concrete",
+            "description": "Generates concrete fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "stone",
+            "description": "Generates stone fences using stone brick walls."
+        },
+        {
+            "key": "fence_type",
+            "value": "glass",
+            "description": "Generates glass fences using glass blocks."
+        },
+        {
+            "key": "material",
+            "description": "Used to determine the material type for various structures."
+        },
+        {
+            "key": "material",
+            "value": "brick",
+            "description": "Uses brick blocks for barrier construction."
+        },
+        {
+            "key": "material",
+            "value": "concrete",
+            "description": "Uses light gray concrete blocks for barrier construction."
+        },
+        {
+            "key": "material",
+            "value": "metal",
+            "description": "Uses stone brick walls (representing metal) for barrier construction."
+        },
+        {
+            "key": "man_made",
+            "description": "Used to generate man-made structures including towers, chimneys, piers, and other constructed features."
+        },
+        {
+            "key": "man_made",
+            "value": "pier",
+            "description": "Generates pier structures with oak planks and support pillars."
+        },
+        {
+            "key": "man_made",
+            "value": "antenna",
+            "description": "Generates antenna/radio towers with iron blocks and bars."
+        },
+        {
+            "key": "man_made",
+            "value": "chimney",
+            "description": "Generates chimney structures with brick construction."
+        },
+        {
+            "key": "man_made",
+            "value": "water_well",
+            "description": "Generates water well structures with stone and water."
+        },
+        {
+            "key": "man_made",
+            "value": "water_tower",
+            "description": "Generates water tower structures with support legs and tank."
+        },
+        {
+            "key": "tower:type",
+            "description": "Used to determine tower type for appropriate sizing."
+        },
+        {
+            "key": "tower:type",
+            "value": "communication",
+            "description": "Generates communication towers with standard height."
+        },
+        {
+            "key": "tower:type",
+            "value": "transmission",
+            "description": "Generates transmission towers with increased height."
+        },
+        {
+            "key": "tower:type",
+            "value": "cellular",
+            "description": "Generates cellular towers with reduced height."
+        },
+        {
+            "key": "aeroway",
+            "description": "Used to generate airport infrastructure including runways and taxiways."
+        },
+        {
+            "key": "area:aeroway",
+            "description": "Used to generate airport area infrastructure."
+        },
+        {
+            "key": "bridge",
+            "description": "Used to identify bridge structures (currently in development)."
+        },
+        {
+            "key": "tourism",
+            "description": "Used to generate tourism-related facilities and information points."
+        },
+        {
+            "key": "tourism",
+            "value": "information",
+            "description": "Generates tourism information points and boards."
+        },
+        {
+            "key": "information",
+            "description": "Used to determine the type of information facility."
+        },
+        {
+            "key": "information",
+            "value": "office",
+            "description": "Information offices are not generated as simple boards."
+        },
+        {
+            "key": "information",
+            "value": "visitor_centre",
+            "description": "Visitor centres are not generated as simple boards."
+        },
+        {
+            "key": "door",
+            "description": "Used to generate door openings in buildings."
+        },
+        {
+            "key": "entrance",
+            "description": "Used to generate building entrances and access points."
+        },
+        {
+            "key": "water",
+            "description": "Used to generate water areas and aquatic features."
+        },
+        {
+            "key": "service",
+            "value": "siding",
+            "description": "Generates railway sidings using stone brick slabs."
+        },
+        {
+            "key": "layer",
+            "description": "Used to handle multi-level features and underground/elevated structures. Negative values are ignored."
+        },
+        {
+            "key": "level",
+            "description": "Used to handle building levels and elevation. Negative values are ignored."
+        }
+    ]
+}

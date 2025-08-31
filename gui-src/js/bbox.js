@@ -322,7 +322,7 @@ function addLayer(layer, name, title, zIndex, on) {
     }
     link.innerHTML = name;
     link.title = title;
-    link.onclick = function(e) {
+    link.onclick = function (e) {
         e.preventDefault();
         e.stopPropagation();
 
@@ -429,7 +429,7 @@ function formatPoint(point, proj) {
             formattedBounds = y + ' ' + x;
         }
     }
-    return formattedBounds
+    return formattedPoint
 }
 
 function validateStringAsBounds(bounds) {
@@ -456,13 +456,122 @@ $(document).ready(function () {
     **  on top of your DOM
     **
     */
-    $('input[type="textarea"]').on('click', function (evt) { this.select() });
 
-    // Have to init the projection input box as it is used to format the initial values
+    // init the projection input box as it is used to format the initial values
+    $('input[type="textarea"]').on('click', function (evt) { this.select() });
     $("#projection").val(currentproj);
 
-    L.mapbox.accessToken = 'pk.eyJ1IjoibG91aXMtZSIsImEiOiJjbWF0cWlycjEwYWNvMmtxeHFwdDQ5NnJoIn0.6A0AKg0iucvoGhYuCkeOjA';
-    map = L.mapbox.map('map').setView([50.114768, 8.687322], 4).addLayer(L.mapbox.styleLayer('mapbox://styles/mapbox/streets-v11'));
+    // Initialize map
+    map = L.map('map').setView([50.114768, 8.687322], 4);
+
+    // Define available tile themes
+    var tileThemes = {
+        'osm': {
+            url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            options: {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 19
+            }
+        },
+        'esri-imagery': {
+            url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            options: {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
+                maxZoom: 18
+            }
+        },
+        'opentopomap': {
+            url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+            options: {
+                attribution: 'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
+                maxZoom: 17
+            }
+        },
+        'stadia-bright': {
+            url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}.{ext}',
+            options: {
+                minZoom: 0,
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                ext: 'png'
+            }
+        },
+        'stadia-dark': {
+            url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}.{ext}',
+            options: {
+                minZoom: 0,
+                maxZoom: 19,
+                attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                ext: 'png'
+            }
+        }
+    };
+
+    // Global variable to store current tile layer
+    var currentTileLayer = null;
+
+    // Function to change tile theme with automatic HTTP fallback
+    function changeTileTheme(themeKey) {
+        // Remove current tile layer if it exists
+        if (currentTileLayer) {
+            map.removeLayer(currentTileLayer);
+        }
+
+        // Get the theme configuration
+        var theme = tileThemes[themeKey];
+        if (theme) {
+            // Create and add new tile layer
+            currentTileLayer = L.tileLayer(theme.url, theme.options);
+
+            // Add automatic HTTP fallback for HTTPS failures
+            var failureCount = 0;
+            currentTileLayer.on('tileerror', function(error) {
+                failureCount++;
+
+                // After a few failures, try HTTP fallback
+                if (failureCount >= 3 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
+                    console.log('HTTPS tile loading failed, attempting HTTP fallback for', themeKey);
+                    this._httpFallbackAttempted = true;
+
+                    // Create HTTP version of the URL
+                    var httpUrl = theme.url.replace('https://', 'http://');
+
+                    // Remove the failed HTTPS layer
+                    map.removeLayer(this);
+
+                    // Create new layer with HTTP URL
+                    var httpLayer = L.tileLayer(httpUrl, theme.options);
+                    httpLayer._httpFallbackAttempted = true;
+                    httpLayer.addTo(map);
+                    currentTileLayer = httpLayer;
+                }
+            });
+
+            currentTileLayer.addTo(map);
+
+            // Save preference to localStorage
+            localStorage.setItem('selectedTileTheme', themeKey);
+        }
+    }
+
+    // Load saved theme or default to OSM
+    var savedTheme = localStorage.getItem('selectedTileTheme') || 'osm';
+    changeTileTheme(savedTheme);
+
+    // Listen for theme changes from parent window (settings modal)
+    window.addEventListener('message', function(event) {
+        if (event.data && event.data.type === 'changeTileTheme') {
+            changeTileTheme(event.data.theme);
+        }
+    });
+
+    // Set the dropdown value in parent window if it exists
+    if (window.parent && window.parent.document) {
+        var dropdown = window.parent.document.getElementById('tile-theme-select');
+        if (dropdown) {
+            dropdown.value = savedTheme;
+        }
+    }
 
     rsidebar = L.control.sidebar('rsidebar', {
         position: 'right',
@@ -496,24 +605,53 @@ $(document).ready(function () {
     crosshair = new L.marker(map.getCenter(), { icon: crosshairIcon, clickable: false });
     crosshair.addTo(map);
 
+    // Override default tooltips
+    L.drawLocal = L.drawLocal || {};
+    L.drawLocal.draw = L.drawLocal.draw || {};
+    L.drawLocal.draw.toolbar = L.drawLocal.draw.toolbar || {};
+    L.drawLocal.draw.toolbar.buttons = L.drawLocal.draw.toolbar.buttons || {};
+    L.drawLocal.draw.toolbar.buttons.rectangle = 'Choose area';
+    L.drawLocal.draw.toolbar.buttons.marker = 'Set spawnpoint';
+
     // Initialize the FeatureGroup to store editable layers
     drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
 
-    // Initialize the draw control and pass it the FeatureGroup of editable layers
+    // Custom icon for drawn markers
+    var customMarkerIcon = L.icon({
+        iconUrl: 'images/marker-icon.png',
+        iconSize: [20, 20],
+        iconAnchor: [10, 10],
+        popupAnchor: [0, -10]
+    });
+
     drawControl = new L.Control.Draw({
         edit: {
             featureGroup: drawnItems
         },
         draw: {
+            rectangle: {
+                shapeOptions: {
+                    color: '#fe57a1',
+                    opacity: 0.6,
+                    weight: 3,
+                    fillColor: '#fe57a1',
+                    fillOpacity: 0.1,
+                    dashArray: '10, 10',
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                },
+                repeatMode: false
+            },
             polyline: false,
             polygon: false,
             circle: false,
-            marker: false
+            marker: {
+                icon: customMarkerIcon
+            }
         }
     });
     map.addControl(drawControl);
-
     /*
     **
     **  create bounds layer
@@ -523,17 +661,22 @@ $(document).ready(function () {
     **
     */
     startBounds = new L.LatLngBounds([0.0, 0.0], [0.0, 0.0]);
-    var bounds = new L.Rectangle(startBounds,
-        {
-            fill: false,
-            opacity: 1.0,
-            color: '#000'
-        }
-    );
+    var bounds = new L.Rectangle(startBounds, {
+        color: '#3778d4',
+        opacity: 1.0,
+        weight: 3,
+        fill: '#3778d4',
+        lineCap: 'round',
+        lineJoin: 'round'
+    });
+
     bounds.on('bounds-set', function (e) {
-        // move it to the end of the parent
-        var parent = e.target._renderer._container.parentElement;
-        $(parent).append(e.target._renderer._container);
+        // move it to the end of the parent if renderer exists
+        if (e.target._renderer && e.target._renderer._container) {
+            var parent = e.target._renderer._container.parentElement;
+            $(parent).append(e.target._renderer._container);
+        }
+
         // Set the hash
         var southwest = this.getBounds().getSouthWest();
         var northeast = this.getBounds().getNorthEast();
@@ -543,13 +686,55 @@ $(document).ready(function () {
         var ymax = northeast.lat.toFixed(6);
         location.hash = ymin + ',' + xmin + ',' + ymax + ',' + xmax;
     });
-    map.addLayer(bounds)
+    map.addLayer(bounds);
+
     map.on('draw:created', function (e) {
+        // If it's a marker, make sure we only have one
+        if (e.layerType === 'marker') {
+            // Remove any existing markers
+            drawnItems.eachLayer(function(layer) {
+                if (layer instanceof L.Marker) {
+                    drawnItems.removeLayer(layer);
+                }
+            });
+        }
+
+        // Check if it's a rectangle and set proper styles before adding it to the layer
+        if (e.layerType === 'rectangle') {
+            e.layer.setStyle({
+                color: '#3778d4',
+                opacity: 1.0,
+                weight: 3,
+                fill: '#3778d4',
+                lineCap: 'round',
+                lineJoin: 'round'
+            });
+        }
+
         drawnItems.addLayer(e.layer);
-        bounds.setBounds(drawnItems.getBounds())
-        $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
-        $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
-        notifyBboxUpdate();
+
+        // Only update the bounds based on non-marker layers
+        if (e.layerType !== 'marker') {
+            // Calculate bounds only from non-marker layers
+            const nonMarkerBounds = new L.LatLngBounds();
+            let hasNonMarkerLayers = false;
+            
+            drawnItems.eachLayer(function(layer) {
+                if (!(layer instanceof L.Marker)) {
+                    hasNonMarkerLayers = true;
+                    nonMarkerBounds.extend(layer.getBounds());
+                }
+            });
+            
+            // Only update bounds if there are non-marker layers
+            if (hasNonMarkerLayers) {
+                bounds.setBounds(nonMarkerBounds);
+                $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
+                $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
+                notifyBboxUpdate();
+            }
+        }
+
         if (!e.geojson &&
             !((drawnItems.getLayers().length == 1) && (drawnItems.getLayers()[0] instanceof L.Marker))) {
             map.fitBounds(bounds.getBounds());
@@ -583,7 +768,22 @@ $(document).ready(function () {
     });
 
     map.on('draw:edited', function (e) {
-        bounds.setBounds(drawnItems.getBounds())
+        // Calculate bounds only from non-marker layers
+        const nonMarkerBounds = new L.LatLngBounds();
+        let hasNonMarkerLayers = false;
+        
+        drawnItems.eachLayer(function(layer) {
+            if (!(layer instanceof L.Marker)) {
+                hasNonMarkerLayers = true;
+                nonMarkerBounds.extend(layer.getBounds());
+            }
+        });
+        
+        // Only update bounds if there are non-marker layers
+        if (hasNonMarkerLayers) {
+            bounds.setBounds(nonMarkerBounds);
+        }
+        
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
         notifyBboxUpdate();
@@ -629,7 +829,14 @@ $(document).ready(function () {
             var splitBounds = initialBBox.split(',');
             startBounds = new L.LatLngBounds([splitBounds[0], splitBounds[1]],
                 [splitBounds[2], splitBounds[3]]);
-            var lyr = new L.Rectangle(startBounds);
+            var lyr = new L.Rectangle(startBounds, {
+                color: '#3778d4',
+                opacity: 1.0,
+                weight: 3,
+                fill: '#3778d4',
+                lineCap: 'round',
+                lineJoin: 'round'
+            });
             var evt = {
                 layer: lyr,
                 layerType: "polygon",
@@ -655,3 +862,24 @@ function notifyBboxUpdate() {
     const bboxText = document.getElementById('boxbounds').textContent;
     window.parent.postMessage({ bboxText: bboxText }, '*');
 }
+
+// Expose marker coordinates to the parent window
+function getSpawnPointCoords() {
+    // Check if there are any markers in drawn items
+    const markers = [];
+    drawnItems.eachLayer(function(layer) {
+        if (layer instanceof L.Marker) {
+            const latLng = layer.getLatLng();
+            markers.push({
+                lat: latLng.lat,
+                lng: latLng.lng
+            });
+        }
+    });
+
+    // Return the first marker found or null if none exists
+    return markers.length > 0 ? markers[0] : null;
+}
+
+// Expose the function to the parent window
+window.getSpawnPointCoords = getSpawnPointCoords;
