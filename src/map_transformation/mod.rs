@@ -5,4 +5,5 @@ mod transform_map;
 pub use transform_map::transform_map;
 
 // interface for custom specific operator generation
+pub mod rotate;
 pub mod translate;

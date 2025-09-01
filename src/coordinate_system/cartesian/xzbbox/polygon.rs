@@ -96,6 +96,10 @@ impl XZBBoxPoly {
         })
     }
 
+    pub fn points(&self) -> &Vec<XZPoint> {
+        &self.points
+    }
+
     pub fn bounding_rect(&self) -> &XZBBoxRect {
         &self.rect
     }
@@ -282,8 +286,8 @@ mod test {
         // 0,0 -> 1,0 single line, not enough points
         #[rustfmt::skip]
         let points = vec![
-            XZPoint::new(0, 0), 
-            XZPoint::new(1, 0)
+            XZPoint::new(0, 0),
+            XZPoint::new(1, 0),
         ];
         let obj = XZBBoxPoly::new(points);
         assert!(obj.is_err());

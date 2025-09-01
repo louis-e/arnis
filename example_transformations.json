@@ -13,7 +13,7 @@
         }
     },
     {
-        "comment": "This drags the map at point 2000,2000 to 100,100",
+        "comment": "This drags the map at point 2000,2000 to 0,0",
         "operation": "translate",
         "config": {
             "type": "startend",
@@ -26,6 +26,34 @@
                     "x": 0,
                     "z": 0
                 }
+            }
+        }
+    },
+    {
+        "comment": "This rotates the map about point 0,0 by 30 deg",
+        "operation": "rotate",
+        "config": {
+            "type": "angle",
+            "config": {
+                "center": {
+                    "x": 0,
+                    "z": 0
+                },
+                "deg": 30.0
+            }
+        }
+    },
+    {
+        "comment": "This rotates the map about point 0,0 by -30 deg",
+        "operation": "rotate",
+        "config": {
+            "type": "angle",
+            "config": {
+                "center": {
+                    "x": 0,
+                    "z": 0
+                },
+                "deg": -30.0
             }
         }
     }
