@@ -92,13 +92,6 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                     }
                 }
             }
-            "vending" => {
-                // Place vending machine blocks
-                if let Some(pt) = first_node {
-                    editor.set_block(IRON_BLOCK, pt.x, 1, pt.z, None, None);
-                    editor.set_block(IRON_BLOCK, pt.x, 2, pt.z, None, None);
-                }
-            }
             "shelter" => {
                 let roof_block: Block = STONE_BRICK_SLAB;
 

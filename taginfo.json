@@ -178,18 +178,13 @@
         },
         {
             "key": "highway",
-            "value": "secondary",
-            "description": "Generates medium-width roads."
+            "value": "residential",
+            "description": "Generates standard residential roads."
         },
         {
             "key": "highway",
             "value": "tertiary",
             "description": "Generates medium-width roads with lane markings."
-        },
-        {
-            "key": "highway",
-            "value": "residential",
-            "description": "Generates standard residential roads."
         },
         {
             "key": "highway",
@@ -329,31 +324,6 @@
             "key": "surface",
             "value": "concrete",
             "description": "Generates light gray concrete surfaces."
-        },
-        {
-            "key": "surface",
-            "value": "clay",
-            "description": "Generates terracotta surfaces."
-        },
-        {
-            "key": "surface",
-            "value": "tartan",
-            "description": "Generates red terracotta surfaces."
-        },
-        {
-            "key": "surface",
-            "value": "pebblestone",
-            "description": "Generates cobblestone surfaces."
-        },
-        {
-            "key": "surface",
-            "value": "cobblestone",
-            "description": "Generates cobblestone surfaces."
-        },
-        {
-            "key": "surface",
-            "value": "unhewn_cobblestone",
-            "description": "Generates cobblestone surfaces."
         },
         {
             "key": "lanes",
@@ -716,11 +686,6 @@
         },
         {
             "key": "amenity",
-            "value": "vending",
-            "description": "Generates vending facilities using iron blocks."
-        },
-        {
-            "key": "amenity",
             "value": "shelter",
             "description": "Generates shelter structures with roofs and fencing."
         },
@@ -822,6 +787,11 @@
             "key": "leisure",
             "value": "ice_rink",
             "description": "Generates ice rink areas with packed ice surfaces."
+        },
+        {
+            "key": "leisure",
+            "value": "schoolyard",
+            "description": "Generates schoolyard areas with asphalt surfaces used for play at schools."
         },
         {
             "key": "waterway",
@@ -1134,11 +1104,6 @@
             "key": "tower:type",
             "value": "transmission",
             "description": "Generates transmission towers with increased height."
-        },
-        {
-            "key": "tower:type",
-            "value": "cellular",
-            "description": "Generates cellular towers with reduced height."
         },
         {
             "key": "aeroway",

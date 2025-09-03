@@ -25,6 +25,7 @@ pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, _
             "chimney" => generate_chimney(editor, element),
             "water_well" => generate_water_well(editor, element),
             "water_tower" => generate_water_tower(editor, element),
+            "mast" => generate_antenna(editor, element),
             _ => {} // Unknown man_made type, ignore
         }
     }
@@ -96,7 +97,6 @@ fn generate_antenna(editor: &mut WorldEditor, element: &ProcessedElement) {
             Some(h) => h.parse::<i32>().unwrap_or(20).min(40), // Max 40 blocks
             None => match element.tags().get("tower:type").map(|s| s.as_str()) {
                 Some("communication") => 20,
-                Some("transmission") => 25,
                 Some("cellular") => 15,
                 _ => 20,
             },
@@ -249,6 +249,7 @@ pub fn generate_man_made_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
             "chimney" => generate_chimney(editor, &element),
             "water_well" => generate_water_well(editor, &element),
             "water_tower" => generate_water_tower(editor, &element),
+            "mast" => generate_antenna(editor, &element),
             _ => {} // Unknown man_made type, ignore
         }
     }
