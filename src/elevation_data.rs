@@ -2,17 +2,6 @@ use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance}
 use image::Rgb;
 use std::path::Path;
 
-/// Clear the tile cache directory - useful for recovering from corrupted cache
-pub fn clear_tile_cache() -> Result<(), Box<dyn std::error::Error>> {
-    let tile_cache_dir = Path::new("./arnis-tile-cache");
-    if tile_cache_dir.exists() {
-        println!("Clearing tile cache directory...");
-        std::fs::remove_dir_all(tile_cache_dir)?;
-        println!("Tile cache cleared successfully");
-    }
-    Ok(())
-}
-
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
 /// Scale factor for converting real elevation to Minecraft heights
@@ -125,7 +114,10 @@ pub fn fetch_elevation_data(
 
                 // Remove the potentially corrupted file
                 if let Err(remove_err) = std::fs::remove_file(&tile_path) {
-                    eprintln!("Warning: Failed to remove corrupted tile file: {}", remove_err);
+                    eprintln!(
+                        "Warning: Failed to remove corrupted tile file: {}",
+                        remove_err
+                    );
                 }
 
                 // Re-download the tile
@@ -144,7 +136,10 @@ pub fn fetch_elevation_data(
 
                         // Remove the corrupted file
                         if let Err(remove_err) = std::fs::remove_file(&tile_path) {
-                            eprintln!("Warning: Failed to remove corrupted tile file: {}", remove_err);
+                            eprintln!(
+                                "Warning: Failed to remove corrupted tile file: {}",
+                                remove_err
+                            );
                         }
 
                         // Re-download the tile
