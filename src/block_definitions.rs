@@ -236,7 +236,7 @@ impl Block {
             155 => "chest",
             156 => "red_carpet",
             157 => "anvil",
-            158 => "jukebox",
+            158 => "note_block",
             159 => "oak_door",
             160 => "brewing_stand",
             161 => "red_bed", // North head
@@ -667,7 +667,7 @@ pub const OAK_STAIRS: Block = Block::new(144);
 pub const CHEST: Block = Block::new(155);
 pub const RED_CARPET: Block = Block::new(156);
 pub const ANVIL: Block = Block::new(157);
-pub const JUKEBOX: Block = Block::new(158);
+pub const NOTE_BLOCK: Block = Block::new(158);
 pub const OAK_DOOR: Block = Block::new(159);
 pub const BREWING_STAND: Block = Block::new(160);
 pub const RED_BED_NORTH_HEAD: Block = Block::new(161);
