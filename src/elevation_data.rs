@@ -44,6 +44,28 @@ fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
     (x, y)
 }
 
+/// Downloads a tile from AWS Terrain Tiles service
+fn download_tile(
+    client: &reqwest::blocking::Client,
+    tile_x: u32,
+    tile_y: u32,
+    zoom: u8,
+    tile_path: &Path,
+) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, Box<dyn std::error::Error>> {
+    println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from AWS Terrain Tiles");
+    let url: String = AWS_TERRARIUM_URL
+        .replace("{z}", &zoom.to_string())
+        .replace("{x}", &tile_x.to_string())
+        .replace("{y}", &tile_y.to_string());
+
+    let response: reqwest::blocking::Response = client.get(&url).send()?;
+    response.error_for_status_ref()?;
+    let bytes = response.bytes()?;
+    std::fs::write(tile_path, &bytes)?;
+    let img: image::DynamicImage = image::load_from_memory(&bytes)?;
+    Ok(img.to_rgb8())
+}
+
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
@@ -80,26 +102,54 @@ pub fn fetch_elevation_data(
         let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
 
         let rgb_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = if tile_path.exists() {
-            println!(
-                "Loading cached tile x={tile_x},y={tile_y},z={zoom} from {}",
-                tile_path.display()
-            );
-            let img: image::DynamicImage = image::open(&tile_path)?;
-            img.to_rgb8()
-        } else {
-            // AWS Terrain Tiles don't require an API key
-            println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from AWS Terrain Tiles");
-            let url: String = AWS_TERRARIUM_URL
-                .replace("{z}", &zoom.to_string())
-                .replace("{x}", &tile_x.to_string())
-                .replace("{y}", &tile_y.to_string());
+            // Check if the cached file has a reasonable size (PNG files should be at least a few KB)
+            let file_size = match std::fs::metadata(&tile_path) {
+                Ok(metadata) => metadata.len(),
+                Err(_) => 0,
+            };
 
-            let response: reqwest::blocking::Response = client.get(&url).send()?;
-            response.error_for_status_ref()?;
-            let bytes = response.bytes()?;
-            std::fs::write(&tile_path, &bytes)?;
-            let img: image::DynamicImage = image::load_from_memory(&bytes)?;
-            img.to_rgb8()
+            if file_size < 1000 {
+                eprintln!("Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
+                         tile_path.display(), file_size);
+
+                // Remove the potentially corrupted file
+                if let Err(remove_err) = std::fs::remove_file(&tile_path) {
+                    eprintln!(
+                        "Warning: Failed to remove corrupted tile file: {}",
+                        remove_err
+                    );
+                }
+
+                // Re-download the tile
+                download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
+            } else {
+                println!(
+                    "Loading cached tile x={tile_x},y={tile_y},z={zoom} from {}",
+                    tile_path.display()
+                );
+
+                // Try to load cached tile, but handle corruption gracefully
+                match image::open(&tile_path) {
+                    Ok(img) => img.to_rgb8(),
+                    Err(e) => {
+                        eprintln!("Warning: Cached tile at {} is corrupted or invalid: {}. Re-downloading...", tile_path.display(), e);
+
+                        // Remove the corrupted file
+                        if let Err(remove_err) = std::fs::remove_file(&tile_path) {
+                            eprintln!(
+                                "Warning: Failed to remove corrupted tile file: {}",
+                                remove_err
+                            );
+                        }
+
+                        // Re-download the tile
+                        download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
+                    }
+                }
+            }
+        } else {
+            // Download the tile for the first time
+            download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
         };
 
         // Only process pixels that fall within the requested bbox
