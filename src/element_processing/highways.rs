@@ -21,29 +21,37 @@ pub fn generate_highways(
 /// Build a connectivity map for highway endpoints to determine where slopes are needed
 fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HashMap<(i32, i32), Vec<i32>> {
     let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
-    
+
     for element in elements {
         if let ProcessedElement::Way(way) = element {
             if way.tags.contains_key("highway") {
-                let layer_value = way.tags.get("layer")
+                let layer_value = way
+                    .tags
+                    .get("layer")
                     .and_then(|layer| layer.parse::<i32>().ok())
                     .unwrap_or(0);
-                
+
                 // Add connectivity for start and end nodes
                 if !way.nodes.is_empty() {
                     let start_node = &way.nodes[0];
                     let end_node = &way.nodes[way.nodes.len() - 1];
-                    
+
                     let start_coord = (start_node.x, start_node.z);
                     let end_coord = (end_node.x, end_node.z);
-                    
-                    connectivity_map.entry(start_coord).or_insert_with(Vec::new).push(layer_value);
-                    connectivity_map.entry(end_coord).or_insert_with(Vec::new).push(layer_value);
+
+                    connectivity_map
+                        .entry(start_coord)
+                        .or_default()
+                        .push(layer_value);
+                    connectivity_map
+                        .entry(end_coord)
+                        .or_default()
+                        .push(layer_value);
                 }
             }
         }
     }
-    
+
     connectivity_map
 }
 
@@ -145,7 +153,9 @@ fn generate_highways_internal(
             let scale_factor = args.scale;
 
             // Parse the layer value for elevation calculation
-            let layer_value = element.tags().get("layer")
+            let layer_value = element
+                .tags()
+                .get("layer")
                 .and_then(|layer| layer.parse::<i32>().ok())
                 .unwrap_or(0);
 
@@ -233,28 +243,35 @@ fn generate_highways_internal(
             let base_elevation = layer_value * LAYER_HEIGHT_STEP;
 
             // Check if we need slopes at start and end
-            let needs_start_slope = should_add_slope_at_node(&way.nodes[0], layer_value, highway_connectivity);
-            let needs_end_slope = should_add_slope_at_node(&way.nodes[way.nodes.len() - 1], layer_value, highway_connectivity);
+            let needs_start_slope =
+                should_add_slope_at_node(&way.nodes[0], layer_value, highway_connectivity);
+            let needs_end_slope = should_add_slope_at_node(
+                &way.nodes[way.nodes.len() - 1],
+                layer_value,
+                highway_connectivity,
+            );
 
             // Calculate total way length for slope distribution
             let total_way_length = calculate_way_length(way);
-            
+
             // Check if this is a short isolated elevated segment - if so, treat as ground level
-            let is_short_isolated_elevated = needs_start_slope && needs_end_slope && layer_value > 0 && total_way_length <= 35;
-            
+            let is_short_isolated_elevated =
+                needs_start_slope && needs_end_slope && layer_value > 0 && total_way_length <= 35;
+
             // Override elevation and slopes for short isolated segments
-            let (effective_elevation, effective_start_slope, effective_end_slope) = if is_short_isolated_elevated {
-                (0, false, false) // Treat as ground level
-            } else {
-                (base_elevation, needs_start_slope, needs_end_slope)
-            };
-            
-            let slope_length = (total_way_length as f32 * 0.35).min(50.0).max(15.0) as usize; // 35% of way length, max 50 blocks, min 15 blocks
+            let (effective_elevation, effective_start_slope, effective_end_slope) =
+                if is_short_isolated_elevated {
+                    (0, false, false) // Treat as ground level
+                } else {
+                    (base_elevation, needs_start_slope, needs_end_slope)
+                };
+
+            let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize; // 35% of way length, max 50 blocks, min 15 blocks
 
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
             let total_segments = way.nodes.len() - 1;
-            
+
             for node in &way.nodes {
                 if let Some(prev) = previous_node {
                     let (x1, z1) = prev;
@@ -267,7 +284,7 @@ fn generate_highways_internal(
 
                     // Calculate elevation for this segment
                     let segment_length = bresenham_points.len();
-                    
+
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
                     let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
@@ -347,16 +364,31 @@ fn generate_highways_internal(
                                         Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
                                     );
                                 }
-                                
+
                                 // Add stone brick foundation underneath elevated highways for thickness
                                 if effective_elevation > 0 && current_y > 0 {
                                     // Add 1 layer of stone bricks underneath the highway surface
-                                    editor.set_block(STONE_BRICKS, set_x, current_y - 1, set_z, None, None);
+                                    editor.set_block(
+                                        STONE_BRICKS,
+                                        set_x,
+                                        current_y - 1,
+                                        set_z,
+                                        None,
+                                        None,
+                                    );
                                 }
-                                
+
                                 // Add support pillars for elevated highways
                                 if effective_elevation != 0 && current_y > 0 {
-                                    add_highway_support_pillar(editor, set_x, current_y, set_z, dx, dz, block_range);
+                                    add_highway_support_pillar(
+                                        editor,
+                                        set_x,
+                                        current_y,
+                                        set_z,
+                                        dx,
+                                        dz,
+                                        block_range,
+                                    );
                                 }
                             }
                         }
@@ -413,7 +445,7 @@ fn generate_highways_internal(
                             }
                         }
                     }
-                    
+
                     segment_index += 1;
                 }
                 previous_node = Some((node.x, node.z));
@@ -429,23 +461,26 @@ fn should_add_slope_at_node(
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>,
 ) -> bool {
     let node_coord = (node.x, node.z);
-    
+
     // If we don't have connectivity information, always add slopes for non-zero layers
     if highway_connectivity.is_empty() {
         return current_layer != 0;
     }
-    
+
     // Check if there are other highways at different layers connected to this node
     if let Some(connected_layers) = highway_connectivity.get(&node_coord) {
         // Count how many ways are at the same layer as current way
-        let same_layer_count = connected_layers.iter().filter(|&&layer| layer == current_layer).count();
-        
+        let same_layer_count = connected_layers
+            .iter()
+            .filter(|&&layer| layer == current_layer)
+            .count();
+
         // If this is the only way at this layer connecting to this node, we need a slope
         // (unless we're at ground level and connecting to ground level ways)
         if same_layer_count <= 1 {
             return current_layer != 0;
         }
-        
+
         // If there are multiple ways at the same layer, don't add slope
         false
     } else {
@@ -458,7 +493,7 @@ fn should_add_slope_at_node(
 fn calculate_way_length(way: &ProcessedWay) -> usize {
     let mut total_length = 0;
     let mut previous_node: Option<&crate::osm_parser::ProcessedNode> = None;
-    
+
     for node in &way.nodes {
         if let Some(prev) = previous_node {
             let dx = (node.x - prev.x).abs();
@@ -467,11 +502,12 @@ fn calculate_way_length(way: &ProcessedWay) -> usize {
         }
         previous_node = Some(node);
     }
-    
+
     total_length
 }
 
 /// Calculate the Y elevation for a specific point along the highway
+#[allow(clippy::too_many_arguments)]
 fn calculate_point_elevation(
     segment_index: usize,
     point_index: usize,
@@ -486,31 +522,33 @@ fn calculate_point_elevation(
     if !needs_start_slope && !needs_end_slope {
         return base_elevation;
     }
-    
+
     // Calculate total distance from start
     let total_distance_from_start = segment_index * segment_length + point_index;
     let total_way_length = total_segments * segment_length;
-    
+
     // Ensure we have reasonable values
     if total_way_length == 0 || slope_length == 0 {
         return base_elevation;
     }
-    
+
     // Start slope calculation - gradual rise from ground level
     if needs_start_slope && total_distance_from_start <= slope_length {
         let slope_progress = total_distance_from_start as f32 / slope_length as f32;
         let elevation_offset = (base_elevation as f32 * slope_progress) as i32;
         return elevation_offset;
     }
-    
+
     // End slope calculation - gradual descent to ground level
-    if needs_end_slope && total_distance_from_start >= (total_way_length.saturating_sub(slope_length)) {
+    if needs_end_slope
+        && total_distance_from_start >= (total_way_length.saturating_sub(slope_length))
+    {
         let distance_from_end = total_way_length - total_distance_from_start;
         let slope_progress = distance_from_end as f32 / slope_length as f32;
         let elevation_offset = (base_elevation as f32 * slope_progress) as i32;
         return elevation_offset;
     }
-    
+
     // Middle section at full elevation
     base_elevation
 }
@@ -531,7 +569,7 @@ fn add_highway_support_pillar(
         for y in 1..highway_y {
             editor.set_block(STONE_BRICKS, x, y, z, None, None);
         }
-        
+
         // Add pillar base
         for base_dx in -1..=1 {
             for base_dz in -1..=1 {
