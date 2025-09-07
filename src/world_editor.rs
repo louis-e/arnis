@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Serialize, Deserialize)]
@@ -305,7 +306,7 @@ impl WorldToModify {
 // template<lifetime A>
 // struct WorldEditor {const XZBBox<A>& xzbbox;}
 pub struct WorldEditor<'a> {
-    region_dir: String,
+    world_dir: PathBuf,
     world: WorldToModify,
     xzbbox: &'a XZBBox,
     ground: Option<Box<Ground>>,
@@ -315,9 +316,9 @@ pub struct WorldEditor<'a> {
 // impl for struct WorldEditor<A> {...}
 impl<'a> WorldEditor<'a> {
     // Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, xzbbox: &'a XZBBox) -> Self {
+    pub fn new(world_dir: PathBuf, xzbbox: &'a XZBBox) -> Self {
         Self {
-            region_dir: region_dir.to_string(),
+            world_dir,
             world: WorldToModify::default(),
             xzbbox,
             ground: None,
@@ -349,7 +350,9 @@ impl<'a> WorldEditor<'a> {
 
     /// Creates a region for the given region coordinates.
     fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
-        let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
+        let out_path = self
+            .world_dir
+            .join(format!("region/r.{}.{}.mca", region_x, region_z));
 
         const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
 

@@ -17,8 +17,7 @@ pub fn generate_world(
     ground: Ground,
     args: &Args,
 ) -> Result<(), String> {
-    let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor = WorldEditor::new(&region_dir, &xzbbox);
+    let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
 

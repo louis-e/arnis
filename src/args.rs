@@ -1,6 +1,6 @@
 use crate::coordinate_system::geographic::LLBBox;
 use clap::Parser;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Command-line arguments parser
@@ -21,7 +21,7 @@ pub struct Args {
 
     /// Path to the Minecraft world (required)
     #[arg(long, value_parser = validate_minecraft_world_path)]
-    pub path: String,
+    pub path: PathBuf,
 
     /// Downloader method (requests/curl/wget) (optional)
     #[arg(long, default_value = "requests")]
