@@ -1,6 +1,6 @@
 use crate::coordinate_system::geographic::LLBBox;
 use clap::Parser;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Command-line arguments parser
@@ -64,8 +64,8 @@ pub struct Args {
     pub spawn_point: Option<(f64, f64)>,
 }
 
-fn validate_minecraft_world_path(path: &str) -> Result<String, String> {
-    let mc_world_path = Path::new(path);
+fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {
+    let mc_world_path = PathBuf::from(path);
     if !mc_world_path.exists() {
         return Err(format!("Path does not exist: {path}"));
     }
@@ -76,7 +76,7 @@ fn validate_minecraft_world_path(path: &str) -> Result<String, String> {
     if !region.is_dir() {
         return Err(format!("No Minecraft world found at {region:?}"));
     }
-    Ok(path.to_string())
+    Ok(mc_world_path)
 }
 
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {

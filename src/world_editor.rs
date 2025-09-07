@@ -1,5 +1,6 @@
 use crate::block_definitions::*;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
@@ -301,6 +302,20 @@ impl WorldToModify {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldMetadata {
+    min_mc_x: i32,
+    max_mc_x: i32,
+    min_mc_z: i32,
+    max_mc_z: i32,
+
+    min_geo_lat: f64,
+    max_geo_lat: f64,
+    min_geo_lon: f64,
+    max_geo_lon: f64,
+}
+
 // Notes for someone not familiar with lifetime parameter:
 // The follwing is like a C++ template:
 // template<lifetime A>
@@ -309,6 +324,7 @@ pub struct WorldEditor<'a> {
     world_dir: PathBuf,
     world: WorldToModify,
     xzbbox: &'a XZBBox,
+    llbbox: LLBBox,
     ground: Option<Box<Ground>>,
 }
 
@@ -316,11 +332,12 @@ pub struct WorldEditor<'a> {
 // impl for struct WorldEditor<A> {...}
 impl<'a> WorldEditor<'a> {
     // Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(world_dir: PathBuf, xzbbox: &'a XZBBox) -> Self {
+    pub fn new(world_dir: PathBuf, xzbbox: &'a XZBBox, llbbox: LLBBox) -> Self {
         Self {
             world_dir,
             world: WorldToModify::default(),
             xzbbox,
+            llbbox,
             ground: None,
         }
     }
@@ -788,6 +805,8 @@ impl<'a> WorldEditor<'a> {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
+        self.save_metadata();
+
         let total_regions = self.world.regions.len() as u64;
         let save_pb = ProgressBar::new(total_regions);
         save_pb.set_style(
@@ -933,6 +952,26 @@ impl<'a> WorldEditor<'a> {
             });
 
         save_pb.finish();
+    }
+
+    fn save_metadata(&mut self) {
+        let mut file = File::create(self.world_dir.join("metadata.json"))
+            .expect("Could not create metadata file");
+
+        let metadata = WorldMetadata {
+            min_mc_x: self.xzbbox.min_x(),
+            max_mc_x: self.xzbbox.max_x(),
+            min_mc_z: self.xzbbox.min_z(),
+            max_mc_z: self.xzbbox.max_z(),
+
+            min_geo_lat: self.llbbox.min().lat(),
+            max_geo_lat: self.llbbox.max().lat(),
+            min_geo_lon: self.llbbox.min().lng(),
+            max_geo_lon: self.llbbox.max().lng(),
+        };
+
+        let contents = serde_json::to_string(&metadata).expect("Could not serialize metadata");
+        write!(&mut file, "{}", contents).expect("Could not write metadata file");
     }
 }
 

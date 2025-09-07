@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -14,10 +15,11 @@ pub const MIN_Y: i32 = -64;
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
     xzbbox: XZBBox,
+    llbbox: LLBBox,
     ground: Ground,
     args: &Args,
 ) -> Result<(), String> {
-    let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox);
+    let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox, llbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
 

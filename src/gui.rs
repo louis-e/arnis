@@ -787,7 +787,13 @@ fn gui_start_generation(
                         &mut ground,
                     );
 
-                    let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
+                    let _ = data_processing::generate_world(
+                        parsed_elements,
+                        xzbbox,
+                        args.bbox,
+                        ground,
+                        &args,
+                    );
                     // Session lock will be automatically released when _session_lock goes out of scope
                     Ok(())
                 }
