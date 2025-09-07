@@ -14,9 +14,11 @@
       system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+
+        stdenv = if pkgs.stdenv.isLinux then pkgs.stdenvAdapters.useMoldLinker pkgs.stdenv else pkgs.stdenv;
       in
       {
-        devShell = pkgs.mkShell {
+        devShell = pkgs.mkShell.override { inherit stdenv; } {
           buildInputs = with pkgs; [
             openssl.dev
             pkg-config
