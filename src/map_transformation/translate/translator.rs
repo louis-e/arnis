@@ -75,7 +75,7 @@ mod tests {
         let dz: i32 = -234;
         let vector = XZVector { dx, dz };
 
-        let (xzbbox1, elements1) = generate_default_example();
+        let (xzbbox1, elements1, _) = generate_default_example();
 
         let mut xzbbox2 = xzbbox1.clone();
         let mut elements2 = elements1.clone();

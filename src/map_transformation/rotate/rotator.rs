@@ -1,7 +1,9 @@
 use super::angle_rotator::AngleRotator;
 use super::Operator;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint, XZVector};
+use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
+use ndarray::Array2;
 
 /// Create a rotate operator (rotator) from json
 pub fn rotator_from_json(config: &serde_json::Value) -> Result<Box<dyn Operator>, String> {
@@ -48,7 +50,12 @@ pub fn rotate_by_angle(
     deg: f64,
     elements: &mut Vec<ProcessedElement>,
     xzbbox: &mut XZBBox,
+    ground: &mut Ground,
 ) {
+    let orig_brect = xzbbox.bounding_rect().clone();
+    let orig_brect_lenx = orig_brect.total_blocks_x();
+    let orig_brect_lenz = orig_brect.total_blocks_z();
+
     match xzbbox {
         XZBBox::Rect(r) => {
             let points = vec![
@@ -86,6 +93,32 @@ pub fn rotate_by_angle(
             _ => {}
         }
     }
+
+    // rotate ground field
+    let brect = xzbbox.bounding_rect();
+    if let Some(elevation_data) = ground.elevation_data() {
+        let reduce_ratio = ((elevation_data.shape().0 * elevation_data.shape().1) as f64
+            / (orig_brect_lenx * orig_brect_lenz) as f64)
+            .sqrt();
+        let rotated_lenx: usize = (brect.total_blocks_x() as f64 * reduce_ratio) as usize;
+        let rotated_lenz: usize = (brect.total_blocks_z() as f64 * reduce_ratio) as usize;
+        let mut rotated = Array2::<i32>::zeros((rotated_lenx, rotated_lenz));
+
+        for i in 0..rotated_lenx {
+            for k in 0..rotated_lenz {
+                // find original position before rotation
+                let x = (i as f64 / reduce_ratio) as i32 + brect.min().x;
+                let z = (k as f64 / reduce_ratio) as i32 + brect.min().z;
+                let point = XZPoint::new(x, z);
+                let orig_point = rotate_point(point, center, -deg);
+                // assign the value at original position on original ground
+                let rel_point = XZPoint::new(0, 0) + (orig_point - orig_brect.min());
+                rotated[(i, k)] = ground.level(rel_point);
+            }
+        }
+
+        *ground = Ground::new_from_ndarray(ground.ground_level(), &rotated);
+    }
 }
 
 #[cfg(test)]
@@ -119,12 +152,13 @@ mod tests {
         let center = XZPoint::new(100, 200);
         let deg = 30.0;
 
-        let (xzbbox1, elements1) = generate_default_example();
+        let (xzbbox1, elements1, ground1) = generate_default_example();
 
         let mut xzbbox2 = xzbbox1.clone();
         let mut elements2 = elements1.clone();
+        let mut ground2 = ground1.clone();
 
-        rotate_by_angle(center, deg, &mut elements2, &mut xzbbox2);
+        rotate_by_angle(center, deg, &mut elements2, &mut xzbbox2, &mut ground2);
 
         // 1. Elem type should not change
         // 2. For node,

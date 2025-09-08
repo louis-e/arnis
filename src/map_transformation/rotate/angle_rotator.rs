@@ -13,8 +13,13 @@ pub struct AngleRotator {
 }
 
 impl Operator for AngleRotator {
-    fn operate(&self, elements: &mut Vec<ProcessedElement>, xzbbox: &mut XZBBox, _: &mut Ground) {
-        rotate_by_angle(self.center, self.deg, elements, xzbbox);
+    fn operate(
+        &self,
+        elements: &mut Vec<ProcessedElement>,
+        xzbbox: &mut XZBBox,
+        ground: &mut Ground,
+    ) {
+        rotate_by_angle(self.center, self.deg, elements, xzbbox, ground);
     }
 
     fn repr(&self) -> String {

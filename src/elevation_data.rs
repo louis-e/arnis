@@ -1,5 +1,6 @@
 use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
 use image::Rgb;
+use ndarray::Array2;
 use std::path::Path;
 
 /// Maximum Y coordinate in Minecraft (build height limit)
@@ -25,6 +26,37 @@ pub struct ElevationData {
     pub(crate) width: usize,
     /// Height of the elevation grid
     pub(crate) height: usize,
+}
+
+impl ElevationData {
+    /// [x,z] ndarray
+    pub fn new_from_ndarray(arr: &Array2<i32>) -> Self {
+        // in mc (x,z)
+        // +------------  N /|\  |
+        // | (0,0) (1,0)     |   |
+        // | (0,1) (1,1)     |  \|/ Z
+
+        // in vecvec,
+        // [z0=[x0, x1, ...], z1=[...], ...]
+        // stacking matrix repr.
+        // but vecvec is not an efficient structure, better change to ndarray
+
+        // in Array2
+        // arr[x,y] for (x,y)
+
+        // row0 is [0,:]
+        let vec2 = arr.columns().into_iter().map(|col| col.to_vec()).collect();
+
+        Self {
+            heights: vec2,
+            width: arr.shape()[0],
+            height: arr.shape()[1],
+        }
+    }
+
+    pub fn shape(&self) -> (usize, usize) {
+        (self.width, self.height)
+    }
 }
 
 /// Calculates appropriate zoom level for the given bounding box
