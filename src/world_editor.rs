@@ -393,7 +393,7 @@ impl<'a> WorldEditor<'a> {
         x: i32,
         y: i32,
         z: i32,
-        _rotation: i8,
+        rotation: i8,
     ) {
         let absolute_y = self.get_absolute_y(x, y, z);
         let chunk_x = x >> 4;
@@ -440,7 +440,14 @@ impl<'a> WorldEditor<'a> {
             );
         }
 
-        self.set_block(SIGN, x, y, z, None, None);
+        let rotation = rotation.clamp(0, 15);
+        let sign_properties = Value::Compound(HashMap::from([(
+            "rotation".to_string(),
+            Value::String(rotation.to_string()),
+        )]));
+        let sign_block = BlockWithProperties::new(SIGN, Some(sign_properties));
+
+        self.set_block_with_properties(sign_block, x, y, z, None, None);
     }
 
     /// Sets a block of the specified type at the given coordinates.
@@ -520,6 +527,49 @@ impl<'a> WorldEditor<'a> {
 
         if should_insert {
             self.world.set_block(x, absolute_y, z, block);
+        }
+    }
+
+    /// Sets a block with properties at the given coordinates.
+    /// Y value is interpreted as an offset from ground level.
+    #[inline]
+    pub fn set_block_with_properties(
+        &mut self,
+        block_with_props: BlockWithProperties,
+        x: i32,
+        y: i32,
+        z: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+    ) {
+        // Check if coordinates are within bounds
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+
+        // Calculate the absolute Y coordinate based on ground level
+        let absolute_y = self.get_absolute_y(x, y, z);
+
+        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
+            // Check against whitelist and blacklist
+            if let Some(whitelist) = override_whitelist {
+                whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+            } else if let Some(blacklist) = override_blacklist {
+                !blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+
+        if should_insert {
+            self.world
+                .set_block_with_properties(x, absolute_y, z, block_with_props);
         }
     }
 
