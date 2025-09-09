@@ -9,6 +9,7 @@ pub struct CoordTransformer {
     scale_factor_z: f64,
     min_lat: f64,
     min_lng: f64,
+    rotation_angle: f64,
 }
 
 impl CoordTransformer {
@@ -23,6 +24,7 @@ impl CoordTransformer {
     pub fn llbbox_to_xzbbox(
         llbbox: &LLBBox,
         scale: f64,
+        rotation_angle: f64,
     ) -> Result<(CoordTransformer, XZBBox), String> {
         let err_header = "Construct LLBBox to XZBBox transformation failed".to_string();
 
@@ -45,6 +47,7 @@ impl CoordTransformer {
                 scale_factor_z,
                 min_lat: llbbox.min().lat(),
                 min_lng: llbbox.min().lng(),
+                rotation_angle,
             },
             xzbbox,
         ))
@@ -55,9 +58,18 @@ impl CoordTransformer {
         let rel_x: f64 = (llpoint.lng() - self.min_lng) / self.len_lng;
         let rel_z: f64 = 1.0 - (llpoint.lat() - self.min_lat) / self.len_lat;
 
+        let scaled_x: f64 = rel_x * self.scale_factor_x;
+        let scaled_z: f64 = rel_z * self.scale_factor_z;
+
+        let sin_rot: f64 = f64::sin(self.rotation_angle * std::f64::consts::PI / 180.0);
+        let cos_rot: f64 = f64::cos(self.rotation_angle * std::f64::consts::PI / 180.0);
+
+        let rotated_rel_x: f64 = scaled_x * cos_rot - scaled_z * sin_rot;
+        let rotated_rel_z: f64 = scaled_z * cos_rot + scaled_x * sin_rot;
+
         // Apply scaling factors for each dimension and convert to Minecraft coordinates
-        let x: i32 = (rel_x * self.scale_factor_x) as i32;
-        let z: i32 = (rel_z * self.scale_factor_z) as i32;
+        let x: i32 = rotated_rel_x as i32;
+        let z: i32 = rotated_rel_z as i32;
 
         XZPoint::new(x, z)
     }
@@ -128,6 +140,7 @@ mod test {
         scale: f64,
         test_latfactor: f64,
         test_lngfactor: f64,
+        test_rotation: f64,
     ) {
         let llbbox = get_llbbox_arnis();
         let llpoint = LLPoint::new(
@@ -135,7 +148,8 @@ mod test {
             llbbox.min().lng() + (llbbox.max().lng() - llbbox.min().lng()) * test_lngfactor,
         )
         .unwrap();
-        let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale).unwrap();
+        let (transformer, xzbbox_new) =
+            CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, test_rotation).unwrap();
 
         // legacy xzbbox creation
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());
@@ -165,21 +179,21 @@ mod test {
     // this ensures that transformer.transform_point == legacy lat_lon_to_minecraft_coords
     #[test]
     pub fn test_llxztransform() {
-        test_llxztransform_one_scale_one_factor(1.0, 0.5, 0.5);
-        test_llxztransform_one_scale_one_factor(3.0, 0.1, 0.2);
-        test_llxztransform_one_scale_one_factor(10.0, -1.2, 2.0);
-        test_llxztransform_one_scale_one_factor(0.4, 0.3, -0.2);
-        test_llxztransform_one_scale_one_factor(0.1, 0.2, 0.7);
+        test_llxztransform_one_scale_one_factor(1.0, 0.5, 0.5, 0.0);
+        test_llxztransform_one_scale_one_factor(3.0, 0.1, 0.2, 0.0);
+        test_llxztransform_one_scale_one_factor(10.0, -1.2, 2.0, 0.0);
+        test_llxztransform_one_scale_one_factor(0.4, 0.3, -0.2, 0.0);
+        test_llxztransform_one_scale_one_factor(0.1, 0.2, 0.7, 0.0);
     }
 
     // this ensures that invalid inputs can be handled correctly
     #[test]
     pub fn test_invalid_construct() {
         let llbbox = get_llbbox_arnis();
-        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, 0.0);
+        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, 0.0, 0.0);
         assert!(obj.is_err());
 
-        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, -1.2);
+        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, -1.2, 0.0);
         assert!(obj.is_err());
     }
 }

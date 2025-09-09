@@ -214,6 +214,7 @@ function setupProgressListener() {
 function initSettings() {
   // Settings
   const settingsModal = document.getElementById("settings-modal");
+
   const slider = document.getElementById("scale-value-slider");
   const sliderValue = document.getElementById("slider-value");
 
@@ -600,6 +601,7 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
+    var rotationAngle = parseFloat(document.getElementById("rotation-input").value);
     var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -614,6 +616,7 @@ async function startGeneration() {
         bboxText: selectedBBox,
         selectedWorld: worldPath,
         worldScale: scale,
+        rotationAngle: rotationAngle,
         groundLevel: ground_level,
         floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
