@@ -6,6 +6,47 @@ use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 
+// Breaks a string into up to four sign lines of at most 15 characters each.
+fn format_sign_lines(name: &str) -> [String; 4] {
+    const MAX_LEN: usize = 15;
+    let mut lines = [String::new(), String::new(), String::new(), String::new()];
+    let mut line_idx = 0usize;
+
+    for word in name.split_whitespace() {
+        if line_idx >= 4 {
+            break;
+        }
+
+        if word.len() > MAX_LEN {
+            let mut start = 0;
+            while start < word.len() && line_idx < 4 {
+                let end = (start + MAX_LEN).min(word.len());
+                lines[line_idx].push_str(&word[start..end]);
+                line_idx += 1;
+                start = end;
+            }
+            continue;
+        }
+
+        let current = &mut lines[line_idx];
+        let needed = if current.is_empty() { 0 } else { 1 } + word.len();
+        if current.len() + needed > MAX_LEN {
+            line_idx += 1;
+            if line_idx >= 4 {
+                break;
+            }
+            lines[line_idx].push_str(word);
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+    }
+
+    lines
+}
+
 pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
@@ -310,6 +351,44 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                     }
                 }
                 previous_node = Some((node.x, node.z));
+            }
+
+            if let Some(name) = element.tags().get("name") {
+                if way.nodes.len() >= 2 {
+                    let mid = way.nodes.len() / 2;
+                    let (start, end) = if mid + 1 < way.nodes.len() {
+                        (&way.nodes[mid], &way.nodes[mid + 1])
+                    } else {
+                        (&way.nodes[mid - 1], &way.nodes[mid])
+                    };
+
+                    let x = (start.x + end.x) / 2;
+                    let z = (start.z + end.z) / 2;
+
+                    let (min_x, min_z) = editor.get_min_coords();
+                    let (max_x, max_z) = editor.get_max_coords();
+                    if x >= min_x && x <= max_x && z >= min_z && z <= max_z {
+                        let dx = (end.x - start.x) as f64;
+                        let dz = (end.z - start.z) as f64;
+                        let mut rotation =
+                            ((dz.atan2(dx) / (2.0 * std::f64::consts::PI)) * 16.0).round() as i8;
+                        if rotation < 0 {
+                            rotation += 16;
+                        }
+
+                        let lines = format_sign_lines(name);
+                        editor.set_sign(
+                            lines[0].clone(),
+                            lines[1].clone(),
+                            lines[2].clone(),
+                            lines[3].clone(),
+                            x,
+                            1,
+                            z,
+                            rotation,
+                        );
+                    }
+                }
             }
         }
     }
