@@ -14,6 +14,41 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+/// Formats a single text string into four lines suitable for Minecraft signs.
+/// Each line is limited to 15 characters and double quotes are replaced with
+/// single quotes to keep the resulting NBT valid.
+pub fn format_sign_text(text: &str) -> (String, String, String, String) {
+    let sanitized = text.replace('"', "'");
+    let mut lines = vec![String::new()];
+
+    for ch in sanitized.chars() {
+        let current = lines.last_mut().expect("lines is never empty");
+
+        if ch == '\n' || current.chars().count() >= 15 {
+            if lines.len() == 4 {
+                break;
+            }
+            lines.push(String::new());
+            if ch == '\n' {
+                continue;
+            }
+        }
+
+        lines.last_mut().unwrap().push(ch);
+    }
+
+    while lines.len() < 4 {
+        lines.push(String::new());
+    }
+
+    (
+        lines[0].clone(),
+        lines[1].clone(),
+        lines[2].clone(),
+        lines[3].clone(),
+    )
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Chunk {

@@ -5,7 +5,7 @@ use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
-use crate::world_editor::WorldEditor;
+use crate::world_editor::{format_sign_text, WorldEditor};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -202,16 +202,8 @@ pub fn generate_world(
     }
 
     // Set sign for player orientation
-    /*editor.set_sign(
-        "↑".to_string(),
-        "Generated World".to_string(),
-        "This direction".to_string(),
-        "".to_string(),
-        9,
-        -61,
-        9,
-        6,
-    );*/
+    let (line1, line2, line3, line4) = format_sign_text("↑\nGenerated World\nThis direction\n");
+    editor.set_sign(line1, line2, line3, line4, 9, -61, 9, 6);
 
     ground_pb.inc(block_counter % batch_size);
     ground_pb.finish();
