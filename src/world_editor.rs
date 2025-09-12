@@ -482,7 +482,12 @@ impl<'a> WorldEditor<'a> {
         )]));
         let sign_block = BlockWithProperties::new(SIGN, Some(sign_properties));
 
-        self.set_block_with_properties(sign_block, x, y, z, None, None);
+        // Ensure that the sign is always placed even if another block
+        // already occupies the target position. An empty blacklist allows
+        // overriding any existing block, which is necessary because signs
+        // are typically placed next to roads where terrain or vegetation
+        // might have been generated earlier.
+        self.set_block_with_properties(sign_block, x, y, z, None, Some(&[]));
     }
 
     /// Sets a block of the specified type at the given coordinates.
