@@ -439,18 +439,38 @@ impl<'a> WorldEditor<'a> {
         let mut block_entities = HashMap::new();
 
         let messages = vec![
-            Value::String(format!("\"{line1}\"")),
-            Value::String(format!("\"{line2}\"")),
-            Value::String(format!("\"{line3}\"")),
-            Value::String(format!("\"{line4}\"")),
+            Value::String(format!("{{\"text\":\"{line1}\"}}")),
+            Value::String(format!("{{\"text\":\"{line2}\"}}")),
+            Value::String(format!("{{\"text\":\"{line3}\"}}")),
+            Value::String(format!("{{\"text\":\"{line4}\"}}")),
+        ];
+        let filtered_messages = vec![
+            Value::String("\"\"".to_string()),
+            Value::String("\"\"".to_string()),
+            Value::String("\"\"".to_string()),
+            Value::String("\"\"".to_string()),
         ];
 
-        let mut text_data = HashMap::new();
-        text_data.insert("messages".to_string(), Value::List(messages));
-        text_data.insert("color".to_string(), Value::String("black".to_string()));
-        text_data.insert("has_glowing_text".to_string(), Value::Byte(0));
+        let mut front_text = HashMap::new();
+        front_text.insert("messages".to_string(), Value::List(messages.clone()));
+        front_text.insert(
+            "filtered_messages".to_string(),
+            Value::List(filtered_messages.clone()),
+        );
+        front_text.insert("color".to_string(), Value::String("black".to_string()));
+        front_text.insert("has_glowing_text".to_string(), Value::Byte(0));
 
-        block_entities.insert("front_text".to_string(), Value::Compound(text_data));
+        let mut back_text = HashMap::new();
+        back_text.insert("messages".to_string(), Value::List(messages));
+        back_text.insert(
+            "filtered_messages".to_string(),
+            Value::List(filtered_messages),
+        );
+        back_text.insert("color".to_string(), Value::String("black".to_string()));
+        back_text.insert("has_glowing_text".to_string(), Value::Byte(0));
+
+        block_entities.insert("front_text".to_string(), Value::Compound(front_text));
+        block_entities.insert("back_text".to_string(), Value::Compound(back_text));
         block_entities.insert(
             "id".to_string(),
             Value::String("minecraft:sign".to_string()),
@@ -1120,8 +1140,7 @@ mod tests {
 
     #[test]
     fn format_sign_text_wraps_and_sanitizes() {
-        let (l1, l2, l3, l4) =
-            format_sign_text("A very long \"street\" name that needs wrapping");
+        let (l1, l2, l3, l4) = format_sign_text("A very long \"street\" name that needs wrapping");
         assert!(l1.len() <= 15);
         assert!(l2.len() <= 15);
         assert!(l3.len() <= 15);
