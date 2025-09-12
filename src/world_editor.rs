@@ -1105,3 +1105,22 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
         ])),
     )])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_sign_text_wraps_and_sanitizes() {
+        let (l1, l2, l3, l4) =
+            format_sign_text("A very long \"street\" name that needs wrapping");
+        assert!(l1.len() <= 15);
+        assert!(l2.len() <= 15);
+        assert!(l3.len() <= 15);
+        assert!(l4.len() <= 15);
+        assert!(!l1.contains('"'));
+        assert!(!l2.contains('"'));
+        assert!(!l3.contains('"'));
+        assert!(!l4.contains('"'));
+    }
+}

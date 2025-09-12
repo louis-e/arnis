@@ -4,48 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
-use crate::world_editor::WorldEditor;
-
-// Breaks a string into up to four sign lines of at most 15 characters each.
-fn format_sign_lines(name: &str) -> [String; 4] {
-    const MAX_LEN: usize = 15;
-    let mut lines = [String::new(), String::new(), String::new(), String::new()];
-    let mut line_idx = 0usize;
-
-    for word in name.split_whitespace() {
-        if line_idx >= 4 {
-            break;
-        }
-
-        if word.len() > MAX_LEN {
-            let mut start = 0;
-            while start < word.len() && line_idx < 4 {
-                let end = (start + MAX_LEN).min(word.len());
-                lines[line_idx].push_str(&word[start..end]);
-                line_idx += 1;
-                start = end;
-            }
-            continue;
-        }
-
-        let current = &mut lines[line_idx];
-        let needed = if current.is_empty() { 0 } else { 1 } + word.len();
-        if current.len() + needed > MAX_LEN {
-            line_idx += 1;
-            if line_idx >= 4 {
-                break;
-            }
-            lines[line_idx].push_str(word);
-        } else {
-            if !current.is_empty() {
-                current.push(' ');
-            }
-            current.push_str(word);
-        }
-    }
-
-    lines
-}
+use crate::world_editor::{format_sign_text, WorldEditor};
 
 pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
     if let Some(highway_type) = element.tags().get("highway") {
@@ -376,12 +335,12 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                             rotation += 16;
                         }
 
-                        let lines = format_sign_lines(name);
+                        let (line1, line2, line3, line4) = format_sign_text(name);
                         editor.set_sign(
-                            lines[0].clone(),
-                            lines[1].clone(),
-                            lines[2].clone(),
-                            lines[3].clone(),
+                            line1,
+                            line2,
+                            line3,
+                            line4,
                             x,
                             1,
                             z,
@@ -448,5 +407,57 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
             }
         }
         previous_node = Some((node.x, node.z));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+    use crate::args::Args;
+    use crate::world_editor::WorldEditor;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    #[test]
+    fn places_sign_for_named_highway() {
+        let bbox = XZBBox::rect_from_xz_lengths(10.0, 10.0).unwrap();
+        let tmp = tempdir().unwrap();
+        let region_dir = tmp.path().join("region");
+        std::fs::create_dir(&region_dir).unwrap();
+        let mut editor = WorldEditor::new(region_dir.to_str().unwrap(), &bbox);
+
+        let args = Args {
+            bbox: LLBBox::new(0., 0., 1., 1.).unwrap(),
+            file: None,
+            save_json_file: None,
+            path: tmp.path().to_str().unwrap().to_string(),
+            downloader: "requests".to_string(),
+            scale: 1.0,
+            ground_level: -62,
+            terrain: false,
+            interior: true,
+            roof: true,
+            fillground: false,
+            debug: false,
+            timeout: None,
+            spawn_point: None,
+        };
+
+        let nodes = vec![
+            ProcessedNode { id: 1, tags: HashMap::new(), x: 0, z: 0 },
+            ProcessedNode { id: 2, tags: HashMap::new(), x: 8, z: 0 },
+        ];
+        let mut tags = HashMap::new();
+        tags.insert("highway".to_string(), "residential".to_string());
+        tags.insert("name".to_string(), "Main Street".to_string());
+        let way = ProcessedWay { id: 1, nodes, tags };
+        let element = ProcessedElement::Way(way);
+
+        generate_highways(&mut editor, &element, &args);
+
+        assert!(editor.block_at(4, 1, 0));
     }
 }
