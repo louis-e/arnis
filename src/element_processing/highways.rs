@@ -313,8 +313,10 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             }
 
             if let Some(name) = element.tags().get("name") {
+                eprintln!("Processing highway '{name}'");
                 let mut prev_node: Option<&crate::osm_parser::ProcessedNode> = None;
                 let sign_interval = (200.0 * args.scale).max(1.0);
+                eprintln!("  Sign placement interval: {sign_interval}");
                 let mut distance_since_sign = 0.0;
                 let mut sign_placed = false;
 
@@ -345,14 +347,24 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                 let sign_z = z + side_dz * (block_range + 1);
                                 let (min_x, min_z) = editor.get_min_coords();
                                 let (max_x, max_z) = editor.get_max_coords();
+                                eprintln!(
+                                    "  Attempting sign for '{name}' at ({sign_x}, {sign_z}) with rotation {rotation}"
+                                );
                                 if sign_x >= min_x
                                     && sign_x <= max_x
                                     && sign_z >= min_z
                                     && sign_z <= max_z
                                 {
+                                    eprintln!(
+                                        "  Placing sign for '{name}' at ({sign_x}, {sign_z})"
+                                    );
                                     let (l1, l2, l3, l4) = format_sign_text(name);
                                     editor.set_sign(l1, l2, l3, l4, sign_x, 1, sign_z, rotation);
                                     sign_placed = true;
+                                } else {
+                                    eprintln!(
+                                        "  Skipping sign for '{name}' at ({sign_x}, {sign_z}); out of bounds x:[{min_x},{max_x}] z:[{min_z},{max_z}]"
+                                    );
                                 }
                                 distance_since_sign = 0.0;
                             }
@@ -362,6 +374,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                     prev_node = Some(node);
                 }
                 if !sign_placed {
+                    eprintln!("  No sign placed along highway '{name}', attempting fallback");
                     if let (Some(start), Some(next)) = (way.nodes.first(), way.nodes.get(1)) {
                         let dx_seg = next.x - start.x;
                         let dz_seg = next.z - start.z;
@@ -380,8 +393,15 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                         let (max_x, max_z) = editor.get_max_coords();
                         if sign_x >= min_x && sign_x <= max_x && sign_z >= min_z && sign_z <= max_z
                         {
+                            eprintln!(
+                                "  Fallback placing sign for '{name}' at ({sign_x}, {sign_z})"
+                            );
                             let (l1, l2, l3, l4) = format_sign_text(name);
                             editor.set_sign(l1, l2, l3, l4, sign_x, 1, sign_z, rotation);
+                        } else {
+                            eprintln!(
+                                "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_z})"
+                            );
                         }
                     }
                 }
