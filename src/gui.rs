@@ -53,7 +53,7 @@ impl SessionLock {
 impl Drop for SessionLock {
     fn drop(&mut self) {
         // Release the lock and remove the session.lock file
-        let _ = self.file.unlock();
+        let _ = fs2::FileExt::unlock(&self.file);
         let _ = fs::remove_file(&self.path);
     }
 }
