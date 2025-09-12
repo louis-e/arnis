@@ -9,6 +9,7 @@ use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -438,18 +439,14 @@ impl<'a> WorldEditor<'a> {
 
         let mut block_entities = HashMap::new();
 
-        let messages = vec![
-            Value::String(format!("{{\"text\":\"{line1}\"}}")),
-            Value::String(format!("{{\"text\":\"{line2}\"}}")),
-            Value::String(format!("{{\"text\":\"{line3}\"}}")),
-            Value::String(format!("{{\"text\":\"{line4}\"}}")),
-        ];
-        let filtered_messages = vec![
-            Value::String("\"\"".to_string()),
-            Value::String("\"\"".to_string()),
-            Value::String("\"\"".to_string()),
-            Value::String("\"\"".to_string()),
-        ];
+        let lines = [line1, line2, line3, line4];
+        let messages: Vec<Value> = lines
+            .iter()
+            .map(|l| Value::String(json!({"text": l}).to_string()))
+            .collect();
+        let filtered_messages: Vec<Value> = (0..4)
+            .map(|_| Value::String(json!({"text": ""}).to_string()))
+            .collect();
 
         let mut front_text = HashMap::new();
         front_text.insert("messages".to_string(), Value::List(messages.clone()));
