@@ -487,6 +487,9 @@ impl<'a> WorldEditor<'a> {
         // overriding any existing block, which is necessary because signs
         // are typically placed next to roads where terrain or vegetation
         // might have been generated earlier.
+        if !self.block_at(x, y - 1, z) {
+            self.set_block(DIRT, x, y - 1, z, None, Some(&[]));
+        }
         self.set_block_with_properties(sign_block, x, y, z, None, Some(&[]));
     }
 
