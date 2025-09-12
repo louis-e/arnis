@@ -313,40 +313,51 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
             }
 
             if let Some(name) = element.tags().get("name") {
-                if way.nodes.len() >= 2 {
-                    let mid = way.nodes.len() / 2;
-                    let (start, end) = if mid + 1 < way.nodes.len() {
-                        (&way.nodes[mid], &way.nodes[mid + 1])
-                    } else {
-                        (&way.nodes[mid - 1], &way.nodes[mid])
-                    };
+                let mut prev_node: Option<&crate::osm_parser::ProcessedNode> = None;
+                let sign_interval = (200.0 * args.scale).max(1.0);
+                let mut distance_since_sign = 0.0;
 
-                    let x = (start.x + end.x) / 2;
-                    let z = (start.z + end.z) / 2;
-
-                    let (min_x, min_z) = editor.get_min_coords();
-                    let (max_x, max_z) = editor.get_max_coords();
-                    if x >= min_x && x <= max_x && z >= min_z && z <= max_z {
-                        let dx = (end.x - start.x) as f64;
-                        let dz = (end.z - start.z) as f64;
+                for node in &way.nodes {
+                    if let Some(start) = prev_node {
+                        let dx_seg = node.x - start.x;
+                        let dz_seg = node.z - start.z;
                         let mut rotation =
-                            ((dz.atan2(dx) / (2.0 * std::f64::consts::PI)) * 16.0).round() as i8;
+                            (( (dz_seg as f64).atan2(dx_seg as f64) / (2.0 * std::f64::consts::PI))
+                                * 16.0)
+                                .round() as i8;
                         if rotation < 0 {
                             rotation += 16;
                         }
 
-                        let (line1, line2, line3, line4) = format_sign_text(name);
-                        editor.set_sign(
-                            line1,
-                            line2,
-                            line3,
-                            line4,
-                            x,
-                            1,
-                            z,
-                            rotation,
-                        );
+                        let side_dx = -dz_seg.signum();
+                        let side_dz = dx_seg.signum();
+
+                        let bres_points = bresenham_line(start.x, 0, start.z, node.x, 0, node.z);
+                        let mut prev_point = (start.x, start.z);
+                        for (x, _, z) in bres_points.into_iter().skip(1) {
+                            let step = (((x - prev_point.0).pow(2) + (z - prev_point.1).pow(2))
+                                as f64)
+                                .sqrt();
+                            distance_since_sign += step;
+                            if distance_since_sign >= sign_interval {
+                                let sign_x = x + side_dx * (block_range + 1);
+                                let sign_z = z + side_dz * (block_range + 1);
+                                let (min_x, min_z) = editor.get_min_coords();
+                                let (max_x, max_z) = editor.get_max_coords();
+                                if sign_x >= min_x
+                                    && sign_x <= max_x
+                                    && sign_z >= min_z
+                                    && sign_z <= max_z
+                                {
+                                    let (l1, l2, l3, l4) = format_sign_text(name);
+                                    editor.set_sign(l1, l2, l3, l4, sign_x, 1, sign_z, rotation);
+                                }
+                                distance_since_sign = 0.0;
+                            }
+                            prev_point = (x, z);
+                        }
                     }
+                    prev_node = Some(node);
                 }
             }
         }
@@ -413,17 +424,18 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::args::Args;
+    use crate::block_definitions::SIGN;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
     use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
-    use crate::args::Args;
     use crate::world_editor::WorldEditor;
     use std::collections::HashMap;
     use tempfile::tempdir;
 
     #[test]
-    fn places_sign_for_named_highway() {
-        let bbox = XZBBox::rect_from_xz_lengths(10.0, 10.0).unwrap();
+    fn places_signs_every_200_meters() {
+        let bbox = XZBBox::rect_from_xz_lengths(1010.0, 20.0).unwrap();
         let tmp = tempdir().unwrap();
         let region_dir = tmp.path().join("region");
         std::fs::create_dir(&region_dir).unwrap();
@@ -448,16 +460,19 @@ mod tests {
 
         let nodes = vec![
             ProcessedNode { id: 1, tags: HashMap::new(), x: 0, z: 0 },
-            ProcessedNode { id: 2, tags: HashMap::new(), x: 8, z: 0 },
+            ProcessedNode { id: 2, tags: HashMap::new(), x: 1000, z: 0 },
         ];
         let mut tags = HashMap::new();
-        tags.insert("highway".to_string(), "residential".to_string());
-        tags.insert("name".to_string(), "Main Street".to_string());
+        tags.insert("highway".to_string(), "primary".to_string());
+        tags.insert("name".to_string(), "First St.".to_string());
         let way = ProcessedWay { id: 1, nodes, tags };
         let element = ProcessedElement::Way(way);
 
         generate_highways(&mut editor, &element, &args);
 
-        assert!(editor.block_at(4, 1, 0));
+        for x in [200, 400, 600, 800, 1000] {
+            assert!(editor.check_for_block(x, 1, 6, Some(&[SIGN])));
+        }
+        assert!(!editor.check_for_block(100, 1, 6, Some(&[SIGN])));
     }
 }
