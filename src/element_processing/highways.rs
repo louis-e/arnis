@@ -316,15 +316,16 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                 let mut prev_node: Option<&crate::osm_parser::ProcessedNode> = None;
                 let sign_interval = (200.0 * args.scale).max(1.0);
                 let mut distance_since_sign = 0.0;
+                let mut sign_placed = false;
 
                 for node in &way.nodes {
                     if let Some(start) = prev_node {
                         let dx_seg = node.x - start.x;
                         let dz_seg = node.z - start.z;
-                        let mut rotation =
-                            (( (dz_seg as f64).atan2(dx_seg as f64) / (2.0 * std::f64::consts::PI))
-                                * 16.0)
-                                .round() as i8;
+                        let mut rotation = (((dz_seg as f64).atan2(dx_seg as f64)
+                            / (2.0 * std::f64::consts::PI))
+                            * 16.0)
+                            .round() as i8;
                         if rotation < 0 {
                             rotation += 16;
                         }
@@ -351,6 +352,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                 {
                                     let (l1, l2, l3, l4) = format_sign_text(name);
                                     editor.set_sign(l1, l2, l3, l4, sign_x, 1, sign_z, rotation);
+                                    sign_placed = true;
                                 }
                                 distance_since_sign = 0.0;
                             }
@@ -358,6 +360,30 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                         }
                     }
                     prev_node = Some(node);
+                }
+                if !sign_placed {
+                    if let (Some(start), Some(next)) = (way.nodes.first(), way.nodes.get(1)) {
+                        let dx_seg = next.x - start.x;
+                        let dz_seg = next.z - start.z;
+                        let mut rotation = (((dz_seg as f64).atan2(dx_seg as f64)
+                            / (2.0 * std::f64::consts::PI))
+                            * 16.0)
+                            .round() as i8;
+                        if rotation < 0 {
+                            rotation += 16;
+                        }
+                        let side_dx = -dz_seg.signum();
+                        let side_dz = dx_seg.signum();
+                        let sign_x = start.x + side_dx * (block_range + 1);
+                        let sign_z = start.z + side_dz * (block_range + 1);
+                        let (min_x, min_z) = editor.get_min_coords();
+                        let (max_x, max_z) = editor.get_max_coords();
+                        if sign_x >= min_x && sign_x <= max_x && sign_z >= min_z && sign_z <= max_z
+                        {
+                            let (l1, l2, l3, l4) = format_sign_text(name);
+                            editor.set_sign(l1, l2, l3, l4, sign_x, 1, sign_z, rotation);
+                        }
+                    }
                 }
             }
         }
@@ -459,8 +485,18 @@ mod tests {
         };
 
         let nodes = vec![
-            ProcessedNode { id: 1, tags: HashMap::new(), x: 0, z: 0 },
-            ProcessedNode { id: 2, tags: HashMap::new(), x: 1000, z: 0 },
+            ProcessedNode {
+                id: 1,
+                tags: HashMap::new(),
+                x: 0,
+                z: 0,
+            },
+            ProcessedNode {
+                id: 2,
+                tags: HashMap::new(),
+                x: 1000,
+                z: 0,
+            },
         ];
         let mut tags = HashMap::new();
         tags.insert("highway".to_string(), "primary".to_string());
@@ -474,5 +510,62 @@ mod tests {
             assert!(editor.check_for_block(x, 1, 6, Some(&[SIGN])));
         }
         assert!(!editor.check_for_block(100, 1, 6, Some(&[SIGN])));
+    }
+
+    #[test]
+    fn short_roads_get_a_sign() {
+        let bbox = XZBBox::rect_from_xz_lengths(110.0, 20.0).unwrap();
+        let tmp = tempdir().unwrap();
+        let region_dir = tmp.path().join("region");
+        std::fs::create_dir(&region_dir).unwrap();
+        let mut editor = WorldEditor::new(region_dir.to_str().unwrap(), &bbox);
+
+        let args = Args {
+            bbox: LLBBox::new(0., 0., 1., 1.).unwrap(),
+            file: None,
+            save_json_file: None,
+            path: tmp.path().to_str().unwrap().to_string(),
+            downloader: "requests".to_string(),
+            scale: 1.0,
+            ground_level: -62,
+            terrain: false,
+            interior: true,
+            roof: true,
+            fillground: false,
+            debug: false,
+            timeout: None,
+            spawn_point: None,
+        };
+
+        let nodes = vec![
+            ProcessedNode {
+                id: 1,
+                tags: HashMap::new(),
+                x: 0,
+                z: 0,
+            },
+            ProcessedNode {
+                id: 2,
+                tags: HashMap::new(),
+                x: 100,
+                z: 0,
+            },
+        ];
+        let mut tags = HashMap::new();
+        tags.insert("highway".to_string(), "primary".to_string());
+        tags.insert("name".to_string(), "Short St.".to_string());
+        let way = ProcessedWay { id: 1, nodes, tags };
+        let element = ProcessedElement::Way(way);
+
+        generate_highways(&mut editor, &element, &args);
+
+        let mut found = false;
+        for x in 0..=100 {
+            if editor.check_for_block(x, 1, 6, Some(&[SIGN])) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found);
     }
 }
