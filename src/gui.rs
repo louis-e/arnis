@@ -226,13 +226,13 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("Failed to create world directory: {e}"))?;
 
     // Copy the region template file
-    const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
+    const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
     let region_path = new_world_path.join("region").join("r.0.0.mca");
     fs::write(&region_path, REGION_TEMPLATE)
         .map_err(|e| format!("Failed to create region file: {e}"))?;
 
     // Add the level.dat file
-    const LEVEL_TEMPLATE: &[u8] = include_bytes!("../mcassets/level.dat");
+    const LEVEL_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/level.dat");
 
     // Decompress the gzipped level.template
     let mut decoder = GzDecoder::new(LEVEL_TEMPLATE);
@@ -299,7 +299,7 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("Failed to create level.dat file: {e}"))?;
 
     // Add the icon.png file
-    const ICON_TEMPLATE: &[u8] = include_bytes!("../mcassets/icon.png");
+    const ICON_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/icon.png");
     fs::write(new_world_path.join("icon.png"), ICON_TEMPLATE)
         .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
 

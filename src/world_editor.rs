@@ -371,7 +371,7 @@ impl<'a> WorldEditor<'a> {
             .world_dir
             .join(format!("region/r.{}.{}.mca", region_x, region_z));
 
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
+        const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
 
         let mut region_file: File = File::options()
             .read(true)
