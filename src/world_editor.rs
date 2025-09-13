@@ -909,8 +909,13 @@ impl<'a> WorldEditor<'a> {
     fn save_metadata(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let metadata_path = self.world_dir.join("metadata.json");
 
-        let mut file = File::create(&metadata_path)
-            .map_err(|e| format!("Failed to create metadata file at {}: {}", metadata_path.display(), e))?;
+        let mut file = File::create(&metadata_path).map_err(|e| {
+            format!(
+                "Failed to create metadata file at {}: {}",
+                metadata_path.display(),
+                e
+            )
+        })?;
 
         let metadata = WorldMetadata {
             min_mc_x: self.xzbbox.min_x(),
