@@ -18,6 +18,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             "park" | "nature_reserve" | "garden" | "disc_golf_course" | "golf_course" => {
                 GRASS_BLOCK
             }
+            "schoolyard" => BLACK_CONCRETE,
             "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {

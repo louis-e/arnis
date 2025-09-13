@@ -307,7 +307,7 @@ impl Tree<'_> {
             FURNACE,
             ANVIL,
             BREWING_STAND,
-            JUKEBOX,
+            NOTE_BLOCK,
             BOOKSHELF,
             CAULDRON,
             // Beds
