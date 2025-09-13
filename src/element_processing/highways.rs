@@ -360,7 +360,8 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                         "  Placing sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
                                     );
                                     let (l1, l2, l3, l4) = format_sign_text(name);
-                                    editor.set_sign(l1, l2, l3, l4, sign_x, 1, sign_z, rotation);
+                                    editor
+                                        .set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z, rotation);
                                     sign_placed = true;
                                 } else {
                                     eprintln!(
@@ -393,12 +394,13 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                         let (min_x, min_z) = editor.get_min_coords();
                         let (max_x, max_z) = editor.get_max_coords();
                         let sign_y = editor.get_absolute_y(sign_x, 1, sign_z);
-                        if sign_x >= min_x && sign_x <= max_x && sign_z >= min_z && sign_z <= max_z {
+                        if sign_x >= min_x && sign_x <= max_x && sign_z >= min_z && sign_z <= max_z
+                        {
                             eprintln!(
                                 "  Fallback placing sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
                             );
                             let (l1, l2, l3, l4) = format_sign_text(name);
-                            editor.set_sign(l1, l2, l3, l4, sign_x, 1, sign_z, rotation);
+                            editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z, rotation);
                         } else {
                             eprintln!(
                                 "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_y}, {sign_z})"

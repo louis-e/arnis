@@ -203,7 +203,8 @@ pub fn generate_world(
 
     // Set sign for player orientation
     let (line1, line2, line3, line4) = format_sign_text("↑\nGenerated World\nThis direction\n");
-    editor.set_sign(line1, line2, line3, line4, 9, -61, 9, 6);
+    let sign_y = editor.get_absolute_y(9, -61, 9);
+    editor.set_sign(line1, line2, line3, line4, 9, sign_y, 9, 6);
 
     ground_pb.inc(block_counter % batch_size);
     ground_pb.finish();
