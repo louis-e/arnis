@@ -1,4 +1,4 @@
-<img src="https://github.com/louis-e/arnis/blob/main/gitassets/banner.png?raw=true" width="100%" alt="Banner">
+<img src="https://github.com/louis-e/arnis/blob/main/assets/gitassets/banner.png?raw=true" width="100%" alt="Banner">
 
 # Arnis [![CI Build Status](https://github.com/louis-e/arnis/actions/workflows/ci-build.yml/badge.svg)](https://github.com/louis-e/arnis/actions) [<img alt="GitHub Release" src="https://img.shields.io/github/v/release/louis-e/arnis" />](https://github.com/louis-e/arnis/releases) [<img alt="GitHub Downloads (all assets, all releases" src="https://img.shields.io/github/downloads/louis-e/arnis/total" />](https://github.com/louis-e/arnis/releases) [![Download here](https://img.shields.io/badge/Download-here-green)](https://github.com/louis-e/arnis/releases) [![Discord](https://img.shields.io/discord/1326192999738249267?label=Discord&color=%237289da)](https://discord.gg/mA2g69Fhxq)
 
@@ -7,11 +7,11 @@ Arnis creates complex and accurate Minecraft Java Edition worlds that reflect re
 This free and open source project is designed to handle large-scale geographic data from the real world and generate detailed Minecraft worlds. The algorithm processes geospatial data from OpenStreetMap as well as elevation data to create an accurate Minecraft representation of terrain and architecture.
 Generate your hometown, big cities, and natural landscapes with ease!
 
-![Minecraft Preview](https://raw.githubusercontent.com/louis-e/arnis/refs/heads/main/gitassets/preview.jpg)
+![Minecraft Preview](https://raw.githubusercontent.com/louis-e/arnis/refs/heads/main/assets/gitassets/preview.jpg)
 <i>This Github page is the official project website. Do not download Arnis from any other website.</i>
 
 ## :keyboard: Usage
-<img width="60%" src="https://github.com/louis-e/arnis/blob/main/gitassets/gui.png?raw=true"><br>
+<img width="60%" src="https://github.com/louis-e/arnis/blob/main/assets/gitassets/gui.png?raw=true"><br>
 Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
 
 Choose your area on the map using the rectangle tool and select your Minecraft world - then simply click on <i>Start Generation</i>!
@@ -19,7 +19,7 @@ Additionally, you can customize various generation settings, such as world scale
 
 ## 📚 Documentation
 
-<img src="https://github.com/louis-e/arnis/blob/main/gitassets/documentation.png?raw=true" width="100%" alt="Banner">
+<img src="https://github.com/louis-e/arnis/blob/main/assets/gitassets/documentation.png?raw=true" width="100%" alt="Banner">
 
 Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/arnis/wiki/), covering topics such as technical explanations, FAQs, contribution guidelines and roadmaps.
 
@@ -51,7 +51,7 @@ After your pull request was merged, I will take care of regularly creating updat
 
 ## :newspaper: Academic & Press Recognition
 
-<img src="https://github.com/louis-e/arnis/blob/main/gitassets/recognition.png?raw=true" width="100%" alt="Banner">
+<img src="https://github.com/louis-e/arnis/blob/main/assets/gitassets/recognition.png?raw=true" width="100%" alt="Banner">
 
 Arnis has been recognized in various academic and press publications after gaining a lot of attention in December 2024.
 

@@ -351,7 +351,7 @@ impl<'a> WorldEditor<'a> {
     fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
         let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
 
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
+        const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/mcassets/region.template");
 
         let mut region_file: File = File::options()
             .read(true)
