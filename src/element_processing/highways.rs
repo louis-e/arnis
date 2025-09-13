@@ -4,12 +4,8 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
-<<<<<<< HEAD
-use crate::world_editor::WorldEditor;
-use std::collections::HashMap;
-=======
 use crate::world_editor::{format_sign_text, WorldEditor};
->>>>>>> street-signs
+use std::collections::HashMap;
 
 /// Generates highways with elevation support based on layer tags and connectivity analysis
 pub fn generate_highways(
@@ -741,13 +737,14 @@ mod tests {
         let tmp = tempdir().unwrap();
         let region_dir = tmp.path().join("region");
         std::fs::create_dir(&region_dir).unwrap();
-        let mut editor = WorldEditor::new(region_dir.to_str().unwrap(), &bbox);
+        let llbbox = LLBBox::new(0., 0., 1., 1.).unwrap();
+        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox.clone());
 
         let args = Args {
-            bbox: LLBBox::new(0., 0., 1., 1.).unwrap(),
+            bbox: llbbox,
             file: None,
             save_json_file: None,
-            path: tmp.path().to_str().unwrap().to_string(),
+            path: tmp.path().to_path_buf(),
             downloader: "requests".to_string(),
             scale: 1.0,
             ground_level: -62,
@@ -780,7 +777,8 @@ mod tests {
         let way = ProcessedWay { id: 1, nodes, tags };
         let element = ProcessedElement::Way(way);
 
-        generate_highways(&mut editor, &element, &args);
+        let all = [element.clone()];
+        generate_highways(&mut editor, &element, &args, &all);
 
         for x in [200, 400, 600, 800, 1000] {
             assert!(editor.check_for_block(x, 1, 6, Some(&[SIGN])));
@@ -794,13 +792,14 @@ mod tests {
         let tmp = tempdir().unwrap();
         let region_dir = tmp.path().join("region");
         std::fs::create_dir(&region_dir).unwrap();
-        let mut editor = WorldEditor::new(region_dir.to_str().unwrap(), &bbox);
+        let llbbox = LLBBox::new(0., 0., 1., 1.).unwrap();
+        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox.clone());
 
         let args = Args {
-            bbox: LLBBox::new(0., 0., 1., 1.).unwrap(),
+            bbox: llbbox,
             file: None,
             save_json_file: None,
-            path: tmp.path().to_str().unwrap().to_string(),
+            path: tmp.path().to_path_buf(),
             downloader: "requests".to_string(),
             scale: 1.0,
             ground_level: -62,
@@ -833,7 +832,8 @@ mod tests {
         let way = ProcessedWay { id: 1, nodes, tags };
         let element = ProcessedElement::Way(way);
 
-        generate_highways(&mut editor, &element, &args);
+        let all = [element.clone()];
+        generate_highways(&mut editor, &element, &args, &all);
 
         let mut found = false;
         for x in 0..=100 {

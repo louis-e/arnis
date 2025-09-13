@@ -814,10 +814,6 @@ impl<'a> WorldEditor<'a> {
             other: chunk.other,
         };
 
-<<<<<<< HEAD
-        // Create the Level wrapper
-        let level_data = create_level_wrapper(&chunk_data);
-=======
         // Build the root NBT structure for the chunk
         let sections = Value::List(
             chunk_data
@@ -868,7 +864,6 @@ impl<'a> WorldEditor<'a> {
                 })
                 .collect(),
         );
->>>>>>> street-signs
 
         let mut root = HashMap::from([
             ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
@@ -1120,25 +1115,6 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
 }
 
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
-<<<<<<< HEAD
-    HashMap::from([(
-        "Level".to_string(),
-        Value::Compound(HashMap::from([
-            ("xPos".to_string(), Value::Int(chunk.x_pos)),
-            ("zPos".to_string(), Value::Int(chunk.z_pos)),
-            (
-                "isLightOn".to_string(),
-                Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
-            ),
-            (
-                "sections".to_string(),
-                Value::List(
-                    chunk
-                        .sections
-                        .iter()
-                        .map(|section| {
-                            let mut block_states = HashMap::from([(
-=======
     let sections = Value::List(
         chunk
             .sections
@@ -1150,7 +1126,6 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                         "block_states".to_string(),
                         Value::Compound(HashMap::from([
                             (
->>>>>>> street-signs
                                 "palette".to_string(),
                                 Value::List(
                                     section
@@ -1172,31 +1147,6 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                                         })
                                         .collect(),
                                 ),
-<<<<<<< HEAD
-                            )]);
-
-                            // only add the `data` attribute if it's non-empty
-                            // some software (cough cough dynmap) chokes otherwise
-                            if let Some(data) = &section.block_states.data {
-                                if !data.is_empty() {
-                                    block_states.insert(
-                                        "data".to_string(),
-                                        Value::LongArray(data.to_owned()),
-                                    );
-                                }
-                            }
-
-                            Value::Compound(HashMap::from([
-                                ("Y".to_string(), Value::Byte(section.y)),
-                                ("block_states".to_string(), Value::Compound(block_states)),
-                            ]))
-                        })
-                        .collect(),
-                ),
-            ),
-        ])),
-    )])
-=======
                             ),
                             (
                                 "data".to_string(),
@@ -1245,8 +1195,7 @@ mod tests {
 
     #[test]
     fn format_sign_text_wraps() {
-        let (l1, l2, l3, l4) =
-            format_sign_text("A very long \"street\" name that needs wrapping");
+        let (l1, l2, l3, l4) = format_sign_text("A very long \"street\" name that needs wrapping");
         assert!(l1.len() <= 15);
         assert!(l2.len() <= 15);
         assert!(l3.len() <= 15);
@@ -1314,5 +1263,4 @@ mod tests {
             _ => panic!("sign properties missing"),
         }
     }
->>>>>>> street-signs
 }
