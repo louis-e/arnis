@@ -928,10 +928,17 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                                         .palette
                                         .iter()
                                         .map(|item| {
-                                            Value::Compound(HashMap::from([(
+                                            let mut palette_item = HashMap::from([(
                                                 "Name".to_string(),
                                                 Value::String(item.name.clone()),
-                                            )]))
+                                            )]);
+                                            if let Some(props) = &item.properties {
+                                                palette_item.insert(
+                                                    "Properties".to_string(),
+                                                    props.clone(),
+                                                );
+                                            }
+                                            Value::Compound(palette_item)
                                         })
                                         .collect(),
                                 ),
