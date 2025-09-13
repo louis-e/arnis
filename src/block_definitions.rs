@@ -82,8 +82,11 @@ impl BlockWithProperties {
 
 impl Block {
     #[inline(always)]
-    const fn new(name: &'static str) -> Self {
-        Self { name }
+    const fn new(namespaced_name: &'static str) -> Self {
+        // Names are expected to include the namespace, e.g. "minecraft:oak_planks"
+        Self {
+            name: namespaced_name,
+        }
     }
 
     #[inline(always)]
@@ -674,4 +677,20 @@ pub fn get_castle_wall_block() -> Block {
         BRICK,
     ];
     castle_wall_options[rng.gen_range(0..castle_wall_options.len())]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn block_new_stores_namespace_qualified_name() {
+        let block = Block::new("minecraft:oak_planks");
+        assert_eq!(block.name(), "minecraft:oak_planks");
+    }
+
+    #[test]
+    fn block_constant_returns_namespaced_name() {
+        assert_eq!(OAK_PLANKS.name(), "minecraft:oak_planks");
+    }
 }
