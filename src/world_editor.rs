@@ -947,7 +947,7 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                             // only add the `data` attribute if it's non-empty
                             // some software (cough cough dynmap) chokes otherwise
                             if let Some(data) = &section.block_states.data {
-                                if data.len() > 0 {
+                                if !data.is_empty() {
                                     block_states.insert(
                                         "data".to_string(),
                                         Value::LongArray(data.to_owned()),
