@@ -4,7 +4,7 @@ use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{LongArray, Value};
+use fastnbt::{ByteArray, LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -69,6 +69,10 @@ struct Section {
     block_states: Blockstates,
     #[serde(rename = "Y")]
     y: i8,
+    #[serde(default)]
+    sky_light: Option<ByteArray>,
+    #[serde(default)]
+    block_light: Option<ByteArray>,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -196,6 +200,8 @@ impl SectionToModify {
                 other: FnvHashMap::default(),
             },
             y,
+            sky_light: Some(ByteArray::new(vec![-1; 2048])),
+            block_light: Some(ByteArray::new(vec![-1; 2048])),
             other: FnvHashMap::default(),
         }
     }
@@ -824,9 +830,27 @@ impl<'a> WorldEditor<'a> {
                                             .data
                                             .clone()
                                             .unwrap_or_else(|| LongArray::new(vec![])),
-                                    ),
                                 ),
-                            ])),
+                            ),
+                        ])),
+                        ),
+                        (
+                            "block_light".to_string(),
+                            Value::ByteArray(
+                                section
+                                    .block_light
+                                    .clone()
+                                    .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
+                            ),
+                        ),
+                        (
+                            "sky_light".to_string(),
+                            Value::ByteArray(
+                                section
+                                    .sky_light
+                                    .clone()
+                                    .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
+                            ),
                         ),
                     ]))
                 })
@@ -925,6 +949,8 @@ impl<'a> WorldEditor<'a> {
                                 existing_section.block_states.palette =
                                     new_section.block_states.palette;
                                 existing_section.block_states.data = new_section.block_states.data;
+                                existing_section.sky_light = new_section.sky_light;
+                                existing_section.block_light = new_section.block_light;
                             } else {
                                 // Add new section if it doesn't exist
                                 chunk.sections.push(new_section);
@@ -1086,6 +1112,24 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                                 ),
                             ),
                         ])),
+                    ),
+                    (
+                        "block_light".to_string(),
+                        Value::ByteArray(
+                            section
+                                .block_light
+                                .clone()
+                                .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
+                        ),
+                    ),
+                    (
+                        "sky_light".to_string(),
+                        Value::ByteArray(
+                            section
+                                .sky_light
+                                .clone()
+                                .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
+                        ),
                     ),
                 ]))
             })
