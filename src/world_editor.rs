@@ -452,25 +452,19 @@ impl<'a> WorldEditor<'a> {
             .iter()
             .map(|l| Value::String(json!({"text": l}).to_string()))
             .collect();
-        let filtered_messages: Vec<Value> = (0..4)
-            .map(|_| Value::String(json!({"text": ""}).to_string()))
-            .collect();
 
         let mut front_text = HashMap::new();
         front_text.insert("messages".to_string(), Value::List(messages.clone()));
         front_text.insert(
             "filtered_messages".to_string(),
-            Value::List(filtered_messages.clone()),
+            Value::List(messages.clone()),
         );
         front_text.insert("color".to_string(), Value::String("black".to_string()));
         front_text.insert("has_glowing_text".to_string(), Value::Byte(0));
 
         let mut back_text = HashMap::new();
-        back_text.insert("messages".to_string(), Value::List(messages));
-        back_text.insert(
-            "filtered_messages".to_string(),
-            Value::List(filtered_messages),
-        );
+        back_text.insert("messages".to_string(), Value::List(messages.clone()));
+        back_text.insert("filtered_messages".to_string(), Value::List(messages));
         back_text.insert("color".to_string(), Value::String("black".to_string()));
         back_text.insert("has_glowing_text".to_string(), Value::Byte(0));
 
