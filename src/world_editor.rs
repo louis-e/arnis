@@ -17,27 +17,27 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Formats a single text string into four lines suitable for Minecraft signs.
 /// Each line is limited to 15 characters and double quotes are replaced with
-/// single quotes to keep the resulting NBT valid.
+/// single quotes to keep the resulting NBT valid. Excess text is wrapped to the
+/// next line and anything beyond four lines is truncated.
 pub fn format_sign_text(text: &str) -> (String, String, String, String) {
     let sanitized = text.replace('"', "'");
-    let mut lines = vec![String::new()];
 
-    for ch in sanitized.chars() {
-        let current = lines.last_mut().expect("lines is never empty");
-
-        if ch == '\n' || current.chars().count() >= 15 {
-            if lines.len() == 4 {
-                break;
+    let mut lines: Vec<String> = sanitized
+        .split('\n')
+        .flat_map(|segment| {
+            let chars: Vec<char> = segment.chars().collect();
+            if chars.is_empty() {
+                vec![String::new()]
+            } else {
+                chars
+                    .chunks(15)
+                    .map(|chunk| chunk.iter().collect::<String>())
+                    .collect::<Vec<_>>()
             }
-            lines.push(String::new());
-            if ch == '\n' {
-                continue;
-            }
-        }
+        })
+        .collect();
 
-        lines.last_mut().unwrap().push(ch);
-    }
-
+    lines.truncate(4);
     while lines.len() < 4 {
         lines.push(String::new());
     }
@@ -1147,5 +1147,15 @@ mod tests {
         assert!(!l2.contains('"'));
         assert!(!l3.contains('"'));
         assert!(!l4.contains('"'));
+    }
+
+    #[test]
+    fn format_sign_text_truncates_after_four_lines() {
+        let input = "0123456789abcde".repeat(5);
+        let (l1, l2, l3, l4) = format_sign_text(&input);
+        assert_eq!(l1, "0123456789abcde");
+        assert_eq!(l2, "0123456789abcde");
+        assert_eq!(l3, "0123456789abcde");
+        assert_eq!(l4, "0123456789abcde");
     }
 }
