@@ -534,9 +534,13 @@ impl<'a> WorldEditor<'a> {
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                whitelist.iter().any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
             } else if let Some(blacklist) = override_blacklist {
-                !blacklist.iter().any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
+                !blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
             } else {
                 false
             }
@@ -568,9 +572,13 @@ impl<'a> WorldEditor<'a> {
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                whitelist.iter().any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
             } else if let Some(blacklist) = override_blacklist {
-                !blacklist.iter().any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
+                !blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
             } else {
                 false
             }
@@ -602,9 +610,13 @@ impl<'a> WorldEditor<'a> {
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                whitelist.iter().any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
             } else if let Some(blacklist) = override_blacklist {
-                !blacklist.iter().any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
+                !blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
             } else {
                 false
             }
@@ -700,7 +712,10 @@ impl<'a> WorldEditor<'a> {
         // Retrieve the chunk modification map
         if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             if let Some(whitelist) = whitelist {
-                if whitelist.iter().any(|whitelisted_block: &Block| *whitelisted_block == existing_block) {
+                if whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                {
                     return true; // Block is in the list
                 }
             }
@@ -722,13 +737,19 @@ impl<'a> WorldEditor<'a> {
         if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = whitelist {
-                if whitelist.iter().any(|whitelisted_block: &Block| *whitelisted_block == existing_block) {
+                if whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                {
                     return true; // Block is in whitelist
                 }
                 return false;
             }
             if let Some(blacklist) = blacklist {
-                if blacklist.iter().any(|blacklisted_block: &Block| *blacklisted_block == existing_block) {
+                if blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
+                {
                     return true; // Block is in blacklist
                 }
             }
@@ -1093,5 +1114,20 @@ mod tests {
         assert_eq!(l2, "0123456789abcde");
         assert_eq!(l3, "0123456789abcde");
         assert_eq!(l4, "0123456789abcde");
+    }
+
+    #[test]
+    fn palette_item_contains_namespaced_names() {
+        use crate::block_definitions::OAK_PLANKS;
+
+        let mut section = SectionToModify::default();
+        section.set_block(0, 0, 0, OAK_PLANKS);
+
+        let nbt_section = section.to_section(0);
+        assert!(nbt_section
+            .block_states
+            .palette
+            .iter()
+            .any(|p| p.name == "minecraft:oak_planks"));
     }
 }
