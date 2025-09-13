@@ -430,7 +430,6 @@ impl<'a> WorldEditor<'a> {
         x: i32,
         y: i32,
         z: i32,
-        rotation: i8,
     ) {
         let absolute_y = y;
         let chunk_x = x >> 4;
@@ -493,13 +492,14 @@ impl<'a> WorldEditor<'a> {
             );
         }
 
-        let rotation = rotation.clamp(0, 15);
-
-        // Start from the default sign properties and override the rotation.
-        let mut sign_block = BlockWithProperties::new(SIGN, SIGN.properties());
-        if let Some(Value::Compound(ref mut props)) = sign_block.properties.as_mut() {
-            props.insert("rotation".to_string(), Value::String(rotation.to_string()));
-        }
+        // Explicitly set all sign properties.
+        let mut props = HashMap::new();
+        props.insert("rotation".to_string(), Value::String("0".to_string()));
+        props.insert(
+            "waterlogged".to_string(),
+            Value::String("false".to_string()),
+        );
+        let sign_block = BlockWithProperties::new(SIGN, Some(Value::Compound(props)));
 
         // Ensure that the sign is always placed even if another block
         // already occupies the target position. An empty blacklist allows

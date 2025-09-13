@@ -324,14 +324,6 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                     if let Some(start) = prev_node {
                         let dx_seg = node.x - start.x;
                         let dz_seg = node.z - start.z;
-                        let mut rotation = (((dz_seg as f64).atan2(dx_seg as f64)
-                            / (2.0 * std::f64::consts::PI))
-                            * 16.0)
-                            .round() as i8;
-                        if rotation < 0 {
-                            rotation += 16;
-                        }
-
                         let side_dx = -dz_seg.signum();
                         let side_dz = dx_seg.signum();
 
@@ -349,7 +341,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                 let (max_x, max_z) = editor.get_max_coords();
                                 let sign_y = editor.get_absolute_y(sign_x, 1, sign_z);
                                 eprintln!(
-                                    "  Attempting sign for '{name}' at ({sign_x}, {sign_y}, {sign_z}) with rotation {rotation}"
+                                    "  Attempting sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
                                 );
                                 if sign_x >= min_x
                                     && sign_x <= max_x
@@ -360,8 +352,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                         "  Placing sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
                                     );
                                     let (l1, l2, l3, l4) = format_sign_text(name);
-                                    editor
-                                        .set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z, rotation);
+                                    editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
                                     sign_placed = true;
                                 } else {
                                     eprintln!(
@@ -380,13 +371,6 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                     if let (Some(start), Some(next)) = (way.nodes.first(), way.nodes.get(1)) {
                         let dx_seg = next.x - start.x;
                         let dz_seg = next.z - start.z;
-                        let mut rotation = (((dz_seg as f64).atan2(dx_seg as f64)
-                            / (2.0 * std::f64::consts::PI))
-                            * 16.0)
-                            .round() as i8;
-                        if rotation < 0 {
-                            rotation += 16;
-                        }
                         let side_dx = -dz_seg.signum();
                         let side_dz = dx_seg.signum();
                         let sign_x = start.x + side_dx * (block_range + 1);
@@ -400,7 +384,7 @@ pub fn generate_highways(editor: &mut WorldEditor, element: &ProcessedElement, a
                                 "  Fallback placing sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
                             );
                             let (l1, l2, l3, l4) = format_sign_text(name);
-                            editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z, rotation);
+                            editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
                         } else {
                             eprintln!(
                                 "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_y}, {sign_z})"
