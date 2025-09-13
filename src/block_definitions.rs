@@ -4,6 +4,7 @@ use fastnbt::Value;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 use crate::colors::RGBTuple;
 
@@ -140,9 +141,28 @@ impl Block {
     }
 }
 
-// Cache for stair blocks with properties
-use std::sync::Mutex;
+// Cache for dynamically created blocks by string name
+static BLOCK_NAME_CACHE: Lazy<Mutex<HashMap<String, Block>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
+impl Block {
+    /// Construct a `Block` from an arbitrary namespaced string.
+    ///
+    /// The string is stored in a global cache to obtain a `'static` lifetime.
+    pub fn from_str(name: &str) -> Block {
+        let mut cache = BLOCK_NAME_CACHE.lock().unwrap();
+        if let Some(block) = cache.get(name) {
+            *block
+        } else {
+            let leaked: &'static str = Box::leak(name.to_string().into_boxed_str());
+            let block = Block::new(leaked);
+            cache.insert(name.to_string(), block);
+            block
+        }
+    }
+}
+
+// Cache for stair blocks with properties
 #[allow(clippy::type_complexity)]
 static STAIR_CACHE: Lazy<Mutex<HashMap<(Block, StairFacing, StairShape), BlockWithProperties>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));

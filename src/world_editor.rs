@@ -897,6 +897,14 @@ impl<'a> WorldEditor<'a> {
                             }
                         };
 
+                        // Normalize palette block names from NBT
+                        for section in &mut chunk.sections {
+                            for palette_item in &mut section.block_states.palette {
+                                palette_item.name =
+                                    Block::from_str(&palette_item.name).name().to_string();
+                            }
+                        }
+
                         // Update sections while preserving existing data
                         let new_sections: Vec<Section> = chunk_to_modify.sections().collect();
                         for new_section in new_sections {
