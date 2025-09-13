@@ -536,11 +536,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.name() == existing_block.name())
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.name() == existing_block.name())
             } else {
                 false
             }
@@ -574,11 +574,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.name() == existing_block.name())
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.name() == existing_block.name())
             } else {
                 false
             }
@@ -612,11 +612,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.name() == existing_block.name())
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.name() == existing_block.name())
             } else {
                 false
             }
@@ -714,7 +714,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.name() == existing_block.name())
                 {
                     return true; // Block is in the list
                 }
@@ -739,7 +739,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| whitelisted_block.name() == existing_block.name())
                 {
                     return true; // Block is in whitelist
                 }
@@ -748,7 +748,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(blacklist) = blacklist {
                 if blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| blacklisted_block.name() == existing_block.name())
                 {
                     return true; // Block is in blacklist
                 }
