@@ -15,6 +15,8 @@ use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+const DATA_VERSION: i32 = 3700;
+
 /// Formats a single text string into four lines suitable for Minecraft signs.
 /// Each line is limited to 15 characters and double quotes are replaced with
 /// single quotes to keep the resulting NBT valid. Excess text is wrapped to the
@@ -787,64 +789,69 @@ impl<'a> WorldEditor<'a> {
             other: chunk.other,
         };
 
-        // Create the Level wrapper
-        let level_data = HashMap::from([(
-            "Level".to_string(),
-            Value::Compound(HashMap::from([
-                ("xPos".to_string(), Value::Int(abs_chunk_x)),
-                ("zPos".to_string(), Value::Int(abs_chunk_z)),
-                ("isLightOn".to_string(), Value::Byte(0)),
-                (
-                    "sections".to_string(),
-                    Value::List(
-                        chunk_data
-                            .sections
-                            .iter()
-                            .map(|section| {
-                                Value::Compound(HashMap::from([
-                                    ("Y".to_string(), Value::Byte(section.y)),
-                                    (
-                                        "block_states".to_string(),
-                                        Value::Compound(HashMap::from([
-                                            (
-                                                "palette".to_string(),
-                                                Value::List(
-                                                    section
-                                                        .block_states
-                                                        .palette
-                                                        .iter()
-                                                        .map(|item| {
-                                                            Value::Compound(HashMap::from([(
-                                                                "Name".to_string(),
-                                                                Value::String(item.name.clone()),
-                                                            )]))
-                                                        })
-                                                        .collect(),
-                                                ),
-                                            ),
-                                            (
-                                                "data".to_string(),
-                                                Value::LongArray(
-                                                    section
-                                                        .block_states
-                                                        .data
-                                                        .clone()
-                                                        .unwrap_or_else(|| LongArray::new(vec![])),
-                                                ),
-                                            ),
-                                        ])),
+        // Build the root NBT structure for the chunk
+        let sections = Value::List(
+            chunk_data
+                .sections
+                .iter()
+                .map(|section| {
+                    Value::Compound(HashMap::from([
+                        ("Y".to_string(), Value::Byte(section.y)),
+                        (
+                            "block_states".to_string(),
+                            Value::Compound(HashMap::from([
+                                (
+                                    "palette".to_string(),
+                                    Value::List(
+                                        section
+                                            .block_states
+                                            .palette
+                                            .iter()
+                                            .map(|item| {
+                                                Value::Compound(HashMap::from([(
+                                                    "Name".to_string(),
+                                                    Value::String(item.name.clone()),
+                                                )]))
+                                            })
+                                            .collect(),
                                     ),
-                                ]))
-                            })
-                            .collect(),
-                    ),
-                ),
-            ])),
-        )]);
+                                ),
+                                (
+                                    "data".to_string(),
+                                    Value::LongArray(
+                                        section
+                                            .block_states
+                                            .data
+                                            .clone()
+                                            .unwrap_or_else(|| LongArray::new(vec![])),
+                                    ),
+                                ),
+                            ])),
+                        ),
+                    ]))
+                })
+                .collect(),
+        );
 
-        // Serialize the chunk with Level wrapper
+        let mut root = HashMap::from([
+            ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
+            ("xPos".to_string(), Value::Int(abs_chunk_x)),
+            ("zPos".to_string(), Value::Int(abs_chunk_z)),
+            ("InhabitedTime".to_string(), Value::Long(0)),
+            ("LastUpdate".to_string(), Value::Long(0)),
+            ("isLightOn".to_string(), Value::Byte(0)),
+            ("status".to_string(), Value::String("full".to_string())),
+            ("sections".to_string(), sections),
+        ]);
+
+        // Include any additional top-level fields
+        for (k, v) in chunk_data.other.iter() {
+            root.insert(k.clone(), v.clone());
+        }
+
+        // Serialize the chunk
         let mut ser_buffer = Vec::with_capacity(8192);
-        fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
+        fastnbt::to_writer(&mut ser_buffer, &root).unwrap();
 
         (ser_buffer, true)
     }
@@ -1031,73 +1038,77 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
     (x, y, z)
 }
 
-#[inline]
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
-    HashMap::from([(
-        "Level".to_string(),
-        Value::Compound(HashMap::from([
-            ("xPos".to_string(), Value::Int(chunk.x_pos)),
-            ("zPos".to_string(), Value::Int(chunk.z_pos)),
-            (
-                "isLightOn".to_string(),
-                Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
-            ),
-            (
-                "sections".to_string(),
-                Value::List(
-                    chunk
-                        .sections
-                        .iter()
-                        .map(|section| {
-                            Value::Compound(HashMap::from([
-                                ("Y".to_string(), Value::Byte(section.y)),
-                                (
-                                    "block_states".to_string(),
-                                    Value::Compound(HashMap::from([
-                                        (
-                                            "palette".to_string(),
-                                            Value::List(
-                                                section
-                                                    .block_states
-                                                    .palette
-                                                    .iter()
-                                                    .map(|item| {
-                                                        let mut palette_item = HashMap::from([(
-                                                            "Name".to_string(),
-                                                            Value::String(item.name.clone()),
-                                                        )]);
-                                                        if let Some(props) = &item.properties {
-                                                            palette_item.insert(
-                                                                "Properties".to_string(),
-                                                                props.clone(),
-                                                            );
-                                                        }
-                                                        Value::Compound(palette_item)
-                                                    })
-                                                    .collect(),
-                                            ),
-                                        ),
-                                        (
-                                            "data".to_string(),
-                                            Value::LongArray(
-                                                section
-                                                    .block_states
-                                                    .data
-                                                    .clone()
-                                                    .unwrap_or_else(|| LongArray::new(vec![])),
-                                            ),
-                                        ),
-                                    ])),
+    let sections = Value::List(
+        chunk
+            .sections
+            .iter()
+            .map(|section| {
+                Value::Compound(HashMap::from([
+                    ("Y".to_string(), Value::Byte(section.y)),
+                    (
+                        "block_states".to_string(),
+                        Value::Compound(HashMap::from([
+                            (
+                                "palette".to_string(),
+                                Value::List(
+                                    section
+                                        .block_states
+                                        .palette
+                                        .iter()
+                                        .map(|item| {
+                                            let mut palette_item = HashMap::from([(
+                                                "Name".to_string(),
+                                                Value::String(item.name.clone()),
+                                            )]);
+                                            if let Some(props) = &item.properties {
+                                                palette_item.insert(
+                                                    "Properties".to_string(),
+                                                    props.clone(),
+                                                );
+                                            }
+                                            Value::Compound(palette_item)
+                                        })
+                                        .collect(),
                                 ),
-                            ]))
-                        })
-                        .collect(),
-                ),
-            ),
-        ])),
-    )])
-}
+                            ),
+                            (
+                                "data".to_string(),
+                                Value::LongArray(
+                                    section
+                                        .block_states
+                                        .data
+                                        .clone()
+                                        .unwrap_or_else(|| LongArray::new(vec![])),
+                                ),
+                            ),
+                        ])),
+                    ),
+                ]))
+            })
+            .collect(),
+    );
 
+    let mut root = HashMap::from([
+        ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
+        ("xPos".to_string(), Value::Int(chunk.x_pos)),
+        ("zPos".to_string(), Value::Int(chunk.z_pos)),
+        ("InhabitedTime".to_string(), Value::Long(0)),
+        ("LastUpdate".to_string(), Value::Long(0)),
+        (
+            "isLightOn".to_string(),
+            Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
+        ),
+        ("status".to_string(), Value::String("full".to_string())),
+        ("sections".to_string(), sections),
+    ]);
+
+    for (k, v) in chunk.other.iter() {
+        root.insert(k.clone(), v.clone());
+    }
+
+    root
+}
 #[cfg(test)]
 mod tests {
     use super::*;
