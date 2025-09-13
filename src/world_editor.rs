@@ -4,7 +4,7 @@ use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{LongArray, Value};
+use fastnbt::{ByteArray, LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -69,6 +69,10 @@ struct Section {
     block_states: Blockstates,
     #[serde(rename = "Y")]
     y: i8,
+    #[serde(default)]
+    sky_light: Option<ByteArray>,
+    #[serde(default)]
+    block_light: Option<ByteArray>,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -196,6 +200,8 @@ impl SectionToModify {
                 other: FnvHashMap::default(),
             },
             y,
+            sky_light: None,
+            block_light: None,
             other: FnvHashMap::default(),
         }
     }
@@ -472,7 +478,7 @@ impl<'a> WorldEditor<'a> {
         block_entities.insert("back_text".to_string(), Value::Compound(back_text));
         block_entities.insert(
             "id".to_string(),
-            Value::String("minecraft:oak_sign".to_string()),
+            Value::String("minecraft:sign".to_string()),
         );
         block_entities.insert("is_waxed".to_string(), Value::Byte(0));
         block_entities.insert("keepPacked".to_string(), Value::Byte(0));
@@ -795,7 +801,7 @@ impl<'a> WorldEditor<'a> {
                 .sections
                 .iter()
                 .map(|section| {
-                    Value::Compound(HashMap::from([
+                    let mut map = HashMap::from([
                         ("Y".to_string(), Value::Byte(section.y)),
                         (
                             "block_states".to_string(),
@@ -828,7 +834,14 @@ impl<'a> WorldEditor<'a> {
                                 ),
                             ])),
                         ),
-                    ]))
+                    ]);
+                    if let Some(bl) = &section.block_light {
+                        map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
+                    }
+                    if let Some(sl) = &section.sky_light {
+                        map.insert("sky_light".to_string(), Value::ByteArray(sl.clone()));
+                    }
+                    Value::Compound(map)
                 })
                 .collect(),
         );
@@ -894,7 +907,9 @@ impl<'a> WorldEditor<'a> {
 
                         // Parse existing chunk or create new one
                         let mut chunk: Chunk = if !existing_data.is_empty() {
-                            fastnbt::from_bytes(&existing_data).unwrap()
+                            let mut existing: Chunk = fastnbt::from_bytes(&existing_data).unwrap();
+                            existing.is_light_on = 0;
+                            existing
                         } else {
                             Chunk {
                                 sections: Vec::new(),
@@ -911,6 +926,8 @@ impl<'a> WorldEditor<'a> {
                                 palette_item.name =
                                     Block::from_str(&palette_item.name).name().to_string();
                             }
+                            section.sky_light = None;
+                            section.block_light = None;
                         }
 
                         // Update sections while preserving existing data
@@ -923,6 +940,8 @@ impl<'a> WorldEditor<'a> {
                                 existing_section.block_states.palette =
                                     new_section.block_states.palette;
                                 existing_section.block_states.data = new_section.block_states.data;
+                                existing_section.sky_light = new_section.sky_light;
+                                existing_section.block_light = new_section.block_light;
                             } else {
                                 // Add new section if it doesn't exist
                                 chunk.sections.push(new_section);
@@ -969,6 +988,7 @@ impl<'a> WorldEditor<'a> {
                         // Update chunk coordinates and flags
                         chunk.x_pos = chunk_x + (region_x * 32);
                         chunk.z_pos = chunk_z + (region_z * 32);
+                        chunk.is_light_on = 0;
 
                         // Create Level wrapper and save
                         let level_data = create_level_wrapper(&chunk);
@@ -1044,7 +1064,7 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
             .sections
             .iter()
             .map(|section| {
-                Value::Compound(HashMap::from([
+                let mut map = HashMap::from([
                     ("Y".to_string(), Value::Byte(section.y)),
                     (
                         "block_states".to_string(),
@@ -1084,7 +1104,14 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                             ),
                         ])),
                     ),
-                ]))
+                ]);
+                if let Some(bl) = &section.block_light {
+                    map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
+                }
+                if let Some(sl) = &section.sky_light {
+                    map.insert("sky_light".to_string(), Value::ByteArray(sl.clone()));
+                }
+                Value::Compound(map)
             })
             .collect(),
     );
@@ -1095,10 +1122,7 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
         ("zPos".to_string(), Value::Int(chunk.z_pos)),
         ("InhabitedTime".to_string(), Value::Long(0)),
         ("LastUpdate".to_string(), Value::Long(0)),
-        (
-            "isLightOn".to_string(),
-            Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
-        ),
+        ("isLightOn".to_string(), Value::Byte(0)),
         ("status".to_string(), Value::String("full".to_string())),
         ("sections".to_string(), sections),
     ]);
