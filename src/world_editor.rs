@@ -5,16 +5,59 @@ use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{LongArray, Value};
+use fastnbt::{ByteArray, LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+
+const DATA_VERSION: i32 = 3700;
+
+fn canonicalize_name(s: &str) -> String {
+    if s.contains(':') {
+        s.to_string()
+    } else {
+        format!("minecraft:{s}")
+    }
+}
+
+/// Formats a single text string into four lines suitable for Minecraft signs.
+/// Each line is limited to 15 characters. Excess text is wrapped to the next
+/// line and anything beyond four lines is truncated.
+pub fn format_sign_text(text: &str) -> (String, String, String, String) {
+    let mut lines: Vec<String> = text
+        .split('\n')
+        .flat_map(|segment| {
+            let chars: Vec<char> = segment.chars().collect();
+            if chars.is_empty() {
+                vec![String::new()]
+            } else {
+                chars
+                    .chunks(15)
+                    .map(|chunk| chunk.iter().collect::<String>())
+                    .collect::<Vec<_>>()
+            }
+        })
+        .collect();
+
+    lines.truncate(4);
+    while lines.len() < 4 {
+        lines.push(String::new());
+    }
+
+    (
+        lines[0].clone(),
+        lines[1].clone(),
+        lines[2].clone(),
+        lines[3].clone(),
+    )
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +76,10 @@ struct Section {
     block_states: Blockstates,
     #[serde(rename = "Y")]
     y: i8,
+    #[serde(default)]
+    sky_light: Option<ByteArray>,
+    #[serde(default)]
+    block_light: Option<ByteArray>,
     #[serde(flatten)]
     other: FnvHashMap<String, Value>,
 }
@@ -160,6 +207,8 @@ impl SectionToModify {
                 other: FnvHashMap::default(),
             },
             y,
+            sky_light: None,
+            block_light: None,
             other: FnvHashMap::default(),
         }
     }
@@ -403,6 +452,7 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, absolute_y, z).is_some()
     }
 
+    /// Places a sign at an absolute Y coordinate.
     #[allow(clippy::too_many_arguments, dead_code)]
     pub fn set_sign(
         &mut self,
@@ -413,9 +463,8 @@ impl<'a> WorldEditor<'a> {
         x: i32,
         y: i32,
         z: i32,
-        _rotation: i8,
     ) {
-        let absolute_y = self.get_absolute_y(x, y, z);
+        let absolute_y = y;
         let chunk_x = x >> 4;
         let chunk_z = z >> 4;
         let region_x = chunk_x >> 5;
@@ -423,19 +472,29 @@ impl<'a> WorldEditor<'a> {
 
         let mut block_entities = HashMap::new();
 
-        let messages = vec![
-            Value::String(format!("\"{line1}\"")),
-            Value::String(format!("\"{line2}\"")),
-            Value::String(format!("\"{line3}\"")),
-            Value::String(format!("\"{line4}\"")),
-        ];
+        let lines = [line1, line2, line3, line4];
+        let messages: Vec<Value> = lines
+            .iter()
+            .map(|l| Value::String(json!({"text": l}).to_string()))
+            .collect();
 
-        let mut text_data = HashMap::new();
-        text_data.insert("messages".to_string(), Value::List(messages));
-        text_data.insert("color".to_string(), Value::String("black".to_string()));
-        text_data.insert("has_glowing_text".to_string(), Value::Byte(0));
+        let mut front_text = HashMap::new();
+        front_text.insert("messages".to_string(), Value::List(messages.clone()));
+        front_text.insert(
+            "filtered_messages".to_string(),
+            Value::List(messages.clone()),
+        );
+        front_text.insert("color".to_string(), Value::String("black".to_string()));
+        front_text.insert("has_glowing_text".to_string(), Value::Byte(0));
 
-        block_entities.insert("front_text".to_string(), Value::Compound(text_data));
+        let mut back_text = HashMap::new();
+        back_text.insert("messages".to_string(), Value::List(messages.clone()));
+        back_text.insert("filtered_messages".to_string(), Value::List(messages));
+        back_text.insert("color".to_string(), Value::String("black".to_string()));
+        back_text.insert("has_glowing_text".to_string(), Value::Byte(0));
+
+        block_entities.insert("front_text".to_string(), Value::Compound(front_text));
+        block_entities.insert("back_text".to_string(), Value::Compound(back_text));
         block_entities.insert(
             "id".to_string(),
             Value::String("minecraft:sign".to_string()),
@@ -460,7 +519,24 @@ impl<'a> WorldEditor<'a> {
             );
         }
 
-        self.set_block(SIGN, x, y, z, None, None);
+        // Explicitly set all sign properties.
+        let mut props = HashMap::new();
+        props.insert("rotation".to_string(), Value::String("0".to_string()));
+        props.insert(
+            "waterlogged".to_string(),
+            Value::String("false".to_string()),
+        );
+        let sign_block = BlockWithProperties::new(SIGN, Some(Value::Compound(props)));
+
+        // Ensure that the sign is always placed even if another block
+        // already occupies the target position. An empty blacklist allows
+        // overriding any existing block, which is necessary because signs
+        // are typically placed next to roads where terrain or vegetation
+        // might have been generated earlier.
+        if self.world.get_block(x, absolute_y - 1, z).is_none() {
+            self.set_block_absolute(DIRT, x, absolute_y - 1, z, None, Some(&[]));
+        }
+        self.set_block_with_properties_absolute(sign_block, x, absolute_y, z, None, Some(&[]));
     }
 
     /// Sets a block of the specified type at the given coordinates.
@@ -488,11 +564,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
             } else {
                 false
             }
@@ -526,11 +602,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
             } else {
                 false
             }
@@ -564,11 +640,11 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = override_whitelist {
                 whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
             } else if let Some(blacklist) = override_blacklist {
                 !blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
             } else {
                 false
             }
@@ -666,7 +742,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
                 {
                     return true; // Block is in the list
                 }
@@ -691,7 +767,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(whitelist) = whitelist {
                 if whitelist
                     .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
                 {
                     return true; // Block is in whitelist
                 }
@@ -700,7 +776,7 @@ impl<'a> WorldEditor<'a> {
             if let Some(blacklist) = blacklist {
                 if blacklist
                     .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
                 {
                     return true; // Block is in blacklist
                 }
@@ -738,12 +814,81 @@ impl<'a> WorldEditor<'a> {
             other: chunk.other,
         };
 
+<<<<<<< HEAD
         // Create the Level wrapper
         let level_data = create_level_wrapper(&chunk_data);
+=======
+        // Build the root NBT structure for the chunk
+        let sections = Value::List(
+            chunk_data
+                .sections
+                .iter()
+                .map(|section| {
+                    let mut map = HashMap::from([
+                        ("Y".to_string(), Value::Byte(section.y)),
+                        (
+                            "block_states".to_string(),
+                            Value::Compound(HashMap::from([
+                                (
+                                    "palette".to_string(),
+                                    Value::List(
+                                        section
+                                            .block_states
+                                            .palette
+                                            .iter()
+                                            .map(|item| {
+                                                Value::Compound(HashMap::from([(
+                                                    "Name".to_string(),
+                                                    Value::String(item.name.clone()),
+                                                )]))
+                                            })
+                                            .collect(),
+                                    ),
+                                ),
+                                (
+                                    "data".to_string(),
+                                    Value::LongArray(
+                                        section
+                                            .block_states
+                                            .data
+                                            .clone()
+                                            .unwrap_or_else(|| LongArray::new(vec![])),
+                                    ),
+                                ),
+                            ])),
+                        ),
+                    ]);
+                    if let Some(bl) = &section.block_light {
+                        map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
+                    }
+                    if let Some(sl) = &section.sky_light {
+                        map.insert("sky_light".to_string(), Value::ByteArray(sl.clone()));
+                    }
+                    Value::Compound(map)
+                })
+                .collect(),
+        );
+>>>>>>> street-signs
 
-        // Serialize the chunk with Level wrapper
+        let mut root = HashMap::from([
+            ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
+            ("xPos".to_string(), Value::Int(abs_chunk_x)),
+            ("zPos".to_string(), Value::Int(abs_chunk_z)),
+            ("InhabitedTime".to_string(), Value::Long(0)),
+            ("LastUpdate".to_string(), Value::Long(0)),
+            ("isLightOn".to_string(), Value::Byte(0)),
+            ("status".to_string(), Value::String("full".to_string())),
+            ("sections".to_string(), sections),
+        ]);
+
+        // Include any additional top-level fields
+        for (k, v) in chunk_data.other.iter() {
+            root.insert(k.clone(), v.clone());
+        }
+
+        // Serialize the chunk
         let mut ser_buffer = Vec::with_capacity(8192);
-        fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
+        fastnbt::to_writer(&mut ser_buffer, &root).unwrap();
 
         (ser_buffer, true)
     }
@@ -792,7 +937,9 @@ impl<'a> WorldEditor<'a> {
 
                         // Parse existing chunk or create new one
                         let mut chunk: Chunk = if !existing_data.is_empty() {
-                            fastnbt::from_bytes(&existing_data).unwrap()
+                            let mut existing: Chunk = fastnbt::from_bytes(&existing_data).unwrap();
+                            existing.is_light_on = 0;
+                            existing
                         } else {
                             Chunk {
                                 sections: Vec::new(),
@@ -802,6 +949,15 @@ impl<'a> WorldEditor<'a> {
                                 other: FnvHashMap::default(),
                             }
                         };
+
+                        // Normalize palette block names from NBT
+                        for section in &mut chunk.sections {
+                            for palette_item in &mut section.block_states.palette {
+                                palette_item.name = canonicalize_name(&palette_item.name);
+                            }
+                            section.sky_light = None;
+                            section.block_light = None;
+                        }
 
                         // Update sections while preserving existing data
                         let new_sections: Vec<Section> = chunk_to_modify.sections().collect();
@@ -813,6 +969,8 @@ impl<'a> WorldEditor<'a> {
                                 existing_section.block_states.palette =
                                     new_section.block_states.palette;
                                 existing_section.block_states.data = new_section.block_states.data;
+                                existing_section.sky_light = new_section.sky_light;
+                                existing_section.block_light = new_section.block_light;
                             } else {
                                 // Add new section if it doesn't exist
                                 chunk.sections.push(new_section);
@@ -859,6 +1017,7 @@ impl<'a> WorldEditor<'a> {
                         // Update chunk coordinates and flags
                         chunk.x_pos = chunk_x + (region_x * 32);
                         chunk.z_pos = chunk_z + (region_z * 32);
+                        chunk.is_light_on = 0;
 
                         // Create Level wrapper and save
                         let level_data = create_level_wrapper(&chunk);
@@ -960,8 +1119,8 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
     (x, y, z)
 }
 
-#[inline]
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
+<<<<<<< HEAD
     HashMap::from([(
         "Level".to_string(),
         Value::Compound(HashMap::from([
@@ -979,6 +1138,19 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                         .iter()
                         .map(|section| {
                             let mut block_states = HashMap::from([(
+=======
+    let sections = Value::List(
+        chunk
+            .sections
+            .iter()
+            .map(|section| {
+                let mut map = HashMap::from([
+                    ("Y".to_string(), Value::Byte(section.y)),
+                    (
+                        "block_states".to_string(),
+                        Value::Compound(HashMap::from([
+                            (
+>>>>>>> street-signs
                                 "palette".to_string(),
                                 Value::List(
                                     section
@@ -1000,6 +1172,7 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                                         })
                                         .collect(),
                                 ),
+<<<<<<< HEAD
                             )]);
 
                             // only add the `data` attribute if it's non-empty
@@ -1023,4 +1196,123 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
             ),
         ])),
     )])
+=======
+                            ),
+                            (
+                                "data".to_string(),
+                                Value::LongArray(
+                                    section
+                                        .block_states
+                                        .data
+                                        .clone()
+                                        .unwrap_or_else(|| LongArray::new(vec![])),
+                                ),
+                            ),
+                        ])),
+                    ),
+                ]);
+                if let Some(bl) = &section.block_light {
+                    map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
+                }
+                if let Some(sl) = &section.sky_light {
+                    map.insert("sky_light".to_string(), Value::ByteArray(sl.clone()));
+                }
+                Value::Compound(map)
+            })
+            .collect(),
+    );
+
+    let mut root = HashMap::from([
+        ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
+        ("xPos".to_string(), Value::Int(chunk.x_pos)),
+        ("zPos".to_string(), Value::Int(chunk.z_pos)),
+        ("InhabitedTime".to_string(), Value::Long(0)),
+        ("LastUpdate".to_string(), Value::Long(0)),
+        ("isLightOn".to_string(), Value::Byte(0)),
+        ("status".to_string(), Value::String("full".to_string())),
+        ("sections".to_string(), sections),
+    ]);
+
+    for (k, v) in chunk.other.iter() {
+        root.insert(k.clone(), v.clone());
+    }
+
+    root
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_sign_text_wraps() {
+        let (l1, l2, l3, l4) =
+            format_sign_text("A very long \"street\" name that needs wrapping");
+        assert!(l1.len() <= 15);
+        assert!(l2.len() <= 15);
+        assert!(l3.len() <= 15);
+        assert!(l4.len() <= 15);
+    }
+
+    #[test]
+    fn format_sign_text_truncates_after_four_lines() {
+        let input = "0123456789abcde".repeat(5);
+        let (l1, l2, l3, l4) = format_sign_text(&input);
+        assert_eq!(l1, "0123456789abcde");
+        assert_eq!(l2, "0123456789abcde");
+        assert_eq!(l3, "0123456789abcde");
+        assert_eq!(l4, "0123456789abcde");
+    }
+
+    #[test]
+    fn palette_item_contains_namespaced_names() {
+        use crate::block_definitions::OAK_PLANKS;
+
+        let mut section = SectionToModify::default();
+        section.set_block(0, 0, 0, OAK_PLANKS);
+
+        let nbt_section = section.to_section(0);
+        assert!(nbt_section
+            .block_states
+            .palette
+            .iter()
+            .any(|p| p.name == "minecraft:oak_planks"));
+    }
+
+    #[test]
+    fn sign_block_serializes_with_rotation_and_waterlogged() {
+        use crate::block_definitions::SIGN;
+        use std::collections::HashMap;
+
+        let mut section = SectionToModify::default();
+
+        // Build properties starting from the sign's defaults and override rotation.
+        let mut props = match SIGN.properties() {
+            Some(Value::Compound(map)) => map,
+            _ => HashMap::new(),
+        };
+        props.insert("rotation".to_string(), Value::String("4".to_string()));
+        let sign_block = BlockWithProperties::new(SIGN, Some(Value::Compound(props)));
+
+        section.set_block_with_properties(0, 0, 0, sign_block);
+
+        let nbt_section = section.to_section(0);
+        let sign_palette = nbt_section
+            .block_states
+            .palette
+            .iter()
+            .find(|p| p.name == "minecraft:oak_sign")
+            .expect("sign palette entry");
+
+        match &sign_palette.properties {
+            Some(Value::Compound(map)) => {
+                assert_eq!(map.get("rotation"), Some(&Value::String("4".to_string())));
+                assert_eq!(
+                    map.get("waterlogged"),
+                    Some(&Value::String("false".to_string()))
+                );
+            }
+            _ => panic!("sign properties missing"),
+        }
+    }
+>>>>>>> street-signs
 }
