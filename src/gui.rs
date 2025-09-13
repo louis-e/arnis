@@ -307,52 +307,45 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
 }
 
 /// Adds localized area name to the world name in level.dat
-fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
-    let world_path = PathBuf::from(world_path_str);
-
+fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     // Only proceed if the path exists
     if !world_path.exists() {
-        return world_path_str.to_string();
+        return world_path;
     }
 
     // Check the level.dat file first to get the current name
     let level_path = world_path.join("level.dat");
 
     if !level_path.exists() {
-        return world_path_str.to_string();
+        return world_path;
     }
 
     // Try to read the current world name from level.dat
-    let current_name = match std::fs::read(&level_path) {
-        Ok(level_data) => {
-            let mut decoder = GzDecoder::new(level_data.as_slice());
-            let mut decompressed_data = Vec::new();
-            if decoder.read_to_end(&mut decompressed_data).is_ok() {
-                if let Ok(Value::Compound(ref root)) =
-                    fastnbt::from_bytes::<Value>(&decompressed_data)
-                {
-                    if let Some(Value::Compound(ref data)) = root.get("Data") {
-                        if let Some(Value::String(name)) = data.get("LevelName") {
-                            name.clone()
-                        } else {
-                            return world_path_str.to_string();
-                        }
-                    } else {
-                        return world_path_str.to_string();
-                    }
-                } else {
-                    return world_path_str.to_string();
-                }
-            } else {
-                return world_path_str.to_string();
-            }
-        }
-        Err(_) => return world_path_str.to_string(),
+    let Ok(level_data) = std::fs::read(&level_path) else {
+        return world_path;
+    };
+
+    let mut decoder = GzDecoder::new(level_data.as_slice());
+    let mut decompressed_data = Vec::new();
+    if decoder.read_to_end(&mut decompressed_data).is_err() {
+        return world_path;
+    }
+
+    let Ok(Value::Compound(ref root)) = fastnbt::from_bytes::<Value>(&decompressed_data) else {
+        return world_path;
+    };
+
+    let Some(Value::Compound(ref data)) = root.get("Data") else {
+        return world_path;
+    };
+
+    let Some(Value::String(current_name)) = data.get("LevelName") else {
+        return world_path;
     };
 
     // Only modify if it's an Arnis world and doesn't already have an area name
     if !current_name.starts_with("Arnis World ") || current_name.contains(": ") {
-        return world_path_str.to_string();
+        return world_path;
     }
 
     // Calculate center coordinates of bbox
@@ -362,7 +355,7 @@ fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
     // Try to fetch the area name
     let area_name = match retrieve_data::fetch_area_name(center_lat, center_lon) {
         Ok(Some(name)) => name,
-        _ => return world_path_str.to_string(), // Keep original name if no area name found
+        _ => return world_path, // Keep original name if no area name found
     };
 
     // Create new name with localized area name, ensuring total length doesn't exceed 30 characters
@@ -378,7 +371,7 @@ fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
                 .collect::<String>()
         } else if max_area_name_len == 0 {
             // If base name is already too long, don't add area name
-            return world_path_str.to_string();
+            return world_path;
         } else {
             area_name
         };
@@ -417,7 +410,7 @@ fn add_localized_world_name(world_path_str: &str, bbox: &LLBBox) -> String {
     }
 
     // Return the original path since we didn't change the directory name
-    world_path_str.to_string()
+    world_path
 }
 
 // Function to update player position in level.dat based on spawn point coordinates
@@ -528,7 +521,7 @@ fn update_player_position(
 
 // Function to update player spawn Y coordinate based on terrain height after generation
 pub fn update_player_spawn_y_after_generation(
-    world_path: &str,
+    world_path: &Path,
     spawn_point: Option<(f64, f64)>,
     bbox_text: String,
     scale: f64,
@@ -744,9 +737,9 @@ fn gui_start_generation(
 
             // Add localized name to the world if user generated a new world
             let updated_world_path = if is_new_world {
-                add_localized_world_name(&selected_world, &bbox)
+                add_localized_world_name(world_path, &bbox)
             } else {
-                selected_world.clone()
+                world_path
             };
 
             // Create an Args instance with the chosen bounding box and world directory path
@@ -794,7 +787,13 @@ fn gui_start_generation(
                         &mut ground,
                     );
 
-                    let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
+                    let _ = data_processing::generate_world(
+                        parsed_elements,
+                        xzbbox,
+                        args.bbox,
+                        ground,
+                        &args,
+                    );
                     // Session lock will be automatically released when _session_lock goes out of scope
                     Ok(())
                 }
