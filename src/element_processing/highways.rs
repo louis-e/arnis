@@ -31,6 +31,9 @@ fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HashMap<(i32
                     .and_then(|layer| layer.parse::<i32>().ok())
                     .unwrap_or(0);
 
+                // Treat negative layers as ground level (0) for connectivity
+                let layer_value = if layer_value < 0 { 0 } else { layer_value };
+
                 // Add connectivity for start and end nodes
                 if !way.nodes.is_empty() {
                     let start_node = &way.nodes[0];
@@ -159,10 +162,8 @@ fn generate_highways_internal(
                 .and_then(|layer| layer.parse::<i32>().ok())
                 .unwrap_or(0);
 
-            // Skip underground levels below -2 for performance reasons
-            if layer_value < -2 {
-                return;
-            }
+            // Treat negative layers as ground level (0)
+            let layer_value = if layer_value < 0 { 0 } else { layer_value };
 
             // Skip if 'level' is negative in the tags (indoor mapping)
             if let Some(level) = element.tags().get("level") {
@@ -181,7 +182,7 @@ fn generate_highways_internal(
                     block_type = DIRT_PATH;
                     block_range = 1;
                 }
-                "motorway" | "primary" => {
+                "motorway" | "primary" | "trunk" => {
                     block_range = 5;
                     add_stripe = true;
                 }
