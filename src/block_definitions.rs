@@ -93,13 +93,27 @@ impl Block {
 
     pub fn properties(&self) -> Option<Value> {
         match self.name {
-            "minecraft:birch_leaves" | "minecraft:oak_leaves" => Some(Value::Compound({
+            "minecraft:birch_leaves" => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
-
-            "minecraft:carrots" | "minecraft:potatoes" | "minecraft:wheat" => Some(Value::Compound({
+            "minecraft:oak_leaves" => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("persistent".to_string(), Value::String("true".to_string()));
+                map
+            })),
+            "minecraft:carrots" => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("7".to_string()));
+                map
+            })),
+            "minecraft:potatoes" => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("age".to_string(), Value::String("7".to_string()));
+                map
+            })),
+            "minecraft:wheat" => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("age".to_string(), Value::String("7".to_string()));
                 map
@@ -343,7 +357,8 @@ pub const BLACK_TERRACOTTA: Block = Block::new("minecraft:black_terracotta");
 pub const BROWN_TERRACOTTA: Block = Block::new("minecraft:brown_terracotta");
 pub const STONE_BRICK_STAIRS: Block = Block::new("minecraft:stone_brick_stairs");
 pub const MUD_BRICK_STAIRS: Block = Block::new("minecraft:mud_brick_stairs");
-pub const POLISHED_BLACKSTONE_BRICK_STAIRS: Block = Block::new("minecraft:polished_blackstone_brick_stairs");
+pub const POLISHED_BLACKSTONE_BRICK_STAIRS: Block =
+    Block::new("minecraft:polished_blackstone_brick_stairs");
 pub const BRICK_STAIRS: Block = Block::new("minecraft:brick_stairs");
 pub const POLISHED_GRANITE_STAIRS: Block = Block::new("minecraft:polished_granite_stairs");
 pub const END_STONE_BRICK_STAIRS: Block = Block::new("minecraft:end_stone_brick_stairs");
