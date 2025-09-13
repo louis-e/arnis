@@ -739,59 +739,7 @@ impl<'a> WorldEditor<'a> {
         };
 
         // Create the Level wrapper
-        let level_data = HashMap::from([(
-            "Level".to_string(),
-            Value::Compound(HashMap::from([
-                ("xPos".to_string(), Value::Int(abs_chunk_x)),
-                ("zPos".to_string(), Value::Int(abs_chunk_z)),
-                ("isLightOn".to_string(), Value::Byte(0)),
-                (
-                    "sections".to_string(),
-                    Value::List(
-                        chunk_data
-                            .sections
-                            .iter()
-                            .map(|section| {
-                                Value::Compound(HashMap::from([
-                                    ("Y".to_string(), Value::Byte(section.y)),
-                                    (
-                                        "block_states".to_string(),
-                                        Value::Compound(HashMap::from([
-                                            (
-                                                "palette".to_string(),
-                                                Value::List(
-                                                    section
-                                                        .block_states
-                                                        .palette
-                                                        .iter()
-                                                        .map(|item| {
-                                                            Value::Compound(HashMap::from([(
-                                                                "Name".to_string(),
-                                                                Value::String(item.name.clone()),
-                                                            )]))
-                                                        })
-                                                        .collect(),
-                                                ),
-                                            ),
-                                            (
-                                                "data".to_string(),
-                                                Value::LongArray(
-                                                    section
-                                                        .block_states
-                                                        .data
-                                                        .clone()
-                                                        .unwrap_or_else(|| LongArray::new(vec![])),
-                                                ),
-                                            ),
-                                        ])),
-                                    ),
-                                ]))
-                            })
-                            .collect(),
-                    ),
-                ),
-            ])),
-        )]);
+        let level_data = create_level_wrapper(&chunk_data);
 
         // Serialize the chunk with Level wrapper
         let mut ser_buffer = Vec::with_capacity(8192);
@@ -1014,46 +962,44 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                         .sections
                         .iter()
                         .map(|section| {
+                            let mut block_states = HashMap::from([(
+                                "palette".to_string(),
+                                Value::List(
+                                    section
+                                        .block_states
+                                        .palette
+                                        .iter()
+                                        .map(|item| {
+                                            let mut palette_item = HashMap::from([(
+                                                "Name".to_string(),
+                                                Value::String(item.name.clone()),
+                                            )]);
+                                            if let Some(props) = &item.properties {
+                                                palette_item.insert(
+                                                    "Properties".to_string(),
+                                                    props.clone(),
+                                                );
+                                            }
+                                            Value::Compound(palette_item)
+                                        })
+                                        .collect(),
+                                ),
+                            )]);
+
+                            // only add the `data` attribute if it's non-empty
+                            // some software (cough cough dynmap) chokes otherwise
+                            if let Some(data) = &section.block_states.data {
+                                if !data.is_empty() {
+                                    block_states.insert(
+                                        "data".to_string(),
+                                        Value::LongArray(data.to_owned()),
+                                    );
+                                }
+                            }
+
                             Value::Compound(HashMap::from([
                                 ("Y".to_string(), Value::Byte(section.y)),
-                                (
-                                    "block_states".to_string(),
-                                    Value::Compound(HashMap::from([
-                                        (
-                                            "palette".to_string(),
-                                            Value::List(
-                                                section
-                                                    .block_states
-                                                    .palette
-                                                    .iter()
-                                                    .map(|item| {
-                                                        let mut palette_item = HashMap::from([(
-                                                            "Name".to_string(),
-                                                            Value::String(item.name.clone()),
-                                                        )]);
-                                                        if let Some(props) = &item.properties {
-                                                            palette_item.insert(
-                                                                "Properties".to_string(),
-                                                                props.clone(),
-                                                            );
-                                                        }
-                                                        Value::Compound(palette_item)
-                                                    })
-                                                    .collect(),
-                                            ),
-                                        ),
-                                        (
-                                            "data".to_string(),
-                                            Value::LongArray(
-                                                section
-                                                    .block_states
-                                                    .data
-                                                    .clone()
-                                                    .unwrap_or_else(|| LongArray::new(vec![])),
-                                            ),
-                                        ),
-                                    ])),
-                                ),
+                                ("block_states".to_string(), Value::Compound(block_states)),
                             ]))
                         })
                         .collect(),

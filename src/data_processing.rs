@@ -81,6 +81,8 @@ pub fn generate_world(
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
                     railways::generate_railways(&mut editor, way);
+                } else if way.tags.contains_key("roller_coaster") {
+                    railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
                     highways::generate_aeroway(&mut editor, way, args);

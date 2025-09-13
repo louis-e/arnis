@@ -133,7 +133,7 @@ pub fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option
         '6' => Some(RED_BED_SOUTH_FOOT), // Bed South Foot
         '7' => Some(RED_BED_WEST_HEAD),  // Bed West Head
         '8' => Some(RED_BED_WEST_FOOT),  // Bed West Foot
-        'H' => Some(CHEST),              // Chest
+        // 'H' => Some(CHEST),           // Chest
         'L' => Some(CAULDRON),           // Cauldron
         'A' => Some(ANVIL),              // Anvil
         'P' => Some(OAK_PRESSURE_PLATE), // Pressure Plate
@@ -145,7 +145,7 @@ pub fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option
                 Some(DARK_OAK_DOOR_LOWER)
             }
         }
-        'J' => Some(JUKEBOX),       // Jukebox
+        'J' => Some(NOTE_BLOCK),    // Note block
         'G' => Some(GLOWSTONE),     // Glowstone
         'N' => Some(BREWING_STAND), // Brewing Stand
         'T' => Some(WHITE_CARPET),  // White Carpet
