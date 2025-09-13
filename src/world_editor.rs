@@ -200,8 +200,8 @@ impl SectionToModify {
                 other: FnvHashMap::default(),
             },
             y,
-            sky_light: Some(ByteArray::new(vec![-1; 2048])),
-            block_light: Some(ByteArray::new(vec![-1; 2048])),
+            sky_light: None,
+            block_light: None,
             other: FnvHashMap::default(),
         }
     }
@@ -478,7 +478,7 @@ impl<'a> WorldEditor<'a> {
         block_entities.insert("back_text".to_string(), Value::Compound(back_text));
         block_entities.insert(
             "id".to_string(),
-            Value::String("minecraft:oak_sign".to_string()),
+            Value::String("minecraft:sign".to_string()),
         );
         block_entities.insert("is_waxed".to_string(), Value::Byte(0));
         block_entities.insert("keepPacked".to_string(), Value::Byte(0));
@@ -791,7 +791,7 @@ impl<'a> WorldEditor<'a> {
             sections: chunk.sections().collect(),
             x_pos: abs_chunk_x,
             z_pos: abs_chunk_z,
-            is_light_on: 1,
+            is_light_on: 0,
             other: chunk.other,
         };
 
@@ -801,7 +801,7 @@ impl<'a> WorldEditor<'a> {
                 .sections
                 .iter()
                 .map(|section| {
-                    Value::Compound(HashMap::from([
+                    let mut map = HashMap::from([
                         ("Y".to_string(), Value::Byte(section.y)),
                         (
                             "block_states".to_string(),
@@ -830,29 +830,18 @@ impl<'a> WorldEditor<'a> {
                                             .data
                                             .clone()
                                             .unwrap_or_else(|| LongArray::new(vec![])),
+                                    ),
                                 ),
-                            ),
-                        ])),
+                            ])),
                         ),
-                        (
-                            "block_light".to_string(),
-                            Value::ByteArray(
-                                section
-                                    .block_light
-                                    .clone()
-                                    .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
-                            ),
-                        ),
-                        (
-                            "sky_light".to_string(),
-                            Value::ByteArray(
-                                section
-                                    .sky_light
-                                    .clone()
-                                    .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
-                            ),
-                        ),
-                    ]))
+                    ]);
+                    if let Some(bl) = &section.block_light {
+                        map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
+                    }
+                    if let Some(sl) = &section.sky_light {
+                        map.insert("sky_light".to_string(), Value::ByteArray(sl.clone()));
+                    }
+                    Value::Compound(map)
                 })
                 .collect(),
         );
@@ -863,7 +852,7 @@ impl<'a> WorldEditor<'a> {
             ("zPos".to_string(), Value::Int(abs_chunk_z)),
             ("InhabitedTime".to_string(), Value::Long(0)),
             ("LastUpdate".to_string(), Value::Long(0)),
-            ("isLightOn".to_string(), Value::Byte(1)),
+            ("isLightOn".to_string(), Value::Byte(0)),
             ("status".to_string(), Value::String("full".to_string())),
             ("sections".to_string(), sections),
         ]);
@@ -919,14 +908,14 @@ impl<'a> WorldEditor<'a> {
                         // Parse existing chunk or create new one
                         let mut chunk: Chunk = if !existing_data.is_empty() {
                             let mut existing: Chunk = fastnbt::from_bytes(&existing_data).unwrap();
-                            existing.is_light_on = 1;
+                            existing.is_light_on = 0;
                             existing
                         } else {
                             Chunk {
                                 sections: Vec::new(),
                                 x_pos: chunk_x + (region_x * 32),
                                 z_pos: chunk_z + (region_z * 32),
-                                is_light_on: 1,
+                                is_light_on: 0,
                                 other: FnvHashMap::default(),
                             }
                         };
@@ -937,6 +926,8 @@ impl<'a> WorldEditor<'a> {
                                 palette_item.name =
                                     Block::from_str(&palette_item.name).name().to_string();
                             }
+                            section.sky_light = None;
+                            section.block_light = None;
                         }
 
                         // Update sections while preserving existing data
@@ -997,7 +988,7 @@ impl<'a> WorldEditor<'a> {
                         // Update chunk coordinates and flags
                         chunk.x_pos = chunk_x + (region_x * 32);
                         chunk.z_pos = chunk_z + (region_z * 32);
-                        chunk.is_light_on = 1;
+                        chunk.is_light_on = 0;
 
                         // Create Level wrapper and save
                         let level_data = create_level_wrapper(&chunk);
@@ -1073,7 +1064,7 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
             .sections
             .iter()
             .map(|section| {
-                Value::Compound(HashMap::from([
+                let mut map = HashMap::from([
                     ("Y".to_string(), Value::Byte(section.y)),
                     (
                         "block_states".to_string(),
@@ -1113,25 +1104,14 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                             ),
                         ])),
                     ),
-                    (
-                        "block_light".to_string(),
-                        Value::ByteArray(
-                            section
-                                .block_light
-                                .clone()
-                                .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
-                        ),
-                    ),
-                    (
-                        "sky_light".to_string(),
-                        Value::ByteArray(
-                            section
-                                .sky_light
-                                .clone()
-                                .unwrap_or_else(|| ByteArray::new(vec![-1; 2048])),
-                        ),
-                    ),
-                ]))
+                ]);
+                if let Some(bl) = &section.block_light {
+                    map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
+                }
+                if let Some(sl) = &section.sky_light {
+                    map.insert("sky_light".to_string(), Value::ByteArray(sl.clone()));
+                }
+                Value::Compound(map)
             })
             .collect(),
     );
@@ -1142,7 +1122,7 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
         ("zPos".to_string(), Value::Int(chunk.z_pos)),
         ("InhabitedTime".to_string(), Value::Long(0)),
         ("LastUpdate".to_string(), Value::Long(0)),
-        ("isLightOn".to_string(), Value::Byte(1)),
+        ("isLightOn".to_string(), Value::Byte(0)),
         ("status".to_string(), Value::String("full".to_string())),
         ("sections".to_string(), sections),
     ]);
