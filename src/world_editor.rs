@@ -494,11 +494,20 @@ impl<'a> WorldEditor<'a> {
         }
 
         let rotation = rotation.clamp(0, 15);
-        let sign_properties = Value::Compound(HashMap::from([(
+
+        // Start from the default sign properties (which include default
+        // rotation and waterlogged state) and override the rotation.
+        let mut sign_properties = match SIGN.properties() {
+            Some(Value::Compound(map)) => map,
+            _ => HashMap::new(),
+        };
+        sign_properties.insert(
             "rotation".to_string(),
             Value::String(rotation.to_string()),
-        )]));
-        let sign_block = BlockWithProperties::new(SIGN, Some(sign_properties));
+        );
+
+        let sign_block =
+            BlockWithProperties::new(SIGN, Some(Value::Compound(sign_properties)));
 
         // Ensure that the sign is always placed even if another block
         // already occupies the target position. An empty blacklist allows
@@ -1137,5 +1146,39 @@ mod tests {
             .palette
             .iter()
             .any(|p| p.name == "minecraft:oak_planks"));
+    }
+
+    #[test]
+    fn sign_block_serializes_with_rotation_and_waterlogged() {
+        use crate::block_definitions::SIGN;
+        use std::collections::HashMap;
+
+        let mut section = SectionToModify::default();
+
+        // Build properties starting from the sign's defaults and override rotation.
+        let mut props = match SIGN.properties() {
+            Some(Value::Compound(map)) => map,
+            _ => HashMap::new(),
+        };
+        props.insert("rotation".to_string(), Value::String("4".to_string()));
+        let sign_block = BlockWithProperties::new(SIGN, Some(Value::Compound(props)));
+
+        section.set_block_with_properties(0, 0, 0, sign_block);
+
+        let nbt_section = section.to_section(0);
+        let sign_palette = nbt_section
+            .block_states
+            .palette
+            .iter()
+            .find(|p| p.name == "minecraft:oak_sign")
+            .expect("sign palette entry");
+
+        match &sign_palette.properties {
+            Some(Value::Compound(map)) => {
+                assert_eq!(map.get("rotation"), Some(&Value::String("4".to_string())));
+                assert_eq!(map.get("waterlogged"), Some(&Value::String("false".to_string())));
+            }
+            _ => panic!("sign properties missing"),
+        }
     }
 }
