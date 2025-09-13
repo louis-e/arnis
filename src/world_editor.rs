@@ -419,6 +419,7 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, absolute_y, z).is_some()
     }
 
+    /// Places a sign at an absolute Y coordinate.
     #[allow(clippy::too_many_arguments, dead_code)]
     pub fn set_sign(
         &mut self,
@@ -431,7 +432,7 @@ impl<'a> WorldEditor<'a> {
         z: i32,
         rotation: i8,
     ) {
-        let absolute_y = self.get_absolute_y(x, y, z);
+        let absolute_y = y;
         let chunk_x = x >> 4;
         let chunk_z = z >> 4;
         let region_x = chunk_x >> 5;
@@ -504,10 +505,10 @@ impl<'a> WorldEditor<'a> {
         // overriding any existing block, which is necessary because signs
         // are typically placed next to roads where terrain or vegetation
         // might have been generated earlier.
-        if !self.block_at(x, y - 1, z) {
-            self.set_block(DIRT, x, y - 1, z, None, Some(&[]));
+        if self.world.get_block(x, absolute_y - 1, z).is_none() {
+            self.set_block_absolute(DIRT, x, absolute_y - 1, z, None, Some(&[]));
         }
-        self.set_block_with_properties(sign_block, x, y, z, None, Some(&[]));
+        self.set_block_with_properties_absolute(sign_block, x, absolute_y, z, None, Some(&[]));
     }
 
     /// Sets a block of the specified type at the given coordinates.
