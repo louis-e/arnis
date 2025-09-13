@@ -4,7 +4,7 @@
   "version": "2.3.0",
   "identifier": "com.louisdev.arnis",
   "build": {
-    "frontendDist": "gui-src"
+    "frontendDist": "src/gui"
   },
   "app": {
     "withGlobalTauri": true,
