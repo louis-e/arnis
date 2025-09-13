@@ -471,7 +471,7 @@ impl<'a> WorldEditor<'a> {
         block_entities.insert("back_text".to_string(), Value::Compound(back_text));
         block_entities.insert(
             "id".to_string(),
-            Value::String("minecraft:sign".to_string()),
+            Value::String("minecraft:oak_sign".to_string()),
         );
         block_entities.insert("is_waxed".to_string(), Value::Byte(0));
         block_entities.insert("keepPacked".to_string(), Value::Byte(0));
