@@ -753,7 +753,11 @@ impl<'a> WorldEditor<'a> {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
-        self.save_metadata();
+        // Save metadata with error handling
+        if let Err(e) = self.save_metadata() {
+            eprintln!("Warning: Failed to save world metadata: {}", e);
+            // Continue with world saving even if metadata fails
+        }
 
         let total_regions = self.world.regions.len() as u64;
         let save_pb = ProgressBar::new(total_regions);
@@ -902,9 +906,16 @@ impl<'a> WorldEditor<'a> {
         save_pb.finish();
     }
 
-    fn save_metadata(&mut self) {
-        let mut file = File::create(self.world_dir.join("metadata.json"))
-            .expect("Could not create metadata file");
+    fn save_metadata(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let metadata_path = self.world_dir.join("metadata.json");
+
+        let mut file = File::create(&metadata_path).map_err(|e| {
+            format!(
+                "Failed to create metadata file at {}: {}",
+                metadata_path.display(),
+                e
+            )
+        })?;
 
         let metadata = WorldMetadata {
             min_mc_x: self.xzbbox.min_x(),
@@ -918,8 +929,13 @@ impl<'a> WorldEditor<'a> {
             max_geo_lon: self.llbbox.max().lng(),
         };
 
-        let contents = serde_json::to_string(&metadata).expect("Could not serialize metadata");
-        write!(&mut file, "{}", contents).expect("Could not write metadata file");
+        let contents = serde_json::to_string(&metadata)
+            .map_err(|e| format!("Failed to serialize metadata to JSON: {}", e))?;
+
+        write!(&mut file, "{}", contents)
+            .map_err(|e| format!("Failed to write metadata to file: {}", e))?;
+
+        Ok(())
     }
 }
 
