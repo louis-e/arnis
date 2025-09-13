@@ -785,7 +785,7 @@ impl<'a> WorldEditor<'a> {
             sections: chunk.sections().collect(),
             x_pos: abs_chunk_x,
             z_pos: abs_chunk_z,
-            is_light_on: 0,
+            is_light_on: 1,
             other: chunk.other,
         };
 
@@ -839,7 +839,7 @@ impl<'a> WorldEditor<'a> {
             ("zPos".to_string(), Value::Int(abs_chunk_z)),
             ("InhabitedTime".to_string(), Value::Long(0)),
             ("LastUpdate".to_string(), Value::Long(0)),
-            ("isLightOn".to_string(), Value::Byte(0)),
+            ("isLightOn".to_string(), Value::Byte(1)),
             ("status".to_string(), Value::String("full".to_string())),
             ("sections".to_string(), sections),
         ]);
@@ -894,13 +894,15 @@ impl<'a> WorldEditor<'a> {
 
                         // Parse existing chunk or create new one
                         let mut chunk: Chunk = if !existing_data.is_empty() {
-                            fastnbt::from_bytes(&existing_data).unwrap()
+                            let mut existing: Chunk = fastnbt::from_bytes(&existing_data).unwrap();
+                            existing.is_light_on = 1;
+                            existing
                         } else {
                             Chunk {
                                 sections: Vec::new(),
                                 x_pos: chunk_x + (region_x * 32),
                                 z_pos: chunk_z + (region_z * 32),
-                                is_light_on: 0,
+                                is_light_on: 1,
                                 other: FnvHashMap::default(),
                             }
                         };
@@ -969,6 +971,7 @@ impl<'a> WorldEditor<'a> {
                         // Update chunk coordinates and flags
                         chunk.x_pos = chunk_x + (region_x * 32);
                         chunk.z_pos = chunk_z + (region_z * 32);
+                        chunk.is_light_on = 1;
 
                         // Create Level wrapper and save
                         let level_data = create_level_wrapper(&chunk);
@@ -1095,10 +1098,7 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
         ("zPos".to_string(), Value::Int(chunk.z_pos)),
         ("InhabitedTime".to_string(), Value::Long(0)),
         ("LastUpdate".to_string(), Value::Long(0)),
-        (
-            "isLightOn".to_string(),
-            Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
-        ),
+        ("isLightOn".to_string(), Value::Byte(1)),
         ("status".to_string(), Value::String("full".to_string())),
         ("sections".to_string(), sections),
     ]);
