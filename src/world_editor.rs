@@ -797,7 +797,10 @@ impl<'a> WorldEditor<'a> {
                 Value::Compound(HashMap::from([
                     ("xPos".to_string(), Value::Int(abs_chunk_x)),
                     ("zPos".to_string(), Value::Int(abs_chunk_z)),
+                    ("InhabitedTime".to_string(), Value::Long(0)),
+                    ("LastUpdate".to_string(), Value::Long(0)),
                     ("isLightOn".to_string(), Value::Byte(0)),
+                    ("status".to_string(), Value::String("full".to_string())),
                     (
                         "sections".to_string(),
                         Value::List(
@@ -1044,20 +1047,23 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
     HashMap::from([
         ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
-        (
-            "Level".to_string(),
-            Value::Compound(HashMap::from([
-                ("xPos".to_string(), Value::Int(chunk.x_pos)),
-                ("zPos".to_string(), Value::Int(chunk.z_pos)),
                 (
-                    "isLightOn".to_string(),
-                    Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
-                ),
-                (
-                    "sections".to_string(),
-                    Value::List(
-                        chunk
-                            .sections
+                    "Level".to_string(),
+                    Value::Compound(HashMap::from([
+                        ("xPos".to_string(), Value::Int(chunk.x_pos)),
+                        ("zPos".to_string(), Value::Int(chunk.z_pos)),
+                        ("InhabitedTime".to_string(), Value::Long(0)),
+                        ("LastUpdate".to_string(), Value::Long(0)),
+                        (
+                            "isLightOn".to_string(),
+                            Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
+                        ),
+                        ("status".to_string(), Value::String("full".to_string())),
+                        (
+                            "sections".to_string(),
+                            Value::List(
+                                chunk
+                                    .sections
                             .iter()
                             .map(|section| {
                                 Value::Compound(HashMap::from([
