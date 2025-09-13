@@ -95,6 +95,13 @@ impl Block {
         self.name
     }
 
+    /// Returns the canonical default properties for this block, if any.
+    ///
+    /// These defaults represent the block's standard state in Minecraft and
+    /// are used throughout the codebase as the baseline configuration. Using
+    /// them ensures consistent behaviour, for example when placing signs whose
+    /// rotation and waterlogged state start from these defaults before
+    /// applying overrides.
     pub fn properties(&self) -> Option<Value> {
         match self.name {
             "minecraft:birch_leaves" => Some(Value::Compound({

@@ -495,19 +495,11 @@ impl<'a> WorldEditor<'a> {
 
         let rotation = rotation.clamp(0, 15);
 
-        // Start from the default sign properties (which include default
-        // rotation and waterlogged state) and override the rotation.
-        let mut sign_properties = match SIGN.properties() {
-            Some(Value::Compound(map)) => map,
-            _ => HashMap::new(),
-        };
-        sign_properties.insert(
-            "rotation".to_string(),
-            Value::String(rotation.to_string()),
-        );
-
-        let sign_block =
-            BlockWithProperties::new(SIGN, Some(Value::Compound(sign_properties)));
+        // Start from the default sign properties and override the rotation.
+        let mut sign_block = BlockWithProperties::new(SIGN, SIGN.properties());
+        if let Some(Value::Compound(ref mut props)) = sign_block.properties.as_mut() {
+            props.insert("rotation".to_string(), Value::String(rotation.to_string()));
+        }
 
         // Ensure that the sign is always placed even if another block
         // already occupies the target position. An empty blacklist allows
@@ -1176,7 +1168,10 @@ mod tests {
         match &sign_palette.properties {
             Some(Value::Compound(map)) => {
                 assert_eq!(map.get("rotation"), Some(&Value::String("4".to_string())));
-                assert_eq!(map.get("waterlogged"), Some(&Value::String("false".to_string())));
+                assert_eq!(
+                    map.get("waterlogged"),
+                    Some(&Value::String("false".to_string()))
+                );
             }
             _ => panic!("sign properties missing"),
         }
