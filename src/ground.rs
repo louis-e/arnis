@@ -126,6 +126,10 @@ impl Ground {
             eprintln!("Failed to save debug image: {e}");
         }
     }
+    //elevation_data mutable
+    pub fn elevation_data_mut(&mut self) -> Option<&mut ElevationData> {
+        self.elevation_data.as_mut()
+    }
 }
 
 pub fn generate_ground_data(args: &Args) -> Ground {

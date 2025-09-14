@@ -295,6 +295,21 @@ button:hover {
   font-weight: bold;
 }
 
+.rotation-slider-container label {
+  display: block;
+  margin-bottom: 5px;
+}
+
+#rotation-angle-slider {
+  accent-color: #fecc44;
+}
+
+#rotation-angle-input {
+  margin-left: 10px;
+  font-weight: bold;
+  width: 30%;
+}
+
 .bbox-input-container {
   margin-bottom: 20px;
 }

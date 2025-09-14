@@ -612,10 +612,15 @@ $(document).ready(function () {
     L.drawLocal.draw.toolbar.buttons = L.drawLocal.draw.toolbar.buttons || {};
     L.drawLocal.draw.toolbar.buttons.rectangle = 'Choose area';
     L.drawLocal.draw.toolbar.buttons.marker = 'Set spawnpoint';
+    L.drawLocal.draw.toolbar.buttons.anglecalc = 'Angle line';
 
     // Initialize the FeatureGroup to store editable layers
     drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
+
+    // Initialize the FeatureGroup to store lines for angle calculation
+    lineItems = new L.FeatureGroup();
+    map.addLayer(lineItems);
 
     // Custom icon for drawn markers
     var customMarkerIcon = L.icon({
@@ -624,6 +629,35 @@ $(document).ready(function () {
         iconAnchor: [10, 10],
         popupAnchor: [0, -10]
     });
+
+    // Calculate the angle (in degrees)
+    function calculateAngleGeo(latlng1, latlng2) {
+        const lat1 = latlng1.lat * Math.PI / 180;
+        const lat2 = latlng2.lat * Math.PI / 180;
+
+        const dx = (latlng2.lng - latlng1.lng) * Math.cos((lat1 + lat2) / 2);
+        const dy = latlng2.lat - latlng1.lat;
+
+        const radians = Math.atan2(dy, dx);
+        let degrees = radians * (180 / Math.PI);
+        if (degrees < 0) degrees += 360;
+        return degrees;
+    }
+    // Rotation to nearest cardinal axis (0,90,180,270)
+    function getRotationToNearestAxis(a) {
+       const axes = [0, 90, 180, 270];
+       let minDiff = 360;
+       let target = 0;
+
+       for (let ax of axes) {
+           let diff = (ax - a + 360) % 360;
+           if (diff < minDiff) {
+               minDiff = diff;
+               target = ax;
+           }
+       }
+       return minDiff;
+    }
 
     drawControl = new L.Control.Draw({
         edit: {
@@ -643,7 +677,15 @@ $(document).ready(function () {
                 },
                 repeatMode: false
             },
-            polyline: false,
+            polyline: {
+                // Draw a straight line for calculating angles
+                shapeOptions: {
+                    color: '#00aaff',
+                    weight: 3,
+                    dashArray: '5, 5'
+                },
+                maxPoints: 2
+            },
             polygon: false,
             circle: false,
             marker: {
@@ -689,6 +731,26 @@ $(document).ready(function () {
     map.addLayer(bounds);
 
     map.on('draw:created', function (e) {
+
+        if (e.layerType === 'polyline') {
+        const layer = e.layer;
+
+        // Add polyline temporarily to calculate angle
+        lineItems.addLayer(layer);
+
+        const latlngs = layer.getLatLngs();
+        if (latlngs.length === 2) {
+            const angle = calculateAngleGeo(latlngs[0], latlngs[1]);
+            const rotation = getRotationToNearestAxis(angle);
+
+            alert('Rotation for input (counterclockwise): ' + rotation.toFixed(2) + '°');
+        }
+
+        // Remove the temporary line after calculation
+        lineItems.removeLayer(layer);
+        return; // stop further processing for polyline
+    }
+
         // If it's a marker, make sure we only have one
         if (e.layerType === 'marker') {
             // Remove any existing markers
