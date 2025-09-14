@@ -142,7 +142,9 @@ pub fn rotate_by_angle(
             }
         }
 
-        laplacian_smooth(&mut rotated, &rotated_mask, smooth_iter);
+        if smooth_iter > 0 {
+            laplacian_smooth(&mut rotated, &rotated_mask, smooth_iter);
+        }
 
         *ground = Ground::new_from_ndarray(ground.ground_level(), &rotated);
     }
