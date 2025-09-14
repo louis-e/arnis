@@ -185,7 +185,7 @@ mod tests {
         let mut elements2 = elements1.clone();
         let mut ground2 = ground1.clone();
 
-        rotate_by_angle(center, deg, &mut elements2, &mut xzbbox2, &mut ground2);
+        rotate_by_angle(center, deg, 0, &mut elements2, &mut xzbbox2, &mut ground2);
 
         // 1. Elem type should not change
         // 2. For node,
