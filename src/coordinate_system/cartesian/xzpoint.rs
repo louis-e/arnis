@@ -14,20 +14,12 @@ impl XZPoint {
         Self { x, z }
     }
 
-    // pub fn origin() -> Self {
-    //     Self {x: 0, z: 0}
-    // }
-
-    pub fn to_relative(&self, relorigin: XZPoint) -> XZPoint {
+    pub fn calc_relative(&self, relorigin: XZPoint) -> XZPoint {
         Self {
             x: self.x - relorigin.x,
             z: self.z - relorigin.z,
         }
     }
-
-    // pub fn to_absolute(&self, relorigin: XZPoint) -> XZPoint {
-    //     Self {x: self.x + relorigin.x, z: self.z + relorigin.z}
-    // }
 }
 
 impl fmt::Display for XZPoint {

@@ -72,7 +72,7 @@ pub fn rotate_by_angle(
     xzbbox: &mut XZBBox,
     ground: &mut Ground,
 ) {
-    let orig_brect = xzbbox.bounding_rect().clone();
+    let orig_brect = xzbbox.bounding_rect();
     let orig_brect_lenx = orig_brect.total_blocks_x();
     let orig_brect_lenz = orig_brect.total_blocks_z();
 

@@ -110,7 +110,7 @@ impl XZBBoxPoly {
             return false;
         }
 
-        let ikpoint = xzpoint.to_relative(self.rect.min());
+        let ikpoint = xzpoint.calc_relative(self.rect.min());
         self.mask[(ikpoint.x as usize, ikpoint.z as usize)]
     }
 }
