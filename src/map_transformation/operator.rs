@@ -1,3 +1,4 @@
+use super::rotate::rotator_from_json;
 use super::translate::translator_from_json;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::ground::Ground;
@@ -30,6 +31,7 @@ pub fn operator_from_json(config: &serde_json::Value) -> Result<Box<dyn Operator
 
     let operator_result: Result<Box<dyn Operator>, String> = match operation_str {
         "translate" => translator_from_json(operator_config),
+        "rotate" => rotator_from_json(operator_config),
         _ => Err(format!("Unrecognized operation type '{operation_str}'")),
     };
 
