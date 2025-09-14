@@ -17,6 +17,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{env, fs, io::Write, panic};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
+use crate::rotate_and_expand; //rotate_and_expand
 
 /// Manages the session.lock file for a Minecraft world directory
 struct SessionLock {
@@ -676,6 +677,8 @@ fn gui_start_generation(
     fillground_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
+    rotation_angle: f64 // rotation_and_expand from GUI
+
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -758,6 +761,7 @@ fn gui_start_generation(
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
                 spawn_point,
+                rotation_angle: rotation_angle, // rotation_and_expand
             };
 
             // Run data fetch and world generation
@@ -786,6 +790,9 @@ fn gui_start_generation(
                         &mut xzbbox,
                         &mut ground,
                     );
+                    
+                    //rotate_and_expand
+                    rotate_and_expand::rotate_and_expand_world_data(&mut parsed_elements,&mut xzbbox,&mut ground,rotation_angle)?;
 
                     let _ = data_processing::generate_world(
                         parsed_elements,
