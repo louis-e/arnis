@@ -738,7 +738,7 @@ mod tests {
         let region_dir = tmp.path().join("region");
         std::fs::create_dir(&region_dir).unwrap();
         let llbbox = LLBBox::new(0., 0., 1., 1.).unwrap();
-        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox.clone());
+        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox);
 
         let args = Args {
             bbox: llbbox,
@@ -793,7 +793,7 @@ mod tests {
         let region_dir = tmp.path().join("region");
         std::fs::create_dir(&region_dir).unwrap();
         let llbbox = LLBBox::new(0., 0., 1., 1.).unwrap();
-        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox.clone());
+        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox);
 
         let args = Args {
             bbox: llbbox,

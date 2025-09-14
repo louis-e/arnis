@@ -562,13 +562,9 @@ impl<'a> WorldEditor<'a> {
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                whitelist.contains(&existing_block)
             } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
+                !blacklist.contains(&existing_block)
             } else {
                 false
             }
@@ -600,13 +596,9 @@ impl<'a> WorldEditor<'a> {
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                whitelist.contains(&existing_block)
             } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
+                !blacklist.contains(&existing_block)
             } else {
                 false
             }
@@ -638,13 +630,9 @@ impl<'a> WorldEditor<'a> {
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
+                whitelist.contains(&existing_block)
             } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
+                !blacklist.contains(&existing_block)
             } else {
                 false
             }
@@ -740,10 +728,7 @@ impl<'a> WorldEditor<'a> {
         // Retrieve the chunk modification map
         if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             if let Some(whitelist) = whitelist {
-                if whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
-                {
+                if whitelist.contains(&existing_block) {
                     return true; // Block is in the list
                 }
             }
@@ -765,19 +750,13 @@ impl<'a> WorldEditor<'a> {
         if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = whitelist {
-                if whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| *whitelisted_block == existing_block)
-                {
+                if whitelist.contains(&existing_block) {
                     return true; // Block is in whitelist
                 }
                 return false;
             }
             if let Some(blacklist) = blacklist {
-                if blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| *blacklisted_block == existing_block)
-                {
+                if blacklist.contains(&existing_block) {
                     return true; // Block is in blacklist
                 }
             }
