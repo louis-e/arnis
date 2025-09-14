@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
@@ -14,11 +15,11 @@ pub const MIN_Y: i32 = -64;
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
     xzbbox: XZBBox,
+    llbbox: LLBBox,
     ground: Ground,
     args: &Args,
 ) -> Result<(), String> {
-    let region_dir: String = format!("{}/region", args.path);
-    let mut editor: WorldEditor = WorldEditor::new(&region_dir, &xzbbox);
+    let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox, llbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
 
@@ -63,7 +64,7 @@ pub fn generate_world(
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                     buildings::generate_buildings(&mut editor, way, args, None);
                 } else if way.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args);
+                    highways::generate_highways(&mut editor, element, args, &elements);
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(&mut editor, way, args);
                 } else if way.tags.contains_key("natural") {
@@ -80,6 +81,8 @@ pub fn generate_world(
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
                     railways::generate_railways(&mut editor, way);
+                } else if way.tags.contains_key("roller_coaster") {
+                    railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
                     highways::generate_aeroway(&mut editor, way, args);
@@ -101,7 +104,7 @@ pub fn generate_world(
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args);
+                    highways::generate_highways(&mut editor, element, args, &elements);
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
                 } else if node.tags.contains_key("man_made") {

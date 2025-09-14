@@ -44,10 +44,30 @@ fn rotate_point(point: XZPoint, center: XZPoint, deg: f64) -> XZPoint {
     center + rotate_vector(point - center, deg)
 }
 
+fn laplacian_smooth(field: &mut Array2<i32>, mask: &Array2<bool>, iteration: usize) {
+    let mut temp: Array2<f64> = field.map(|&x| x as f64);
+
+    for _ in 0..iteration {
+        for i in 1..field.shape()[0] - 1 {
+            for k in 1..field.shape()[1] - 1 {
+                if !mask[(i, k)] {
+                    continue;
+                }
+                temp[(i, k)] =
+                    (temp[(i - 1, k)] + temp[(i + 1, k)] + temp[(i, k - 1)] + temp[(i, k + 1)])
+                        / 4.0
+            }
+        }
+    }
+
+    field.assign(&temp.mapv(|x| x as i32));
+}
+
 /// Rotate elements and bounding box by a degree (axis y, passing center)
 pub fn rotate_by_angle(
     center: XZPoint,
     deg: f64,
+    smooth_iter: usize,
     elements: &mut Vec<ProcessedElement>,
     xzbbox: &mut XZBBox,
     ground: &mut Ground,
@@ -97,12 +117,16 @@ pub fn rotate_by_angle(
     // rotate ground field
     let brect = xzbbox.bounding_rect();
     if let Some(elevation_data) = ground.elevation_data() {
+        // elevation data might be stored in lower resolution
         let reduce_ratio = ((elevation_data.shape().0 * elevation_data.shape().1) as f64
             / (orig_brect_lenx * orig_brect_lenz) as f64)
             .sqrt();
+
+        // dimensions of rotated elevation data field
         let rotated_lenx: usize = (brect.total_blocks_x() as f64 * reduce_ratio) as usize;
         let rotated_lenz: usize = (brect.total_blocks_z() as f64 * reduce_ratio) as usize;
         let mut rotated = Array2::<i32>::zeros((rotated_lenx, rotated_lenz));
+        let mut rotated_mask = Array2::<bool>::from_elem((rotated_lenx, rotated_lenz), false);
 
         for i in 0..rotated_lenx {
             for k in 0..rotated_lenz {
@@ -114,8 +138,11 @@ pub fn rotate_by_angle(
                 // assign the value at original position on original ground
                 let rel_point = XZPoint::new(0, 0) + (orig_point - orig_brect.min());
                 rotated[(i, k)] = ground.level(rel_point);
+                rotated_mask[(i, k)] = xzbbox.contains(&point);
             }
         }
+
+        laplacian_smooth(&mut rotated, &rotated_mask, smooth_iter);
 
         *ground = Ground::new_from_ndarray(ground.ground_level(), &rotated);
     }

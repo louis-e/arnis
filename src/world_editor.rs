@@ -1,5 +1,6 @@
 use crate::block_definitions::*;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
@@ -12,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Serialize, Deserialize)]
@@ -300,14 +302,29 @@ impl WorldToModify {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldMetadata {
+    min_mc_x: i32,
+    max_mc_x: i32,
+    min_mc_z: i32,
+    max_mc_z: i32,
+
+    min_geo_lat: f64,
+    max_geo_lat: f64,
+    min_geo_lon: f64,
+    max_geo_lon: f64,
+}
+
 // Notes for someone not familiar with lifetime parameter:
 // The follwing is like a C++ template:
 // template<lifetime A>
 // struct WorldEditor {const XZBBox<A>& xzbbox;}
 pub struct WorldEditor<'a> {
-    region_dir: String,
+    world_dir: PathBuf,
     world: WorldToModify,
     xzbbox: &'a XZBBox,
+    llbbox: LLBBox,
     ground: Option<Box<Ground>>,
 }
 
@@ -315,11 +332,12 @@ pub struct WorldEditor<'a> {
 // impl for struct WorldEditor<A> {...}
 impl<'a> WorldEditor<'a> {
     // Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, xzbbox: &'a XZBBox) -> Self {
+    pub fn new(world_dir: PathBuf, xzbbox: &'a XZBBox, llbbox: LLBBox) -> Self {
         Self {
-            region_dir: region_dir.to_string(),
+            world_dir,
             world: WorldToModify::default(),
             xzbbox,
+            llbbox,
             ground: None,
         }
     }
@@ -349,9 +367,11 @@ impl<'a> WorldEditor<'a> {
 
     /// Creates a region for the given region coordinates.
     fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
-        let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
+        let out_path = self
+            .world_dir
+            .join(format!("region/r.{}.{}.mca", region_x, region_z));
 
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
+        const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
 
         let mut region_file: File = File::options()
             .read(true)
@@ -719,59 +739,7 @@ impl<'a> WorldEditor<'a> {
         };
 
         // Create the Level wrapper
-        let level_data = HashMap::from([(
-            "Level".to_string(),
-            Value::Compound(HashMap::from([
-                ("xPos".to_string(), Value::Int(abs_chunk_x)),
-                ("zPos".to_string(), Value::Int(abs_chunk_z)),
-                ("isLightOn".to_string(), Value::Byte(0)),
-                (
-                    "sections".to_string(),
-                    Value::List(
-                        chunk_data
-                            .sections
-                            .iter()
-                            .map(|section| {
-                                Value::Compound(HashMap::from([
-                                    ("Y".to_string(), Value::Byte(section.y)),
-                                    (
-                                        "block_states".to_string(),
-                                        Value::Compound(HashMap::from([
-                                            (
-                                                "palette".to_string(),
-                                                Value::List(
-                                                    section
-                                                        .block_states
-                                                        .palette
-                                                        .iter()
-                                                        .map(|item| {
-                                                            Value::Compound(HashMap::from([(
-                                                                "Name".to_string(),
-                                                                Value::String(item.name.clone()),
-                                                            )]))
-                                                        })
-                                                        .collect(),
-                                                ),
-                                            ),
-                                            (
-                                                "data".to_string(),
-                                                Value::LongArray(
-                                                    section
-                                                        .block_states
-                                                        .data
-                                                        .clone()
-                                                        .unwrap_or_else(|| LongArray::new(vec![])),
-                                                ),
-                                            ),
-                                        ])),
-                                    ),
-                                ]))
-                            })
-                            .collect(),
-                    ),
-                ),
-            ])),
-        )]);
+        let level_data = create_level_wrapper(&chunk_data);
 
         // Serialize the chunk with Level wrapper
         let mut ser_buffer = Vec::with_capacity(8192);
@@ -784,6 +752,12 @@ impl<'a> WorldEditor<'a> {
     pub fn save(&mut self) {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
+
+        // Save metadata with error handling
+        if let Err(e) = self.save_metadata() {
+            eprintln!("Warning: Failed to save world metadata: {}", e);
+            // Continue with world saving even if metadata fails
+        }
 
         let total_regions = self.world.regions.len() as u64;
         let save_pb = ProgressBar::new(total_regions);
@@ -931,6 +905,38 @@ impl<'a> WorldEditor<'a> {
 
         save_pb.finish();
     }
+
+    fn save_metadata(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let metadata_path = self.world_dir.join("metadata.json");
+
+        let mut file = File::create(&metadata_path).map_err(|e| {
+            format!(
+                "Failed to create metadata file at {}: {}",
+                metadata_path.display(),
+                e
+            )
+        })?;
+
+        let metadata = WorldMetadata {
+            min_mc_x: self.xzbbox.min_x(),
+            max_mc_x: self.xzbbox.max_x(),
+            min_mc_z: self.xzbbox.min_z(),
+            max_mc_z: self.xzbbox.max_z(),
+
+            min_geo_lat: self.llbbox.min().lat(),
+            max_geo_lat: self.llbbox.max().lat(),
+            min_geo_lon: self.llbbox.min().lng(),
+            max_geo_lon: self.llbbox.max().lng(),
+        };
+
+        let contents = serde_json::to_string(&metadata)
+            .map_err(|e| format!("Failed to serialize metadata to JSON: {}", e))?;
+
+        write!(&mut file, "{}", contents)
+            .map_err(|e| format!("Failed to write metadata to file: {}", e))?;
+
+        Ok(())
+    }
 }
 
 // Helper function to get entity coordinates
@@ -972,46 +978,44 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                         .sections
                         .iter()
                         .map(|section| {
+                            let mut block_states = HashMap::from([(
+                                "palette".to_string(),
+                                Value::List(
+                                    section
+                                        .block_states
+                                        .palette
+                                        .iter()
+                                        .map(|item| {
+                                            let mut palette_item = HashMap::from([(
+                                                "Name".to_string(),
+                                                Value::String(item.name.clone()),
+                                            )]);
+                                            if let Some(props) = &item.properties {
+                                                palette_item.insert(
+                                                    "Properties".to_string(),
+                                                    props.clone(),
+                                                );
+                                            }
+                                            Value::Compound(palette_item)
+                                        })
+                                        .collect(),
+                                ),
+                            )]);
+
+                            // only add the `data` attribute if it's non-empty
+                            // some software (cough cough dynmap) chokes otherwise
+                            if let Some(data) = &section.block_states.data {
+                                if !data.is_empty() {
+                                    block_states.insert(
+                                        "data".to_string(),
+                                        Value::LongArray(data.to_owned()),
+                                    );
+                                }
+                            }
+
                             Value::Compound(HashMap::from([
                                 ("Y".to_string(), Value::Byte(section.y)),
-                                (
-                                    "block_states".to_string(),
-                                    Value::Compound(HashMap::from([
-                                        (
-                                            "palette".to_string(),
-                                            Value::List(
-                                                section
-                                                    .block_states
-                                                    .palette
-                                                    .iter()
-                                                    .map(|item| {
-                                                        let mut palette_item = HashMap::from([(
-                                                            "Name".to_string(),
-                                                            Value::String(item.name.clone()),
-                                                        )]);
-                                                        if let Some(props) = &item.properties {
-                                                            palette_item.insert(
-                                                                "Properties".to_string(),
-                                                                props.clone(),
-                                                            );
-                                                        }
-                                                        Value::Compound(palette_item)
-                                                    })
-                                                    .collect(),
-                                            ),
-                                        ),
-                                        (
-                                            "data".to_string(),
-                                            Value::LongArray(
-                                                section
-                                                    .block_states
-                                                    .data
-                                                    .clone()
-                                                    .unwrap_or_else(|| LongArray::new(vec![])),
-                                            ),
-                                        ),
-                                    ])),
-                                ),
+                                ("block_states".to_string(), Value::Compound(block_states)),
                             ]))
                         })
                         .collect(),

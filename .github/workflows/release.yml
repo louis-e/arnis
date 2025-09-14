@@ -30,7 +30,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@v1
@@ -97,13 +97,13 @@ jobs:
     runs-on: macos-latest
     steps:
     - name: Download macOS Intel build
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: macos-13-x86_64-apple-darwin-build
         path: ./intel
 
     - name: Download macOS ARM64 build
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: macos-latest-aarch64-apple-darwin-build
         path: ./arm64
@@ -124,22 +124,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
 
     - name: Download Windows build artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: windows-latest-x86_64-pc-windows-msvc-build
         path: ./builds/windows
 
     - name: Download Linux build artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: ubuntu-latest-x86_64-unknown-linux-gnu-build
         path: ./builds/linux
 
     - name: Download macOS universal build artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: macos-universal-build
         path: ./builds/macos

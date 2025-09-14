@@ -115,7 +115,7 @@ fn run_cli() {
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
     // Generate world
-    let _ = data_processing::generate_world(parsed_elements, xzbbox, ground, &args);
+    let _ = data_processing::generate_world(parsed_elements, xzbbox, args.bbox, ground, &args);
 }
 
 fn main() {

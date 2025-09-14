@@ -10,6 +10,7 @@ use serde::Deserialize;
 pub struct AngleRotator {
     pub center: XZPoint,
     pub deg: f64,
+    pub smooth_iter: usize,
 }
 
 impl Operator for AngleRotator {
@@ -19,7 +20,14 @@ impl Operator for AngleRotator {
         xzbbox: &mut XZBBox,
         ground: &mut Ground,
     ) {
-        rotate_by_angle(self.center, self.deg, elements, xzbbox, ground);
+        rotate_by_angle(
+            self.center,
+            self.deg,
+            self.smooth_iter,
+            elements,
+            xzbbox,
+            ground,
+        );
     }
 
     fn repr(&self) -> String {
