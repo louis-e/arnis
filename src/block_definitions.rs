@@ -173,7 +173,7 @@ impl Block {
 // Cache for stair blocks with properties
 #[allow(clippy::type_complexity)]
 static STAIR_CACHE: Lazy<DashMap<(Block, StairFacing, StairShape), BlockWithProperties>> =
-    Lazy::new(|| DashMap::new());
+    Lazy::new(DashMap::new);
 
 // General function to create any stair block with facing and shape properties
 pub fn create_stair_with_properties(
