@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+use dashmap::DashMap;
 use fastnbt::Value;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -171,8 +172,8 @@ impl Block {
 
 // Cache for stair blocks with properties
 #[allow(clippy::type_complexity)]
-static STAIR_CACHE: Lazy<Mutex<HashMap<(Block, StairFacing, StairShape), BlockWithProperties>>> =
-    Lazy::new(|| Mutex::new(HashMap::new()));
+static STAIR_CACHE: Lazy<DashMap<(Block, StairFacing, StairShape), BlockWithProperties>> =
+    Lazy::new(|| DashMap::new());
 
 // General function to create any stair block with facing and shape properties
 pub fn create_stair_with_properties(
@@ -183,11 +184,8 @@ pub fn create_stair_with_properties(
     let cache_key = (base_stair_block, facing, shape);
 
     // Check cache first
-    {
-        let cache = STAIR_CACHE.lock().unwrap();
-        if let Some(cached_block) = cache.get(&cache_key) {
-            return cached_block.clone();
-        }
+    if let Some(cached_block) = STAIR_CACHE.get(&cache_key) {
+        return cached_block.value().clone();
     }
 
     // Create properties
@@ -209,10 +207,7 @@ pub fn create_stair_with_properties(
     let block_with_props = BlockWithProperties::new(base_stair_block, Some(properties));
 
     // Cache the result
-    {
-        let mut cache = STAIR_CACHE.lock().unwrap();
-        cache.insert(cache_key, block_with_props.clone());
-    }
+    STAIR_CACHE.insert(cache_key, block_with_props.clone());
 
     block_with_props
 }

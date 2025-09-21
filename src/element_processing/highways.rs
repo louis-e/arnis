@@ -65,6 +65,7 @@ fn generate_highways_internal(
     args: &Args,
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
 ) {
+    let debug = args.debug;
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
             // Handle street lamps
@@ -453,12 +454,17 @@ fn generate_highways_internal(
             }
 
             if let Some(name) = element.tags().get("name") {
-                eprintln!("Processing highway '{name}'");
+                if debug {
+                    eprintln!("Processing highway '{name}'");
+                }
                 let mut prev_node: Option<&crate::osm_parser::ProcessedNode> = None;
                 let sign_interval = (200.0 * args.scale).max(1.0);
-                eprintln!("  Sign placement interval: {sign_interval}");
+                if debug {
+                    eprintln!("  Sign placement interval: {sign_interval}");
+                }
                 let mut distance_since_sign = 0.0;
                 let mut sign_placed = false;
+                let mut placed_signs = Vec::new();
 
                 for node in &way.nodes {
                     if let Some(start) = prev_node {
@@ -480,24 +486,17 @@ fn generate_highways_internal(
                                 let (min_x, min_z) = editor.get_min_coords();
                                 let (max_x, max_z) = editor.get_max_coords();
                                 let sign_y = editor.get_absolute_y(sign_x, 1, sign_z);
-                                eprintln!(
-                                    "  Attempting sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
-                                );
                                 if sign_x >= min_x
                                     && sign_x <= max_x
                                     && sign_z >= min_z
                                     && sign_z <= max_z
                                 {
-                                    eprintln!(
-                                        "  Placing sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
-                                    );
                                     let (l1, l2, l3, l4) = format_sign_text(name);
                                     editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
                                     sign_placed = true;
-                                } else {
-                                    eprintln!(
-                                        "  Skipping sign for '{name}' at ({sign_x}, {sign_y}, {sign_z}); out of bounds x:[{min_x},{max_x}] z:[{min_z},{max_z}]"
-                                    );
+                                    if debug {
+                                        placed_signs.push((sign_x, sign_y, sign_z));
+                                    }
                                 }
                                 distance_since_sign = 0.0;
                             }
@@ -506,8 +505,12 @@ fn generate_highways_internal(
                     }
                     prev_node = Some(node);
                 }
+                if debug {
+                    for (sign_x, sign_y, sign_z) in placed_signs {
+                        eprintln!("  Placed sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})");
+                    }
+                }
                 if !sign_placed {
-                    eprintln!("  No sign placed along highway '{name}', attempting fallback");
                     if let (Some(start), Some(next)) = (way.nodes.first(), way.nodes.get(1)) {
                         let dx_seg = next.x - start.x;
                         let dz_seg = next.z - start.z;
@@ -520,15 +523,19 @@ fn generate_highways_internal(
                         let sign_y = editor.get_absolute_y(sign_x, 1, sign_z);
                         if sign_x >= min_x && sign_x <= max_x && sign_z >= min_z && sign_z <= max_z
                         {
-                            eprintln!(
-                                "  Fallback placing sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
-                            );
                             let (l1, l2, l3, l4) = format_sign_text(name);
                             editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
+                            if debug {
+                                eprintln!(
+                                    "  Fallback placed sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
+                                );
+                            }
                         } else {
-                            eprintln!(
-                                "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_y}, {sign_z})"
-                            );
+                            if debug {
+                                eprintln!(
+                                    "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_y}, {sign_z})"
+                                );
+                            }
                         }
                     }
                 }

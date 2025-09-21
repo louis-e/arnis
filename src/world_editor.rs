@@ -10,7 +10,6 @@ use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -19,12 +18,26 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const DATA_VERSION: i32 = 3700;
 
-fn canonicalize_name(s: &str) -> String {
-    if s.contains(':') {
-        s.to_string()
-    } else {
-        format!("minecraft:{s}")
+#[inline]
+fn canonicalize_name_in_place(s: &mut String) {
+    if !s.as_bytes().contains(&b':') {
+        s.insert_str(0, "minecraft:");
     }
+}
+
+#[inline]
+fn json_text_message(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 10);
+    out.push_str("{\"text\":\"");
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            _ => out.push(ch),
+        }
+    }
+    out.push_str("\"}");
+    out
 }
 
 /// Formats a single text string into four lines suitable for Minecraft signs.
@@ -475,21 +488,21 @@ impl<'a> WorldEditor<'a> {
         let lines = [line1, line2, line3, line4];
         let messages: Vec<Value> = lines
             .iter()
-            .map(|l| Value::String(json!({"text": l}).to_string()))
+            .map(|l| Value::String(json_text_message(l)))
             .collect();
 
+        let front = Value::List(messages.clone());
+        let back = Value::List(messages);
+
         let mut front_text = HashMap::new();
-        front_text.insert("messages".to_string(), Value::List(messages.clone()));
-        front_text.insert(
-            "filtered_messages".to_string(),
-            Value::List(messages.clone()),
-        );
+        front_text.insert("messages".to_string(), front.clone());
+        front_text.insert("filtered_messages".to_string(), front);
         front_text.insert("color".to_string(), Value::String("black".to_string()));
         front_text.insert("has_glowing_text".to_string(), Value::Byte(0));
 
         let mut back_text = HashMap::new();
-        back_text.insert("messages".to_string(), Value::List(messages.clone()));
-        back_text.insert("filtered_messages".to_string(), Value::List(messages));
+        back_text.insert("messages".to_string(), back.clone());
+        back_text.insert("filtered_messages".to_string(), back);
         back_text.insert("color".to_string(), Value::String("black".to_string()));
         back_text.insert("has_glowing_text".to_string(), Value::Byte(0));
 
@@ -799,39 +812,30 @@ impl<'a> WorldEditor<'a> {
                 .sections
                 .iter()
                 .map(|section| {
+                    let mut block_states = HashMap::from([(
+                        "palette".to_string(),
+                        Value::List(
+                            section
+                                .block_states
+                                .palette
+                                .iter()
+                                .map(|item| {
+                                    Value::Compound(HashMap::from([(
+                                        "Name".to_string(),
+                                        Value::String(item.name.clone()),
+                                    )]))
+                                })
+                                .collect(),
+                        ),
+                    )]);
+                    if let Some(data) = &section.block_states.data {
+                        if !data.is_empty() {
+                            block_states.insert("data".to_string(), Value::LongArray(data.clone()));
+                        }
+                    }
                     let mut map = HashMap::from([
                         ("Y".to_string(), Value::Byte(section.y)),
-                        (
-                            "block_states".to_string(),
-                            Value::Compound(HashMap::from([
-                                (
-                                    "palette".to_string(),
-                                    Value::List(
-                                        section
-                                            .block_states
-                                            .palette
-                                            .iter()
-                                            .map(|item| {
-                                                Value::Compound(HashMap::from([(
-                                                    "Name".to_string(),
-                                                    Value::String(item.name.clone()),
-                                                )]))
-                                            })
-                                            .collect(),
-                                    ),
-                                ),
-                                (
-                                    "data".to_string(),
-                                    Value::LongArray(
-                                        section
-                                            .block_states
-                                            .data
-                                            .clone()
-                                            .unwrap_or_else(|| LongArray::new(vec![])),
-                                    ),
-                                ),
-                            ])),
-                        ),
+                        ("block_states".to_string(), Value::Compound(block_states)),
                     ]);
                     if let Some(bl) = &section.block_light {
                         map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
@@ -927,10 +931,8 @@ impl<'a> WorldEditor<'a> {
                         // Normalize palette block names from NBT
                         for section in &mut chunk.sections {
                             for palette_item in &mut section.block_states.palette {
-                                palette_item.name = canonicalize_name(&palette_item.name);
+                                canonicalize_name_in_place(&mut palette_item.name);
                             }
-                            section.sky_light = None;
-                            section.block_light = None;
                         }
 
                         // Update sections while preserving existing data
@@ -1099,46 +1101,34 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
             .sections
             .iter()
             .map(|section| {
+                let mut block_states = HashMap::from([(
+                    "palette".to_string(),
+                    Value::List(
+                        section
+                            .block_states
+                            .palette
+                            .iter()
+                            .map(|item| {
+                                let mut palette_item = HashMap::from([(
+                                    "Name".to_string(),
+                                    Value::String(item.name.clone()),
+                                )]);
+                                if let Some(props) = &item.properties {
+                                    palette_item.insert("Properties".to_string(), props.clone());
+                                }
+                                Value::Compound(palette_item)
+                            })
+                            .collect(),
+                    ),
+                )]);
+                if let Some(data) = &section.block_states.data {
+                    if !data.is_empty() {
+                        block_states.insert("data".to_string(), Value::LongArray(data.clone()));
+                    }
+                }
                 let mut map = HashMap::from([
                     ("Y".to_string(), Value::Byte(section.y)),
-                    (
-                        "block_states".to_string(),
-                        Value::Compound(HashMap::from([
-                            (
-                                "palette".to_string(),
-                                Value::List(
-                                    section
-                                        .block_states
-                                        .palette
-                                        .iter()
-                                        .map(|item| {
-                                            let mut palette_item = HashMap::from([(
-                                                "Name".to_string(),
-                                                Value::String(item.name.clone()),
-                                            )]);
-                                            if let Some(props) = &item.properties {
-                                                palette_item.insert(
-                                                    "Properties".to_string(),
-                                                    props.clone(),
-                                                );
-                                            }
-                                            Value::Compound(palette_item)
-                                        })
-                                        .collect(),
-                                ),
-                            ),
-                            (
-                                "data".to_string(),
-                                Value::LongArray(
-                                    section
-                                        .block_states
-                                        .data
-                                        .clone()
-                                        .unwrap_or_else(|| LongArray::new(vec![])),
-                                ),
-                            ),
-                        ])),
-                    ),
+                    ("block_states".to_string(), Value::Compound(block_states)),
                 ]);
                 if let Some(bl) = &section.block_light {
                     map.insert("block_light".to_string(), Value::ByteArray(bl.clone()));
