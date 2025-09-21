@@ -530,12 +530,10 @@ fn generate_highways_internal(
                                     "  Fallback placed sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
                                 );
                             }
-                        } else {
-                            if debug {
-                                eprintln!(
-                                    "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_y}, {sign_z})"
-                                );
-                            }
+                        } else if debug {
+                            eprintln!(
+                                "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_y}, {sign_z})"
+                            );
                         }
                     }
                 }
