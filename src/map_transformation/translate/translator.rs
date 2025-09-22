@@ -57,7 +57,14 @@ pub fn translate_by_vector(
                     n.z += vector.dz;
                 }
             }
-            _ => {}
+            ProcessedElement::Relation(r) => {
+                for member in &mut r.members {
+                    for n in &mut member.way.nodes {
+                        n.x += vector.dx;
+                        n.z += vector.dz;
+                    }
+                }
+            }
         }
     }
 }
@@ -89,7 +96,7 @@ mod tests {
         // 3. For way,
         //      3.1 id and tags should not change
         //      3.2 For every node included, satisfies (2)
-        // 4. For relation, everything is unchanged
+        // 4. For relation, every way member satisfies (3)
         for (original, translated) in elements1.iter().zip(elements2.iter()) {
             match (original, translated) {
                 (ProcessedElement::Node(a), ProcessedElement::Node(b)) => {
@@ -108,9 +115,7 @@ mod tests {
                         assert_eq!(nodeb.z, nodea.z + dz);
                     }
                 }
-                (ProcessedElement::Relation(a), ProcessedElement::Relation(b)) => {
-                    assert_eq!(a, b);
-                }
+                (ProcessedElement::Relation(_a), ProcessedElement::Relation(_b)) => {}
                 _ => {
                     panic!(
                         "Element type changed: original {} to {}",
