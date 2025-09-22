@@ -190,7 +190,7 @@ pub fn generate_world(
             editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
             block_counter += 1;
-            if block_counter % batch_size == 0 {
+            if block_counter.is_multiple_of(batch_size) {
                 ground_pb.inc(batch_size);
             }
 
