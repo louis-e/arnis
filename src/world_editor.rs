@@ -962,65 +962,70 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
 
 #[inline]
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
-    HashMap::from([(
-        "Level".to_string(),
-        Value::Compound(HashMap::from([
-            ("xPos".to_string(), Value::Int(chunk.x_pos)),
-            ("zPos".to_string(), Value::Int(chunk.z_pos)),
-            (
-                "isLightOn".to_string(),
-                Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
-            ),
-            (
-                "sections".to_string(),
-                Value::List(
-                    chunk
-                        .sections
-                        .iter()
-                        .map(|section| {
-                            let mut block_states = HashMap::from([(
-                                "palette".to_string(),
-                                Value::List(
-                                    section
-                                        .block_states
-                                        .palette
-                                        .iter()
-                                        .map(|item| {
-                                            let mut palette_item = HashMap::from([(
-                                                "Name".to_string(),
-                                                Value::String(item.name.clone()),
-                                            )]);
-                                            if let Some(props) = &item.properties {
-                                                palette_item.insert(
-                                                    "Properties".to_string(),
-                                                    props.clone(),
-                                                );
-                                            }
-                                            Value::Compound(palette_item)
-                                        })
-                                        .collect(),
-                                ),
-                            )]);
-
-                            // only add the `data` attribute if it's non-empty
-                            // some software (cough cough dynmap) chokes otherwise
-                            if let Some(data) = &section.block_states.data {
-                                if !data.is_empty() {
-                                    block_states.insert(
-                                        "data".to_string(),
-                                        Value::LongArray(data.to_owned()),
-                                    );
-                                }
-                            }
-
-                            Value::Compound(HashMap::from([
-                                ("Y".to_string(), Value::Byte(section.y)),
-                                ("block_states".to_string(), Value::Compound(block_states)),
-                            ]))
-                        })
-                        .collect(),
+    HashMap::from([
+        (
+            "Level".to_string(),
+            Value::Compound(HashMap::from([
+                ("xPos".to_string(), Value::Int(chunk.x_pos)),
+                ("zPos".to_string(), Value::Int(chunk.z_pos)),
+                (
+                    "isLightOn".to_string(),
+                    Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
                 ),
-            ),
-        ])),
-    )])
+                (
+                    "Sections".to_string(),
+                    Value::List(
+                        chunk
+                            .sections
+                            .iter()
+                            .map(|section| {
+                                let mut out =
+                                    HashMap::from([("Y".to_string(), Value::Byte(section.y))]);
+
+                                // only add the `data` attribute if it's non-empty
+                                // some software (cough cough dynmap) chokes otherwise
+                                if let Some(data) = &section.block_states.data {
+                                    if !data.is_empty() {
+                                        out.insert(
+                                            "BlockStates".to_string(),
+                                            Value::LongArray(data.to_owned()),
+                                        );
+
+                                        let palette = Value::List(
+                                            section
+                                                .block_states
+                                                .palette
+                                                .iter()
+                                                .map(|item| {
+                                                    let mut palette_item = HashMap::from([(
+                                                        "Name".to_string(),
+                                                        Value::String(format!(
+                                                            "minecraft:{}",
+                                                            item.name
+                                                        )),
+                                                    )]);
+                                                    if let Some(props) = &item.properties {
+                                                        palette_item.insert(
+                                                            "Properties".to_string(),
+                                                            props.clone(),
+                                                        );
+                                                    }
+                                                    Value::Compound(palette_item)
+                                                })
+                                                .collect(),
+                                        );
+
+                                        out.insert("Palette".to_string(), palette);
+                                    }
+                                }
+
+                                Value::Compound(out)
+                            })
+                            .collect(),
+                    ),
+                ),
+            ])),
+        ),
+        ("DataVersion".to_string(), Value::Int(2724)),
+    ])
 }
