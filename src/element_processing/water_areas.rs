@@ -36,70 +36,32 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         }
     }
 
-    // Process each outer polygon individually
-    for (i, outer_nodes) in outers.iter().enumerate() {
-        let mut individual_outers = vec![outer_nodes.clone()];
-
-        merge_loopy_loops(&mut individual_outers);
-        if !verify_loopy_loops(&individual_outers) {
-            println!(
-                "Skipping invalid outer polygon {} for relation {}",
-                i + 1,
-                element.id
-            );
-            continue; // Skip this outer if it's not valid
-        }
-
-        merge_loopy_loops(&mut inners);
-        if !verify_loopy_loops(&inners) {
-            // If inners are invalid, process outer without inners
-            let empty_inners: Vec<Vec<ProcessedNode>> = vec![];
-            let mut temp_inners = empty_inners;
-            merge_loopy_loops(&mut temp_inners);
-
-            let (min_x, min_z) = editor.get_min_coords();
-            let (max_x, max_z) = editor.get_max_coords();
-            let individual_outers_xz: Vec<Vec<XZPoint>> = individual_outers
-                .iter()
-                .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
-                .collect();
-            let empty_inners_xz: Vec<Vec<XZPoint>> = vec![];
-
-            inverse_floodfill(
-                min_x,
-                min_z,
-                max_x,
-                max_z,
-                individual_outers_xz,
-                empty_inners_xz,
-                editor,
-                start_time,
-            );
-            continue;
-        }
-
-        let (min_x, min_z) = editor.get_min_coords();
-        let (max_x, max_z) = editor.get_max_coords();
-        let individual_outers_xz: Vec<Vec<XZPoint>> = individual_outers
-            .iter()
-            .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
-            .collect();
-        let inners_xz: Vec<Vec<XZPoint>> = inners
-            .iter()
-            .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
-            .collect();
-
-        inverse_floodfill(
-            min_x,
-            min_z,
-            max_x,
-            max_z,
-            individual_outers_xz,
-            inners_xz,
-            editor,
-            start_time,
-        );
+    merge_loopy_loops(&mut outers);
+    if !verify_loopy_loops(&outers) {
+        println!("Skipping relation {} due to invalid polygon", element.id);
+        return;
     }
+
+    merge_loopy_loops(&mut inners);
+    if !verify_loopy_loops(&inners) {
+        println!("Skipping relation {} due to invalid polygon", element.id);
+        return;
+    }
+
+    let (min_x, min_z) = editor.get_min_coords();
+    let (max_x, max_z) = editor.get_max_coords();
+    let outers_xz: Vec<Vec<XZPoint>> = outers
+        .iter()
+        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
+        .collect();
+    let inners_xz: Vec<Vec<XZPoint>> = inners
+        .iter()
+        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
+        .collect();
+
+    inverse_floodfill(
+        min_x, min_z, max_x, max_z, outers_xz, inners_xz, editor, start_time,
+    );
 }
 
 // Merges ways that share nodes into full loops
