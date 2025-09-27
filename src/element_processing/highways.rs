@@ -4,7 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
-use crate::world_editor::{format_sign_text, WorldEditor};
+use crate::world_editor::WorldEditor; //format_sign_text
 use std::collections::HashMap;
 
 /// Generates highways with elevation support based on layer tags and connectivity analysis
@@ -65,7 +65,6 @@ fn generate_highways_internal(
     args: &Args,
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
 ) {
-    let debug = args.debug;
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
             // Handle street lamps
@@ -453,18 +452,12 @@ fn generate_highways_internal(
                 previous_node = Some((node.x, node.z));
             }
 
+            /* Add signs for named highways every 200 meters
             if let Some(name) = element.tags().get("name") {
-                if debug {
-                    eprintln!("Processing highway '{name}'");
-                }
                 let mut prev_node: Option<&crate::osm_parser::ProcessedNode> = None;
                 let sign_interval = (200.0 * args.scale).max(1.0);
-                if debug {
-                    eprintln!("  Sign placement interval: {sign_interval}");
-                }
                 let mut distance_since_sign = 0.0;
                 let mut sign_placed = false;
-                let mut placed_signs = Vec::new();
 
                 for node in &way.nodes {
                     if let Some(start) = prev_node {
@@ -494,9 +487,6 @@ fn generate_highways_internal(
                                     let (l1, l2, l3, l4) = format_sign_text(name);
                                     editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
                                     sign_placed = true;
-                                    if debug {
-                                        placed_signs.push((sign_x, sign_y, sign_z));
-                                    }
                                 }
                                 distance_since_sign = 0.0;
                             }
@@ -505,11 +495,7 @@ fn generate_highways_internal(
                     }
                     prev_node = Some(node);
                 }
-                if debug {
-                    for (sign_x, sign_y, sign_z) in placed_signs {
-                        eprintln!("  Placed sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})");
-                    }
-                }
+
                 if !sign_placed {
                     if let (Some(start), Some(next)) = (way.nodes.first(), way.nodes.get(1)) {
                         let dx_seg = next.x - start.x;
@@ -525,19 +511,11 @@ fn generate_highways_internal(
                         {
                             let (l1, l2, l3, l4) = format_sign_text(name);
                             editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
-                            if debug {
-                                eprintln!(
-                                    "  Fallback placed sign for '{name}' at ({sign_x}, {sign_y}, {sign_z})"
-                                );
-                            }
-                        } else if debug {
-                            eprintln!(
-                                "  Fallback sign for '{name}' out of bounds at ({sign_x}, {sign_y}, {sign_z})"
-                            );
                         }
                     }
                 }
             }
+            */
         }
     }
 }
