@@ -162,10 +162,9 @@ fn original_flood_fill_area(
             // Reduced timeout checking frequency for better performance
             // Use manual % check since is_multiple_of() is unstable on stable Rust
             #[allow(clippy::manual_is_multiple_of)]
-                if let Some(timeout) = timeout {
-                    if &start_time.elapsed() > timeout {
-                        return filled_area;
-                    }
+            if let Some(timeout) = timeout {
+                if &start_time.elapsed() > timeout {
+                    return filled_area;
                 }
             }
 
