@@ -120,7 +120,11 @@ pub fn generate_world(
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
                     buildings::generate_building_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("water")
-                    || rel.tags.get("natural") == Some(&"water".to_string())
+                    || rel
+                        .tags
+                        .get("natural")
+                        .map(|val| val == "water" || val == "bay")
+                        .unwrap_or(false)
                 {
                     water_areas::generate_water_areas_from_relation(&mut editor, rel);
                 } else if rel.tags.contains_key("natural") {

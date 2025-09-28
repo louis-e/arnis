@@ -25,7 +25,11 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
 
     // Check if this is a water relation (either with water tag or natural=water)
     let is_water = element.tags.contains_key("water")
-        || element.tags.get("natural") == Some(&"water".to_string());
+        || element
+            .tags
+            .get("natural")
+            .map(|val| val == "water" || val == "bay")
+            .unwrap_or(false);
 
     if !is_water {
         return;
