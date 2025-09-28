@@ -4,11 +4,23 @@ use std::time::Instant;
 use crate::{
     block_definitions::WATER,
     coordinate_system::cartesian::XZPoint,
-    osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation},
+    osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
     world_editor::WorldEditor,
 };
 
-pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelation) {
+pub fn generate_water_area_from_way(editor: &mut WorldEditor, element: &ProcessedWay) {
+    let start_time = Instant::now();
+
+    let outers = [element.nodes.clone()];
+    if !verify_loopy_loops(&outers) {
+        println!("Skipping way {} due to invalid polygon", element.id);
+        return;
+    }
+
+    generate_water_areas(editor, &outers, &[], start_time);
+}
+
+pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &ProcessedRelation) {
     let start_time = Instant::now();
 
     // Check if this is a water relation (either with water tag or natural=water)
@@ -48,6 +60,15 @@ pub fn generate_water_areas(editor: &mut WorldEditor, element: &ProcessedRelatio
         return;
     }
 
+    generate_water_areas(editor, &outers, &inners, start_time);
+}
+
+fn generate_water_areas(
+    editor: &mut WorldEditor,
+    outers: &[Vec<ProcessedNode>],
+    inners: &[Vec<ProcessedNode>],
+    start_time: Instant,
+) {
     let (min_x, min_z) = editor.get_min_coords();
     let (max_x, max_z) = editor.get_max_coords();
     let outers_xz: Vec<Vec<XZPoint>> = outers
