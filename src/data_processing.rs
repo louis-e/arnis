@@ -190,6 +190,8 @@ pub fn generate_world(
             editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
             block_counter += 1;
+            // Use manual % check since is_multiple_of() is unstable on stable Rust
+            #[allow(clippy::manual_is_multiple_of)]
             if block_counter % batch_size == 0 {
                 ground_pb.inc(batch_size);
             }

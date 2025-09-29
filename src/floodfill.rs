@@ -160,11 +160,11 @@ fn original_flood_fill_area(
     for z in (min_z..=max_z).step_by(step_z as usize) {
         for x in (min_x..=max_x).step_by(step_x as usize) {
             // Reduced timeout checking frequency for better performance
-            if global_visited.len() % 200 == 0 {
-                if let Some(timeout) = timeout {
-                    if &start_time.elapsed() > timeout {
-                        return filled_area;
-                    }
+            // Use manual % check since is_multiple_of() is unstable on stable Rust
+            #[allow(clippy::manual_is_multiple_of)]
+            if let Some(timeout) = timeout {
+                if &start_time.elapsed() > timeout {
+                    return filled_area;
                 }
             }
 
