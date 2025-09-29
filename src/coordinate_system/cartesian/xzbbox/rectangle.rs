@@ -2,7 +2,7 @@ use crate::coordinate_system::cartesian::{XZPoint, XZVector};
 use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-/// An underlying shape of XZBBox enum.
+/// An underlying shape rectangle of XZBBox enum.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct XZBBoxRect {
     /// The "bottom-left" vertex of the rectangle
