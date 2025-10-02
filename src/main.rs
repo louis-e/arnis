@@ -28,6 +28,9 @@ mod elevation_data;
 #[cfg(feature = "gui")]
 mod gui;
 
+//rotate_and_expand
+mod rotate_and_expand;
+
 // If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
 #[cfg(not(feature = "gui"))]
 mod progress {
@@ -113,6 +116,9 @@ fn run_cli() {
 
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
+
+    //rotate_and_expand
+    let _ = rotate_and_expand::rotate_and_expand_world_data(&mut parsed_elements,&mut xzbbox,&mut ground, args.rotation_angle);
 
     // Generate world
     let _ = data_processing::generate_world(parsed_elements, xzbbox, args.bbox, ground, &args);

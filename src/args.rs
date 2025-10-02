@@ -62,6 +62,10 @@ pub struct Args {
     /// Spawn point coordinates (lat, lng)
     #[arg(skip)]
     pub spawn_point: Option<(f64, f64)>,
+
+    /// Counterclockwise rotation angle in degrees [max: 90] (optional)
+    #[clap(long, default_value_t = 0.0)]
+    pub rotation_angle: f64,
 }
 
 fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {
