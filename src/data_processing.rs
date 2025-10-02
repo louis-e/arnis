@@ -75,8 +75,13 @@ pub fn generate_world(
                     leisure::generate_leisure(&mut editor, way, args);
                 } else if way.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element);
-                } else if way.tags.contains_key("waterway") {
-                    waterways::generate_waterways(&mut editor, way);
+                } else if let Some(val) = way.tags.get("waterway") {
+                    if val == "dock" {
+                        // docks count as water areas
+                        water_areas::generate_water_area_from_way(&mut editor, way);
+                    } else {
+                        waterways::generate_waterways(&mut editor, way);
+                    }
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
@@ -115,9 +120,13 @@ pub fn generate_world(
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
                     buildings::generate_building_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("water")
-                    || rel.tags.get("natural") == Some(&"water".to_string())
+                    || rel
+                        .tags
+                        .get("natural")
+                        .map(|val| val == "water" || val == "bay")
+                        .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas(&mut editor, rel);
+                    water_areas::generate_water_areas_from_relation(&mut editor, rel);
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("landuse") {
