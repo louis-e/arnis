@@ -8,7 +8,7 @@ This free and open source project is designed to handle large-scale geographic d
 Generate your hometown, big cities, and natural landscapes with ease!
 
 ![Minecraft Preview](assets/git/preview.jpg)
-<i>This Github page is the official project website. Do not download Arnis from any other website.</i>
+<i>This Github page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
 
 ## :keyboard: Usage
 <img width="60%" src="assets/git/gui.png"><br>
