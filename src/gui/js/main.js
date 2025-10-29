@@ -237,6 +237,27 @@ function initSettings() {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
 
+  // rotation slider and input elements
+  const rotationSlider = document.getElementById("rotation-angle-slider");
+  const rotationInput = document.getElementById("rotation-angle-input");
+
+  // Sync rotation value slider <--> input
+  function updateRotation(val) {
+      if (isNaN(val)) val = 0;
+      val = Math.min(Math.max(val, 0), 90); // 0-90 range
+      rotationInput.value = val.toFixed(2);
+      rotationSlider.value = val;
+  }
+  rotationSlider.addEventListener("input", () => {
+      updateRotation(parseFloat(rotationSlider.value));
+  });
+  rotationInput.addEventListener("input", () => {
+      updateRotation(parseFloat(rotationInput.value));
+  });
+  rotationInput.addEventListener("change", () => {
+      updateRotation(parseFloat(rotationInput.value));
+  });
+
   // Language selector
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
@@ -609,6 +630,9 @@ async function startGeneration() {
     floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
     ground_level = isNaN(ground_level) || ground_level < -62 ? 20 : ground_level;
 
+    // rotation angle from input
+    var rotationAngle = parseFloat(document.getElementById("rotation-angle-input").value);
+
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
@@ -621,7 +645,8 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         isNewWorld: isNewWorld,
-        spawnPoint: spawnPoint
+        spawnPoint: spawnPoint,
+        rotationAngle: rotationAngle // for Rotation
     });
 
     console.log("Generation process started.");
