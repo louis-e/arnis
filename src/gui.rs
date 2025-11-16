@@ -88,7 +88,7 @@ pub fn run_gui() {
     tauri::Builder::default()
         .plugin(
             LogBuilder::default()
-                .level(LevelFilter::Trace)
+                .level(LevelFilter::Warn)
                 .targets([
                     Target::new(TargetKind::LogDir {
                         file_name: Some("arnis".into()),
