@@ -38,6 +38,10 @@
   "language": "Langue",
   "map_theme": "Thème de carte",
   "terrain": "Terrain",
+  "generation_mode": "Mode de génération",
+  "mode_geo_terrain": "Objets + Terrain",
+  "mode_geo_only": "Objets uniquement",
+  "mode_terrain_only": "Terrain uniquement",
   "interior": "Génération d'intérieur",
   "roof": "Génération de toit",
   "fillground": "Remplir le sol"

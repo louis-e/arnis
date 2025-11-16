@@ -93,6 +93,10 @@ async function applyLocalization(localization) {
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     "label[data-localize='language']": "language",
+    "label[data-localize='generation_mode']": "generation_mode",
+    "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
+    "option[data-localize='mode_geo_only']": "mode_geo_only",
+    "option[data-localize='mode_terrain_only']": "mode_terrain_only",
     "label[data-localize='terrain']": "terrain",
     "label[data-localize='interior']": "interior",
     "label[data-localize='roof']": "roof",
@@ -595,7 +599,10 @@ async function startGeneration() {
       }
     }
 
-    var terrain = document.getElementById("terrain-toggle").checked;
+    // Get generation mode from dropdown
+    var generationMode = document.getElementById("generation-mode-select").value;
+    var terrain = (generationMode === "geo-terrain" || generationMode === "terrain-only");
+
     var interior = document.getElementById("interior-toggle").checked;
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
