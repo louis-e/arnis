@@ -3,7 +3,7 @@ export const licenseText = `
 
 <p>For a full list of contributors, please refer to the <a href="https://github.com/louis-e/arnis/graphs/contributors" style="color: inherit;" target="_blank">Github contributors page</a>. Logo made by nxfx21.
 
-<p style="color: #ff8686;"><b>Download Arnis only from the official source:</b> <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">https://github.com/louis-e/arnis/</a>. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.</p>
+<p style="color: #ff8686;"><b>Download Arnis only from the official source:</b> <a href="https://arnismc.com" style="color: inherit;" target="_blank">https://arnismc.com</a> or <a href="https://github.com/louis-e/arnis" style="color: inherit;" target="_blank">https://github.com/louis-e/arnis/</a>. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.</p>
 
 <p><b>Third-Party Map Data and Tile Services:</b></p>
 <p>This application uses map tiles from multiple providers, each with their own licensing requirements:</p>
@@ -20,6 +20,9 @@ export const licenseText = `
 <b>Stadia Maps:</b><br> © <a href="https://www.stadiamaps.com/" style="color: inherit;" target="_blank">Stadia Maps</a> © <a href="https://openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a> © OpenStreetMap contributors
 <p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
 
+<b>AWS Terrain Tiles:</b><br>
+Elevation data derived from the <a href="https://registry.opendata.aws/terrain-tiles/" style="color: inherit;" target="_blank">AWS Terrain Tiles</a> dataset.
+<br><br>
 
 <p><b>License:</b></p>
 <pre style="white-space: pre-wrap; font-family: inherit;">
