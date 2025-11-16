@@ -74,6 +74,7 @@ fn optimized_flood_fill_area(
     for z in (min_z..=max_z).step_by(step_z as usize) {
         for x in (min_x..=max_x).step_by(step_x as usize) {
             // Check timeout more frequently for small areas
+            #[allow(clippy::manual_is_multiple_of)]
             if iterations % 50 == 0 {
                 if let Some(timeout) = timeout {
                     if start_time.elapsed() > *timeout {
@@ -116,6 +117,7 @@ fn optimized_flood_fill_area(
                 }
 
                 // Timeout check in inner loop for problematic polygons
+                #[allow(clippy::manual_is_multiple_of)]
                 if iterations % 1000 == 0 {
                     if let Some(timeout) = timeout {
                         if start_time.elapsed() > *timeout {
@@ -193,6 +195,7 @@ fn original_flood_fill_area(
     for z in (min_z..=max_z).step_by(step_z as usize) {
         for x in (min_x..=max_x).step_by(step_x as usize) {
             // Check timeout more frequently for problematic polygons
+            #[allow(clippy::manual_is_multiple_of)]
             if iterations % 50 == 0 {
                 if let Some(timeout) = timeout {
                     if &start_time.elapsed() > timeout {
@@ -235,6 +238,7 @@ fn original_flood_fill_area(
                 }
 
                 // Timeout check in inner loop
+                #[allow(clippy::manual_is_multiple_of)]
                 if iterations % 1000 == 0 {
                     if let Some(timeout) = timeout {
                         if &start_time.elapsed() > timeout {
