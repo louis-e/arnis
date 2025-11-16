@@ -4,7 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
-use crate::world_editor::WorldEditor;
+use crate::world_editor::WorldEditor; //format_sign_text
 use std::collections::HashMap;
 
 /// Generates highways with elevation support based on layer tags and connectivity analysis
@@ -451,6 +451,71 @@ fn generate_highways_internal(
                 }
                 previous_node = Some((node.x, node.z));
             }
+
+            /* Add signs for named highways every 200 meters
+            if let Some(name) = element.tags().get("name") {
+                let mut prev_node: Option<&crate::osm_parser::ProcessedNode> = None;
+                let sign_interval = (200.0 * args.scale).max(1.0);
+                let mut distance_since_sign = 0.0;
+                let mut sign_placed = false;
+
+                for node in &way.nodes {
+                    if let Some(start) = prev_node {
+                        let dx_seg = node.x - start.x;
+                        let dz_seg = node.z - start.z;
+                        let side_dx = -dz_seg.signum();
+                        let side_dz = dx_seg.signum();
+
+                        let bres_points = bresenham_line(start.x, 0, start.z, node.x, 0, node.z);
+                        let mut prev_point = (start.x, start.z);
+                        for (x, _, z) in bres_points.into_iter().skip(1) {
+                            let step = (((x - prev_point.0).pow(2) + (z - prev_point.1).pow(2))
+                                as f64)
+                                .sqrt();
+                            distance_since_sign += step;
+                            if distance_since_sign >= sign_interval {
+                                let sign_x = x + side_dx * (block_range + 1);
+                                let sign_z = z + side_dz * (block_range + 1);
+                                let (min_x, min_z) = editor.get_min_coords();
+                                let (max_x, max_z) = editor.get_max_coords();
+                                let sign_y = editor.get_absolute_y(sign_x, 1, sign_z);
+                                if sign_x >= min_x
+                                    && sign_x <= max_x
+                                    && sign_z >= min_z
+                                    && sign_z <= max_z
+                                {
+                                    let (l1, l2, l3, l4) = format_sign_text(name);
+                                    editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
+                                    sign_placed = true;
+                                }
+                                distance_since_sign = 0.0;
+                            }
+                            prev_point = (x, z);
+                        }
+                    }
+                    prev_node = Some(node);
+                }
+
+                if !sign_placed {
+                    if let (Some(start), Some(next)) = (way.nodes.first(), way.nodes.get(1)) {
+                        let dx_seg = next.x - start.x;
+                        let dz_seg = next.z - start.z;
+                        let side_dx = -dz_seg.signum();
+                        let side_dz = dx_seg.signum();
+                        let sign_x = start.x + side_dx * (block_range + 1);
+                        let sign_z = start.z + side_dz * (block_range + 1);
+                        let (min_x, min_z) = editor.get_min_coords();
+                        let (max_x, max_z) = editor.get_max_coords();
+                        let sign_y = editor.get_absolute_y(sign_x, 1, sign_z);
+                        if sign_x >= min_x && sign_x <= max_x && sign_z >= min_z && sign_z <= max_z
+                        {
+                            let (l1, l2, l3, l4) = format_sign_text(name);
+                            editor.set_sign(l1, l2, l3, l4, sign_x, sign_y, sign_z);
+                        }
+                    }
+                }
+            }
+            */
         }
     }
 }
@@ -634,5 +699,132 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
             }
         }
         previous_node = Some((node.x, node.z));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::args::Args;
+    use crate::block_definitions::SIGN;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
+    use crate::world_editor::WorldEditor;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    #[test]
+    fn places_signs_every_200_meters() {
+        let bbox = XZBBox::rect_from_xz_lengths(1010.0, 20.0).unwrap();
+        let tmp = tempdir().unwrap();
+        let region_dir = tmp.path().join("region");
+        std::fs::create_dir(&region_dir).unwrap();
+        let llbbox = LLBBox::new(0., 0., 1., 1.).unwrap();
+        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox);
+
+        let args = Args {
+            bbox: llbbox,
+            file: None,
+            save_json_file: None,
+            path: tmp.path().to_path_buf(),
+            downloader: "requests".to_string(),
+            scale: 1.0,
+            ground_level: -62,
+            terrain: false,
+            interior: true,
+            roof: true,
+            fillground: false,
+            debug: false,
+            timeout: None,
+            spawn_point: None,
+        };
+
+        let nodes = vec![
+            ProcessedNode {
+                id: 1,
+                tags: HashMap::new(),
+                x: 0,
+                z: 0,
+            },
+            ProcessedNode {
+                id: 2,
+                tags: HashMap::new(),
+                x: 1000,
+                z: 0,
+            },
+        ];
+        let mut tags = HashMap::new();
+        tags.insert("highway".to_string(), "primary".to_string());
+        tags.insert("name".to_string(), "First St.".to_string());
+        let way = ProcessedWay { id: 1, nodes, tags };
+        let element = ProcessedElement::Way(way);
+
+        let all = [element.clone()];
+        generate_highways(&mut editor, &element, &args, &all);
+
+        for x in [200, 400, 600, 800, 1000] {
+            assert!(editor.check_for_block(x, 1, 6, Some(&[SIGN])));
+        }
+        assert!(!editor.check_for_block(100, 1, 6, Some(&[SIGN])));
+    }
+
+    #[test]
+    fn short_roads_get_a_sign() {
+        let bbox = XZBBox::rect_from_xz_lengths(110.0, 20.0).unwrap();
+        let tmp = tempdir().unwrap();
+        let region_dir = tmp.path().join("region");
+        std::fs::create_dir(&region_dir).unwrap();
+        let llbbox = LLBBox::new(0., 0., 1., 1.).unwrap();
+        let mut editor = WorldEditor::new(region_dir.clone(), &bbox, llbbox);
+
+        let args = Args {
+            bbox: llbbox,
+            file: None,
+            save_json_file: None,
+            path: tmp.path().to_path_buf(),
+            downloader: "requests".to_string(),
+            scale: 1.0,
+            ground_level: -62,
+            terrain: false,
+            interior: true,
+            roof: true,
+            fillground: false,
+            debug: false,
+            timeout: None,
+            spawn_point: None,
+        };
+
+        let nodes = vec![
+            ProcessedNode {
+                id: 1,
+                tags: HashMap::new(),
+                x: 0,
+                z: 0,
+            },
+            ProcessedNode {
+                id: 2,
+                tags: HashMap::new(),
+                x: 100,
+                z: 0,
+            },
+        ];
+        let mut tags = HashMap::new();
+        tags.insert("highway".to_string(), "primary".to_string());
+        tags.insert("name".to_string(), "Short St.".to_string());
+        let way = ProcessedWay { id: 1, nodes, tags };
+        let element = ProcessedElement::Way(way);
+
+        let all = [element.clone()];
+        generate_highways(&mut editor, &element, &args, &all);
+
+        let mut found = false;
+        for x in 0..=100 {
+            if editor.check_for_block(x, 1, 6, Some(&[SIGN])) {
+                found = true;
+                break;
+            }
+        }
+        assert!(found);
     }
 }

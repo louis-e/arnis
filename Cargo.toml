@@ -26,6 +26,7 @@ dirs = {version = "6.0.0", optional = true }
 fastanvil = "0.32.0"
 fastnbt = "2.6.0"
 flate2 = "1.1"
+dashmap = "5"
 fnv = "1.0.7"
 fs2 = "0.4"
 geo = "0.30.0"
