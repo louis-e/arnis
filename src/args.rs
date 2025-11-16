@@ -62,6 +62,10 @@ pub struct Args {
     /// Spawn point coordinates (lat, lng)
     #[arg(skip)]
     pub spawn_point: Option<(f64, f64)>,
+
+    /// User consent for telemetry/crash reporting (defaults to false)
+    #[arg(skip = false)]
+    pub telemetry_consent: bool,
 }
 
 fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {

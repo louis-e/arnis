@@ -249,6 +249,33 @@ button:hover {
   color: #ffffff;
 }
 
+/* Modal actions/buttons */
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn-primary {
+  background-color: var(--primary-accent);
+  color: #1a1a1a;
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-accent-dark);
+}
+
+.btn-secondary {
+  background-color: #e0e0e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-secondary {
+    background-color: #3a3a3a;
+    color: #ffffff;
+  }
+}
+
 #terrain-toggle {
   accent-color: #fecc44;
 }

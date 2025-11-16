@@ -8,15 +8,16 @@ use crate::map_transformation;
 use crate::osm_parser;
 use crate::progress;
 use crate::retrieve_data;
+use crate::telemetry;
 use crate::version_check;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
-use log::{error, LevelFilter};
+use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::{env, fs, io::Write, panic};
+use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
 /// Manages the session.lock file for a Minecraft world directory
@@ -63,12 +64,8 @@ pub fn run_gui() {
     // Launch the UI
     println!("Launching UI...");
 
-    // Set a custom panic hook to log panic information
-    panic::set_hook(Box::new(|panic_info| {
-        let message = format!("Application panicked: {panic_info:?}");
-        error!("{message}");
-        std::process::exit(1);
-    }));
+    // Install panic hook for crash reporting
+    telemetry::install_panic_hook();
 
     // Workaround WebKit2GTK issue with NVIDIA drivers and graphics issues
     // Source: https://github.com/tauri-apps/tauri/issues/10702
@@ -678,9 +675,13 @@ fn gui_start_generation(
     fillground_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
+    telemetry_consent: bool,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
+
+    // Store telemetry consent for crash reporting
+    telemetry::set_telemetry_consent(telemetry_consent);
 
     // If spawn point was chosen and the world is new, check and set the spawn point
     if is_new_world && spawn_point.is_some() {
@@ -760,6 +761,7 @@ fn gui_start_generation(
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
                 spawn_point,
+                telemetry_consent,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

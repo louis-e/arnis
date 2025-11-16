@@ -20,6 +20,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   setupProgressListener();
   initSettings();
   initWorldPicker();
+  initTelemetryConsent();
   handleBboxInput();
   const localization = await getLocalization();
   await applyLocalization(localization);
@@ -329,6 +330,39 @@ function initSettings() {
   window.closeLicense = closeLicense;
 }
 
+// Telemetry consent (first run only)
+function initTelemetryConsent() {
+  const key = 'telemetry-consent'; // values: 'true' | 'false'
+  const existing = localStorage.getItem(key);
+
+  const modal = document.getElementById('telemetry-modal');
+  if (!modal) return;
+
+  if (existing === null) {
+    // First run: ask for consent
+    modal.style.display = 'flex';
+    modal.style.justifyContent = 'center';
+    modal.style.alignItems = 'center';
+  }
+
+  // Expose handlers
+  window.acceptTelemetry = () => {
+    localStorage.setItem(key, 'true');
+    modal.style.display = 'none';
+  };
+
+  window.rejectTelemetry = () => {
+    localStorage.setItem(key, 'false');
+    modal.style.display = 'none';
+  };
+
+  // Utility for other scripts to read consent
+  window.getTelemetryConsent = () => {
+    const v = localStorage.getItem(key);
+    return v === null ? null : v === 'true';
+  };
+}
+
 function initWorldPicker() {
   // World Picker
   const worldPickerModal = document.getElementById("world-modal");
@@ -617,6 +651,9 @@ async function startGeneration() {
     floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
     ground_level = isNaN(ground_level) || ground_level < -62 ? 20 : ground_level;
 
+    // Get telemetry consent (defaults to false if not set)
+    const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
+
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
@@ -630,7 +667,8 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         isNewWorld: isNewWorld,
-        spawnPoint: spawnPoint
+        spawnPoint: spawnPoint,
+        telemetryConsent: telemetryConsent || false
     });
 
     console.log("Generation process started.");

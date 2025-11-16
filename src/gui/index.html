@@ -203,6 +203,22 @@
       </div>
     </div>
 
+    <!-- Telemetry Consent Modal (first run) -->
+    <div id="telemetry-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="rejectTelemetry()">&times;</span>
+        <h2>Help improve Arnis</h2>
+        <p style="text-align:left; margin-top:6px; color:#ececec;">
+          We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
+          No personal data or world contents are collected.
+        </p>
+        <div class="modal-actions" style="margin-top:14px;">
+          <button type="button" class="btn-secondary" onclick="rejectTelemetry()">No thanks</button>
+          <button type="button" class="btn-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
+        </div>
+      </div>
+    </div>
+
     <!-- License Modal -->
     <div id="license-modal" class="modal" style="display: none;">
       <div class="modal-content">
