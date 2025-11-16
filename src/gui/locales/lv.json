@@ -38,7 +38,11 @@
   "language": "Valoda",
   "map_theme": "Kartes tēma",
   "terrain": "Reljefs",
+  "generation_mode": "Ģenerēšanas režīms",
+  "mode_geo_terrain": "Objekti + Reljefs",
+  "mode_geo_only": "Tikai objekti",
+  "mode_terrain_only": "Tikai reljefs",
   "interior": "Interjera ģenerēšana",
-  "roof": "Jumtu ģenerēšana",
+  "roof": "Jumta ģenerēšana",
   "fillground": "Aizpildīt zemi"
 }

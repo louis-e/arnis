@@ -87,11 +87,15 @@
         <span class="close-button" onclick="closeSettings()">&times;</span>
         <h2 data-localize="customization_settings">Customization Settings</h2>
 
-        <!-- Terrain Toggle Button -->
+        <!-- Generation Mode Dropdown -->
         <div class="settings-row">
-          <label for="terrain-toggle" data-localize="terrain">Terrain</label>
+          <label for="generation-mode-select" data-localize="generation_mode">Generation Mode</label>
           <div class="settings-control">
-            <input type="checkbox" id="terrain-toggle" name="terrain-toggle" checked>
+            <select id="generation-mode-select" name="generation-mode-select" class="generation-mode-dropdown">
+              <option value="geo-terrain" data-localize="mode_geo_terrain">Objects + Terrain</option>
+              <option value="geo-only" data-localize="mode_geo_only">Objects only</option>
+              <option value="terrain-only" data-localize="mode_terrain_only">Terrain only</option>
+            </select>
           </div>
         </div>
 

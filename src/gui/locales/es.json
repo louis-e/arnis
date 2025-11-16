@@ -36,9 +36,13 @@
   "placeholder_floodfill": "Seconds",
   "placeholder_ground": "Ground Level",
   "language": "Idioma",
-  "map_theme": "Tema del mapa",
+  "map_theme": "Tema del Mapa",
   "terrain": "Terreno",
-  "interior": "Generación de interiores",
-  "roof": "Generación de techos",
-  "fillground": "Rellenar suelo"
+  "generation_mode": "Modo de Generación",
+  "mode_geo_terrain": "Objetos + Terreno",
+  "mode_geo_only": "Solo Objetos",
+  "mode_terrain_only": "Solo Terreno",
+  "interior": "Generación Interior",
+  "roof": "Generación de Tejado",
+  "fillground": "Rellenar Suelo"
 }

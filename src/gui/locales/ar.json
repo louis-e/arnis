@@ -38,6 +38,10 @@
   "language": "اللغة",
   "map_theme": "موضوع الخريطة",
   "terrain": "التضاريس",
+  "generation_mode": "وضع الإنشاء",
+  "mode_geo_terrain": "كائنات + تضاريس",
+  "mode_geo_only": "كائنات فقط",
+  "mode_terrain_only": "تضاريس فقط",
   "interior": "توليد الداخلية",
   "roof": "توليد السقف",
   "fillground": "ملء الأرض"
