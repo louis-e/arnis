@@ -769,8 +769,9 @@ fn gui_start_generation(
 
                 // Create empty parsed_elements and xzbbox for terrain-only mode
                 let parsed_elements = Vec::new();
-                let (_coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
-                    .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
+                let (_coord_transformer, xzbbox) =
+                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                        .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
 
                 let _ = data_processing::generate_world(
                     parsed_elements,
