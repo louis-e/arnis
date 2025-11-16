@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing;
 use crate::ground::{self, Ground};
 use crate::map_transformation;
@@ -671,6 +672,7 @@ fn gui_start_generation(
     ground_level: i32,
     floodfill_timeout: u64,
     terrain_enabled: bool,
+    skip_osm_objects: bool,
     interior_enabled: bool,
     roof_enabled: bool,
     fillground_enabled: bool,
@@ -760,7 +762,28 @@ fn gui_start_generation(
                 spawn_point,
             };
 
-            // Run data fetch and world generation
+            // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
+            if skip_osm_objects {
+                // Generate ground data (terrain) for terrain-only mode
+                let ground = ground::generate_ground_data(&args);
+
+                // Create empty parsed_elements and xzbbox for terrain-only mode
+                let parsed_elements = Vec::new();
+                let (_coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                    .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
+
+                let _ = data_processing::generate_world(
+                    parsed_elements,
+                    xzbbox,
+                    args.bbox,
+                    ground,
+                    &args,
+                );
+                // Session lock will be automatically released when _session_lock goes out of scope
+                return Ok(());
+            }
+
+            // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox) =

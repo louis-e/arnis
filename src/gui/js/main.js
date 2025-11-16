@@ -602,6 +602,7 @@ async function startGeneration() {
     // Get generation mode from dropdown
     var generationMode = document.getElementById("generation-mode-select").value;
     var terrain = (generationMode === "geo-terrain" || generationMode === "terrain-only");
+    var skipOsmObjects = (generationMode === "terrain-only");
 
     var interior = document.getElementById("interior-toggle").checked;
     var roof = document.getElementById("roof-toggle").checked;
@@ -624,6 +625,7 @@ async function startGeneration() {
         groundLevel: ground_level,
         floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
+        skipOsmObjects: skipOsmObjects,
         interiorEnabled: interior,
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
