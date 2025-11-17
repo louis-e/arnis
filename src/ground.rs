@@ -23,12 +23,22 @@ impl Ground {
     }
 
     pub fn new_enabled(bbox: &LLBBox, scale: f64, ground_level: i32) -> Self {
-        let elevation_data = fetch_elevation_data(bbox, scale, ground_level)
-            .expect("Failed to fetch elevation data");
-        Self {
-            elevation_enabled: true,
-            ground_level,
-            elevation_data: Some(elevation_data),
+        match fetch_elevation_data(bbox, scale, ground_level) {
+            Ok(elevation_data) => Self {
+                elevation_enabled: true,
+                ground_level,
+                elevation_data: Some(elevation_data),
+            },
+            Err(e) => {
+                eprintln!("Failed to fetch elevation data: {}", e);
+                emit_gui_progress_update(15.0, "Elevation unavailable, using flat ground");
+                // Graceful fallback: disable elevation and keep provided ground_level
+                Self {
+                    elevation_enabled: false,
+                    ground_level,
+                    elevation_data: None,
+                }
+            }
         }
     }
 
