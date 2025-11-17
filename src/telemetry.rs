@@ -28,7 +28,7 @@ struct CrashReport<'a> {
 fn send_crash_report(error_message: String, platform: &str, app_version: &str) {
     let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
         let client = Client::new();
-        let url = "https://arnismc.com/report_telemetry.php";
+        let url = "https://arnismc.com/telemetry/report_telemetry.php";
 
         let payload = CrashReport {
             error_message: &error_message,

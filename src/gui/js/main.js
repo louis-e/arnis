@@ -306,6 +306,20 @@ function initSettings() {
     }
   });
 
+  // Telemetry consent toggle
+  const telemetryToggle = document.getElementById("telemetry-toggle");
+  const telemetryKey = 'telemetry-consent';
+
+  // Load saved telemetry consent
+  const savedConsent = localStorage.getItem(telemetryKey);
+  telemetryToggle.checked = savedConsent === 'true';
+
+  // Handle telemetry consent change
+  telemetryToggle.addEventListener("change", () => {
+    const isEnabled = telemetryToggle.checked;
+    localStorage.setItem(telemetryKey, isEnabled ? 'true' : 'false');
+  });
+
 
   /// License and Credits
   function openLicense() {
@@ -349,11 +363,21 @@ function initTelemetryConsent() {
   window.acceptTelemetry = () => {
     localStorage.setItem(key, 'true');
     modal.style.display = 'none';
+    // Update settings toggle to reflect the consent
+    const telemetryToggle = document.getElementById('telemetry-toggle');
+    if (telemetryToggle) {
+      telemetryToggle.checked = true;
+    }
   };
 
   window.rejectTelemetry = () => {
     localStorage.setItem(key, 'false');
     modal.style.display = 'none';
+    // Update settings toggle to reflect the consent
+    const telemetryToggle = document.getElementById('telemetry-toggle');
+    if (telemetryToggle) {
+      telemetryToggle.checked = false;
+    }
   };
 
   // Utility for other scripts to read consent
