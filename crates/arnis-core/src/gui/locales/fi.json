@@ -38,6 +38,10 @@
   "language": "Kieli",
   "map_theme": "Karttateema",
   "terrain": "Maasto",
+  "generation_mode": "Luontitila",
+  "mode_geo_terrain": "Kohteet + Maasto",
+  "mode_geo_only": "Vain kohteet",
+  "mode_terrain_only": "Vain maasto",
   "interior": "Sisätilan luonti",
   "roof": "Katon luonti",
   "fillground": "Täytä maa"

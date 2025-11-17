@@ -36,9 +36,13 @@
   "placeholder_floodfill": "Секунды",
   "placeholder_ground": "Уровень земли",
   "language": "Язык",
-  "map_theme": "Тема карты",
+  "map_theme": "Тема Карты",
   "terrain": "Рельеф",
-  "interior": "Генерация интерьера",
-  "roof": "Генерация крыш",
-  "fillground": "Заполнить землю"
+  "generation_mode": "Режим Генерации",
+  "mode_geo_terrain": "Объекты + Рельеф",
+  "mode_geo_only": "Только Объекты",
+  "mode_terrain_only": "Только Рельеф",
+  "interior": "Генерация Интерьера",
+  "roof": "Генерация Крыши",
+  "fillground": "Заполнить Землю"
 }

@@ -38,6 +38,10 @@
   "language": "Språk",
   "map_theme": "Karttema",
   "terrain": "Terräng",
+  "generation_mode": "Genereringsläge",
+  "mode_geo_terrain": "Objekt + Terräng",
+  "mode_geo_only": "Endast objekt",
+  "mode_terrain_only": "Endast terräng",
   "interior": "Interiörgenerering",
   "roof": "Takgenerering",
   "fillground": "Fyll mark"
