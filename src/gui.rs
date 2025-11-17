@@ -761,7 +761,6 @@ fn gui_start_generation(
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
                 spawn_point,
-                telemetry_consent,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

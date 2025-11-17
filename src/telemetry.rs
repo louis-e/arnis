@@ -1,4 +1,3 @@
-use log::error;
 use reqwest::blocking::Client;
 use serde::Serialize;
 use std::panic::{self, AssertUnwindSafe};
