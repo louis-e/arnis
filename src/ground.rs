@@ -75,6 +75,10 @@ impl Ground {
     /// Converts game coordinates to elevation data coordinates
     #[inline(always)]
     fn get_data_coordinates(&self, coord: XZPoint, data: &ElevationData) -> (f64, f64) {
+        // Guard against division by zero for edge cases
+        if data.width == 0 || data.height == 0 {
+            return (0.0, 0.0);
+        }
         let x_ratio: f64 = coord.x as f64 / data.width as f64;
         let z_ratio: f64 = coord.z as f64 / data.height as f64;
         (x_ratio.clamp(0.0, 1.0), z_ratio.clamp(0.0, 1.0))
@@ -83,8 +87,17 @@ impl Ground {
     /// Interpolates height value from the elevation grid
     #[inline(always)]
     fn interpolate_height(&self, x_ratio: f64, z_ratio: f64, data: &ElevationData) -> i32 {
+        // Guard against out of bounds access
+        if data.width == 0 || data.height == 0 || data.heights.is_empty() {
+            return self.ground_level;
+        }
         let x: usize = ((x_ratio * (data.width - 1) as f64).round() as usize).min(data.width - 1);
         let z: usize = ((z_ratio * (data.height - 1) as f64).round() as usize).min(data.height - 1);
+        
+        // Additional safety check for row length
+        if z >= data.heights.len() || x >= data.heights[z].len() {
+            return self.ground_level;
+        }
         data.heights[z][x]
     }
 
