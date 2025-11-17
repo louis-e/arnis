@@ -8,15 +8,16 @@ use crate::map_transformation;
 use crate::osm_parser;
 use crate::progress;
 use crate::retrieve_data;
+use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
-use log::{error, LevelFilter};
+use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::{env, fs, io::Write, panic};
+use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
 /// Manages the session.lock file for a Minecraft world directory
@@ -63,12 +64,8 @@ pub fn run_gui() {
     // Launch the UI
     println!("Launching UI...");
 
-    // Set a custom panic hook to log panic information
-    panic::set_hook(Box::new(|panic_info| {
-        let message = format!("Application panicked: {panic_info:?}");
-        error!("{message}");
-        std::process::exit(1);
-    }));
+    // Install panic hook for crash reporting
+    telemetry::install_panic_hook();
 
     // Workaround WebKit2GTK issue with NVIDIA drivers and graphics issues
     // Source: https://github.com/tauri-apps/tauri/issues/10702
@@ -400,6 +397,10 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                                 if let Ok(compressed_data) = encoder.finish() {
                                     if let Err(e) = std::fs::write(&level_path, compressed_data) {
                                         eprintln!("Failed to update level.dat with area name: {e}");
+                                        send_log(
+                                            LogLevel::Warning,
+                                            "Failed to update level.dat with area name",
+                                        );
                                     }
                                 }
                             }
@@ -678,9 +679,16 @@ fn gui_start_generation(
     fillground_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
+    telemetry_consent: bool,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
+
+    // Store telemetry consent for crash reporting
+    telemetry::set_telemetry_consent(telemetry_consent);
+
+    // Send generation click telemetry
+    telemetry::send_generation_click();
 
     // If spawn point was chosen and the world is new, check and set the spawn point
     if is_new_world && spawn_point.is_some() {
@@ -810,6 +818,7 @@ fn gui_start_generation(
                         &mut xzbbox,
                         &mut ground,
                     );
+                    send_log(LogLevel::Info, "Map transformation completed.");
 
                     let _ = data_processing::generate_world(
                         parsed_elements,

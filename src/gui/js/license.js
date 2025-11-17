@@ -24,6 +24,10 @@ export const licenseText = `
 Elevation data derived from the <a href="https://registry.opendata.aws/terrain-tiles/" style="color: inherit;" target="_blank">AWS Terrain Tiles</a> dataset.
 <br><br>
 
+<p><b>Privacy Policy:</b></p>
+If you consent to telemetry data collection, please review our Privacy Policy at:
+<a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank">https://arnismc.com/privacypolicy.html</a>.
+
 <p><b>License:</b></p>
 <pre style="white-space: pre-wrap; font-family: inherit;">
 Apache License

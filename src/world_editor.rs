@@ -3,6 +3,7 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
+use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
@@ -755,7 +756,8 @@ impl<'a> WorldEditor<'a> {
 
         // Save metadata with error handling
         if let Err(e) = self.save_metadata() {
-            eprintln!("Warning: Failed to save world metadata: {}", e);
+            eprintln!("Failed to save world metadata: {}", e);
+            send_log(LogLevel::Warning, "Failed to save world metadata.");
             // Continue with world saving even if metadata fails
         }
 

@@ -14,6 +14,8 @@ mod osm_parser;
 #[cfg(feature = "gui")]
 mod progress;
 mod retrieve_data;
+#[cfg(feature = "gui")]
+mod telemetry;
 #[cfg(test)]
 mod test_utilities;
 mod version_check;
