@@ -1,9 +1,9 @@
-use super::operator::operator_vec_from_json;
+use colored::Colorize;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
-use colored::Colorize;
+use super::operator::operator_vec_from_json;
 
 pub fn transform_map(
     elements: &mut Vec<ProcessedElement>,

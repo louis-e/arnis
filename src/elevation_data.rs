@@ -1,4 +1,5 @@
 use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
+use crate::telemetry::{send_log, LogLevel};
 use image::Rgb;
 use std::path::Path;
 
@@ -111,12 +112,17 @@ pub fn fetch_elevation_data(
             if file_size < 1000 {
                 eprintln!("Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
                          tile_path.display(), file_size);
+                send_log(LogLevel::Warning, "Cached tile appears to be too small. Refetching tile.");
 
                 // Remove the potentially corrupted file
                 if let Err(remove_err) = std::fs::remove_file(&tile_path) {
                     eprintln!(
                         "Warning: Failed to remove corrupted tile file: {}",
                         remove_err
+                    );
+                    send_log(
+                        LogLevel::Warning,
+                        "Failed to remove corrupted tile file during refetching.",
                     );
                 }
 
@@ -132,7 +138,10 @@ pub fn fetch_elevation_data(
                 match image::open(&tile_path) {
                     Ok(img) => img.to_rgb8(),
                     Err(e) => {
-                        eprintln!("Warning: Cached tile at {} is corrupted or invalid: {}. Re-downloading...", tile_path.display(), e);
+                        eprintln!("Cached tile at {} is corrupted or invalid: {}. Re-downloading...",
+                            tile_path.display(),
+                            e);
+                        send_log(LogLevel::Warning, "Cached tile is corrupted or invalid. Re-downloading...");
 
                         // Remove the corrupted file
                         if let Err(remove_err) = std::fs::remove_file(&tile_path) {
@@ -140,6 +149,7 @@ pub fn fetch_elevation_data(
                                 "Warning: Failed to remove corrupted tile file: {}",
                                 remove_err
                             );
+                            send_log(LogLevel::Warning, "Failed to remove corrupted tile file during re-download.");
                         }
 
                         // Re-download the tile

@@ -1,10 +1,10 @@
+use colored::Colorize;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
-use colored::Colorize;
-use serde::Deserialize;
 use serde_json::Value;
+use serde::Deserialize;
 use std::collections::HashMap;
 
 // Raw data from OSM
