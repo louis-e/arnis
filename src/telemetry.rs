@@ -1,3 +1,4 @@
+use log::error;
 use reqwest::blocking::Client;
 use serde::Serialize;
 use std::panic::{self, AssertUnwindSafe};
@@ -193,6 +194,9 @@ pub fn send_log(level: LogLevel, message: &str) {
 /// Installs a panic hook that logs panics and sends crash reports
 pub fn install_panic_hook() {
     panic::set_hook(Box::new(|panic_info| {
+        // Log the panic to both stderr and log file
+        error!("Application panicked: {:?}", panic_info);
+
         // Filter out secondary "panic in a function that cannot unwind" panics
         if let Some(location) = panic_info.location() {
             if location.file().contains("panicking.rs") {
