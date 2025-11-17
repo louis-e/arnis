@@ -55,6 +55,11 @@ pub struct Args {
     #[arg(long)]
     pub debug: bool,
 
+    /// Output runtime metrics JSON (requires `metrics` feature)
+    #[cfg(feature = "metrics")]
+    #[arg(long, value_name = "PATH")]
+    pub metrics_out: Option<PathBuf>,
+
     /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,

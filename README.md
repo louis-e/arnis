@@ -17,6 +17,18 @@ Download the [latest release](https://github.com/louis-e/arnis/releases/) or [co
 Choose your area on the map using the rectangle tool and select your Minecraft world - then simply click on <i>Start Generation</i>!
 Additionally, you can customize various generation settings, such as world scale, spawn point, or building interior generation.
 
+## 🧠 Apple Silicon & Native Builds
+- Build the CLI or GUI with Apple Silicon optimized code by enabling the `simd-native` feature and compiling with native CPU flags. For example:
+
+```pwsh
+$env:RUSTFLAGS = "-C target-cpu=native"
+cargo build --release --features simd-native
+```
+
+- To ship a universal macOS binary, build both `x86_64-apple-darwin` and `aarch64-apple-darwin` targets and merge them with `lipo`.
+- When running on macOS, the unified memory architecture allows the CPU and GPU to share buffers. Avoid unnecessary data copies if you offload compute-heavy work to Metal or `wgpu` in future contributions.
+- Always run the latest macOS release to benefit from Apple Silicon performance updates and improved GPU drivers.
+
 ## 📚 Documentation
 
 <img src="assets/git/documentation.png" width="100%" alt="Banner">
@@ -35,6 +47,7 @@ Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/
 This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. Please respect the above mentioned key objectives. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
 
 Command line Build: ```cargo run --no-default-features -- --terrain --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lat,min_lng,max_lat,max_lng"```<br>
+If you need runtime metrics, enable the `metrics` feature (for example `cargo run --no-default-features --features metrics ...`) and add `--metrics-out path/to/metrics.json` to the CLI arguments. The generated JSON will include system memory and the Arnis process RSS/virtual size at the end of the run.
 GUI Build: ```cargo run```<br>
 
 After your pull request was merged, I will take care of regularly creating update releases which will include your changes.

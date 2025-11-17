@@ -1,0 +1,24 @@
+[package]
+name = "arnis"
+version = "2.3.0"
+edition = "2021"
+description = "Arnis - Generate real life cities in Minecraft"
+homepage = "https://github.com/louis-e/arnis"
+repository = "https://github.com/louis-e/arnis"
+license = "Apache-2.0"
+readme = "../../README.md"
+
+[dependencies]
+arnis-core = { path = "../arnis-core" }
+clap = { version = "4.5", features = ["derive", "env"] }
+colored = "3.0.0"
+rayon = "1.10.0"
+
+[features]
+default = []
+gui = ["arnis-core/gui"]
+simd-native = ["arnis-core/simd-native"]
+metrics = ["arnis-core/metrics"]
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61.1", features = ["Win32_System_Console"] }

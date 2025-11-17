@@ -1,42 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod args;
-mod block_definitions;
-mod bresenham;
-mod colors;
-mod coordinate_system;
-mod data_processing;
-mod element_processing;
-mod floodfill;
-mod ground;
-mod map_transformation;
-mod osm_parser;
-#[cfg(feature = "gui")]
-mod progress;
-mod retrieve_data;
-#[cfg(test)]
-mod test_utilities;
-mod version_check;
-mod world_editor;
-
-use args::Args;
+#[cfg(feature = "metrics")]
+use arnis_core::metrics::MetricsRecorder;
+use arnis_core::{
+    data_processing, ground, map_transformation, osm_parser, retrieve_data, version_check, Args,
+    PerformanceConfig,
+};
 use clap::Parser;
 use colored::*;
+use rayon::ThreadPoolBuilder;
 use std::{env, fs, io::Write};
 
-mod elevation_data;
 #[cfg(feature = "gui")]
-mod gui;
+use arnis_core::gui;
 
-// If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
-#[cfg(not(feature = "gui"))]
-mod progress {
-    pub fn emit_gui_error(_message: &str) {}
-    pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
-    pub fn is_running_with_gui() -> bool {
-        false
-    }
-}
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
@@ -62,7 +39,6 @@ fn run_cli() {
         repository.bright_white().bold()
     );
 
-    // Check for updates
     if let Err(e) = version_check::check_for_updates() {
         eprintln!(
             "{}: {}",
@@ -71,10 +47,8 @@ fn run_cli() {
         );
     }
 
-    // Parse input arguments
     let args: Args = Args::parse();
 
-    // Fetch data
     let raw_data = match &args.file {
         Some(file) => retrieve_data::fetch_data_from_file(file),
         None => retrieve_data::fetch_data_from_overpass(
@@ -88,13 +62,11 @@ fn run_cli() {
 
     let mut ground = ground::generate_ground_data(&args);
 
-    // Parse raw data
     let (mut parsed_elements, mut xzbbox) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
 
-    // Write the parsed OSM data to a file for inspection
     if args.debug {
         let mut buf = std::io::BufWriter::new(
             fs::File::create("parsed_osm_data.txt").expect("Failed to create output file"),
@@ -111,30 +83,41 @@ fn run_cli() {
         }
     }
 
-    // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
-
-    // Generate world
     let _ = data_processing::generate_world(parsed_elements, xzbbox, args.bbox, ground, &args);
+
+    #[cfg(feature = "metrics")]
+    if let Some(metrics_out) = &args.metrics_out {
+        let mut recorder = MetricsRecorder::new();
+        if let Err(err) = recorder.write_to_path(metrics_out) {
+            eprintln!("{}: {}", "Failed to write metrics".red().bold(), err);
+        } else {
+            println!("Metrics written to {}", metrics_out.display());
+        }
+    }
 }
 
 fn main() {
-    // If on Windows, free and reattach to the parent console when using as a CLI tool
-    // Either of these can fail, but if they do it is not an issue, so the return value is ignored
     #[cfg(target_os = "windows")]
     unsafe {
         let _ = FreeConsole();
         let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
 
-    // Only run CLI mode if the user supplied args.
     #[cfg(feature = "gui")]
     {
-        let gui_mode = std::env::args().len() == 1; // Just "arnis" with no args
+        let gui_mode = std::env::args().len() == 1;
         if gui_mode {
             gui::run_gui();
         }
     }
+
+    let perf = PerformanceConfig::init_default();
+    perf.log_config();
+    ThreadPoolBuilder::new()
+        .num_threads(perf.effective_threads)
+        .build_global()
+        .ok();
 
     run_cli();
 }

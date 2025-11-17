@@ -13,7 +13,8 @@ pub fn transform_map(
     println!("{} Transforming map...", "[4/7]".bold());
     emit_gui_progress_update(20.0, "Transforming map...");
 
-    let opjson_string = include_str!("../../tests/map_transformation/example_transformations.json");
+    let opjson_string =
+        include_str!("../../../../tests/map_transformation/example_transformations.json");
     let opjson = serde_json::from_str(opjson_string)
         .expect("Failed to parse map transformations config json");
 
