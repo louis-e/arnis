@@ -198,7 +198,7 @@ dependencies = [
  "itertools 0.14.0",
  "log",
  "once_cell",
- "rand 0.8.5",
+ "rand 0.9.1",
  "rayon",
  "reqwest",
  "rfd",
