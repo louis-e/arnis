@@ -151,6 +151,80 @@ impl Ground {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ground_level_with_zero_dimensions() {
+        // Test that zero-dimension elevation data doesn't cause panic
+        let elevation_data = ElevationData {
+            heights: vec![],
+            width: 0,
+            height: 0,
+        };
+        
+        let ground = Ground {
+            elevation_enabled: true,
+            ground_level: 64,
+            elevation_data: Some(elevation_data),
+        };
+        
+        // This should not panic and should return ground_level
+        let level = ground.level(XZPoint::new(10, 10));
+        assert_eq!(level, 64);
+    }
+
+    #[test]
+    fn test_ground_level_with_one_dimension_zero() {
+        // Test that partial zero dimensions don't cause panic
+        let elevation_data = ElevationData {
+            heights: vec![vec![100]],
+            width: 0,
+            height: 1,
+        };
+        
+        let ground = Ground {
+            elevation_enabled: true,
+            ground_level: 64,
+            elevation_data: Some(elevation_data),
+        };
+        
+        // This should not panic and should return ground_level
+        let level = ground.level(XZPoint::new(5, 5));
+        assert_eq!(level, 64);
+    }
+
+    #[test]
+    fn test_ground_level_normal_case() {
+        // Test that normal elevation data works correctly
+        let elevation_data = ElevationData {
+            heights: vec![vec![80, 85], vec![90, 95]],
+            width: 2,
+            height: 2,
+        };
+        
+        let ground = Ground {
+            elevation_enabled: true,
+            ground_level: 64,
+            elevation_data: Some(elevation_data),
+        };
+        
+        // This should work normally
+        let level = ground.level(XZPoint::new(0, 0));
+        assert!(level >= 64); // Should be one of the elevation values
+    }
+
+    #[test]
+    fn test_ground_level_disabled() {
+        // Test that disabled elevation returns ground_level
+        let ground = Ground::new_flat(70);
+        
+        let level = ground.level(XZPoint::new(100, 100));
+        assert_eq!(level, 70);
+    }
+}
+
 pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
         println!("{} Fetching elevation...", "[3/7]".bold());

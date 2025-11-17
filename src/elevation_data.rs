@@ -615,4 +615,46 @@ mod tests {
             .unwrap()
             .contains("image"));
     }
+
+    #[test]
+    fn test_empty_grid_handling() {
+        // Test that empty grids don't cause panics
+        let empty_grid: Vec<Vec<f64>> = vec![];
+        let result = apply_gaussian_blur(&empty_grid, 5.0);
+        assert!(result.is_empty());
+
+        // Test grid with empty rows
+        let grid_with_empty_rows: Vec<Vec<f64>> = vec![vec![]];
+        let result = apply_gaussian_blur(&grid_with_empty_rows, 5.0);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_empty());
+    }
+
+    #[test]
+    fn test_fill_nan_values_empty_grid() {
+        // Test that empty grids don't cause panics
+        let mut empty_grid: Vec<Vec<f64>> = vec![];
+        fill_nan_values(&mut empty_grid);
+        assert!(empty_grid.is_empty());
+
+        // Test grid with empty rows
+        let mut grid_with_empty_rows: Vec<Vec<f64>> = vec![vec![]];
+        fill_nan_values(&mut grid_with_empty_rows);
+        assert_eq!(grid_with_empty_rows.len(), 1);
+        assert!(grid_with_empty_rows[0].is_empty());
+    }
+
+    #[test]
+    fn test_filter_outliers_empty_grid() {
+        // Test that empty grids don't cause panics
+        let mut empty_grid: Vec<Vec<f64>> = vec![];
+        filter_elevation_outliers(&mut empty_grid);
+        assert!(empty_grid.is_empty());
+
+        // Test grid with empty rows
+        let mut grid_with_empty_rows: Vec<Vec<f64>> = vec![vec![]];
+        filter_elevation_outliers(&mut grid_with_empty_rows);
+        assert_eq!(grid_with_empty_rows.len(), 1);
+        assert!(grid_with_empty_rows[0].is_empty());
+    }
 }
