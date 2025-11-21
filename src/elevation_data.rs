@@ -26,6 +26,12 @@ pub struct ElevationData {
     pub(crate) width: usize,
     /// Height of the elevation grid
     pub(crate) height: usize,
+    /// Minimum real-world elevation in meters
+    pub(crate) min_real_height: f64,
+    /// Maximum real-world elevation in meters
+    pub(crate) max_real_height: f64,
+    /// Ground level (base Y coordinate)
+    pub(crate) ground_level: i32,
 }
 
 /// Calculates appropriate zoom level for the given bounding box
@@ -358,6 +364,9 @@ pub fn fetch_elevation_data(
         heights: mc_heights,
         width: grid_width,
         height: grid_height,
+        min_real_height: min_height,
+        max_real_height: max_height,
+        ground_level,
     })
 }
 

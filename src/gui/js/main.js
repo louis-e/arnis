@@ -408,6 +408,22 @@ function initWorldPicker() {
 }
 
 /**
+ * Opens a file picker to select a water shapefile
+ */
+async function selectWaterShapefile() {
+  try {
+    const shapefilePath = await invoke('gui_select_shapefile');
+    if (shapefilePath) {
+      document.getElementById('water-shapefile-path').value = shapefilePath;
+    }
+  } catch (error) {
+    console.error('Error selecting shapefile:', error);
+  }
+}
+
+window.selectWaterShapefile = selectWaterShapefile;
+
+/**
  * Validates and processes bounding box coordinates input
  * Supports both comma and space-separated formats
  * Updates the map display when valid coordinates are entered
@@ -678,6 +694,10 @@ async function startGeneration() {
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
 
+    // Get water shapefile path (optional)
+    var waterShapefilePath = document.getElementById("water-shapefile-path").value.trim();
+    waterShapefilePath = waterShapefilePath === "" ? null : waterShapefilePath;
+
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
@@ -692,7 +712,8 @@ async function startGeneration() {
         fillgroundEnabled: fill_ground,
         isNewWorld: isNewWorld,
         spawnPoint: spawnPoint,
-        telemetryConsent: telemetryConsent || false
+        telemetryConsent: telemetryConsent || false,
+        waterShapefilePath: waterShapefilePath
     });
 
     console.log("Generation process started.");

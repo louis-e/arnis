@@ -202,9 +202,12 @@ dependencies = [
  "rayon",
  "reqwest",
  "rfd",
+ "rstar",
+ "rustc-hash",
  "semver",
  "serde",
  "serde_json",
+ "shapefile",
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
@@ -1091,6 +1094,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dbase"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b2ee10366b9a0956358110073ea66ab06d77169ee9955d32c9ba7b7b8d4e1c3"
+dependencies = [
+ "byteorder",
+ "time",
+]
+
+[[package]]
 name = "deranged"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1141,7 +1154,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4412,6 +4425,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustc-hash"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d"
+
+[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4785,6 +4804,16 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shapefile"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c318c0e76bc2d54086b2d936ae0ca92eab5b84eb73f5704c1d14dba33be643e3"
+dependencies = [
+ "byteorder",
+ "dbase",
 ]
 
 [[package]]
@@ -5430,7 +5459,7 @@ dependencies = [
  "getrandom 0.3.3",
  "once_cell",
  "rustix 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
