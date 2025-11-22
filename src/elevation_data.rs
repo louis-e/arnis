@@ -1,4 +1,5 @@
 use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
+#[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use image::Rgb;
 use std::path::Path;
@@ -115,6 +116,7 @@ pub fn fetch_elevation_data(
                     tile_path.display(),
                     file_size
                 );
+                #[cfg(feature = "gui")]
                 send_log(
                     LogLevel::Warning,
                     "Cached tile appears to be too small. Refetching tile.",
@@ -126,6 +128,7 @@ pub fn fetch_elevation_data(
                         "Warning: Failed to remove corrupted tile file: {}",
                         remove_err
                     );
+                    #[cfg(feature = "gui")]
                     send_log(
                         LogLevel::Warning,
                         "Failed to remove corrupted tile file during refetching.",
@@ -149,6 +152,7 @@ pub fn fetch_elevation_data(
                             tile_path.display(),
                             e
                         );
+                        #[cfg(feature = "gui")]
                         send_log(
                             LogLevel::Warning,
                             "Cached tile is corrupted or invalid. Re-downloading...",
@@ -160,6 +164,7 @@ pub fn fetch_elevation_data(
                                 "Warning: Failed to remove corrupted tile file: {}",
                                 remove_err
                             );
+                            #[cfg(feature = "gui")]
                             send_log(
                                 LogLevel::Warning,
                                 "Failed to remove corrupted tile file during re-download.",

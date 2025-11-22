@@ -1,3 +1,4 @@
+#[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use once_cell::sync::OnceCell;
 use serde_json::json;
@@ -41,6 +42,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         if let Err(e) = window.emit("progress-update", payload) {
             let error_msg = format!("Failed to emit progress event: {}", e);
             eprintln!("{}", error_msg);
+            #[cfg(feature = "gui")]
             send_log(LogLevel::Warning, &error_msg);
         }
     }
