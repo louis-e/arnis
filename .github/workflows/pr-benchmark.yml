@@ -43,7 +43,7 @@ jobs:
       - name: Run benchmark command with memory tracking
         id: benchmark
         run: |
-          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --bbox="48.101470,11.517792,48.168375,11.626968" 2> benchmark_log.txt
+          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
           grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
