@@ -59,6 +59,10 @@ pub struct Args {
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
 
+    /// Path to shapefile containing water body polygons (optional)
+    #[arg(long)]
+    pub water_shapefile: Option<PathBuf>,
+
     /// Spawn point coordinates (lat, lng)
     #[arg(skip)]
     pub spawn_point: Option<(f64, f64)>,

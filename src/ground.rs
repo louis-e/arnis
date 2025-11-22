@@ -54,6 +54,34 @@ impl Ground {
         self.interpolate_height(x_ratio, z_ratio, data)
     }
 
+    /// Returns the Minecraft Y coordinate that corresponds to sea level (0m elevation)
+    pub fn sea_level(&self) -> i32 {
+        if !self.elevation_enabled || self.elevation_data.is_none() {
+            return self.ground_level;
+        }
+
+        let data = self.elevation_data.as_ref().unwrap();
+        let min_height = data.min_real_height;
+        let max_height = data.max_real_height;
+        let height_range = max_height - min_height;
+
+        if height_range == 0.0 {
+            return data.ground_level;
+        }
+
+        // Calculate where 0m (sea level) falls in the elevation range
+        // If 0m is outside the range, clamp it
+        let sea_level_real = 0.0_f64.clamp(min_height, max_height);
+        let relative_height = (sea_level_real - min_height) / height_range;
+        
+        // Apply the same scaling that was used in elevation_data.rs
+        let height_scale = 0.7 * (1.0_f64).sqrt(); // Using scale=1.0 as reference
+        let scaled_range = height_range * height_scale;
+        let scaled_height = relative_height * scaled_range;
+        
+        (data.ground_level as f64 + scaled_height).round() as i32
+    }
+
     #[allow(unused)]
     #[inline(always)]
     pub fn min_level<I: Iterator<Item = XZPoint>>(&self, coords: I) -> Option<i32> {

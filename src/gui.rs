@@ -100,7 +100,8 @@ pub fn run_gui() {
             gui_select_world,
             gui_start_generation,
             gui_get_version,
-            gui_check_for_updates
+            gui_check_for_updates,
+            gui_select_shapefile
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -664,6 +665,20 @@ fn gui_check_for_updates() -> Result<bool, String> {
 }
 
 #[tauri::command]
+fn gui_select_shapefile() -> Result<String, String> {
+    // Open file picker dialog for shapefile selection
+    let dialog = FileDialog::new()
+        .add_filter("Shapefile", &["shp"])
+        .set_title("Select Water Shapefile");
+
+    if let Some(path) = dialog.pick_file() {
+        Ok(path.display().to_string())
+    } else {
+        Err("No file selected".to_string())
+    }
+}
+
+#[tauri::command]
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
 fn gui_start_generation(
@@ -680,6 +695,7 @@ fn gui_start_generation(
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
+    water_shapefile_path: Option<String>,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -767,6 +783,7 @@ fn gui_start_generation(
                 fillground: fillground_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
+                water_shapefile: water_shapefile_path.map(PathBuf::from),
                 spawn_point,
             };
 

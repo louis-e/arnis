@@ -44,5 +44,6 @@
   "mode_terrain_only": "Terrain only",
   "interior": "Interior Generation",
   "roof": "Roof Generation",
-  "fillground": "Fill Ground"
+  "fillground": "Fill Ground",
+  "water_shapefile": "Water Shapefile (Optional)"
 }
