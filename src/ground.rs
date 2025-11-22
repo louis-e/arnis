@@ -75,6 +75,10 @@ impl Ground {
     /// Converts game coordinates to elevation data coordinates
     #[inline(always)]
     fn get_data_coordinates(&self, coord: XZPoint, data: &ElevationData) -> (f64, f64) {
+        // Guard against division by zero for edge cases
+        if data.width == 0 || data.height == 0 {
+            return (0.0, 0.0);
+        }
         let x_ratio: f64 = coord.x as f64 / data.width as f64;
         let z_ratio: f64 = coord.z as f64 / data.height as f64;
         (x_ratio.clamp(0.0, 1.0), z_ratio.clamp(0.0, 1.0))
@@ -83,8 +87,17 @@ impl Ground {
     /// Interpolates height value from the elevation grid
     #[inline(always)]
     fn interpolate_height(&self, x_ratio: f64, z_ratio: f64, data: &ElevationData) -> i32 {
+        // Guard against out of bounds access
+        if data.width == 0 || data.height == 0 || data.heights.is_empty() {
+            return self.ground_level;
+        }
         let x: usize = ((x_ratio * (data.width - 1) as f64).round() as usize).min(data.width - 1);
         let z: usize = ((z_ratio * (data.height - 1) as f64).round() as usize).min(data.height - 1);
+        
+        // Additional safety check for row length
+        if z >= data.heights.len() || x >= data.heights[z].len() {
+            return self.ground_level;
+        }
         data.heights[z][x]
     }
 
@@ -135,6 +148,80 @@ impl Ground {
         if let Err(e) = img.save(&filename) {
             eprintln!("Failed to save debug image: {e}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ground_level_with_zero_dimensions() {
+        // Test that zero-dimension elevation data doesn't cause panic
+        let elevation_data = ElevationData {
+            heights: vec![],
+            width: 0,
+            height: 0,
+        };
+        
+        let ground = Ground {
+            elevation_enabled: true,
+            ground_level: 64,
+            elevation_data: Some(elevation_data),
+        };
+        
+        // This should not panic and should return ground_level
+        let level = ground.level(XZPoint::new(10, 10));
+        assert_eq!(level, 64);
+    }
+
+    #[test]
+    fn test_ground_level_with_one_dimension_zero() {
+        // Test that partial zero dimensions don't cause panic
+        let elevation_data = ElevationData {
+            heights: vec![vec![100]],
+            width: 0,
+            height: 1,
+        };
+        
+        let ground = Ground {
+            elevation_enabled: true,
+            ground_level: 64,
+            elevation_data: Some(elevation_data),
+        };
+        
+        // This should not panic and should return ground_level
+        let level = ground.level(XZPoint::new(5, 5));
+        assert_eq!(level, 64);
+    }
+
+    #[test]
+    fn test_ground_level_normal_case() {
+        // Test that normal elevation data works correctly
+        let elevation_data = ElevationData {
+            heights: vec![vec![80, 85], vec![90, 95]],
+            width: 2,
+            height: 2,
+        };
+        
+        let ground = Ground {
+            elevation_enabled: true,
+            ground_level: 64,
+            elevation_data: Some(elevation_data),
+        };
+        
+        // This should work normally
+        let level = ground.level(XZPoint::new(0, 0));
+        assert!(level >= 64); // Should be one of the elevation values
+    }
+
+    #[test]
+    fn test_ground_level_disabled() {
+        // Test that disabled elevation returns ground_level
+        let ground = Ground::new_flat(70);
+        
+        let level = ground.level(XZPoint::new(100, 100));
+        assert_eq!(level, 70);
     }
 }
 
