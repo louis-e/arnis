@@ -1,8 +1,6 @@
 use geo::{Contains, LineString, Point, Polygon};
-use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use rayon::prelude::*;
-use rustc_hash::FxHashSet;
 use std::time::{Duration, Instant};
 
 /// Bit-packed grid for efficient visited tracking in bounded areas
@@ -48,7 +46,7 @@ struct VecQueue<T> {
     head: usize,
 }
 
-impl<T> VecQueue<T> {
+impl<T: Copy> VecQueue<T> {
     fn with_capacity(capacity: usize) -> Self {
         Self {
             data: Vec::with_capacity(capacity),
@@ -64,9 +62,7 @@ impl<T> VecQueue<T> {
     #[inline]
     fn pop(&mut self) -> Option<T> {
         if self.head < self.data.len() {
-            let item = std::mem::replace(&mut self.data[self.head], unsafe {
-                std::mem::MaybeUninit::zeroed().assume_init()
-            });
+            let item = self.data[self.head];
             self.head += 1;
             Some(item)
         } else {
@@ -112,14 +108,12 @@ pub fn flood_fill_area(
 
     let area = (max_x - min_x + 1) as i64 * (max_z - min_z + 1) as i64;
 
-    // For very large areas (oceans), use parallel scanline algorithm
+    // For very large areas (oceans), route to optimized fill to avoid scanline overhead for now
     if area > 500000 {
-        parallel_scanline_flood_fill(polygon_coords, min_x, max_x, min_z, max_z)
+        optimized_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z)
     } else if area < 50000 {
-        // For small and medium areas, use optimized flood fill with span filling
         optimized_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z)
     } else {
-        // For larger areas, use original flood fill with grid sampling
         original_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z)
     }
 }
@@ -161,20 +155,15 @@ fn optimized_flood_fill_area(
 
     // Only parallelize if we have enough seed points to justify overhead
     const PARALLEL_THRESHOLD: usize = 100;
-    if seed_points.len() < PARALLEL_THRESHOLD {
-        // Sequential processing for small workloads
+    let in_par = rayon::current_thread_index().is_some();
+    if in_par || seed_points.len() < PARALLEL_THRESHOLD {
+        // Sequential processing for small workloads or when already in a Rayon context
         return sequential_span_fill(&polygon, &seed_points, min_x, max_x, min_z, max_z, timeout, &start_time);
     }
 
-    // Create progress bar for parallel processing
-    let pb = ProgressBar::new(seed_points.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} seeds ({eta})")
-        .unwrap()
-        .progress_chars("█▓░"));
-
     // Process seed points in parallel chunks
-    let chunk_size = (seed_points.len() / rayon::current_num_threads()).max(1);
+    let threads = rayon::current_num_threads().max(1);
+    let chunk_size = (seed_points.len() / threads).max(1);
     let results: Vec<Vec<(i32, i32)>> = seed_points
         .par_chunks(chunk_size)
         .map(|chunk_seeds| {
@@ -186,8 +175,6 @@ fn optimized_flood_fill_area(
             const MAX_ITERATIONS: u64 = 1_000_000;
 
             for &(seed_x, seed_z) in chunk_seeds {
-                pb.inc(1);
-                
                 // Check timeout less frequently
                 if iterations % 10000 == 0 {
                     if let Some(timeout) = timeout {
@@ -260,8 +247,6 @@ fn optimized_flood_fill_area(
             local_filled
         })
         .collect();
-
-    pb.finish_and_clear();
 
     // Merge results - no deduplication needed with proper visited tracking
     results.into_iter().flatten().collect()
@@ -387,19 +372,14 @@ fn original_flood_fill_area(
 
     // Only parallelize if we have enough seed points to justify overhead
     const PARALLEL_THRESHOLD: usize = 100;
-    if seed_points.len() < PARALLEL_THRESHOLD {
+    let in_par = rayon::current_thread_index().is_some();
+    if in_par || seed_points.len() < PARALLEL_THRESHOLD {
         return sequential_span_fill(&polygon, &seed_points, min_x, max_x, min_z, max_z, timeout, &start_time);
     }
 
-    // Create progress bar for parallel processing
-    let pb = ProgressBar::new(seed_points.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} seeds ({eta})")
-        .unwrap()
-        .progress_chars("█▓░"));
-
     // Process seed points in parallel chunks
-    let chunk_size = (seed_points.len() / rayon::current_num_threads()).max(1);
+    let threads = rayon::current_num_threads().max(1);
+    let chunk_size = (seed_points.len() / threads).max(1);
     let results: Vec<Vec<(i32, i32)>> = seed_points
         .par_chunks(chunk_size)
         .map(|chunk_seeds| {
@@ -411,7 +391,6 @@ fn original_flood_fill_area(
             const MAX_ITERATIONS: u64 = 1_000_000;
 
             for &(seed_x, seed_z) in chunk_seeds {
-                pb.inc(1);
                 
                 // Check timeout less frequently
                 if iterations % 10000 == 0 {
@@ -485,7 +464,6 @@ fn original_flood_fill_area(
         })
         .collect();
 
-    pb.finish_and_clear();
 
     // Merge results - no deduplication needed with proper visited tracking
     results.into_iter().flatten().collect()
@@ -513,31 +491,8 @@ fn parallel_scanline_flood_fill(
     let mut strips = Vec::new();
     let mut strip_z = min_z;
     while strip_z <= max_z {
-        let strip_max_z = (strip_z + strip_height - 1).min(max_z);
-        strips.push((strip_z, strip_max_z));
-        strip_z += strip_height;
-    }
-
-    println!("Processing {} strips in parallel for flood fill...", strips.len());
-
-    // Create progress bar for strip processing
-    let pb = ProgressBar::new(strips.len() as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} strips ({eta})")
-        .unwrap()
-        .progress_chars("█▓░"));
-
-    // Process each strip in parallel using scanline algorithm
-    let results: Vec<Vec<(i32, i32)>> = strips
-        .par_iter()
-        .map(|&(strip_min_z, strip_max_z)| {
-            let mut strip_filled = Vec::new();
-
             // For each row in the strip, find continuous spans inside the polygon
             for z in strip_min_z..=strip_max_z {
-                if z == strip_min_z {
-                    pb.inc(1);
-                }
                 let mut x = min_x;
                 while x <= max_x {
                     // Skip until we find a point inside the polygon
@@ -567,11 +522,8 @@ fn parallel_scanline_flood_fill(
         })
         .collect();
 
-    pb.finish_and_clear();
-
     // Flatten results
-    let total_points: usize = results.iter().map(|v| v.len()).sum();
-    println!("Parallel flood fill completed: {} points", total_points);
+    let _total_points: usize = results.iter().map(|v| v.len()).sum();
 
     results.into_iter().flatten().collect()
 }
