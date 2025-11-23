@@ -215,7 +215,7 @@ pub fn parse_osm_data(
         }
     }
 
-    // Second pass: process ways and clip them to bbox
+    // Second pass: process ways and filter nodes to bbox
     for element in data.ways {
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
@@ -226,14 +226,22 @@ pub fn parse_osm_data(
             }
         }
 
-        let processed: ProcessedWay = ProcessedWay {
-            id: element.id,
-            tags: element.tags.clone().unwrap_or_default(),
-            nodes,
-        };
+        if !nodes.is_empty() {
+            // Filter nodes to bounding box
+            let tags = element.tags.clone().unwrap_or_default();
+            let filtered_nodes = filter_nodes_to_bbox(&nodes, &xzbbox, &tags);
 
-        ways_map.insert(element.id, processed.clone());
-        processed_elements.push(ProcessedElement::Way(processed));
+            if !filtered_nodes.is_empty() {
+                let processed: ProcessedWay = ProcessedWay {
+                    id: element.id,
+                    tags,
+                    nodes: filtered_nodes,
+                };
+
+                ways_map.insert(element.id, processed.clone());
+                processed_elements.push(ProcessedElement::Way(processed));
+            }
+        }
     }
 
     // Third pass: process relations and clip member ways
@@ -303,4 +311,80 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     }
     // Return a default priority if none of the tags match
     PRIORITY_ORDER.len()
+}
+
+/// Filters nodes to bounding box for performance optimization.
+/// This improves performance by removing nodes far outside the bbox.
+/// IMPORTANT: Water/natural features are NOT filtered to preserve node IDs for polygon merging.
+fn filter_nodes_to_bbox(
+    nodes: &[ProcessedNode],
+    xzbbox: &XZBBox,
+    tags: &HashMap<String, String>,
+) -> Vec<ProcessedNode> {
+    if nodes.is_empty() {
+        return Vec::new();
+    }
+
+    // DO NOT filter natural features or ways that might be part of multipolygon relations
+    // Water multipolygon relations need exact node IDs preserved for merge_loopy_loops
+    // algorithm in water_areas.rs. Since we process ways before relations, we can't know
+    // if a way will be part of a water relation, so we preserve natural features and
+    // ways without specific non-water tags to be safe.
+    if tags.contains_key("natural")
+        || tags.contains_key("water")
+        || tags.contains_key("waterway")
+        || (tags.is_empty())
+        || (!tags.contains_key("building")
+            && !tags.contains_key("highway")
+            && !tags.contains_key("railway")
+            && !tags.contains_key("barrier")
+            && !tags.contains_key("landuse")
+            && !tags.contains_key("amenity")
+            && !tags.contains_key("leisure"))
+    {
+        return nodes.to_vec();
+    }
+
+    // Check if any nodes are outside the bbox
+    let min_x = xzbbox.min_x();
+    let max_x = xzbbox.max_x();
+    let min_z = xzbbox.min_z();
+    let max_z = xzbbox.max_z();
+
+    let has_nodes_outside = nodes
+        .iter()
+        .any(|node| node.x < min_x || node.x > max_x || node.z < min_z || node.z > max_z);
+
+    // If all nodes are inside the bbox, return original to preserve IDs and structure
+    if !has_nodes_outside {
+        return nodes.to_vec();
+    }
+
+    // Filter nodes to bbox
+    let filtered: Vec<ProcessedNode> = nodes
+        .iter()
+        .filter(|node| node.x >= min_x && node.x <= max_x && node.z >= min_z && node.z <= max_z)
+        .cloned()
+        .collect();
+
+    // If all nodes were filtered out, the way is completely outside the bbox
+    if filtered.is_empty() {
+        return Vec::new();
+    }
+
+    // For closed polygons (buildings, etc.), ensure the polygon remains closed
+    // if it was closed before filtering
+    if filtered.len() >= 3 && nodes.len() >= 3 {
+        let original_closed = nodes.first().unwrap().id == nodes.last().unwrap().id;
+        let filtered_closed = filtered.first().unwrap().id == filtered.last().unwrap().id;
+
+        if original_closed && !filtered_closed {
+            // Re-close the polygon by duplicating the first node at the end
+            let mut result = filtered;
+            result.push(result[0].clone());
+            return result;
+        }
+    }
+
+    filtered
 }
