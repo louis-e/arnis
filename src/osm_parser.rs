@@ -313,9 +313,9 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     PRIORITY_ORDER.len()
 }
 
-/// Filters nodes to bounding box for performance optimization.
-/// This improves performance by removing nodes far outside the bbox.
-/// IMPORTANT: Water/natural features are NOT filtered to preserve node IDs for polygon merging.
+/// Clips nodes to bounding box using Sutherland-Hodgman algorithm.
+/// For clipped nodes, preserves original node IDs by finding the closest original node.
+/// This ensures multipolygon relations can still merge ways correctly via node ID matching.
 fn filter_nodes_to_bbox(
     nodes: &[ProcessedNode],
     xzbbox: &XZBBox,
@@ -325,22 +325,13 @@ fn filter_nodes_to_bbox(
         return Vec::new();
     }
 
-    // DO NOT filter natural features or ways that might be part of multipolygon relations
-    // Water multipolygon relations need exact node IDs preserved for merge_loopy_loops
-    // algorithm in water_areas.rs. Since we process ways before relations, we can't know
-    // if a way will be part of a water relation, so we preserve natural features and
-    // ways without specific non-water tags to be safe.
-    if tags.contains_key("natural")
-        || tags.contains_key("water")
-        || tags.contains_key("waterway")
-        || (tags.is_empty())
-        || (!tags.contains_key("building")
-            && !tags.contains_key("highway")
-            && !tags.contains_key("railway")
-            && !tags.contains_key("barrier")
-            && !tags.contains_key("landuse")
-            && !tags.contains_key("amenity")
-            && !tags.contains_key("leisure"))
+    // Don't clip/filter ways that are typically part of multipolygon relations
+    // These need exact node ID preservation for merge_loopy_loops to work
+    if tags.get("natural") == Some(&"coastline".to_string())
+        || tags.is_empty()
+        || (tags.get("natural").is_some()
+            && !tags.contains_key("building")
+            && !tags.contains_key("highway"))
     {
         return nodes.to_vec();
     }
@@ -360,31 +351,223 @@ fn filter_nodes_to_bbox(
         return nodes.to_vec();
     }
 
-    // Filter nodes to bbox
-    let filtered: Vec<ProcessedNode> = nodes
-        .iter()
-        .filter(|node| node.x >= min_x && node.x <= max_x && node.z >= min_z && node.z <= max_z)
-        .cloned()
-        .collect();
+    // Determine if this is a polyline (highway, railway, waterway, barrier, service)
+    // or a polygon (building, area, etc.)
+    let is_polyline = tags.contains_key("highway")
+        || tags.contains_key("railway")
+        || tags.contains_key("waterway")
+        || tags.contains_key("barrier")
+        || tags.get("service").is_some();
 
-    // If all nodes were filtered out, the way is completely outside the bbox
-    if filtered.is_empty() {
+    if is_polyline {
+        // For polylines, simply filter out nodes outside bbox
+        let filtered: Vec<ProcessedNode> = nodes
+            .iter()
+            .filter(|node| {
+                node.x >= min_x && node.x <= max_x && node.z >= min_z && node.z <= max_z
+            })
+            .cloned()
+            .collect();
+        return filtered;
+    }
+
+    // For polygons, use Sutherland-Hodgman clipping with ID preservation
+    clip_polygon_to_bbox(nodes, xzbbox)
+}
+
+/// Clips a polygon to a bounding box using the Sutherland-Hodgman algorithm.
+/// Preserves original node IDs by finding the closest original node for clipped points.
+fn clip_polygon_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
+    if nodes.is_empty() {
         return Vec::new();
     }
 
-    // For closed polygons (buildings, etc.), ensure the polygon remains closed
-    // if it was closed before filtering
-    if filtered.len() >= 3 && nodes.len() >= 3 {
-        let original_closed = nodes.first().unwrap().id == nodes.last().unwrap().id;
-        let filtered_closed = filtered.first().unwrap().id == filtered.last().unwrap().id;
+    let min_x = xzbbox.min_x();
+    let max_x = xzbbox.max_x();
+    let min_z = xzbbox.min_z();
+    let max_z = xzbbox.max_z();
 
-        if original_closed && !filtered_closed {
-            // Re-close the polygon by duplicating the first node at the end
-            let mut result = filtered;
-            result.push(result[0].clone());
-            return result;
+    // Sutherland-Hodgman algorithm clips against each edge sequentially
+    let mut output = nodes.to_vec();
+
+    // Clip against left edge (x = min_x)
+    output = clip_against_edge(&output, min_x, max_x, min_z, max_z, EdgeType::Left, nodes);
+    if output.is_empty() {
+        return Vec::new();
+    }
+
+    // Clip against right edge (x = max_x)
+    output = clip_against_edge(&output, min_x, max_x, min_z, max_z, EdgeType::Right, nodes);
+    if output.is_empty() {
+        return Vec::new();
+    }
+
+    // Clip against bottom edge (z = min_z)
+    output = clip_against_edge(&output, min_x, max_x, min_z, max_z, EdgeType::Bottom, nodes);
+    if output.is_empty() {
+        return Vec::new();
+    }
+
+    // Clip against top edge (z = max_z)
+    output = clip_against_edge(&output, min_x, max_x, min_z, max_z, EdgeType::Top, nodes);
+
+    output
+}
+
+#[derive(Clone, Copy)]
+enum EdgeType {
+    Left,
+    Right,
+    Bottom,
+    Top,
+}
+
+/// Helper function to clip polygon against a single edge
+fn clip_against_edge(
+    polygon: &[ProcessedNode],
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    edge: EdgeType,
+    original_nodes: &[ProcessedNode],
+) -> Vec<ProcessedNode> {
+    if polygon.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+
+    for i in 0..polygon.len() {
+        let current = &polygon[i];
+        let next = &polygon[(i + 1) % polygon.len()];
+
+        let current_inside = is_inside(current, min_x, max_x, min_z, max_z, edge);
+        let next_inside = is_inside(next, min_x, max_x, min_z, max_z, edge);
+
+        if current_inside && next_inside {
+            // Both inside: add next vertex
+            result.push(next.clone());
+        } else if current_inside && !next_inside {
+            // Leaving: add intersection point
+            let intersection = compute_intersection(current, next, min_x, max_x, min_z, max_z, edge);
+            let intersection_with_id = assign_closest_id(&intersection, original_nodes);
+            result.push(intersection_with_id);
+        } else if !current_inside && next_inside {
+            // Entering: add intersection point and next vertex
+            let intersection = compute_intersection(current, next, min_x, max_x, min_z, max_z, edge);
+            let intersection_with_id = assign_closest_id(&intersection, original_nodes);
+            result.push(intersection_with_id);
+            result.push(next.clone());
+        }
+        // Both outside: add nothing
+    }
+
+    result
+}
+
+/// Check if a point is inside relative to the given edge
+fn is_inside(node: &ProcessedNode, min_x: i32, max_x: i32, min_z: i32, max_z: i32, edge: EdgeType) -> bool {
+    match edge {
+        EdgeType::Left => node.x >= min_x,
+        EdgeType::Right => node.x <= max_x,
+        EdgeType::Bottom => node.z >= min_z,
+        EdgeType::Top => node.z <= max_z,
+    }
+}
+
+/// Compute intersection point between line segment and edge
+fn compute_intersection(
+    p1: &ProcessedNode,
+    p2: &ProcessedNode,
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    edge: EdgeType,
+) -> ProcessedNode {
+    let x1 = p1.x as f64;
+    let z1 = p1.z as f64;
+    let x2 = p2.x as f64;
+    let z2 = p2.z as f64;
+
+    let (x, z) = match edge {
+        EdgeType::Left => {
+            let edge_x = min_x as f64;
+            if (x2 - x1).abs() < 1e-10 {
+                (edge_x, z1)
+            } else {
+                let t = (edge_x - x1) / (x2 - x1);
+                let z = z1 + t * (z2 - z1);
+                (edge_x, z)
+            }
+        }
+        EdgeType::Right => {
+            let edge_x = max_x as f64;
+            if (x2 - x1).abs() < 1e-10 {
+                (edge_x, z1)
+            } else {
+                let t = (edge_x - x1) / (x2 - x1);
+                let z = z1 + t * (z2 - z1);
+                (edge_x, z)
+            }
+        }
+        EdgeType::Bottom => {
+            let edge_z = min_z as f64;
+            if (z2 - z1).abs() < 1e-10 {
+                (x1, edge_z)
+            } else {
+                let t = (edge_z - z1) / (z2 - z1);
+                let x = x1 + t * (x2 - x1);
+                (x, edge_z)
+            }
+        }
+        EdgeType::Top => {
+            let edge_z = max_z as f64;
+            if (z2 - z1).abs() < 1e-10 {
+                (x1, edge_z)
+            } else {
+                let t = (edge_z - z1) / (z2 - z1);
+                let x = x1 + t * (x2 - x1);
+                (x, edge_z)
+            }
+        }
+    };
+
+    ProcessedNode {
+        id: 0, // Temporary ID, will be replaced by assign_closest_id
+        tags: HashMap::new(),
+        x: x.round() as i32,
+        z: z.round() as i32,
+    }
+}
+
+/// Assigns the ID of the closest original node to a clipped intersection point.
+/// This preserves node IDs for multipolygon merging.
+fn assign_closest_id(node: &ProcessedNode, original_nodes: &[ProcessedNode]) -> ProcessedNode {
+    if original_nodes.is_empty() {
+        return node.clone();
+    }
+
+    // Find the closest original node
+    let mut min_distance = i64::MAX;
+    let mut closest_id = original_nodes[0].id;
+
+    for original in original_nodes {
+        let dx = (node.x - original.x) as i64;
+        let dz = (node.z - original.z) as i64;
+        let distance = dx * dx + dz * dz;
+
+        if distance < min_distance {
+            min_distance = distance;
+            closest_id = original.id;
         }
     }
 
-    filtered
+    ProcessedNode {
+        id: closest_id,
+        tags: node.tags.clone(),
+        x: node.x,
+        z: node.z,
+    }
 }
