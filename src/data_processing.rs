@@ -25,6 +25,9 @@ pub fn generate_world(
 
     println!("{} Processing data...", "[4/7]".bold());
 
+    // Build highway connectivity map ONCE before processing (not for each highway!)
+    let highway_connectivity = highways::build_highway_connectivity_map(&elements);
+
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
 
@@ -66,7 +69,7 @@ pub fn generate_world(
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                     buildings::generate_buildings(&mut editor, way, args, None);
                 } else if way.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args, &elements);
+                    highways::generate_highways(&mut editor, element, args, &highway_connectivity);
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(&mut editor, way, args);
                 } else if way.tags.contains_key("natural") {
@@ -80,7 +83,7 @@ pub fn generate_world(
                 } else if let Some(val) = way.tags.get("waterway") {
                     if val == "dock" {
                         // docks count as water areas
-                        water_areas::generate_water_area_from_way(&mut editor, way);
+                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox);
                     } else {
                         waterways::generate_waterways(&mut editor, way);
                     }
@@ -111,7 +114,7 @@ pub fn generate_world(
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args, &elements);
+                    highways::generate_highways(&mut editor, element, args, &highway_connectivity);
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
                 } else if node.tags.contains_key("man_made") {
@@ -128,7 +131,7 @@ pub fn generate_world(
                         .map(|val| val == "water" || val == "bay")
                         .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas_from_relation(&mut editor, rel);
+                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("landuse") {

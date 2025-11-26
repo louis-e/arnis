@@ -16,7 +16,11 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+// Global counter to limit bbox violation warnings
+static BBOX_VIOLATION_COUNT: AtomicUsize = AtomicUsize::new(0);
+const MAX_BBOX_WARNINGS: usize = 10;
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -479,6 +483,15 @@ impl<'a> WorldEditor<'a> {
     ) {
         // Check if coordinates are within bounds
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            let count = BBOX_VIOLATION_COUNT.fetch_add(1, Ordering::Relaxed);
+            if count < MAX_BBOX_WARNINGS {
+                eprintln!("WARN: Attempted to place block outside bbox: ({}, {}, {}) - bbox: min=({},{}), max=({},{})",
+                    x, y, z,
+                    self.xzbbox.min_x(), self.xzbbox.min_z(),
+                    self.xzbbox.max_x(), self.xzbbox.max_z());
+            } else if count == MAX_BBOX_WARNINGS {
+                eprintln!("WARN: Suppressing further bbox violation warnings (too many)...");
+            }
             return;
         }
 
@@ -520,6 +533,15 @@ impl<'a> WorldEditor<'a> {
     ) {
         // Check if coordinates are within bounds
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            let count = BBOX_VIOLATION_COUNT.fetch_add(1, Ordering::Relaxed);
+            if count < MAX_BBOX_WARNINGS {
+                eprintln!("WARN: Attempted to place block outside bbox (absolute): ({}, {}, {}) - bbox: min=({},{}), max=({},{})",
+                    x, absolute_y, z,
+                    self.xzbbox.min_x(), self.xzbbox.min_z(),
+                    self.xzbbox.max_x(), self.xzbbox.max_z());
+            } else if count == MAX_BBOX_WARNINGS {
+                eprintln!("WARN: Suppressing further bbox violation warnings (too many)...");
+            }
             return;
         }
 
@@ -558,6 +580,15 @@ impl<'a> WorldEditor<'a> {
     ) {
         // Check if coordinates are within bounds
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            let count = BBOX_VIOLATION_COUNT.fetch_add(1, Ordering::Relaxed);
+            if count < MAX_BBOX_WARNINGS {
+                eprintln!("WARN: Attempted to place block with properties outside bbox: ({}, {}, {}) - bbox: min=({},{}), max=({},{})",
+                    x, absolute_y, z,
+                    self.xzbbox.min_x(), self.xzbbox.min_z(),
+                    self.xzbbox.max_x(), self.xzbbox.max_z());
+            } else if count == MAX_BBOX_WARNINGS {
+                eprintln!("WARN: Suppressing further bbox violation warnings (too many)...");
+            }
             return;
         }
 

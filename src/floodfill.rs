@@ -69,7 +69,6 @@ fn optimized_flood_fill_area(
     // Pre-allocate queue with reasonable capacity to avoid reallocations
     let mut queue = VecDeque::with_capacity(1024);
     let mut iterations = 0u64;
-    const MAX_ITERATIONS: u64 = 1_000_000; // Safety limit to prevent infinite loops
 
     for z in (min_z..=max_z).step_by(step_z as usize) {
         for x in (min_x..=max_x).step_by(step_x as usize) {
@@ -85,13 +84,6 @@ fn optimized_flood_fill_area(
 
             // Safety check: prevent infinite loops
             iterations += 1;
-            if iterations > MAX_ITERATIONS {
-                eprintln!(
-                    "Warning: Flood fill exceeded max iterations ({}), aborting",
-                    MAX_ITERATIONS
-                );
-                return filled_area;
-            }
 
             // Skip if already visited or not inside polygon
             if global_visited.contains(&(x, z))
@@ -108,13 +100,6 @@ fn optimized_flood_fill_area(
             while let Some((curr_x, curr_z)) = queue.pop_front() {
                 // Additional iteration check inside inner loop
                 iterations += 1;
-                if iterations > MAX_ITERATIONS {
-                    eprintln!(
-                        "Warning: Flood fill exceeded max iterations ({}), aborting",
-                        MAX_ITERATIONS
-                    );
-                    return filled_area;
-                }
 
                 // Timeout check in inner loop for problematic polygons
                 #[allow(clippy::manual_is_multiple_of)]
@@ -189,7 +174,6 @@ fn original_flood_fill_area(
     let mut queue: VecDeque<(i32, i32)> = VecDeque::with_capacity(2048);
     filled_area.reserve(1000); // Reserve space to reduce reallocations
     let mut iterations = 0u64;
-    const MAX_ITERATIONS: u64 = 1_000_000; // Safety limit to prevent infinite loops
 
     // Scan for multiple seed points to handle U-shapes and concave polygons
     for z in (min_z..=max_z).step_by(step_z as usize) {
@@ -206,13 +190,6 @@ fn original_flood_fill_area(
 
             // Safety check: prevent infinite loops
             iterations += 1;
-            if iterations > MAX_ITERATIONS {
-                eprintln!(
-                    "Warning: Flood fill exceeded max iterations ({}), aborting",
-                    MAX_ITERATIONS
-                );
-                return filled_area;
-            }
 
             // Skip if already processed or not inside polygon
             if global_visited.contains(&(x, z))
@@ -229,13 +206,6 @@ fn original_flood_fill_area(
             while let Some((curr_x, curr_z)) = queue.pop_front() {
                 // Additional iteration check inside inner loop
                 iterations += 1;
-                if iterations > MAX_ITERATIONS {
-                    eprintln!(
-                        "Warning: Flood fill exceeded max iterations ({}), aborting",
-                        MAX_ITERATIONS
-                    );
-                    return filled_area;
-                }
 
                 // Timeout check in inner loop
                 #[allow(clippy::manual_is_multiple_of)]
