@@ -295,26 +295,6 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
     valid
 }
 
-/// Closes loops with nearby endpoints (handles clipping artifacts)
-fn close_open_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
-    for loop_nodes in loops.iter_mut() {
-        if loop_nodes.len() < 2 {
-            continue;
-        }
-
-        let first = &loop_nodes[0];
-        let last = &loop_nodes[loop_nodes.len() - 1];
-
-        // Skip already closed loops
-        if first.id == last.id {
-            continue;
-        }
-
-        // Close the loop by duplicating the first node
-        loop_nodes.push(first.clone());
-    }
-}
-
 /// Clips a polygon ring to the bounding box using Sutherland-Hodgman algorithm.
 /// Returns `None` if the polygon is entirely outside the bbox.
 fn clip_polygon_ring_to_bbox(
@@ -474,6 +454,7 @@ fn point_inside_edge(
     (dx * pz - dz * px) >= 0.0
 }
 
+#[allow(clippy::too_many_arguments)]
 fn line_edge_intersection(
     x1: f64,
     z1: f64,

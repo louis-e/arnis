@@ -341,7 +341,6 @@ fn matches_endpoint(coord: (f64, f64), endpoint: &ProcessedNode, tolerance: f64)
 }
 
 /// Assigns node IDs to clipped coordinates, preserving original endpoint IDs where possible.
-/// 
 /// Endpoint ID preservation is required for `merge_loopy_loops` to correctly connect
 /// way segments in multipolygon relations. Middle nodes receive synthetic IDs.
 fn assign_node_ids_preserving_endpoints(
