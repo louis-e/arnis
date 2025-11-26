@@ -5,7 +5,6 @@ use std::time::Instant;
 use crate::{
     block_definitions::WATER,
     coordinate_system::cartesian::{XZBBox, XZPoint},
-    debug_logging,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
     world_editor::WorldEditor,
 };
@@ -66,179 +65,24 @@ pub fn generate_water_areas_from_relation(
     // OSM data should already have correct roles; if it's wrong in OSM, fix it there
     // The previous heuristic was causing water to fill on land
 
-    // However, log if we detect a suspicious configuration
-    if debug_logging::is_tracking_element(element.id) {
-        let outer_nodes: usize = outers.iter().map(|o| o.len()).sum();
-        let inner_nodes: usize = inners.iter().map(|i| i.len()).sum();
-        if !inners.is_empty() && inner_nodes > outer_nodes * 2 {
-            eprintln!(
-                "DEBUG: Relation {} has {} inner nodes vs {} outer nodes - may be inverted",
-                element.id, inner_nodes, outer_nodes
-            );
-        }
-    }
-
-    // Log BEFORE merge_loopy_loops
-    if debug_logging::is_tracking_element(element.id) {
-        let notes = vec![
-            format!(
-                "Before merge_loopy_loops: {} outer loops, {} inner loops",
-                outers.len(),
-                inners.len()
-            ),
-            format!(
-                "Outer loops details: {}",
-                outers
-                    .iter()
-                    .enumerate()
-                    .map(|(i, o)| format!(
-                        "loop{}: {} nodes (first_id={}, last_id={})",
-                        i,
-                        o.len(),
-                        o.first().map(|n| n.id).unwrap_or(0),
-                        o.last().map(|n| n.id).unwrap_or(0)
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        ];
-
-        let fake_members: Vec<crate::osm_parser::ProcessedMember> = outers
-            .iter()
-            .map(|nodes| crate::osm_parser::ProcessedMember {
-                role: ProcessedMemberRole::Outer,
-                way: ProcessedWay {
-                    id: 0,
-                    tags: std::collections::HashMap::new(),
-                    nodes: nodes.clone(),
-                },
-            })
-            .collect();
-
-        debug_logging::log_relation_transformation(
-            "4_before_merge_loopy_loops",
-            element.id,
-            &element.tags,
-            &fake_members,
-            notes,
-        );
-    }
-
     merge_loopy_loops(&mut outers);
-
-    // Log AFTER merge_loopy_loops
-    if debug_logging::is_tracking_element(element.id) {
-        let notes = vec![
-            format!(
-                "After merge_loopy_loops: {} outer loops, {} inner loops",
-                outers.len(),
-                inners.len()
-            ),
-            format!(
-                "Outer loops details: {}",
-                outers
-                    .iter()
-                    .enumerate()
-                    .map(|(i, o)| format!(
-                        "loop{}: {} nodes (first_id={}, last_id={})",
-                        i,
-                        o.len(),
-                        o.first().map(|n| n.id).unwrap_or(0),
-                        o.last().map(|n| n.id).unwrap_or(0)
-                    ))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        ];
-
-        let fake_members: Vec<crate::osm_parser::ProcessedMember> = outers
-            .iter()
-            .map(|nodes| crate::osm_parser::ProcessedMember {
-                role: ProcessedMemberRole::Outer,
-                way: ProcessedWay {
-                    id: 0,
-                    tags: std::collections::HashMap::new(),
-                    nodes: nodes.clone(),
-                },
-            })
-            .collect();
-
-        debug_logging::log_relation_transformation(
-            "5_after_merge_loopy_loops",
-            element.id,
-            &element.tags,
-            &fake_members,
-            notes,
-        );
-    }
 
     // NOW clip the assembled complete rings to bbox
     // This is crucial: we merged complete rings first, THEN clip them
     outers = outers
         .into_iter()
-        .filter_map(|ring| {
-            let clipped = clip_polygon_ring_to_bbox(&ring, xzbbox);
-            if clipped.is_none() && debug_logging::is_tracking_element(element.id) {
-                eprintln!(
-                    "DEBUG: Relation {} outer ring failed clipping (ring had {} nodes)",
-                    element.id,
-                    ring.len()
-                );
-            }
-            clipped
-        })
+        .filter_map(|ring| clip_polygon_ring_to_bbox(&ring, xzbbox))
         .collect();
     merge_loopy_loops(&mut inners);
     inners = inners
         .into_iter()
-        .filter_map(|ring| {
-            let clipped = clip_polygon_ring_to_bbox(&ring, xzbbox);
-            if clipped.is_none() && debug_logging::is_tracking_element(element.id) {
-                eprintln!(
-                    "DEBUG: Relation {} inner ring failed clipping (ring had {} nodes)",
-                    element.id,
-                    ring.len()
-                );
-            }
-            clipped
-        })
+        .filter_map(|ring| clip_polygon_ring_to_bbox(&ring, xzbbox))
         .collect();
-
-    if debug_logging::is_tracking_element(element.id) {
-        eprintln!(
-            "DEBUG: After bbox clipping: {} outer rings, {} inner rings",
-            outers.len(),
-            inners.len()
-        );
-    }
 
     if !verify_loopy_loops(&outers) {
         // For clipped multipolygons, some loops may not close perfectly
         // Instead of force-closing with straight lines (which creates wedges),
         // filter out unclosed loops and only render the properly closed ones
-        if debug_logging::is_tracking_element(element.id) {
-            eprintln!(
-                "DEBUG: Relation {} has {} outer loops before filtering",
-                element.id,
-                outers.len()
-            );
-            for (i, outer) in outers.iter().enumerate() {
-                let first = &outer[0];
-                let last = outer.last().unwrap();
-                let dx = (first.x - last.x).abs();
-                let dz = (first.z - last.z).abs();
-                let is_closed = first.id == last.id || (dx <= 1 && dz <= 1);
-                eprintln!(
-                    "  Loop {}: {} nodes, closed={}, endpoints {} blocks apart (dx={}, dz={})",
-                    i,
-                    outer.len(),
-                    is_closed,
-                    ((dx * dx + dz * dz) as f64).sqrt() as i32,
-                    dx,
-                    dz
-                );
-            }
-        }
 
         // Filter: Keep only loops that are already closed OR can be closed within 1 block
         outers.retain(|loop_nodes| {
@@ -264,51 +108,14 @@ pub fn generate_water_areas_from_relation(
             }
         }
 
-        if debug_logging::is_tracking_element(element.id) {
-            eprintln!(
-                "DEBUG: Relation {} has {} outer loops after filtering and closing",
-                element.id,
-                outers.len()
-            );
-        }
-
         // If no valid outer loops remain, skip the relation
         if outers.is_empty() {
-            if debug_logging::is_tracking_element(element.id) {
-                debug_logging::log_relation_transformation(
-                    "6_SKIPPED_no_valid_loops",
-                    element.id,
-                    &element.tags,
-                    &[],
-                    vec![
-                        "No properly closed loops after filtering unclosed segments".to_string(),
-                        "Skipping to avoid diagonal wedge artifacts".to_string(),
-                    ],
-                );
-            }
             return;
         }
 
         // Verify again after filtering and closing
         if !verify_loopy_loops(&outers) {
             println!("Skipping relation {} due to invalid polygon", element.id);
-
-            if debug_logging::is_tracking_element(element.id) {
-                debug_logging::log_relation_transformation(
-                    "6_SKIPPED_invalid_polygon",
-                    element.id,
-                    &element.tags,
-                    &[],
-                    vec![
-                        "verify_loopy_loops returned false after filtering and closure".to_string(),
-                        format!("Number of outer loops: {}", outers.len()),
-                        format!(
-                            "Outer loop sizes: {:?}",
-                            outers.iter().map(|l| l.len()).collect::<Vec<_>>()
-                        ),
-                    ],
-                );
-            }
             return;
         }
     }

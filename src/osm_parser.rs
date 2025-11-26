@@ -1,7 +1,6 @@
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
-use crate::debug_logging;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
@@ -237,23 +236,6 @@ pub fn parse_osm_data(
         // Clip the way to bbox to reduce node count dramatically
         let tags = element.tags.clone().unwrap_or_default();
 
-        // Log BEFORE clipping
-        if debug_logging::is_tracking_element(element.id) {
-            let before_way = ProcessedWay {
-                id: element.id,
-                tags: tags.clone(),
-                nodes: nodes.clone(),
-            };
-            debug_logging::log_way_transformation(
-                "1_before_clipping",
-                &before_way,
-                vec![
-                    format!("Original node count: {}", nodes.len()),
-                    format!("Bbox: {:?}", xzbbox),
-                ],
-            );
-        }
-
         // Store UNCLIPPED way in ways_map for relation assembly
         // IMPORTANT: Relations need original node IDs for merge_loopy_loops to connect segments
         // The actual clipping happens AFTER ring assembly in water_areas.rs
@@ -271,34 +253,6 @@ pub fn parse_osm_data(
 
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() {
-            if debug_logging::is_tracking_element(element.id) {
-                debug_logging::log_way_transformation(
-                    "2_after_clipping_SKIPPED",
-                    &ProcessedWay {
-                        id: element.id,
-                        tags: tags.clone(),
-                        nodes: vec![],
-                    },
-                    vec![
-                        "Way completely outside bbox - SKIPPED for standalone processing"
-                            .to_string(),
-                        format!(
-                            "Original {} nodes still in ways_map for relations",
-                            nodes.len()
-                        ),
-                        format!(
-                            "First orig node: ({}, {})",
-                            nodes.first().map(|n| n.x).unwrap_or(0),
-                            nodes.first().map(|n| n.z).unwrap_or(0)
-                        ),
-                        format!(
-                            "Last orig node: ({}, {})",
-                            nodes.last().map(|n| n.x).unwrap_or(0),
-                            nodes.last().map(|n| n.z).unwrap_or(0)
-                        ),
-                    ],
-                );
-            }
             continue;
         }
 
@@ -307,29 +261,6 @@ pub fn parse_osm_data(
             tags: tags.clone(),
             nodes: clipped_nodes.clone(), // CLIPPED for standalone processing
         };
-
-        // Log AFTER clipping
-        if debug_logging::is_tracking_element(element.id) {
-            debug_logging::log_way_transformation(
-                "2_after_clipping",
-                &processed,
-                vec![
-                    format!("Clipped node count: {}", clipped_nodes.len()),
-                    format!(
-                        "First node: id={}, x={}, z={}",
-                        clipped_nodes.first().map(|n| n.id).unwrap_or(0),
-                        clipped_nodes.first().map(|n| n.x).unwrap_or(0),
-                        clipped_nodes.first().map(|n| n.z).unwrap_or(0)
-                    ),
-                    format!(
-                        "Last node: id={}, x={}, z={}",
-                        clipped_nodes.last().map(|n| n.id).unwrap_or(0),
-                        clipped_nodes.last().map(|n| n.x).unwrap_or(0),
-                        clipped_nodes.last().map(|n| n.z).unwrap_or(0)
-                    ),
-                ],
-            );
-        }
 
         processed_elements.push(ProcessedElement::Way(processed));
     }
@@ -365,12 +296,6 @@ pub fn parse_osm_data(
                     Some(w) => w.clone(),
                     None => {
                         // Way was likely filtered out because it was completely outside the bbox
-                        if debug_logging::is_tracking_element(element.id) {
-                            eprintln!(
-                                "DEBUG: Relation {} missing member way {}",
-                                element.id, mem.r#ref
-                            );
-                        }
                         return None;
                     }
                 };
@@ -380,50 +305,11 @@ pub fn parse_osm_data(
             .collect();
 
         if !members.is_empty() {
-            // Log relation after member assembly
-            if debug_logging::is_tracking_element(element.id) {
-                debug_logging::log_relation_transformation(
-                    "3_relation_assembled",
-                    element.id,
-                    tags,
-                    &members,
-                    vec![
-                        format!("Total members: {}", members.len()),
-                        format!(
-                            "Outer members: {}",
-                            members
-                                .iter()
-                                .filter(|m| matches!(m.role, ProcessedMemberRole::Outer))
-                                .count()
-                        ),
-                        format!(
-                            "Inner members: {}",
-                            members
-                                .iter()
-                                .filter(|m| matches!(m.role, ProcessedMemberRole::Inner))
-                                .count()
-                        ),
-                        format!(
-                            "Total nodes across all members: {}",
-                            members.iter().map(|m| m.way.nodes.len()).sum::<usize>()
-                        ),
-                    ],
-                );
-            }
-
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
                 tags: tags.clone(),
             }));
-        } else if debug_logging::is_tracking_element(element.id) {
-            debug_logging::log_relation_transformation(
-                "3_relation_EMPTY",
-                element.id,
-                tags,
-                &[],
-                vec!["Relation has no members after filtering - SKIPPED".to_string()],
-            );
         }
     }
 
