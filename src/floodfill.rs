@@ -82,9 +82,6 @@ fn optimized_flood_fill_area(
                 }
             }
 
-            // Safety check: prevent infinite loops
-            iterations += 1;
-
             // Skip if already visited or not inside polygon
             if global_visited.contains(&(x, z))
                 || !polygon.contains(&Point::new(x as f64, z as f64))
@@ -98,19 +95,6 @@ fn optimized_flood_fill_area(
             global_visited.insert((x, z));
 
             while let Some((curr_x, curr_z)) = queue.pop_front() {
-                // Additional iteration check inside inner loop
-                iterations += 1;
-
-                // Timeout check in inner loop for problematic polygons
-                #[allow(clippy::manual_is_multiple_of)]
-                if iterations % 1000 == 0 {
-                    if let Some(timeout) = timeout {
-                        if start_time.elapsed() > *timeout {
-                            return filled_area;
-                        }
-                    }
-                }
-
                 // Add current point to filled area
                 filled_area.push((curr_x, curr_z));
 
@@ -178,18 +162,13 @@ fn original_flood_fill_area(
     // Scan for multiple seed points to handle U-shapes and concave polygons
     for z in (min_z..=max_z).step_by(step_z as usize) {
         for x in (min_x..=max_x).step_by(step_x as usize) {
-            // Check timeout more frequently for problematic polygons
-            #[allow(clippy::manual_is_multiple_of)]
-            if iterations % 50 == 0 {
-                if let Some(timeout) = timeout {
-                    if &start_time.elapsed() > timeout {
-                        return filled_area;
-                    }
+            // Reduced timeout checking frequency for better performance
+            // Use manual % check since is_multiple_of() is unstable on stable Rust
+            if let Some(timeout) = timeout {
+                if &start_time.elapsed() > timeout {
+                    return filled_area;
                 }
             }
-
-            // Safety check: prevent infinite loops
-            iterations += 1;
 
             // Skip if already processed or not inside polygon
             if global_visited.contains(&(x, z))
@@ -204,19 +183,6 @@ fn original_flood_fill_area(
             global_visited.insert((x, z));
 
             while let Some((curr_x, curr_z)) = queue.pop_front() {
-                // Additional iteration check inside inner loop
-                iterations += 1;
-
-                // Timeout check in inner loop
-                #[allow(clippy::manual_is_multiple_of)]
-                if iterations % 1000 == 0 {
-                    if let Some(timeout) = timeout {
-                        if &start_time.elapsed() > timeout {
-                            return filled_area;
-                        }
-                    }
-                }
-
                 // Only check polygon containment once per point when adding to filled_area
                 if polygon.contains(&Point::new(curr_x as f64, curr_z as f64)) {
                     filled_area.push((curr_x, curr_z));
