@@ -68,13 +68,11 @@ fn optimized_flood_fill_area(
 
     // Pre-allocate queue with reasonable capacity to avoid reallocations
     let mut queue = VecDeque::with_capacity(1024);
-    let mut iterations = 0u64;
 
     for z in (min_z..=max_z).step_by(step_z as usize) {
         for x in (min_x..=max_x).step_by(step_x as usize) {
-            // Check timeout more frequently for small areas
-            #[allow(clippy::manual_is_multiple_of)]
-            if iterations % 50 == 0 {
+            // Fast timeout check, only every few iterations
+            if filled_area.len() % 100 == 0 {
                 if let Some(timeout) = timeout {
                     if start_time.elapsed() > *timeout {
                         return filled_area;
@@ -157,7 +155,6 @@ fn original_flood_fill_area(
     // Pre-allocate queue and reserve space for filled_area
     let mut queue: VecDeque<(i32, i32)> = VecDeque::with_capacity(2048);
     filled_area.reserve(1000); // Reserve space to reduce reallocations
-    let mut iterations = 0u64;
 
     // Scan for multiple seed points to handle U-shapes and concave polygons
     for z in (min_z..=max_z).step_by(step_z as usize) {

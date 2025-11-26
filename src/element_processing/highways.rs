@@ -21,7 +21,6 @@ pub fn generate_highways(
 }
 
 /// Build a connectivity map for highway endpoints to determine where slopes are needed.
-/// IMPORTANT: Call this ONCE before processing elements, not for each highway!
 pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayConnectivityMap {
     let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
 

@@ -25,7 +25,7 @@ pub fn generate_world(
 
     println!("{} Processing data...", "[4/7]".bold());
 
-    // Build highway connectivity map ONCE before processing (not for each highway!)
+    // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
 
     // Set ground reference in the editor to enable elevation-aware block placement
