@@ -1,16 +1,20 @@
-use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 use geo::orient::{Direction, Orient};
+use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 use std::time::Instant;
 
 use crate::{
     block_definitions::WATER,
-    coordinate_system::cartesian::{XZPoint, XZBBox},
+    coordinate_system::cartesian::{XZBBox, XZPoint},
     debug_logging,
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
     world_editor::WorldEditor,
 };
 
-pub fn generate_water_area_from_way(editor: &mut WorldEditor, element: &ProcessedWay, _xzbbox: &XZBBox) {
+pub fn generate_water_area_from_way(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    _xzbbox: &XZBBox,
+) {
     let start_time = Instant::now();
 
     let outers = [element.nodes.clone()];
@@ -22,7 +26,11 @@ pub fn generate_water_area_from_way(editor: &mut WorldEditor, element: &Processe
     generate_water_areas(editor, &outers, &[], start_time);
 }
 
-pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &ProcessedRelation, xzbbox: &XZBBox) {
+pub fn generate_water_areas_from_relation(
+    editor: &mut WorldEditor,
+    element: &ProcessedRelation,
+    xzbbox: &XZBBox,
+) {
     let start_time = Instant::now();
 
     // Check if this is a water relation (either with water tag or natural=water)
@@ -53,36 +61,50 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
             ProcessedMemberRole::Inner => inners.push(mem.way.nodes.clone()),
         }
     }
-    
+
     // DON'T auto-swap outer/inner - this causes more problems than it solves
     // OSM data should already have correct roles; if it's wrong in OSM, fix it there
     // The previous heuristic was causing water to fill on land
-    
+
     // However, log if we detect a suspicious configuration
     if debug_logging::is_tracking_element(element.id) {
         let outer_nodes: usize = outers.iter().map(|o| o.len()).sum();
         let inner_nodes: usize = inners.iter().map(|i| i.len()).sum();
         if !inners.is_empty() && inner_nodes > outer_nodes * 2 {
-            eprintln!("DEBUG: Relation {} has {} inner nodes vs {} outer nodes - may be inverted", 
-                element.id, inner_nodes, outer_nodes);
+            eprintln!(
+                "DEBUG: Relation {} has {} inner nodes vs {} outer nodes - may be inverted",
+                element.id, inner_nodes, outer_nodes
+            );
         }
     }
 
     // Log BEFORE merge_loopy_loops
     if debug_logging::is_tracking_element(element.id) {
         let notes = vec![
-            format!("Before merge_loopy_loops: {} outer loops, {} inner loops", outers.len(), inners.len()),
-            format!("Outer loops details: {}", 
-                outers.iter().enumerate()
-                    .map(|(i, o)| format!("loop{}: {} nodes (first_id={}, last_id={})", 
-                        i, o.len(), 
+            format!(
+                "Before merge_loopy_loops: {} outer loops, {} inner loops",
+                outers.len(),
+                inners.len()
+            ),
+            format!(
+                "Outer loops details: {}",
+                outers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| format!(
+                        "loop{}: {} nodes (first_id={}, last_id={})",
+                        i,
+                        o.len(),
                         o.first().map(|n| n.id).unwrap_or(0),
-                        o.last().map(|n| n.id).unwrap_or(0)))
+                        o.last().map(|n| n.id).unwrap_or(0)
+                    ))
                     .collect::<Vec<_>>()
-                    .join(", ")),
+                    .join(", ")
+            ),
         ];
-        
-        let fake_members: Vec<crate::osm_parser::ProcessedMember> = outers.iter()
+
+        let fake_members: Vec<crate::osm_parser::ProcessedMember> = outers
+            .iter()
             .map(|nodes| crate::osm_parser::ProcessedMember {
                 role: ProcessedMemberRole::Outer,
                 way: ProcessedWay {
@@ -92,7 +114,7 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
                 },
             })
             .collect();
-            
+
         debug_logging::log_relation_transformation(
             "4_before_merge_loopy_loops",
             element.id,
@@ -103,22 +125,34 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
     }
 
     merge_loopy_loops(&mut outers);
-    
+
     // Log AFTER merge_loopy_loops
     if debug_logging::is_tracking_element(element.id) {
         let notes = vec![
-            format!("After merge_loopy_loops: {} outer loops, {} inner loops", outers.len(), inners.len()),
-            format!("Outer loops details: {}", 
-                outers.iter().enumerate()
-                    .map(|(i, o)| format!("loop{}: {} nodes (first_id={}, last_id={})", 
-                        i, o.len(), 
+            format!(
+                "After merge_loopy_loops: {} outer loops, {} inner loops",
+                outers.len(),
+                inners.len()
+            ),
+            format!(
+                "Outer loops details: {}",
+                outers
+                    .iter()
+                    .enumerate()
+                    .map(|(i, o)| format!(
+                        "loop{}: {} nodes (first_id={}, last_id={})",
+                        i,
+                        o.len(),
                         o.first().map(|n| n.id).unwrap_or(0),
-                        o.last().map(|n| n.id).unwrap_or(0)))
+                        o.last().map(|n| n.id).unwrap_or(0)
+                    ))
                     .collect::<Vec<_>>()
-                    .join(", ")),
+                    .join(", ")
+            ),
         ];
-        
-        let fake_members: Vec<crate::osm_parser::ProcessedMember> = outers.iter()
+
+        let fake_members: Vec<crate::osm_parser::ProcessedMember> = outers
+            .iter()
             .map(|nodes| crate::osm_parser::ProcessedMember {
                 role: ProcessedMemberRole::Outer,
                 way: ProcessedWay {
@@ -128,7 +162,7 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
                 },
             })
             .collect();
-            
+
         debug_logging::log_relation_transformation(
             "5_after_merge_loopy_loops",
             element.id,
@@ -137,52 +171,75 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
             notes,
         );
     }
-    
+
     // NOW clip the assembled complete rings to bbox
     // This is crucial: we merged complete rings first, THEN clip them
-    outers = outers.into_iter()
+    outers = outers
+        .into_iter()
         .filter_map(|ring| {
             let clipped = clip_polygon_ring_to_bbox(&ring, xzbbox);
             if clipped.is_none() && debug_logging::is_tracking_element(element.id) {
-                eprintln!("DEBUG: Relation {} outer ring failed clipping (ring had {} nodes)", 
-                    element.id, ring.len());
+                eprintln!(
+                    "DEBUG: Relation {} outer ring failed clipping (ring had {} nodes)",
+                    element.id,
+                    ring.len()
+                );
             }
             clipped
         })
         .collect();
     merge_loopy_loops(&mut inners);
-    inners = inners.into_iter()
+    inners = inners
+        .into_iter()
         .filter_map(|ring| {
             let clipped = clip_polygon_ring_to_bbox(&ring, xzbbox);
             if clipped.is_none() && debug_logging::is_tracking_element(element.id) {
-                eprintln!("DEBUG: Relation {} inner ring failed clipping (ring had {} nodes)", 
-                    element.id, ring.len());
+                eprintln!(
+                    "DEBUG: Relation {} inner ring failed clipping (ring had {} nodes)",
+                    element.id,
+                    ring.len()
+                );
             }
             clipped
         })
         .collect();
-    
+
     if debug_logging::is_tracking_element(element.id) {
-        eprintln!("DEBUG: After bbox clipping: {} outer rings, {} inner rings", outers.len(), inners.len());
+        eprintln!(
+            "DEBUG: After bbox clipping: {} outer rings, {} inner rings",
+            outers.len(),
+            inners.len()
+        );
     }
-    
+
     if !verify_loopy_loops(&outers) {
         // For clipped multipolygons, some loops may not close perfectly
         // Instead of force-closing with straight lines (which creates wedges),
         // filter out unclosed loops and only render the properly closed ones
         if debug_logging::is_tracking_element(element.id) {
-            eprintln!("DEBUG: Relation {} has {} outer loops before filtering", element.id, outers.len());
+            eprintln!(
+                "DEBUG: Relation {} has {} outer loops before filtering",
+                element.id,
+                outers.len()
+            );
             for (i, outer) in outers.iter().enumerate() {
                 let first = &outer[0];
                 let last = outer.last().unwrap();
                 let dx = (first.x - last.x).abs();
                 let dz = (first.z - last.z).abs();
                 let is_closed = first.id == last.id || (dx <= 1 && dz <= 1);
-                eprintln!("  Loop {}: {} nodes, closed={}, endpoints {} blocks apart (dx={}, dz={})", 
-                    i, outer.len(), is_closed, ((dx*dx + dz*dz) as f64).sqrt() as i32, dx, dz);
+                eprintln!(
+                    "  Loop {}: {} nodes, closed={}, endpoints {} blocks apart (dx={}, dz={})",
+                    i,
+                    outer.len(),
+                    is_closed,
+                    ((dx * dx + dz * dz) as f64).sqrt() as i32,
+                    dx,
+                    dz
+                );
             }
         }
-        
+
         // Filter: Keep only loops that are already closed OR can be closed within 1 block
         outers.retain(|loop_nodes| {
             if loop_nodes.len() < 3 {
@@ -192,11 +249,11 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
             let last = loop_nodes.last().unwrap();
             let dx = (first.x - last.x).abs();
             let dz = (first.z - last.z).abs();
-            
+
             // Keep if already closed by ID or endpoints are within 1 block
             first.id == last.id || (dx <= 1 && dz <= 1)
         });
-        
+
         // Now close the remaining loops that are within 1 block tolerance
         for loop_nodes in outers.iter_mut() {
             let first = loop_nodes[0].clone();
@@ -206,11 +263,15 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
                 loop_nodes.push(first);
             }
         }
-        
+
         if debug_logging::is_tracking_element(element.id) {
-            eprintln!("DEBUG: Relation {} has {} outer loops after filtering and closing", element.id, outers.len());
+            eprintln!(
+                "DEBUG: Relation {} has {} outer loops after filtering and closing",
+                element.id,
+                outers.len()
+            );
         }
-        
+
         // If no valid outer loops remain, skip the relation
         if outers.is_empty() {
             if debug_logging::is_tracking_element(element.id) {
@@ -227,11 +288,11 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
             }
             return;
         }
-        
+
         // Verify again after filtering and closing
         if !verify_loopy_loops(&outers) {
             println!("Skipping relation {} due to invalid polygon", element.id);
-            
+
             if debug_logging::is_tracking_element(element.id) {
                 debug_logging::log_relation_transformation(
                     "6_SKIPPED_invalid_polygon",
@@ -241,7 +302,10 @@ pub fn generate_water_areas_from_relation(editor: &mut WorldEditor, element: &Pr
                     vec![
                         "verify_loopy_loops returned false after filtering and closure".to_string(),
                         format!("Number of outer loops: {}", outers.len()),
-                        format!("Outer loop sizes: {:?}", outers.iter().map(|l| l.len()).collect::<Vec<_>>()),
+                        format!(
+                            "Outer loop sizes: {:?}",
+                            outers.iter().map(|l| l.len()).collect::<Vec<_>>()
+                        ),
                     ],
                 );
             }
@@ -271,7 +335,7 @@ fn generate_water_areas(
     let mut poly_min_z = i32::MAX;
     let mut poly_max_x = i32::MIN;
     let mut poly_max_z = i32::MIN;
-    
+
     for outer in outers {
         for node in outer {
             poly_min_x = poly_min_x.min(node.x);
@@ -280,12 +344,12 @@ fn generate_water_areas(
             poly_max_z = poly_max_z.max(node.z);
         }
     }
-    
+
     // If no valid bounds, nothing to fill
     if poly_min_x == i32::MAX || poly_max_x == i32::MIN {
         return;
     }
-    
+
     // Clamp to world bounds just in case
     let (world_min_x, world_min_z) = editor.get_min_coords();
     let (world_max_x, world_max_z) = editor.get_max_coords();
@@ -293,7 +357,7 @@ fn generate_water_areas(
     let min_z = poly_min_z.max(world_min_z);
     let max_x = poly_max_x.min(world_max_x);
     let max_z = poly_max_z.min(world_max_z);
-    
+
     let outers_xz: Vec<Vec<XZPoint>> = outers
         .iter()
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
@@ -312,7 +376,7 @@ fn generate_water_areas(
 fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
     let mut removed: Vec<usize> = vec![];
     let mut merged: Vec<Vec<ProcessedNode>> = vec![];
-    
+
     // Helper function to check if two nodes match (by ID or proximity)
     let nodes_match = |a: &ProcessedNode, b: &ProcessedNode| -> bool {
         if a.id == b.id {
@@ -337,12 +401,12 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
 
             let x: &Vec<ProcessedNode> = &loops[i];
             let y: &Vec<ProcessedNode> = &loops[j];
-            
+
             // Skip empty loops (can happen after clipping)
             if x.is_empty() || y.is_empty() {
                 continue;
             }
-            
+
             let x_first = &x[0];
             let x_last = x.last().unwrap();
             let y_first = &y[0];
@@ -415,14 +479,14 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
     for l in loops {
         let first = &l[0];
         let last = l.last().unwrap();
-        
+
         // Check if loop is closed (by ID or proximity)
         let is_closed = first.id == last.id || {
             let dx = (first.x - last.x).abs();
             let dz = (first.z - last.z).abs();
             dx <= 1 && dz <= 1
         };
-        
+
         if !is_closed {
             eprintln!("WARN: Disconnected loop");
             valid = false;
@@ -439,19 +503,19 @@ fn close_open_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
         if loop_nodes.len() < 2 {
             continue;
         }
-        
+
         let first = &loop_nodes[0];
         let last = &loop_nodes[loop_nodes.len() - 1];
-        
+
         // Check if already closed
         if first.id == last.id {
             continue;
         }
-        
+
         // Check if endpoints are very close - just duplicate first node to close
         let dx = (first.x - last.x).abs();
         let dz = (first.z - last.z).abs();
-        
+
         if dx <= 1 && dz <= 1 {
             // Already essentially closed, just duplicate first node
             loop_nodes.push(first.clone());
@@ -466,72 +530,74 @@ fn close_open_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
 
 /// Clip a complete polygon ring to the bbox using Sutherland-Hodgman algorithm
 /// Returns None if the polygon is completely outside the bbox
-fn clip_polygon_ring_to_bbox(ring: &[ProcessedNode], xzbbox: &XZBBox) -> Option<Vec<ProcessedNode>> {
+fn clip_polygon_ring_to_bbox(
+    ring: &[ProcessedNode],
+    xzbbox: &XZBBox,
+) -> Option<Vec<ProcessedNode>> {
     if ring.is_empty() {
         return None;
     }
-    
+
     let min_x = xzbbox.min_x() as f64;
     let min_z = xzbbox.min_z() as f64;
     let max_x = xzbbox.max_x() as f64;
     let max_z = xzbbox.max_z() as f64;
-    
+
     // Check if entire ring is inside bbox - if so, return unchanged
     let all_inside = ring.iter().all(|n| {
-        n.x as f64 >= min_x && n.x as f64 <= max_x && 
-        n.z as f64 >= min_z && n.z as f64 <= max_z
+        n.x as f64 >= min_x && n.x as f64 <= max_x && n.z as f64 >= min_z && n.z as f64 <= max_z
     });
-    
+
     if all_inside {
         // Ring is entirely inside bbox, no clipping needed
         return Some(ring.to_vec());
     }
-    
+
     // Check if entire ring is outside bbox
     let all_outside_left = ring.iter().all(|n| (n.x as f64) < min_x);
     let all_outside_right = ring.iter().all(|n| (n.x as f64) > max_x);
     let all_outside_top = ring.iter().all(|n| (n.z as f64) < min_z);
     let all_outside_bottom = ring.iter().all(|n| (n.z as f64) > max_z);
-    
+
     if all_outside_left || all_outside_right || all_outside_top || all_outside_bottom {
         // Ring is entirely outside bbox
         return None;
     }
-    
+
     // Ring crosses bbox boundary, need to clip
     // Convert to f64 coordinates for clipping
     let mut polygon: Vec<(f64, f64)> = ring.iter().map(|n| (n.x as f64, n.z as f64)).collect();
-    
+
     // Ensure polygon is closed
     if !polygon.is_empty() && polygon.first() != polygon.last() {
         polygon.push(polygon[0]);
     }
-    
+
     // Clip against each edge of the bounding box
     // Edges are traversed COUNTER-CLOCKWISE, so "inside" (left of edge) = inside bbox
     let bbox_edges = [
         (min_x, min_z, max_x, min_z), // Bottom edge: left to right
-        (max_x, min_z, max_x, max_z), // Right edge: bottom to top  
+        (max_x, min_z, max_x, max_z), // Right edge: bottom to top
         (max_x, max_z, min_x, max_z), // Top edge: right to left
         (min_x, max_z, min_x, min_z), // Left edge: top to bottom
     ];
-    
+
     for (edge_x1, edge_z1, edge_x2, edge_z2) in bbox_edges {
         let mut clipped = Vec::new();
-        
+
         if polygon.is_empty() {
             return None;
         }
-        
+
         // Process edges: iterate through adjacent pairs
         // For a closed polygon, we process n-1 edges (since last point == first point)
         for i in 0..(polygon.len() - 1) {
             let current = polygon[i];
             let next = polygon[i + 1];
-            
+
             let current_inside = point_inside_edge(current, edge_x1, edge_z1, edge_x2, edge_z2);
             let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
-            
+
             if next_inside {
                 if !current_inside {
                     // Entering: add intersection
@@ -557,19 +623,19 @@ fn clip_polygon_ring_to_bbox(ring: &[ProcessedNode], xzbbox: &XZBBox) -> Option<
                 }
             }
         }
-        
+
         polygon = clipped;
     }
-    
+
     if polygon.len() < 3 {
         return None; // Not a valid polygon
     }
-    
+
     // Verify all points are within bbox before returning
-    let all_points_inside = polygon.iter().all(|&(x, z)| {
-        x >= min_x && x <= max_x && z >= min_z && z <= max_z
-    });
-    
+    let all_points_inside = polygon
+        .iter()
+        .all(|&(x, z)| x >= min_x && x <= max_x && z >= min_z && z <= max_z);
+
     if !all_points_inside {
         eprintln!("ERROR: clip_polygon_ring_to_bbox produced points outside bbox!");
         eprintln!("  Bbox: x=[{}, {}], z=[{}, {}]", min_x, max_x, min_z, max_z);
@@ -580,30 +646,40 @@ fn clip_polygon_ring_to_bbox(ring: &[ProcessedNode], xzbbox: &XZBBox) -> Option<
         }
         return None; // Reject invalid result
     }
-    
+
     // Convert back to ProcessedNode with synthetic IDs
     // IMPORTANT: Clamp coordinates to bbox boundaries to handle floating-point edge cases
-    let mut result: Vec<ProcessedNode> = polygon.iter().enumerate().map(|(i, &(x, z))| {
-        let clamped_x = x.clamp(min_x, max_x);
-        let clamped_z = z.clamp(min_z, max_z);
-        ProcessedNode {
-            id: 1_000_000_000 + i as u64, // Synthetic ID for clipped nodes
-            tags: std::collections::HashMap::new(),
-            x: clamped_x.round() as i32,
-            z: clamped_z.round() as i32,
-        }
-    }).collect();
-    
+    let mut result: Vec<ProcessedNode> = polygon
+        .iter()
+        .enumerate()
+        .map(|(i, &(x, z))| {
+            let clamped_x = x.clamp(min_x, max_x);
+            let clamped_z = z.clamp(min_z, max_z);
+            ProcessedNode {
+                id: 1_000_000_000 + i as u64, // Synthetic ID for clipped nodes
+                tags: std::collections::HashMap::new(),
+                x: clamped_x.round() as i32,
+                z: clamped_z.round() as i32,
+            }
+        })
+        .collect();
+
     // Ensure first and last have same ID to close the loop
     if !result.is_empty() {
         let first_id = result[0].id;
         result.last_mut().unwrap().id = first_id;
     }
-    
+
     Some(result)
 }
 
-fn point_inside_edge(point: (f64, f64), edge_x1: f64, edge_z1: f64, edge_x2: f64, edge_z2: f64) -> bool {
+fn point_inside_edge(
+    point: (f64, f64),
+    edge_x1: f64,
+    edge_z1: f64,
+    edge_x2: f64,
+    edge_z2: f64,
+) -> bool {
     // Cross product to determine if point is on the "inside" (left) of the edge
     let dx = edge_x2 - edge_x1;
     let dz = edge_z2 - edge_z1;
@@ -626,17 +702,17 @@ fn line_edge_intersection(
     let dz = z2 - z1;
     let edge_dx = edge_x2 - edge_x1;
     let edge_dz = edge_z2 - edge_z1;
-    
+
     let denominator = dx * edge_dz - dz * edge_dx;
     if denominator.abs() < 1e-10 {
         return None; // Parallel lines
     }
-    
+
     let t = ((edge_x1 - x1) * edge_dz - (edge_z1 - z1) * edge_dx) / denominator;
     if !(0.0..=1.0).contains(&t) {
         return None;
     }
-    
+
     Some((x1 + t * dx, z1 + t * dz))
 }
 

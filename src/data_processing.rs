@@ -24,7 +24,7 @@ pub fn generate_world(
     let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox, llbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
-    
+
     // Build highway connectivity map ONCE before processing (not for each highway!)
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
 

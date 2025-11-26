@@ -140,7 +140,7 @@ fn main() {
     }
 
     run_cli();
-    
+
     // Write debug log if tracking was enabled
     debug_logging::write_debug_log();
 }

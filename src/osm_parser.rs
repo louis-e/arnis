@@ -236,7 +236,7 @@ pub fn parse_osm_data(
 
         // Clip the way to bbox to reduce node count dramatically
         let tags = element.tags.clone().unwrap_or_default();
-        
+
         // Log BEFORE clipping
         if debug_logging::is_tracking_element(element.id) {
             let before_way = ProcessedWay {
@@ -253,16 +253,19 @@ pub fn parse_osm_data(
                 ],
             );
         }
-        
+
         // Store UNCLIPPED way in ways_map for relation assembly
         // IMPORTANT: Relations need original node IDs for merge_loopy_loops to connect segments
         // The actual clipping happens AFTER ring assembly in water_areas.rs
-        ways_map.insert(element.id, ProcessedWay {
-            id: element.id,
-            tags: tags.clone(),
-            nodes: nodes.clone(),  // UNCLIPPED - preserves original endpoint IDs for merging
-        });
-        
+        ways_map.insert(
+            element.id,
+            ProcessedWay {
+                id: element.id,
+                tags: tags.clone(),
+                nodes: nodes.clone(), // UNCLIPPED - preserves original endpoint IDs for merging
+            },
+        );
+
         // Clip way nodes for standalone way processing (not relations)
         let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox, &tags);
 
@@ -277,10 +280,22 @@ pub fn parse_osm_data(
                         nodes: vec![],
                     },
                     vec![
-                        "Way completely outside bbox - SKIPPED for standalone processing".to_string(),
-                        format!("Original {} nodes still in ways_map for relations", nodes.len()),
-                        format!("First orig node: ({}, {})", nodes.first().map(|n| n.x).unwrap_or(0), nodes.first().map(|n| n.z).unwrap_or(0)),
-                        format!("Last orig node: ({}, {})", nodes.last().map(|n| n.x).unwrap_or(0), nodes.last().map(|n| n.z).unwrap_or(0)),
+                        "Way completely outside bbox - SKIPPED for standalone processing"
+                            .to_string(),
+                        format!(
+                            "Original {} nodes still in ways_map for relations",
+                            nodes.len()
+                        ),
+                        format!(
+                            "First orig node: ({}, {})",
+                            nodes.first().map(|n| n.x).unwrap_or(0),
+                            nodes.first().map(|n| n.z).unwrap_or(0)
+                        ),
+                        format!(
+                            "Last orig node: ({}, {})",
+                            nodes.last().map(|n| n.x).unwrap_or(0),
+                            nodes.last().map(|n| n.z).unwrap_or(0)
+                        ),
                     ],
                 );
             }
@@ -290,7 +305,7 @@ pub fn parse_osm_data(
         let processed: ProcessedWay = ProcessedWay {
             id: element.id,
             tags: tags.clone(),
-            nodes: clipped_nodes.clone(),  // CLIPPED for standalone processing
+            nodes: clipped_nodes.clone(), // CLIPPED for standalone processing
         };
 
         // Log AFTER clipping
@@ -300,14 +315,18 @@ pub fn parse_osm_data(
                 &processed,
                 vec![
                     format!("Clipped node count: {}", clipped_nodes.len()),
-                    format!("First node: id={}, x={}, z={}", 
+                    format!(
+                        "First node: id={}, x={}, z={}",
                         clipped_nodes.first().map(|n| n.id).unwrap_or(0),
                         clipped_nodes.first().map(|n| n.x).unwrap_or(0),
-                        clipped_nodes.first().map(|n| n.z).unwrap_or(0)),
-                    format!("Last node: id={}, x={}, z={}", 
+                        clipped_nodes.first().map(|n| n.z).unwrap_or(0)
+                    ),
+                    format!(
+                        "Last node: id={}, x={}, z={}",
                         clipped_nodes.last().map(|n| n.id).unwrap_or(0),
                         clipped_nodes.last().map(|n| n.x).unwrap_or(0),
-                        clipped_nodes.last().map(|n| n.z).unwrap_or(0)),
+                        clipped_nodes.last().map(|n| n.z).unwrap_or(0)
+                    ),
                 ],
             );
         }
@@ -347,7 +366,10 @@ pub fn parse_osm_data(
                     None => {
                         // Way was likely filtered out because it was completely outside the bbox
                         if debug_logging::is_tracking_element(element.id) {
-                            eprintln!("DEBUG: Relation {} missing member way {}", element.id, mem.r#ref);
+                            eprintln!(
+                                "DEBUG: Relation {} missing member way {}",
+                                element.id, mem.r#ref
+                            );
                         }
                         return None;
                     }
@@ -367,13 +389,28 @@ pub fn parse_osm_data(
                     &members,
                     vec![
                         format!("Total members: {}", members.len()),
-                        format!("Outer members: {}", members.iter().filter(|m| matches!(m.role, ProcessedMemberRole::Outer)).count()),
-                        format!("Inner members: {}", members.iter().filter(|m| matches!(m.role, ProcessedMemberRole::Inner)).count()),
-                        format!("Total nodes across all members: {}", members.iter().map(|m| m.way.nodes.len()).sum::<usize>()),
+                        format!(
+                            "Outer members: {}",
+                            members
+                                .iter()
+                                .filter(|m| matches!(m.role, ProcessedMemberRole::Outer))
+                                .count()
+                        ),
+                        format!(
+                            "Inner members: {}",
+                            members
+                                .iter()
+                                .filter(|m| matches!(m.role, ProcessedMemberRole::Inner))
+                                .count()
+                        ),
+                        format!(
+                            "Total nodes across all members: {}",
+                            members.iter().map(|m| m.way.nodes.len()).sum::<usize>()
+                        ),
                     ],
                 );
             }
-            
+
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
@@ -435,7 +472,7 @@ fn assign_node_ids_preserving_endpoints(
 
     let original_first = original_nodes.first();
     let original_last = original_nodes.last();
-    
+
     // CRITICAL: Use large tolerance because clipping can move endpoints significantly
     // When a way crosses bbox boundary, S-H creates intersection point that may be
     // far from original endpoint, but we still need to preserve the ID for merging
@@ -455,9 +492,9 @@ fn assign_node_ids_preserving_endpoints(
                 if let Some(first) = original_first {
                     if matches_endpoint(coord, first, tolerance) {
                         return ProcessedNode {
-                            id: first.id,  // Preserve ID for merge_loopy_loops matching
-                            x: coord.0.round() as i32,  // Use CLIPPED coord (stays in bbox)
-                            z: coord.1.round() as i32,  // Use CLIPPED coord (stays in bbox)
+                            id: first.id,              // Preserve ID for merge_loopy_loops matching
+                            x: coord.0.round() as i32, // Use CLIPPED coord (stays in bbox)
+                            z: coord.1.round() as i32, // Use CLIPPED coord (stays in bbox)
                             tags: HashMap::new(),
                         };
                     }
@@ -466,9 +503,9 @@ fn assign_node_ids_preserving_endpoints(
                 if let Some(last) = original_last {
                     if matches_endpoint(coord, last, tolerance) {
                         return ProcessedNode {
-                            id: last.id,  // Preserve ID for merge_loopy_loops matching
-                            x: coord.0.round() as i32,  // Use CLIPPED coord (stays in bbox)
-                            z: coord.1.round() as i32,  // Use CLIPPED coord (stays in bbox)
+                            id: last.id,               // Preserve ID for merge_loopy_loops matching
+                            x: coord.0.round() as i32, // Use CLIPPED coord (stays in bbox)
+                            z: coord.1.round() as i32, // Use CLIPPED coord (stays in bbox)
                             tags: HashMap::new(),
                         };
                     }
@@ -634,7 +671,10 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
 
                 for intersection in intersections {
                     // Create synthetic node with unique ID for intersection
-                    let synthetic_id = nodes[0].id.wrapping_mul(10000000).wrapping_add(result.len() as u64);
+                    let synthetic_id = nodes[0]
+                        .id
+                        .wrapping_mul(10000000)
+                        .wrapping_add(result.len() as u64);
                     result.push(ProcessedNode {
                         id: synthetic_id,
                         x: intersection.0.round() as i32,
@@ -648,15 +688,23 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
 
     // Now preserve endpoint IDs if they match original endpoints
     if !result.is_empty() && result.len() >= 2 {
-        let tolerance = 50.0;  // Large tolerance for bbox edge intersections
+        let tolerance = 50.0; // Large tolerance for bbox edge intersections
         if let Some(first_orig) = nodes.first() {
-            if matches_endpoint((result[0].x as f64, result[0].z as f64), first_orig, tolerance) {
+            if matches_endpoint(
+                (result[0].x as f64, result[0].z as f64),
+                first_orig,
+                tolerance,
+            ) {
                 result[0].id = first_orig.id;
             }
         }
         if let Some(last_orig) = nodes.last() {
             let last_idx = result.len() - 1;
-            if matches_endpoint((result[last_idx].x as f64, result[last_idx].z as f64), last_orig, tolerance) {
+            if matches_endpoint(
+                (result[last_idx].x as f64, result[last_idx].z as f64),
+                last_orig,
+                tolerance,
+            ) {
                 result[last_idx].id = last_orig.id;
             }
         }
@@ -682,7 +730,7 @@ fn clip_way_to_bbox(
     let use_polygon_clipping = ["building", "landuse", "leisure"]
         .iter()
         .any(|key| tags.contains_key(*key));
-    
+
     if !use_polygon_clipping {
         return clip_polyline_to_bbox(nodes, xzbbox);
     }
@@ -713,7 +761,7 @@ fn clip_way_to_bbox(
     // Edges are traversed COUNTER-CLOCKWISE, so "inside" (left of edge) = inside bbox
     let bbox_edges = [
         (min_x, min_z, max_x, min_z), // Bottom edge: left to right
-        (max_x, min_z, max_x, max_z), // Right edge: bottom to top  
+        (max_x, min_z, max_x, max_z), // Right edge: bottom to top
         (max_x, max_z, min_x, max_z), // Top edge: right to left
         (min_x, max_z, min_x, min_z), // Left edge: top to bottom
     ];
@@ -734,7 +782,11 @@ fn clip_way_to_bbox(
 
         for i in 0..edge_count {
             let current = polygon[i];
-            let next = if i + 1 < polygon.len() { polygon[i + 1] } else { polygon[0] };
+            let next = if i + 1 < polygon.len() {
+                polygon[i + 1]
+            } else {
+                polygon[0]
+            };
 
             let current_inside = point_inside_edge(current, edge_x1, edge_z1, edge_x2, edge_z2);
             let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);

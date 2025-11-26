@@ -1,5 +1,5 @@
-use crate::osm_parser::{ProcessedNode, ProcessedWay, ProcessedMember, ProcessedMemberRole};
-use serde::{Serialize, Deserialize};
+use crate::osm_parser::{ProcessedMember, ProcessedMemberRole, ProcessedNode, ProcessedWay};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -104,7 +104,10 @@ impl DebugLogger {
             .unwrap_or_default();
 
         if !enabled_elements.is_empty() {
-            eprintln!("DEBUG: Element tracking enabled for IDs: {:?}", enabled_elements);
+            eprintln!(
+                "DEBUG: Element tracking enabled for IDs: {:?}",
+                enabled_elements
+            );
         }
 
         DebugLogger {
@@ -133,7 +136,14 @@ impl DebugLogger {
         });
     }
 
-    pub fn log_relation(&mut self, stage: &str, relation_id: u64, tags: &HashMap<String, String>, members: &[ProcessedMember], notes: Vec<String>) {
+    pub fn log_relation(
+        &mut self,
+        stage: &str,
+        relation_id: u64,
+        tags: &HashMap<String, String>,
+        members: &[ProcessedMember],
+        notes: Vec<String>,
+    ) {
         if !self.is_tracking(relation_id) {
             return;
         }
@@ -162,14 +172,20 @@ impl DebugLogger {
             return Ok(());
         }
 
-        let filename = format!("debug_elements_{}.json", 
-            chrono::Local::now().format("%Y%m%d_%H%M%S"));
-        
+        let filename = format!(
+            "debug_elements_{}.json",
+            chrono::Local::now().format("%Y%m%d_%H%M%S")
+        );
+
         let mut file = File::create(&filename)?;
         let json = serde_json::to_string_pretty(&self.stages)?;
         file.write_all(json.as_bytes())?;
-        
-        eprintln!("DEBUG: Wrote {} transformation stages to {}", self.stages.len(), filename);
+
+        eprintln!(
+            "DEBUG: Wrote {} transformation stages to {}",
+            self.stages.len(),
+            filename
+        );
         Ok(())
     }
 }
@@ -181,14 +197,21 @@ pub fn log_way_transformation(stage: &str, way: &ProcessedWay, notes: Vec<String
     }
 }
 
-pub fn log_relation_transformation(stage: &str, relation_id: u64, tags: &HashMap<String, String>, members: &[ProcessedMember], notes: Vec<String>) {
+pub fn log_relation_transformation(
+    stage: &str,
+    relation_id: u64,
+    tags: &HashMap<String, String>,
+    members: &[ProcessedMember],
+    notes: Vec<String>,
+) {
     if let Ok(mut logger) = DEBUG_LOG.lock() {
         logger.log_relation(stage, relation_id, tags, members, notes);
     }
 }
 
 pub fn is_tracking_element(element_id: u64) -> bool {
-    DEBUG_LOG.lock()
+    DEBUG_LOG
+        .lock()
         .map(|logger| logger.is_tracking(element_id))
         .unwrap_or(false)
 }
