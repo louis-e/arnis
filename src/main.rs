@@ -6,6 +6,7 @@ mod bresenham;
 mod colors;
 mod coordinate_system;
 mod data_processing;
+mod debug_logging;
 mod element_processing;
 mod floodfill;
 mod ground;
@@ -139,4 +140,7 @@ fn main() {
     }
 
     run_cli();
+    
+    // Write debug log if tracking was enabled
+    debug_logging::write_debug_log();
 }

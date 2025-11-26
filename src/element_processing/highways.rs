@@ -7,19 +7,22 @@ use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
+/// Type alias for highway connectivity map
+pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
+
 /// Generates highways with elevation support based on layer tags and connectivity analysis
 pub fn generate_highways(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     args: &Args,
-    all_elements: &[ProcessedElement],
+    highway_connectivity: &HighwayConnectivityMap,
 ) {
-    let highway_connectivity = build_highway_connectivity_map(all_elements);
-    generate_highways_internal(editor, element, args, &highway_connectivity);
+    generate_highways_internal(editor, element, args, highway_connectivity);
 }
 
-/// Build a connectivity map for highway endpoints to determine where slopes are needed
-fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HashMap<(i32, i32), Vec<i32>> {
+/// Build a connectivity map for highway endpoints to determine where slopes are needed.
+/// IMPORTANT: Call this ONCE before processing elements, not for each highway!
+pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayConnectivityMap {
     let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
 
     for element in elements {
