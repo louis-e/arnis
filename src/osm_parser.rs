@@ -236,15 +236,13 @@ pub fn parse_osm_data(
         // Clip the way to bbox to reduce node count dramatically
         let tags = element.tags.clone().unwrap_or_default();
 
-        // Store UNCLIPPED way in ways_map for relation assembly
-        // IMPORTANT: Relations need original node IDs for merge_loopy_loops to connect segments
-        // The actual clipping happens AFTER ring assembly in water_areas.rs
+        // Store unclipped way for relation assembly (clipping happens after ring merging)
         ways_map.insert(
             element.id,
             ProcessedWay {
                 id: element.id,
                 tags: tags.clone(),
-                nodes: nodes.clone(), // UNCLIPPED - preserves original endpoint IDs for merging
+                nodes: nodes.clone(),
             },
         );
 
@@ -259,7 +257,7 @@ pub fn parse_osm_data(
         let processed: ProcessedWay = ProcessedWay {
             id: element.id,
             tags: tags.clone(),
-            nodes: clipped_nodes.clone(), // CLIPPED for standalone processing
+            nodes: clipped_nodes.clone(),
         };
 
         processed_elements.push(ProcessedElement::Way(processed));
@@ -342,11 +340,10 @@ fn matches_endpoint(coord: (f64, f64), endpoint: &ProcessedNode, tolerance: f64)
     distance_sq < tolerance * tolerance
 }
 
-/// Assign node IDs to clipped coordinates, preserving endpoint IDs for merge_loopy_loops.
-/// - First clipped node: Gets original first/last endpoint ID if it matches
-/// - Last clipped node: Gets original first/last endpoint ID if it matches  
-/// - Middle nodes: Get unique synthetic IDs to avoid duplicates
-/// This is CRITICAL for water multipolygons that rely on exact endpoint ID matching.
+/// Assigns node IDs to clipped coordinates, preserving original endpoint IDs where possible.
+/// 
+/// Endpoint ID preservation is required for `merge_loopy_loops` to correctly connect
+/// way segments in multipolygon relations. Middle nodes receive synthetic IDs.
 fn assign_node_ids_preserving_endpoints(
     original_nodes: &[ProcessedNode],
     clipped_coords: Vec<(f64, f64)>,
@@ -359,10 +356,8 @@ fn assign_node_ids_preserving_endpoints(
     let original_first = original_nodes.first();
     let original_last = original_nodes.last();
 
-    // CRITICAL: Use large tolerance because clipping can move endpoints significantly
-    // When a way crosses bbox boundary, S-H creates intersection point that may be
-    // far from original endpoint, but we still need to preserve the ID for merging
-    let tolerance = 50.0; // 50 blocks - generous tolerance for bbox edge intersections
+    // Large tolerance to account for endpoint displacement from bbox clipping
+    let tolerance = 50.0;
     let last_index = clipped_coords.len() - 1;
 
     clipped_coords
@@ -599,9 +594,8 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
     result
 }
 
-/// Clips a way to the bounding box boundaries using Sutherland-Hodgman algorithm for polygons
-/// or simple line clipping for polylines. PRESERVES ORIGINAL NODE IDs by mapping clipped
-/// coordinates back to closest original nodes - critical for merge_loopy_loops in water processing
+/// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
+/// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
 fn clip_way_to_bbox(
     nodes: &[ProcessedNode],
     xzbbox: &XZBBox,
@@ -621,8 +615,7 @@ fn clip_way_to_bbox(
         return clip_polyline_to_bbox(nodes, xzbbox);
     }
 
-    // For now, let's be conservative and only clip if the way actually extends outside the bbox
-    // Check if any nodes are outside the bbox
+    // Only clip if the way extends outside the bbox
     let has_nodes_outside = nodes
         .iter()
         .any(|node| !xzbbox.contains(&XZPoint::new(node.x, node.z)));

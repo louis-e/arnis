@@ -61,14 +61,11 @@ pub fn generate_water_areas_from_relation(
         }
     }
 
-    // DON'T auto-swap outer/inner - this causes more problems than it solves
-    // OSM data should already have correct roles; if it's wrong in OSM, fix it there
-    // The previous heuristic was causing water to fill on land
+    // Preserve OSM-defined outer/inner roles without modification
 
     merge_loopy_loops(&mut outers);
 
-    // NOW clip the assembled complete rings to bbox
-    // This is crucial: we merged complete rings first, THEN clip them
+    // Clip assembled rings to bbox (must happen after merging to preserve ring connectivity)
     outers = outers
         .into_iter()
         .filter_map(|ring| clip_polygon_ring_to_bbox(&ring, xzbbox))
@@ -135,9 +132,7 @@ fn generate_water_areas(
     inners: &[Vec<ProcessedNode>],
     start_time: Instant,
 ) {
-    // Calculate the actual bounding box of the polygon nodes
-    // This is CRITICAL for performance - we only need to scan the area covered by the polygons,
-    // not the entire world!
+    // Calculate polygon bounding box to limit fill area
     let mut poly_min_x = i32::MAX;
     let mut poly_min_z = i32::MAX;
     let mut poly_max_x = i32::MIN;
@@ -184,13 +179,11 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
     let mut removed: Vec<usize> = vec![];
     let mut merged: Vec<Vec<ProcessedNode>> = vec![];
 
-    // Helper function to check if two nodes match (by ID or proximity)
+    // Match nodes by ID or proximity (handles synthetic nodes from bbox clipping)
     let nodes_match = |a: &ProcessedNode, b: &ProcessedNode| -> bool {
         if a.id == b.id {
             return true;
         }
-        // Also match if coordinates are very close (within 1 block)
-        // This handles synthetic nodes created at bbox edges
         let dx = (a.x - b.x).abs();
         let dz = (a.z - b.z).abs();
         dx <= 1 && dz <= 1
@@ -219,12 +212,11 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
             let y_first = &y[0];
             let y_last = y.last().unwrap();
 
-            // it's looped already
+            // Skip already-closed loops
             if nodes_match(x_first, x_last) {
                 continue;
             }
 
-            // it's looped already
             if nodes_match(y_first, y_last) {
                 continue;
             }
@@ -303,8 +295,7 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
     valid
 }
 
-/// Force-close loops that have endpoints very close to each other
-/// This handles cases where clipping creates nearly-closed loops
+/// Closes loops with nearby endpoints (handles clipping artifacts)
 fn close_open_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
     for loop_nodes in loops.iter_mut() {
         if loop_nodes.len() < 2 {
@@ -314,29 +305,18 @@ fn close_open_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
         let first = &loop_nodes[0];
         let last = &loop_nodes[loop_nodes.len() - 1];
 
-        // Check if already closed
+        // Skip already closed loops
         if first.id == last.id {
             continue;
         }
 
-        // Check if endpoints are very close - just duplicate first node to close
-        let dx = (first.x - last.x).abs();
-        let dz = (first.z - last.z).abs();
-
-        if dx <= 1 && dz <= 1 {
-            // Already essentially closed, just duplicate first node
-            loop_nodes.push(first.clone());
-        } else {
-            // Endpoints are far apart - this is likely a clipped multipolygon
-            // that enters/exits the bbox. Close it by connecting endpoints directly.
-            // This creates a "closed polygon within bbox" representation.
-            loop_nodes.push(first.clone());
-        }
+        // Close the loop by duplicating the first node
+        loop_nodes.push(first.clone());
     }
 }
 
-/// Clip a complete polygon ring to the bbox using Sutherland-Hodgman algorithm
-/// Returns None if the polygon is completely outside the bbox
+/// Clips a polygon ring to the bounding box using Sutherland-Hodgman algorithm.
+/// Returns `None` if the polygon is entirely outside the bbox.
 fn clip_polygon_ring_to_bbox(
     ring: &[ProcessedNode],
     xzbbox: &XZBBox,
@@ -380,8 +360,7 @@ fn clip_polygon_ring_to_bbox(
         polygon.push(polygon[0]);
     }
 
-    // Clip against each edge of the bounding box
-    // Edges are traversed COUNTER-CLOCKWISE, so "inside" (left of edge) = inside bbox
+    // Clip against each bbox edge (counter-clockwise traversal)
     let bbox_edges = [
         (min_x, min_z, max_x, min_z), // Bottom edge: left to right
         (max_x, min_z, max_x, max_z), // Right edge: bottom to top
@@ -537,10 +516,7 @@ fn inverse_floodfill(
     editor: &mut WorldEditor,
     start_time: Instant,
 ) {
-    // Convert to geo Polygons and ORIENT them correctly
-    // The geo crate expects exterior rings to be CCW and interior rings to be CW
-    // Our coordinate transformation inverts the Z axis, which reverses winding order
-    // Using orient(Direction::Default) normalizes this to the expected convention
+    // Convert to geo Polygons with normalized winding order
     let inners: Vec<_> = inners
         .into_iter()
         .map(|x| {
@@ -552,7 +528,7 @@ fn inverse_floodfill(
                 ),
                 vec![],
             )
-            .orient(Direction::Default) // Normalize winding order
+            .orient(Direction::Default)
         })
         .collect();
 
@@ -567,7 +543,7 @@ fn inverse_floodfill(
                 ),
                 vec![],
             )
-            .orient(Direction::Default) // Normalize winding order
+            .orient(Direction::Default)
         })
         .collect();
 
