@@ -197,6 +197,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
             let next_inside = point_in_bbox(next_point, min_x, min_z, max_x, max_z);
 
             if current_inside != next_inside {
+                // One endpoint inside, one outside - find single intersection
                 let intersections =
                     find_bbox_intersections(current_point, next_point, min_x, min_z, max_x, max_z);
 
@@ -211,6 +212,36 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
                         z: intersection.1.round() as i32,
                         tags: HashMap::new(),
                     });
+                }
+            } else if !current_inside && !next_inside {
+                // Both endpoints outside - segment might still cross through bbox
+                let mut intersections =
+                    find_bbox_intersections(current_point, next_point, min_x, min_z, max_x, max_z);
+
+                if intersections.len() >= 2 {
+                    // Sort intersections by distance from current point
+                    intersections.sort_by(|a, b| {
+                        let dist_a =
+                            (a.0 - current_point.0).powi(2) + (a.1 - current_point.1).powi(2);
+                        let dist_b =
+                            (b.0 - current_point.0).powi(2) + (b.1 - current_point.1).powi(2);
+                        dist_a
+                            .partial_cmp(&dist_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+
+                    for intersection in intersections {
+                        let synthetic_id = nodes[0]
+                            .id
+                            .wrapping_mul(10000000)
+                            .wrapping_add(result.len() as u64);
+                        result.push(ProcessedNode {
+                            id: synthetic_id,
+                            x: intersection.0.round() as i32,
+                            z: intersection.1.round() as i32,
+                            tags: HashMap::new(),
+                        });
+                    }
                 }
             }
         }
