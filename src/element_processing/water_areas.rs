@@ -62,18 +62,17 @@ pub fn generate_water_areas_from_relation(
     }
 
     // Preserve OSM-defined outer/inner roles without modification
-
     merge_loopy_loops(&mut outers);
 
     // Clip assembled rings to bbox (must happen after merging to preserve ring connectivity)
     outers = outers
         .into_iter()
-        .filter_map(|ring| clip_polygon_ring_to_bbox(&ring, xzbbox))
+        .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
         .collect();
     merge_loopy_loops(&mut inners);
     inners = inners
         .into_iter()
-        .filter_map(|ring| clip_polygon_ring_to_bbox(&ring, xzbbox))
+        .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
         .collect();
 
     if !verify_loopy_loops(&outers) {
@@ -267,7 +266,7 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
     for m in merged {
         loops.push(m);
     }
-
+    
     if merged_len > 0 {
         merge_loopy_loops(loops);
     }
@@ -295,9 +294,8 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
     valid
 }
 
-/// Clips a polygon ring to the bounding box using Sutherland-Hodgman algorithm.
-/// Returns `None` if the polygon is entirely outside the bbox.
-fn clip_polygon_ring_to_bbox(
+/// Clips a water polygon ring to bbox using Sutherland-Hodgman (post-ring-merge).
+fn clip_water_ring_to_bbox(
     ring: &[ProcessedNode],
     xzbbox: &XZBBox,
 ) -> Option<Vec<ProcessedNode>> {
@@ -403,7 +401,7 @@ fn clip_polygon_ring_to_bbox(
         .all(|&(x, z)| x >= min_x && x <= max_x && z >= min_z && z <= max_z);
 
     if !all_points_inside {
-        eprintln!("ERROR: clip_polygon_ring_to_bbox produced points outside bbox!");
+        eprintln!("ERROR: clip_water_ring_to_bbox produced points outside bbox!");
         eprintln!("  Bbox: x=[{}, {}], z=[{}, {}]", min_x, max_x, min_z, max_z);
         for (i, &(x, z)) in polygon.iter().enumerate() {
             if x < min_x || x > max_x || z < min_z || z > max_z {
@@ -411,6 +409,13 @@ fn clip_polygon_ring_to_bbox(
             }
         }
         return None; // Reject invalid result
+    }
+
+    // Insert corners where polygon follows bbox edges
+    let polygon = insert_water_bbox_corners(polygon, min_x, min_z, max_x, max_z);
+
+    if polygon.len() < 3 {
+        return None;
     }
 
     // Convert back to ProcessedNode with synthetic IDs
@@ -437,6 +442,116 @@ fn clip_polygon_ring_to_bbox(
     }
 
     Some(result)
+}
+
+/// Returns which bbox edge a point lies on: 0=bottom, 1=right, 2=top, 3=left, -1=interior.
+fn get_water_bbox_edge(point: (f64, f64), min_x: f64, min_z: f64, max_x: f64, max_z: f64) -> i32 {
+    let eps = 0.5; // Tolerance for floating point comparison
+    
+    let on_left = (point.0 - min_x).abs() < eps;
+    let on_right = (point.0 - max_x).abs() < eps;
+    let on_bottom = (point.1 - min_z).abs() < eps;
+    let on_top = (point.1 - max_z).abs() < eps;
+    
+    // Handle corners - assign to the edge we're "leaving" in counter-clockwise order
+    if on_bottom && on_left { return 3; }
+    if on_bottom && on_right { return 0; }
+    if on_top && on_right { return 1; }
+    if on_top && on_left { return 2; }
+    
+    // Single edge
+    if on_bottom { return 0; }
+    if on_right { return 1; }
+    if on_top { return 2; }
+    if on_left { return 3; }
+    
+    -1 // Not on any edge
+}
+
+/// Returns corners to insert when traversing from edge1 to edge2 via the shorter path.
+fn get_water_corners_between_edges(
+    edge1: i32, 
+    edge2: i32, 
+    min_x: f64, 
+    min_z: f64, 
+    max_x: f64, 
+    max_z: f64
+) -> Vec<(f64, f64)> {
+    if edge1 == edge2 || edge1 < 0 || edge2 < 0 {
+        return Vec::new();
+    }
+    
+    // Corners indexed by edge: corner[i] is the corner between edge i and edge (i+1)%4
+    let corners = [
+        (max_x, min_z), // 0: bottom-right
+        (max_x, max_z), // 1: top-right
+        (min_x, max_z), // 2: top-left
+        (min_x, min_z), // 3: bottom-left
+    ];
+    
+    // Calculate distance in both directions
+    let ccw_dist = ((edge2 - edge1 + 4) % 4) as usize;
+    let cw_dist = ((edge1 - edge2 + 4) % 4) as usize;
+    
+    // If edges are opposite (distance 2 in both directions), don't insert corners.
+    // The polygon is passing through the bbox, not wrapping around it.
+    if ccw_dist == 2 && cw_dist == 2 {
+        return Vec::new();
+    }
+    
+    let mut result = Vec::new();
+    
+    if ccw_dist <= cw_dist {
+        // Go counter-clockwise (shorter or equal)
+        let mut current = edge1;
+        for _ in 0..ccw_dist {
+            result.push(corners[current as usize]);
+            current = (current + 1) % 4;
+        }
+    } else {
+        // Go clockwise (shorter)
+        let mut current = edge1;
+        for _ in 0..cw_dist {
+            current = (current + 4 - 1) % 4;
+            result.push(corners[current as usize]);
+        }
+    }
+    
+    result
+}
+
+/// Inserts bbox corners where polygon transitions between different bbox edges.
+fn insert_water_bbox_corners(
+    polygon: Vec<(f64, f64)>, 
+    min_x: f64, 
+    min_z: f64, 
+    max_x: f64, 
+    max_z: f64
+) -> Vec<(f64, f64)> {
+    if polygon.len() < 3 {
+        return polygon;
+    }
+    
+    let mut result = Vec::with_capacity(polygon.len() + 4);
+    
+    for i in 0..polygon.len() {
+        let current = polygon[i];
+        let next = polygon[(i + 1) % polygon.len()];
+        
+        result.push(current);
+        
+        let edge1 = get_water_bbox_edge(current, min_x, min_z, max_x, max_z);
+        let edge2 = get_water_bbox_edge(next, min_x, min_z, max_x, max_z);
+        
+        if edge1 >= 0 && edge2 >= 0 && edge1 != edge2 {
+            let corners = get_water_corners_between_edges(edge1, edge2, min_x, min_z, max_x, max_z);
+            for corner in corners {
+                result.push(corner);
+            }
+        }
+    }
+    
+    result
 }
 
 fn point_inside_edge(

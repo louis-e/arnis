@@ -247,7 +247,7 @@ pub fn parse_osm_data(
         );
 
         // Clip way nodes for standalone way processing (not relations)
-        let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox, &tags);
+        let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
 
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() {
@@ -274,6 +274,9 @@ pub fn parse_osm_data(
             continue;
         };
 
+        // Water relations require unclipped ways for ring merging in water_areas.rs
+        let is_water_relation = is_water_element(tags);
+
         let members: Vec<ProcessedMember> = element
             .members
             .iter()
@@ -298,7 +301,23 @@ pub fn parse_osm_data(
                     }
                 };
 
-                Some(ProcessedMember { role, way })
+                // Water relations: keep unclipped for ring merging
+                // Non-water relations: clip member ways now
+                let final_way = if is_water_relation {
+                    way
+                } else {
+                    let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
+                    if clipped_nodes.is_empty() {
+                        return None;
+                    }
+                    ProcessedWay {
+                        id: way.id,
+                        tags: way.tags,
+                        nodes: clipped_nodes,
+                    }
+                };
+
+                Some(ProcessedMember { role, way: final_way })
             })
             .collect();
 
@@ -314,6 +333,30 @@ pub fn parse_osm_data(
     emit_gui_progress_update(15.0, "");
 
     (processed_elements, xzbbox)
+}
+
+/// Returns true if tags indicate a water element handled by water_areas.rs.
+fn is_water_element(tags: &HashMap<String, String>) -> bool {
+    // Check for explicit water tag
+    if tags.contains_key("water") {
+        return true;
+    }
+    
+    // Check for natural=water or natural=bay
+    if let Some(natural_val) = tags.get("natural") {
+        if natural_val == "water" || natural_val == "bay" {
+            return true;
+        }
+    }
+    
+    // Check for waterway=dock (also handled as water area)
+    if let Some(waterway_val) = tags.get("waterway") {
+        if waterway_val == "dock" {
+            return true;
+        }
+    }
+    
+    false
 }
 
 const PRIORITY_ORDER: [&str; 6] = [
@@ -408,6 +451,161 @@ fn assign_node_ids_preserving_endpoints(
             }
         })
         .collect()
+}
+
+/// Removes consecutive duplicate points from a polygon (within epsilon tolerance).
+fn remove_consecutive_duplicates(polygon: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    if polygon.is_empty() {
+        return polygon;
+    }
+    
+    let eps = 0.1; // Tolerance for considering points as duplicates
+    let mut result: Vec<(f64, f64)> = Vec::with_capacity(polygon.len());
+    
+    for p in &polygon {
+        if let Some(last) = result.last() {
+            // Skip if this point is essentially the same as the previous one
+            if (p.0 - last.0).abs() < eps && (p.1 - last.1).abs() < eps {
+                continue;
+            }
+        }
+        result.push(*p);
+    }
+    
+    // Also check if first and last are duplicates (for closed polygons)
+    if result.len() > 1 {
+        let first = result.first().unwrap();
+        let last = result.last().unwrap();
+        if (first.0 - last.0).abs() < eps && (first.1 - last.1).abs() < eps {
+            result.pop();
+        }
+    }
+    
+    result
+}
+
+/// Returns which bbox edge a point lies on: 0=bottom, 1=right, 2=top, 3=left, -1=interior.
+fn get_bbox_edge(point: (f64, f64), min_x: f64, min_z: f64, max_x: f64, max_z: f64) -> i32 {
+    let eps = 0.5; // Tolerance for floating point comparison
+    
+    let on_left = (point.0 - min_x).abs() < eps;
+    let on_right = (point.0 - max_x).abs() < eps;
+    let on_bottom = (point.1 - min_z).abs() < eps;
+    let on_top = (point.1 - max_z).abs() < eps;
+    
+    // Handle corners - assign to the edge we're "leaving" in counter-clockwise order
+    if on_bottom && on_left {
+        return 3; // Bottom-left corner, assign to left edge
+    }
+    if on_bottom && on_right {
+        return 0; // Bottom-right corner, assign to bottom edge
+    }
+    if on_top && on_right {
+        return 1; // Top-right corner, assign to right edge
+    }
+    if on_top && on_left {
+        return 2; // Top-left corner, assign to top edge
+    }
+    
+    // Single edge
+    if on_bottom { return 0; }
+    if on_right { return 1; }
+    if on_top { return 2; }
+    if on_left { return 3; }
+    
+    -1 // Not on any edge (interior point)
+}
+
+/// Returns corners to insert when traversing from edge1 to edge2 via the shorter path.
+/// Returns empty for opposite edges (polygon passes through bbox).
+fn get_corners_between_edges(
+    edge1: i32, 
+    edge2: i32, 
+    min_x: f64, 
+    min_z: f64, 
+    max_x: f64, 
+    max_z: f64
+) -> Vec<(f64, f64)> {
+    if edge1 == edge2 || edge1 < 0 || edge2 < 0 {
+        return Vec::new();
+    }
+    
+    // Corners indexed by edge: corner[i] is the corner between edge i and edge (i+1)%4
+    // Edges: 0=bottom, 1=right, 2=top, 3=left
+    // Corners: 0=bottom-right, 1=top-right, 2=top-left, 3=bottom-left
+    let corners = [
+        (max_x, min_z), // 0: bottom-right (between bottom and right)
+        (max_x, max_z), // 1: top-right (between right and top)
+        (min_x, max_z), // 2: top-left (between top and left)
+        (min_x, min_z), // 3: bottom-left (between left and bottom)
+    ];
+    
+    // Calculate distance in both directions
+    let ccw_dist = ((edge2 - edge1 + 4) % 4) as usize; // Counter-clockwise distance
+    let cw_dist = ((edge1 - edge2 + 4) % 4) as usize;  // Clockwise distance
+    
+    // If edges are opposite (distance 2 in both directions), don't insert corners.
+    // The polygon is passing through the bbox, not wrapping around it.
+    if ccw_dist == 2 && cw_dist == 2 {
+        return Vec::new();
+    }
+    
+    let mut result = Vec::new();
+    
+    if ccw_dist <= cw_dist {
+        // Go counter-clockwise (shorter or equal)
+        let mut current = edge1;
+        for _ in 0..ccw_dist {
+            result.push(corners[current as usize]);
+            current = (current + 1) % 4;
+        }
+    } else {
+        // Go clockwise (shorter)
+        let mut current = edge1;
+        for _ in 0..cw_dist {
+            current = (current + 4 - 1) % 4; // Move clockwise (decrement with wrap)
+            result.push(corners[current as usize]);
+        }
+    }
+    
+    result
+}
+
+/// Inserts bbox corners where polygon transitions between different bbox edges.
+fn insert_bbox_corners(
+    polygon: Vec<(f64, f64)>, 
+    min_x: f64, 
+    min_z: f64, 
+    max_x: f64, 
+    max_z: f64
+) -> Vec<(f64, f64)> {
+    if polygon.len() < 3 {
+        return polygon;
+    }
+    
+    let mut result = Vec::with_capacity(polygon.len() + 4); // May add up to 4 corners
+    
+    for i in 0..polygon.len() {
+        let current = polygon[i];
+        let next = polygon[(i + 1) % polygon.len()];
+        
+        result.push(current);
+        
+        // Check if current and next are on different bbox edges
+        let edge1 = get_bbox_edge(current, min_x, min_z, max_x, max_z);
+        let edge2 = get_bbox_edge(next, min_x, min_z, max_x, max_z);
+        
+        if edge1 >= 0 && edge2 >= 0 && edge1 != edge2 {
+            // Both points are on bbox edges but different edges
+            // We need to insert corner(s) between them
+            let corners = get_corners_between_edges(edge1, edge2, min_x, min_z, max_x, max_z);
+            for corner in corners {
+                result.push(corner);
+            }
+        }
+    }
+    
+    result
 }
 
 /// Check if a point is on the "inside" side of an edge (using cross product)
@@ -598,26 +796,29 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
 fn clip_way_to_bbox(
     nodes: &[ProcessedNode],
     xzbbox: &XZBBox,
-    tags: &HashMap<String, String>,
 ) -> Vec<ProcessedNode> {
     if nodes.is_empty() {
         return Vec::new();
     }
 
-    // Use polygon clipping ONLY for explicitly closed polygons (buildings, landuse, etc.)
-    // Everything else uses polyline clipping to avoid issues with open paths
-    let use_polygon_clipping = ["building", "landuse", "leisure"]
-        .iter()
-        .any(|key| tags.contains_key(*key));
-
-    if !use_polygon_clipping {
-        return clip_polyline_to_bbox(nodes, xzbbox);
-    }
+    // Closed polygons use Sutherland-Hodgman; open paths use polyline clipping
+    let is_closed_polygon = if nodes.len() >= 3 {
+        let first = nodes.first().unwrap();
+        let last = nodes.last().unwrap();
+        // Check if closed by ID or by coordinates
+        first.id == last.id || (first.x == last.x && first.z == last.z)
+    } else {
+        false
+    };
 
     // Only clip if the way extends outside the bbox
     let has_nodes_outside = nodes
         .iter()
         .any(|node| !xzbbox.contains(&XZPoint::new(node.x, node.z)));
+
+    if !is_closed_polygon {
+        return clip_polyline_to_bbox(nodes, xzbbox);
+    }
 
     // If all nodes are inside the bbox, return the original nodes unchanged
     if !has_nodes_outside {
@@ -632,27 +833,27 @@ fn clip_way_to_bbox(
     // Convert nodes to a simple coordinate list for easier processing
     let mut polygon: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
 
-    // Determine if input is explicitly closed (first == last)
-    let is_explicitly_closed = !polygon.is_empty() && polygon.first() == polygon.last();
-
-    // Clip against each edge of the bounding box using Sutherland-Hodgman algorithm
-    // Edges are traversed COUNTER-CLOCKWISE, so "inside" (left of edge) = inside bbox
+    // Sutherland-Hodgman: clip against each bbox edge (counter-clockwise traversal)
     let bbox_edges = [
-        (min_x, min_z, max_x, min_z), // Bottom edge: left to right
-        (max_x, min_z, max_x, max_z), // Right edge: bottom to top
-        (max_x, max_z, min_x, max_z), // Top edge: right to left
-        (min_x, max_z, min_x, min_z), // Left edge: top to bottom
+        (min_x, min_z, max_x, min_z, 0), // Bottom edge: horizontal, clamp z only
+        (max_x, min_z, max_x, max_z, 1), // Right edge: vertical, clamp x only
+        (max_x, max_z, min_x, max_z, 2), // Top edge: horizontal, clamp z only
+        (min_x, max_z, min_x, min_z, 3), // Left edge: vertical, clamp x only
     ];
 
-    for (edge_x1, edge_z1, edge_x2, edge_z2) in bbox_edges {
+    for (edge_x1, edge_z1, edge_x2, edge_z2, edge_idx) in bbox_edges {
         if polygon.is_empty() {
             break;
         }
 
         let mut clipped_polygon: Vec<(f64, f64)> = Vec::new();
 
+        // Recompute whether polygon is explicitly closed for EACH pass
+        // (the clipping can change this property)
+        let is_closed = !polygon.is_empty() && polygon.first() == polygon.last();
+        
         // If explicitly closed, process n-1 edges; else process n edges with wrap
-        let edge_count = if is_explicitly_closed {
+        let edge_count = if is_closed {
             polygon.len().saturating_sub(1)
         } else {
             polygon.len()
@@ -675,9 +876,14 @@ fn clip_way_to_bbox(
                     if let Some(mut intersection) = line_edge_intersection(
                         current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
                     ) {
-                        // Clamp intersection to bbox to handle floating-point errors
-                        intersection.0 = intersection.0.clamp(min_x, max_x);
-                        intersection.1 = intersection.1.clamp(min_z, max_z);
+                        // Clamp to current edge only
+                        match edge_idx {
+                            0 => intersection.1 = min_z,
+                            1 => intersection.0 = max_x,
+                            2 => intersection.1 = max_z,
+                            3 => intersection.0 = min_x,
+                            _ => {}
+                        }
                         clipped_polygon.push(intersection);
                     }
                 }
@@ -688,9 +894,14 @@ fn clip_way_to_bbox(
                 if let Some(mut intersection) = line_edge_intersection(
                     current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
                 ) {
-                    // Clamp intersection to bbox to handle floating-point errors
-                    intersection.0 = intersection.0.clamp(min_x, max_x);
-                    intersection.1 = intersection.1.clamp(min_z, max_z);
+                    // Clamp to current edge only
+                    match edge_idx {
+                        0 => intersection.1 = min_z,
+                        1 => intersection.0 = max_x,
+                        2 => intersection.1 = max_z,
+                        3 => intersection.0 = min_x,
+                        _ => {}
+                    }
                     clipped_polygon.push(intersection);
                 }
             }
@@ -705,13 +916,30 @@ fn clip_way_to_bbox(
         return Vec::new();
     }
 
-    // Ensure all points are within bbox; clamp if not
+    // Final clamping for floating-point errors
     for p in &mut polygon {
         p.0 = p.0.clamp(min_x, max_x);
         p.1 = p.1.clamp(min_z, max_z);
     }
+    
+    // Remove duplicates from corner clipping
+    let polygon = remove_consecutive_duplicates(polygon);
+    
+    if polygon.len() < 3 {
+        return Vec::new();
+    }
 
-    // Convert back to ProcessedNode format - PRESERVE endpoint IDs
+    // Insert corners where polygon follows bbox edges
+    let polygon = insert_bbox_corners(polygon, min_x, min_z, max_x, max_z);
+    
+    // Remove duplicates from corner insertion
+    let polygon = remove_consecutive_duplicates(polygon);
+
+    if polygon.len() < 3 {
+        return Vec::new();
+    }
+
+    // Convert back to ProcessedNode format (preserve endpoint IDs)
     let way_id = nodes.first().map(|n| n.id).unwrap_or(0);
     assign_node_ids_preserving_endpoints(nodes, polygon, way_id)
 }
