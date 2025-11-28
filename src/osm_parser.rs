@@ -1,3 +1,4 @@
+use crate::clipping::clip_way_to_bbox;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
@@ -211,7 +212,14 @@ pub fn parse_osm_data(
 
             nodes_map.insert(element.id, processed.clone());
 
-            processed_elements.push(ProcessedElement::Node(processed));
+            // Only add tagged nodes to processed_elements if they're within or near the bbox
+            // This significantly improves performance by filtering out distant nodes
+            if !element.tags.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
+                // Node has tags, check if it's in the bbox (with some margin)
+                if xzbbox.contains(&xzpoint) {
+                    processed_elements.push(ProcessedElement::Node(processed));
+                }
+            }
         }
     }
 
@@ -226,13 +234,33 @@ pub fn parse_osm_data(
             }
         }
 
+        // Clip the way to bbox to reduce node count dramatically
+        let tags = element.tags.clone().unwrap_or_default();
+
+        // Store unclipped way for relation assembly (clipping happens after ring merging)
+        ways_map.insert(
+            element.id,
+            ProcessedWay {
+                id: element.id,
+                tags: tags.clone(),
+                nodes: nodes.clone(),
+            },
+        );
+
+        // Clip way nodes for standalone way processing (not relations)
+        let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
+
+        // Skip ways that are completely outside the bbox (empty after clipping)
+        if clipped_nodes.is_empty() {
+            continue;
+        }
+
         let processed: ProcessedWay = ProcessedWay {
             id: element.id,
-            tags: element.tags.clone().unwrap_or_default(),
-            nodes,
+            tags: tags.clone(),
+            nodes: clipped_nodes.clone(),
         };
 
-        ways_map.insert(element.id, processed.clone());
         processed_elements.push(ProcessedElement::Way(processed));
     }
 
@@ -246,6 +274,9 @@ pub fn parse_osm_data(
         if tags.get("type").map(|x: &String| x.as_str()) != Some("multipolygon") {
             continue;
         };
+
+        // Water relations require unclipped ways for ring merging in water_areas.rs
+        let is_water_relation = is_water_element(tags);
 
         let members: Vec<ProcessedMember> = element
             .members
@@ -271,7 +302,26 @@ pub fn parse_osm_data(
                     }
                 };
 
-                Some(ProcessedMember { role, way })
+                // Water relations: keep unclipped for ring merging
+                // Non-water relations: clip member ways now
+                let final_way = if is_water_relation {
+                    way
+                } else {
+                    let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
+                    if clipped_nodes.is_empty() {
+                        return None;
+                    }
+                    ProcessedWay {
+                        id: way.id,
+                        tags: way.tags,
+                        nodes: clipped_nodes,
+                    }
+                };
+
+                Some(ProcessedMember {
+                    role,
+                    way: final_way,
+                })
             })
             .collect();
 
@@ -287,6 +337,30 @@ pub fn parse_osm_data(
     emit_gui_progress_update(15.0, "");
 
     (processed_elements, xzbbox)
+}
+
+/// Returns true if tags indicate a water element handled by water_areas.rs.
+fn is_water_element(tags: &HashMap<String, String>) -> bool {
+    // Check for explicit water tag
+    if tags.contains_key("water") {
+        return true;
+    }
+
+    // Check for natural=water or natural=bay
+    if let Some(natural_val) = tags.get("natural") {
+        if natural_val == "water" || natural_val == "bay" {
+            return true;
+        }
+    }
+
+    // Check for waterway=dock (also handled as water area)
+    if let Some(waterway_val) = tags.get("waterway") {
+        if waterway_val == "dock" {
+            return true;
+        }
+    }
+
+    false
 }
 
 const PRIORITY_ORDER: [&str; 6] = [

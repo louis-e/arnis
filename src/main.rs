@@ -3,6 +3,7 @@
 mod args;
 mod block_definitions;
 mod bresenham;
+mod clipping;
 mod colors;
 mod coordinate_system;
 mod data_processing;
