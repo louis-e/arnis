@@ -197,7 +197,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
             let next_inside = point_in_bbox(next_point, min_x, min_z, max_x, max_z);
 
             if current_inside != next_inside {
-                // One endpoint inside, one outside - find single intersection
+                // One endpoint inside, one outside, find single intersection
                 let intersections =
                     find_bbox_intersections(current_point, next_point, min_x, min_z, max_x, max_z);
 
@@ -214,7 +214,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
                     });
                 }
             } else if !current_inside && !next_inside {
-                // Both endpoints outside - segment might still cross through bbox
+                // Both endpoints outside, segment might still cross through bbox
                 let mut intersections =
                     find_bbox_intersections(current_point, next_point, min_x, min_z, max_x, max_z);
 
