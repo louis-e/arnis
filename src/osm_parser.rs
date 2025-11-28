@@ -317,7 +317,10 @@ pub fn parse_osm_data(
                     }
                 };
 
-                Some(ProcessedMember { role, way: final_way })
+                Some(ProcessedMember {
+                    role,
+                    way: final_way,
+                })
             })
             .collect();
 
@@ -341,21 +344,21 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     if tags.contains_key("water") {
         return true;
     }
-    
+
     // Check for natural=water or natural=bay
     if let Some(natural_val) = tags.get("natural") {
         if natural_val == "water" || natural_val == "bay" {
             return true;
         }
     }
-    
+
     // Check for waterway=dock (also handled as water area)
     if let Some(waterway_val) = tags.get("waterway") {
         if waterway_val == "dock" {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -458,10 +461,10 @@ fn remove_consecutive_duplicates(polygon: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     if polygon.is_empty() {
         return polygon;
     }
-    
+
     let eps = 0.1; // Tolerance for considering points as duplicates
     let mut result: Vec<(f64, f64)> = Vec::with_capacity(polygon.len());
-    
+
     for p in &polygon {
         if let Some(last) = result.last() {
             // Skip if this point is essentially the same as the previous one
@@ -471,7 +474,7 @@ fn remove_consecutive_duplicates(polygon: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
         }
         result.push(*p);
     }
-    
+
     // Also check if first and last are duplicates (for closed polygons)
     if result.len() > 1 {
         let first = result.first().unwrap();
@@ -480,19 +483,19 @@ fn remove_consecutive_duplicates(polygon: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
             result.pop();
         }
     }
-    
+
     result
 }
 
 /// Returns which bbox edge a point lies on: 0=bottom, 1=right, 2=top, 3=left, -1=interior.
 fn get_bbox_edge(point: (f64, f64), min_x: f64, min_z: f64, max_x: f64, max_z: f64) -> i32 {
     let eps = 0.5; // Tolerance for floating point comparison
-    
+
     let on_left = (point.0 - min_x).abs() < eps;
     let on_right = (point.0 - max_x).abs() < eps;
     let on_bottom = (point.1 - min_z).abs() < eps;
     let on_top = (point.1 - max_z).abs() < eps;
-    
+
     // Handle corners - assign to the edge we're "leaving" in counter-clockwise order
     if on_bottom && on_left {
         return 3; // Bottom-left corner, assign to left edge
@@ -506,30 +509,38 @@ fn get_bbox_edge(point: (f64, f64), min_x: f64, min_z: f64, max_x: f64, max_z: f
     if on_top && on_left {
         return 2; // Top-left corner, assign to top edge
     }
-    
+
     // Single edge
-    if on_bottom { return 0; }
-    if on_right { return 1; }
-    if on_top { return 2; }
-    if on_left { return 3; }
-    
+    if on_bottom {
+        return 0;
+    }
+    if on_right {
+        return 1;
+    }
+    if on_top {
+        return 2;
+    }
+    if on_left {
+        return 3;
+    }
+
     -1 // Not on any edge (interior point)
 }
 
 /// Returns corners to insert when traversing from edge1 to edge2 via the shorter path.
 /// Returns empty for opposite edges (polygon passes through bbox).
 fn get_corners_between_edges(
-    edge1: i32, 
-    edge2: i32, 
-    min_x: f64, 
-    min_z: f64, 
-    max_x: f64, 
-    max_z: f64
+    edge1: i32,
+    edge2: i32,
+    min_x: f64,
+    min_z: f64,
+    max_x: f64,
+    max_z: f64,
 ) -> Vec<(f64, f64)> {
     if edge1 == edge2 || edge1 < 0 || edge2 < 0 {
         return Vec::new();
     }
-    
+
     // Corners indexed by edge: corner[i] is the corner between edge i and edge (i+1)%4
     // Edges: 0=bottom, 1=right, 2=top, 3=left
     // Corners: 0=bottom-right, 1=top-right, 2=top-left, 3=bottom-left
@@ -539,19 +550,19 @@ fn get_corners_between_edges(
         (min_x, max_z), // 2: top-left (between top and left)
         (min_x, min_z), // 3: bottom-left (between left and bottom)
     ];
-    
+
     // Calculate distance in both directions
     let ccw_dist = ((edge2 - edge1 + 4) % 4) as usize; // Counter-clockwise distance
-    let cw_dist = ((edge1 - edge2 + 4) % 4) as usize;  // Clockwise distance
-    
+    let cw_dist = ((edge1 - edge2 + 4) % 4) as usize; // Clockwise distance
+
     // If edges are opposite (distance 2 in both directions), don't insert corners.
     // The polygon is passing through the bbox, not wrapping around it.
     if ccw_dist == 2 && cw_dist == 2 {
         return Vec::new();
     }
-    
+
     let mut result = Vec::new();
-    
+
     if ccw_dist <= cw_dist {
         // Go counter-clockwise (shorter or equal)
         let mut current = edge1;
@@ -567,34 +578,34 @@ fn get_corners_between_edges(
             result.push(corners[current as usize]);
         }
     }
-    
+
     result
 }
 
 /// Inserts bbox corners where polygon transitions between different bbox edges.
 fn insert_bbox_corners(
-    polygon: Vec<(f64, f64)>, 
-    min_x: f64, 
-    min_z: f64, 
-    max_x: f64, 
-    max_z: f64
+    polygon: Vec<(f64, f64)>,
+    min_x: f64,
+    min_z: f64,
+    max_x: f64,
+    max_z: f64,
 ) -> Vec<(f64, f64)> {
     if polygon.len() < 3 {
         return polygon;
     }
-    
+
     let mut result = Vec::with_capacity(polygon.len() + 4); // May add up to 4 corners
-    
+
     for i in 0..polygon.len() {
         let current = polygon[i];
         let next = polygon[(i + 1) % polygon.len()];
-        
+
         result.push(current);
-        
+
         // Check if current and next are on different bbox edges
         let edge1 = get_bbox_edge(current, min_x, min_z, max_x, max_z);
         let edge2 = get_bbox_edge(next, min_x, min_z, max_x, max_z);
-        
+
         if edge1 >= 0 && edge2 >= 0 && edge1 != edge2 {
             // Both points are on bbox edges but different edges
             // We need to insert corner(s) between them
@@ -604,7 +615,7 @@ fn insert_bbox_corners(
             }
         }
     }
-    
+
     result
 }
 
@@ -793,10 +804,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
 
 /// Clips a way to the bounding box using Sutherland-Hodgman for polygons or
 /// simple line clipping for polylines. Preserves endpoint IDs for ring assembly.
-fn clip_way_to_bbox(
-    nodes: &[ProcessedNode],
-    xzbbox: &XZBBox,
-) -> Vec<ProcessedNode> {
+fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<ProcessedNode> {
     if nodes.is_empty() {
         return Vec::new();
     }
@@ -851,7 +859,7 @@ fn clip_way_to_bbox(
         // Recompute whether polygon is explicitly closed for EACH pass
         // (the clipping can change this property)
         let is_closed = !polygon.is_empty() && polygon.first() == polygon.last();
-        
+
         // If explicitly closed, process n-1 edges; else process n edges with wrap
         let edge_count = if is_closed {
             polygon.len().saturating_sub(1)
@@ -921,17 +929,17 @@ fn clip_way_to_bbox(
         p.0 = p.0.clamp(min_x, max_x);
         p.1 = p.1.clamp(min_z, max_z);
     }
-    
+
     // Remove duplicates from corner clipping
     let polygon = remove_consecutive_duplicates(polygon);
-    
+
     if polygon.len() < 3 {
         return Vec::new();
     }
 
     // Insert corners where polygon follows bbox edges
     let polygon = insert_bbox_corners(polygon, min_x, min_z, max_x, max_z);
-    
+
     // Remove duplicates from corner insertion
     let polygon = remove_consecutive_duplicates(polygon);
 
