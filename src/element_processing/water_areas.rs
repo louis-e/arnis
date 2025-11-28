@@ -2,6 +2,7 @@ use geo::orient::{Direction, Orient};
 use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
 use std::time::Instant;
 
+use crate::clipping::clip_water_ring_to_bbox;
 use crate::{
     block_definitions::WATER,
     coordinate_system::cartesian::{XZBBox, XZPoint},
@@ -17,7 +18,7 @@ pub fn generate_water_area_from_way(
     let start_time = Instant::now();
 
     let outers = [element.nodes.clone()];
-    if !verify_loopy_loops(&outers) {
+    if !verify_closed_rings(&outers) {
         println!("Skipping way {} due to invalid polygon", element.id);
         return;
     }
@@ -62,20 +63,20 @@ pub fn generate_water_areas_from_relation(
     }
 
     // Preserve OSM-defined outer/inner roles without modification
-    merge_loopy_loops(&mut outers);
+    merge_way_segments(&mut outers);
 
     // Clip assembled rings to bbox (must happen after merging to preserve ring connectivity)
     outers = outers
         .into_iter()
         .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
         .collect();
-    merge_loopy_loops(&mut inners);
+    merge_way_segments(&mut inners);
     inners = inners
         .into_iter()
         .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
         .collect();
 
-    if !verify_loopy_loops(&outers) {
+    if !verify_closed_rings(&outers) {
         // For clipped multipolygons, some loops may not close perfectly
         // Instead of force-closing with straight lines (which creates wedges),
         // filter out unclosed loops and only render the properly closed ones
@@ -110,14 +111,14 @@ pub fn generate_water_areas_from_relation(
         }
 
         // Verify again after filtering and closing
-        if !verify_loopy_loops(&outers) {
+        if !verify_closed_rings(&outers) {
             println!("Skipping relation {} due to invalid polygon", element.id);
             return;
         }
     }
 
-    merge_loopy_loops(&mut inners);
-    if !verify_loopy_loops(&inners) {
+    merge_way_segments(&mut inners);
+    if !verify_closed_rings(&inners) {
         println!("Skipping relation {} due to invalid polygon", element.id);
         return;
     }
@@ -173,8 +174,8 @@ fn generate_water_areas(
     );
 }
 
-// Merges ways that share nodes into full loops
-fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
+/// Merges way segments that share endpoints into closed rings.
+fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
     let mut removed: Vec<usize> = vec![];
     let mut merged: Vec<Vec<ProcessedNode>> = vec![];
 
@@ -188,8 +189,8 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
         dx <= 1 && dz <= 1
     };
 
-    for i in 0..loops.len() {
-        for j in 0..loops.len() {
+    for i in 0..rings.len() {
+        for j in 0..rings.len() {
             if i == j {
                 continue;
             }
@@ -198,10 +199,10 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
                 continue;
             }
 
-            let x: &Vec<ProcessedNode> = &loops[i];
-            let y: &Vec<ProcessedNode> = &loops[j];
+            let x: &Vec<ProcessedNode> = &rings[i];
+            let y: &Vec<ProcessedNode> = &rings[j];
 
-            // Skip empty loops (can happen after clipping)
+            // Skip empty rings (can happen after clipping)
             if x.is_empty() || y.is_empty() {
                 continue;
             }
@@ -211,7 +212,7 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
             let y_first = &y[0];
             let y_last = y.last().unwrap();
 
-            // Skip already-closed loops
+            // Skip already-closed rings
             if nodes_match(x_first, x_last) {
                 continue;
             }
@@ -259,26 +260,27 @@ fn merge_loopy_loops(loops: &mut Vec<Vec<ProcessedNode>>) {
     removed.sort();
 
     for r in removed.iter().rev() {
-        loops.remove(*r);
+        rings.remove(*r);
     }
 
     let merged_len: usize = merged.len();
     for m in merged {
-        loops.push(m);
+        rings.push(m);
     }
 
     if merged_len > 0 {
-        merge_loopy_loops(loops);
+        merge_way_segments(rings);
     }
 }
 
-fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
-    let mut valid: bool = true;
-    for l in loops {
-        let first = &l[0];
-        let last = l.last().unwrap();
+/// Verifies all rings are properly closed (first node matches last).
+fn verify_closed_rings(rings: &[Vec<ProcessedNode>]) -> bool {
+    let mut valid = true;
+    for ring in rings {
+        let first = &ring[0];
+        let last = ring.last().unwrap();
 
-        // Check if loop is closed (by ID or proximity)
+        // Check if ring is closed (by ID or proximity)
         let is_closed = first.id == last.id || {
             let dx = (first.x - last.x).abs();
             let dz = (first.z - last.z).abs();
@@ -286,329 +288,12 @@ fn verify_loopy_loops(loops: &[Vec<ProcessedNode>]) -> bool {
         };
 
         if !is_closed {
-            eprintln!("WARN: Disconnected loop");
+            eprintln!("WARN: Disconnected ring");
             valid = false;
         }
     }
 
     valid
-}
-
-/// Clips a water polygon ring to bbox using Sutherland-Hodgman (post-ring-merge).
-fn clip_water_ring_to_bbox(ring: &[ProcessedNode], xzbbox: &XZBBox) -> Option<Vec<ProcessedNode>> {
-    if ring.is_empty() {
-        return None;
-    }
-
-    let min_x = xzbbox.min_x() as f64;
-    let min_z = xzbbox.min_z() as f64;
-    let max_x = xzbbox.max_x() as f64;
-    let max_z = xzbbox.max_z() as f64;
-
-    // Check if entire ring is inside bbox - if so, return unchanged
-    let all_inside = ring.iter().all(|n| {
-        n.x as f64 >= min_x && n.x as f64 <= max_x && n.z as f64 >= min_z && n.z as f64 <= max_z
-    });
-
-    if all_inside {
-        // Ring is entirely inside bbox, no clipping needed
-        return Some(ring.to_vec());
-    }
-
-    // Check if entire ring is outside bbox
-    let all_outside_left = ring.iter().all(|n| (n.x as f64) < min_x);
-    let all_outside_right = ring.iter().all(|n| (n.x as f64) > max_x);
-    let all_outside_top = ring.iter().all(|n| (n.z as f64) < min_z);
-    let all_outside_bottom = ring.iter().all(|n| (n.z as f64) > max_z);
-
-    if all_outside_left || all_outside_right || all_outside_top || all_outside_bottom {
-        // Ring is entirely outside bbox
-        return None;
-    }
-
-    // Ring crosses bbox boundary, need to clip
-    // Convert to f64 coordinates for clipping
-    let mut polygon: Vec<(f64, f64)> = ring.iter().map(|n| (n.x as f64, n.z as f64)).collect();
-
-    // Ensure polygon is closed
-    if !polygon.is_empty() && polygon.first() != polygon.last() {
-        polygon.push(polygon[0]);
-    }
-
-    // Clip against each bbox edge (counter-clockwise traversal)
-    let bbox_edges = [
-        (min_x, min_z, max_x, min_z), // Bottom edge: left to right
-        (max_x, min_z, max_x, max_z), // Right edge: bottom to top
-        (max_x, max_z, min_x, max_z), // Top edge: right to left
-        (min_x, max_z, min_x, min_z), // Left edge: top to bottom
-    ];
-
-    for (edge_x1, edge_z1, edge_x2, edge_z2) in bbox_edges {
-        let mut clipped = Vec::new();
-
-        if polygon.is_empty() {
-            return None;
-        }
-
-        // Process edges: iterate through adjacent pairs
-        // For a closed polygon, we process n-1 edges (since last point == first point)
-        for i in 0..(polygon.len() - 1) {
-            let current = polygon[i];
-            let next = polygon[i + 1];
-
-            let current_inside = point_inside_edge(current, edge_x1, edge_z1, edge_x2, edge_z2);
-            let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
-
-            if next_inside {
-                if !current_inside {
-                    // Entering: add intersection
-                    if let Some(mut intersection) = line_edge_intersection(
-                        current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
-                    ) {
-                        // Clamp intersection to bbox to handle floating-point errors
-                        intersection.0 = intersection.0.clamp(min_x, max_x);
-                        intersection.1 = intersection.1.clamp(min_z, max_z);
-                        clipped.push(intersection);
-                    }
-                }
-                clipped.push(next);
-            } else if current_inside {
-                // Exiting: add intersection
-                if let Some(mut intersection) = line_edge_intersection(
-                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
-                ) {
-                    // Clamp intersection to bbox to handle floating-point errors
-                    intersection.0 = intersection.0.clamp(min_x, max_x);
-                    intersection.1 = intersection.1.clamp(min_z, max_z);
-                    clipped.push(intersection);
-                }
-            }
-        }
-
-        polygon = clipped;
-    }
-
-    if polygon.len() < 3 {
-        return None; // Not a valid polygon
-    }
-
-    // Verify all points are within bbox before returning
-    let all_points_inside = polygon
-        .iter()
-        .all(|&(x, z)| x >= min_x && x <= max_x && z >= min_z && z <= max_z);
-
-    if !all_points_inside {
-        eprintln!("ERROR: clip_water_ring_to_bbox produced points outside bbox!");
-        eprintln!("  Bbox: x=[{}, {}], z=[{}, {}]", min_x, max_x, min_z, max_z);
-        for (i, &(x, z)) in polygon.iter().enumerate() {
-            if x < min_x || x > max_x || z < min_z || z > max_z {
-                eprintln!("  Point {}: ({}, {}) is OUTSIDE", i, x, z);
-            }
-        }
-        return None; // Reject invalid result
-    }
-
-    // Insert corners where polygon follows bbox edges
-    let polygon = insert_water_bbox_corners(polygon, min_x, min_z, max_x, max_z);
-
-    if polygon.len() < 3 {
-        return None;
-    }
-
-    // Convert back to ProcessedNode with synthetic IDs
-    // IMPORTANT: Clamp coordinates to bbox boundaries to handle floating-point edge cases
-    let mut result: Vec<ProcessedNode> = polygon
-        .iter()
-        .enumerate()
-        .map(|(i, &(x, z))| {
-            let clamped_x = x.clamp(min_x, max_x);
-            let clamped_z = z.clamp(min_z, max_z);
-            ProcessedNode {
-                id: 1_000_000_000 + i as u64, // Synthetic ID for clipped nodes
-                tags: std::collections::HashMap::new(),
-                x: clamped_x.round() as i32,
-                z: clamped_z.round() as i32,
-            }
-        })
-        .collect();
-
-    // Ensure first and last have same ID to close the loop
-    if !result.is_empty() {
-        let first_id = result[0].id;
-        result.last_mut().unwrap().id = first_id;
-    }
-
-    Some(result)
-}
-
-/// Returns which bbox edge a point lies on: 0=bottom, 1=right, 2=top, 3=left, -1=interior.
-fn get_water_bbox_edge(point: (f64, f64), min_x: f64, min_z: f64, max_x: f64, max_z: f64) -> i32 {
-    let eps = 0.5; // Tolerance for floating point comparison
-
-    let on_left = (point.0 - min_x).abs() < eps;
-    let on_right = (point.0 - max_x).abs() < eps;
-    let on_bottom = (point.1 - min_z).abs() < eps;
-    let on_top = (point.1 - max_z).abs() < eps;
-
-    // Handle corners - assign to the edge we're "leaving" in counter-clockwise order
-    if on_bottom && on_left {
-        return 3;
-    }
-    if on_bottom && on_right {
-        return 0;
-    }
-    if on_top && on_right {
-        return 1;
-    }
-    if on_top && on_left {
-        return 2;
-    }
-
-    // Single edge
-    if on_bottom {
-        return 0;
-    }
-    if on_right {
-        return 1;
-    }
-    if on_top {
-        return 2;
-    }
-    if on_left {
-        return 3;
-    }
-
-    -1 // Not on any edge
-}
-
-/// Returns corners to insert when traversing from edge1 to edge2 via the shorter path.
-fn get_water_corners_between_edges(
-    edge1: i32,
-    edge2: i32,
-    min_x: f64,
-    min_z: f64,
-    max_x: f64,
-    max_z: f64,
-) -> Vec<(f64, f64)> {
-    if edge1 == edge2 || edge1 < 0 || edge2 < 0 {
-        return Vec::new();
-    }
-
-    // Corners indexed by edge: corner[i] is the corner between edge i and edge (i+1)%4
-    let corners = [
-        (max_x, min_z), // 0: bottom-right
-        (max_x, max_z), // 1: top-right
-        (min_x, max_z), // 2: top-left
-        (min_x, min_z), // 3: bottom-left
-    ];
-
-    // Calculate distance in both directions
-    let ccw_dist = ((edge2 - edge1 + 4) % 4) as usize;
-    let cw_dist = ((edge1 - edge2 + 4) % 4) as usize;
-
-    // If edges are opposite (distance 2 in both directions), don't insert corners.
-    // The polygon is passing through the bbox, not wrapping around it.
-    if ccw_dist == 2 && cw_dist == 2 {
-        return Vec::new();
-    }
-
-    let mut result = Vec::new();
-
-    if ccw_dist <= cw_dist {
-        // Go counter-clockwise (shorter or equal)
-        let mut current = edge1;
-        for _ in 0..ccw_dist {
-            result.push(corners[current as usize]);
-            current = (current + 1) % 4;
-        }
-    } else {
-        // Go clockwise (shorter)
-        let mut current = edge1;
-        for _ in 0..cw_dist {
-            current = (current + 4 - 1) % 4;
-            result.push(corners[current as usize]);
-        }
-    }
-
-    result
-}
-
-/// Inserts bbox corners where polygon transitions between different bbox edges.
-fn insert_water_bbox_corners(
-    polygon: Vec<(f64, f64)>,
-    min_x: f64,
-    min_z: f64,
-    max_x: f64,
-    max_z: f64,
-) -> Vec<(f64, f64)> {
-    if polygon.len() < 3 {
-        return polygon;
-    }
-
-    let mut result = Vec::with_capacity(polygon.len() + 4);
-
-    for i in 0..polygon.len() {
-        let current = polygon[i];
-        let next = polygon[(i + 1) % polygon.len()];
-
-        result.push(current);
-
-        let edge1 = get_water_bbox_edge(current, min_x, min_z, max_x, max_z);
-        let edge2 = get_water_bbox_edge(next, min_x, min_z, max_x, max_z);
-
-        if edge1 >= 0 && edge2 >= 0 && edge1 != edge2 {
-            let corners = get_water_corners_between_edges(edge1, edge2, min_x, min_z, max_x, max_z);
-            for corner in corners {
-                result.push(corner);
-            }
-        }
-    }
-
-    result
-}
-
-fn point_inside_edge(
-    point: (f64, f64),
-    edge_x1: f64,
-    edge_z1: f64,
-    edge_x2: f64,
-    edge_z2: f64,
-) -> bool {
-    // Cross product to determine if point is on the "inside" (left) of the edge
-    let dx = edge_x2 - edge_x1;
-    let dz = edge_z2 - edge_z1;
-    let px = point.0 - edge_x1;
-    let pz = point.1 - edge_z1;
-    (dx * pz - dz * px) >= 0.0
-}
-
-#[allow(clippy::too_many_arguments)]
-fn line_edge_intersection(
-    x1: f64,
-    z1: f64,
-    x2: f64,
-    z2: f64,
-    edge_x1: f64,
-    edge_z1: f64,
-    edge_x2: f64,
-    edge_z2: f64,
-) -> Option<(f64, f64)> {
-    let dx = x2 - x1;
-    let dz = z2 - z1;
-    let edge_dx = edge_x2 - edge_x1;
-    let edge_dz = edge_z2 - edge_z1;
-
-    let denominator = dx * edge_dz - dz * edge_dx;
-    if denominator.abs() < 1e-10 {
-        return None; // Parallel lines
-    }
-
-    let t = ((edge_x1 - x1) * edge_dz - (edge_z1 - z1) * edge_dx) / denominator;
-    if !(0.0..=1.0).contains(&t) {
-        return None;
-    }
-
-    Some((x1 + t * dx, z1 + t * dz))
 }
 
 // Water areas are absolutely huge. We can't easily flood fill the entire thing.
