@@ -184,7 +184,6 @@ dependencies = [
 name = "arnis"
 version = "2.3.1"
 dependencies = [
- "chrono",
  "clap",
  "colored",
  "dirs",
@@ -197,7 +196,6 @@ dependencies = [
  "image 0.25.6",
  "indicatif",
  "itertools 0.14.0",
- "lazy_static",
  "log",
  "once_cell",
  "rand 0.8.5",
@@ -788,10 +786,8 @@ checksum = "7e36cc9d416881d2e24f9a963be5fb1cd90966419ac844274161d10488b3e825"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
- "js-sys",
  "num-traits",
  "serde",
- "wasm-bindgen",
  "windows-targets 0.52.6",
 ]
 
