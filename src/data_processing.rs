@@ -6,7 +6,7 @@ use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
-use crate::progress::emit_gui_progress_update;
+use crate::progress::{emit_gui_progress_update, emit_map_preview_ready};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::world_editor::WorldEditor;
@@ -283,7 +283,7 @@ pub fn generate_world(
         match result {
             Ok(Ok(_path)) => {
                 // Notify the GUI that the map preview is ready
-                crate::progress::emit_map_preview_ready();
+                emit_map_preview_ready();
             }
             Ok(Err(e)) => {
                 eprintln!("Warning: Failed to generate map preview: {}", e);
