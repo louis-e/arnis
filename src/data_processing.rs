@@ -293,7 +293,9 @@ pub fn generate_world(
                 Ok(Ok(_path)) => {
                     // Notify the GUI that the map preview is ready
                     #[cfg(feature = "gui")]
-                    crate::progress::emit_map_preview_ready();
+                    {
+                        crate::progress::emit_map_preview_ready();
+                    }
                 }
                 Ok(Err(e)) => {
                     eprintln!("Warning: Failed to generate map preview: {}", e);
