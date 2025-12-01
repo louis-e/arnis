@@ -558,10 +558,207 @@ $(document).ready(function () {
     var savedTheme = localStorage.getItem('selectedTileTheme') || 'osm';
     changeTileTheme(savedTheme);
 
-    // Listen for theme changes from parent window (settings modal)
+    // World overlay state
+    var worldOverlay = null;
+    var worldOverlayData = null;
+    var worldOverlayEnabled = false;
+    var worldPreviewAvailable = false;
+    var sliderControl = null;
+
+    // Create the opacity slider as a proper Leaflet control
+    var SliderControl = L.Control.extend({
+        options: { position: 'topleft' },
+        onAdd: function(map) {
+            var container = L.DomUtil.create('div', 'leaflet-bar world-preview-slider-container');
+            container.id = 'world-preview-slider-container';
+            container.style.display = 'none';
+
+            var slider = L.DomUtil.create('input', 'world-preview-slider', container);
+            slider.type = 'range';
+            slider.min = '0';
+            slider.max = '100';
+            slider.value = '50';
+            slider.id = 'world-preview-opacity';
+            slider.title = 'Overlay Opacity';
+
+            L.DomEvent.on(slider, 'input', function(e) {
+                if (worldOverlay) {
+                    worldOverlay.setOpacity(e.target.value / 100);
+                }
+            });
+
+            // Prevent all map interactions
+            L.DomEvent.disableClickPropagation(container);
+            L.DomEvent.disableScrollPropagation(container);
+            L.DomEvent.on(container, 'mousedown', L.DomEvent.stopPropagation);
+            L.DomEvent.on(container, 'touchstart', L.DomEvent.stopPropagation);
+            L.DomEvent.on(slider, 'mousedown', L.DomEvent.stopPropagation);
+            L.DomEvent.on(slider, 'touchstart', L.DomEvent.stopPropagation);
+
+            return container;
+        }
+    });
+
+    // Function to add world preview button to the draw control's edit toolbar
+    function addWorldPreviewToEditToolbar() {
+        // Find the edit toolbar (contains Edit layers and Delete layers buttons)
+        var editToolbar = document.querySelector('.leaflet-draw-toolbar:not(.leaflet-draw-toolbar-top)');
+        if (!editToolbar) {
+            // Try finding by the edit/delete buttons
+            var deleteBtn = document.querySelector('.leaflet-draw-edit-remove');
+            if (deleteBtn) {
+                editToolbar = deleteBtn.parentElement;
+            }
+        }
+
+        if (editToolbar) {
+            // Create the preview button
+            var toggleBtn = document.createElement('a');
+            toggleBtn.className = 'leaflet-draw-edit-preview disabled';
+            toggleBtn.href = '#';
+            toggleBtn.title = 'Show World Preview (not available yet)';
+            toggleBtn.id = 'world-preview-btn';
+
+            toggleBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (worldPreviewAvailable) {
+                    toggleWorldOverlay();
+                }
+            });
+
+            editToolbar.appendChild(toggleBtn);
+
+            // Add the slider control to the map
+            sliderControl = new SliderControl();
+            map.addControl(sliderControl);
+        }
+    }
+
+    // Toggle world overlay function
+    function toggleWorldOverlay() {
+        if (!worldPreviewAvailable || !worldOverlayData) return;
+
+        worldOverlayEnabled = !worldOverlayEnabled;
+        var btn = document.getElementById('world-preview-btn');
+        var sliderContainer = document.getElementById('world-preview-slider-container');
+
+        if (worldOverlayEnabled) {
+            // Show overlay
+            var data = worldOverlayData;
+            var bounds = L.latLngBounds(
+                [data.min_lat, data.min_lon],
+                [data.max_lat, data.max_lon]
+            );
+
+            if (worldOverlay) {
+                map.removeLayer(worldOverlay);
+            }
+
+            var opacity = document.getElementById('world-preview-opacity');
+            var opacityValue = opacity ? opacity.value / 100 : 0.5;
+
+            worldOverlay = L.imageOverlay(data.image_base64, bounds, {
+                opacity: opacityValue,
+                interactive: false,
+                zIndex: 500
+            });
+            worldOverlay.addTo(map);
+
+            if (btn) {
+                btn.classList.add('active');
+                btn.title = 'Hide World Preview';
+            }
+            if (sliderContainer) {
+                sliderContainer.style.display = 'block';
+            }
+        } else {
+            // Hide overlay
+            if (worldOverlay) {
+                map.removeLayer(worldOverlay);
+                worldOverlay = null;
+            }
+            if (btn) {
+                btn.classList.remove('active');
+                btn.title = 'Show World Preview';
+            }
+            if (sliderContainer) {
+                sliderContainer.style.display = 'none';
+            }
+        }
+    }
+
+    // Enable the preview button when data is available
+    function enableWorldPreview(data) {
+        worldOverlayData = data;
+        worldPreviewAvailable = true;
+        var btn = document.getElementById('world-preview-btn');
+        if (btn) {
+            btn.classList.remove('disabled');
+            btn.title = 'Show World Preview';
+        }
+    }
+
+    // Disable and reset preview (when world changes)
+    function disableWorldPreview() {
+        worldPreviewAvailable = false;
+        worldOverlayData = null;
+        worldOverlayEnabled = false;
+
+        if (worldOverlay) {
+            map.removeLayer(worldOverlay);
+            worldOverlay = null;
+        }
+
+        var btn = document.getElementById('world-preview-btn');
+        var sliderContainer = document.getElementById('world-preview-slider-container');
+        if (btn) {
+            btn.classList.add('disabled');
+            btn.classList.remove('active');
+            btn.title = 'Show World Preview (not available yet)';
+        }
+        if (sliderContainer) {
+            sliderContainer.style.display = 'none';
+        }
+    }
+
+    // Listen for messages from parent window
     window.addEventListener('message', function(event) {
         if (event.data && event.data.type === 'changeTileTheme') {
             changeTileTheme(event.data.theme);
+        }
+
+        // Handle world preview data ready (after generation completes)
+        if (event.data && event.data.type === 'worldPreviewReady') {
+            enableWorldPreview(event.data.data);
+
+            // Auto-enable the overlay when generation completes
+            if (!worldOverlayEnabled) {
+                toggleWorldOverlay();
+            }
+        }
+
+        // Handle existing world map load (zoom to location and auto-enable)
+        if (event.data && event.data.type === 'loadExistingWorldMap') {
+            var data = event.data.data;
+            enableWorldPreview(data);
+
+            // Calculate bounds and zoom to them
+            var bounds = L.latLngBounds(
+                [data.min_lat, data.min_lon],
+                [data.max_lat, data.max_lon]
+            );
+            map.fitBounds(bounds, { padding: [50, 50] });
+
+            // Auto-enable the overlay
+            if (!worldOverlayEnabled) {
+                toggleWorldOverlay();
+            }
+        }
+
+        // Handle world changed (disable preview)
+        if (event.data && event.data.type === 'worldChanged') {
+            disableWorldPreview();
         }
     });
 
@@ -652,6 +849,9 @@ $(document).ready(function () {
         }
     });
     map.addControl(drawControl);
+
+    // Add world preview button to the edit toolbar after drawControl is added
+    addWorldPreviewToEditToolbar();
     /*
     **
     **  create bounds layer

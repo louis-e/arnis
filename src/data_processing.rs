@@ -4,6 +4,7 @@ use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
 use crate::ground::Ground;
+use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
 #[cfg(feature = "gui")]
@@ -264,5 +265,35 @@ pub fn generate_world(
 
     emit_gui_progress_update(100.0, "Done! World generation completed.");
     println!("{}", "Done! World generation completed.".green().bold());
+
+    // Generate top-down map preview silently in background after completion
+    let world_path = args.path.clone();
+    let bounds = (
+        xzbbox.min_x(),
+        xzbbox.max_x(),
+        xzbbox.min_z(),
+        xzbbox.max_z(),
+    );
+    std::thread::spawn(move || {
+        // Use catch_unwind to prevent any panic from affecting the application
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            map_renderer::render_world_map(&world_path, bounds.0, bounds.1, bounds.2, bounds.3)
+        }));
+
+        match result {
+            Ok(Ok(path)) => {
+                println!("{}", format!("Map preview saved to: {}", path.display()));
+                // Notify the GUI that the map preview is ready
+                crate::progress::emit_map_preview_ready();
+            }
+            Ok(Err(e)) => {
+                eprintln!("Warning: Failed to generate map preview: {}", e);
+            }
+            Err(_) => {
+                eprintln!("Warning: Map preview generation panicked unexpectedly");
+            }
+        }
+    });
+
     Ok(())
 }
