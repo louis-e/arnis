@@ -503,7 +503,6 @@ fn get_fallback_color(name: &str) -> Rgb<u8> {
 /// Returns a mapping of common block names to RGB colors (without minecraft: prefix)
 fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
     FnvHashMap::from_iter([
-        // Natural blocks
         ("grass_block", Rgb([86, 125, 70])),
         ("short_grass", Rgb([86, 125, 70])),
         ("tall_grass", Rgb([86, 125, 70])),
@@ -532,7 +531,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("gravel", Rgb([131, 127, 126])),
         ("clay", Rgb([160, 166, 179])),
         ("bedrock", Rgb([85, 85, 85])),
-        // Water and ice
         ("water", Rgb([59, 86, 165])),
         ("ice", Rgb([145, 183, 253])),
         ("packed_ice", Rgb([141, 180, 250])),
@@ -540,7 +538,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("snow", Rgb([249, 254, 254])),
         ("snow_block", Rgb([249, 254, 254])),
         ("powder_snow", Rgb([248, 253, 253])),
-        // Wood types
         ("oak_log", Rgb([109, 85, 50])),
         ("oak_planks", Rgb([162, 130, 78])),
         ("oak_slab", Rgb([162, 130, 78])),
@@ -579,7 +576,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("crimson_planks", Rgb([101, 48, 70])),
         ("warped_stem", Rgb([58, 58, 77])),
         ("warped_planks", Rgb([43, 104, 99])),
-        // Leaves
         ("oak_leaves", Rgb([55, 95, 36])),
         ("spruce_leaves", Rgb([61, 99, 61])),
         ("birch_leaves", Rgb([80, 106, 47])),
@@ -589,7 +585,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("mangrove_leaves", Rgb([69, 123, 38])),
         ("cherry_leaves", Rgb([228, 177, 197])),
         ("azalea_leaves", Rgb([71, 96, 37])),
-        // Stone bricks and variants
         ("stone_bricks", Rgb([122, 122, 122])),
         ("stone_brick_slab", Rgb([122, 122, 122])),
         ("stone_brick_stairs", Rgb([122, 122, 122])),
@@ -612,7 +607,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("stone_stairs", Rgb([128, 128, 128])),
         ("smooth_stone", Rgb([158, 158, 158])),
         ("smooth_stone_slab", Rgb([158, 158, 158])),
-        // Bricks and terracotta
         ("bricks", Rgb([150, 97, 83])),
         ("brick_slab", Rgb([150, 97, 83])),
         ("brick_stairs", Rgb([150, 97, 83])),
@@ -638,7 +632,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("green_terracotta", Rgb([76, 83, 42])),
         ("red_terracotta", Rgb([143, 61, 47])),
         ("black_terracotta", Rgb([37, 23, 16])),
-        // Concrete
         ("white_concrete", Rgb([207, 213, 214])),
         ("orange_concrete", Rgb([224, 97, 0])),
         ("magenta_concrete", Rgb([169, 48, 159])),
@@ -655,7 +648,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("green_concrete", Rgb([73, 91, 36])),
         ("red_concrete", Rgb([142, 33, 33])),
         ("black_concrete", Rgb([8, 10, 15])),
-        // Wool
         ("white_wool", Rgb([234, 236, 237])),
         ("orange_wool", Rgb([241, 118, 20])),
         ("magenta_wool", Rgb([190, 68, 179])),
@@ -672,7 +664,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("green_wool", Rgb([85, 110, 28])),
         ("red_wool", Rgb([161, 39, 35])),
         ("black_wool", Rgb([21, 21, 26])),
-        // Sandstone
         ("sandstone", Rgb([223, 214, 170])),
         ("sandstone_slab", Rgb([223, 214, 170])),
         ("sandstone_stairs", Rgb([223, 214, 170])),
@@ -688,7 +679,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("red_sandstone_stairs", Rgb([186, 99, 29])),
         ("red_sandstone_wall", Rgb([186, 99, 29])),
         ("smooth_red_sandstone", Rgb([186, 99, 29])),
-        // Nether blocks
         ("netherrack", Rgb([111, 54, 53])),
         ("nether_bricks", Rgb([44, 21, 26])),
         ("nether_brick_slab", Rgb([44, 21, 26])),
@@ -717,7 +707,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("shroomlight", Rgb([240, 146, 70])),
         ("crying_obsidian", Rgb([32, 10, 60])),
         ("obsidian", Rgb([15, 10, 24])),
-        // End blocks
         ("end_stone", Rgb([219, 222, 158])),
         ("end_stone_bricks", Rgb([218, 224, 162])),
         ("end_stone_brick_slab", Rgb([218, 224, 162])),
@@ -727,7 +716,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("purpur_pillar", Rgb([171, 129, 171])),
         ("purpur_slab", Rgb([170, 126, 170])),
         ("purpur_stairs", Rgb([170, 126, 170])),
-        // Ores and minerals
         ("coal_ore", Rgb([105, 105, 105])),
         ("iron_ore", Rgb([136, 130, 127])),
         ("copper_ore", Rgb([124, 125, 120])),
@@ -749,7 +737,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("raw_iron_block", Rgb([166, 136, 107])),
         ("raw_copper_block", Rgb([154, 105, 79])),
         ("raw_gold_block", Rgb([221, 169, 46])),
-        // Quartz
         ("quartz_block", Rgb([235, 229, 222])),
         ("quartz_slab", Rgb([235, 229, 222])),
         ("quartz_stairs", Rgb([235, 229, 222])),
@@ -759,7 +746,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("quartz_bricks", Rgb([234, 229, 221])),
         ("quartz_pillar", Rgb([235, 230, 224])),
         ("chiseled_quartz_block", Rgb([231, 226, 218])),
-        // Prismarine
         ("prismarine", Rgb([76, 128, 113])),
         ("prismarine_slab", Rgb([76, 128, 113])),
         ("prismarine_stairs", Rgb([76, 128, 113])),
@@ -771,7 +757,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("dark_prismarine_slab", Rgb([51, 91, 75])),
         ("dark_prismarine_stairs", Rgb([51, 91, 75])),
         ("sea_lantern", Rgb([172, 199, 190])),
-        // Copper variants
         ("exposed_copper", Rgb([161, 125, 103])),
         ("weathered_copper", Rgb([109, 145, 107])),
         ("oxidized_copper", Rgb([82, 162, 132])),
@@ -787,7 +772,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("oxidized_cut_copper", Rgb([79, 153, 126])),
         ("oxidized_cut_copper_slab", Rgb([79, 153, 126])),
         ("oxidized_cut_copper_stairs", Rgb([79, 153, 126])),
-        // Glass (slightly transparent look)
         ("glass", Rgb([200, 220, 230])),
         ("glass_pane", Rgb([200, 220, 230])),
         ("white_stained_glass", Rgb([255, 255, 255])),
@@ -822,7 +806,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("red_stained_glass_pane", Rgb([153, 51, 51])),
         ("black_stained_glass", Rgb([25, 25, 25])),
         ("black_stained_glass_pane", Rgb([25, 25, 25])),
-        // Misc common blocks
         ("bookshelf", Rgb([116, 89, 53])),
         ("hay_block", Rgb([166, 139, 12])),
         ("melon", Rgb([111, 145, 31])),
@@ -853,11 +836,9 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("jukebox", Rgb([130, 90, 70])),
         ("note_block", Rgb([120, 80, 65])),
         ("bell", Rgb([200, 170, 50])),
-        // Roads and paths
         ("dirt_path", Rgb([148, 121, 65])),
         ("farmland", Rgb([143, 88, 46])),
         ("mycelium", Rgb([111, 99, 107])),
-        // Rails and redstone
         ("rail", Rgb([125, 108, 77])),
         ("powered_rail", Rgb([153, 126, 55])),
         ("detector_rail", Rgb([120, 97, 80])),
@@ -867,7 +848,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("redstone_lamp", Rgb([180, 130, 70])),
         ("lever", Rgb([100, 80, 60])),
         ("tripwire_hook", Rgb([120, 100, 80])),
-        // Lighting
         ("torch", Rgb([255, 200, 100])),
         ("wall_torch", Rgb([255, 200, 100])),
         ("lantern", Rgb([200, 150, 80])),
@@ -877,7 +857,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("campfire", Rgb([200, 100, 50])),
         ("soul_campfire", Rgb([80, 200, 200])),
         ("candle", Rgb([200, 180, 130])),
-        // Flowers and plants
         ("dandelion", Rgb([255, 236, 85])),
         ("poppy", Rgb([200, 30, 30])),
         ("blue_orchid", Rgb([47, 186, 199])),
@@ -908,7 +887,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("lily_pad", Rgb([40, 110, 40])),
         ("sweet_berry_bush", Rgb([60, 90, 50])),
         ("cactus", Rgb([85, 127, 52])),
-        // Carpets
         ("white_carpet", Rgb([234, 236, 237])),
         ("orange_carpet", Rgb([241, 118, 20])),
         ("magenta_carpet", Rgb([190, 68, 179])),
@@ -925,7 +903,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("green_carpet", Rgb([85, 110, 28])),
         ("red_carpet", Rgb([161, 39, 35])),
         ("black_carpet", Rgb([21, 21, 26])),
-        // Signs and banners
         ("oak_sign", Rgb([162, 130, 78])),
         ("oak_wall_sign", Rgb([162, 130, 78])),
         ("spruce_sign", Rgb([115, 85, 49])),
@@ -934,7 +911,6 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("birch_wall_sign", Rgb([196, 179, 123])),
         ("dark_oak_sign", Rgb([67, 43, 20])),
         ("dark_oak_wall_sign", Rgb([67, 43, 20])),
-        // Beds (show blanket color from top)
         ("white_bed", Rgb([234, 236, 237])),
         ("orange_bed", Rgb([241, 118, 20])),
         ("magenta_bed", Rgb([190, 68, 179])),
@@ -951,17 +927,13 @@ fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
         ("green_bed", Rgb([85, 110, 28])),
         ("red_bed", Rgb([161, 39, 35])),
         ("black_bed", Rgb([21, 21, 26])),
-        // Trapdoors
         ("oak_trapdoor", Rgb([162, 130, 78])),
         ("spruce_trapdoor", Rgb([115, 85, 49])),
         ("birch_trapdoor", Rgb([196, 179, 123])),
         ("dark_oak_trapdoor", Rgb([67, 43, 20])),
         ("iron_trapdoor", Rgb([200, 200, 200])),
-        // Fences and walls
         ("iron_bars", Rgb([150, 150, 150])),
-        // Ladders
         ("ladder", Rgb([160, 130, 70])),
-        // Crops
         ("wheat", Rgb([200, 180, 80])),
         ("carrots", Rgb([230, 140, 30])),
         ("potatoes", Rgb([180, 160, 80])),
