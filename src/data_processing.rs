@@ -266,33 +266,55 @@ pub fn generate_world(
     emit_gui_progress_update(100.0, "Done! World generation completed.");
     println!("{}", "Done! World generation completed.".green().bold());
 
-    // Generate top-down map preview silently in background after completion
-    let world_path = args.path.clone();
-    let bounds = (
-        xzbbox.min_x(),
-        xzbbox.max_x(),
-        xzbbox.min_z(),
-        xzbbox.max_z(),
-    );
-    std::thread::spawn(move || {
-        // Use catch_unwind to prevent any panic from affecting the application
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            map_renderer::render_world_map(&world_path, bounds.0, bounds.1, bounds.2, bounds.3)
-        }));
+    // Generate top-down map preview:
+    // - Always for GUI mode (non-blocking, runs in background)
+    // - Only when --generate-map flag is set for CLI mode (blocking, waits for completion)
+    #[cfg(feature = "gui")]
+    let should_generate_map = true;
+    #[cfg(not(feature = "gui"))]
+    let should_generate_map = args.generate_map;
 
-        match result {
-            Ok(Ok(_path)) => {
-                // Notify the GUI that the map preview is ready
-                crate::progress::emit_map_preview_ready();
+    if should_generate_map {
+        let world_path = args.path.clone();
+        let bounds = (
+            xzbbox.min_x(),
+            xzbbox.max_x(),
+            xzbbox.min_z(),
+            xzbbox.max_z(),
+        );
+
+        let map_thread = std::thread::spawn(move || {
+            // Use catch_unwind to prevent any panic from affecting the application
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                map_renderer::render_world_map(&world_path, bounds.0, bounds.1, bounds.2, bounds.3)
+            }));
+
+            match result {
+                Ok(Ok(_path)) => {
+                    // Notify the GUI that the map preview is ready
+                    #[cfg(feature = "gui")]
+                    crate::progress::emit_map_preview_ready();
+                }
+                Ok(Err(e)) => {
+                    eprintln!("Warning: Failed to generate map preview: {}", e);
+                }
+                Err(_) => {
+                    eprintln!("Warning: Map preview generation panicked unexpectedly");
+                }
             }
-            Ok(Err(e)) => {
-                eprintln!("Warning: Failed to generate map preview: {}", e);
-            }
-            Err(_) => {
-                eprintln!("Warning: Map preview generation panicked unexpectedly");
-            }
+        });
+
+        // In CLI mode, wait for map generation to complete before exiting
+        // In GUI mode, let it run in background to keep UI responsive
+        #[cfg(not(feature = "gui"))]
+        {
+            let _ = map_thread.join();
         }
-    });
+
+        // In GUI mode, we don't join, let the thread run in background
+        #[cfg(feature = "gui")]
+        drop(map_thread);
+    }
 
     Ok(())
 }

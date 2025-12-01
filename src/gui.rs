@@ -825,6 +825,7 @@ fn gui_start_generation(
                 fillground: fillground_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
+                generate_map: true,
                 spawn_point,
             };
 
@@ -876,7 +877,6 @@ fn gui_start_generation(
                         &mut xzbbox,
                         &mut ground,
                     );
-                    send_log(LogLevel::Info, "Map transformation completed.");
 
                     let _ = data_processing::generate_world(
                         parsed_elements,

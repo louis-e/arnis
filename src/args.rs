@@ -59,6 +59,10 @@ pub struct Args {
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
 
+    /// Generate a top-down map preview image after world generation (optional)
+    #[arg(long)]
+    pub generate_map: bool,
+
     /// Spawn point coordinates (lat, lng)
     #[arg(skip)]
     pub spawn_point: Option<(f64, f64)>,
