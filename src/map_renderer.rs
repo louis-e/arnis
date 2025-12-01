@@ -214,7 +214,7 @@ fn apply_elevation_shading(color: Rgb<u8>, y: i32) -> Rgb<u8> {
 
     // Normalize Y to a -1.0 to 1.0 range (roughly)
     // y=0 -> -0.5, y=0 -> 0, y=200 -> +1.0
-    let normalized = ((y - 0) as f32 / 100.0).clamp(-1.0, 1.0);
+    let normalized = (y as f32 / 100.0).clamp(-1.0, 1.0);
 
     // Base 10% brightness boost + asymmetric elevation shading
     let elevation_adjust = if normalized >= 0.0 {
