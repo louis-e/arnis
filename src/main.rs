@@ -8,8 +8,10 @@ mod colors;
 mod coordinate_system;
 mod data_processing;
 mod element_processing;
+mod elevation_data;
 mod floodfill;
 mod ground;
+mod map_renderer;
 mod map_transformation;
 mod osm_parser;
 #[cfg(feature = "gui")]
@@ -27,7 +29,6 @@ use clap::Parser;
 use colored::*;
 use std::{env, fs, io::Write};
 
-mod elevation_data;
 #[cfg(feature = "gui")]
 mod gui;
 
