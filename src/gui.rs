@@ -876,7 +876,6 @@ fn gui_start_generation(
                         &mut xzbbox,
                         &mut ground,
                     );
-                    send_log(LogLevel::Info, "Map transformation completed.");
 
                     let _ = data_processing::generate_world(
                         parsed_elements,
