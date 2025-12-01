@@ -281,8 +281,7 @@ pub fn generate_world(
         }));
 
         match result {
-            Ok(Ok(path)) => {
-                println!("{}", format!("Map preview saved to: {}", path.display()));
+            Ok(Ok(_path)) => {
                 // Notify the GUI that the map preview is ready
                 crate::progress::emit_map_preview_ready();
             }

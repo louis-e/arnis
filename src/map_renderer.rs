@@ -5,10 +5,16 @@
 
 use fastanvil::Region;
 use fastnbt::{from_bytes, Value};
+use fnv::FnvHashMap;
 use image::{Rgb, RgbImage};
-use std::collections::HashMap;
+use once_cell::sync::Lazy;
+use rayon::prelude::*;
 use std::fs::File;
 use std::path::Path;
+use std::sync::Mutex;
+
+/// Pre-computed block colors for fast lookup
+static BLOCK_COLORS: Lazy<FnvHashMap<&'static str, Rgb<u8>>> = Lazy::new(get_block_colors);
 
 /// Renders a top-down view of the generated Minecraft world.
 /// Returns the path to the saved image file.
@@ -26,8 +32,8 @@ pub fn render_world_map(
         return Err("Invalid world bounds".to_string());
     }
 
-    let mut img = RgbImage::from_pixel(width, height, Rgb([255, 255, 255]));
-    let colors = get_block_colors();
+    // Use Mutex for thread-safe image access
+    let img = Mutex::new(RgbImage::from_pixel(width, height, Rgb([255, 255, 255])));
 
     // Calculate region range
     let min_region_x = min_x >> 9; // divide by 512 (32 chunks * 16 blocks)
@@ -37,52 +43,66 @@ pub fn render_world_map(
 
     let region_dir = world_dir.join("region");
 
-    for region_x in min_region_x..=max_region_x {
-        for region_z in min_region_z..=max_region_z {
-            let region_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
+    // Collect all region coordinates for parallel processing
+    let region_coords: Vec<(i32, i32)> = (min_region_x..=max_region_x)
+        .flat_map(|rx| (min_region_z..=max_region_z).map(move |rz| (rx, rz)))
+        .collect();
 
-            if !region_path.exists() {
-                continue;
-            }
+    // Process regions in parallel
+    region_coords.par_iter().for_each(|&(region_x, region_z)| {
+        let region_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
 
-            if let Ok(file) = File::open(&region_path) {
-                if let Ok(mut region) = Region::from_stream(file) {
-                    render_region(
-                        &mut region,
-                        &mut img,
-                        region_x,
-                        region_z,
-                        min_x,
-                        min_z,
-                        max_x,
-                        max_z,
-                        &colors,
-                    );
+        if !region_path.exists() {
+            return;
+        }
+
+        if let Ok(file) = File::open(&region_path) {
+            if let Ok(mut region) = Region::from_stream(file) {
+                // Collect all pixels from this region first
+                let pixels = render_region_to_pixels(
+                    &mut region,
+                    region_x,
+                    region_z,
+                    min_x,
+                    min_z,
+                    max_x,
+                    max_z,
+                );
+
+                // Then batch-write to image under lock
+                if !pixels.is_empty() {
+                    let mut img_guard = img.lock().unwrap();
+                    for (x, z, color) in pixels {
+                        if x < img_guard.width() && z < img_guard.height() {
+                            img_guard.put_pixel(x, z, color);
+                        }
+                    }
                 }
             }
         }
-    }
+    });
 
     // Save the image
     let output_path = world_dir.join("arnis_world_map.png");
-    img.save(&output_path)
+    img.into_inner()
+        .unwrap()
+        .save(&output_path)
         .map_err(|e| format!("Failed to save map image: {}", e))?;
 
     Ok(output_path)
 }
 
-/// Renders all chunks within a region to the image
-fn render_region(
+/// Renders all chunks within a region and returns pixel data
+fn render_region_to_pixels(
     region: &mut Region<File>,
-    img: &mut RgbImage,
     region_x: i32,
     region_z: i32,
     min_x: i32,
     min_z: i32,
     max_x: i32,
     max_z: i32,
-    colors: &HashMap<&'static str, Rgb<u8>>,
-) {
+) -> Vec<(u32, u32, Rgb<u8>)> {
+    let mut pixels = Vec::new();
     let region_base_x = region_x * 512;
     let region_base_z = region_z * 512;
 
@@ -103,34 +123,34 @@ fn render_region(
             if let Ok(Some(chunk_data)) =
                 region.read_chunk(chunk_local_x as usize, chunk_local_z as usize)
             {
-                render_chunk(
+                render_chunk_to_pixels(
                     &chunk_data,
-                    img,
+                    &mut pixels,
                     chunk_base_x,
                     chunk_base_z,
                     min_x,
                     min_z,
                     max_x,
                     max_z,
-                    colors,
                 );
             }
         }
     }
+
+    pixels
 }
 
-/// Renders a single chunk to the image
+/// Renders a single chunk and appends pixel data
 #[allow(clippy::too_many_arguments)]
-fn render_chunk(
+fn render_chunk_to_pixels(
     chunk_data: &[u8],
-    img: &mut RgbImage,
+    pixels: &mut Vec<(u32, u32, Rgb<u8>)>,
     chunk_base_x: i32,
     chunk_base_z: i32,
     min_x: i32,
     min_z: i32,
     max_x: i32,
     max_z: i32,
-    colors: &HashMap<&'static str, Rgb<u8>>,
 ) {
     // Parse chunk NBT - look for Level.sections or sections depending on format
     let chunk: Value = match from_bytes(chunk_data) {
@@ -141,6 +161,12 @@ fn render_chunk(
     // Try to get sections from the chunk data
     let sections = get_sections_from_chunk(&chunk);
     if sections.is_empty() {
+        return;
+    }
+
+    // Pre-sort sections by Y (descending) once per chunk, not per column
+    let sorted_sections = get_sorted_sections(&sections);
+    if sorted_sections.is_empty() {
         return;
     }
 
@@ -155,26 +181,57 @@ fn render_chunk(
                 continue;
             }
 
-            // Find topmost non-air block
-            if let Some(block_name) = find_top_block(&sections, local_x as usize, local_z as usize)
+            // Find topmost non-air block using pre-sorted sections
+            if let Some((block_name, world_y)) =
+                find_top_block_sorted(&sorted_sections, local_x as usize, local_z as usize)
             {
                 // Strip minecraft: prefix for lookup
                 let short_name = block_name.strip_prefix("minecraft:").unwrap_or(&block_name);
 
-                let color = colors
+                let base_color = BLOCK_COLORS
                     .get(short_name)
                     .copied()
                     .unwrap_or_else(|| get_fallback_color(&block_name));
 
+                // Apply elevation shading
+                let color = apply_elevation_shading(base_color, world_y);
+
                 let img_x = (world_x - min_x) as u32;
                 let img_z = (world_z - min_z) as u32;
 
-                if img_x < img.width() && img_z < img.height() {
-                    img.put_pixel(img_x, img_z, color);
-                }
+                pixels.push((img_x, img_z, color));
             }
         }
     }
+}
+
+/// Applies elevation-based shading to a color
+/// Higher elevations are brighter, lower are darker
+#[inline]
+fn apply_elevation_shading(color: Rgb<u8>, y: i32) -> Rgb<u8> {
+    // Base brightness boost of 10%, plus elevation shading
+    // Shading range: -20% darker to +20% brighter (asymmetric, more bright than dark)
+
+    // Normalize Y to a -1.0 to 1.0 range (roughly)
+    // y=0 -> -0.5, y=0 -> 0, y=200 -> +1.0
+    let normalized = ((y - 0) as f32 / 100.0).clamp(-1.0, 1.0);
+
+    // Base 10% brightness boost + asymmetric elevation shading
+    let elevation_adjust = if normalized >= 0.0 {
+        // Above sea level: up to +20% brighter
+        normalized * 0.20
+    } else {
+        // Below sea level: up to -20% darker
+        normalized * 0.20
+    };
+
+    let multiplier = 1.10 + elevation_adjust;
+
+    Rgb([
+        (color.0[0] as f32 * multiplier).clamp(0.0, 255.0) as u8,
+        (color.0[1] as f32 * multiplier).clamp(0.0, 255.0) as u8,
+        (color.0[2] as f32 * multiplier).clamp(0.0, 255.0) as u8,
+    ])
 }
 
 /// Extracts sections from chunk data (handles both old and new formats)
@@ -203,10 +260,10 @@ fn get_sections_from_chunk(chunk: &Value) -> Vec<&Value> {
     sections
 }
 
-/// Finds the topmost non-air block at the given local x,z coordinates
-fn find_top_block(sections: &[&Value], local_x: usize, local_z: usize) -> Option<String> {
-    // Sort sections by Y (descending) to find topmost first
-    let mut sorted_sections: Vec<(i8, &Value)> = sections
+/// Pre-sorts sections by Y coordinate (descending) - called once per chunk
+/// Returns Vec of (section_y, section_value) for Y tracking
+fn get_sorted_sections<'a>(sections: &[&'a Value]) -> Vec<(i8, &'a Value)> {
+    let mut sorted: Vec<(i8, &Value)> = sections
         .iter()
         .filter_map(|s| {
             if let Value::Compound(map) = s {
@@ -218,12 +275,23 @@ fn find_top_block(sections: &[&Value], local_x: usize, local_z: usize) -> Option
         })
         .collect();
 
-    sorted_sections.sort_by(|a, b| b.0.cmp(&a.0));
+    sorted.sort_by(|a, b| b.0.cmp(&a.0));
+    sorted
+}
 
-    for (_y, section) in sorted_sections {
-        if let Some(block_name) = get_block_at_section(section, local_x, local_z) {
+/// Finds the topmost non-air block using pre-sorted sections
+/// Returns (block_name, world_y) where world_y is the actual Y coordinate
+fn find_top_block_sorted(
+    sorted_sections: &[(i8, &Value)],
+    local_x: usize,
+    local_z: usize,
+) -> Option<(String, i32)> {
+    for (section_y, section) in sorted_sections {
+        if let Some((block_name, local_y)) = get_block_at_section(section, local_x, local_z) {
             if !is_transparent_block(&block_name) {
-                return Some(block_name);
+                // Calculate world Y: section_y * 16 + local_y
+                let world_y = (*section_y as i32) * 16 + local_y as i32;
+                return Some((block_name, world_y));
             }
         }
     }
@@ -232,7 +300,12 @@ fn find_top_block(sections: &[&Value], local_x: usize, local_z: usize) -> Option
 }
 
 /// Gets the topmost non-air block in a section at the given x,z
-fn get_block_at_section(section: &Value, local_x: usize, local_z: usize) -> Option<String> {
+/// Returns (block_name, local_y) where local_y is 0-15 within the section
+fn get_block_at_section(
+    section: &Value,
+    local_x: usize,
+    local_z: usize,
+) -> Option<(String, usize)> {
     let section_map = match section {
         Value::Compound(m) => m,
         _ => return None,
@@ -250,7 +323,8 @@ fn get_block_at_section(section: &Value, local_x: usize, local_z: usize) -> Opti
 
     // If palette has only one block, that's the block for the entire section
     if palette.len() == 1 {
-        return get_block_name_from_palette(&palette[0]);
+        // Return with local_y=15 (top of section) for single-block sections
+        return get_block_name_from_palette(&palette[0]).map(|name| (name, 15));
     }
 
     let data = match block_states.get("data") {
@@ -278,7 +352,7 @@ fn get_block_at_section(section: &Value, local_x: usize, local_z: usize) -> Opti
         if palette_index < palette.len() {
             if let Some(name) = get_block_name_from_palette(&palette[palette_index]) {
                 if !is_transparent_block(&name) {
-                    return Some(name);
+                    return Some((name, local_y));
                 }
             }
         }
@@ -427,8 +501,8 @@ fn get_fallback_color(name: &str) -> Rgb<u8> {
 }
 
 /// Returns a mapping of common block names to RGB colors (without minecraft: prefix)
-fn get_block_colors() -> HashMap<&'static str, Rgb<u8>> {
-    HashMap::from([
+fn get_block_colors() -> FnvHashMap<&'static str, Rgb<u8>> {
+    FnvHashMap::from_iter([
         // Natural blocks
         ("grass_block", Rgb([86, 125, 70])),
         ("short_grass", Rgb([86, 125, 70])),
