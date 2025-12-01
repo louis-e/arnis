@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v5
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@v1
@@ -43,7 +43,7 @@ jobs:
       - name: Run benchmark command with memory tracking
         id: benchmark
         run: |
-          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
+          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --generate-map --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
           grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
@@ -56,6 +56,25 @@ jobs:
           start_time=${{ steps.start_time.outputs.start_time }}
           duration=$((end_time - start_time))
           echo "duration=$duration" >> $GITHUB_OUTPUT
+
+      - name: Check for map preview
+        id: map_check
+        run: |
+          if [ -f "./world/arnis_world_map.png" ]; then
+            echo "Map preview generated successfully"
+            echo "map_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Map preview not found"
+            echo "map_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload map preview as artifact
+        if: steps.map_check.outputs.map_exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: world-map-preview
+          path: ./world/arnis_world_map.png
+          retention-days: 60
 
       - name: Format duration and generate summary
         id: comment_body
@@ -87,16 +106,27 @@ jobs:
             mem_annotation=" (↗ ${mem_percent}% more)"
           fi
 
+          # Get current timestamp
+          benchmark_time=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
+          run_url="https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
           {
             echo "summary<<EOF"
-            echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**"
-            echo "🧠 Peak memory usage: **${peak_mem} MB**${mem_annotation}"
+            echo "## ⏱️ Benchmark Results"
             echo ""
-            echo "📈 Compared against baseline: **${baseline_time}s**"
-            echo "🧮 Delta: **${diff}s**"
-            echo "🔢 Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Duration | **${minutes}m ${seconds}s** |"
+            echo "| Peak Memory | **${peak_mem} MB**${mem_annotation} |"
+            echo "| Baseline | **${baseline_time}s** |"
+            echo "| Delta | **${diff}s** |"
+            echo "| Commit | [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) |"
             echo ""
             echo "${verdict}"
+            echo ""
+            echo "---"
+            echo ""
+            echo "📅 **Last benchmark:** ${benchmark_time} | 📥 [Download generated world map](${run_url}#artifacts)"
             echo ""
             echo "_You can retrigger the benchmark by commenting \`retrigger-benchmark\`._"
             echo "EOF"
