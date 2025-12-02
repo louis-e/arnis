@@ -15,21 +15,30 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 
         // Determine block type based on leisure type
         let block_type: Block = match leisure_type.as_str() {
-            "park" => GRASS_BLOCK,
-            "playground" | "recreation_ground" | "pitch" => {
+            "park" | "nature_reserve" | "garden" | "disc_golf_course" | "golf_course" => {
+                GRASS_BLOCK
+            }
+            "schoolyard" => BLACK_CONCRETE,
+            "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
                 if let Some(surface) = element.tags.get("surface") {
                     match surface.as_str() {
                         "clay" => TERRACOTTA,
                         "sand" => SAND,
                         "tartan" => RED_TERRACOTTA,
+                        "grass" => GRASS_BLOCK,
+                        "dirt" => DIRT,
+                        "pebblestone" | "cobblestone" | "unhewn_cobblestone" => COBBLESTONE,
                         _ => GREEN_STAINED_HARDENED_CLAY,
                     }
                 } else {
                     GREEN_STAINED_HARDENED_CLAY
                 }
             }
-            "garden" => GRASS_BLOCK,
-            "swimming_pool" => WATER,
+            "swimming_pool" | "swimming_area" => WATER, //Swimming area: Area in a larger body of water for swimming
+            "bathing_place" => SMOOTH_SANDSTONE,        // Could be sand or concrete
+            "outdoor_seating" => SMOOTH_STONE,          //Usually stone or stone bricks
+            "water_park" | "slipway" => LIGHT_GRAY_CONCRETE, // Water park area, not the pool. Usually is concrete
+            "ice_rink" => PACKED_ICE, // TODO: Ice for Ice Rink, needs building defined
             _ => GRASS_BLOCK,
         };
 
@@ -79,14 +88,14 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens
-                if matches!(leisure_type.as_str(), "park" | "garden")
+                if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
                     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                     let random_choice: i32 = rng.gen_range(0..1000);
 
                     match random_choice {
-                        0..40 => {
+                        0..30 => {
                             // Flowers
                             let flower_choice = match random_choice {
                                 0..10 => RED_FLOWER,
@@ -96,11 +105,15 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                             };
                             editor.set_block(flower_choice, x, 1, z, None, None);
                         }
-                        40..80 => {
+                        30..90 => {
                             // Grass
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
-                        80..90 => {
+                        90..105 => {
+                            // Oak leaves
+                            editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                        }
+                        105..120 => {
                             // Tree
                             Tree::create(editor, (x, 1, z));
                         }
@@ -116,11 +129,13 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                     match random_choice {
                         0..10 => {
                             // Swing set
-                            for y in 1..=4 {
+                            for y in 1..=3 {
                                 editor.set_block(OAK_FENCE, x - 1, y, z, None, None);
                                 editor.set_block(OAK_FENCE, x + 1, y, z, None, None);
                             }
-                            editor.set_block(OAK_FENCE, x, 4, z, None, None);
+                            editor.set_block(OAK_PLANKS, x - 1, 4, z, None, None);
+                            editor.set_block(OAK_SLAB, x, 4, z, None, None);
+                            editor.set_block(OAK_PLANKS, x + 1, 4, z, None, None);
                             editor.set_block(STONE_BLOCK_SLAB, x, 2, z, None, None);
                         }
                         10..20 => {

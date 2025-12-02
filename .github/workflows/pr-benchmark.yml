@@ -1,0 +1,115 @@
+name: PR Benchmark
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  pull_request:
+    types: [opened, reopened]
+  issue_comment:
+    types: [created]
+
+jobs:
+  benchmark:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request != null &&
+       contains(github.event.comment.body, 'retrigger-benchmark'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Create dummy Minecraft world directory
+        run: |
+          mkdir -p "./world/region"
+
+      - name: Build for release
+        run: cargo build --release --no-default-features
+
+      - name: Start timer
+        id: start_time
+        run: echo "start_time=$(date +%s)" >> $GITHUB_OUTPUT
+
+      - name: Run benchmark command with memory tracking
+        id: benchmark
+        run: |
+          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
+          grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
+          peak_kb=$(cat peak_mem_kb.txt)
+          peak_mb=$((peak_kb / 1024))
+          echo "peak_memory=${peak_mb}" >> $GITHUB_OUTPUT
+
+      - name: End timer and calculate duration
+        id: end_time
+        run: |
+          end_time=$(date +%s)
+          start_time=${{ steps.start_time.outputs.start_time }}
+          duration=$((end_time - start_time))
+          echo "duration=$duration" >> $GITHUB_OUTPUT
+
+      - name: Format duration and generate summary
+        id: comment_body
+        run: |
+          duration=${{ steps.end_time.outputs.duration }}
+          minutes=$((duration / 60))
+          seconds=$((duration % 60))
+          peak_mem=${{ steps.benchmark.outputs.peak_memory }}
+
+          baseline_time=69
+          diff=$((duration - baseline_time))
+          abs_diff=${diff#-}
+
+          if [ "$diff" -lt -5 ]; then
+            verdict="✅ This PR **improves generation time**."
+          elif [ "$abs_diff" -le 4 ]; then
+            verdict="🟢 Generation time is unchanged."
+          elif [ "$diff" -le 15 ]; then
+            verdict="⚠️ This PR **worsens generation time**."
+          else
+            verdict="🚨 This PR **drastically worsens generation time**."
+          fi
+
+          baseline_mem=935
+          mem_annotation=""
+          if [ "$peak_mem" -gt 2000 ]; then
+            mem_diff=$((peak_mem - baseline_mem))
+            mem_percent=$((mem_diff * 100 / baseline_mem))
+            mem_annotation=" (↗ ${mem_percent}% more)"
+          fi
+
+          benchmark_time=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
+
+          {
+            echo "summary<<EOF"
+            echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**"
+            echo "🧠 Peak memory usage: **${peak_mem} MB**${mem_annotation}"
+            echo ""
+            echo "📈 Compared against baseline: **${baseline_time}s**"
+            echo "🧮 Delta: **${diff}s**"
+            echo "🔢 Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
+            echo ""
+            echo "${verdict}"
+            echo ""
+            echo "📅 **Last benchmark:** ${benchmark_time}"
+            echo ""
+            echo "_You can retrigger the benchmark by commenting \`retrigger-benchmark\`._"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment build time on PR
+        uses: thollander/actions-comment-pull-request@v3
+        with:
+          message: ${{ steps.comment_body.outputs.summary }}
+          comment-tag: benchmark-report
+        env:
+          GITHUB_TOKEN: ${{ secrets.BENCHMARK_TOKEN }}

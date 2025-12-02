@@ -64,12 +64,13 @@ const OAK_LEAVES_FILL: [(Coord, Coord); 5] = [
     ((0, 9, 0), (0, 10, 0)),
 ];
 
-const SPRUCE_LEAVES_FILL: [(Coord, Coord); 5] = [
+const SPRUCE_LEAVES_FILL: [(Coord, Coord); 6] = [
     ((-1, 3, 0), (-1, 10, 0)),
     ((0, 3, -1), (0, 10, -1)),
     ((1, 3, 0), (1, 10, 0)),
     ((0, 3, -1), (0, 10, -1)),
     ((0, 3, 1), (0, 10, 1)),
+    ((0, 11, 0), (0, 11, 0)),
 ];
 
 const BIRCH_LEAVES_FILL: [(Coord, Coord); 5] = [
@@ -108,9 +109,10 @@ pub struct Tree<'a> {
 impl Tree<'_> {
     pub fn create(editor: &mut WorldEditor, (x, y, z): Coord) {
         let mut blacklist: Vec<Block> = Vec::new();
-        blacklist.extend(BUILDING_CORNER_VARIATIONS);
-        blacklist.extend(building_wall_variations());
-        blacklist.extend(building_floor_variations());
+        blacklist.extend(Self::get_building_wall_blocks());
+        blacklist.extend(Self::get_building_floor_blocks());
+        blacklist.extend(Self::get_structural_blocks());
+        blacklist.extend(Self::get_functional_blocks());
         blacklist.push(WATER);
 
         let mut rng = rand::thread_rng();
@@ -193,4 +195,148 @@ impl Tree<'_> {
             },
         } // match
     } // fn get_tree
+
+    /// Get all possible building wall blocks
+    fn get_building_wall_blocks() -> Vec<Block> {
+        vec![
+            BLACKSTONE,
+            BLACK_TERRACOTTA,
+            BRICK,
+            BROWN_CONCRETE,
+            BROWN_TERRACOTTA,
+            DEEPSLATE_BRICKS,
+            END_STONE_BRICKS,
+            GRAY_CONCRETE,
+            GRAY_TERRACOTTA,
+            LIGHT_BLUE_TERRACOTTA,
+            LIGHT_GRAY_CONCRETE,
+            MUD_BRICKS,
+            NETHER_BRICK,
+            NETHERITE_BLOCK,
+            POLISHED_ANDESITE,
+            POLISHED_BLACKSTONE,
+            POLISHED_BLACKSTONE_BRICKS,
+            POLISHED_DEEPSLATE,
+            POLISHED_GRANITE,
+            QUARTZ_BLOCK,
+            QUARTZ_BRICKS,
+            SANDSTONE,
+            SMOOTH_SANDSTONE,
+            SMOOTH_STONE,
+            STONE_BRICKS,
+            WHITE_CONCRETE,
+            WHITE_TERRACOTTA,
+            ORANGE_TERRACOTTA,
+            GREEN_STAINED_HARDENED_CLAY,
+            BLUE_TERRACOTTA,
+            YELLOW_TERRACOTTA,
+            BLACK_CONCRETE,
+            WHITE_CONCRETE,
+            GRAY_CONCRETE,
+            LIGHT_GRAY_CONCRETE,
+            BROWN_CONCRETE,
+            RED_CONCRETE,
+            ORANGE_TERRACOTTA,
+            YELLOW_CONCRETE,
+            LIME_CONCRETE,
+            GREEN_STAINED_HARDENED_CLAY,
+            CYAN_CONCRETE,
+            LIGHT_BLUE_CONCRETE,
+            BLUE_CONCRETE,
+            PURPLE_CONCRETE,
+            MAGENTA_CONCRETE,
+            RED_TERRACOTTA,
+        ]
+    }
+
+    /// Get all possible building floor blocks
+    fn get_building_floor_blocks() -> Vec<Block> {
+        vec![
+            GRAY_CONCRETE,
+            LIGHT_GRAY_CONCRETE,
+            WHITE_CONCRETE,
+            SMOOTH_STONE,
+            POLISHED_ANDESITE,
+            STONE_BRICKS,
+        ]
+    }
+
+    /// Get structural blocks (fences, walls, stairs, slabs, rails, etc.)
+    fn get_structural_blocks() -> Vec<Block> {
+        vec![
+            // Fences
+            OAK_FENCE,
+            // Walls
+            COBBLESTONE_WALL,
+            ANDESITE_WALL,
+            STONE_BRICK_WALL,
+            // Stairs
+            OAK_STAIRS,
+            // Slabs
+            OAK_SLAB,
+            STONE_BLOCK_SLAB,
+            STONE_BRICK_SLAB,
+            // Rails
+            RAIL,
+            RAIL_NORTH_SOUTH,
+            RAIL_EAST_WEST,
+            RAIL_ASCENDING_EAST,
+            RAIL_ASCENDING_WEST,
+            RAIL_ASCENDING_NORTH,
+            RAIL_ASCENDING_SOUTH,
+            RAIL_NORTH_EAST,
+            RAIL_NORTH_WEST,
+            RAIL_SOUTH_EAST,
+            RAIL_SOUTH_WEST,
+            // Doors and trapdoors
+            OAK_DOOR,
+            DARK_OAK_DOOR_LOWER,
+            DARK_OAK_DOOR_UPPER,
+            OAK_TRAPDOOR,
+            // Ladders
+            LADDER,
+        ]
+    }
+
+    /// Get functional blocks (furniture, decorative items, etc.)
+    fn get_functional_blocks() -> Vec<Block> {
+        vec![
+            // Furniture and functional blocks
+            CHEST,
+            CRAFTING_TABLE,
+            FURNACE,
+            ANVIL,
+            BREWING_STAND,
+            NOTE_BLOCK,
+            BOOKSHELF,
+            CAULDRON,
+            // Beds
+            RED_BED_NORTH_HEAD,
+            RED_BED_NORTH_FOOT,
+            RED_BED_EAST_HEAD,
+            RED_BED_EAST_FOOT,
+            RED_BED_SOUTH_HEAD,
+            RED_BED_SOUTH_FOOT,
+            RED_BED_WEST_HEAD,
+            RED_BED_WEST_FOOT,
+            // Pressure plates and signs
+            OAK_PRESSURE_PLATE,
+            SIGN,
+            // Glass blocks (windows)
+            GLASS,
+            WHITE_STAINED_GLASS,
+            GRAY_STAINED_GLASS,
+            LIGHT_GRAY_STAINED_GLASS,
+            BROWN_STAINED_GLASS,
+            TINTED_GLASS,
+            // Carpets
+            WHITE_CARPET,
+            RED_CARPET,
+            // Other structural/building blocks
+            IRON_BARS,
+            IRON_BLOCK,
+            SCAFFOLDING,
+            BEDROCK,
+        ]
+    }
 } // impl Tree

@@ -1,0 +1,68 @@
+<html>
+<head>
+    <title>Map View</title>
+    
+    <meta name="viewport" content="initial-scale=1.0, user-scalable=no" />
+    <link rel="stylesheet" href="css/maps/leaflet.css" />
+    <link rel="stylesheet" href="css/maps/leaflet.draw.css" />
+    <link rel="stylesheet" href="css/maps/leaflet.sidebar.css" />
+    <link rel="stylesheet" href="css/bbox.css" />
+    <link rel="stylesheet" href="css/search.css" />
+    
+    <script src="js/libs/jquery-1.9.1.min.js"></script>
+    <script src="js/libs/jquery-ui-1.10.3.custom.js"></script>
+    <script src="js/maps/leaflet.js"></script>
+    <script src="js/maps/leaflet.draw.js"></script>
+    <script src="js/maps/leaflet.sidebar.js"></script>
+    <script src="js/maps/wkt.parser.js"></script>
+    <script src="js/maps/proj4-src.js"></script>
+    <script src="js/maps/proj4leaflet.js"></script>
+    <script src="js/search.js"></script>
+    <script src="js/bbox.js"></script>
+   
+</head>
+<body>    
+    <!-- City Search Box -->
+    <div id="search-container">
+        <div id="search-box">
+            <input type="text" id="city-search" placeholder="Search for a city..." autocomplete="off" />
+            <button id="search-btn">🔍</button>
+        </div>
+        <div id="search-results"></div>
+    </div>
+    
+    <div id="map"></div>
+    <div id="rsidebar" >
+      <button id="add">Add</button>
+      <button id="clear">Clear</button>
+    </div>
+    <div id="lsidebar">
+    </div>
+
+    <section id="info-box">
+        <div id="info">
+            <div id="wgscoords" class="coords">
+                <div id="bbounds">
+                    <span id="bbboundslabel" class="bboxlabel">BBOX</span>
+                    <span id="boxbounds" class="bboxllpos"></span>
+                </div>
+            </div>
+            <div id="projcoords" class="coords">
+                <div id="bbounds">
+                    <span id="bbboundslabel" class="bboxlabel">BBOX</span>
+                    <span id="boxboundsmerc" class="bboxprojpos"></span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+
+    <div id="ocontainer" class="ocontainer" style="display:none;">
+        <textarea rows="25" cols="100" ></textarea>
+        <div id="submit-buttons">
+            <button id="cancel">Cancel</button>
+            <button id="add">Add</button>
+        </div>
+    </div>
+</body>
+</html>

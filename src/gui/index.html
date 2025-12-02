@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="./css/styles.css" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Arnis</title>
+  <script type="module" src="./js/main.js" defer></script>
+  <script type="module" src="./js/license.js" defer></script>
+  <script type="module" src="./js/language-selector.js" defer></script>
+</head>
+
+<body>
+  <main class="container">
+    <div class="row">
+      <a href="https://arnismc.com" target="_blank">
+        <img src="./images/logo.png" id="arnis-logo" class="logo arnis" alt="Arnis Logo" style="width: 35%; height: auto;">
+      </a>
+    </div>
+
+    <div class="flex-container">
+      <!-- Left Box: Map and BBox Input -->
+      <section class="section map-box" style="margin-bottom: 0; padding-bottom: 0;">
+        <h2 data-localize="select_location">Select Location</h2>
+        <span id="bbox-text" style="font-size: 1.0em; display: block; margin-top: -8px; margin-bottom: 3px;" data-localize="zoom_in_and_choose">
+          Zoom in and choose your area using the rectangle tool
+        </span>
+        <iframe src="maps.html" width="100%" height="300" class="map-container" title="Map Picker"></iframe>
+
+        <span id="bbox-info"
+          style="font-size: 0.75em; color: #7bd864; display: block; margin-bottom: 4px; font-weight: bold; min-height: 2em;"></span>
+      </section>
+
+      <!-- Right Box: Directory Selection, Start Button, and Progress Bar -->
+      <section class="section controls-box">
+        <div class="controls-content">
+          <h2 data-localize="select_world">Select World</h2>
+
+          <!-- Updated Tooltip Structure -->
+          <div class="tooltip" style="width: 100%;">
+            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;">
+              <span id="choose_world">Choose World</span>
+              <br>
+              <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
+                No world selected
+              </span>
+            </button>
+          </div>
+          
+          <div class="button-container">
+            <button type="button" id="start-button" class="start-button" onclick="startGeneration()" data-localize="start_generation">Start Generation</button>
+            <button type="button" class="settings-button" onclick="openSettings()">
+                <i class="gear-icon"></i>
+            </button>
+          </div>
+          <br><br>
+
+          <div class="progress-section">
+            <h2 data-localize="progress">Progress</h2>
+            <div class="progress-bar-container">
+              <div class="progress-bar" id="progress-bar"></div>
+            </div>
+            <div class="progress-status">
+              <span id="progress-message"></span>
+              <span id="progress-detail">0%</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- World Picker Modal -->
+    <div id="world-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="closeWorldPicker()">&times;</span>
+        <h2 data-localize="choose_world_modal_title">Choose World</h2>
+
+        <button type="button" id="select-world-button" class="select-world-button" onclick="selectWorld(false)" data-localize="select_existing_world">Select existing world</button>
+        <button type="button" id="generate-world-button" class="generate-world-button" onclick="selectWorld(true)" data-localize="generate_new_world">Generate new world</button>
+      </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="closeSettings()">&times;</span>
+        <h2 data-localize="customization_settings">Customization Settings</h2>
+
+        <!-- Generation Mode Dropdown -->
+        <div class="settings-row">
+          <label for="generation-mode-select" data-localize="generation_mode">Generation Mode</label>
+          <div class="settings-control">
+            <select id="generation-mode-select" name="generation-mode-select" class="generation-mode-dropdown">
+              <option value="geo-terrain" data-localize="mode_geo_terrain">Objects + Terrain</option>
+              <option value="geo-only" data-localize="mode_geo_only">Objects only</option>
+              <option value="terrain-only" data-localize="mode_terrain_only">Terrain only</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Interior Toggle Button -->
+        <div class="settings-row">
+          <label for="interior-toggle" data-localize="interior">Interior Generation</label>
+          <div class="settings-control">
+            <input type="checkbox" id="interior-toggle" name="interior-toggle" checked>
+          </div>
+        </div>
+
+        <!-- Roof Toggle Button -->
+        <div class="settings-row">
+          <label for="roof-toggle" data-localize="roof">Roof Generation</label>
+          <div class="settings-control">
+            <input type="checkbox" id="roof-toggle" name="roof-toggle" checked>
+          </div>
+        </div>
+
+        <!-- Fill ground Toggle Button -->
+        <div class="settings-row">
+          <label for="fillground-toggle" data-localize="fillground">Fill Ground</label>
+          <div class="settings-control">
+            <input type="checkbox" id="fillground-toggle" name="fillground-toggle">
+          </div>
+        </div>
+
+        <!-- World Scale Slider -->
+        <div class="settings-row">
+          <label for="scale-value-slider" data-localize="world_scale">World Scale</label>
+          <div class="settings-control">
+            <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
+            <span id="slider-value">1.00</span>
+          </div>
+        </div>
+
+        <!-- Bounding Box Input -->
+        <div class="settings-row">
+          <label for="bbox-coords" data-localize="custom_bounding_box">Custom Bounding Box</label>
+          <div class="settings-control">
+            <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" placeholder="Format: lat,lng,lat,lng">
+          </div>
+        </div>
+
+        <!-- Floodfill Timeout Input -->
+        <div class="settings-row">
+          <label for="floodfill-timeout" data-localize="floodfill_timeout">Floodfill Timeout (sec)</label>
+          <div class="settings-control">
+            <input type="number" id="floodfill-timeout" name="floodfill-timeout" min="0" step="1" value="20" placeholder="Seconds">
+          </div>
+        </div>
+
+        <!-- Map Theme Selector -->
+        <div class="settings-row">
+          <label for="tile-theme-select" data-localize="map_theme">Map Theme</label>
+          <div class="settings-control">
+            <select id="tile-theme-select" name="tile-theme-select" class="theme-dropdown">
+              <option value="osm">Standard</option>
+              <option value="esri-imagery">Satellite</option>
+              <option value="opentopomap">Topographic</option>
+              <option value="stadia-bright">Smooth Bright</option>
+              <option value="stadia-dark">Smooth Dark</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Language Selector -->
+        <div class="settings-row">
+          <label for="language-select" data-localize="language">Language</label>
+          <div class="settings-control">
+            <select id="language-select" name="language-select" class="language-dropdown">
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="fr-FR">Français</option>
+              <option value="ru">Русский</option>
+              <option value="zh-CN">中文 (简体)</option>
+              <option value="ko">한국어</option>
+              <option value="pl">Polski</option>
+              <option value="lv">Latviešu</option>
+              <option value="sv">Svenska</option>
+              <option value="ar">العربية</option>
+              <option value="fi">Suomi</option>
+              <option value="hu">Magyar</option>
+              <option value="lt">Lietuvių</option>
+              <option value="ua">Українська</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Telemetry Consent Toggle -->
+        <div class="settings-row">
+          <label for="telemetry-toggle">Anonymous Crash Reports</label>
+          <div class="settings-control">
+            <input type="checkbox" id="telemetry-toggle" name="telemetry-toggle">
+          </div>
+        </div>
+
+        <!-- License and Credits Button -->
+        <div class="settings-row license-button-row">
+          <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
+        </div>
+
+        <!-- Buy Me a Coffee and Discord -->
+        <div class="settings-row buymeacoffee-row">
+          <a href="https://buymeacoffee.com/louisdev" target="_blank" class="buymeacoffee-link">
+            <img src="./images/buymeacoffee.png" alt="Buy Me a Coffee" class="buymeacoffee-logo">
+          </a>
+          <a href="https://discord.gg/mA2g69Fhxq" target="_blank" class="discord-link">
+            <img src="./images/discord.png" alt="Discord" class="discord-logo">
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telemetry Consent Modal (first run) -->
+    <div id="telemetry-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="rejectTelemetry()">&times;</span>
+        <h2>Help improve Arnis</h2>
+        <p style="text-align:left; margin-top:6px; color:#ececec;">
+          We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
+          <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank">No personal data or world contents are collected.</a>
+        </p>
+        <div class="modal-actions" style="margin-top:14px;">
+          <button type="button" class="btn-secondary" onclick="rejectTelemetry()">No thanks</button>
+          <button type="button" class="btn-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- License Modal -->
+    <div id="license-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="closeLicense()">&times;</span>
+        <h2 data-localize="license_and_credits">License and Credits</h2>
+        <div id="license-content" style="overflow-y: auto; max-height: 300px; font-size: 0.85em; line-height: 1.3; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+          Loading...
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <a href="https://github.com/louis-e/arnis" target="_blank" class="footer-link" data-localize="footer_text">
+        © {year} Arnis v{version} by louis-e
+      </a>
+    </footer>
+  </main>
+</body>
+
+</html>

@@ -1,3 +1,5 @@
+#[cfg(feature = "gui")]
+use crate::telemetry::{send_log, LogLevel};
 use once_cell::sync::OnceCell;
 use serde_json::json;
 use tauri::{Emitter, WebviewWindow};
@@ -21,11 +23,13 @@ pub fn is_running_with_gui() -> bool {
 /// This code manages a multi-step process with a progress bar indicating the overall completion.
 /// The progress updates are mapped to specific steps in the pipeline:
 ///
-/// [1/5] Fetching data... - Starts at: 0% / Completes at: 5%
-/// [2/5] Parsing data... - Starts at: 5% / Completes at: 10%
-/// [3/5] Processing data... - Starts at: 10% / Completes at: 60%
-/// [4/5] Generating ground layer... - Starts at: 60% / Completes at: 90%
-/// [5/5] Saving world... - Starts at: 90% / Completes at: 100%
+/// [1/7] Fetching data... - Starts at: 0% / Completes at: 5%
+/// [2/7] Parsing data... - Starts at: 5% / Completes at: 15%
+/// [3/7] Fetching elevation... - Starts at: 15% / Completes at: 20%
+/// [4/7] Transforming map... - Starts at: 20% / Completes at: 25%
+/// [5/7] Processing terrain... - Starts at: 25% / Completes at: 70%
+/// [6/7] Generating ground... - Starts at: 70% / Completes at: 90%
+/// [7/7] Saving world... - Starts at: 90% / Completes at: 100%
 ///
 /// The function `emit_gui_progress_update` is used to send real-time progress updates to the UI.
 pub fn emit_gui_progress_update(progress: f64, message: &str) {
@@ -36,11 +40,28 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         });
 
         if let Err(e) = window.emit("progress-update", payload) {
-            eprintln!("Failed to emit progress event: {}", e);
+            let error_msg = format!("Failed to emit progress event: {}", e);
+            eprintln!("{}", error_msg);
+            #[cfg(feature = "gui")]
+            send_log(LogLevel::Warning, &error_msg);
         }
     }
 }
 
 pub fn emit_gui_error(message: &str) {
-    emit_gui_progress_update(0.0, &format!("Error! {}", message));
+    let truncated_message = if message.len() > 35 {
+        &message[..35]
+    } else {
+        message
+    };
+    emit_gui_progress_update(0.0, &format!("Error! {truncated_message}"));
+}
+
+/// Emits an event when the world map preview is ready
+pub fn emit_map_preview_ready() {
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("map-preview-ready", ()) {
+            eprintln!("Failed to emit map-preview-ready event: {}", e);
+        }
+    }
 }

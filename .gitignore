@@ -1,6 +1,7 @@
+/wiki
+
 # Environment files
 .env
-.envrc
 /.direnv
 
 # Build artifacts
@@ -28,6 +29,8 @@ Thumbs.db
 /export.json
 /parsed_osm_data.txt
 /elevation_debug.png
+/terrain-tile-cache
+/arnis-tile-cache
 /gen/
 /build/
 *.rmeta

@@ -1,7 +1,8 @@
-use crate::{
-    args::Args, bbox::BBox, cartesian::XZPoint, geo_coord::GeoCoord,
-    progress::emit_gui_progress_update,
-};
+use crate::clipping::clip_way_to_bbox;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::coordinate_system::transformation::CoordTransformer;
+use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
 use serde_json::Value;
@@ -28,16 +29,55 @@ struct OsmElement {
     pub members: Vec<OsmMember>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct OsmData {
     pub elements: Vec<OsmElement>,
+}
+
+struct SplitOsmData {
+    pub nodes: Vec<OsmElement>,
+    pub ways: Vec<OsmElement>,
+    pub relations: Vec<OsmElement>,
+    #[allow(dead_code)]
+    pub others: Vec<OsmElement>,
+}
+
+impl SplitOsmData {
+    fn total_count(&self) -> usize {
+        self.nodes.len() + self.ways.len() + self.relations.len() + self.others.len()
+    }
+    fn from_raw_osm_data(osm_data: OsmData) -> Self {
+        let mut nodes = Vec::new();
+        let mut ways = Vec::new();
+        let mut relations = Vec::new();
+        let mut others = Vec::new();
+        for element in osm_data.elements {
+            match element.r#type.as_str() {
+                "node" => nodes.push(element),
+                "way" => ways.push(element),
+                "relation" => relations.push(element),
+                _ => others.push(element),
+            }
+        }
+        SplitOsmData {
+            nodes,
+            ways,
+            relations,
+            others,
+        }
+    }
+}
+
+fn parse_raw_osm_data(json_data: Value) -> Result<SplitOsmData, serde_json::Error> {
+    let osm_data: OsmData = serde_json::from_value(json_data)?;
+    Ok(SplitOsmData::from_raw_osm_data(osm_data))
 }
 
 // End raw data
 
 // Normalized data that we can use
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedNode {
     pub id: u64,
     pub tags: HashMap<String, String>,
@@ -56,33 +96,33 @@ impl ProcessedNode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedWay {
     pub id: u64,
     pub nodes: Vec<ProcessedNode>,
     pub tags: HashMap<String, String>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum ProcessedMemberRole {
     Outer,
     Inner,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedMember {
     pub role: ProcessedMemberRole,
     pub way: ProcessedWay,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedRelation {
     pub id: u64,
     pub tags: HashMap<String, String>,
     pub members: Vec<ProcessedMember>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ProcessedElement {
     Node(ProcessedNode),
     Way(ProcessedWay),
@@ -123,45 +163,29 @@ impl ProcessedElement {
     }
 }
 
-// Function to convert latitude and longitude to Minecraft coordinates.
-fn lat_lon_to_minecraft_coords(
-    lat: f64,
-    lon: f64,
-    bbox: BBox, // (min_lon, min_lat, max_lon, max_lat)
-    scale_factor_z: f64,
-    scale_factor_x: f64,
-) -> (i32, i32) {
-    // Calculate the relative position within the bounding box
-    let rel_x: f64 = (lon - bbox.min().lng()) / (bbox.max().lng() - bbox.min().lng());
-    let rel_z: f64 = 1.0 - (lat - bbox.min().lat()) / (bbox.max().lat() - bbox.min().lat());
-
-    // Apply scaling factors for each dimension and convert to Minecraft coordinates
-    let x: i32 = (rel_x * scale_factor_x) as i32;
-    let z: i32 = (rel_z * scale_factor_z) as i32;
-
-    (x, z)
-}
-
 pub fn parse_osm_data(
-    json_data: &Value,
-    bbox: BBox,
-    args: &Args,
-) -> (Vec<ProcessedElement>, f64, f64) {
-    println!("{} Parsing data...", "[2/5]".bold());
+    json_data: Value,
+    bbox: LLBBox,
+    scale: f64,
+    debug: bool,
+) -> (Vec<ProcessedElement>, XZBBox) {
+    println!("{} Parsing data...", "[2/7]".bold());
+    println!("Bounding box: {bbox:?}");
     emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
-    let data: OsmData =
-        serde_json::from_value(json_data.clone()).expect("Failed to parse OSM data");
+    let data = parse_raw_osm_data(json_data).expect("Failed to parse OSM data");
 
-    // Determine which dimension is larger and assign scale factors accordingly
-    let (scale_factor_z, scale_factor_x) = geo_distance(bbox.min(), bbox.max());
-    let scale_factor_z: f64 = scale_factor_z.floor() * args.scale;
-    let scale_factor_x: f64 = scale_factor_x.floor() * args.scale;
+    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
+        .unwrap_or_else(|e| {
+            eprintln!("Error in defining coordinate transformation:\n{e}");
+            panic!();
+        });
 
-    if args.debug {
-        println!("Scale factor X: {}", scale_factor_x);
-        println!("Scale factor Z: {}", scale_factor_z);
+    if debug {
+        println!("Total elements: {}", data.total_count());
+        println!("Scale factor X: {}", coord_transformer.scale_factor_x());
+        println!("Scale factor Z: {}", coord_transformer.scale_factor_z());
     }
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
@@ -170,37 +194,37 @@ pub fn parse_osm_data(
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
     // First pass: store all nodes with Minecraft coordinates and process nodes with tags
-    for element in &data.elements {
-        if element.r#type == "node" {
-            if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
-                let (x, z) =
-                    lat_lon_to_minecraft_coords(lat, lon, bbox, scale_factor_z, scale_factor_x);
+    for element in data.nodes {
+        if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
+            let llpoint = LLPoint::new(lat, lon).unwrap_or_else(|e| {
+                eprintln!("Encountered invalid node element:\n{e}");
+                panic!();
+            });
 
-                let processed: ProcessedNode = ProcessedNode {
-                    id: element.id,
-                    tags: element.tags.clone().unwrap_or_default(),
-                    x,
-                    z,
-                };
+            let xzpoint = coord_transformer.transform_point(llpoint);
 
-                nodes_map.insert(element.id, processed.clone());
+            let processed: ProcessedNode = ProcessedNode {
+                id: element.id,
+                tags: element.tags.clone().unwrap_or_default(),
+                x: xzpoint.x,
+                z: xzpoint.z,
+            };
 
-                // Process nodes with tags
-                if let Some(tags) = &element.tags {
-                    if !tags.is_empty() {
-                        processed_elements.push(ProcessedElement::Node(processed));
-                    }
+            nodes_map.insert(element.id, processed.clone());
+
+            // Only add tagged nodes to processed_elements if they're within or near the bbox
+            // This significantly improves performance by filtering out distant nodes
+            if !element.tags.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
+                // Node has tags, check if it's in the bbox (with some margin)
+                if xzbbox.contains(&xzpoint) {
+                    processed_elements.push(ProcessedElement::Node(processed));
                 }
             }
         }
     }
 
-    // Second pass: process ways
-    for element in &data.elements {
-        if element.r#type != "way" {
-            continue;
-        }
-
+    // Second pass: process ways and clip them to bbox
+    for element in data.ways {
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
             for &node_id in node_ids {
@@ -210,25 +234,38 @@ pub fn parse_osm_data(
             }
         }
 
-        let processed: ProcessedWay = ProcessedWay {
-            id: element.id,
-            tags: element.tags.clone().unwrap_or_default(),
-            nodes,
-        };
+        // Clip the way to bbox to reduce node count dramatically
+        let tags = element.tags.clone().unwrap_or_default();
 
-        ways_map.insert(element.id, processed.clone());
+        // Store unclipped way for relation assembly (clipping happens after ring merging)
+        ways_map.insert(
+            element.id,
+            ProcessedWay {
+                id: element.id,
+                tags: tags.clone(),
+                nodes: nodes.clone(),
+            },
+        );
 
-        if !processed.nodes.is_empty() {
-            processed_elements.push(ProcessedElement::Way(processed));
-        }
-    }
+        // Clip way nodes for standalone way processing (not relations)
+        let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
 
-    // Third pass: process relations
-    for element in &data.elements {
-        if element.r#type != "relation" {
+        // Skip ways that are completely outside the bbox (empty after clipping)
+        if clipped_nodes.is_empty() {
             continue;
         }
 
+        let processed: ProcessedWay = ProcessedWay {
+            id: element.id,
+            tags: tags.clone(),
+            nodes: clipped_nodes.clone(),
+        };
+
+        processed_elements.push(ProcessedElement::Way(processed));
+    }
+
+    // Third pass: process relations and clip member ways
+    for element in data.relations {
         let Some(tags) = &element.tags else {
             continue;
         };
@@ -238,12 +275,15 @@ pub fn parse_osm_data(
             continue;
         };
 
+        // Water relations require unclipped ways for ring merging in water_areas.rs
+        let is_water_relation = is_water_element(tags);
+
         let members: Vec<ProcessedMember> = element
             .members
             .iter()
             .filter_map(|mem: &OsmMember| {
                 if mem.r#type != "way" {
-                    eprintln!("WARN: Unknown relation type {}", mem.r#type);
+                    eprintln!("WARN: Unknown relation member type \"{}\"", mem.r#type);
                     return None;
                 }
 
@@ -253,25 +293,74 @@ pub fn parse_osm_data(
                     _ => return None,
                 };
 
-                let way: ProcessedWay = ways_map
-                    .get(&mem.r#ref)
-                    .expect("Missing a way referenced by a rel")
-                    .clone();
+                // Check if the way exists in ways_map
+                let way: ProcessedWay = match ways_map.get(&mem.r#ref) {
+                    Some(w) => w.clone(),
+                    None => {
+                        // Way was likely filtered out because it was completely outside the bbox
+                        return None;
+                    }
+                };
 
-                Some(ProcessedMember { role, way })
+                // Water relations: keep unclipped for ring merging
+                // Non-water relations: clip member ways now
+                let final_way = if is_water_relation {
+                    way
+                } else {
+                    let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
+                    if clipped_nodes.is_empty() {
+                        return None;
+                    }
+                    ProcessedWay {
+                        id: way.id,
+                        tags: way.tags,
+                        nodes: clipped_nodes,
+                    }
+                };
+
+                Some(ProcessedMember {
+                    role,
+                    way: final_way,
+                })
             })
             .collect();
 
-        processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
-            id: element.id,
-            members,
-            tags: tags.clone(),
-        }));
+        if !members.is_empty() {
+            processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
+                id: element.id,
+                members,
+                tags: tags.clone(),
+            }));
+        }
     }
 
-    emit_gui_progress_update(10.0, "");
+    emit_gui_progress_update(15.0, "");
 
-    (processed_elements, scale_factor_x, scale_factor_z)
+    (processed_elements, xzbbox)
+}
+
+/// Returns true if tags indicate a water element handled by water_areas.rs.
+fn is_water_element(tags: &HashMap<String, String>) -> bool {
+    // Check for explicit water tag
+    if tags.contains_key("water") {
+        return true;
+    }
+
+    // Check for natural=water or natural=bay
+    if let Some(natural_val) = tags.get("natural") {
+        if natural_val == "water" || natural_val == "bay" {
+            return true;
+        }
+    }
+
+    // Check for waterway=dock (also handled as water area)
+    if let Some(waterway_val) = tags.get("waterway") {
+        if waterway_val == "dock" {
+            return true;
+        }
+    }
+
+    false
 }
 
 const PRIORITY_ORDER: [&str; 6] = [
@@ -288,38 +377,4 @@ pub fn get_priority(element: &ProcessedElement) -> usize {
     }
     // Return a default priority if none of the tags match
     PRIORITY_ORDER.len()
-}
-
-// (lat meters, lon meters)
-#[inline]
-pub fn geo_distance(a: GeoCoord, b: GeoCoord) -> (f64, f64) {
-    let z: f64 = lat_distance(a.lat(), b.lat());
-
-    // distance between two lons depends on their latitude. In this case we'll just average them
-    let x: f64 = lon_distance((a.lat() + b.lat()) / 2.0, a.lng(), b.lng());
-
-    (z, x)
-}
-
-// Haversine but optimized for a latitude delta of 0
-// returns meters
-fn lon_distance(lat: f64, lon1: f64, lon2: f64) -> f64 {
-    const R: f64 = 6_371_000.0;
-    let d_lon: f64 = (lon2 - lon1).to_radians();
-    let a: f64 =
-        lat.to_radians().cos() * lat.to_radians().cos() * (d_lon / 2.0).sin() * (d_lon / 2.0).sin();
-    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    R * c
-}
-
-// Haversine but optimized for a longitude delta of 0
-// returns meters
-fn lat_distance(lat1: f64, lat2: f64) -> f64 {
-    const R: f64 = 6_371_000.0;
-    let d_lat: f64 = (lat2 - lat1).to_radians();
-    let a: f64 = (d_lat / 2.0).sin() * (d_lat / 2.0).sin();
-    let c: f64 = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    R * c
 }

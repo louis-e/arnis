@@ -1,7 +1,10 @@
 use crate::block_definitions::*;
-use crate::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
+#[cfg(feature = "gui")]
+use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use fastanvil::Region;
 use fastnbt::{LongArray, Value};
@@ -12,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Serialize, Deserialize)]
@@ -53,6 +57,8 @@ struct PaletteItem {
 
 struct SectionToModify {
     blocks: [Block; 4096],
+    // Store properties for blocks that have them, indexed by the same index as blocks array
+    properties: FnvHashMap<usize, Value>,
 }
 
 impl SectionToModify {
@@ -69,32 +75,63 @@ impl SectionToModify {
         self.blocks[Self::index(x, y, z)] = block;
     }
 
+    fn set_block_with_properties(
+        &mut self,
+        x: u8,
+        y: u8,
+        z: u8,
+        block_with_props: BlockWithProperties,
+    ) {
+        let index = Self::index(x, y, z);
+        self.blocks[index] = block_with_props.block;
+
+        // Store properties if they exist
+        if let Some(props) = block_with_props.properties {
+            self.properties.insert(index, props);
+        } else {
+            // Remove any existing properties for this position
+            self.properties.remove(&index);
+        }
+    }
+
     fn index(x: u8, y: u8, z: u8) -> usize {
         usize::from(y) % 16 * 256 + usize::from(z) * 16 + usize::from(x)
     }
 
     fn to_section(&self, y: i8) -> Section {
-        let mut palette = self.blocks.to_vec();
-        palette.sort();
-        palette.dedup();
+        // Create a map of unique block+properties combinations to palette indices
+        let mut unique_blocks: Vec<(Block, Option<Value>)> = Vec::new();
+        let mut palette_lookup: FnvHashMap<(Block, Option<String>), usize> = FnvHashMap::default();
 
-        let palette_lookup: FnvHashMap<_, _> = palette
-            .iter()
-            .enumerate()
-            .map(|(k, v)| (v, i64::try_from(k).unwrap()))
-            .collect();
+        // Build unique block combinations and lookup table
+        for (i, &block) in self.blocks.iter().enumerate() {
+            let properties = self.properties.get(&i).cloned();
+
+            // Create a key for the lookup (block + properties hash)
+            let props_key = properties.as_ref().map(|p| format!("{p:?}"));
+            let lookup_key = (block, props_key);
+
+            if let std::collections::hash_map::Entry::Vacant(e) = palette_lookup.entry(lookup_key) {
+                let palette_index = unique_blocks.len();
+                e.insert(palette_index);
+                unique_blocks.push((block, properties));
+            }
+        }
 
         let mut bits_per_block = 4; // minimum allowed
-        while (1 << bits_per_block) < palette.len() {
+        while (1 << bits_per_block) < unique_blocks.len() {
             bits_per_block += 1;
         }
 
         let mut data = vec![];
-
         let mut cur = 0;
         let mut cur_idx = 0;
-        for block in &self.blocks {
-            let p = palette_lookup[block];
+
+        for (i, &block) in self.blocks.iter().enumerate() {
+            let properties = self.properties.get(&i).cloned();
+            let props_key = properties.as_ref().map(|p| format!("{p:?}"));
+            let lookup_key = (block, props_key);
+            let p = palette_lookup[&lookup_key] as i64;
 
             if cur_idx + bits_per_block > 64 {
                 data.push(cur);
@@ -110,11 +147,11 @@ impl SectionToModify {
             data.push(cur);
         }
 
-        let palette = palette
+        let palette = unique_blocks
             .iter()
-            .map(|x| PaletteItem {
-                name: x.name().to_string(),
-                properties: x.properties(),
+            .map(|(block, stored_props)| PaletteItem {
+                name: block.name().to_string(),
+                properties: stored_props.clone().or_else(|| block.properties()),
             })
             .collect();
 
@@ -134,6 +171,7 @@ impl Default for SectionToModify {
     fn default() -> Self {
         Self {
             blocks: [AIR; 4096],
+            properties: FnvHashMap::default(),
         }
     }
 }
@@ -159,6 +197,20 @@ impl ChunkToModify {
         let section = self.sections.entry(section_idx).or_default();
 
         section.set_block(x, (y & 15).try_into().unwrap(), z, block);
+    }
+
+    fn set_block_with_properties(
+        &mut self,
+        x: u8,
+        y: i32,
+        z: u8,
+        block_with_props: BlockWithProperties,
+    ) {
+        let section_idx: i8 = (y >> 4).try_into().unwrap();
+
+        let section = self.sections.entry(section_idx).or_default();
+
+        section.set_block_with_properties(x, (y & 15).try_into().unwrap(), z, block_with_props);
     }
 
     fn sections(&self) -> impl Iterator<Item = Section> + '_ {
@@ -227,24 +279,67 @@ impl WorldToModify {
             block,
         );
     }
+
+    fn set_block_with_properties(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_with_props: BlockWithProperties,
+    ) {
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
+        let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        chunk.set_block_with_properties(
+            (x & 15).try_into().unwrap(),
+            y,
+            (z & 15).try_into().unwrap(),
+            block_with_props,
+        );
+    }
 }
 
-pub struct WorldEditor {
-    region_dir: String,
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorldMetadata {
+    min_mc_x: i32,
+    max_mc_x: i32,
+    min_mc_z: i32,
+    max_mc_z: i32,
+
+    min_geo_lat: f64,
+    max_geo_lat: f64,
+    min_geo_lon: f64,
+    max_geo_lon: f64,
+}
+
+// Notes for someone not familiar with lifetime parameter:
+// The follwing is like a C++ template:
+// template<lifetime A>
+// struct WorldEditor {const XZBBox<A>& xzbbox;}
+pub struct WorldEditor<'a> {
+    world_dir: PathBuf,
     world: WorldToModify,
-    scale_factor_x: f64,
-    scale_factor_z: f64,
+    xzbbox: &'a XZBBox,
+    llbbox: LLBBox,
     ground: Option<Box<Ground>>,
 }
 
-impl WorldEditor {
-    /// Initializes the WorldEditor with the region directory and template region path.
-    pub fn new(region_dir: &str, scale_factor_x: f64, scale_factor_z: f64) -> Self {
+// template<lifetime A>
+// impl for struct WorldEditor<A> {...}
+impl<'a> WorldEditor<'a> {
+    // Initializes the WorldEditor with the region directory and template region path.
+    pub fn new(world_dir: PathBuf, xzbbox: &'a XZBBox, llbbox: LLBBox) -> Self {
         Self {
-            region_dir: region_dir.to_string(),
+            world_dir,
             world: WorldToModify::default(),
-            scale_factor_x,
-            scale_factor_z,
+            xzbbox,
+            llbbox,
             ground: None,
         }
     }
@@ -254,11 +349,19 @@ impl WorldEditor {
         self.ground = Some(Box::new(ground.clone()));
     }
 
+    /// Gets a reference to the ground data if available
+    pub fn get_ground(&self) -> Option<&Ground> {
+        self.ground.as_ref().map(|g| g.as_ref())
+    }
+
     /// Calculate the absolute Y position from a ground-relative offset
     #[inline(always)]
     pub fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {
         if let Some(ground) = &self.ground {
-            ground.level(XZPoint::new(x, z)) + y_offset
+            ground.level(XZPoint::new(
+                x - self.xzbbox.min_x(),
+                z - self.xzbbox.min_z(),
+            )) + y_offset
         } else {
             y_offset // If no ground reference, use y_offset as absolute Y
         }
@@ -266,9 +369,11 @@ impl WorldEditor {
 
     /// Creates a region for the given region coordinates.
     fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
-        let out_path: String = format!("{}/r.{}.{}.mca", self.region_dir, region_x, region_z);
+        let out_path = self
+            .world_dir
+            .join(format!("region/r.{}.{}.mca", region_x, region_z));
 
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../mcassets/region.template");
+        const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
 
         let mut region_file: File = File::options()
             .read(true)
@@ -285,8 +390,12 @@ impl WorldEditor {
         Region::from_stream(region_file).expect("Failed to load region")
     }
 
+    pub fn get_min_coords(&self) -> (i32, i32) {
+        (self.xzbbox.min_x(), self.xzbbox.min_z())
+    }
+
     pub fn get_max_coords(&self) -> (i32, i32) {
-        (self.scale_factor_x as i32, self.scale_factor_x as i32)
+        (self.xzbbox.max_x(), self.xzbbox.max_z())
     }
 
     #[allow(unused)]
@@ -317,10 +426,10 @@ impl WorldEditor {
         let mut block_entities = HashMap::new();
 
         let messages = vec![
-            Value::String(format!("\"{}\"", line1)),
-            Value::String(format!("\"{}\"", line2)),
-            Value::String(format!("\"{}\"", line3)),
-            Value::String(format!("\"{}\"", line4)),
+            Value::String(format!("\"{line1}\"")),
+            Value::String(format!("\"{line2}\"")),
+            Value::String(format!("\"{line3}\"")),
+            Value::String(format!("\"{line4}\"")),
         ];
 
         let mut text_data = HashMap::new();
@@ -369,7 +478,7 @@ impl WorldEditor {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
 
@@ -410,7 +519,7 @@ impl WorldEditor {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if x < 0 || x > self.scale_factor_x as i32 || z < 0 || z > self.scale_factor_z as i32 {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
 
@@ -433,6 +542,45 @@ impl WorldEditor {
 
         if should_insert {
             self.world.set_block(x, absolute_y, z, block);
+        }
+    }
+
+    /// Sets a block with properties at the given coordinates with absolute Y value.
+    #[inline]
+    pub fn set_block_with_properties_absolute(
+        &mut self,
+        block_with_props: BlockWithProperties,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+    ) {
+        // Check if coordinates are within bounds
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+
+        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
+            // Check against whitelist and blacklist
+            if let Some(whitelist) = override_whitelist {
+                whitelist
+                    .iter()
+                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+            } else if let Some(blacklist) = override_blacklist {
+                !blacklist
+                    .iter()
+                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
+            } else {
+                false
+            }
+        } else {
+            true
+        };
+
+        if should_insert {
+            self.world
+                .set_block_with_properties(x, absolute_y, z, block_with_props);
         }
     }
 
@@ -593,59 +741,7 @@ impl WorldEditor {
         };
 
         // Create the Level wrapper
-        let level_data = HashMap::from([(
-            "Level".to_string(),
-            Value::Compound(HashMap::from([
-                ("xPos".to_string(), Value::Int(abs_chunk_x)),
-                ("zPos".to_string(), Value::Int(abs_chunk_z)),
-                ("isLightOn".to_string(), Value::Byte(0)),
-                (
-                    "sections".to_string(),
-                    Value::List(
-                        chunk_data
-                            .sections
-                            .iter()
-                            .map(|section| {
-                                Value::Compound(HashMap::from([
-                                    ("Y".to_string(), Value::Byte(section.y)),
-                                    (
-                                        "block_states".to_string(),
-                                        Value::Compound(HashMap::from([
-                                            (
-                                                "palette".to_string(),
-                                                Value::List(
-                                                    section
-                                                        .block_states
-                                                        .palette
-                                                        .iter()
-                                                        .map(|item| {
-                                                            Value::Compound(HashMap::from([(
-                                                                "Name".to_string(),
-                                                                Value::String(item.name.clone()),
-                                                            )]))
-                                                        })
-                                                        .collect(),
-                                                ),
-                                            ),
-                                            (
-                                                "data".to_string(),
-                                                Value::LongArray(
-                                                    section
-                                                        .block_states
-                                                        .data
-                                                        .clone()
-                                                        .unwrap_or_else(|| LongArray::new(vec![])),
-                                                ),
-                                            ),
-                                        ])),
-                                    ),
-                                ]))
-                            })
-                            .collect(),
-                    ),
-                ),
-            ])),
-        )]);
+        let level_data = create_level_wrapper(&chunk_data);
 
         // Serialize the chunk with Level wrapper
         let mut ser_buffer = Vec::with_capacity(8192);
@@ -656,8 +752,16 @@ impl WorldEditor {
 
     /// Saves all changes made to the world by writing modified chunks to the appropriate region files.
     pub fn save(&mut self) {
-        println!("{} Saving world...", "[5/5]".bold());
+        println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
+
+        // Save metadata with error handling
+        if let Err(e) = self.save_metadata() {
+            eprintln!("Failed to save world metadata: {}", e);
+            #[cfg(feature = "gui")]
+            send_log(LogLevel::Warning, "Failed to save world metadata.");
+            // Continue with world saving even if metadata fails
+        }
 
         let total_regions = self.world.regions.len() as u64;
         let save_pb = ProgressBar::new(total_regions);
@@ -805,6 +909,38 @@ impl WorldEditor {
 
         save_pb.finish();
     }
+
+    fn save_metadata(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let metadata_path = self.world_dir.join("metadata.json");
+
+        let mut file = File::create(&metadata_path).map_err(|e| {
+            format!(
+                "Failed to create metadata file at {}: {}",
+                metadata_path.display(),
+                e
+            )
+        })?;
+
+        let metadata = WorldMetadata {
+            min_mc_x: self.xzbbox.min_x(),
+            max_mc_x: self.xzbbox.max_x(),
+            min_mc_z: self.xzbbox.min_z(),
+            max_mc_z: self.xzbbox.max_z(),
+
+            min_geo_lat: self.llbbox.min().lat(),
+            max_geo_lat: self.llbbox.max().lat(),
+            min_geo_lon: self.llbbox.min().lng(),
+            max_geo_lon: self.llbbox.max().lng(),
+        };
+
+        let contents = serde_json::to_string(&metadata)
+            .map_err(|e| format!("Failed to serialize metadata to JSON: {}", e))?;
+
+        write!(&mut file, "{}", contents)
+            .map_err(|e| format!("Failed to write metadata to file: {}", e))?;
+
+        Ok(())
+    }
 }
 
 // Helper function to get entity coordinates
@@ -846,46 +982,44 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                         .sections
                         .iter()
                         .map(|section| {
+                            let mut block_states = HashMap::from([(
+                                "palette".to_string(),
+                                Value::List(
+                                    section
+                                        .block_states
+                                        .palette
+                                        .iter()
+                                        .map(|item| {
+                                            let mut palette_item = HashMap::from([(
+                                                "Name".to_string(),
+                                                Value::String(item.name.clone()),
+                                            )]);
+                                            if let Some(props) = &item.properties {
+                                                palette_item.insert(
+                                                    "Properties".to_string(),
+                                                    props.clone(),
+                                                );
+                                            }
+                                            Value::Compound(palette_item)
+                                        })
+                                        .collect(),
+                                ),
+                            )]);
+
+                            // only add the `data` attribute if it's non-empty
+                            // some software (cough cough dynmap) chokes otherwise
+                            if let Some(data) = &section.block_states.data {
+                                if !data.is_empty() {
+                                    block_states.insert(
+                                        "data".to_string(),
+                                        Value::LongArray(data.to_owned()),
+                                    );
+                                }
+                            }
+
                             Value::Compound(HashMap::from([
                                 ("Y".to_string(), Value::Byte(section.y)),
-                                (
-                                    "block_states".to_string(),
-                                    Value::Compound(HashMap::from([
-                                        (
-                                            "palette".to_string(),
-                                            Value::List(
-                                                section
-                                                    .block_states
-                                                    .palette
-                                                    .iter()
-                                                    .map(|item| {
-                                                        let mut palette_item = HashMap::from([(
-                                                            "Name".to_string(),
-                                                            Value::String(item.name.clone()),
-                                                        )]);
-                                                        if let Some(props) = &item.properties {
-                                                            palette_item.insert(
-                                                                "Properties".to_string(),
-                                                                props.clone(),
-                                                            );
-                                                        }
-                                                        Value::Compound(palette_item)
-                                                    })
-                                                    .collect(),
-                                            ),
-                                        ),
-                                        (
-                                            "data".to_string(),
-                                            Value::LongArray(
-                                                section
-                                                    .block_states
-                                                    .data
-                                                    .clone()
-                                                    .unwrap_or_else(|| LongArray::new(vec![])),
-                                            ),
-                                        ),
-                                    ])),
-                                ),
+                                ("block_states".to_string(), Value::Compound(block_states)),
                             ]))
                         })
                         .collect(),
