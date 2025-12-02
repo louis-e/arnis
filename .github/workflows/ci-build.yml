@@ -74,7 +74,7 @@ jobs:
       run: cargo test --all-targets --all-features
   
     - name: Upload artifact
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      if: github.ref == 'refs/heads/main'
       uses: actions/upload-artifact@v4
       with:
         name: ${{ matrix.os }}-latest-build
