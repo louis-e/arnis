@@ -64,14 +64,8 @@ pub(crate) struct WorldMetadata {
 
 /// The main world editor struct for placing blocks and saving worlds.
 ///
-/// # Lifetime Parameter
-///
-/// The lifetime `'a` is tied to the `XZBBox` reference, which defines the
-/// world boundaries. This is similar to a C++ template:
-/// ```cpp
-/// template<lifetime A>
-/// struct WorldEditor { const XZBBox<A>& xzbbox; }
-/// ```
+/// The lifetime `'a` is tied to the `XZBBox` reference, which defines
+/// the world boundaries and must outlive the WorldEditor instance.
 pub struct WorldEditor<'a> {
     world_dir: PathBuf,
     world: WorldToModify,

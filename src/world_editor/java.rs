@@ -299,8 +299,8 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
                                 ),
                             )]);
 
-                            // only add the `data` attribute if it's non-empty
-                            // some software (cough cough dynmap) chokes otherwise
+                            // Only add the `data` attribute if it's non-empty
+                            // to maintain compatibility with third-party tools like Dynmap
                             if let Some(data) = &section.block_states.data {
                                 if !data.is_empty() {
                                     block_states.insert(
