@@ -314,7 +314,13 @@ pub fn generate_world_with_options(
     }
 
     // Generate top-down map preview silently in background after completion (Java only)
-    if world_format == WorldFormat::JavaAnvil {
+    // Skip map preview for very large areas to avoid memory issues
+    const MAX_MAP_PREVIEW_AREA: i64 = 6400 * 6900;
+    let world_width = (xzbbox.max_x() - xzbbox.min_x()) as i64;
+    let world_height = (xzbbox.max_z() - xzbbox.min_z()) as i64;
+    let world_area = world_width * world_height;
+
+    if world_format == WorldFormat::JavaAnvil && world_area <= MAX_MAP_PREVIEW_AREA {
         let world_path = args.path.clone();
         let bounds = (
             xzbbox.min_x(),
