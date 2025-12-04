@@ -224,7 +224,6 @@ function setupProgressListener() {
   // Listen for open-mcworld-file event to show the generated Bedrock world in file explorer
   window.__TAURI__.event.listen("open-mcworld-file", async (event) => {
     const filePath = event.payload;
-    console.log("Showing mcworld file in folder:", filePath);
     try {
       // Use our custom command to show the file in the system file explorer
       await invoke("gui_show_in_folder", { path: filePath });
