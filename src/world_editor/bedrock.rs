@@ -201,7 +201,7 @@ impl BedrockWriter {
             minimum_compatible_client_version: version_array,
 
             // World identity
-            level_name: "Arnis World".to_string(),
+            level_name: self.level_name.clone(),
             random_seed: 0,
 
             // Spawn location

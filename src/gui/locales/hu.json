@@ -44,5 +44,6 @@
   "mode_terrain_only": "Csak terep",
   "interior": "Belső generálás",
   "roof": "Tető generálás",
-  "fillground": "Talaj feltöltése"
+  "fillground": "Talaj feltöltése",
+  "bedrock_use_java": "Java világválasztáshoz"
 }

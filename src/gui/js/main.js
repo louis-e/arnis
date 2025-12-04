@@ -24,6 +24,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   handleBboxInput();
   const localization = await getLocalization();
   await applyLocalization(localization);
+  updateFormatToggleUI(selectedWorldFormat);
   initFooter();
   await checkForUpdates();
 });
@@ -389,13 +390,41 @@ function setWorldFormat(format) {
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
+  const chooseWorldBtn = document.getElementById('choose-world-btn');
+  const selectedWorldText = document.getElementById('selected-world');
   
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
+    // Enable Choose World button for Java
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = false;
+      chooseWorldBtn.style.opacity = '1';
+      chooseWorldBtn.style.cursor = 'pointer';
+    }
+    // Show default text (world was cleared when switching to Bedrock)
+    if (selectedWorldText) {
+      const noWorldText = window.localization?.no_world_selected || 'No world selected';
+      selectedWorldText.textContent = noWorldText;
+      selectedWorldText.style.color = '#fecc44';
+    }
   } else {
     javaBtn.classList.remove('format-active');
     bedrockBtn.classList.add('format-active');
+    // Disable Choose World button for Bedrock and clear any selected world
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = true;
+      chooseWorldBtn.style.opacity = '0.5';
+      chooseWorldBtn.style.cursor = 'not-allowed';
+    }
+    // Clear world selection and show Bedrock info message
+    worldPath = "";
+    isNewWorld = false;
+    if (selectedWorldText) {
+      const bedrockText = window.localization?.bedrock_use_java || 'Use Java to select worlds';
+      selectedWorldText.textContent = bedrockText;
+      selectedWorldText.style.color = '#fecc44';
+    }
   }
 }
 

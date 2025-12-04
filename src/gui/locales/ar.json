@@ -44,5 +44,6 @@
   "mode_terrain_only": "تضاريس فقط",
   "interior": "توليد الداخلية",
   "roof": "توليد السقف",
-  "fillground": "ملء الأرض"
+  "fillground": "ملء الأرض",
+  "bedrock_use_java": "استخدم Java لاختيار العوالم"
 }

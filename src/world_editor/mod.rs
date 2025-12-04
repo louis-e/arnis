@@ -482,6 +482,11 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves all changes made to the world by writing to the appropriate format.
     pub fn save(&mut self) {
+        println!("Generating world for: {}", match self.format {
+            WorldFormat::JavaAnvil => "Java Edition (Anvil)",
+            WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
+        });
+
         match self.format {
             WorldFormat::JavaAnvil => self.save_java(),
             WorldFormat::BedrockMcWorld => self.save_bedrock(),

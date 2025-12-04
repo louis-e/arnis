@@ -44,5 +44,6 @@
   "mode_terrain_only": "Vain maasto",
   "interior": "Sisätilan luonti",
   "roof": "Katon luonti",
-  "fillground": "Täytä maa"
+  "fillground": "Täytä maa",
+  "bedrock_use_java": "Käytä Javaa maailmojen valintaan"
 }

@@ -44,5 +44,6 @@
   "mode_terrain_only": "Tik reljefas",
   "interior": "Interjero generavimas",
   "roof": "Stogo generavimas",
-  "fillground": "Užpildyti pagrindą"
+  "fillground": "Užpildyti pagrindą",
+  "bedrock_use_java": "Naudok Java pasauliams"
 }

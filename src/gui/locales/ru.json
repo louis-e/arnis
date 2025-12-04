@@ -44,5 +44,6 @@
   "mode_terrain_only": "Только Рельеф",
   "interior": "Генерация Интерьера",
   "roof": "Генерация Крыши",
-  "fillground": "Заполнить Землю"
+  "fillground": "Заполнить Землю",
+  "bedrock_use_java": "Используйте Java для миров"
 }

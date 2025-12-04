@@ -44,5 +44,6 @@
   "mode_terrain_only": "Nur Terrain",
   "interior": "Innenraum Generierung",
   "roof": "Dach Generierung",
-  "fillground": "Boden füllen"
+  "fillground": "Boden füllen",
+  "bedrock_use_java": "Java für Weltauswahl nutzen"
 }

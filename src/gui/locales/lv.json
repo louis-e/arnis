@@ -44,5 +44,6 @@
   "mode_terrain_only": "Tikai reljefs",
   "interior": "Interjera ģenerēšana",
   "roof": "Jumta ģenerēšana",
-  "fillground": "Aizpildīt zemi"
+  "fillground": "Aizpildīt zemi",
+  "bedrock_use_java": "Izmanto Java pasaulēm"
 }
