@@ -1315,6 +1315,7 @@ mod bedrock_support {
             self.write_chunks_to_db(world)?;
             self.write_metadata(world, xzbbox, llbbox)?;
             self.package_mcworld()?;
+            self.cleanup_temp_dir()?;
             Ok(())
         }
 
@@ -1826,6 +1827,14 @@ mod bedrock_support {
             }
 
             writer.finish()?;
+            Ok(())
+        }
+
+        /// Clean up the temporary directory after packaging mcworld
+        fn cleanup_temp_dir(&self) -> Result<(), BedrockSaveError> {
+            if self.output_dir.exists() {
+                fs::remove_dir_all(&self.output_dir)?;
+            }
             Ok(())
         }
 
