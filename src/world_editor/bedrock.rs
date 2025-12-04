@@ -10,6 +10,7 @@ use crate::bedrock_block_map::{
 };
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::progress::emit_gui_progress_update;
 
 use bedrockrs_level::level::db_interface::bedrock_key::ChunkKey;
 use bedrockrs_level::level::db_interface::rusty::RustyDBInterface;
@@ -149,10 +150,20 @@ impl BedrockWriter {
     ) -> Result<(), BedrockSaveError> {
         self.prepare_output_dir()?;
         self.write_level_name()?;
+
+        emit_gui_progress_update(91.0, "Saving Bedrock world...");
         self.write_level_dat(xzbbox)?;
+
+        emit_gui_progress_update(92.0, "Saving Bedrock world...");
         self.write_chunks_to_db(world)?;
+
+        emit_gui_progress_update(97.0, "Saving Bedrock world...");
         self.write_metadata(world, xzbbox, llbbox)?;
+
+        emit_gui_progress_update(98.0, "Saving Bedrock world...");
         self.package_mcworld()?;
+
+        emit_gui_progress_update(99.0, "Saving Bedrock world...");
         self.cleanup_temp_dir()?;
         Ok(())
     }
@@ -391,6 +402,8 @@ impl BedrockWriter {
                 .progress_chars("█▓░"),
         );
 
+        let mut chunks_processed: usize = 0;
+
         // Process each region and chunk
         for ((region_x, region_z), region) in &world.regions {
             for ((local_chunk_x, local_chunk_z), chunk) in &region.chunks {
@@ -422,7 +435,15 @@ impl BedrockWriter {
                         .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
                 }
 
+                chunks_processed += 1;
                 progress_bar.inc(1);
+
+                // Update GUI progress (92% to 97% range for chunk writing)
+                if chunks_processed.is_multiple_of(10) || chunks_processed == total_chunks {
+                    let chunk_progress = chunks_processed as f64 / total_chunks as f64;
+                    let gui_progress = 92.0 + (chunk_progress * 5.0); // 92% to 97%
+                    emit_gui_progress_update(gui_progress, "");
+                }
             }
         }
 

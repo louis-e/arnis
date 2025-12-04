@@ -6,7 +6,6 @@
 
 use crate::block_definitions::Block;
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 /// Represents a Bedrock block with its identifier and state properties.
 #[derive(Debug, Clone)]
