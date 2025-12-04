@@ -6,6 +6,7 @@
 
 use crate::block_definitions::Block;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 /// Represents a Bedrock block with its identifier and state properties.
 #[derive(Debug, Clone)]
@@ -526,7 +527,29 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             )],
         ),
 
+        // Blocks with different names in Bedrock
+        "bricks" => BedrockBlock::simple("brick_block"),
+        "end_stone_bricks" => BedrockBlock::simple("end_bricks"),
+        "nether_bricks" => BedrockBlock::simple("nether_brick"),
+        "red_nether_bricks" => BedrockBlock::simple("red_nether_brick"),
+        "snow_block" => BedrockBlock::simple("snow"),
+        "dirt_path" => BedrockBlock::simple("grass_path"),
+        "dead_bush" => BedrockBlock::simple("deadbush"),
+        "note_block" => BedrockBlock::simple("noteblock"),
+
+        // Oak items mapped to dark_oak in Bedrock (or generic equivalents)
+        "oak_pressure_plate" => BedrockBlock::simple("wooden_pressure_plate"),
+        "oak_door" => BedrockBlock::simple("wooden_door"),
+        "oak_trapdoor" => BedrockBlock::simple("trapdoor"),
+
+        // Bed (Bedrock uses single "bed" block with color state)
+        "red_bed" => BedrockBlock::with_states(
+            "bed",
+            vec![("color", BedrockBlockStateValue::String("red".to_string()))],
+        ),
+
         // Default: use the same name (works for many blocks)
+        // Log unmapped blocks to help identify missing mappings
         _ => BedrockBlock::simple(java_name),
     }
 }
@@ -575,8 +598,11 @@ fn convert_stairs(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    // Get the base stair name for Bedrock
-    let bedrock_name = java_name; // Most stairs have the same name
+    // Map Java stair names to Bedrock equivalents
+    let bedrock_name = match java_name {
+        "end_stone_brick_stairs" => "end_brick_stairs",
+        _ => java_name, // Most stairs have the same name
+    };
 
     let mut states = HashMap::new();
 
