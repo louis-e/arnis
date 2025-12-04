@@ -531,6 +531,200 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
     }
 }
 
+/// Converts an internal Block with optional Java properties to a BedrockBlock.
+///
+/// This function extends `to_bedrock_block` by also handling block-specific properties
+/// like stair facing/shape, slab type, etc. Java property names and values are converted
+/// to their Bedrock equivalents.
+pub fn to_bedrock_block_with_properties(
+    block: Block,
+    java_properties: Option<&fastnbt::Value>,
+) -> BedrockBlock {
+    let java_name = block.name();
+
+    // Extract Java properties as a map if present
+    let props_map = java_properties.and_then(|v| {
+        if let fastnbt::Value::Compound(map) = v {
+            Some(map)
+        } else {
+            None
+        }
+    });
+
+    // Handle stairs with facing/shape properties
+    if java_name.ends_with("_stairs") {
+        return convert_stairs(java_name, props_map);
+    }
+
+    // Handle slabs with type property (top/bottom/double)
+    if java_name.ends_with("_slab") {
+        return convert_slab(java_name, props_map);
+    }
+
+    // Handle logs with axis property
+    if java_name.ends_with("_log") || java_name.ends_with("_wood") {
+        return convert_log(java_name, props_map);
+    }
+
+    // Fall back to basic conversion without properties
+    to_bedrock_block(block)
+}
+
+/// Convert Java stair block to Bedrock format with proper orientation.
+fn convert_stairs(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    // Get the base stair name for Bedrock
+    let bedrock_name = java_name; // Most stairs have the same name
+
+    let mut states = HashMap::new();
+
+    // Convert facing: Java uses "north/south/east/west", Bedrock uses "weirdo_direction" (0-3)
+    // Bedrock: 0=east, 1=west, 2=south, 3=north
+    if let Some(props) = props {
+        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
+            let direction = match facing.as_str() {
+                "east" => 0,
+                "west" => 1,
+                "south" => 2,
+                "north" => 3,
+                _ => 0,
+            };
+            states.insert(
+                "weirdo_direction".to_string(),
+                BedrockBlockStateValue::Int(direction),
+            );
+        }
+
+        // Convert half: Java uses "top/bottom", Bedrock uses "upside_down_bit"
+        if let Some(fastnbt::Value::String(half)) = props.get("half") {
+            let upside_down = half == "top";
+            states.insert(
+                "upside_down_bit".to_string(),
+                BedrockBlockStateValue::Bool(upside_down),
+            );
+        }
+    }
+
+    // If no properties were set, use defaults
+    if states.is_empty() {
+        states.insert(
+            "weirdo_direction".to_string(),
+            BedrockBlockStateValue::Int(0),
+        );
+        states.insert(
+            "upside_down_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
+    }
+
+    BedrockBlock {
+        name: format!("minecraft:{bedrock_name}"),
+        states,
+    }
+}
+
+/// Convert Java slab block to Bedrock format with proper type.
+fn convert_slab(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let mut states = HashMap::new();
+
+    // Convert type: Java uses "top/bottom/double", Bedrock uses "top_slot_bit"
+    if let Some(props) = props {
+        if let Some(fastnbt::Value::String(slab_type)) = props.get("type") {
+            let top_slot = slab_type == "top";
+            states.insert(
+                "top_slot_bit".to_string(),
+                BedrockBlockStateValue::Bool(top_slot),
+            );
+            // Note: "double" slabs in Java become full blocks in Bedrock (different block ID)
+        }
+    }
+
+    // Default to bottom if not specified
+    if !states.contains_key("top_slot_bit") {
+        states.insert(
+            "top_slot_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
+    }
+
+    // Handle special slab name mappings (same as in to_bedrock_block)
+    let bedrock_name = match java_name {
+        "stone_slab" => "stone_block_slab",
+        "stone_brick_slab" => "stone_block_slab",
+        "oak_slab" => "wooden_slab",
+        "spruce_slab" => "wooden_slab",
+        "birch_slab" => "wooden_slab",
+        "jungle_slab" => "wooden_slab",
+        "acacia_slab" => "wooden_slab",
+        "dark_oak_slab" => "wooden_slab",
+        _ => java_name,
+    };
+
+    // Add wood_type for wooden slabs
+    if bedrock_name == "wooden_slab" {
+        let wood_type = java_name.trim_end_matches("_slab");
+        states.insert(
+            "wood_type".to_string(),
+            BedrockBlockStateValue::String(wood_type.to_string()),
+        );
+    }
+
+    // Add stone_slab_type for stone slabs
+    if bedrock_name == "stone_block_slab" {
+        let slab_type = if java_name == "stone_brick_slab" {
+            "stone_brick"
+        } else {
+            "stone"
+        };
+        states.insert(
+            "stone_slab_type".to_string(),
+            BedrockBlockStateValue::String(slab_type.to_string()),
+        );
+    }
+
+    BedrockBlock {
+        name: format!("minecraft:{bedrock_name}"),
+        states,
+    }
+}
+
+/// Convert Java log/wood block to Bedrock format with proper axis.
+fn convert_log(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let bedrock_name = java_name;
+    let mut states = HashMap::new();
+
+    // Convert axis: Java uses "x/y/z", Bedrock uses "pillar_axis"
+    if let Some(props) = props {
+        if let Some(fastnbt::Value::String(axis)) = props.get("axis") {
+            states.insert(
+                "pillar_axis".to_string(),
+                BedrockBlockStateValue::String(axis.clone()),
+            );
+        }
+    }
+
+    // Default to y-axis if not specified
+    if states.is_empty() {
+        states.insert(
+            "pillar_axis".to_string(),
+            BedrockBlockStateValue::String("y".to_string()),
+        );
+    }
+
+    BedrockBlock {
+        name: format!("minecraft:{bedrock_name}"),
+        states,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,6 +754,71 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(s)) if s == "white"
+        ));
+    }
+
+    #[test]
+    fn test_stairs_with_properties() {
+        use crate::block_definitions::OAK_STAIRS;
+        use std::collections::HashMap as StdHashMap;
+
+        // Create Java properties for a south-facing stair
+        let mut props = StdHashMap::new();
+        props.insert(
+            "facing".to_string(),
+            fastnbt::Value::String("south".to_string()),
+        );
+        props.insert(
+            "half".to_string(),
+            fastnbt::Value::String("bottom".to_string()),
+        );
+        let java_props = fastnbt::Value::Compound(props);
+
+        let bedrock = to_bedrock_block_with_properties(OAK_STAIRS, Some(&java_props));
+        assert_eq!(bedrock.name, "minecraft:oak_stairs");
+
+        // Check weirdo_direction is set correctly (south = 2)
+        assert!(matches!(
+            bedrock.states.get("weirdo_direction"),
+            Some(BedrockBlockStateValue::Int(2))
+        ));
+
+        // Check upside_down_bit is false for bottom half
+        assert!(matches!(
+            bedrock.states.get("upside_down_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        ));
+    }
+
+    #[test]
+    fn test_stairs_upside_down() {
+        use crate::block_definitions::STONE_BRICK_STAIRS;
+        use std::collections::HashMap as StdHashMap;
+
+        // Create Java properties for an upside-down north-facing stair
+        let mut props = StdHashMap::new();
+        props.insert(
+            "facing".to_string(),
+            fastnbt::Value::String("north".to_string()),
+        );
+        props.insert(
+            "half".to_string(),
+            fastnbt::Value::String("top".to_string()),
+        );
+        let java_props = fastnbt::Value::Compound(props);
+
+        let bedrock = to_bedrock_block_with_properties(STONE_BRICK_STAIRS, Some(&java_props));
+
+        // Check weirdo_direction is set correctly (north = 3)
+        assert!(matches!(
+            bedrock.states.get("weirdo_direction"),
+            Some(BedrockBlockStateValue::Int(3))
+        ));
+
+        // Check upside_down_bit is true for top half
+        assert!(matches!(
+            bedrock.states.get("upside_down_bit"),
+            Some(BedrockBlockStateValue::Bool(true))
         ));
     }
 }

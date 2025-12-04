@@ -5,7 +5,9 @@
 
 use super::common::{ChunkToModify, SectionToModify, WorldToModify};
 use super::WorldMetadata;
-use crate::bedrock_block_map::{to_bedrock_block, BedrockBlock, BedrockBlockStateValue};
+use crate::bedrock_block_map::{
+    to_bedrock_block_with_properties, BedrockBlock, BedrockBlockStateValue,
+};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 
@@ -520,6 +522,9 @@ impl BedrockWriter {
     /// Converts from internal YZX ordering to Bedrock's XZY ordering:
     /// - Internal: index = y*256 + z*16 + x
     /// - Bedrock:  index = x*256 + z*16 + y
+    ///
+    /// Also propagates stored block properties (e.g., stair facing/shape) to the
+    /// Bedrock palette, ensuring blocks with non-default states are serialized correctly.
     fn build_palette_and_indices(
         &self,
         section: &SectionToModify,
@@ -541,7 +546,11 @@ impl BedrockWriter {
                     let internal_idx = y * 256 + z * 16 + x;
                     let block = section.blocks[internal_idx];
 
-                    let bedrock_block = to_bedrock_block(block);
+                    // Get stored properties for this block position (if any)
+                    let properties = section.properties.get(&internal_idx);
+
+                    // Convert to Bedrock format, preserving properties
+                    let bedrock_block = to_bedrock_block_with_properties(block, properties);
                     let key = format!("{:?}", (&bedrock_block.name, &bedrock_block.states));
 
                     let palette_index = if let Some(&idx) = palette_map.get(&key) {
