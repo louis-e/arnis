@@ -966,7 +966,9 @@ fn gui_start_generation(
                     &args,
                     generation_options,
                 );
-                // Session lock will be automatically released when _session_lock goes out of scope
+                // Explicitly release session lock before returning so Minecraft can open the world
+                // while map preview generates in the background
+                drop(_session_lock);
                 return Ok(());
             }
 
@@ -1005,7 +1007,9 @@ fn gui_start_generation(
                         &args,
                         generation_options.clone(),
                     );
-                    // Session lock will be automatically released when _session_lock goes out of scope
+                    // Explicitly release session lock before returning so Minecraft can open the world
+                    // while map preview generates in the background
+                    drop(_session_lock);
                     Ok(())
                 }
                 Err(e) => {
