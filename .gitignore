@@ -1,4 +1,5 @@
 /wiki
+*.mcworld
 
 # Environment files
 .env
