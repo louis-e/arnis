@@ -37,15 +37,26 @@
         <div class="controls-content">
           <h2 data-localize="select_world">Select World</h2>
 
-          <!-- Updated Tooltip Structure -->
-          <div class="tooltip" style="width: 100%;">
-            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;">
-              <span id="choose_world">Choose World</span>
-              <br>
-              <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
-                No world selected
-              </span>
-            </button>
+          <!-- World Selection Container -->
+          <div class="world-selection-container">
+            <div class="tooltip" style="width: 100%;">
+              <button type="button" onclick="openWorldPicker()" class="choose-world-btn">
+                <span id="choose_world">Choose World</span>
+                <br>
+                <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
+                  No world selected
+                </span>
+              </button>
+            </div>
+            <!-- World Format Toggle -->
+            <div class="format-toggle-container">
+              <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">
+                Java
+              </button>
+              <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">
+                Bedrock
+              </button>
+            </div>
           </div>
           
           <div class="button-container">
