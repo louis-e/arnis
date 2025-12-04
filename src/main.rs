@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+#[cfg(feature = "bedrock")]
+mod bedrock_block_map;
 mod block_definitions;
 mod bresenham;
 mod clipping;
