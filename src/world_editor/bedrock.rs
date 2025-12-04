@@ -10,6 +10,7 @@ use crate::bedrock_block_map::{
 };
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
+use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 
 use bedrockrs_level::level::db_interface::bedrock_key::ChunkKey;
@@ -121,11 +122,17 @@ pub struct BedrockWriter {
     output_dir: PathBuf,
     level_name: String,
     spawn_point: Option<(i32, i32)>,
+    ground: Option<Box<Ground>>,
 }
 
 impl BedrockWriter {
     /// Creates a new BedrockWriter
-    pub fn new(output_path: PathBuf, level_name: String, spawn_point: Option<(i32, i32)>) -> Self {
+    pub fn new(
+        output_path: PathBuf,
+        level_name: String,
+        spawn_point: Option<(i32, i32)>,
+        ground: Option<Box<Ground>>,
+    ) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
         let output_dir = if output_path.extension().is_some_and(|ext| ext == "mcworld") {
@@ -138,6 +145,7 @@ impl BedrockWriter {
             output_dir,
             level_name,
             spawn_point,
+            ground,
         }
     }
 
@@ -201,6 +209,16 @@ impl BedrockWriter {
             (x, z)
         });
 
+        // Calculate spawn Y from ground elevation data, or default to 64
+        let spawn_y = self
+            .ground
+            .as_ref()
+            .map(|ground| {
+                let coord = crate::coordinate_system::cartesian::XZPoint::new(spawn_x, spawn_z);
+                ground.level(coord) + 2 // Add 2 blocks above ground for safety
+            })
+            .unwrap_or(64);
+
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -223,9 +241,9 @@ impl BedrockWriter {
             level_name: self.level_name.clone(),
             random_seed: 0,
 
-            // Spawn location
+            // Spawn location (Y derived from terrain elevation)
             spawn_x,
-            spawn_y: 64,
+            spawn_y,
             spawn_z,
 
             // World generation - Flat/Void world
@@ -998,7 +1016,7 @@ mod tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
         let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
 
-        BedrockWriter::new(output_dir.clone(), "test-world".to_string(), None)
+        BedrockWriter::new(output_dir.clone(), "test-world".to_string(), None, None)
             .write_world(&world, &xzbbox, &llbbox)
             .expect("write_world");
 
@@ -1039,9 +1057,14 @@ mod tests {
         let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
 
         // Custom spawn point at (42, 84)
-        BedrockWriter::new(output_dir.clone(), "spawn-test".to_string(), Some((42, 84)))
-            .write_world(&world, &xzbbox, &llbbox)
-            .expect("write_world");
+        BedrockWriter::new(
+            output_dir.clone(),
+            "spawn-test".to_string(),
+            Some((42, 84)),
+            None,
+        )
+        .write_world(&world, &xzbbox, &llbbox)
+        .expect("write_world");
 
         // Verify the mcworld was created
         let mcworld_path = output_dir.with_extension("mcworld");

@@ -543,8 +543,13 @@ impl<'a> WorldEditor<'a> {
                 .to_string()
         });
 
-        BedrockWriter::new(self.world_dir.clone(), level_name, self.bedrock_spawn_point)
-            .write_world(&self.world, self.xzbbox, &self.llbbox)
+        BedrockWriter::new(
+            self.world_dir.clone(),
+            level_name,
+            self.bedrock_spawn_point,
+            self.ground.clone(),
+        )
+        .write_world(&self.world, self.xzbbox, &self.llbbox)
     }
 
     /// Saves world metadata to a JSON file
