@@ -75,6 +75,8 @@ pub struct WorldEditor<'a> {
     format: WorldFormat,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
     bedrock_level_name: Option<String>,
+    /// Optional spawn point for Bedrock worlds (x, z coordinates)
+    bedrock_spawn_point: Option<(i32, i32)>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -91,6 +93,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::JavaAnvil,
             bedrock_level_name: None,
+            bedrock_spawn_point: None,
         }
     }
 
@@ -104,6 +107,7 @@ impl<'a> WorldEditor<'a> {
         llbbox: LLBBox,
         format: WorldFormat,
         bedrock_level_name: Option<String>,
+        bedrock_spawn_point: Option<(i32, i32)>,
     ) -> Self {
         Self {
             world_dir,
@@ -113,6 +117,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format,
             bedrock_level_name,
+            bedrock_spawn_point,
         }
     }
 
@@ -538,11 +543,8 @@ impl<'a> WorldEditor<'a> {
                 .to_string()
         });
 
-        BedrockWriter::new(self.world_dir.clone(), level_name).write_world(
-            &self.world,
-            self.xzbbox,
-            &self.llbbox,
-        )
+        BedrockWriter::new(self.world_dir.clone(), level_name, self.bedrock_spawn_point)
+            .write_world(&self.world, self.xzbbox, &self.llbbox)
     }
 
     /// Saves world metadata to a JSON file

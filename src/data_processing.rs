@@ -22,6 +22,7 @@ pub struct GenerationOptions {
     pub path: PathBuf,
     pub format: WorldFormat,
     pub level_name: Option<String>,
+    pub spawn_point: Option<(i32, i32)>,
 }
 
 pub fn generate_world(
@@ -36,6 +37,7 @@ pub fn generate_world(
         path: args.path.clone(),
         format: WorldFormat::JavaAnvil,
         level_name: None,
+        spawn_point: None,
     };
     generate_world_with_options(elements, xzbbox, llbbox, ground, args, options).map(|_| ())
 }
@@ -57,6 +59,7 @@ pub fn generate_world_with_options(
         llbbox,
         options.format,
         options.level_name,
+        options.spawn_point,
     );
 
     println!("{} Processing data...", "[4/7]".bold());
@@ -274,27 +277,29 @@ pub fn generate_world_with_options(
 
     // Update player spawn Y coordinate based on terrain height after generation
     #[cfg(feature = "gui")]
-    if let Some(spawn_coords) = &args.spawn_point {
-        use crate::gui::update_player_spawn_y_after_generation;
-        let bbox_string = format!(
-            "{},{},{},{}",
-            args.bbox.min().lng(),
-            args.bbox.min().lat(),
-            args.bbox.max().lng(),
-            args.bbox.max().lat()
-        );
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(spawn_coords) = &args.spawn_point {
+            use crate::gui::update_player_spawn_y_after_generation;
+            let bbox_string = format!(
+                "{},{},{},{}",
+                args.bbox.min().lng(),
+                args.bbox.min().lat(),
+                args.bbox.max().lng(),
+                args.bbox.max().lat()
+            );
 
-        if let Err(e) = update_player_spawn_y_after_generation(
-            &args.path,
-            Some(*spawn_coords),
-            bbox_string,
-            args.scale,
-            &ground,
-        ) {
-            let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
-            eprintln!("Warning: {}", warning_msg);
-            #[cfg(feature = "gui")]
-            send_log(LogLevel::Warning, &warning_msg);
+            if let Err(e) = update_player_spawn_y_after_generation(
+                &args.path,
+                Some(*spawn_coords),
+                bbox_string,
+                args.scale,
+                &ground,
+            ) {
+                let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
+                eprintln!("Warning: {}", warning_msg);
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &warning_msg);
+            }
         }
     }
 

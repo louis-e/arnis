@@ -119,11 +119,12 @@ impl From<&BedrockBlockStateValue> for BedrockNbtValue {
 pub struct BedrockWriter {
     output_dir: PathBuf,
     level_name: String,
+    spawn_point: Option<(i32, i32)>,
 }
 
 impl BedrockWriter {
     /// Creates a new BedrockWriter
-    pub fn new(output_path: PathBuf, level_name: String) -> Self {
+    pub fn new(output_path: PathBuf, level_name: String, spawn_point: Option<(i32, i32)>) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
         let output_dir = if output_path.extension().is_some_and(|ext| ext == "mcworld") {
@@ -135,6 +136,7 @@ impl BedrockWriter {
         Self {
             output_dir,
             level_name,
+            spawn_point,
         }
     }
 
@@ -181,8 +183,12 @@ impl BedrockWriter {
         // The format is: 8 bytes header + NBT data
         // Header: version (4 bytes LE) + length (4 bytes LE)
 
-        let spawn_x = (xzbbox.min_x() + xzbbox.max_x()) / 2;
-        let spawn_z = (xzbbox.min_z() + xzbbox.max_z()) / 2;
+        // Use custom spawn point if provided, otherwise center of bbox
+        let (spawn_x, spawn_z) = self.spawn_point.unwrap_or_else(|| {
+            let x = (xzbbox.min_x() + xzbbox.max_x()) / 2;
+            let z = (xzbbox.min_z() + xzbbox.max_z()) / 2;
+            (x, z)
+        });
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -971,7 +977,7 @@ mod tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
         let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
 
-        BedrockWriter::new(output_dir.clone(), "test-world".to_string())
+        BedrockWriter::new(output_dir.clone(), "test-world".to_string(), None)
             .write_world(&world, &xzbbox, &llbbox)
             .expect("write_world");
 
@@ -1000,5 +1006,24 @@ mod tests {
 
         assert_eq!(metadata["format"], "bedrock-mcworld");
         assert_eq!(metadata["chunk_count"], 0); // empty world structure
+    }
+
+    #[test]
+    fn writes_mcworld_with_custom_spawn_point() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_dir = temp_dir.path().join("bedrock_world_spawn");
+
+        let world = WorldToModify::default();
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+
+        // Custom spawn point at (42, 84)
+        BedrockWriter::new(output_dir.clone(), "spawn-test".to_string(), Some((42, 84)))
+            .write_world(&world, &xzbbox, &llbbox)
+            .expect("write_world");
+
+        // Verify the mcworld was created
+        let mcworld_path = output_dir.with_extension("mcworld");
+        assert!(mcworld_path.exists(), "mcworld file should exist");
     }
 }

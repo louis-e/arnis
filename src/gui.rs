@@ -898,11 +898,30 @@ fn gui_start_generation(
                 }
             };
 
+            // Calculate MC spawn coordinates from lat/lng if spawn point was provided
+            let mc_spawn_point: Option<(i32, i32)> = if let Some((lat, lng)) = spawn_point {
+                if let Ok(llpoint) = LLPoint::new(lat, lng) {
+                    if let Ok((transformer, _)) =
+                        CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+                    {
+                        let xzpoint = transformer.transform_point(llpoint);
+                        Some((xzpoint.x, xzpoint.z))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             // Create generation options
             let generation_options = GenerationOptions {
                 path: generation_path.clone(),
                 format: world_format,
                 level_name,
+                spawn_point: mc_spawn_point,
             };
 
             // Create an Args instance with the chosen bounding box
