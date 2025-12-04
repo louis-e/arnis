@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
-use crate::data_processing;
+use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
@@ -10,6 +10,7 @@ use crate::progress;
 use crate::retrieve_data;
 use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
+use crate::world_editor::WorldFormat;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
@@ -60,6 +61,17 @@ impl Drop for SessionLock {
     }
 }
 
+/// Gets the area name for a given bounding box using the center point
+fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
+    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+
+    match retrieve_data::fetch_area_name(center_lat, center_lon) {
+        Ok(Some(name)) => name,
+        _ => "Unknown Location".to_string(),
+    }
+}
+
 pub fn run_gui() {
     // Launch the UI
     println!("Launching UI...");
@@ -101,7 +113,8 @@ pub fn run_gui() {
             gui_start_generation,
             gui_get_version,
             gui_check_for_updates,
-            gui_get_world_map_data
+            gui_get_world_map_data,
+            gui_show_in_folder
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -721,6 +734,57 @@ struct WorldMapData {
     max_lon: f64,
 }
 
+/// Opens the file with default application (Windows) or shows in file explorer (macOS/Linux)
+#[tauri::command]
+fn gui_show_in_folder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, try to open with default application (Minecraft Bedrock)
+        // If that fails, show in Explorer
+        if std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .is_err()
+        {
+            std::process::Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, just reveal in Finder
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open Finder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, just show in file manager
+        let path_parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+        
+        // Try nautilus with select first, then fall back to xdg-open on parent
+        if std::process::Command::new("nautilus")
+            .args(["--select", &path])
+            .spawn()
+            .is_err()
+        {
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&path_parent)
+                .spawn();
+        }
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
@@ -738,6 +802,7 @@ fn gui_start_generation(
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
+    world_format: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -803,19 +868,50 @@ fn gui_start_generation(
                 }
             };
 
-            // Add localized name to the world if user generated a new world
-            let updated_world_path = if is_new_world {
-                add_localized_world_name(world_path, &bbox)
+            // Determine world format from UI selection
+            let world_format = if world_format == "bedrock" {
+                WorldFormat::BedrockMcWorld
             } else {
-                world_path
+                WorldFormat::JavaAnvil
             };
 
-            // Create an Args instance with the chosen bounding box and world directory path
+            // Determine output path and level name based on format
+            let (generation_path, level_name) = match world_format {
+                WorldFormat::JavaAnvil => {
+                    // Java: use the selected world path, add localized name if new
+                    let updated_path = if is_new_world {
+                        add_localized_world_name(world_path.clone(), &bbox)
+                    } else {
+                        world_path.clone()
+                    };
+                    (updated_path, None)
+                }
+                WorldFormat::BedrockMcWorld => {
+                    // Bedrock: generate .mcworld in current directory with location-based name
+                    let area_name = get_area_name_for_bedrock(&bbox);
+                    let filename = format!("Arnis {}.mcworld", area_name);
+                    let lvl_name = format!("Arnis World: {}", area_name);
+                    let output_path = std::env::current_dir()
+                        .unwrap_or_else(|_| PathBuf::from("."))
+                        .join(filename);
+                    (output_path, Some(lvl_name))
+                }
+            };
+
+            // Create generation options
+            let generation_options = GenerationOptions {
+                path: generation_path.clone(),
+                format: world_format,
+                level_name,
+            };
+
+            // Create an Args instance with the chosen bounding box
+            // Note: path is used for Java-specific features like spawn point update
             let args: Args = Args {
                 bbox,
                 file: None,
                 save_json_file: None,
-                path: updated_world_path,
+                path: if world_format == WorldFormat::JavaAnvil { generation_path } else { world_path },
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
@@ -839,12 +935,13 @@ fn gui_start_generation(
                     CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
 
-                let _ = data_processing::generate_world(
+                let _ = data_processing::generate_world_with_options(
                     parsed_elements,
                     xzbbox,
                     args.bbox,
                     ground,
                     &args,
+                    generation_options,
                 );
                 // Session lock will be automatically released when _session_lock goes out of scope
                 return Ok(());
@@ -877,12 +974,13 @@ fn gui_start_generation(
                         &mut ground,
                     );
 
-                    let _ = data_processing::generate_world(
+                    let _ = data_processing::generate_world_with_options(
                         parsed_elements,
                         xzbbox,
                         args.bbox,
                         ground,
                         &args,
+                        generation_options.clone(),
                     );
                     // Session lock will be automatically released when _session_lock goes out of scope
                     Ok(())
