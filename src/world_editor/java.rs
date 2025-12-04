@@ -98,9 +98,6 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
 
-        let total_steps: f64 = 9.0;
-        let progress_increment_save: f64 = total_steps / total_regions as f64;
-        let current_progress = AtomicU64::new(900);
         let regions_processed = AtomicU64::new(0);
 
         self.world
@@ -219,13 +216,14 @@ impl<'a> WorldEditor<'a> {
                 }
 
                 // Update progress
-                let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst);
-                let new_progress = (90.0 + (regions_done as f64 * progress_increment_save)) * 10.0;
-                let prev_progress =
-                    current_progress.fetch_max(new_progress as u64, Ordering::SeqCst);
+                let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst) + 1;
 
-                if new_progress as u64 - prev_progress > 1 {
-                    emit_gui_progress_update(new_progress / 10.0, "Saving world...");
+                // Update progress at regular intervals (every ~1% or at least every 10 regions)
+                // This ensures progress is visible even with many regions
+                let update_interval = (total_regions / 10).max(1);
+                if regions_done.is_multiple_of(update_interval) || regions_done == total_regions {
+                    let progress = 90.0 + (regions_done as f64 / total_regions as f64) * 9.0;
+                    emit_gui_progress_update(progress, "Saving world...");
                 }
 
                 save_pb.inc(1);
