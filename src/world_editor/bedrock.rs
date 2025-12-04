@@ -124,7 +124,7 @@ impl BedrockWriter {
     pub fn new(output_path: PathBuf, level_name: String) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
-        let output_dir = if output_path.extension().map_or(false, |ext| ext == "mcworld") {
+        let output_dir = if output_path.extension().is_some_and(|ext| ext == "mcworld") {
             output_path.with_extension("")
         } else {
             output_path
@@ -473,7 +473,7 @@ impl BedrockWriter {
         // blocksPerWord = floor(32 / bitsPerBlock)
         // wordSize = ceil(4096 / blocksPerWord)
         let blocks_per_word = 32 / bits_per_block as u32; // Integer division = floor
-        let word_count = (4096 + blocks_per_word - 1) / blocks_per_word; // Ceiling division
+        let word_count = 4096_u32.div_ceil(blocks_per_word);
         let mask = (1u32 << bits_per_block) - 1;
 
         // Pack indices into 32-bit words (matching Chunker's loop exactly)
@@ -623,7 +623,7 @@ impl BedrockWriter {
         // Add db directory and its contents
         let db_path = self.output_dir.join("db");
         if db_path.is_dir() {
-            self.add_directory_to_zip(&mut writer, &db_path, "db", options)?;
+            add_directory_to_zip(&mut writer, &db_path, "db", options)?;
         }
 
         writer.finish()?;
@@ -637,38 +637,37 @@ impl BedrockWriter {
         }
         Ok(())
     }
+}
 
-    fn add_directory_to_zip(
-        &self,
-        writer: &mut ZipWriter<File>,
-        dir_path: &std::path::Path,
-        zip_prefix: &str,
-        options: FileOptions,
-    ) -> Result<(), BedrockSaveError> {
-        // Add directory entry
-        writer.add_directory(format!("{}/", zip_prefix), options)?;
+fn add_directory_to_zip(
+    writer: &mut ZipWriter<File>,
+    dir_path: &std::path::Path,
+    zip_prefix: &str,
+    options: FileOptions,
+) -> Result<(), BedrockSaveError> {
+    // Add directory entry
+    writer.add_directory(format!("{}/", zip_prefix), options)?;
 
-        // Add all files in directory
-        for entry in fs::read_dir(dir_path)? {
-            let entry = entry?;
-            let path = entry.path();
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("unknown");
-            let zip_path = format!("{}/{}", zip_prefix, name);
+    // Add all files in directory
+    for entry in fs::read_dir(dir_path)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let zip_path = format!("{}/{}", zip_prefix, name);
 
-            if path.is_file() {
-                writer.start_file(&zip_path, options)?;
-                let contents = fs::read(&path)?;
-                writer.write_all(&contents)?;
-            } else if path.is_dir() {
-                self.add_directory_to_zip(writer, &path, &zip_path, options)?;
-            }
+        if path.is_file() {
+            writer.start_file(&zip_path, options)?;
+            let contents = fs::read(&path)?;
+            writer.write_all(&contents)?;
+        } else if path.is_dir() {
+            add_directory_to_zip(writer, &path, &zip_path, options)?;
         }
-
-        Ok(())
     }
+
+    Ok(())
 }
 
 /// Calculate bits per block using valid Bedrock values: {1, 2, 3, 4, 5, 6, 8, 16}
@@ -985,7 +984,9 @@ mod tests {
         assert!(entries.contains(&"metadata.json".to_string()));
 
         // Check metadata inside the archive
-        let metadata_file = archive.by_name("metadata.json").expect("metadata in archive");
+        let metadata_file = archive
+            .by_name("metadata.json")
+            .expect("metadata in archive");
         let metadata: Value = serde_json::from_reader(metadata_file).expect("valid metadata JSON");
 
         assert_eq!(metadata["format"], "bedrock-mcworld");

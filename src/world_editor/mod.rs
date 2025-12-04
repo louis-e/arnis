@@ -81,6 +81,7 @@ impl<'a> WorldEditor<'a> {
     /// Creates a new WorldEditor with Java Anvil format (default).
     ///
     /// This is the default constructor used by CLI mode.
+    #[allow(dead_code)]
     pub fn new(world_dir: PathBuf, xzbbox: &'a XZBBox, llbbox: LLBBox) -> Self {
         Self {
             world_dir,
@@ -482,10 +483,13 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves all changes made to the world by writing to the appropriate format.
     pub fn save(&mut self) {
-        println!("Generating world for: {}", match self.format {
-            WorldFormat::JavaAnvil => "Java Edition (Anvil)",
-            WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
-        });
+        println!(
+            "Generating world for: {}",
+            match self.format {
+                WorldFormat::JavaAnvil => "Java Edition (Anvil)",
+                WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
+            }
+        );
 
         match self.format {
             WorldFormat::JavaAnvil => self.save_java(),
@@ -508,7 +512,6 @@ impl<'a> WorldEditor<'a> {
                     &format!("Failed to save Bedrock world: {error}"),
                 );
             }
-            return;
         }
 
         #[cfg(not(feature = "bedrock"))]

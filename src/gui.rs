@@ -769,7 +769,7 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| path.clone());
-        
+
         // Try nautilus with select first, then fall back to xdg-open on parent
         if std::process::Command::new("nautilus")
             .args(["--select", &path])
@@ -911,7 +911,11 @@ fn gui_start_generation(
                 bbox,
                 file: None,
                 save_json_file: None,
-                path: if world_format == WorldFormat::JavaAnvil { generation_path } else { world_path },
+                path: if world_format == WorldFormat::JavaAnvil {
+                    generation_path
+                } else {
+                    world_path
+                },
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,

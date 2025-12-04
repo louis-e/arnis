@@ -759,7 +759,8 @@ async function startGeneration() {
       return;
     }
 
-    if (!worldPath || worldPath === "") {
+    // Only require world selection for Java format (Bedrock generates a new .mcworld file)
+    if (selectedWorldFormat === 'java' && (!worldPath || worldPath === "")) {
       const selectedWorld = document.getElementById('selected-world');
       localizeElement(window.localization, { element: selectedWorld }, "select_minecraft_world_first");
       selectedWorld.style.color = "#fa7878";

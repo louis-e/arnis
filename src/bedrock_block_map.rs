@@ -4,8 +4,6 @@
 //! and Bedrock Edition block format. Bedrock uses string identifiers with
 //! state properties that differ slightly from Java Edition.
 
-#![cfg(feature = "bedrock")]
-
 use crate::block_definitions::Block;
 use std::collections::HashMap;
 
@@ -65,20 +63,29 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         // Short grass is just "short_grass" in Java but "tallgrass" in Bedrock
         "short_grass" => BedrockBlock::with_states(
             "tallgrass",
-            vec![("tall_grass_type", BedrockBlockStateValue::String("tall".to_string()))],
+            vec![(
+                "tall_grass_type",
+                BedrockBlockStateValue::String("tall".to_string()),
+            )],
         ),
 
         // Tall grass needs height state
         "tall_grass" => BedrockBlock::with_states(
             "double_plant",
-            vec![("double_plant_type", BedrockBlockStateValue::String("grass".to_string()))],
+            vec![(
+                "double_plant_type",
+                BedrockBlockStateValue::String("grass".to_string()),
+            )],
         ),
 
         // Oak leaves with persistence
         "oak_leaves" => BedrockBlock::with_states(
             "leaves",
             vec![
-                ("old_leaf_type", BedrockBlockStateValue::String("oak".to_string())),
+                (
+                    "old_leaf_type",
+                    BedrockBlockStateValue::String("oak".to_string()),
+                ),
                 ("persistent_bit", BedrockBlockStateValue::Bool(true)),
             ],
         ),
@@ -87,7 +94,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "birch_leaves" => BedrockBlock::with_states(
             "leaves",
             vec![
-                ("old_leaf_type", BedrockBlockStateValue::String("birch".to_string())),
+                (
+                    "old_leaf_type",
+                    BedrockBlockStateValue::String("birch".to_string()),
+                ),
                 ("persistent_bit", BedrockBlockStateValue::Bool(true)),
             ],
         ),
@@ -95,26 +105,38 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         // Oak log with axis (default up_down)
         "oak_log" => BedrockBlock::with_states(
             "oak_log",
-            vec![("pillar_axis", BedrockBlockStateValue::String("y".to_string()))],
+            vec![(
+                "pillar_axis",
+                BedrockBlockStateValue::String("y".to_string()),
+            )],
         ),
 
         // Birch log with axis
         "birch_log" => BedrockBlock::with_states(
             "birch_log",
-            vec![("pillar_axis", BedrockBlockStateValue::String("y".to_string()))],
+            vec![(
+                "pillar_axis",
+                BedrockBlockStateValue::String("y".to_string()),
+            )],
         ),
 
         // Spruce log with axis
         "spruce_log" => BedrockBlock::with_states(
             "spruce_log",
-            vec![("pillar_axis", BedrockBlockStateValue::String("y".to_string()))],
+            vec![(
+                "pillar_axis",
+                BedrockBlockStateValue::String("y".to_string()),
+            )],
         ),
 
         // Stone slab (bottom half by default)
         "stone_slab" => BedrockBlock::with_states(
             "stone_block_slab",
             vec![
-                ("stone_slab_type", BedrockBlockStateValue::String("smooth_stone".to_string())),
+                (
+                    "stone_slab_type",
+                    BedrockBlockStateValue::String("smooth_stone".to_string()),
+                ),
                 ("top_slot_bit", BedrockBlockStateValue::Bool(false)),
             ],
         ),
@@ -123,7 +145,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "stone_brick_slab" => BedrockBlock::with_states(
             "stone_block_slab",
             vec![
-                ("stone_slab_type", BedrockBlockStateValue::String("stone_brick".to_string())),
+                (
+                    "stone_slab_type",
+                    BedrockBlockStateValue::String("stone_brick".to_string()),
+                ),
                 ("top_slot_bit", BedrockBlockStateValue::Bool(false)),
             ],
         ),
@@ -132,7 +157,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "oak_slab" => BedrockBlock::with_states(
             "wooden_slab",
             vec![
-                ("wood_type", BedrockBlockStateValue::String("oak".to_string())),
+                (
+                    "wood_type",
+                    BedrockBlockStateValue::String("oak".to_string()),
+                ),
                 ("top_slot_bit", BedrockBlockStateValue::Bool(false)),
             ],
         ),
@@ -164,25 +192,37 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         // Cobblestone wall
         "cobblestone_wall" => BedrockBlock::with_states(
             "cobblestone_wall",
-            vec![("wall_block_type", BedrockBlockStateValue::String("cobblestone".to_string()))],
+            vec![(
+                "wall_block_type",
+                BedrockBlockStateValue::String("cobblestone".to_string()),
+            )],
         ),
 
         // Andesite wall
         "andesite_wall" => BedrockBlock::with_states(
             "cobblestone_wall",
-            vec![("wall_block_type", BedrockBlockStateValue::String("andesite".to_string()))],
+            vec![(
+                "wall_block_type",
+                BedrockBlockStateValue::String("andesite".to_string()),
+            )],
         ),
 
         // Stone brick wall
         "stone_brick_wall" => BedrockBlock::with_states(
             "cobblestone_wall",
-            vec![("wall_block_type", BedrockBlockStateValue::String("stone_brick".to_string()))],
+            vec![(
+                "wall_block_type",
+                BedrockBlockStateValue::String("stone_brick".to_string()),
+            )],
         ),
 
         // Flowers - poppy is just "red_flower" in Bedrock
         "poppy" => BedrockBlock::with_states(
             "red_flower",
-            vec![("flower_type", BedrockBlockStateValue::String("poppy".to_string()))],
+            vec![(
+                "flower_type",
+                BedrockBlockStateValue::String("poppy".to_string()),
+            )],
         ),
 
         // Dandelion is "yellow_flower" in Bedrock
@@ -191,13 +231,19 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         // Blue orchid
         "blue_orchid" => BedrockBlock::with_states(
             "red_flower",
-            vec![("flower_type", BedrockBlockStateValue::String("orchid".to_string()))],
+            vec![(
+                "flower_type",
+                BedrockBlockStateValue::String("orchid".to_string()),
+            )],
         ),
 
         // Azure bluet
         "azure_bluet" => BedrockBlock::with_states(
             "red_flower",
-            vec![("flower_type", BedrockBlockStateValue::String("houstonia".to_string()))],
+            vec![(
+                "flower_type",
+                BedrockBlockStateValue::String("houstonia".to_string()),
+            )],
         ),
 
         // Concrete colors (Bedrock uses a single block with color state)
@@ -215,11 +261,17 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         "light_gray_concrete" => BedrockBlock::with_states(
             "concrete",
-            vec![("color", BedrockBlockStateValue::String("silver".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("silver".to_string()),
+            )],
         ),
         "light_blue_concrete" => BedrockBlock::with_states(
             "concrete",
-            vec![("color", BedrockBlockStateValue::String("light_blue".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("light_blue".to_string()),
+            )],
         ),
         "cyan_concrete" => BedrockBlock::with_states(
             "concrete",
@@ -231,11 +283,17 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         "purple_concrete" => BedrockBlock::with_states(
             "concrete",
-            vec![("color", BedrockBlockStateValue::String("purple".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("purple".to_string()),
+            )],
         ),
         "magenta_concrete" => BedrockBlock::with_states(
             "concrete",
-            vec![("color", BedrockBlockStateValue::String("magenta".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("magenta".to_string()),
+            )],
         ),
         "red_concrete" => BedrockBlock::with_states(
             "concrete",
@@ -243,11 +301,17 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         "orange_concrete" => BedrockBlock::with_states(
             "concrete",
-            vec![("color", BedrockBlockStateValue::String("orange".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("orange".to_string()),
+            )],
         ),
         "yellow_concrete" => BedrockBlock::with_states(
             "concrete",
-            vec![("color", BedrockBlockStateValue::String("yellow".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("yellow".to_string()),
+            )],
         ),
         "lime_concrete" => BedrockBlock::with_states(
             "concrete",
@@ -265,15 +329,24 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         "orange_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("orange".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("orange".to_string()),
+            )],
         ),
         "yellow_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("yellow".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("yellow".to_string()),
+            )],
         ),
         "light_blue_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
-            vec![("color", BedrockBlockStateValue::String("light_blue".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("light_blue".to_string()),
+            )],
         ),
         "blue_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
@@ -325,7 +398,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         "yellow_wool" => BedrockBlock::with_states(
             "wool",
-            vec![("color", BedrockBlockStateValue::String("yellow".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("yellow".to_string()),
+            )],
         ),
 
         // Carpets
@@ -349,7 +425,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         "light_gray_stained_glass" => BedrockBlock::with_states(
             "stained_glass",
-            vec![("color", BedrockBlockStateValue::String("silver".to_string()))],
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("silver".to_string()),
+            )],
         ),
         "brown_stained_glass" => BedrockBlock::with_states(
             "stained_glass",
@@ -359,27 +438,45 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         // Planks - Bedrock uses single "planks" block with wood_type state
         "oak_planks" => BedrockBlock::with_states(
             "planks",
-            vec![("wood_type", BedrockBlockStateValue::String("oak".to_string()))],
+            vec![(
+                "wood_type",
+                BedrockBlockStateValue::String("oak".to_string()),
+            )],
         ),
         "spruce_planks" => BedrockBlock::with_states(
             "planks",
-            vec![("wood_type", BedrockBlockStateValue::String("spruce".to_string()))],
+            vec![(
+                "wood_type",
+                BedrockBlockStateValue::String("spruce".to_string()),
+            )],
         ),
         "birch_planks" => BedrockBlock::with_states(
             "planks",
-            vec![("wood_type", BedrockBlockStateValue::String("birch".to_string()))],
+            vec![(
+                "wood_type",
+                BedrockBlockStateValue::String("birch".to_string()),
+            )],
         ),
         "jungle_planks" => BedrockBlock::with_states(
             "planks",
-            vec![("wood_type", BedrockBlockStateValue::String("jungle".to_string()))],
+            vec![(
+                "wood_type",
+                BedrockBlockStateValue::String("jungle".to_string()),
+            )],
         ),
         "acacia_planks" => BedrockBlock::with_states(
             "planks",
-            vec![("wood_type", BedrockBlockStateValue::String("acacia".to_string()))],
+            vec![(
+                "wood_type",
+                BedrockBlockStateValue::String("acacia".to_string()),
+            )],
         ),
         "dark_oak_planks" => BedrockBlock::with_states(
             "planks",
-            vec![("wood_type", BedrockBlockStateValue::String("dark_oak".to_string()))],
+            vec![(
+                "wood_type",
+                BedrockBlockStateValue::String("dark_oak".to_string()),
+            )],
         ),
         "crimson_planks" => BedrockBlock::simple("crimson_planks"),
         "warped_planks" => BedrockBlock::simple("warped_planks"),
@@ -388,27 +485,45 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "stone" => BedrockBlock::simple("stone"),
         "granite" => BedrockBlock::with_states(
             "stone",
-            vec![("stone_type", BedrockBlockStateValue::String("granite".to_string()))],
+            vec![(
+                "stone_type",
+                BedrockBlockStateValue::String("granite".to_string()),
+            )],
         ),
         "polished_granite" => BedrockBlock::with_states(
             "stone",
-            vec![("stone_type", BedrockBlockStateValue::String("granite_smooth".to_string()))],
+            vec![(
+                "stone_type",
+                BedrockBlockStateValue::String("granite_smooth".to_string()),
+            )],
         ),
         "diorite" => BedrockBlock::with_states(
             "stone",
-            vec![("stone_type", BedrockBlockStateValue::String("diorite".to_string()))],
+            vec![(
+                "stone_type",
+                BedrockBlockStateValue::String("diorite".to_string()),
+            )],
         ),
         "polished_diorite" => BedrockBlock::with_states(
             "stone",
-            vec![("stone_type", BedrockBlockStateValue::String("diorite_smooth".to_string()))],
+            vec![(
+                "stone_type",
+                BedrockBlockStateValue::String("diorite_smooth".to_string()),
+            )],
         ),
         "andesite" => BedrockBlock::with_states(
             "stone",
-            vec![("stone_type", BedrockBlockStateValue::String("andesite".to_string()))],
+            vec![(
+                "stone_type",
+                BedrockBlockStateValue::String("andesite".to_string()),
+            )],
         ),
         "polished_andesite" => BedrockBlock::with_states(
             "stone",
-            vec![("stone_type", BedrockBlockStateValue::String("andesite_smooth".to_string()))],
+            vec![(
+                "stone_type",
+                BedrockBlockStateValue::String("andesite_smooth".to_string()),
+            )],
         ),
 
         // Default: use the same name (works for many blocks)

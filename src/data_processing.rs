@@ -54,7 +54,7 @@ pub fn generate_world_with_options(
     let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
         options.path,
         &xzbbox,
-        llbbox.clone(),
+        llbbox,
         options.format,
         options.level_name,
     );
