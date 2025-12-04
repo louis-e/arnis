@@ -220,6 +220,18 @@ function setupProgressListener() {
     console.log("Map preview ready event received");
     showWorldPreviewButton();
   });
+
+  // Listen for open-mcworld-file event to show the generated Bedrock world in file explorer
+  window.__TAURI__.event.listen("open-mcworld-file", async (event) => {
+    const filePath = event.payload;
+    console.log("Showing mcworld file in folder:", filePath);
+    try {
+      // Use our custom command to show the file in the system file explorer
+      await invoke("gui_show_in_folder", { path: filePath });
+    } catch (error) {
+      console.error("Failed to show mcworld file in folder:", error);
+    }
+  });
 }
 
 function initSettings() {
@@ -312,6 +324,9 @@ function initSettings() {
     }
   });
 
+  // World format toggle (Java/Bedrock)
+  initWorldFormatToggle();
+
   // Telemetry consent toggle
   const telemetryToggle = document.getElementById("telemetry-toggle");
   const telemetryKey = 'telemetry-consent';
@@ -349,6 +364,44 @@ function initSettings() {
   window.openLicense = openLicense;
   window.closeLicense = closeLicense;
 }
+
+// World format selection (Java/Bedrock)
+let selectedWorldFormat = 'java'; // Default to Java
+
+function initWorldFormatToggle() {
+  // Load saved format preference
+  const savedFormat = localStorage.getItem('arnis-world-format');
+  if (savedFormat && (savedFormat === 'java' || savedFormat === 'bedrock')) {
+    selectedWorldFormat = savedFormat;
+  }
+  
+  // Apply the saved selection to UI
+  updateFormatToggleUI(selectedWorldFormat);
+}
+
+function setWorldFormat(format) {
+  if (format !== 'java' && format !== 'bedrock') return;
+  
+  selectedWorldFormat = format;
+  localStorage.setItem('arnis-world-format', format);
+  updateFormatToggleUI(format);
+}
+
+function updateFormatToggleUI(format) {
+  const javaBtn = document.getElementById('format-java');
+  const bedrockBtn = document.getElementById('format-bedrock');
+  
+  if (format === 'java') {
+    javaBtn.classList.add('format-active');
+    bedrockBtn.classList.remove('format-active');
+  } else {
+    javaBtn.classList.remove('format-active');
+    bedrockBtn.classList.add('format-active');
+  }
+}
+
+// Expose to window for onclick handlers
+window.setWorldFormat = setWorldFormat;
 
 // Telemetry consent (first run only)
 function initTelemetryConsent() {
@@ -735,7 +788,8 @@ async function startGeneration() {
         fillgroundEnabled: fill_ground,
         isNewWorld: isNewWorld,
         spawnPoint: spawnPoint,
-        telemetryConsent: telemetryConsent || false
+        telemetryConsent: telemetryConsent || false,
+        worldFormat: selectedWorldFormat
     });
 
     console.log("Generation process started.");
