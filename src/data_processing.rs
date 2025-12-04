@@ -6,14 +6,23 @@ use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
-use crate::progress::{emit_gui_progress_update, emit_map_preview_ready};
+use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
-use crate::world_editor::WorldEditor;
+use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::PathBuf;
 
 pub const MIN_Y: i32 = -64;
+
+/// Generation options that can be passed separately from CLI Args
+#[derive(Clone)]
+pub struct GenerationOptions {
+    pub path: PathBuf,
+    pub format: WorldFormat,
+    pub level_name: Option<String>,
+}
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
@@ -22,7 +31,33 @@ pub fn generate_world(
     ground: Ground,
     args: &Args,
 ) -> Result<(), String> {
-    let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox, llbbox);
+    // Default to Java format when called from CLI
+    let options = GenerationOptions {
+        path: args.path.clone(),
+        format: WorldFormat::JavaAnvil,
+        level_name: None,
+    };
+    generate_world_with_options(elements, xzbbox, llbbox, ground, args, options).map(|_| ())
+}
+
+/// Generate world with explicit format options (used by GUI for Bedrock support)
+pub fn generate_world_with_options(
+    elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
+    llbbox: LLBBox,
+    ground: Ground,
+    args: &Args,
+    options: GenerationOptions,
+) -> Result<PathBuf, String> {
+    let output_path = options.path.clone();
+    let world_format = options.format;
+    let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
+        options.path,
+        &xzbbox,
+        llbbox.clone(),
+        options.format,
+        options.level_name,
+    );
 
     println!("{} Processing data...", "[4/7]".bold());
 
@@ -266,33 +301,42 @@ pub fn generate_world(
     emit_gui_progress_update(100.0, "Done! World generation completed.");
     println!("{}", "Done! World generation completed.".green().bold());
 
-    // Generate top-down map preview silently in background after completion
-    let world_path = args.path.clone();
-    let bounds = (
-        xzbbox.min_x(),
-        xzbbox.max_x(),
-        xzbbox.min_z(),
-        xzbbox.max_z(),
-    );
-    std::thread::spawn(move || {
-        // Use catch_unwind to prevent any panic from affecting the application
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            map_renderer::render_world_map(&world_path, bounds.0, bounds.1, bounds.2, bounds.3)
-        }));
-
-        match result {
-            Ok(Ok(_path)) => {
-                // Notify the GUI that the map preview is ready
-                emit_map_preview_ready();
-            }
-            Ok(Err(e)) => {
-                eprintln!("Warning: Failed to generate map preview: {}", e);
-            }
-            Err(_) => {
-                eprintln!("Warning: Map preview generation panicked unexpectedly");
-            }
+    // For Bedrock format, emit event to open the mcworld file
+    if world_format == WorldFormat::BedrockMcWorld {
+        if let Some(path_str) = output_path.to_str() {
+            emit_open_mcworld_file(path_str);
         }
-    });
+    }
 
-    Ok(())
+    // Generate top-down map preview silently in background after completion (Java only)
+    if world_format == WorldFormat::JavaAnvil {
+        let world_path = args.path.clone();
+        let bounds = (
+            xzbbox.min_x(),
+            xzbbox.max_x(),
+            xzbbox.min_z(),
+            xzbbox.max_z(),
+        );
+        std::thread::spawn(move || {
+            // Use catch_unwind to prevent any panic from affecting the application
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                map_renderer::render_world_map(&world_path, bounds.0, bounds.1, bounds.2, bounds.3)
+            }));
+
+            match result {
+                Ok(Ok(_path)) => {
+                    // Notify the GUI that the map preview is ready
+                    emit_map_preview_ready();
+                }
+                Ok(Err(e)) => {
+                    eprintln!("Warning: Failed to generate map preview: {}", e);
+                }
+                Err(_) => {
+                    eprintln!("Warning: Map preview generation panicked unexpectedly");
+                }
+            }
+        });
+    }
+
+    Ok(output_path)
 }
