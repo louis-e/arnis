@@ -1,6 +1,6 @@
 use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
 #[cfg(feature = "gui")]
-use crate::telemetry::{send_log, LogLevel};
+use crate::telemetry::{LogLevel, send_log};
 use image::Rgb;
 use std::path::Path;
 
@@ -219,8 +219,10 @@ pub fn fetch_elevation_data(
                         .push((tile_x, tile_y, x, y, pixel[0], pixel[1], pixel[2], height));
                     if extreme_values_found.len() <= 5 {
                         // Only log first 5 extreme values
-                        eprintln!("Extreme value found: tile({tile_x},{tile_y}) pixel({x},{y}) RGB({},{},{}) = {height}m", 
-                                 pixel[0], pixel[1], pixel[2]);
+                        eprintln!(
+                            "Extreme value found: tile({tile_x},{tile_y}) pixel({x},{y}) RGB({},{},{}) = {height}m",
+                            pixel[0], pixel[1], pixel[2]
+                        );
                     }
                 }
 
@@ -591,12 +593,14 @@ mod tests {
 
         let response = response.unwrap();
         assert!(response.status().is_success());
-        assert!(response
-            .headers()
-            .get("content-type")
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .contains("image"));
+        assert!(
+            response
+                .headers()
+                .get("content-type")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("image")
+        );
     }
 }

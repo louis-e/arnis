@@ -1,7 +1,7 @@
 // use super::startend_translator::StartEndTranslator;
+use super::Operator;
 use super::startend_translator::StartEndTranslator;
 use super::vector_translator::VectorTranslator;
-use super::Operator;
 use crate::coordinate_system::cartesian::{XZBBox, XZVector};
 use crate::osm_parser::ProcessedElement;
 

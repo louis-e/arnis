@@ -9,16 +9,16 @@ use crate::world_editor::WorldEditor;
 
 pub fn generate_man_made(editor: &mut WorldEditor<'_>, element: &ProcessedElement, _args: &Args) {
     // Skip if 'layer' or 'level' is negative in the tags
-    if let Some(layer) = element.tags().get("layer") {
-        if layer.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(layer) = element.tags().get("layer")
+        && layer.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
-    if let Some(level) = element.tags().get("level") {
-        if level.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(level) = element.tags().get("level")
+        && level.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
     if let Some(man_made_type) = element.tags().get("man_made") {

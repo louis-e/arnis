@@ -658,15 +658,15 @@ fn convert_slab(
     let mut states = HashMap::new();
 
     // Convert type: Java uses "top/bottom/double", Bedrock uses "top_slot_bit"
-    if let Some(props) = props {
-        if let Some(fastnbt::Value::String(slab_type)) = props.get("type") {
-            let top_slot = slab_type == "top";
-            states.insert(
-                "top_slot_bit".to_string(),
-                BedrockBlockStateValue::Bool(top_slot),
-            );
-            // Note: "double" slabs in Java become full blocks in Bedrock (different block ID)
-        }
+    if let Some(props) = props
+        && let Some(fastnbt::Value::String(slab_type)) = props.get("type")
+    {
+        let top_slot = slab_type == "top";
+        states.insert(
+            "top_slot_bit".to_string(),
+            BedrockBlockStateValue::Bool(top_slot),
+        );
+        // Note: "double" slabs in Java become full blocks in Bedrock (different block ID)
     }
 
     // Default to bottom if not specified
@@ -727,13 +727,13 @@ fn convert_log(
     let mut states = HashMap::new();
 
     // Convert axis: Java uses "x/y/z", Bedrock uses "pillar_axis"
-    if let Some(props) = props {
-        if let Some(fastnbt::Value::String(axis)) = props.get("axis") {
-            states.insert(
-                "pillar_axis".to_string(),
-                BedrockBlockStateValue::String(axis.clone()),
-            );
-        }
+    if let Some(props) = props
+        && let Some(fastnbt::Value::String(axis)) = props.get("axis")
+    {
+        states.insert(
+            "pillar_axis".to_string(),
+            BedrockBlockStateValue::String(axis.clone()),
+        );
     }
 
     // Default to y-axis if not specified

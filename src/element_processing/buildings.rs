@@ -1,11 +1,11 @@
 use crate::args::Args;
 use crate::block_definitions::{
+    ANDESITE, Block, BlockWithProperties, CHISELED_STONE_BRICKS, COBBLESTONE, COBBLESTONE_WALL,
+    GLOWSTONE, MUD_BRICKS, OAK_FENCE, OAK_PLANKS, POLISHED_ANDESITE, SMOOTH_STONE, STONE,
+    STONE_BLOCK_SLAB, STONE_BRICK_SLAB, STONE_BRICKS, StairFacing, StairShape,
     create_stair_with_properties, get_building_wall_block_for_color, get_castle_wall_block,
     get_fallback_building_block, get_random_floor_block, get_stair_block_for_material,
-    get_window_block_for_building_type, Block, BlockWithProperties, StairFacing, StairShape,
-    ANDESITE, CHISELED_STONE_BRICKS, COBBLESTONE, COBBLESTONE_WALL, GLOWSTONE, MUD_BRICKS,
-    OAK_FENCE, OAK_PLANKS, POLISHED_ANDESITE, SMOOTH_STONE, STONE, STONE_BLOCK_SLAB, STONE_BRICKS,
-    STONE_BRICK_SLAB,
+    get_window_block_for_building_type,
 };
 use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
@@ -143,44 +143,44 @@ pub fn generate_buildings(
     let accent_block = accent_blocks[rng.gen_range(0..accent_blocks.len())];
 
     // Skip if 'layer' or 'level' is negative in the tags
-    if let Some(layer) = element.tags.get("layer") {
-        if layer.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(layer) = element.tags.get("layer")
+        && layer.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
-    if let Some(level) = element.tags.get("level") {
-        if level.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(level) = element.tags.get("level")
+        && level.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
     // Determine building height from tags
-    if let Some(levels_str) = element.tags.get("building:levels") {
-        if let Ok(levels) = levels_str.parse::<i32>() {
-            let lev = levels - min_level;
+    if let Some(levels_str) = element.tags.get("building:levels")
+        && let Ok(levels) = levels_str.parse::<i32>()
+    {
+        let lev = levels - min_level;
 
-            if lev >= 1 {
-                building_height = multiply_scale(levels * 4 + 2, scale_factor);
-                building_height = building_height.max(3);
+        if lev >= 1 {
+            building_height = multiply_scale(levels * 4 + 2, scale_factor);
+            building_height = building_height.max(3);
 
-                // Mark as tall building if more than 7 stories
-                if levels > 7 {
-                    is_tall_building = true;
-                }
+            // Mark as tall building if more than 7 stories
+            if levels > 7 {
+                is_tall_building = true;
             }
         }
     }
 
-    if let Some(height_str) = element.tags.get("height") {
-        if let Ok(height) = height_str.trim_end_matches('m').trim().parse::<f64>() {
-            building_height = (height * scale_factor) as i32;
-            building_height = building_height.max(3);
+    if let Some(height_str) = element.tags.get("height")
+        && let Ok(height) = height_str.trim_end_matches('m').trim().parse::<f64>()
+    {
+        building_height = (height * scale_factor) as i32;
+        building_height = building_height.max(3);
 
-            // Mark as tall building if height suggests more than 7 stories
-            if height > 28.0 {
-                is_tall_building = true;
-            }
+        // Mark as tall building if height suggests more than 7 stories
+        if height > 28.0 {
+            is_tall_building = true;
         }
     }
 
@@ -199,31 +199,31 @@ pub fn generate_buildings(
     let use_accent_lines = has_multiple_floors && rng.gen_bool(0.2);
     let use_vertical_accent = has_multiple_floors && !use_accent_lines && rng.gen_bool(0.1);
 
-    if let Some(amenity_type) = element.tags.get("amenity") {
-        if amenity_type == "shelter" {
-            let roof_block: Block = STONE_BRICK_SLAB;
+    if let Some(amenity_type) = element.tags.get("amenity")
+        && amenity_type == "shelter"
+    {
+        let roof_block: Block = STONE_BRICK_SLAB;
 
-            // Use cached floor area instead of recalculating
-            let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
+        // Use cached floor area instead of recalculating
+        let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
 
-            // Place fences and roof slabs at each corner node directly
-            for node in &element.nodes {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
+        // Place fences and roof slabs at each corner node directly
+        for node in &element.nodes {
+            let x: i32 = node.x;
+            let z: i32 = node.z;
 
-                for shelter_y in 1..=multiply_scale(4, scale_factor) {
-                    editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
-                }
-                editor.set_block(roof_block, x, 5, z, None, None);
+            for shelter_y in 1..=multiply_scale(4, scale_factor) {
+                editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
             }
-
-            // Flood fill the roof area
-            for (x, z) in roof_area {
-                editor.set_block(roof_block, *x, 5, *z, None, None);
-            }
-
-            return;
+            editor.set_block(roof_block, x, 5, z, None, None);
         }
+
+        // Flood fill the roof area
+        for (x, z) in roof_area {
+            editor.set_block(roof_block, *x, 5, *z, None, None);
+        }
+
+        return;
     }
 
     if let Some(building_type) = element.tags.get("building") {

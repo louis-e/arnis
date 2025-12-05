@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
-use crate::elevation_data::{fetch_elevation_data, ElevationData};
+use crate::elevation_data::{ElevationData, fetch_elevation_data};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use image::{Rgb, RgbImage};

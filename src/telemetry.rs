@@ -198,10 +198,10 @@ pub fn install_panic_hook() {
         error!("Application panicked: {panic_info:?}");
 
         // Filter out secondary "panic in a function that cannot unwind" panics
-        if let Some(location) = panic_info.location() {
-            if location.file().contains("panicking.rs") {
-                return;
-            }
+        if let Some(location) = panic_info.location()
+            && location.file().contains("panicking.rs")
+        {
+            return;
         }
 
         // Check user consent

@@ -11,7 +11,7 @@ use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
 #[cfg(feature = "gui")]
-use crate::telemetry::{send_log, LogLevel};
+use crate::telemetry::{LogLevel, send_log};
 use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -279,39 +279,39 @@ pub fn generate_world_with_options(
 
     // Update player spawn Y coordinate based on terrain height after generation
     #[cfg(feature = "gui")]
-    if world_format == WorldFormat::JavaAnvil {
-        if let Some(spawn_coords) = &args.spawn_point {
-            use crate::gui::update_player_spawn_y_after_generation;
-            let bbox_string = format!(
-                "{},{},{},{}",
-                args.bbox.min().lng(),
-                args.bbox.min().lat(),
-                args.bbox.max().lng(),
-                args.bbox.max().lat()
-            );
+    if world_format == WorldFormat::JavaAnvil
+        && let Some(spawn_coords) = &args.spawn_point
+    {
+        use crate::gui::update_player_spawn_y_after_generation;
+        let bbox_string = format!(
+            "{},{},{},{}",
+            args.bbox.min().lng(),
+            args.bbox.min().lat(),
+            args.bbox.max().lng(),
+            args.bbox.max().lat()
+        );
 
-            if let Err(e) = update_player_spawn_y_after_generation(
-                &args.path,
-                Some(*spawn_coords),
-                bbox_string,
-                args.scale,
-                &ground,
-            ) {
-                let warning_msg = format!("Failed to update spawn point Y coordinate: {e}");
-                eprintln!("Warning: {warning_msg}");
-                #[cfg(feature = "gui")]
-                send_log(LogLevel::Warning, &warning_msg);
-            }
+        if let Err(e) = update_player_spawn_y_after_generation(
+            &args.path,
+            Some(*spawn_coords),
+            bbox_string,
+            args.scale,
+            &ground,
+        ) {
+            let warning_msg = format!("Failed to update spawn point Y coordinate: {e}");
+            eprintln!("Warning: {warning_msg}");
+            #[cfg(feature = "gui")]
+            send_log(LogLevel::Warning, &warning_msg);
         }
     }
 
     emit_gui_progress_update(99.0, "Finalizing world...");
 
     // For Bedrock format, emit event to open the mcworld file
-    if world_format == WorldFormat::BedrockMcWorld {
-        if let Some(path_str) = output_path.to_str() {
-            emit_open_mcworld_file(path_str);
-        }
+    if world_format == WorldFormat::BedrockMcWorld
+        && let Some(path_str) = output_path.to_str()
+    {
+        emit_open_mcworld_file(path_str);
     }
 
     // Generate top-down map preview silently in background after completion (Java only)

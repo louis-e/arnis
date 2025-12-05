@@ -45,10 +45,10 @@ pub fn generate_water_areas_from_relation(
     }
 
     // Don't handle water below layer 0
-    if let Some(layer) = element.tags.get("layer") {
-        if layer.parse::<i32>().map(|x| x < 0).unwrap_or(false) {
-            return;
-        }
+    if let Some(layer) = element.tags.get("layer")
+        && layer.parse::<i32>().map(|x| x < 0).unwrap_or(false)
+    {
+        return;
     }
 
     let mut outers: Vec<Vec<ProcessedNode>> = vec![];

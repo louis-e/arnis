@@ -3,10 +3,10 @@
 //! This module handles saving worlds in the Bedrock Edition format,
 //! producing .mcworld files that can be imported into Minecraft Bedrock.
 
-use super::common::{ChunkToModify, SectionToModify, WorldToModify};
 use super::WorldMetadata;
+use super::common::{ChunkToModify, SectionToModify, WorldToModify};
 use crate::bedrock_block_map::{
-    to_bedrock_block_with_properties, BedrockBlock, BedrockBlockStateValue,
+    BedrockBlock, BedrockBlockStateValue, to_bedrock_block_with_properties,
 };
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
@@ -25,9 +25,9 @@ use std::fs::{self, File};
 use std::io::{Cursor, Write as IoWrite};
 use std::path::PathBuf;
 use vek::Vec2;
-use zip::write::FileOptions;
 use zip::CompressionMethod;
 use zip::ZipWriter;
+use zip::write::FileOptions;
 
 /// Error type for Bedrock world saving operations
 #[derive(Debug)]

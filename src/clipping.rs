@@ -259,14 +259,14 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
     // Preserve endpoint IDs where possible
     if result.len() >= 2 {
         let tolerance = 50.0;
-        if let Some(first_orig) = nodes.first() {
-            if matches_endpoint(
+        if let Some(first_orig) = nodes.first()
+            && matches_endpoint(
                 (f64::from(result[0].x), f64::from(result[0].z)),
                 first_orig,
                 tolerance,
-            ) {
-                result[0].id = first_orig.id;
-            }
+            )
+        {
+            result[0].id = first_orig.id;
         }
         if let Some(last_orig) = nodes.last() {
             let last_idx = result.len() - 1;
@@ -320,26 +320,12 @@ fn clip_polygon_sutherland_hodgman(
             let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
 
             if next_inside {
-                if !current_inside {
-                    if let Some(mut intersection) = line_edge_intersection(
+                if !current_inside
+                    && let Some(mut intersection) = line_edge_intersection(
                         current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
-                    ) {
-                        // Clamp to current edge only
-                        match edge_idx {
-                            0 => intersection.1 = min_z,
-                            1 => intersection.0 = max_x,
-                            2 => intersection.1 = max_z,
-                            3 => intersection.0 = min_x,
-                            _ => {}
-                        }
-                        clipped.push(intersection);
-                    }
-                }
-                clipped.push(next);
-            } else if current_inside {
-                if let Some(mut intersection) = line_edge_intersection(
-                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
-                ) {
+                    )
+                {
+                    // Clamp to current edge only
                     match edge_idx {
                         0 => intersection.1 = min_z,
                         1 => intersection.0 = max_x,
@@ -349,6 +335,20 @@ fn clip_polygon_sutherland_hodgman(
                     }
                     clipped.push(intersection);
                 }
+                clipped.push(next);
+            } else if current_inside
+                && let Some(mut intersection) = line_edge_intersection(
+                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
+                )
+            {
+                match edge_idx {
+                    0 => intersection.1 = min_z,
+                    1 => intersection.0 = max_x,
+                    2 => intersection.1 = max_z,
+                    3 => intersection.0 = min_x,
+                    _ => {}
+                }
+                clipped.push(intersection);
             }
         }
 
@@ -388,24 +388,24 @@ fn clip_polygon_sutherland_hodgman_simple(
             let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
 
             if next_inside {
-                if !current_inside {
-                    if let Some(mut intersection) = line_edge_intersection(
+                if !current_inside
+                    && let Some(mut intersection) = line_edge_intersection(
                         current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
-                    ) {
-                        intersection.0 = intersection.0.clamp(min_x, max_x);
-                        intersection.1 = intersection.1.clamp(min_z, max_z);
-                        clipped.push(intersection);
-                    }
-                }
-                clipped.push(next);
-            } else if current_inside {
-                if let Some(mut intersection) = line_edge_intersection(
-                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
-                ) {
+                    )
+                {
                     intersection.0 = intersection.0.clamp(min_x, max_x);
                     intersection.1 = intersection.1.clamp(min_z, max_z);
                     clipped.push(intersection);
                 }
+                clipped.push(next);
+            } else if current_inside
+                && let Some(mut intersection) = line_edge_intersection(
+                    current.0, current.1, next.0, next.1, edge_x1, edge_z1, edge_x2, edge_z2,
+                )
+            {
+                intersection.0 = intersection.0.clamp(min_x, max_x);
+                intersection.1 = intersection.1.clamp(min_z, max_z);
+                clipped.push(intersection);
             }
         }
 
@@ -632,10 +632,11 @@ fn remove_consecutive_duplicates(polygon: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
     let mut result: Vec<(f64, f64)> = Vec::with_capacity(polygon.len());
 
     for p in &polygon {
-        if let Some(last) = result.last() {
-            if (p.0 - last.0).abs() < eps && (p.1 - last.1).abs() < eps {
-                continue;
-            }
+        if let Some(last) = result.last()
+            && (p.0 - last.0).abs() < eps
+            && (p.1 - last.1).abs() < eps
+        {
+            continue;
         }
         result.push(*p);
     }
@@ -682,25 +683,25 @@ fn assign_node_ids_preserving_endpoints(
             let is_last = i == last_index;
 
             if is_first || is_last {
-                if let Some(first) = original_first {
-                    if matches_endpoint(coord, first, tolerance) {
-                        return ProcessedNode {
-                            id: first.id,
-                            x: coord.0.round() as i32,
-                            z: coord.1.round() as i32,
-                            tags: HashMap::new(),
-                        };
-                    }
+                if let Some(first) = original_first
+                    && matches_endpoint(coord, first, tolerance)
+                {
+                    return ProcessedNode {
+                        id: first.id,
+                        x: coord.0.round() as i32,
+                        z: coord.1.round() as i32,
+                        tags: HashMap::new(),
+                    };
                 }
-                if let Some(last) = original_last {
-                    if matches_endpoint(coord, last, tolerance) {
-                        return ProcessedNode {
-                            id: last.id,
-                            x: coord.0.round() as i32,
-                            z: coord.1.round() as i32,
-                            tags: HashMap::new(),
-                        };
-                    }
+                if let Some(last) = original_last
+                    && matches_endpoint(coord, last, tolerance)
+                {
+                    return ProcessedNode {
+                        id: last.id,
+                        x: coord.0.round() as i32,
+                        z: coord.1.round() as i32,
+                        tags: HashMap::new(),
+                    };
                 }
             }
 

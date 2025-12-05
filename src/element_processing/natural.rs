@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{
-    Block, ANDESITE, BLUE_FLOWER, COBBLESTONE, DEAD_BUSH, DIORITE, DIRT, GRANITE, GRASS,
+    ANDESITE, BLUE_FLOWER, Block, COBBLESTONE, DEAD_BUSH, DIORITE, DIRT, GRANITE, GRASS,
     GRASS_BLOCK, GRAVEL, MOSS_BLOCK, MUD, OAK_LEAVES, PACKED_ICE, RED_FLOWER, SAND, STONE,
     TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHITE_FLOWER, YELLOW_FLOWER,
 };
@@ -290,7 +290,7 @@ pub fn generate_natural(editor: &mut WorldEditor<'_>, element: &ProcessedElement
                                         if distance <= cluster_size as f32 {
                                             // Probability decreases with distance from center
                                             let place_prob = 1.0 - (distance / cluster_size as f32);
-                                            if rng.gen::<f32>() < place_prob {
+                                            if rng.r#gen::<f32>() < place_prob {
                                                 editor.set_block(
                                                     cluster_block,
                                                     cluster_x,

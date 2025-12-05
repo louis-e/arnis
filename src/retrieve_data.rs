@@ -230,7 +230,9 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
 
-    let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
+    let url = format!(
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1"
+    );
 
     let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
 

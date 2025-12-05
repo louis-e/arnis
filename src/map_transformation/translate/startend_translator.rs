@@ -1,5 +1,5 @@
-use super::translator::translate_by_vector;
 use super::Operator;
+use super::translator::translate_by_vector;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;

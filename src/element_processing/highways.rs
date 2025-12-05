@@ -1,8 +1,8 @@
 use crate::args::Args;
 use crate::block_definitions::{
-    Block, BLACK_CONCRETE, BRICK, COBBLESTONE_WALL, DIRT, DIRT_PATH, GLOWSTONE, GRASS_BLOCK,
+    BLACK_CONCRETE, BRICK, Block, COBBLESTONE_WALL, DIRT, DIRT_PATH, GLOWSTONE, GRASS_BLOCK,
     GRAVEL, GRAY_CONCRETE, GREEN_WOOL, LIGHT_GRAY_CONCRETE, OAK_FENCE, OAK_PLANKS, RED_WOOL, SAND,
-    STONE, STONE_BRICKS, STONE_BRICK_SLAB, WHITE_CONCRETE, WHITE_WOOL, YELLOW_WOOL,
+    STONE, STONE_BRICK_SLAB, STONE_BRICKS, WHITE_CONCRETE, WHITE_WOOL, YELLOW_WOOL,
 };
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
@@ -29,34 +29,34 @@ pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayC
     let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
 
     for element in elements {
-        if let ProcessedElement::Way(way) = element {
-            if way.tags.contains_key("highway") {
-                let layer_value = way
-                    .tags
-                    .get("layer")
-                    .and_then(|layer| layer.parse::<i32>().ok())
-                    .unwrap_or(0);
+        if let ProcessedElement::Way(way) = element
+            && way.tags.contains_key("highway")
+        {
+            let layer_value = way
+                .tags
+                .get("layer")
+                .and_then(|layer| layer.parse::<i32>().ok())
+                .unwrap_or(0);
 
-                // Treat negative layers as ground level (0) for connectivity
-                let layer_value = if layer_value < 0 { 0 } else { layer_value };
+            // Treat negative layers as ground level (0) for connectivity
+            let layer_value = if layer_value < 0 { 0 } else { layer_value };
 
-                // Add connectivity for start and end nodes
-                if !way.nodes.is_empty() {
-                    let start_node = &way.nodes[0];
-                    let end_node = &way.nodes[way.nodes.len() - 1];
+            // Add connectivity for start and end nodes
+            if !way.nodes.is_empty() {
+                let start_node = &way.nodes[0];
+                let end_node = &way.nodes[way.nodes.len() - 1];
 
-                    let start_coord = (start_node.x, start_node.z);
-                    let end_coord = (end_node.x, end_node.z);
+                let start_coord = (start_node.x, start_node.z);
+                let end_coord = (end_node.x, end_node.z);
 
-                    connectivity_map
-                        .entry(start_coord)
-                        .or_default()
-                        .push(layer_value);
-                    connectivity_map
-                        .entry(end_coord)
-                        .or_default()
-                        .push(layer_value);
-                }
+                connectivity_map
+                    .entry(start_coord)
+                    .or_default()
+                    .push(layer_value);
+                connectivity_map
+                    .entry(end_coord)
+                    .or_default()
+                    .push(layer_value);
             }
         }
     }
@@ -85,21 +85,20 @@ fn generate_highways_internal(
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
-            if let Some(crossing_type) = element.tags().get("crossing") {
-                if crossing_type == "traffic_signals" {
-                    if let ProcessedElement::Node(node) = element {
-                        let x: i32 = node.x;
-                        let z: i32 = node.z;
+            if let Some(crossing_type) = element.tags().get("crossing")
+                && crossing_type == "traffic_signals"
+                && let ProcessedElement::Node(node) = element
+            {
+                let x: i32 = node.x;
+                let z: i32 = node.z;
 
-                        for dy in 1..=3 {
-                            editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
-                        }
-
-                        editor.set_block(GREEN_WOOL, x, 4, z, None, None);
-                        editor.set_block(YELLOW_WOOL, x, 5, z, None, None);
-                        editor.set_block(RED_WOOL, x, 6, z, None, None);
-                    }
+                for dy in 1..=3 {
+                    editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
                 }
+
+                editor.set_block(GREEN_WOOL, x, 4, z, None, None);
+                editor.set_block(YELLOW_WOOL, x, 5, z, None, None);
+                editor.set_block(RED_WOOL, x, 6, z, None, None);
             }
         } else if highway_type == "bus_stop" {
             // Handle bus stops
@@ -172,10 +171,10 @@ fn generate_highways_internal(
             let layer_value = if layer_value < 0 { 0 } else { layer_value };
 
             // Skip if 'level' is negative in the tags (indoor mapping)
-            if let Some(level) = element.tags().get("level") {
-                if level.parse::<i32>().unwrap_or(0) < 0 {
-                    return;
-                }
+            if let Some(level) = element.tags().get("level")
+                && level.parse::<i32>().unwrap_or(0) < 0
+            {
+                return;
             }
 
             // Determine block type and range based on highway type

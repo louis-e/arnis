@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{
-    Block, BLACK_CONCRETE, CAULDRON, COBBLESTONE_WALL, GLOWSTONE, GRAY_CONCRETE, IRON_BLOCK,
+    BLACK_CONCRETE, Block, CAULDRON, COBBLESTONE_WALL, GLOWSTONE, GRAY_CONCRETE, IRON_BLOCK,
     LIGHT_GRAY_CONCRETE, OAK_FENCE, OAK_LOG, OAK_PLANKS, SMOOTH_STONE, STONE_BLOCK_SLAB,
     STONE_BRICK_SLAB, WATER,
 };
@@ -12,16 +12,16 @@ use crate::world_editor::WorldEditor;
 
 pub fn generate_amenities(editor: &mut WorldEditor<'_>, element: &ProcessedElement, args: &Args) {
     // Skip if 'layer' or 'level' is negative in the tags
-    if let Some(layer) = element.tags().get("layer") {
-        if layer.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(layer) = element.tags().get("layer")
+        && layer.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
-    if let Some(level) = element.tags().get("level") {
-        if level.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(level) = element.tags().get("level")
+        && level.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
     if let Some(amenity_type) = element.tags().get("amenity") {

@@ -35,7 +35,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 #[cfg(feature = "gui")]
-use crate::telemetry::{send_log, LogLevel};
+use crate::telemetry::{LogLevel, send_log};
 
 /// World format to generate
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -429,15 +429,13 @@ impl<'a> WorldEditor<'a> {
         let absolute_y = self.get_absolute_y(x, y, z);
 
         // Retrieve the chunk modification map
-        if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            if let Some(whitelist) = whitelist {
-                if whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-                {
-                    return true; // Block is in the list
-                }
-            }
+        if let Some(existing_block) = self.world.get_block(x, absolute_y, z)
+            && let Some(whitelist) = whitelist
+            && whitelist
+                .iter()
+                .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+        {
+            return true; // Block is in the list
         }
         false
     }
@@ -464,13 +462,12 @@ impl<'a> WorldEditor<'a> {
                 }
                 return false;
             }
-            if let Some(blacklist) = blacklist {
-                if blacklist
+            if let Some(blacklist) = blacklist
+                && blacklist
                     .iter()
                     .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-                {
-                    return true; // Block is in blacklist
-                }
+            {
+                return true; // Block is in blacklist
             }
             return whitelist.is_none() && blacklist.is_none();
         }

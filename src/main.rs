@@ -46,7 +46,7 @@ mod progress {
     }
 }
 #[cfg(target_os = "windows")]
-use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
+use windows::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole, FreeConsole};
 
 fn run_cli() {
     let version: &str = env!("CARGO_PKG_VERSION");

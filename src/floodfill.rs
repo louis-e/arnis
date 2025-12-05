@@ -72,12 +72,11 @@ fn optimized_flood_fill_area(
     for z in (min_z..=max_z).step_by(step_z as usize) {
         for x in (min_x..=max_x).step_by(step_x as usize) {
             // Fast timeout check, only every few iterations
-            if filled_area.len() % 100 == 0 {
-                if let Some(timeout) = timeout {
-                    if start_time.elapsed() > *timeout {
-                        return filled_area;
-                    }
-                }
+            if filled_area.len() % 100 == 0
+                && let Some(timeout) = timeout
+                && start_time.elapsed() > *timeout
+            {
+                return filled_area;
             }
 
             // Skip if already visited or not inside polygon
@@ -161,10 +160,10 @@ fn original_flood_fill_area(
         for x in (min_x..=max_x).step_by(step_x as usize) {
             // Reduced timeout checking frequency for better performance
             // Use manual % check since is_multiple_of() is unstable on stable Rust
-            if let Some(timeout) = timeout {
-                if &start_time.elapsed() > timeout {
-                    return filled_area;
-                }
+            if let Some(timeout) = timeout
+                && &start_time.elapsed() > timeout
+            {
+                return filled_area;
             }
 
             // Skip if already processed or not inside polygon

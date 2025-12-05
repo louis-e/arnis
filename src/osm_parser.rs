@@ -351,17 +351,17 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     }
 
     // Check for natural=water or natural=bay
-    if let Some(natural_val) = tags.get("natural") {
-        if natural_val == "water" || natural_val == "bay" {
-            return true;
-        }
+    if let Some(natural_val) = tags.get("natural")
+        && (natural_val == "water" || natural_val == "bay")
+    {
+        return true;
     }
 
     // Check for waterway=dock (also handled as water area)
-    if let Some(waterway_val) = tags.get("waterway") {
-        if waterway_val == "dock" {
-            return true;
-        }
+    if let Some(waterway_val) = tags.get("waterway")
+        && waterway_val == "dock"
+    {
+        return true;
     }
 
     false

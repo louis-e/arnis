@@ -2,8 +2,8 @@
 //!
 //! This module handles saving worlds in the Java Edition Anvil (.mca) format.
 
-use super::common::{Chunk, ChunkToModify, Section};
 use super::WorldEditor;
+use super::common::{Chunk, ChunkToModify, Section};
 use crate::block_definitions::GRASS_BLOCK;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
@@ -18,7 +18,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(feature = "gui")]
-use crate::telemetry::{send_log, LogLevel};
+use crate::telemetry::{LogLevel, send_log};
 
 impl WorldEditor<'_> {
     /// Creates a region file for the given region coordinates.
@@ -147,29 +147,27 @@ impl WorldEditor<'_> {
                         // Preserve existing block entities and merge with new ones
                         if let Some(existing_entities) = chunk.other.get_mut("block_entities") {
                             if let Some(new_entities) = chunk_to_modify.other.get("block_entities")
-                            {
-                                if let (Value::List(existing), Value::List(new)) =
+                                && let (Value::List(existing), Value::List(new)) =
                                     (existing_entities, new_entities)
-                                {
-                                    // Remove old entities that are replaced by new ones
-                                    existing.retain(|e| {
-                                        if let Value::Compound(map) = e {
-                                            let (x, y, z) = get_entity_coords(map);
-                                            !new.iter().any(|new_e| {
-                                                if let Value::Compound(new_map) = new_e {
-                                                    let (nx, ny, nz) = get_entity_coords(new_map);
-                                                    x == nx && y == ny && z == nz
-                                                } else {
-                                                    false
-                                                }
-                                            })
-                                        } else {
-                                            true
-                                        }
-                                    });
-                                    // Add new entities
-                                    existing.extend(new.clone());
-                                }
+                            {
+                                // Remove old entities that are replaced by new ones
+                                existing.retain(|e| {
+                                    if let Value::Compound(map) = e {
+                                        let (x, y, z) = get_entity_coords(map);
+                                        !new.iter().any(|new_e| {
+                                            if let Value::Compound(new_map) = new_e {
+                                                let (nx, ny, nz) = get_entity_coords(new_map);
+                                                x == nx && y == ny && z == nz
+                                            } else {
+                                                false
+                                            }
+                                        })
+                                    } else {
+                                        true
+                                    }
+                                });
+                                // Add new entities
+                                existing.extend(new.clone());
                             }
                         } else {
                             // If no existing entities, just add the new ones
@@ -299,13 +297,11 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
 
                             // Only add the `data` attribute if it's non-empty
                             // to maintain compatibility with third-party tools like Dynmap
-                            if let Some(data) = &section.block_states.data {
-                                if !data.is_empty() {
-                                    block_states.insert(
-                                        "data".to_string(),
-                                        Value::LongArray(data.to_owned()),
-                                    );
-                                }
+                            if let Some(data) = &section.block_states.data
+                                && !data.is_empty()
+                            {
+                                block_states
+                                    .insert("data".to_string(), Value::LongArray(data.to_owned()));
                             }
 
                             Value::Compound(HashMap::from([
