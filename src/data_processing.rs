@@ -303,8 +303,7 @@ pub fn generate_world_with_options(
         }
     }
 
-    emit_gui_progress_update(100.0, "Done! World generation completed.");
-    println!("{}", "Done! World generation completed.".green().bold());
+    emit_gui_progress_update(99.0, "Finalizing world...");
 
     // For Bedrock format, emit event to open the mcworld file
     if world_format == WorldFormat::BedrockMcWorld {

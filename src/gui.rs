@@ -6,11 +6,12 @@ use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
-use crate::progress;
+use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
 use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
 use crate::world_editor::WorldFormat;
+use colored::Colorize;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
@@ -966,9 +967,11 @@ fn gui_start_generation(
                     &args,
                     generation_options,
                 );
-                // Explicitly release session lock before returning so Minecraft can open the world
-                // while map preview generates in the background
+                // Explicitly release session lock before showing Done message
+                // so Minecraft can open the world immediately
                 drop(_session_lock);
+                emit_gui_progress_update(100.0, "Done! World generation completed.");
+                println!("{}", "Done! World generation completed.".green().bold());
                 return Ok(());
             }
 
@@ -1007,9 +1010,11 @@ fn gui_start_generation(
                         &args,
                         generation_options.clone(),
                     );
-                    // Explicitly release session lock before returning so Minecraft can open the world
-                    // while map preview generates in the background
+                    // Explicitly release session lock before showing Done message
+                    // so Minecraft can open the world immediately
                     drop(_session_lock);
+                    emit_gui_progress_update(100.0, "Done! World generation completed.");
+                    println!("{}", "Done! World generation completed.".green().bold());
                     Ok(())
                 }
                 Err(e) => {
