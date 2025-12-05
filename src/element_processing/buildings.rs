@@ -127,9 +127,9 @@ pub fn generate_buildings(
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
     let mut is_tall_building = false;
-    let mut rng = rand::thread_rng();
-    let use_vertical_windows = rng.gen_bool(0.7);
-    let use_accent_roof_line = rng.gen_bool(0.25);
+    let mut rng = rand::rng();
+    let use_vertical_windows = rng.random_bool(0.7);
+    let use_accent_roof_line = rng.random_bool(0.25);
 
     // Random accent block selection for this building
     let accent_blocks = [
@@ -140,7 +140,7 @@ pub fn generate_buildings(
         ANDESITE,
         CHISELED_STONE_BRICKS,
     ];
-    let accent_block = accent_blocks[rng.gen_range(0..accent_blocks.len())];
+    let accent_block = accent_blocks[rng.random_range(0..accent_blocks.len())];
 
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags.get("layer")
@@ -196,8 +196,8 @@ pub fn generate_buildings(
 
     // Determine accent line usage based on whether building has multiple floors
     let has_multiple_floors = building_height > 6;
-    let use_accent_lines = has_multiple_floors && rng.gen_bool(0.2);
-    let use_vertical_accent = has_multiple_floors && !use_accent_lines && rng.gen_bool(0.1);
+    let use_accent_lines = has_multiple_floors && rng.random_bool(0.2);
+    let use_vertical_accent = has_multiple_floors && !use_accent_lines && rng.random_bool(0.1);
 
     if let Some(amenity_type) = element.tags.get("amenity")
         && amenity_type == "shelter"
@@ -699,8 +699,8 @@ pub fn generate_buildings(
                 // Maximum footprint size threshold for gabled roofs
                 let max_footprint_for_gabled = 800;
 
-                let mut rng = rand::thread_rng();
-                if footprint_size <= max_footprint_for_gabled && rng.gen_bool(0.9) {
+                let mut rng = rand::rng();
+                if footprint_size <= max_footprint_for_gabled && rng.random_bool(0.9) {
                     generate_roof(
                         editor,
                         element,
@@ -808,8 +808,8 @@ fn generate_roof(
             };
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -928,8 +928,8 @@ fn generate_roof(
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -1193,8 +1193,8 @@ fn generate_roof(
             let max_roof_height = (building_size / 3).clamp(4, 10);
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -1275,8 +1275,8 @@ fn generate_roof(
             let peak_height = base_height + (building_size / 3).clamp(3, 8);
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -1462,8 +1462,8 @@ fn generate_roof(
             let radius = f64::from((max_x - min_x).max(max_z - min_z) / 2);
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block

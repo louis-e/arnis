@@ -96,8 +96,8 @@ pub fn generate_leisure(editor: &mut WorldEditor<'_>, element: &ProcessedWay, ar
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                    let random_choice: i32 = rng.gen_range(0..1000);
+                    let mut rng: rand::prelude::ThreadRng = rand::rng();
+                    let random_choice: i32 = rng.random_range(0..1000);
 
                     match random_choice {
                         0..30 => {
@@ -128,8 +128,8 @@ pub fn generate_leisure(editor: &mut WorldEditor<'_>, element: &ProcessedWay, ar
 
                 // Add playground or recreation ground features
                 if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                    let random_choice: i32 = rng.gen_range(0..5000);
+                    let mut rng: rand::prelude::ThreadRng = rand::rng();
+                    let random_choice: i32 = rng.random_range(0..5000);
 
                     match random_choice {
                         0..10 => {

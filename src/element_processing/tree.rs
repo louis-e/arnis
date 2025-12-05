@@ -135,9 +135,9 @@ impl Tree<'_> {
         blacklist.extend(Self::get_functional_blocks());
         blacklist.push(WATER);
 
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
-        let tree = Self::get_tree(match rng.gen_range(1..=3) {
+        let tree = Self::get_tree(match rng.random_range(1..=3) {
             1 => TreeType::Oak,
             2 => TreeType::Spruce,
             3 => TreeType::Birch,

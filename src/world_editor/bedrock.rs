@@ -690,7 +690,7 @@ fn add_directory_to_zip(
     writer: &mut ZipWriter<File>,
     dir_path: &std::path::Path,
     zip_prefix: &str,
-    options: FileOptions,
+    options: FileOptions<'_, ()>,
 ) -> Result<(), BedrockSaveError> {
     // Add directory entry
     writer.add_directory(format!("{zip_prefix}/"), options)?;
