@@ -1,5 +1,12 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    ANDESITE, Block, BlockWithProperties, CHISELED_STONE_BRICKS, COBBLESTONE, COBBLESTONE_WALL,
+    GLOWSTONE, MUD_BRICKS, OAK_FENCE, OAK_PLANKS, POLISHED_ANDESITE, SMOOTH_STONE, STONE,
+    STONE_BLOCK_SLAB, STONE_BRICK_SLAB, STONE_BRICKS, StairFacing, StairShape,
+    create_stair_with_properties, get_building_wall_block_for_color, get_castle_wall_block,
+    get_fallback_building_block, get_random_floor_block, get_stair_block_for_material,
+    get_window_block_for_building_type,
+};
 use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
@@ -24,7 +31,7 @@ enum RoofType {
 
 #[inline]
 pub fn generate_buildings(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     element: &ProcessedWay,
     args: &Args,
     relation_levels: Option<i32>,
@@ -37,7 +44,7 @@ pub fn generate_buildings(
     };
 
     // Calculate y-offset for non-terrain mode for absolute positioning
-    let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
+    let abs_terrain_offset = if args.terrain { 0 } else { args.ground_level };
 
     // Calculate starting y-offset from min_level
     let scale_factor = args.scale;
@@ -95,8 +102,7 @@ pub fn generate_buildings(
         .tags
         .get("building")
         .or_else(|| element.tags.get("building:part"))
-        .map(|s| s.as_str())
-        .unwrap_or("yes");
+        .map_or("yes", std::string::String::as_str);
 
     let wall_block: Block = if element.tags.get("historic") == Some(&"castle".to_string()) {
         // Historic forts and castles should use stone/brick materials
@@ -121,9 +127,9 @@ pub fn generate_buildings(
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
     let mut is_tall_building = false;
-    let mut rng = rand::thread_rng();
-    let use_vertical_windows = rng.gen_bool(0.7);
-    let use_accent_roof_line = rng.gen_bool(0.25);
+    let mut rng = rand::rng();
+    let use_vertical_windows = rng.random_bool(0.7);
+    let use_accent_roof_line = rng.random_bool(0.25);
 
     // Random accent block selection for this building
     let accent_blocks = [
@@ -134,47 +140,47 @@ pub fn generate_buildings(
         ANDESITE,
         CHISELED_STONE_BRICKS,
     ];
-    let accent_block = accent_blocks[rng.gen_range(0..accent_blocks.len())];
+    let accent_block = accent_blocks[rng.random_range(0..accent_blocks.len())];
 
     // Skip if 'layer' or 'level' is negative in the tags
-    if let Some(layer) = element.tags.get("layer") {
-        if layer.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(layer) = element.tags.get("layer")
+        && layer.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
-    if let Some(level) = element.tags.get("level") {
-        if level.parse::<i32>().unwrap_or(0) < 0 {
-            return;
-        }
+    if let Some(level) = element.tags.get("level")
+        && level.parse::<i32>().unwrap_or(0) < 0
+    {
+        return;
     }
 
     // Determine building height from tags
-    if let Some(levels_str) = element.tags.get("building:levels") {
-        if let Ok(levels) = levels_str.parse::<i32>() {
-            let lev = levels - min_level;
+    if let Some(levels_str) = element.tags.get("building:levels")
+        && let Ok(levels) = levels_str.parse::<i32>()
+    {
+        let lev = levels - min_level;
 
-            if lev >= 1 {
-                building_height = multiply_scale(levels * 4 + 2, scale_factor);
-                building_height = building_height.max(3);
+        if lev >= 1 {
+            building_height = multiply_scale(levels * 4 + 2, scale_factor);
+            building_height = building_height.max(3);
 
-                // Mark as tall building if more than 7 stories
-                if levels > 7 {
-                    is_tall_building = true;
-                }
+            // Mark as tall building if more than 7 stories
+            if levels > 7 {
+                is_tall_building = true;
             }
         }
     }
 
-    if let Some(height_str) = element.tags.get("height") {
-        if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
-            building_height = (height * scale_factor) as i32;
-            building_height = building_height.max(3);
+    if let Some(height_str) = element.tags.get("height")
+        && let Ok(height) = height_str.trim_end_matches('m').trim().parse::<f64>()
+    {
+        building_height = (height * scale_factor) as i32;
+        building_height = building_height.max(3);
 
-            // Mark as tall building if height suggests more than 7 stories
-            if height > 28.0 {
-                is_tall_building = true;
-            }
+        // Mark as tall building if height suggests more than 7 stories
+        if height > 28.0 {
+            is_tall_building = true;
         }
     }
 
@@ -190,34 +196,34 @@ pub fn generate_buildings(
 
     // Determine accent line usage based on whether building has multiple floors
     let has_multiple_floors = building_height > 6;
-    let use_accent_lines = has_multiple_floors && rng.gen_bool(0.2);
-    let use_vertical_accent = has_multiple_floors && !use_accent_lines && rng.gen_bool(0.1);
+    let use_accent_lines = has_multiple_floors && rng.random_bool(0.2);
+    let use_vertical_accent = has_multiple_floors && !use_accent_lines && rng.random_bool(0.1);
 
-    if let Some(amenity_type) = element.tags.get("amenity") {
-        if amenity_type == "shelter" {
-            let roof_block: Block = STONE_BRICK_SLAB;
+    if let Some(amenity_type) = element.tags.get("amenity")
+        && amenity_type == "shelter"
+    {
+        let roof_block: Block = STONE_BRICK_SLAB;
 
-            // Use cached floor area instead of recalculating
-            let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
+        // Use cached floor area instead of recalculating
+        let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
 
-            // Place fences and roof slabs at each corner node directly
-            for node in &element.nodes {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
+        // Place fences and roof slabs at each corner node directly
+        for node in &element.nodes {
+            let x: i32 = node.x;
+            let z: i32 = node.z;
 
-                for shelter_y in 1..=multiply_scale(4, scale_factor) {
-                    editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
-                }
-                editor.set_block(roof_block, x, 5, z, None, None);
+            for shelter_y in 1..=multiply_scale(4, scale_factor) {
+                editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
             }
-
-            // Flood fill the roof area
-            for (x, z) in roof_area.iter() {
-                editor.set_block(roof_block, *x, 5, *z, None, None);
-            }
-
-            return;
+            editor.set_block(roof_block, x, 5, z, None, None);
         }
+
+        // Flood fill the roof area
+        for (x, z) in roof_area {
+            editor.set_block(roof_block, *x, 5, *z, None, None);
+        }
+
+        return;
     }
 
     if let Some(building_type) = element.tags.get("building") {
@@ -234,7 +240,7 @@ pub fn generate_buildings(
                 let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
 
                 // Fill the floor area
-                for (x, z) in floor_area.iter() {
+                for (x, z) in floor_area {
                     editor.set_block(ground_block, *x, 0, *z, None, None);
                 }
 
@@ -250,7 +256,7 @@ pub fn generate_buildings(
                 }
 
                 // Flood fill the roof area
-                for (x, z) in floor_area.iter() {
+                for (x, z) in floor_area {
                     editor.set_block(roof_block, *x, 5, *z, None, None);
                 }
 
@@ -358,7 +364,7 @@ pub fn generate_buildings(
                     }
                 }
 
-                for y in 1..=(roof_height - 1) {
+                for y in 1..roof_height {
                     editor.set_block(COBBLESTONE_WALL, x, y, z, None, None);
                 }
 
@@ -369,7 +375,7 @@ pub fn generate_buildings(
             let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
 
             // Fill the interior of the roof with STONE_BRICK_SLAB
-            for (x, z) in roof_area.iter() {
+            for (x, z) in roof_area {
                 editor.set_block(STONE_BRICK_SLAB, *x, roof_height, *z, None, None);
                 // Set roof block
             }
@@ -415,7 +421,7 @@ pub fn generate_buildings(
                     };
 
                     // Add foundation blocks from ground to building base
-                    for y in local_ground_level..start_y_offset + 1 {
+                    for y in local_ground_level..=start_y_offset {
                         editor.set_block_absolute(
                             wall_block,
                             bx,
@@ -540,7 +546,7 @@ pub fn generate_buildings(
             }
         }
 
-        for (x, z) in floor_area.iter().cloned() {
+        for (x, z) in floor_area.iter().copied() {
             if processed_points.insert((x, z)) {
                 // Create foundation columns for the floor area when using terrain
                 if args.terrain {
@@ -623,8 +629,7 @@ pub fn generate_buildings(
             let building_type = element
                 .tags
                 .get("building")
-                .map(|s| s.as_str())
-                .unwrap_or("yes");
+                .map_or("yes", std::string::String::as_str);
             let skip_interior = matches!(
                 building_type,
                 "garage" | "shed" | "parking" | "roof" | "bridge"
@@ -680,8 +685,7 @@ pub fn generate_buildings(
             let building_type = element
                 .tags
                 .get("building")
-                .map(|s| s.as_str())
-                .unwrap_or("yes");
+                .map_or("yes", std::string::String::as_str);
 
             // For apartments, give 80% chance to generate a gabled roof only if building footprint is not too large
             if building_type == "apartments"
@@ -695,8 +699,8 @@ pub fn generate_buildings(
                 // Maximum footprint size threshold for gabled roofs
                 let max_footprint_for_gabled = 800;
 
-                let mut rng = rand::thread_rng();
-                if footprint_size <= max_footprint_for_gabled && rng.gen_bool(0.9) {
+                let mut rng = rand::rng();
+                if footprint_size <= max_footprint_for_gabled && rng.random_bool(0.9) {
                     generate_roof(
                         editor,
                         element,
@@ -728,7 +732,7 @@ fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
     } else if scale_factor == 4.0 {
         value << 2
     } else {
-        let result = (value as f64) * scale_factor;
+        let result = f64::from(value) * scale_factor;
         result.floor() as i32
     }
 }
@@ -737,7 +741,7 @@ fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
 #[allow(clippy::too_many_arguments)]
 #[inline]
 fn generate_roof(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     element: &ProcessedWay,
     start_y_offset: i32,
     building_height: i32,
@@ -792,7 +796,7 @@ fn generate_roof(
             let building_size = width.max(length);
 
             // Enhanced logarithmic scaling with increased base values for taller roofs
-            let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
+            let roof_height_boost = (3.0 + (f64::from(building_size) * 0.15).ln().max(1.0)) as i32;
             let roof_peak_height = base_height + roof_height_boost;
 
             // Pre-determine orientation and material
@@ -804,8 +808,8 @@ fn generate_roof(
             };
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -829,8 +833,9 @@ fn generate_roof(
                 {
                     roof_peak_height
                 } else {
-                    let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
-                    (roof_peak_height as f64 - (slope_ratio * roof_height_boost as f64)) as i32
+                    let slope_ratio = f64::from(distance_to_ridge) / f64::from(max_distance.max(1));
+                    (f64::from(roof_peak_height) - (slope_ratio * f64::from(roof_height_boost)))
+                        as i32
                 }
                 .max(base_height);
 
@@ -915,16 +920,16 @@ fn generate_roof(
             let length = max_z - min_z;
 
             // Determine if building is significantly rectangular or more square-shaped
-            let is_rectangular =
-                (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
+            let is_rectangular = (f64::from(width) / f64::from(length) > 1.3)
+                || (f64::from(length) / f64::from(width) > 1.3);
             let long_axis_is_x = width > length;
 
             // Make roof taller and more pointy
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -954,14 +959,14 @@ fn generate_roof(
 
                     // Create proper slope from ridge (high) to edges (low)
                     let slope_factor = if max_distance_from_ridge > 0 {
-                        distance_to_ridge as f64 / max_distance_from_ridge as f64
+                        f64::from(distance_to_ridge) / f64::from(max_distance_from_ridge)
                     } else {
                         0.0
                     };
 
                     // Ridge gets peak height, edges get base height
                     let roof_height = roof_peak_height
-                        - (slope_factor * (roof_peak_height - base_height) as f64) as i32;
+                        - (slope_factor * f64::from(roof_peak_height - base_height)) as i32;
                     let roof_y = roof_height.max(base_height);
                     roof_heights.insert((x, z), roof_y);
                 }
@@ -1057,17 +1062,17 @@ fn generate_roof(
 
                 for &(x, z) in floor_area {
                     // Calculate distance from center point
-                    let dx = (x - center_x) as f64;
-                    let dz = (z - center_z) as f64;
+                    let dx = f64::from(x - center_x);
+                    let dz = f64::from(z - center_z);
                     let distance_from_center = (dx * dx + dz * dz).sqrt();
 
                     // Calculate maximum possible distance from center to any corner
                     let max_distance = {
                         let corner_distances = [
-                            ((min_x - center_x).pow(2) + (min_z - center_z).pow(2)) as f64,
-                            ((min_x - center_x).pow(2) + (max_z - center_z).pow(2)) as f64,
-                            ((max_x - center_x).pow(2) + (min_z - center_z).pow(2)) as f64,
-                            ((max_x - center_x).pow(2) + (max_z - center_z).pow(2)) as f64,
+                            f64::from((min_x - center_x).pow(2) + (min_z - center_z).pow(2)),
+                            f64::from((min_x - center_x).pow(2) + (max_z - center_z).pow(2)),
+                            f64::from((max_x - center_x).pow(2) + (min_z - center_z).pow(2)),
+                            f64::from((max_x - center_x).pow(2) + (max_z - center_z).pow(2)),
                         ];
                         corner_distances
                             .iter()
@@ -1084,7 +1089,7 @@ fn generate_roof(
 
                     // Center gets peak height, edges get base height
                     let roof_height = roof_peak_height
-                        - (distance_factor * (roof_peak_height - base_height) as f64) as i32;
+                        - (distance_factor * f64::from(roof_peak_height - base_height)) as i32;
                     let roof_y = roof_height.max(base_height);
                     roof_heights.insert((x, z), roof_y);
                 }
@@ -1188,8 +1193,8 @@ fn generate_roof(
             let max_roof_height = (building_size / 3).clamp(4, 10);
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -1198,8 +1203,9 @@ fn generate_roof(
             // First pass: calculate all roof heights
             let mut roof_heights = std::collections::HashMap::new();
             for &(x, z) in floor_area {
-                let slope_progress = (x - min_x) as f64 / width as f64;
-                let roof_height = base_height + (slope_progress * max_roof_height as f64) as i32;
+                let slope_progress = f64::from(x - min_x) / f64::from(width);
+                let roof_height =
+                    base_height + (slope_progress * f64::from(max_roof_height)) as i32;
                 roof_heights.insert((x, z), roof_height);
             }
 
@@ -1269,8 +1275,8 @@ fn generate_roof(
             let peak_height = base_height + (building_size / 3).clamp(3, 8);
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
@@ -1280,15 +1286,15 @@ fn generate_roof(
             let mut roof_heights = std::collections::HashMap::new();
             for &(x, z) in floor_area {
                 // Calculate distance from this point to the center
-                let dx = (x - center_x).abs() as f64;
-                let dz = (z - center_z).abs() as f64;
+                let dx = f64::from((x - center_x).abs());
+                let dz = f64::from((z - center_z).abs());
 
                 // Use the maximum distance to either edge to determine slope
                 // This creates the pyramid effect where all sides slope equally
                 let distance_to_edge = dx.max(dz);
 
                 // Calculate maximum distance from center to any edge
-                let max_distance = ((max_x - min_x) / 2).max((max_z - min_z) / 2) as f64;
+                let max_distance = f64::from(((max_x - min_x) / 2).max((max_z - min_z) / 2));
 
                 // Calculate height based on distance from center
                 // Points closer to center are higher, creating the pyramid slope
@@ -1299,7 +1305,7 @@ fn generate_roof(
                 };
 
                 let roof_height =
-                    base_height + (height_factor * (peak_height - base_height) as f64) as i32;
+                    base_height + (height_factor * f64::from(peak_height - base_height)) as i32;
                 roof_heights.insert((x, z), roof_height);
             }
 
@@ -1453,18 +1459,18 @@ fn generate_roof(
 
         RoofType::Dome => {
             // Dome roof - rounded hemispherical structure
-            let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
+            let radius = f64::from((max_x - min_x).max(max_z - min_z) / 2);
 
             // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
+            let mut rng = rand::rng();
+            let roof_block = if rng.random_bool(0.5) {
                 accent_block
             } else {
                 wall_block
             };
 
             for &(x, z) in floor_area {
-                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
+                let distance_from_center = f64::from((x - center_x).pow(2) + (z - center_z).pow(2));
                 let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
 
                 // Use hemisphere equation to determine the height
@@ -1481,7 +1487,7 @@ fn generate_roof(
 }
 
 pub fn generate_building_from_relation(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     relation: &ProcessedRelation,
     args: &Args,
 ) {
@@ -1517,7 +1523,7 @@ pub fn generate_building_from_relation(
 
 /// Generates a bridge structure, paying attention to the "level" tag.
 fn generate_bridge(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     element: &ProcessedWay,
     floodfill_timeout: Option<&Duration>,
 ) {

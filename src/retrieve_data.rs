@@ -1,7 +1,7 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 use colored::Colorize;
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom as _;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
 use serde_json::Value;
@@ -58,10 +58,10 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
         .arg(format!("{url}?data={query}"))
         .output()?;
 
-    if !output.status.success() {
-        Err(io::Error::other("Curl command failed"))
-    } else {
+    if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(io::Error::other("Curl command failed"))
     }
 }
 
@@ -72,10 +72,10 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
         .arg(format!("{url}?data={query}"))
         .output()?;
 
-    if !output.status.success() {
-        Err(io::Error::other("Wget command failed"))
-    } else {
+    if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(io::Error::other("Wget command failed"))
     }
 }
 
@@ -109,7 +109,7 @@ pub fn fetch_data_from_overpass(
     ];
     let fallback_api_servers: Vec<&str> =
         vec!["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
-    let mut url: &&str = api_servers.choose(&mut rand::thread_rng()).unwrap();
+    let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
 
     // Generate Overpass API query for bounding box
     let query: String = format!(
@@ -155,8 +155,8 @@ pub fn fetch_data_from_overpass(
             println!("Downloading from {url} with method {download_method}...");
             let result = match download_method {
                 "requests" => download_with_reqwest(url, &query),
-                "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
-                "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
+                "curl" => download_with_curl(url, &query).map_err(std::convert::Into::into),
+                "wget" => download_with_wget(url, &query).map_err(std::convert::Into::into),
                 _ => download_with_reqwest(url, &query), // Default to requests
             };
 
@@ -168,9 +168,7 @@ pub fn fetch_data_from_overpass(
                     }
 
                     println!("Request failed. Switching to fallback url...");
-                    url = fallback_api_servers
-                        .choose(&mut rand::thread_rng())
-                        .unwrap();
+                    url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
                     attempt += 1;
                 }
             }
@@ -214,11 +212,10 @@ pub fn fetch_data_from_overpass(
                 println!("Additional debug information: {data}");
             }
 
-            if !is_running_with_gui() {
-                std::process::exit(1);
-            } else {
+            if is_running_with_gui() {
                 return Err("Data fetch failed".into());
             }
+            std::process::exit(1);
         }
 
         emit_gui_progress_update(5.0, "");
@@ -231,7 +228,9 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
 
-    let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
+    let url = format!(
+        "https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1"
+    );
 
     let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
 
@@ -243,7 +242,7 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
 
     if let Some(address) = json.get("address") {
         let fields = ["city", "town", "village", "county", "borough", "suburb"];
-        for field in fields.iter() {
+        for field in &fields {
             if let Some(name) = address.get(*field).and_then(|v| v.as_str()) {
                 let mut name_str = name.to_string();
 

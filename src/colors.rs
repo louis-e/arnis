@@ -18,7 +18,7 @@ pub fn color_text_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
 
 fn full_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
     if text.len() != 7
-        || !text.starts_with("#")
+        || !text.starts_with('#')
         || !text.chars().skip(1).all(|c: char| c.is_ascii_hexdigit())
     {
         return None;
@@ -31,7 +31,7 @@ fn full_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
 
 fn short_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
     if text.len() != 4
-        || !text.starts_with("#")
+        || !text.starts_with('#')
         || !text.chars().skip(1).all(|c: char| c.is_ascii_hexdigit())
     {
         return None;
@@ -76,12 +76,12 @@ fn color_name_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
     })
 }
 
-pub fn rgb_distance(from: &RGBTuple, to: &RGBTuple) -> u32 {
+pub fn rgb_distance(from: RGBTuple, to: RGBTuple) -> u32 {
     // i32 because .pow(2) returns the same data type as self and 255^2 wouldn't fit
     let difference: (i32, i32, i32) = (
-        from.0 as i32 - to.0 as i32,
-        from.1 as i32 - to.1 as i32,
-        from.2 as i32 - to.2 as i32,
+        i32::from(from.0) - i32::from(to.0),
+        i32::from(from.1) - i32::from(to.1),
+        i32::from(from.2) - i32::from(to.2),
     );
     let distance: i32 = difference.0.pow(2) + difference.1.pow(2) + difference.2.pow(2);
     distance as u32

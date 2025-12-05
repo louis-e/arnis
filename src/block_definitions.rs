@@ -27,7 +27,7 @@ pub enum StairShape {
 
 impl StairFacing {
     #[inline(always)]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             StairFacing::North => "north",
             StairFacing::East => "east",
@@ -39,7 +39,7 @@ impl StairFacing {
 
 impl StairShape {
     #[inline(always)]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             StairShape::Straight => "straight",
             StairShape::InnerLeft => "inner_left",
@@ -87,12 +87,16 @@ impl Block {
     }
 
     #[inline(always)]
-    pub fn id(&self) -> u8 {
+    pub fn id(self) -> u8 {
         self.id
     }
 
+    #[expect(
+        clippy::unused_self,
+        reason = "Future-proofing for potential multi-namespace support"
+    )]
     #[inline(always)]
-    pub fn namespace(&self) -> &str {
+    pub fn namespace(self) -> &'static str {
         "minecraft"
     }
 
@@ -270,7 +274,7 @@ impl Block {
         }
     }
 
-    pub fn properties(&self) -> Option<Value> {
+    pub fn properties(self) -> Option<Value> {
         match self.id {
             3 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
@@ -751,7 +755,7 @@ pub static WINDOW_VARIATIONS: [Block; 7] = [
 // Window types for different building styles
 pub fn get_window_block_for_building_type(building_type: &str) -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     match building_type {
         "residential" | "house" | "apartment" => {
@@ -761,15 +765,15 @@ pub fn get_window_block_for_building_type(building_type: &str) -> Block {
                 LIGHT_GRAY_STAINED_GLASS,
                 BROWN_STAINED_GLASS,
             ];
-            residential_windows[rng.gen_range(0..residential_windows.len())]
+            residential_windows[rng.random_range(0..residential_windows.len())]
         }
         "hospital" | "school" | "university" => {
             let institutional_windows = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
-            institutional_windows[rng.gen_range(0..institutional_windows.len())]
+            institutional_windows[rng.random_range(0..institutional_windows.len())]
         }
         "hotel" | "restaurant" => {
             let hospitality_windows = [GLASS, WHITE_STAINED_GLASS];
-            hospitality_windows[rng.gen_range(0..hospitality_windows.len())]
+            hospitality_windows[rng.random_range(0..hospitality_windows.len())]
         }
         "industrial" | "warehouse" => {
             let industrial_windows = [
@@ -778,16 +782,16 @@ pub fn get_window_block_for_building_type(building_type: &str) -> Block {
                 LIGHT_GRAY_STAINED_GLASS,
                 BROWN_STAINED_GLASS,
             ];
-            industrial_windows[rng.gen_range(0..industrial_windows.len())]
+            industrial_windows[rng.random_range(0..industrial_windows.len())]
         }
-        _ => WINDOW_VARIATIONS[rng.gen_range(0..WINDOW_VARIATIONS.len())],
+        _ => WINDOW_VARIATIONS[rng.random_range(0..WINDOW_VARIATIONS.len())],
     }
 }
 
 // Random floor block selection
 pub fn get_random_floor_block() -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let floor_options = [
         WHITE_CONCRETE,
@@ -799,7 +803,7 @@ pub fn get_random_floor_block() -> Block {
         MUD_BRICKS,
         OAK_PLANKS,
     ];
-    floor_options[rng.gen_range(0..floor_options.len())]
+    floor_options[rng.random_range(0..floor_options.len())]
 }
 
 // Define all predefined colors with their blocks
@@ -934,15 +938,15 @@ static DEFINED_COLORS: &[ColorBlockMapping] = &[
 // Function to randomly select building wall block with alternatives
 pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Find the closest color match
     let closest_color = DEFINED_COLORS
         .iter()
-        .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
+        .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(color, *defined_color));
 
     if let Some((_, options)) = closest_color {
-        options[rng.gen_range(0..options.len())]
+        options[rng.random_range(0..options.len())]
     } else {
         // This should never happen, but fallback just in case
         get_fallback_building_block()
@@ -952,7 +956,7 @@ pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
 // Function to get a random fallback building block when no color attribute is specified
 pub fn get_fallback_building_block() -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let fallback_options = [
         BLACKSTONE,
@@ -983,13 +987,13 @@ pub fn get_fallback_building_block() -> Block {
         WHITE_TERRACOTTA,
         OAK_PLANKS,
     ];
-    fallback_options[rng.gen_range(0..fallback_options.len())]
+    fallback_options[rng.random_range(0..fallback_options.len())]
 }
 
 // Function to get a random castle wall block
 pub fn get_castle_wall_block() -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let castle_wall_options = [
         STONE_BRICKS,
@@ -1003,5 +1007,5 @@ pub fn get_castle_wall_block() -> Block {
         SMOOTH_STONE,
         BRICK,
     ];
-    castle_wall_options[rng.gen_range(0..castle_wall_options.len())]
+    castle_wall_options[rng.random_range(0..castle_wall_options.len())]
 }

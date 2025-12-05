@@ -46,7 +46,7 @@ impl BedrockBlock {
     }
 }
 
-/// Converts an internal Block to a BedrockBlock representation.
+/// Converts an internal Block to a `BedrockBlock` representation.
 ///
 /// This function handles the mapping between Java Edition block names/properties
 /// and their Bedrock Edition equivalents. Many blocks are identical, but some
@@ -553,7 +553,7 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
     }
 }
 
-/// Converts an internal Block with optional Java properties to a BedrockBlock.
+/// Converts an internal Block with optional Java properties to a `BedrockBlock`.
 ///
 /// This function extends `to_bedrock_block` by also handling block-specific properties
 /// like stair facing/shape, slab type, etc. Java property names and values are converted
@@ -658,15 +658,15 @@ fn convert_slab(
     let mut states = HashMap::new();
 
     // Convert type: Java uses "top/bottom/double", Bedrock uses "top_slot_bit"
-    if let Some(props) = props {
-        if let Some(fastnbt::Value::String(slab_type)) = props.get("type") {
-            let top_slot = slab_type == "top";
-            states.insert(
-                "top_slot_bit".to_string(),
-                BedrockBlockStateValue::Bool(top_slot),
-            );
-            // Note: "double" slabs in Java become full blocks in Bedrock (different block ID)
-        }
+    if let Some(props) = props
+        && let Some(fastnbt::Value::String(slab_type)) = props.get("type")
+    {
+        let top_slot = slab_type == "top";
+        states.insert(
+            "top_slot_bit".to_string(),
+            BedrockBlockStateValue::Bool(top_slot),
+        );
+        // Note: "double" slabs in Java become full blocks in Bedrock (different block ID)
     }
 
     // Default to bottom if not specified
@@ -727,13 +727,13 @@ fn convert_log(
     let mut states = HashMap::new();
 
     // Convert axis: Java uses "x/y/z", Bedrock uses "pillar_axis"
-    if let Some(props) = props {
-        if let Some(fastnbt::Value::String(axis)) = props.get("axis") {
-            states.insert(
-                "pillar_axis".to_string(),
-                BedrockBlockStateValue::String(axis.clone()),
-            );
-        }
+    if let Some(props) = props
+        && let Some(fastnbt::Value::String(axis)) = props.get("axis")
+    {
+        states.insert(
+            "pillar_axis".to_string(),
+            BedrockBlockStateValue::String(axis.clone()),
+        );
     }
 
     // Default to y-axis if not specified

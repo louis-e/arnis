@@ -4,10 +4,14 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 /// Command-line arguments parser
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Flags are clearer this way for users"
+)]
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 pub struct Args {
-    /// Bounding box of the area (min_lat,min_lng,max_lat,max_lng) (required)
+    /// Bounding box of the area (`min_lat,min_lng,max_lat,max_lng`) (required)
     #[arg(long, allow_hyphen_values = true, value_parser = LLBBox::from_str)]
     pub bbox: LLBBox,
 
@@ -74,7 +78,7 @@ fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {
     }
     let region = mc_world_path.join("region");
     if !region.is_dir() {
-        return Err(format!("No Minecraft world found at {region:?}"));
+        return Err(format!("No Minecraft world found at {}", region.display()));
     }
     Ok(mc_world_path)
 }

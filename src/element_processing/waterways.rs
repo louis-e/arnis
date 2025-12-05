@@ -1,9 +1,9 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{AIR, CARROTS, DIRT, GRASS, POTATOES, WATER, WHEAT};
 use crate::bresenham::bresenham_line;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
+pub fn generate_waterways(editor: &mut WorldEditor<'_>, element: &ProcessedWay) {
     if let Some(waterway_type) = element.tags.get("waterway") {
         let (mut waterway_width, waterway_depth) = get_waterway_dimensions(waterway_type);
 
@@ -19,8 +19,8 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
 
         // Skip layers below the ground level
         if matches!(
-            element.tags.get("layer").map(|s| s.as_str()),
-            Some("-1") | Some("-2") | Some("-3")
+            element.tags.get("layer").map(std::string::String::as_str),
+            Some("-1" | "-2" | "-3")
         ) {
             return;
         }
@@ -66,7 +66,7 @@ fn get_waterway_dimensions(waterway_type: &str) -> (i32, i32) {
 
 /// Creates a water channel with proper depth and sloped banks
 fn create_water_channel(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     center_x: i32,
     center_z: i32,
     width: i32,
