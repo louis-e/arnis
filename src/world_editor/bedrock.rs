@@ -279,7 +279,7 @@ impl BedrockWriter {
             // Game rules
             do_daylight_cycle: true,
             do_weather_cycle: true,
-            do_mob_spawning: false, // Disabled since spawnMobs is false
+            do_mob_spawning: false,
             do_mob_loot: true,
             do_tile_drops: true,
             do_entity_drops: true,
