@@ -44,5 +44,6 @@
   "mode_terrain_only": "Terrain uniquement",
   "interior": "Génération d'intérieur",
   "roof": "Génération de toit",
-  "fillground": "Remplir le sol"
+  "fillground": "Remplir le sol",
+  "bedrock_use_java": "Utilisez Java pour les mondes"
 }

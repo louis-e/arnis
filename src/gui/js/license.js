@@ -24,6 +24,10 @@ export const licenseText = `
 Elevation data derived from the <a href="https://registry.opendata.aws/terrain-tiles/" style="color: inherit;" target="_blank">AWS Terrain Tiles</a> dataset.
 <br><br>
 
+<b>bedrock-rs:</b><br>
+Bedrock Edition world format support uses the <a href="https://github.com/bedrock-crustaceans/bedrock-rs" style="color: inherit;" target="_blank">bedrock-rs</a> library, licensed under the Apache License 2.0.
+<br><br>
+
 <p><b>Privacy Policy:</b></p>
 If you consent to telemetry data collection, please review our Privacy Policy at:
 <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank">https://arnismc.com/privacypolicy.html</a>.

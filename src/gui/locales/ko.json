@@ -44,5 +44,6 @@
   "mode_terrain_only": "지형만",
   "interior": "내부 생성",
   "roof": "지붕 생성",
-  "fillground": "지면 채우기"
+  "fillground": "지면 채우기",
+  "bedrock_use_java": "Java로 세계 선택"
 }

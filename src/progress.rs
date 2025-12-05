@@ -65,3 +65,12 @@ pub fn emit_map_preview_ready() {
         }
     }
 }
+
+/// Emits an event to open the generated mcworld file
+pub fn emit_open_mcworld_file(path: &str) {
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("open-mcworld-file", path) {
+            eprintln!("Failed to emit open-mcworld-file event: {}", e);
+        }
+    }
+}

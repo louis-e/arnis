@@ -529,7 +529,7 @@ $(document).ready(function () {
                 failureCount++;
 
                 // After a few failures, try HTTP fallback
-                if (failureCount >= 3 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
+                if (failureCount >= 6 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
                     console.log('HTTPS tile loading failed, attempting HTTP fallback for', themeKey);
                     this._httpFallbackAttempted = true;
 

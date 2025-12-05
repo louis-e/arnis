@@ -6,14 +6,24 @@ use crate::element_processing::*;
 use crate::ground::Ground;
 use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
-use crate::progress::{emit_gui_progress_update, emit_map_preview_ready};
+use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
-use crate::world_editor::WorldEditor;
+use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::PathBuf;
 
 pub const MIN_Y: i32 = -64;
+
+/// Generation options that can be passed separately from CLI Args
+#[derive(Clone)]
+pub struct GenerationOptions {
+    pub path: PathBuf,
+    pub format: WorldFormat,
+    pub level_name: Option<String>,
+    pub spawn_point: Option<(i32, i32)>,
+}
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
@@ -22,7 +32,35 @@ pub fn generate_world(
     ground: Ground,
     args: &Args,
 ) -> Result<(), String> {
-    let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox, llbbox);
+    // Default to Java format when called from CLI
+    let options = GenerationOptions {
+        path: args.path.clone(),
+        format: WorldFormat::JavaAnvil,
+        level_name: None,
+        spawn_point: None,
+    };
+    generate_world_with_options(elements, xzbbox, llbbox, ground, args, options).map(|_| ())
+}
+
+/// Generate world with explicit format options (used by GUI for Bedrock support)
+pub fn generate_world_with_options(
+    elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
+    llbbox: LLBBox,
+    ground: Ground,
+    args: &Args,
+    options: GenerationOptions,
+) -> Result<PathBuf, String> {
+    let output_path = options.path.clone();
+    let world_format = options.format;
+    let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
+        options.path,
+        &xzbbox,
+        llbbox,
+        options.format,
+        options.level_name,
+        options.spawn_point,
+    );
 
     println!("{} Processing data...", "[4/7]".bold());
 
@@ -239,60 +277,76 @@ pub fn generate_world(
 
     // Update player spawn Y coordinate based on terrain height after generation
     #[cfg(feature = "gui")]
-    if let Some(spawn_coords) = &args.spawn_point {
-        use crate::gui::update_player_spawn_y_after_generation;
-        let bbox_string = format!(
-            "{},{},{},{}",
-            args.bbox.min().lng(),
-            args.bbox.min().lat(),
-            args.bbox.max().lng(),
-            args.bbox.max().lat()
-        );
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(spawn_coords) = &args.spawn_point {
+            use crate::gui::update_player_spawn_y_after_generation;
+            let bbox_string = format!(
+                "{},{},{},{}",
+                args.bbox.min().lng(),
+                args.bbox.min().lat(),
+                args.bbox.max().lng(),
+                args.bbox.max().lat()
+            );
 
-        if let Err(e) = update_player_spawn_y_after_generation(
-            &args.path,
-            Some(*spawn_coords),
-            bbox_string,
-            args.scale,
-            &ground,
-        ) {
-            let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
-            eprintln!("Warning: {}", warning_msg);
-            #[cfg(feature = "gui")]
-            send_log(LogLevel::Warning, &warning_msg);
+            if let Err(e) = update_player_spawn_y_after_generation(
+                &args.path,
+                Some(*spawn_coords),
+                bbox_string,
+                args.scale,
+                &ground,
+            ) {
+                let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
+                eprintln!("Warning: {}", warning_msg);
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &warning_msg);
+            }
         }
     }
 
-    emit_gui_progress_update(100.0, "Done! World generation completed.");
-    println!("{}", "Done! World generation completed.".green().bold());
+    emit_gui_progress_update(99.0, "Finalizing world...");
 
-    // Generate top-down map preview silently in background after completion
-    let world_path = args.path.clone();
-    let bounds = (
-        xzbbox.min_x(),
-        xzbbox.max_x(),
-        xzbbox.min_z(),
-        xzbbox.max_z(),
-    );
-    std::thread::spawn(move || {
-        // Use catch_unwind to prevent any panic from affecting the application
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            map_renderer::render_world_map(&world_path, bounds.0, bounds.1, bounds.2, bounds.3)
-        }));
-
-        match result {
-            Ok(Ok(_path)) => {
-                // Notify the GUI that the map preview is ready
-                emit_map_preview_ready();
-            }
-            Ok(Err(e)) => {
-                eprintln!("Warning: Failed to generate map preview: {}", e);
-            }
-            Err(_) => {
-                eprintln!("Warning: Map preview generation panicked unexpectedly");
-            }
+    // For Bedrock format, emit event to open the mcworld file
+    if world_format == WorldFormat::BedrockMcWorld {
+        if let Some(path_str) = output_path.to_str() {
+            emit_open_mcworld_file(path_str);
         }
-    });
+    }
 
-    Ok(())
+    // Generate top-down map preview silently in background after completion (Java only)
+    // Skip map preview for very large areas to avoid memory issues
+    const MAX_MAP_PREVIEW_AREA: i64 = 6400 * 6900;
+    let world_width = (xzbbox.max_x() - xzbbox.min_x()) as i64;
+    let world_height = (xzbbox.max_z() - xzbbox.min_z()) as i64;
+    let world_area = world_width * world_height;
+
+    if world_format == WorldFormat::JavaAnvil && world_area <= MAX_MAP_PREVIEW_AREA {
+        let world_path = args.path.clone();
+        let bounds = (
+            xzbbox.min_x(),
+            xzbbox.max_x(),
+            xzbbox.min_z(),
+            xzbbox.max_z(),
+        );
+        std::thread::spawn(move || {
+            // Use catch_unwind to prevent any panic from affecting the application
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                map_renderer::render_world_map(&world_path, bounds.0, bounds.1, bounds.2, bounds.3)
+            }));
+
+            match result {
+                Ok(Ok(_path)) => {
+                    // Notify the GUI that the map preview is ready
+                    emit_map_preview_ready();
+                }
+                Ok(Err(e)) => {
+                    eprintln!("Warning: Failed to generate map preview: {}", e);
+                }
+                Err(_) => {
+                    eprintln!("Warning: Map preview generation panicked unexpectedly");
+                }
+            }
+        });
+    }
+
+    Ok(output_path)
 }

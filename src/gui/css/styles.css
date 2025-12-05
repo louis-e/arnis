@@ -222,6 +222,68 @@ button:hover {
   width: 100%;
 }
 
+/* World Selection Container */
+.world-selection-container {
+  width: 100%;
+}
+
+.choose-world-btn {
+  padding: 10px;
+  line-height: 1.2;
+  width: 100%;
+  border-radius: 8px 8px 0 0 !important;
+  margin-bottom: 0 !important;
+  box-shadow: none !important;
+}
+
+/* World Format Toggle */
+.format-toggle-container {
+  display: flex;
+  width: 100%;
+  gap: 0;
+  margin-top: 0;
+}
+
+.format-toggle-btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 1em;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  margin-top: 0;
+  border-radius: 0;
+}
+
+.format-toggle-btn:first-child {
+  border-radius: 0 0 0 8px;
+}
+
+.format-toggle-btn:last-child {
+  border-radius: 0 0 8px 0;
+}
+
+.format-toggle-btn:not(.format-active) {
+  background-color: #3a3a3a;
+  color: #b0b0b0;
+}
+
+.format-toggle-btn:not(.format-active):hover {
+  background-color: #4a4a4a;
+  color: #ffffff;
+}
+
+.format-toggle-btn.format-active {
+  background-color: var(--primary-accent);
+  color: #0f0f0f;
+  font-weight: 600;
+}
+
+.format-toggle-btn.format-active:hover {
+  background-color: var(--primary-accent-dark);
+}
+
 /* Customization Settings */
 .modal {
   position: fixed;

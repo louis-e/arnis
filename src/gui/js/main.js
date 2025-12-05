@@ -24,6 +24,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   handleBboxInput();
   const localization = await getLocalization();
   await applyLocalization(localization);
+  updateFormatToggleUI(selectedWorldFormat);
   initFooter();
   await checkForUpdates();
 });
@@ -220,6 +221,17 @@ function setupProgressListener() {
     console.log("Map preview ready event received");
     showWorldPreviewButton();
   });
+
+  // Listen for open-mcworld-file event to show the generated Bedrock world in file explorer
+  window.__TAURI__.event.listen("open-mcworld-file", async (event) => {
+    const filePath = event.payload;
+    try {
+      // Use our custom command to show the file in the system file explorer
+      await invoke("gui_show_in_folder", { path: filePath });
+    } catch (error) {
+      console.error("Failed to show mcworld file in folder:", error);
+    }
+  });
 }
 
 function initSettings() {
@@ -247,6 +259,9 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+
+  // World format toggle (Java/Bedrock)
+  initWorldFormatToggle();
 
   // Language selector
   const languageSelect = document.getElementById("language-select");
@@ -349,6 +364,72 @@ function initSettings() {
   window.openLicense = openLicense;
   window.closeLicense = closeLicense;
 }
+
+// World format selection (Java/Bedrock)
+let selectedWorldFormat = 'java'; // Default to Java
+
+function initWorldFormatToggle() {
+  // Load saved format preference
+  const savedFormat = localStorage.getItem('arnis-world-format');
+  if (savedFormat && (savedFormat === 'java' || savedFormat === 'bedrock')) {
+    selectedWorldFormat = savedFormat;
+  }
+  
+  // Apply the saved selection to UI
+  updateFormatToggleUI(selectedWorldFormat);
+}
+
+function setWorldFormat(format) {
+  if (format !== 'java' && format !== 'bedrock') return;
+  
+  selectedWorldFormat = format;
+  localStorage.setItem('arnis-world-format', format);
+  updateFormatToggleUI(format);
+}
+
+function updateFormatToggleUI(format) {
+  const javaBtn = document.getElementById('format-java');
+  const bedrockBtn = document.getElementById('format-bedrock');
+  const chooseWorldBtn = document.getElementById('choose-world-btn');
+  const selectedWorldText = document.getElementById('selected-world');
+  
+  if (format === 'java') {
+    javaBtn.classList.add('format-active');
+    bedrockBtn.classList.remove('format-active');
+    // Enable Choose World button for Java
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = false;
+      chooseWorldBtn.style.opacity = '1';
+      chooseWorldBtn.style.cursor = 'pointer';
+    }
+    // Show default text (world was cleared when switching to Bedrock)
+    if (selectedWorldText) {
+      const noWorldText = window.localization?.no_world_selected || 'No world selected';
+      selectedWorldText.textContent = noWorldText;
+      selectedWorldText.style.color = '#fecc44';
+    }
+  } else {
+    javaBtn.classList.remove('format-active');
+    bedrockBtn.classList.add('format-active');
+    // Disable Choose World button for Bedrock and clear any selected world
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = true;
+      chooseWorldBtn.style.opacity = '0.5';
+      chooseWorldBtn.style.cursor = 'not-allowed';
+    }
+    // Clear world selection and show Bedrock info message
+    worldPath = "";
+    isNewWorld = false;
+    if (selectedWorldText) {
+      const bedrockText = window.localization?.bedrock_use_java || 'Use Java to select worlds';
+      selectedWorldText.textContent = bedrockText;
+      selectedWorldText.style.color = '#fecc44';
+    }
+  }
+}
+
+// Expose to window for onclick handlers
+window.setWorldFormat = setWorldFormat;
 
 // Telemetry consent (first run only)
 function initTelemetryConsent() {
@@ -539,8 +620,8 @@ function normalizeLongitude(lon) {
   return ((lon + 180) % 360 + 360) % 360 - 180;
 }
 
-const threshold1 = 30000000.00;
-const threshold2 = 45000000.00;
+const threshold1 = 44000000.00;  // Yellow warning threshold (~6.2km x 7km)
+const threshold2 = 85000000.00;  // Red error threshold (~8.7km x 9.8km)
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
@@ -678,7 +759,8 @@ async function startGeneration() {
       return;
     }
 
-    if (!worldPath || worldPath === "") {
+    // Only require world selection for Java format (Bedrock generates a new .mcworld file)
+    if (selectedWorldFormat === 'java' && (!worldPath || worldPath === "")) {
       const selectedWorld = document.getElementById('selected-world');
       localizeElement(window.localization, { element: selectedWorld }, "select_minecraft_world_first");
       selectedWorld.style.color = "#fa7878";
@@ -735,7 +817,8 @@ async function startGeneration() {
         fillgroundEnabled: fill_ground,
         isNewWorld: isNewWorld,
         spawnPoint: spawnPoint,
-        telemetryConsent: telemetryConsent || false
+        telemetryConsent: telemetryConsent || false,
+        worldFormat: selectedWorldFormat
     });
 
     console.log("Generation process started.");
