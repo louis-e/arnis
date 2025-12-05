@@ -260,6 +260,9 @@ function initSettings() {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
 
+  // World format toggle (Java/Bedrock)
+  initWorldFormatToggle();
+
   // Language selector
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
@@ -323,9 +326,6 @@ function initSettings() {
       }, '*');
     }
   });
-
-  // World format toggle (Java/Bedrock)
-  initWorldFormatToggle();
 
   // Telemetry consent toggle
   const telemetryToggle = document.getElementById("telemetry-toggle");
