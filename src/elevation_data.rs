@@ -116,11 +116,6 @@ pub fn fetch_elevation_data(
                     tile_path.display(),
                     file_size
                 );
-                #[cfg(feature = "gui")]
-                send_log(
-                    LogLevel::Warning,
-                    "Cached tile appears to be too small. Refetching tile.",
-                );
 
                 // Remove the potentially corrupted file
                 if let Err(remove_err) = std::fs::remove_file(&tile_path) {
