@@ -111,7 +111,7 @@ impl From<&BedrockBlockStateValue> for BedrockNbtValue {
     fn from(value: &BedrockBlockStateValue) -> Self {
         match value {
             BedrockBlockStateValue::String(s) => BedrockNbtValue::String(s.clone()),
-            BedrockBlockStateValue::Bool(b) => BedrockNbtValue::Byte(if *b { 1 } else { 0 }),
+            BedrockBlockStateValue::Bool(b) => BedrockNbtValue::Byte(i8::from(*b)),
             BedrockBlockStateValue::Int(i) => BedrockNbtValue::Int(*i),
         }
     }
@@ -126,7 +126,7 @@ pub struct BedrockWriter {
 }
 
 impl BedrockWriter {
-    /// Creates a new BedrockWriter
+    /// Creates a new `BedrockWriter`
     pub fn new(
         output_path: PathBuf,
         level_name: String,
@@ -204,20 +204,16 @@ impl BedrockWriter {
 
         // Use custom spawn point if provided, otherwise center of bbox
         let (spawn_x, spawn_z) = self.spawn_point.unwrap_or_else(|| {
-            let x = (xzbbox.min_x() + xzbbox.max_x()) / 2;
-            let z = (xzbbox.min_z() + xzbbox.max_z()) / 2;
+            let x = i32::midpoint(xzbbox.min_x(), xzbbox.max_x());
+            let z = i32::midpoint(xzbbox.min_z(), xzbbox.max_z());
             (x, z)
         });
 
         // Calculate spawn Y from ground elevation data, or default to 64
-        let spawn_y = self
-            .ground
-            .as_ref()
-            .map(|ground| {
-                let coord = crate::coordinate_system::cartesian::XZPoint::new(spawn_x, spawn_z);
-                ground.level(coord) + 2 // Add 2 blocks above ground for safety
-            })
-            .unwrap_or(64);
+        let spawn_y = self.ground.as_ref().map_or(64, |ground| {
+            let coord = crate::coordinate_system::cartesian::XZPoint::new(spawn_x, spawn_z);
+            ground.level(coord) + 2 // Add 2 blocks above ground for safety
+        });
 
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -364,8 +360,8 @@ impl BedrockWriter {
             edu_offer: 0,
 
             // Override
-            biome_override: "".to_string(),
-            prid: "".to_string(),
+            biome_override: String::new(),
+            prid: String::new(),
 
             // Player sleeping
             players_sleeping_percentage: 100,
@@ -399,7 +395,7 @@ impl BedrockWriter {
         let mut state = ();
         let mut db: RustyDBInterface<()> =
             RustyDBInterface::new(db_path.into_boxed_path(), true, &mut state)
-                .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
+                .map_err(|e| BedrockSaveError::Database(format!("{e:?}")))?;
 
         // Count total chunks for progress
         let total_chunks: usize = world
@@ -433,13 +429,13 @@ impl BedrockWriter {
                 // Write chunk version marker (42 is current Bedrock version as of 1.21+)
                 let version_key = ChunkKey::chunk_marker(chunk_pos, Dimension::Overworld);
                 db.set_subchunk_raw(version_key, &[42], &mut state)
-                    .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
+                    .map_err(|e| BedrockSaveError::Database(format!("{e:?}")))?;
 
                 // Write Data3D (heightmap + biomes) - required for chunk to be valid
                 let data3d_key = ChunkKey::data3d(chunk_pos, Dimension::Overworld);
                 let data3d = self.create_data3d(chunk);
                 db.set_subchunk_raw(data3d_key, &data3d, &mut state)
-                    .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
+                    .map_err(|e| BedrockSaveError::Database(format!("{e:?}")))?;
 
                 // Process each section (subchunk)
                 for (&section_y, section) in &chunk.sections {
@@ -450,7 +446,7 @@ impl BedrockWriter {
                     let subchunk_key =
                         ChunkKey::new_subchunk(chunk_pos, Dimension::Overworld, section_y);
                     db.set_subchunk_raw(subchunk_key, &subchunk_bytes, &mut state)
-                        .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
+                        .map_err(|e| BedrockSaveError::Database(format!("{e:?}")))?;
                 }
 
                 chunks_processed += 1;
@@ -473,7 +469,7 @@ impl BedrockWriter {
         Ok(())
     }
 
-    /// Creates a Data3D record containing heightmap and biome data.
+    /// Creates a `Data3D` record containing heightmap and biome data.
     ///
     /// Format: 512 bytes heightmap (256 x i16 LE) + 28 bytes minimal biome data
     fn create_data3d(&self, _chunk: &ChunkToModify) -> Vec<u8> {
@@ -519,7 +515,7 @@ impl BedrockWriter {
         // Calculate word packing parameters (matching Chunker's PaletteUtil exactly)
         // blocksPerWord = floor(32 / bitsPerBlock)
         // wordSize = ceil(4096 / blocksPerWord)
-        let blocks_per_word = 32 / bits_per_block as u32; // Integer division = floor
+        let blocks_per_word = 32 / u32::from(bits_per_block); // Integer division = floor
         let word_count = 4096_u32.div_ceil(blocks_per_word);
         let mask = (1u32 << bits_per_block) - 1;
 
@@ -533,8 +529,8 @@ impl BedrockWriter {
                 if block_index >= 4096 {
                     break;
                 }
-                let start_bit_index = bits_per_block as u32 * block_in_word;
-                let index_val = indices[block_index] as u32 & mask;
+                let start_bit_index = u32::from(bits_per_block) * block_in_word;
+                let index_val = u32::from(indices[block_index]) & mask;
                 word |= index_val << start_bit_index;
                 block_index += 1;
             }
@@ -697,7 +693,7 @@ fn add_directory_to_zip(
     options: FileOptions,
 ) -> Result<(), BedrockSaveError> {
     // Add directory entry
-    writer.add_directory(format!("{}/", zip_prefix), options)?;
+    writer.add_directory(format!("{zip_prefix}/"), options)?;
 
     // Add all files in directory
     for entry in fs::read_dir(dir_path)? {
@@ -707,7 +703,7 @@ fn add_directory_to_zip(
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("unknown");
-        let zip_path = format!("{}/{}", zip_prefix, name);
+        let zip_path = format!("{zip_prefix}/{name}");
 
         if path.is_file() {
             writer.start_file(&zip_path, options)?;

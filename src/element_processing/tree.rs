@@ -1,4 +1,24 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, ANDESITE_WALL, ANVIL, BEDROCK, BIRCH_LEAVES, BIRCH_LOG, BLACKSTONE, BLACK_CONCRETE,
+    BLACK_TERRACOTTA, BLUE_CONCRETE, BLUE_TERRACOTTA, BOOKSHELF, BREWING_STAND, BRICK,
+    BROWN_CONCRETE, BROWN_STAINED_GLASS, BROWN_TERRACOTTA, CAULDRON, CHEST, COBBLESTONE_WALL,
+    CRAFTING_TABLE, CYAN_CONCRETE, DARK_OAK_DOOR_LOWER, DARK_OAK_DOOR_UPPER, DEEPSLATE_BRICKS,
+    END_STONE_BRICKS, FURNACE, GLASS, GRAY_CONCRETE, GRAY_STAINED_GLASS, GRAY_TERRACOTTA,
+    GREEN_STAINED_HARDENED_CLAY, IRON_BARS, IRON_BLOCK, LADDER, LIGHT_BLUE_CONCRETE,
+    LIGHT_BLUE_TERRACOTTA, LIGHT_GRAY_CONCRETE, LIGHT_GRAY_STAINED_GLASS, LIME_CONCRETE,
+    MAGENTA_CONCRETE, MUD_BRICKS, NETHERITE_BLOCK, NETHER_BRICK, NOTE_BLOCK, OAK_DOOR, OAK_FENCE,
+    OAK_LEAVES, OAK_LOG, OAK_PRESSURE_PLATE, OAK_SLAB, OAK_STAIRS, OAK_TRAPDOOR, ORANGE_TERRACOTTA,
+    POLISHED_ANDESITE, POLISHED_BLACKSTONE, POLISHED_BLACKSTONE_BRICKS, POLISHED_DEEPSLATE,
+    POLISHED_GRANITE, PURPLE_CONCRETE, QUARTZ_BLOCK, QUARTZ_BRICKS, RAIL, RAIL_ASCENDING_EAST,
+    RAIL_ASCENDING_NORTH, RAIL_ASCENDING_SOUTH, RAIL_ASCENDING_WEST, RAIL_EAST_WEST,
+    RAIL_NORTH_EAST, RAIL_NORTH_SOUTH, RAIL_NORTH_WEST, RAIL_SOUTH_EAST, RAIL_SOUTH_WEST,
+    RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, RED_BED_NORTH_FOOT, RED_BED_NORTH_HEAD,
+    RED_BED_SOUTH_FOOT, RED_BED_SOUTH_HEAD, RED_BED_WEST_FOOT, RED_BED_WEST_HEAD, RED_CARPET,
+    RED_CONCRETE, RED_TERRACOTTA, SANDSTONE, SCAFFOLDING, SIGN, SMOOTH_SANDSTONE, SMOOTH_STONE,
+    SPRUCE_LOG, STONE_BLOCK_SLAB, STONE_BRICKS, STONE_BRICK_SLAB, STONE_BRICK_WALL, TINTED_GLASS,
+    WATER, WHITE_CARPET, WHITE_CONCRETE, WHITE_STAINED_GLASS, WHITE_TERRACOTTA, YELLOW_CONCRETE,
+    YELLOW_TERRACOTTA,
+};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
@@ -84,7 +104,7 @@ const BIRCH_LEAVES_FILL: [(Coord, Coord); 5] = [
 //////////////////////////////////////////////////
 
 /// Helper function to set blocks in various patterns.
-fn round(editor: &mut WorldEditor, material: Block, (x, y, z): Coord, block_pattern: &[Coord]) {
+fn round(editor: &mut WorldEditor<'_>, material: Block, (x, y, z): Coord, block_pattern: &[Coord]) {
     for (i, j, k) in block_pattern {
         editor.set_block(material, x + i, y + j, z + k, None, None);
     }
@@ -107,7 +127,7 @@ pub struct Tree<'a> {
 }
 
 impl Tree<'_> {
-    pub fn create(editor: &mut WorldEditor, (x, y, z): Coord) {
+    pub fn create(editor: &mut WorldEditor<'_>, (x, y, z): Coord) {
         let mut blacklist: Vec<Block> = Vec::new();
         blacklist.extend(Self::get_building_wall_blocks());
         blacklist.extend(Self::get_building_floor_blocks());

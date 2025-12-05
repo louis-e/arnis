@@ -14,8 +14,8 @@ impl XZBBox {
     pub fn rect_from_xz_lengths(length_x: f64, length_z: f64) -> Result<Self, String> {
         let lenx_ge_0 = length_x >= 0.0;
         let lenz_ge_0 = length_z >= 0.0;
-        let lenx_overflow = length_x > i32::MAX as f64;
-        let lenz_overflow = length_z > i32::MAX as f64;
+        let lenx_overflow = length_x > f64::from(i32::MAX);
+        let lenz_overflow = length_z > f64::from(i32::MAX);
 
         if !lenx_ge_0 {
             return Err(format!(
@@ -50,14 +50,14 @@ impl XZBBox {
         )?))
     }
 
-    /// Check whether an XZPoint is covered
-    pub fn contains(&self, xzpoint: &XZPoint) -> bool {
+    /// Check whether an `XZPoint` is covered
+    pub fn contains(&self, xzpoint: XZPoint) -> bool {
         match self {
             Self::Rect(r) => r.contains(xzpoint),
         }
     }
 
-    /// Return the circumscribed rectangle of the current XZBBox shape
+    /// Return the circumscribed rectangle of the current `XZBBox` shape
     pub fn bounding_rect(&self) -> XZBBoxRect {
         match self {
             Self::Rect(r) => *r,

@@ -21,7 +21,7 @@ pub(crate) use common::WorldToModify;
 #[cfg(feature = "bedrock")]
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
-use crate::block_definitions::*;
+use crate::block_definitions::{Block, BlockWithProperties, SIGN};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
@@ -65,7 +65,7 @@ pub(crate) struct WorldMetadata {
 /// The main world editor struct for placing blocks and saving worlds.
 ///
 /// The lifetime `'a` is tied to the `XZBBox` reference, which defines
-/// the world boundaries and must outlive the WorldEditor instance.
+/// the world boundaries and must outlive the `WorldEditor` instance.
 pub struct WorldEditor<'a> {
     world_dir: PathBuf,
     world: WorldToModify,
@@ -80,7 +80,7 @@ pub struct WorldEditor<'a> {
 }
 
 impl<'a> WorldEditor<'a> {
-    /// Creates a new WorldEditor with Java Anvil format (default).
+    /// Creates a new `WorldEditor` with Java Anvil format (default).
     ///
     /// This is the default constructor used by CLI mode.
     #[allow(dead_code)]
@@ -97,7 +97,7 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
-    /// Creates a new WorldEditor with a specific format and optional level name.
+    /// Creates a new `WorldEditor` with a specific format and optional level name.
     ///
     /// Used by GUI mode to support both Java and Bedrock formats.
     #[allow(dead_code)]
@@ -128,7 +128,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Gets a reference to the ground data if available
     pub fn get_ground(&self) -> Option<&Ground> {
-        self.ground.as_ref().map(|g| g.as_ref())
+        self.ground.as_ref().map(std::convert::AsRef::as_ref)
     }
 
     /// Returns the current world format
@@ -243,7 +243,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+        if !self.xzbbox.contains(XZPoint::new(x, z)) {
             return;
         }
 
@@ -284,7 +284,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+        if !self.xzbbox.contains(XZPoint::new(x, z)) {
             return;
         }
 
@@ -322,7 +322,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+        if !self.xzbbox.contains(XZPoint::new(x, z)) {
             return;
         }
 
@@ -577,10 +577,10 @@ impl<'a> WorldEditor<'a> {
         };
 
         let contents = serde_json::to_string(&metadata)
-            .map_err(|e| format!("Failed to serialize metadata to JSON: {}", e))?;
+            .map_err(|e| format!("Failed to serialize metadata to JSON: {e}"))?;
 
-        write!(&mut file, "{}", contents)
-            .map_err(|e| format!("Failed to write metadata to file: {}", e))?;
+        write!(&mut file, "{contents}")
+            .map_err(|e| format!("Failed to write metadata to file: {e}"))?;
 
         Ok(())
     }

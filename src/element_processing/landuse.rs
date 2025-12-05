@@ -1,14 +1,21 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, ANDESITE, BLACK_CONCRETE, BLUE_FLOWER, BRICK, CARROTS, CLAY, COAL_ORE, COARSE_DIRT,
+    COBBLESTONE, COBBLESTONE_WALL, COPPER_ORE, CRAFTING_TABLE, DIORITE, DIRT, FARMLAND, FURNACE,
+    GLOWSTONE, GOLD_ORE, GRANITE, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, HAY_BALE, IRON_ORE,
+    OAK_LEAVES, OAK_LOG, OAK_PLANKS, PODZOL, POLISHED_ANDESITE, POTATOES, RED_FLOWER, SAND,
+    SCAFFOLDING, SMOOTH_STONE, SPONGE, STONE, STONE_BLOCK_SLAB, STONE_BRICKS, STONE_BRICK_SLAB,
+    WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
+};
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
+pub fn generate_landuse(editor: &mut WorldEditor<'_>, element: &ProcessedWay, args: &Args) {
     // Determine block type based on landuse tag
-    let binding: String = "".to_string();
+    let binding: String = String::new();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
 
     let block_type = match landuse_tag.as_str() {
@@ -272,7 +279,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 }
 
 pub fn generate_landuse_from_relation(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     rel: &ProcessedRelation,
     args: &Args,
 ) {

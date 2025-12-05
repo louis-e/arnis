@@ -3,7 +3,7 @@ use crate::coordinate_system::cartesian::XZBBox;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
 
-/// An Operator does transformation on the map, modifying Vec<ProcessedElement> and XZBBox
+/// An Operator does transformation on the map, modifying Vec<ProcessedElement> and `XZBBox`
 pub trait Operator {
     /// Apply the operation
     fn operate(

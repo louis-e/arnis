@@ -58,10 +58,10 @@ fn download_with_curl(url: &str, query: &str) -> io::Result<String> {
         .arg(format!("{url}?data={query}"))
         .output()?;
 
-    if !output.status.success() {
-        Err(io::Error::other("Curl command failed"))
-    } else {
+    if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(io::Error::other("Curl command failed"))
     }
 }
 
@@ -72,10 +72,10 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
         .arg(format!("{url}?data={query}"))
         .output()?;
 
-    if !output.status.success() {
-        Err(io::Error::other("Wget command failed"))
-    } else {
+    if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(io::Error::other("Wget command failed"))
     }
 }
 
@@ -155,8 +155,8 @@ pub fn fetch_data_from_overpass(
             println!("Downloading from {url} with method {download_method}...");
             let result = match download_method {
                 "requests" => download_with_reqwest(url, &query),
-                "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
-                "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
+                "curl" => download_with_curl(url, &query).map_err(std::convert::Into::into),
+                "wget" => download_with_wget(url, &query).map_err(std::convert::Into::into),
                 _ => download_with_reqwest(url, &query), // Default to requests
             };
 
@@ -214,11 +214,10 @@ pub fn fetch_data_from_overpass(
                 println!("Additional debug information: {data}");
             }
 
-            if !is_running_with_gui() {
-                std::process::exit(1);
-            } else {
+            if is_running_with_gui() {
                 return Err("Data fetch failed".into());
             }
+            std::process::exit(1);
         }
 
         emit_gui_progress_update(5.0, "");
@@ -243,7 +242,7 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
 
     if let Some(address) = json.get("address") {
         let fields = ["city", "town", "village", "county", "borough", "suburb"];
-        for field in fields.iter() {
+        for field in &fields {
             if let Some(name) = address.get(*field).and_then(|v| v.as_str()) {
                 let mut name_str = name.to_string();
 

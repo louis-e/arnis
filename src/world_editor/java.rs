@@ -20,12 +20,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 
-impl<'a> WorldEditor<'a> {
+impl WorldEditor<'_> {
     /// Creates a region file for the given region coordinates.
     pub(super) fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
         let out_path = self
             .world_dir
-            .join(format!("region/r.{}.{}.mca", region_x, region_z));
+            .join(format!("region/r.{region_x}.{region_z}.mca"));
 
         const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
 
@@ -81,7 +81,7 @@ impl<'a> WorldEditor<'a> {
 
         // Save metadata with error handling
         if let Err(e) = self.save_metadata() {
-            eprintln!("Failed to save world metadata: {}", e);
+            eprintln!("Failed to save world metadata: {e}");
             #[cfg(feature = "gui")]
             send_log(LogLevel::Warning, "Failed to save world metadata.");
             // Continue with world saving even if metadata fails
@@ -116,9 +116,7 @@ impl<'a> WorldEditor<'a> {
                             .unwrap_or_default();
 
                         // Parse existing chunk or create new one
-                        let mut chunk: Chunk = if !existing_data.is_empty() {
-                            fastnbt::from_bytes(&existing_data).unwrap()
-                        } else {
+                        let mut chunk: Chunk = if existing_data.is_empty() {
                             Chunk {
                                 sections: Vec::new(),
                                 x_pos: chunk_x + (region_x * 32),
@@ -126,6 +124,8 @@ impl<'a> WorldEditor<'a> {
                                 is_light_on: 0,
                                 other: FnvHashMap::default(),
                             }
+                        } else {
+                            fastnbt::from_bytes(&existing_data).unwrap()
                         };
 
                         // Update sections while preserving existing data

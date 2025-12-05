@@ -1,8 +1,8 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{DARK_OAK_DOOR_LOWER, DARK_OAK_DOOR_UPPER, GRAY_CONCRETE};
 use crate::osm_parser::ProcessedNode;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_doors(editor: &mut WorldEditor, element: &ProcessedNode) {
+pub fn generate_doors(editor: &mut WorldEditor<'_>, element: &ProcessedNode) {
     // Check if the element is a door or entrance
     if element.tags.contains_key("door") || element.tags.contains_key("entrance") {
         // Check for the "level" tag and skip doors that are not at ground level

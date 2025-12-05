@@ -3,7 +3,7 @@
 //! This module contains the internal data structures used to track block changes
 //! before they are written to either Java or Bedrock format.
 
-use crate::block_definitions::*;
+use crate::block_definitions::{Block, BlockWithProperties, AIR};
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};

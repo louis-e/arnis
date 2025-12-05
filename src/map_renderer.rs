@@ -50,7 +50,7 @@ pub fn render_world_map(
 
     // Process regions in parallel
     region_coords.par_iter().for_each(|&(region_x, region_z)| {
-        let region_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
+        let region_path = region_dir.join(format!("r.{region_x}.{region_z}.mca"));
 
         if !region_path.exists() {
             return;
@@ -87,7 +87,7 @@ pub fn render_world_map(
     img.into_inner()
         .unwrap()
         .save(&output_path)
-        .map_err(|e| format!("Failed to save map image: {}", e))?;
+        .map_err(|e| format!("Failed to save map image: {e}"))?;
 
     Ok(output_path)
 }
@@ -228,9 +228,9 @@ fn apply_elevation_shading(color: Rgb<u8>, y: i32) -> Rgb<u8> {
     let multiplier = 1.10 + elevation_adjust;
 
     Rgb([
-        (color.0[0] as f32 * multiplier).clamp(0.0, 255.0) as u8,
-        (color.0[1] as f32 * multiplier).clamp(0.0, 255.0) as u8,
-        (color.0[2] as f32 * multiplier).clamp(0.0, 255.0) as u8,
+        (f32::from(color.0[0]) * multiplier).clamp(0.0, 255.0) as u8,
+        (f32::from(color.0[1]) * multiplier).clamp(0.0, 255.0) as u8,
+        (f32::from(color.0[2]) * multiplier).clamp(0.0, 255.0) as u8,
     ])
 }
 
@@ -261,7 +261,7 @@ fn get_sections_from_chunk(chunk: &Value) -> Vec<&Value> {
 }
 
 /// Pre-sorts sections by Y coordinate (descending) - called once per chunk
-/// Returns Vec of (section_y, section_value) for Y tracking
+/// Returns Vec of (`section_y`, `section_value`) for Y tracking
 fn get_sorted_sections<'a>(sections: &[&'a Value]) -> Vec<(i8, &'a Value)> {
     let mut sorted: Vec<(i8, &Value)> = sections
         .iter()
@@ -280,7 +280,7 @@ fn get_sorted_sections<'a>(sections: &[&'a Value]) -> Vec<(i8, &'a Value)> {
 }
 
 /// Finds the topmost non-air block using pre-sorted sections
-/// Returns (block_name, world_y) where world_y is the actual Y coordinate
+/// Returns (`block_name`, `world_y`) where `world_y` is the actual Y coordinate
 fn find_top_block_sorted(
     sorted_sections: &[(i8, &Value)],
     local_x: usize,
@@ -290,7 +290,7 @@ fn find_top_block_sorted(
         if let Some((block_name, local_y)) = get_block_at_section(section, local_x, local_z) {
             if !is_transparent_block(&block_name) {
                 // Calculate world Y: section_y * 16 + local_y
-                let world_y = (*section_y as i32) * 16 + local_y as i32;
+                let world_y = i32::from(*section_y) * 16 + local_y as i32;
                 return Some((block_name, world_y));
             }
         }
@@ -300,7 +300,7 @@ fn find_top_block_sorted(
 }
 
 /// Gets the topmost non-air block in a section at the given x,z
-/// Returns (block_name, local_y) where local_y is 0-15 within the section
+/// Returns (`block_name`, `local_y`) where `local_y` is 0-15 within the section
 fn get_block_at_section(
     section: &Value,
     local_x: usize,

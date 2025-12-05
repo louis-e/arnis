@@ -23,18 +23,21 @@ pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Process
     // If all nodes are inside the bbox, return unchanged
     let has_nodes_outside = nodes
         .iter()
-        .any(|node| !xzbbox.contains(&XZPoint::new(node.x, node.z)));
+        .any(|node| !xzbbox.contains(XZPoint::new(node.x, node.z)));
 
     if !has_nodes_outside {
         return nodes.to_vec();
     }
 
-    let min_x = xzbbox.min_x() as f64;
-    let min_z = xzbbox.min_z() as f64;
-    let max_x = xzbbox.max_x() as f64;
-    let max_z = xzbbox.max_z() as f64;
+    let min_x = f64::from(xzbbox.min_x());
+    let min_z = f64::from(xzbbox.min_z());
+    let max_x = f64::from(xzbbox.max_x());
+    let max_z = f64::from(xzbbox.max_z());
 
-    let mut polygon: Vec<(f64, f64)> = nodes.iter().map(|n| (n.x as f64, n.z as f64)).collect();
+    let mut polygon: Vec<(f64, f64)> = nodes
+        .iter()
+        .map(|n| (f64::from(n.x), f64::from(n.z)))
+        .collect();
 
     polygon = clip_polygon_sutherland_hodgman(polygon, min_x, min_z, max_x, max_z);
 
@@ -59,7 +62,7 @@ pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Process
         return Vec::new();
     }
 
-    let way_id = nodes.first().map(|n| n.id).unwrap_or(0);
+    let way_id = nodes.first().map_or(0, |n| n.id);
     assign_node_ids_preserving_endpoints(nodes, polygon, way_id)
 }
 
@@ -72,14 +75,17 @@ pub fn clip_water_ring_to_bbox(
         return None;
     }
 
-    let min_x = xzbbox.min_x() as f64;
-    let min_z = xzbbox.min_z() as f64;
-    let max_x = xzbbox.max_x() as f64;
-    let max_z = xzbbox.max_z() as f64;
+    let min_x = f64::from(xzbbox.min_x());
+    let min_z = f64::from(xzbbox.min_z());
+    let max_x = f64::from(xzbbox.max_x());
+    let max_z = f64::from(xzbbox.max_z());
 
     // Check if entire ring is inside bbox
     let all_inside = ring.iter().all(|n| {
-        n.x as f64 >= min_x && n.x as f64 <= max_x && n.z as f64 >= min_z && n.z as f64 <= max_z
+        f64::from(n.x) >= min_x
+            && f64::from(n.x) <= max_x
+            && f64::from(n.z) >= min_z
+            && f64::from(n.z) <= max_z
     });
 
     if all_inside {
@@ -92,7 +98,10 @@ pub fn clip_water_ring_to_bbox(
     }
 
     // Convert to f64 coordinates and ensure closed
-    let mut polygon: Vec<(f64, f64)> = ring.iter().map(|n| (n.x as f64, n.z as f64)).collect();
+    let mut polygon: Vec<(f64, f64)> = ring
+        .iter()
+        .map(|n| (f64::from(n.x), f64::from(n.z)))
+        .collect();
     if !polygon.is_empty() && polygon.first() != polygon.last() {
         polygon.push(polygon[0]);
     }
@@ -162,10 +171,10 @@ fn is_ring_outside_bbox(
     max_x: f64,
     max_z: f64,
 ) -> bool {
-    let all_left = ring.iter().all(|n| (n.x as f64) < min_x);
-    let all_right = ring.iter().all(|n| (n.x as f64) > max_x);
-    let all_top = ring.iter().all(|n| (n.z as f64) < min_z);
-    let all_bottom = ring.iter().all(|n| (n.z as f64) > max_z);
+    let all_left = ring.iter().all(|n| f64::from(n.x) < min_x);
+    let all_right = ring.iter().all(|n| f64::from(n.x) > max_x);
+    let all_top = ring.iter().all(|n| f64::from(n.z) < min_z);
+    let all_bottom = ring.iter().all(|n| f64::from(n.z) > max_z);
     all_left || all_right || all_top || all_bottom
 }
 
@@ -175,16 +184,16 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
         return Vec::new();
     }
 
-    let min_x = xzbbox.min_x() as f64;
-    let min_z = xzbbox.min_z() as f64;
-    let max_x = xzbbox.max_x() as f64;
-    let max_z = xzbbox.max_z() as f64;
+    let min_x = f64::from(xzbbox.min_x());
+    let min_z = f64::from(xzbbox.min_z());
+    let max_x = f64::from(xzbbox.max_x());
+    let max_z = f64::from(xzbbox.max_z());
 
     let mut result = Vec::new();
 
     for i in 0..nodes.len() {
         let current = &nodes[i];
-        let current_point = (current.x as f64, current.z as f64);
+        let current_point = (f64::from(current.x), f64::from(current.z));
         let current_inside = point_in_bbox(current_point, min_x, min_z, max_x, max_z);
 
         if current_inside {
@@ -193,7 +202,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
 
         if i + 1 < nodes.len() {
             let next = &nodes[i + 1];
-            let next_point = (next.x as f64, next.z as f64);
+            let next_point = (f64::from(next.x), f64::from(next.z));
             let next_inside = point_in_bbox(next_point, min_x, min_z, max_x, max_z);
 
             if current_inside != next_inside {
@@ -252,7 +261,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
         let tolerance = 50.0;
         if let Some(first_orig) = nodes.first() {
             if matches_endpoint(
-                (result[0].x as f64, result[0].z as f64),
+                (f64::from(result[0].x), f64::from(result[0].z)),
                 first_orig,
                 tolerance,
             ) {
@@ -262,7 +271,7 @@ fn clip_polyline_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Proces
         if let Some(last_orig) = nodes.last() {
             let last_idx = result.len() - 1;
             if matches_endpoint(
-                (result[last_idx].x as f64, result[last_idx].z as f64),
+                (f64::from(result[last_idx].x), f64::from(result[last_idx].z)),
                 last_orig,
                 tolerance,
             ) {
@@ -645,8 +654,8 @@ fn remove_consecutive_duplicates(polygon: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
 
 /// Checks if a clipped coordinate matches an original endpoint.
 fn matches_endpoint(coord: (f64, f64), endpoint: &ProcessedNode, tolerance: f64) -> bool {
-    let dx = (coord.0 - endpoint.x as f64).abs();
-    let dz = (coord.1 - endpoint.z as f64).abs();
+    let dx = (coord.0 - f64::from(endpoint.x)).abs();
+    let dz = (coord.1 - f64::from(endpoint.z)).abs();
     dx * dx + dz * dz < tolerance * tolerance
 }
 

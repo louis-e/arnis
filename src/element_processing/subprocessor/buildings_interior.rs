@@ -1,4 +1,9 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, ANVIL, BOOKSHELF, BREWING_STAND, CAULDRON, CRAFTING_TABLE, DARK_OAK_DOOR_LOWER,
+    DARK_OAK_DOOR_UPPER, FURNACE, GLOWSTONE, NOTE_BLOCK, OAK_FENCE, OAK_LEAVES, OAK_PRESSURE_PLATE,
+    OAK_STAIRS, RED_BED_EAST_FOOT, RED_BED_EAST_HEAD, RED_BED_NORTH_FOOT, RED_BED_NORTH_HEAD,
+    RED_BED_SOUTH_FOOT, RED_BED_SOUTH_HEAD, RED_BED_WEST_FOOT, RED_BED_WEST_HEAD, WHITE_CARPET,
+};
 use crate::world_editor::WorldEditor;
 use std::collections::HashSet;
 
@@ -157,7 +162,7 @@ pub fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option
 /// Generates interior layouts inside buildings at each floor level
 #[allow(clippy::too_many_arguments)]
 pub fn generate_building_interior(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     floor_area: &[(i32, i32)],
     min_x: i32,
     min_z: i32,
@@ -180,7 +185,7 @@ pub fn generate_building_interior(
     }
 
     // For efficiency, create a HashSet of floor area coordinates
-    let floor_area_set: HashSet<(i32, i32)> = floor_area.iter().cloned().collect();
+    let floor_area_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
     // Add buffer around edges to avoid placing furniture too close to walls
     let buffer = 2;

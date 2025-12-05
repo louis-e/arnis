@@ -30,7 +30,7 @@ impl Ground {
                 elevation_data: Some(elevation_data),
             },
             Err(e) => {
-                eprintln!("Failed to fetch elevation data: {}", e);
+                eprintln!("Failed to fetch elevation data: {e}");
                 emit_gui_progress_update(15.0, "Elevation unavailable, using flat ground");
                 // Graceful fallback: disable elevation and keep provided ground_level
                 Self {
@@ -75,8 +75,8 @@ impl Ground {
     /// Converts game coordinates to elevation data coordinates
     #[inline(always)]
     fn get_data_coordinates(&self, coord: XZPoint, data: &ElevationData) -> (f64, f64) {
-        let x_ratio: f64 = coord.x as f64 / data.width as f64;
-        let z_ratio: f64 = coord.z as f64 / data.height as f64;
+        let x_ratio: f64 = f64::from(coord.x) / data.width as f64;
+        let z_ratio: f64 = f64::from(coord.z) / data.height as f64;
         (x_ratio.clamp(0.0, 1.0), z_ratio.clamp(0.0, 1.0))
     }
 
@@ -115,8 +115,9 @@ impl Ground {
 
         for (y, row) in heights.iter().enumerate() {
             for (x, &h) in row.iter().enumerate() {
-                let normalized: u8 =
-                    (((h - min_height) as f64 / (max_height - min_height) as f64) * 255.0) as u8;
+                let normalized: u8 = ((f64::from(h - min_height)
+                    / f64::from(max_height - min_height))
+                    * 255.0) as u8;
                 img.put_pixel(
                     x as u32,
                     y as u32,
@@ -126,10 +127,10 @@ impl Ground {
         }
 
         // Ensure filename has .png extension
-        let filename: String = if !filename.ends_with(".png") {
-            format!("{filename}.png")
-        } else {
+        let filename: String = if filename.ends_with(".png") {
             filename.to_string()
+        } else {
+            format!("{filename}.png")
         };
 
         if let Err(e) = img.save(&filename) {

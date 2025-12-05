@@ -46,7 +46,7 @@ impl BedrockBlock {
     }
 }
 
-/// Converts an internal Block to a BedrockBlock representation.
+/// Converts an internal Block to a `BedrockBlock` representation.
 ///
 /// This function handles the mapping between Java Edition block names/properties
 /// and their Bedrock Edition equivalents. Many blocks are identical, but some
@@ -553,7 +553,7 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
     }
 }
 
-/// Converts an internal Block with optional Java properties to a BedrockBlock.
+/// Converts an internal Block with optional Java properties to a `BedrockBlock`.
 ///
 /// This function extends `to_bedrock_block` by also handling block-specific properties
 /// like stair facing/shape, slab type, etc. Java property names and values are converted

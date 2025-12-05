@@ -195,7 +195,7 @@ pub fn send_log(level: LogLevel, message: &str) {
 pub fn install_panic_hook() {
     panic::set_hook(Box::new(|panic_info| {
         // Log the panic to both stderr and log file
-        error!("Application panicked: {:?}", panic_info);
+        error!("Application panicked: {panic_info:?}");
 
         // Filter out secondary "panic in a function that cannot unwind" panics
         if let Some(location) = panic_info.location() {
@@ -218,7 +218,7 @@ pub fn install_panic_hook() {
         let _ = std::panic::catch_unwind(AssertUnwindSafe(|| {
             // Extract panic payload
             let payload = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
-                s.to_string()
+                (*s).to_string()
             } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
                 s.clone()
             } else {
@@ -226,13 +226,13 @@ pub fn install_panic_hook() {
             };
 
             // Extract location
-            let location = panic_info
-                .location()
-                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-                .unwrap_or_else(|| "unknown location".to_string());
+            let location = panic_info.location().map_or_else(
+                || "unknown location".to_string(),
+                |l| format!("{}:{}:{}", l.file(), l.line(), l.column()),
+            );
 
             // Combine payload and location
-            let mut error_message = format!("{} @ {}", payload, location);
+            let mut error_message = format!("{payload} @ {location}");
 
             // Truncate to 500 Unicode characters
             if error_message.chars().count() > 500 {

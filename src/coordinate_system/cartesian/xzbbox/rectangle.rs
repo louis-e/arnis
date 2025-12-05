@@ -2,7 +2,7 @@ use crate::coordinate_system::cartesian::{XZPoint, XZVector};
 use std::fmt;
 use std::ops::{Add, AddAssign, Sub, SubAssign};
 
-/// An underlying shape of XZBBox enum.
+/// An underlying shape of `XZBBox` enum.
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct XZBBoxRect {
     /// The "bottom-left" vertex of the rectangle
@@ -44,7 +44,7 @@ impl XZBBoxRect {
 
     /// Total number of blocks covered in this 2D bbox
     pub fn total_blocks(&self) -> u64 {
-        (self.total_blocks_x() as u64) * (self.total_blocks_z() as u64)
+        u64::from(self.total_blocks_x()) * u64::from(self.total_blocks_z())
     }
 
     /// Total number of blocks covered in x direction
@@ -59,8 +59,8 @@ impl XZBBoxRect {
         nz as u32
     }
 
-    /// Check whether an XZPoint is covered
-    pub fn contains(&self, xzpoint: &XZPoint) -> bool {
+    /// Check whether an `XZPoint` is covered
+    pub fn contains(&self, xzpoint: XZPoint) -> bool {
         xzpoint.x >= self.min.x
             && xzpoint.x <= self.max.x
             && xzpoint.z >= self.min.z

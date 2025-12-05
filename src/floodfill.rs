@@ -27,7 +27,7 @@ pub fn flood_fill_area(
         .into_option()
         .unwrap();
 
-    let area = (max_x - min_x + 1) as i64 * (max_z - min_z + 1) as i64;
+    let area = i64::from(max_x - min_x + 1) * i64::from(max_z - min_z + 1);
 
     // For small and medium areas, use optimized flood fill with span filling
     if area < 50000 {
@@ -55,7 +55,7 @@ fn optimized_flood_fill_area(
     // Create polygon for containment testing
     let exterior_coords: Vec<(f64, f64)> = polygon_coords
         .iter()
-        .map(|&(x, z)| (x as f64, z as f64))
+        .map(|&(x, z)| (f64::from(x), f64::from(z)))
         .collect();
     let exterior = LineString::from(exterior_coords);
     let polygon = Polygon::new(exterior, vec![]);
@@ -82,7 +82,7 @@ fn optimized_flood_fill_area(
 
             // Skip if already visited or not inside polygon
             if global_visited.contains(&(x, z))
-                || !polygon.contains(&Point::new(x as f64, z as f64))
+                || !polygon.contains(&Point::new(f64::from(x), f64::from(z)))
             {
                 continue;
             }
@@ -104,7 +104,7 @@ fn optimized_flood_fill_area(
                     (curr_x, curr_z + 1),
                 ];
 
-                for (nx, nz) in neighbors.iter() {
+                for (nx, nz) in &neighbors {
                     if *nx >= min_x
                         && *nx <= max_x
                         && *nz >= min_z
@@ -112,7 +112,7 @@ fn optimized_flood_fill_area(
                         && !global_visited.contains(&(*nx, *nz))
                     {
                         // Only check polygon containment for unvisited points
-                        if polygon.contains(&Point::new(*nx as f64, *nz as f64)) {
+                        if polygon.contains(&Point::new(f64::from(*nx), f64::from(*nz))) {
                             global_visited.insert((*nx, *nz));
                             queue.push_back((*nx, *nz));
                         }
@@ -141,7 +141,7 @@ fn original_flood_fill_area(
     // Convert input to a geo::Polygon for efficient point-in-polygon testing
     let exterior_coords: Vec<(f64, f64)> = polygon_coords
         .iter()
-        .map(|&(x, z)| (x as f64, z as f64))
+        .map(|&(x, z)| (f64::from(x), f64::from(z)))
         .collect::<Vec<_>>();
     let exterior: LineString = LineString::from(exterior_coords);
     let polygon: Polygon<f64> = Polygon::new(exterior, vec![]);
@@ -169,7 +169,7 @@ fn original_flood_fill_area(
 
             // Skip if already processed or not inside polygon
             if global_visited.contains(&(x, z))
-                || !polygon.contains(&Point::new(x as f64, z as f64))
+                || !polygon.contains(&Point::new(f64::from(x), f64::from(z)))
             {
                 continue;
             }
@@ -181,7 +181,7 @@ fn original_flood_fill_area(
 
             while let Some((curr_x, curr_z)) = queue.pop_front() {
                 // Only check polygon containment once per point when adding to filled_area
-                if polygon.contains(&Point::new(curr_x as f64, curr_z as f64)) {
+                if polygon.contains(&Point::new(f64::from(curr_x), f64::from(curr_z))) {
                     filled_area.push((curr_x, curr_z));
 
                     // Check adjacent points with optimized iteration
@@ -192,7 +192,7 @@ fn original_flood_fill_area(
                         (curr_x, curr_z + 1),
                     ];
 
-                    for (nx, nz) in neighbors.iter() {
+                    for (nx, nz) in &neighbors {
                         if *nx >= min_x
                             && *nx <= max_x
                             && *nz >= min_z

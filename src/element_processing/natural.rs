@@ -1,5 +1,9 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, ANDESITE, BLUE_FLOWER, COBBLESTONE, DEAD_BUSH, DIORITE, DIRT, GRANITE, GRASS,
+    GRASS_BLOCK, GRAVEL, MOSS_BLOCK, MUD, OAK_LEAVES, PACKED_ICE, RED_FLOWER, SAND, STONE,
+    TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHITE_FLOWER, YELLOW_FLOWER,
+};
 use crate::bresenham::bresenham_line;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
@@ -7,7 +11,7 @@ use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+pub fn generate_natural(editor: &mut WorldEditor<'_>, element: &ProcessedElement, args: &Args) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
@@ -20,7 +24,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
             let mut previous_node: Option<(i32, i32)> = None;
             let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
             let mut current_natural: Vec<(i32, i32)> = vec![];
-            let binding: String = "".to_string();
+            let binding: String = String::new();
 
             // Determine block type based on natural tag
             let block_type: Block = match natural_type.as_str() {
@@ -241,7 +245,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                         }
                                     }
                                     "tidalflat" => {
-                                        continue; // No vegetation here
+                                        // No vegetation here
                                     }
                                     _ => {
                                         editor.set_block(GRASS, x, 1, z, None, None);
@@ -273,11 +277,11 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                 };
 
                                 // Generate cluster size (5-10 blocks radius)
-                                let cluster_size = rng.gen_range(5..=10);
+                                let cluster_size: i32 = rng.gen_range(5..=10);
 
                                 // Create cluster around current position
-                                for dx in -(cluster_size as i32)..=(cluster_size as i32) {
-                                    for dz in -(cluster_size as i32)..=(cluster_size as i32) {
+                                for dx in -cluster_size..=cluster_size {
+                                    for dz in -cluster_size..=cluster_size {
                                         let cluster_x = x + dx;
                                         let cluster_z = z + dz;
 
@@ -445,7 +449,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
 }
 
 pub fn generate_natural_from_relation(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     rel: &ProcessedRelation,
     args: &Args,
 ) {

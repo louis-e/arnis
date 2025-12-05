@@ -2,7 +2,10 @@ use crate::args::Args;
 use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
-use crate::element_processing::*;
+use crate::element_processing::{
+    amenities, barriers, buildings, doors, highways, landuse, leisure, man_made, natural, railways,
+    tourisms, water_areas, waterways,
+};
 use crate::ground::Ground;
 use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
@@ -31,7 +34,7 @@ pub fn generate_world(
     llbbox: LLBBox,
     ground: Ground,
     args: &Args,
-) -> Result<(), String> {
+) {
     // Default to Java format when called from CLI
     let options = GenerationOptions {
         path: args.path.clone(),
@@ -39,21 +42,21 @@ pub fn generate_world(
         level_name: None,
         spawn_point: None,
     };
-    generate_world_with_options(elements, xzbbox, llbbox, ground, args, options).map(|_| ())
+    let _ = generate_world_with_options(&elements, xzbbox, llbbox, ground, args, options);
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
 pub fn generate_world_with_options(
-    elements: Vec<ProcessedElement>,
+    elements: &[ProcessedElement],
     xzbbox: XZBBox,
     llbbox: LLBBox,
     ground: Ground,
     args: &Args,
     options: GenerationOptions,
-) -> Result<PathBuf, String> {
+) -> PathBuf {
     let output_path = options.path.clone();
     let world_format = options.format;
-    let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
+    let mut editor = WorldEditor::new_with_format_and_name(
         options.path,
         &xzbbox,
         llbbox,
@@ -65,7 +68,7 @@ pub fn generate_world_with_options(
     println!("{} Processing data...", "[4/7]".bold());
 
     // Build highway connectivity map once before processing
-    let highway_connectivity = highways::build_highway_connectivity_map(&elements);
+    let highway_connectivity = highways::build_highway_connectivity_map(elements);
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
@@ -85,7 +88,7 @@ pub fn generate_world_with_options(
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
-    for element in &elements {
+    for element in elements {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {
@@ -167,8 +170,7 @@ pub fn generate_world_with_options(
                     || rel
                         .tags
                         .get("natural")
-                        .map(|val| val == "water" || val == "bay")
-                        .unwrap_or(false)
+                        .is_some_and(|val| val == "water" || val == "bay")
                 {
                     water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
                 } else if rel.tags.contains_key("natural") {
@@ -295,8 +297,8 @@ pub fn generate_world_with_options(
                 args.scale,
                 &ground,
             ) {
-                let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
-                eprintln!("Warning: {}", warning_msg);
+                let warning_msg = format!("Failed to update spawn point Y coordinate: {e}");
+                eprintln!("Warning: {warning_msg}");
                 #[cfg(feature = "gui")]
                 send_log(LogLevel::Warning, &warning_msg);
             }
@@ -315,8 +317,8 @@ pub fn generate_world_with_options(
     // Generate top-down map preview silently in background after completion (Java only)
     // Skip map preview for very large areas to avoid memory issues
     const MAX_MAP_PREVIEW_AREA: i64 = 6400 * 6900;
-    let world_width = (xzbbox.max_x() - xzbbox.min_x()) as i64;
-    let world_height = (xzbbox.max_z() - xzbbox.min_z()) as i64;
+    let world_width = i64::from(xzbbox.max_x() - xzbbox.min_x());
+    let world_height = i64::from(xzbbox.max_z() - xzbbox.min_z());
     let world_area = world_width * world_height;
 
     if world_format == WorldFormat::JavaAnvil && world_area <= MAX_MAP_PREVIEW_AREA {
@@ -339,7 +341,7 @@ pub fn generate_world_with_options(
                     emit_map_preview_ready();
                 }
                 Ok(Err(e)) => {
-                    eprintln!("Warning: Failed to generate map preview: {}", e);
+                    eprintln!("Warning: Failed to generate map preview: {e}");
                 }
                 Err(_) => {
                     eprintln!("Warning: Map preview generation panicked unexpectedly");
@@ -348,5 +350,5 @@ pub fn generate_world_with_options(
         });
     }
 
-    Ok(output_path)
+    output_path
 }

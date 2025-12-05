@@ -40,7 +40,7 @@ fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
 
 fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
     let lat_rad: f64 = lat.to_radians();
-    let n: f64 = 2.0_f64.powi(zoom as i32);
+    let n: f64 = 2.0_f64.powi(i32::from(zoom));
     let x: u32 = ((lng + 180.0) / 360.0 * n).floor() as u32;
     let y: u32 = ((1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n).floor() as u32;
     (x, y)
@@ -119,10 +119,7 @@ pub fn fetch_elevation_data(
 
                 // Remove the potentially corrupted file
                 if let Err(remove_err) = std::fs::remove_file(&tile_path) {
-                    eprintln!(
-                        "Warning: Failed to remove corrupted tile file: {}",
-                        remove_err
-                    );
+                    eprintln!("Warning: Failed to remove corrupted tile file: {remove_err}");
                     #[cfg(feature = "gui")]
                     send_log(
                         LogLevel::Warning,
@@ -156,8 +153,7 @@ pub fn fetch_elevation_data(
                         // Remove the corrupted file
                         if let Err(remove_err) = std::fs::remove_file(&tile_path) {
                             eprintln!(
-                                "Warning: Failed to remove corrupted tile file: {}",
-                                remove_err
+                                "Warning: Failed to remove corrupted tile file: {remove_err}"
                             );
                             #[cfg(feature = "gui")]
                             send_log(
@@ -180,12 +176,14 @@ pub fn fetch_elevation_data(
         for (y, row) in rgb_img.rows().enumerate() {
             for (x, pixel) in row.enumerate() {
                 // Convert tile pixel coordinates back to geographic coordinates
-                let pixel_lng = ((*tile_x as f64 + x as f64 / 256.0) / (2.0_f64.powi(zoom as i32)))
+                let pixel_lng = ((f64::from(*tile_x) + x as f64 / 256.0)
+                    / (2.0_f64.powi(i32::from(zoom))))
                     * 360.0
                     - 180.0;
                 let pixel_lat_rad = std::f64::consts::PI
                     * (1.0
-                        - 2.0 * (*tile_y as f64 + y as f64 / 256.0) / (2.0_f64.powi(zoom as i32)));
+                        - 2.0 * (f64::from(*tile_y) + y as f64 / 256.0)
+                            / (2.0_f64.powi(i32::from(zoom))));
                 let pixel_lat = pixel_lat_rad.sinh().atan().to_degrees();
 
                 // Skip pixels outside the requested bounding box
@@ -210,9 +208,10 @@ pub fn fetch_elevation_data(
                 }
 
                 // Decode Terrarium format: (R * 256 + G + B/256) - 32768
-                let height: f64 =
-                    (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0)
-                        - TERRARIUM_OFFSET;
+                let height: f64 = (f64::from(pixel[0]) * 256.0
+                    + f64::from(pixel[1])
+                    + f64::from(pixel[2]) / 256.0)
+                    - TERRARIUM_OFFSET;
 
                 // Track extreme values for debugging
                 if !(-1000.0..=10000.0).contains(&height) {
@@ -263,8 +262,7 @@ pub fn fetch_elevation_data(
 
     let blur_percentage: f64 = (sigma / grid_size) * 100.0;
     eprintln!(
-        "Elevation blur: grid={}x{}, sigma={:.2}, blur_percentage={:.2}%",
-        grid_width, grid_height, sigma, blur_percentage
+        "Elevation blur: grid={grid_width}x{grid_height}, sigma={sigma:.2}, blur_percentage={blur_percentage:.2}%"
     );
 
     /* eprintln!(
@@ -316,7 +314,7 @@ pub fn fetch_elevation_data(
     let mut scaled_range: f64 = height_range * height_scale;
 
     // Adaptive scaling: ensure we don't exceed reasonable Y range
-    let available_y_range = (MAX_Y - ground_level) as f64;
+    let available_y_range = f64::from(MAX_Y - ground_level);
     let safety_margin = 0.9; // Use 90% of available range
     let max_allowed_range = available_y_range * safety_margin;
 
@@ -339,7 +337,8 @@ pub fn fetch_elevation_data(
                 let relative_height: f64 = (h - min_height) / height_range;
                 let scaled_height: f64 = relative_height * scaled_range;
                 // With terrain enabled, ground_level is used as the MIN_Y for terrain
-                ((ground_level as f64 + scaled_height).round() as i32).clamp(ground_level, MAX_Y)
+                ((f64::from(ground_level) + scaled_height).round() as i32)
+                    .clamp(ground_level, MAX_Y)
             })
             .collect();
         mc_heights.push(mc_row);
@@ -384,7 +383,7 @@ fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
     let mut blurred: Vec<Vec<f64>> = heights.to_owned();
 
     // Horizontal pass
-    for row in blurred.iter_mut() {
+    for row in &mut blurred {
         let mut temp: Vec<f64> = row.clone();
         for (i, val) in temp.iter_mut().enumerate() {
             let mut sum: f64 = 0.0;
@@ -438,7 +437,7 @@ fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
     }
 
     let sum: f64 = kernel.iter().sum();
-    for k in kernel.iter_mut() {
+    for k in &mut kernel {
         *k /= sum;
     }
 
@@ -476,7 +475,7 @@ fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
                     }
 
                     if count > 0 {
-                        height_grid[y][x] = sum / count as f64;
+                        height_grid[y][x] = sum / f64::from(count);
                         changes_made = true;
                     }
                 }
@@ -580,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // This test requires internet connection, run with --ignored
+    #[ignore = "This test requires internet connection, run with --ignored"]
     fn test_aws_tile_fetch() {
         use reqwest::blocking::Client;
 

@@ -1,9 +1,12 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, GRAVEL, IRON_BLOCK, OAK_LOG, RAIL_EAST_WEST, RAIL_NORTH_EAST, RAIL_NORTH_SOUTH,
+    RAIL_NORTH_WEST, RAIL_SOUTH_EAST, RAIL_SOUTH_WEST,
+};
 use crate::bresenham::bresenham_line;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
+pub fn generate_railways(editor: &mut WorldEditor<'_>, element: &ProcessedWay) {
     if let Some(railway_type) = element.tags.get("railway") {
         if [
             "proposed",
@@ -175,7 +178,7 @@ fn determine_rail_direction(
     }
 }
 
-pub fn generate_roller_coaster(editor: &mut WorldEditor, element: &ProcessedWay) {
+pub fn generate_roller_coaster(editor: &mut WorldEditor<'_>, element: &ProcessedWay) {
     if let Some(roller_coaster) = element.tags.get("roller_coaster") {
         if roller_coaster == "track" {
             // Check if it's indoor (skip if yes)

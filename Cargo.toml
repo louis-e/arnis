@@ -14,18 +14,34 @@ overflow-checks = true
 
 [features]
 default = ["gui"]
-gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "dirs", "tauri-build", "bedrock"]
-bedrock = ["bedrockrs_level", "bedrockrs_shared", "nbtx", "zip", "byteorder", "vek"]
+gui = [
+    "tauri",
+    "tauri-plugin-log",
+    "tauri-plugin-shell",
+    "tokio",
+    "rfd",
+    "dirs",
+    "tauri-build",
+    "bedrock",
+]
+bedrock = [
+    "bedrockrs_level",
+    "bedrockrs_shared",
+    "nbtx",
+    "zip",
+    "byteorder",
+    "vek",
+]
 
 [build-dependencies]
-tauri-build = {version = "2", optional = true}
+tauri-build = { version = "2", optional = true }
 
 [dependencies]
 base64 = "0.22.1"
 byteorder = { version = "1.5", optional = true }
 clap = { version = "4.5", features = ["derive", "env"] }
 colored = "3.0.0"
-dirs = {version = "6.0.0", optional = true }
+dirs = { version = "6.0.0", optional = true }
 fastanvil = "0.32.0"
 fastnbt = "2.6.0"
 flate2 = "1.1"
@@ -52,10 +68,56 @@ bedrockrs_level = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", p
 bedrockrs_shared = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", package = "bedrockrs_shared", optional = true }
 nbtx = { git = "https://github.com/bedrock-crustaceans/nbtx", optional = true }
 vek = { version = "0.17", optional = true }
-zip = { version = "0.6", default-features = false, features = ["deflate"], optional = true }
+zip = { version = "0.6", default-features = false, features = [
+    "deflate",
+], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.1", features = ["Win32_System_Console"] }
 
 [dev-dependencies]
 tempfile = "3.23.0"
+
+[lints.rust]
+unsafe_code = "deny"
+deprecated = "warn"
+elided_lifetimes_in_paths = "warn"
+rust_2021_prelude_collisions = "warn"
+semicolon_in_expressions_from_macros = "warn"
+trivial_numeric_casts = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_extern_crates = "warn"
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+
+[lints.rustdoc]
+all = "warn"
+missing_crate_level_docs = "warn"
+
+[lints.clippy]
+all = "warn"
+correctness = "warn"
+suspicious = "warn"
+style = "warn"
+complexity = "warn"
+perf = "warn"
+
+
+# Later: 
+# pedantic = { level = "warn", priority = -1 }
+
+# allow_attributes = "warn"
+# allow_attributes_without_reason = "warn"
+# Allowed lints (might be reconsidered later)
+
+# cast_possible_truncation = "allow" # This is not useful as we have many intentional casts
+# cast_sign_loss = "allow"    # This is not useful as we have many intentional casts
+# inline_always = "allow" # https://rust-lang.github.io/rust-clippy/rust-1.91.0/index.html#inline_always
+# too_many_lines = "allow" # Many functions are long --> Reformatting would be better
+# match_same_arms = "allow" # Sometimes useful for clarity
+# module_name_repetitions = "allow" # Sometimes useful for clarity
+# unreadable_literal = "allow"
+# similar_names = "allow"
+# float_cmp = "allow"
+# cast_lossless = "allow"
+# fn_params_excessive_bools = "allow"

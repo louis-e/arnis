@@ -1,5 +1,9 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, BLACK_CONCRETE, BRICK, COBBLESTONE_WALL, DIRT, DIRT_PATH, GLOWSTONE, GRASS_BLOCK,
+    GRAVEL, GRAY_CONCRETE, GREEN_WOOL, LIGHT_GRAY_CONCRETE, OAK_FENCE, OAK_PLANKS, RED_WOOL, SAND,
+    STONE, STONE_BRICKS, STONE_BRICK_SLAB, WHITE_CONCRETE, WHITE_WOOL, YELLOW_WOOL,
+};
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
@@ -12,7 +16,7 @@ pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
 /// Generates highways with elevation support based on layer tags and connectivity analysis
 pub fn generate_highways(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     element: &ProcessedElement,
     args: &Args,
     highway_connectivity: &HighwayConnectivityMap,
@@ -62,7 +66,7 @@ pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayC
 
 /// Internal function that generates highways with connectivity context for elevation handling
 fn generate_highways_internal(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     element: &ProcessedElement,
     args: &Args,
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
@@ -238,7 +242,7 @@ fn generate_highways_internal(
             };
 
             if scale_factor < 1.0 {
-                block_range = ((block_range as f64) * scale_factor).floor() as i32;
+                block_range = (f64::from(block_range) * scale_factor).floor() as i32;
             }
 
             // Calculate elevation based on layer
@@ -558,7 +562,7 @@ fn calculate_point_elevation(
 
 /// Add support pillars for elevated highways
 fn add_highway_support_pillar(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     x: i32,
     highway_y: i32,
     z: i32,
@@ -583,7 +587,7 @@ fn add_highway_support_pillar(
 }
 
 /// Generates a siding using stone brick slabs
-pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
+pub fn generate_siding(editor: &mut WorldEditor<'_>, element: &ProcessedWay) {
     let mut previous_node: Option<XZPoint> = None;
     let siding_block: Block = STONE_BRICK_SLAB;
 
@@ -613,7 +617,7 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
 }
 
 /// Generates an aeroway
-pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Args) {
+pub fn generate_aeroway(editor: &mut WorldEditor<'_>, way: &ProcessedWay, args: &Args) {
     let mut previous_node: Option<(i32, i32)> = None;
     let surface_block = LIGHT_GRAY_CONCRETE;
 

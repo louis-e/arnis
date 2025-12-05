@@ -1,12 +1,16 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, BLACK_CONCRETE, CAULDRON, COBBLESTONE_WALL, GLOWSTONE, GRAY_CONCRETE, IRON_BLOCK,
+    LIGHT_GRAY_CONCRETE, OAK_FENCE, OAK_LOG, OAK_PLANKS, SMOOTH_STONE, STONE_BLOCK_SLAB,
+    STONE_BRICK_SLAB, WATER,
+};
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+pub fn generate_amenities(editor: &mut WorldEditor<'_>, element: &ProcessedElement, args: &Args) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -55,7 +59,7 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                     flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 // Fill the floor area
-                for (x, z) in floor_area.iter() {
+                for (x, z) in &floor_area {
                     editor.set_block(ground_block, *x, 0, *z, None, None);
                 }
 
@@ -73,7 +77,7 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                 }
 
                 // Flood fill the roof area
-                for (x, z) in floor_area.iter() {
+                for (x, z) in &floor_area {
                     editor.set_block(roof_block, *x, 5, *z, None, None);
                 }
             }
@@ -114,7 +118,7 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                 }
 
                 // Flood fill the roof area
-                for (x, z) in roof_area.iter() {
+                for (x, z) in &roof_area {
                     editor.set_block(roof_block, *x, 5, *z, None, None);
                 }
             }
@@ -142,8 +146,8 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
 
                             // Decorative border around fountains
                             if amenity_type == "fountain" {
-                                for dx in [-1, 0, 1].iter() {
-                                    for dz in [-1, 0, 1].iter() {
+                                for dx in &[-1, 0, 1] {
+                                    for dz in &[-1, 0, 1] {
                                         if (*dx, *dz) != (0, 0) {
                                             editor.set_block(
                                                 LIGHT_GRAY_CONCRETE,
@@ -169,7 +173,7 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
 
                 // Flood-fill the interior area for parking or fountains
                 if corner_addup.2 > 0 {
-                    let polygon_coords: Vec<(i32, i32)> = current_amenity.to_vec();
+                    let polygon_coords: Vec<(i32, i32)> = current_amenity.clone();
                     let flood_area: Vec<(i32, i32)> =
                         flood_fill_area(&polygon_coords, args.timeout.as_ref());
 

@@ -40,8 +40,8 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         });
 
         if let Err(e) = window.emit("progress-update", payload) {
-            let error_msg = format!("Failed to emit progress event: {}", e);
-            eprintln!("{}", error_msg);
+            let error_msg = format!("Failed to emit progress event: {e}");
+            eprintln!("{error_msg}");
             #[cfg(feature = "gui")]
             send_log(LogLevel::Warning, &error_msg);
         }
@@ -61,7 +61,7 @@ pub fn emit_gui_error(message: &str) {
 pub fn emit_map_preview_ready() {
     if let Some(window) = get_main_window() {
         if let Err(e) = window.emit("map-preview-ready", ()) {
-            eprintln!("Failed to emit map-preview-ready event: {}", e);
+            eprintln!("Failed to emit map-preview-ready event: {e}");
         }
     }
 }
@@ -70,7 +70,7 @@ pub fn emit_map_preview_ready() {
 pub fn emit_open_mcworld_file(path: &str) {
     if let Some(window) = get_main_window() {
         if let Err(e) = window.emit("open-mcworld-file", path) {
-            eprintln!("Failed to emit open-mcworld-file event: {}", e);
+            eprintln!("Failed to emit open-mcworld-file event: {e}");
         }
     }
 }

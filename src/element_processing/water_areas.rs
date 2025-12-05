@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub fn generate_water_area_from_way(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     element: &ProcessedWay,
     _xzbbox: &XZBBox,
 ) {
@@ -27,7 +27,7 @@ pub fn generate_water_area_from_way(
 }
 
 pub fn generate_water_areas_from_relation(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     element: &ProcessedRelation,
     xzbbox: &XZBBox,
 ) {
@@ -38,8 +38,7 @@ pub fn generate_water_areas_from_relation(
         || element
             .tags
             .get("natural")
-            .map(|val| val == "water" || val == "bay")
-            .unwrap_or(false);
+            .is_some_and(|val| val == "water" || val == "bay");
 
     if !is_water {
         return;
@@ -96,7 +95,7 @@ pub fn generate_water_areas_from_relation(
         });
 
         // Now close the remaining loops that are within 1 block tolerance
-        for loop_nodes in outers.iter_mut() {
+        for loop_nodes in &mut outers {
             let first = loop_nodes[0].clone();
             let last_idx = loop_nodes.len() - 1;
             if loop_nodes[0].id != loop_nodes[last_idx].id {
@@ -127,7 +126,7 @@ pub fn generate_water_areas_from_relation(
 }
 
 fn generate_water_areas(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     outers: &[Vec<ProcessedNode>],
     inners: &[Vec<ProcessedNode>],
     start_time: Instant,
@@ -162,11 +161,19 @@ fn generate_water_areas(
 
     let outers_xz: Vec<Vec<XZPoint>> = outers
         .iter()
-        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
+        .map(|x| {
+            x.iter()
+                .map(super::super::osm_parser::ProcessedNode::xz)
+                .collect::<Vec<_>>()
+        })
         .collect();
     let inners_xz: Vec<Vec<XZPoint>> = inners
         .iter()
-        .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
+        .map(|x| {
+            x.iter()
+                .map(super::super::osm_parser::ProcessedNode::xz)
+                .collect::<Vec<_>>()
+        })
         .collect();
 
     inverse_floodfill(
@@ -257,7 +264,7 @@ fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
         }
     }
 
-    removed.sort();
+    removed.sort_unstable();
 
     for r in removed.iter().rev() {
         rings.remove(*r);
@@ -307,7 +314,7 @@ fn inverse_floodfill(
     max_z: i32,
     outers: Vec<Vec<XZPoint>>,
     inners: Vec<Vec<XZPoint>>,
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     start_time: Instant,
 ) {
     // Convert to geo Polygons with normalized winding order
@@ -317,7 +324,7 @@ fn inverse_floodfill(
             Polygon::new(
                 LineString::from(
                     x.iter()
-                        .map(|pt| (pt.x as f64, pt.z as f64))
+                        .map(|pt| (f64::from(pt.x), f64::from(pt.z)))
                         .collect::<Vec<_>>(),
                 ),
                 vec![],
@@ -332,7 +339,7 @@ fn inverse_floodfill(
             Polygon::new(
                 LineString::from(
                     x.iter()
-                        .map(|pt| (pt.x as f64, pt.z as f64))
+                        .map(|pt| (f64::from(pt.x), f64::from(pt.z)))
                         .collect::<Vec<_>>(),
                 ),
                 vec![],
@@ -356,7 +363,7 @@ fn inverse_floodfill_recursive(
     max: (i32, i32),
     outers: &[Polygon],
     inners: &[Polygon],
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     start_time: Instant,
 ) {
     // Check if we've exceeded 25 seconds
@@ -372,13 +379,13 @@ fn inverse_floodfill_recursive(
 
     // Multiply as i64 to avoid overflow; in release builds where unchecked math is
     // enabled, this could cause the rest of this code to end up in an infinite loop.
-    if ((max.0 - min.0) as i64) * ((max.1 - min.1) as i64) < ITERATIVE_THRES {
+    if i64::from(max.0 - min.0) * i64::from(max.1 - min.1) < ITERATIVE_THRES {
         inverse_floodfill_iterative(min, max, 0, outers, inners, editor);
         return;
     }
 
-    let center_x: i32 = (min.0 + max.0) / 2;
-    let center_z: i32 = (min.1 + max.1) / 2;
+    let center_x: i32 = i32::midpoint(min.0, max.0);
+    let center_z: i32 = i32::midpoint(min.1, max.1);
     let quadrants: [(i32, i32, i32, i32); 4] = [
         (min.0, center_x, min.1, center_z),
         (center_x, max.0, min.1, center_z),
@@ -388,8 +395,8 @@ fn inverse_floodfill_recursive(
 
     for (min_x, max_x, min_z, max_z) in quadrants {
         let rect: Rect = Rect::new(
-            Point::new(min_x as f64, min_z as f64),
-            Point::new(max_x as f64, max_z as f64),
+            Point::new(f64::from(min_x), f64::from(min_z)),
+            Point::new(f64::from(max_x), f64::from(max_z)),
         );
 
         if outers.iter().any(|outer: &Polygon| outer.contains(&rect))
@@ -430,11 +437,11 @@ fn inverse_floodfill_iterative(
     ground_level: i32,
     outers: &[Polygon],
     inners: &[Polygon],
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
 ) {
     for x in min.0..max.0 {
         for z in min.1..max.1 {
-            let p: Point = Point::new(x as f64, z as f64);
+            let p: Point = Point::new(f64::from(x), f64::from(z));
 
             if outers.iter().any(|poly: &Polygon| poly.contains(&p))
                 && inners.iter().all(|poly: &Polygon| !poly.contains(&p))
@@ -451,7 +458,7 @@ fn rect_fill(
     min_z: i32,
     max_z: i32,
     ground_level: i32,
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
 ) {
     for x in min_x..max_x {
         for z in min_z..max_z {

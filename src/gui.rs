@@ -64,8 +64,8 @@ impl Drop for SessionLock {
 
 /// Gets the area name for a given bounding box using the center point
 fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
-    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+    let center_lat = f64::midpoint(bbox.min().lat(), bbox.max().lat());
+    let center_lon = f64::midpoint(bbox.min().lng(), bbox.max().lng());
 
     match retrieve_data::fetch_area_name(center_lat, center_lon) {
         Ok(Some(name)) => name,
@@ -83,6 +83,10 @@ pub fn run_gui() {
     // Workaround WebKit2GTK issue with NVIDIA drivers and graphics issues
     // Source: https://github.com/tauri-apps/tauri/issues/10702
     #[cfg(target_os = "linux")]
+    #[expect(
+        unsafe_code,
+        reason = "Calling unsafe code to set environment variables"
+    )]
     unsafe {
         // Disable problematic GPU features that cause map loading issues
         env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -185,18 +189,16 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                     if let Ok(file) = fs::File::open(&session_lock_path) {
                         if fs2::FileExt::try_lock_shared(&file).is_err() {
                             return Err(2); // Error code 2: The selected world is currently in use
-                        } else {
-                            // Release the lock immediately
-                            let _ = fs2::FileExt::unlock(&file);
                         }
+                        // Release the lock immediately
+                        let _ = fs2::FileExt::unlock(&file);
                     }
                 }
 
                 return Ok(path.display().to_string());
-            } else {
-                // No Minecraft directory found, generating new world in custom user selected directory
-                return create_new_world(&path).map_err(|_| 3); // Error code 3: Failed to create new world
             }
+            // No Minecraft directory found, generating new world in custom user selected directory
+            return create_new_world(&path).map_err(|_| 3); // Error code 3: Failed to create new world
         }
 
         // If no folder was selected, return an error message
@@ -362,8 +364,8 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     }
 
     // Calculate center coordinates of bbox
-    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+    let center_lat = f64::midpoint(bbox.min().lat(), bbox.max().lat());
+    let center_lon = f64::midpoint(bbox.min().lng(), bbox.max().lng());
 
     // Try to fetch the area name
     let area_name = match retrieve_data::fetch_area_name(center_lat, center_lon) {
@@ -499,13 +501,13 @@ fn update_player_position(
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
                     if let Value::Double(ref mut pos_x) = pos.get_mut(0).unwrap() {
-                        *pos_x = xzpoint.x as f64;
+                        *pos_x = f64::from(xzpoint.x);
                     }
                     if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
                         *pos_y = y;
                     }
                     if let Value::Double(ref mut pos_z) = pos.get_mut(2).unwrap() {
-                        *pos_z = xzpoint.z as f64;
+                        *pos_z = f64::from(xzpoint.z);
                     }
                 }
             }
@@ -634,7 +636,7 @@ pub fn update_player_spawn_y_after_generation(
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
                     // Keep existing X and Z, only update Y
                     if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
-                        *pos_y = spawn_y as f64;
+                        *pos_y = f64::from(spawn_y);
                     }
                 }
             }
@@ -717,7 +719,7 @@ fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, St
         .ok_or("Missing maxGeoLon in metadata")?;
 
     Ok(Some(WorldMapData {
-        image_base64: format!("data:image/png;base64,{}", base64_image),
+        image_base64: format!("data:image/png;base64,{base64_image}"),
         min_lat,
         max_lat,
         min_lon,
@@ -750,7 +752,7 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
             std::process::Command::new("explorer")
                 .args(["/select,", &path])
                 .spawn()
-                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+                .map_err(|e| format!("Failed to open explorer: {e}"))?;
         }
     }
 
@@ -892,8 +894,8 @@ fn gui_start_generation(
                 WorldFormat::BedrockMcWorld => {
                     // Bedrock: generate .mcworld in current directory with location-based name
                     let area_name = get_area_name_for_bedrock(&bbox);
-                    let filename = format!("Arnis {}.mcworld", area_name);
-                    let lvl_name = format!("Arnis World: {}", area_name);
+                    let filename = format!("Arnis {area_name}.mcworld");
+                    let lvl_name = format!("Arnis World: {area_name}");
                     let output_path = std::env::current_dir()
                         .unwrap_or_else(|_| PathBuf::from("."))
                         .join(filename);
@@ -959,10 +961,10 @@ fn gui_start_generation(
                 let parsed_elements = Vec::new();
                 let (_coord_transformer, xzbbox) =
                     CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
-                        .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
+                        .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
                 let _ = data_processing::generate_world_with_options(
-                    parsed_elements,
+                    &parsed_elements,
                     xzbbox,
                     args.bbox,
                     ground,
@@ -1005,7 +1007,7 @@ fn gui_start_generation(
                     );
 
                     let _ = data_processing::generate_world_with_options(
-                        parsed_elements,
+                        &parsed_elements,
                         xzbbox,
                         args.bbox,
                         ground,

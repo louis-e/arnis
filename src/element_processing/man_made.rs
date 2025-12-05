@@ -1,10 +1,13 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    BRICK, GRAY_CONCRETE, IRON_BARS, IRON_BLOCK, OAK_FENCE, OAK_LOG, OAK_SLAB, POLISHED_ANDESITE,
+    SMOOTH_STONE, STONE_BRICKS, WATER,
+};
 use crate::bresenham::bresenham_line;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
 
-pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, _args: &Args) {
+pub fn generate_man_made(editor: &mut WorldEditor<'_>, element: &ProcessedElement, _args: &Args) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -31,8 +34,8 @@ pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, _
     }
 }
 
-/// Generate a pier structure with OAK_SLAB planks and OAK_LOG support pillars
-fn generate_pier(editor: &mut WorldEditor, element: &ProcessedElement) {
+/// Generate a pier structure with `OAK_SLAB` planks and `OAK_LOG` support pillars
+fn generate_pier(editor: &mut WorldEditor<'_>, element: &ProcessedElement) {
     if let ProcessedElement::Way(way) = element {
         let nodes = &way.nodes;
         if nodes.len() < 2 {
@@ -87,7 +90,7 @@ fn generate_pier(editor: &mut WorldEditor, element: &ProcessedElement) {
 }
 
 /// Generate an antenna/radio tower
-fn generate_antenna(editor: &mut WorldEditor, element: &ProcessedElement) {
+fn generate_antenna(editor: &mut WorldEditor<'_>, element: &ProcessedElement) {
     if let Some(first_node) = element.nodes().next() {
         let x = first_node.x;
         let z = first_node.z;
@@ -95,7 +98,11 @@ fn generate_antenna(editor: &mut WorldEditor, element: &ProcessedElement) {
         // Extract antenna configuration from tags
         let height = match element.tags().get("height") {
             Some(h) => h.parse::<i32>().unwrap_or(20).min(40), // Max 40 blocks
-            None => match element.tags().get("tower:type").map(|s| s.as_str()) {
+            None => match element
+                .tags()
+                .get("tower:type")
+                .map(std::string::String::as_str)
+            {
                 Some("communication") => 20,
                 Some("cellular") => 15,
                 _ => 20,
@@ -133,7 +140,7 @@ fn generate_antenna(editor: &mut WorldEditor, element: &ProcessedElement) {
 }
 
 /// Generate a chimney structure
-fn generate_chimney(editor: &mut WorldEditor, element: &ProcessedElement) {
+fn generate_chimney(editor: &mut WorldEditor<'_>, element: &ProcessedElement) {
     if let Some(first_node) = element.nodes().next() {
         let x = first_node.x;
         let z = first_node.z;
@@ -155,7 +162,7 @@ fn generate_chimney(editor: &mut WorldEditor, element: &ProcessedElement) {
 }
 
 /// Generate a water well structure
-fn generate_water_well(editor: &mut WorldEditor, element: &ProcessedElement) {
+fn generate_water_well(editor: &mut WorldEditor<'_>, element: &ProcessedElement) {
     if let Some(first_node) = element.nodes().next() {
         let x = first_node.x;
         let z = first_node.z;
@@ -191,7 +198,7 @@ fn generate_water_well(editor: &mut WorldEditor, element: &ProcessedElement) {
 }
 
 /// Generate a water tower structure
-fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
+fn generate_water_tower(editor: &mut WorldEditor<'_>, element: &ProcessedElement) {
     if let Some(first_node) = element.nodes().next() {
         let x = first_node.x;
         let z = first_node.z;
@@ -239,8 +246,8 @@ fn generate_water_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
     }
 }
 
-/// Generate man_made structures for node elements
-pub fn generate_man_made_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
+/// Generate `man_made` structures for node elements
+pub fn generate_man_made_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode) {
     if let Some(man_made_type) = node.tags.get("man_made") {
         let element = ProcessedElement::Node(node.clone());
 

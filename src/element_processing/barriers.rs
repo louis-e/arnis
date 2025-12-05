@@ -1,14 +1,21 @@
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    Block, AIR, BRICK, COBBLESTONE_WALL, GLASS, LIGHT_GRAY_CONCRETE, OAK_FENCE, OAK_LEAVES, STONE,
+    STONE_BRICK_SLAB, STONE_BRICK_WALL,
+};
 use crate::bresenham::bresenham_line;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
 
-pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
+pub fn generate_barriers(editor: &mut WorldEditor<'_>, element: &ProcessedElement) {
     // Default values
     let mut barrier_material: Block = COBBLESTONE_WALL;
     let mut barrier_height: i32 = 2;
 
-    match element.tags().get("barrier").map(|s| s.as_str()) {
+    match element
+        .tags()
+        .get("barrier")
+        .map(std::string::String::as_str)
+    {
         Some("bollard") => {
             barrier_material = COBBLESTONE_WALL;
             barrier_height = 1;
@@ -23,7 +30,11 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
         }
         Some("fence") => {
             // Handle fence sub-types
-            match element.tags().get("fence_type").map(|s| s.as_str()) {
+            match element
+                .tags()
+                .get("fence_type")
+                .map(std::string::String::as_str)
+            {
                 Some("railing" | "bars" | "krest") => {
                     barrier_material = STONE_BRICK_WALL;
                     barrier_height = 1;
@@ -79,8 +90,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
             .tags()
             .get("height")
             .and_then(|height: &String| height.parse::<f32>().ok())
-            .map(|height: f32| height.round() as i32)
-            .unwrap_or(barrier_height);
+            .map_or(barrier_height, |height: f32| height.round() as i32);
 
         // Process nodes to create the barrier wall
         for i in 1..way.nodes.len() {
@@ -111,7 +121,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
 }
 
 pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode) {
-    match node.tags.get("barrier").map(|s| s.as_str()) {
+    match node.tags.get("barrier").map(std::string::String::as_str) {
         Some("bollard") => {
             editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
         }

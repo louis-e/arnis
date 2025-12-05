@@ -28,7 +28,7 @@ mod world_editor;
 
 use args::Args;
 use clap::Parser;
-use colored::*;
+use colored::Colorize;
 use std::{env, fs, io::Write};
 
 #[cfg(feature = "gui")]
@@ -52,7 +52,7 @@ fn run_cli() {
     let version: &str = env!("CARGO_PKG_VERSION");
     let repository: &str = env!("CARGO_PKG_REPOSITORY");
     println!(
-        r#"
+        r"
         ▄████████    ▄████████ ███▄▄▄▄    ▄█     ▄████████
         ███    ███   ███    ███ ███▀▀▀██▄ ███    ███    ███
         ███    ███   ███    ███ ███   ███ ███▌   ███    █▀
@@ -65,7 +65,7 @@ fn run_cli() {
 
                           version {}
                 {}
-        "#,
+        ",
         version,
         repository.bright_white().bold()
     );
@@ -123,13 +123,17 @@ fn run_cli() {
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
     // Generate world
-    let _ = data_processing::generate_world(parsed_elements, xzbbox, args.bbox, ground, &args);
+    data_processing::generate_world(parsed_elements, xzbbox, args.bbox, ground, &args);
 }
 
 fn main() {
     // If on Windows, free and reattach to the parent console when using as a CLI tool
     // Either of these can fail, but if they do it is not an issue, so the return value is ignored
     #[cfg(target_os = "windows")]
+    #[expect(
+        unsafe_code,
+        reason = "Calling Windows API functions that are marked unsafe"
+    )]
     unsafe {
         let _ = FreeConsole();
         let _ = AttachConsole(ATTACH_PARENT_PROCESS);

@@ -27,7 +27,7 @@ pub enum StairShape {
 
 impl StairFacing {
     #[inline(always)]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             StairFacing::North => "north",
             StairFacing::East => "east",
@@ -39,7 +39,7 @@ impl StairFacing {
 
 impl StairShape {
     #[inline(always)]
-    pub fn as_str(&self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             StairShape::Straight => "straight",
             StairShape::InnerLeft => "inner_left",
@@ -87,12 +87,16 @@ impl Block {
     }
 
     #[inline(always)]
-    pub fn id(&self) -> u8 {
+    pub fn id(self) -> u8 {
         self.id
     }
 
+    #[expect(
+        clippy::unused_self,
+        reason = "Future-proofing for potential multi-namespace support"
+    )]
     #[inline(always)]
-    pub fn namespace(&self) -> &str {
+    pub fn namespace(self) -> &'static str {
         "minecraft"
     }
 
@@ -270,7 +274,7 @@ impl Block {
         }
     }
 
-    pub fn properties(&self) -> Option<Value> {
+    pub fn properties(self) -> Option<Value> {
         match self.id {
             3 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
@@ -939,7 +943,7 @@ pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
     // Find the closest color match
     let closest_color = DEFINED_COLORS
         .iter()
-        .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
+        .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(color, *defined_color));
 
     if let Some((_, options)) = closest_color {
         options[rng.gen_range(0..options.len())]
