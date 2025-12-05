@@ -666,13 +666,10 @@ impl BedrockWriter {
             }
         }
 
-        // Add world_icon.jpeg from assets
-        let icon_path = std::path::Path::new("assets/minecraft/world_icon.jpeg");
-        if icon_path.exists() {
-            writer.start_file("world_icon.jpeg", options)?;
-            let contents = fs::read(icon_path)?;
-            writer.write_all(&contents)?;
-        }
+        // Add world_icon.jpeg from embedded assets
+        const WORLD_ICON: &[u8] = include_bytes!("../../assets/minecraft/world_icon.jpeg");
+        writer.start_file("world_icon.jpeg", options)?;
+        writer.write_all(WORLD_ICON)?;
 
         // Add db directory and its contents
         let db_path = self.output_dir.join("db");
