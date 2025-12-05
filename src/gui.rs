@@ -815,7 +815,9 @@ fn gui_start_generation(
     telemetry::send_generation_click();
 
     // If spawn point was chosen and the world is new, check and set the spawn point
-    if is_new_world && spawn_point.is_some() {
+    // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
+    // level.dat to modify (the spawn point will be set when the .mcworld is created)
+    if is_new_world && spawn_point.is_some() && world_format != "bedrock" {
         // Verify the spawn point is within bounds
         if let Some(coords) = spawn_point {
             let llbbox = match LLBBox::from_str(&bbox_text) {
