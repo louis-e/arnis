@@ -280,10 +280,13 @@ pub fn generate_world_with_options(
     if world_format == WorldFormat::JavaAnvil {
         if let Some(spawn_coords) = &args.spawn_point {
             use crate::gui::update_player_spawn_y_after_generation;
-            // Note: LLBBox stores values with swapped lat/lng internally to accommodate
-            // the GUI's lng,lat,lng,lat format. So .lat() returns the GUI's lng value
-            // and .lng() returns the GUI's lat value. We use lat(),lng() order here
-            // to reconstruct the lng,lat,lng,lat format that LLBBox::from_str expects.
+            // Reconstruct bbox string in the format expected by LLBBox::from_str().
+            // The GUI provides bbox in lng,lat,lng,lat format. When LLBBox is created
+            // via from_str() with this format, it assigns the first value to a variable
+            // named min_lat (though it's actually lng), and passes it to LLPoint::new()
+            // as the first argument (lat position), resulting in swapped storage.
+            // Therefore, .lat() returns what was originally the lng value, and vice versa.
+            // We use .lat(),.lng() order to reconstruct the original lng,lat,lng,lat format.
             let bbox_string = format!(
                 "{},{},{},{}",
                 args.bbox.min().lat(),
