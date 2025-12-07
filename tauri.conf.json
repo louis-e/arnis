@@ -16,7 +16,7 @@
         "minWidth": 1000,
         "minHeight": 650,
         "resizable": true,
-        "transparent": true,
+        "transparent": false,
         "center": true,
         "theme": "Dark",
         "additionalBrowserArgs": "--disable-features=VizDisplayCompositor"
