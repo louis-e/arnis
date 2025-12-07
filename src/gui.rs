@@ -963,17 +963,27 @@ fn gui_start_generation(
 
                 let _ = data_processing::generate_world_with_options(
                     parsed_elements,
-                    xzbbox,
+                    xzbbox.clone(),
                     args.bbox,
                     ground,
                     &args,
-                    generation_options,
+                    generation_options.clone(),
                 );
                 // Explicitly release session lock before showing Done message
                 // so Minecraft can open the world immediately
                 drop(_session_lock);
                 emit_gui_progress_update(100.0, "Done! World generation completed.");
                 println!("{}", "Done! World generation completed.".green().bold());
+
+                // Start map preview generation silently in background (Java only)
+                if world_format == WorldFormat::JavaAnvil {
+                    let preview_info = data_processing::MapPreviewInfo::new(
+                        generation_options.path.clone(),
+                        &xzbbox,
+                    );
+                    data_processing::start_map_preview_generation(preview_info);
+                }
+
                 return Ok(());
             }
 
@@ -1006,7 +1016,7 @@ fn gui_start_generation(
 
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,
-                        xzbbox,
+                        xzbbox.clone(),
                         args.bbox,
                         ground,
                         &args,
@@ -1017,6 +1027,16 @@ fn gui_start_generation(
                     drop(_session_lock);
                     emit_gui_progress_update(100.0, "Done! World generation completed.");
                     println!("{}", "Done! World generation completed.".green().bold());
+
+                    // Start map preview generation silently in background (Java only)
+                    if world_format == WorldFormat::JavaAnvil {
+                        let preview_info = data_processing::MapPreviewInfo::new(
+                            generation_options.path.clone(),
+                            &xzbbox,
+                        );
+                        data_processing::start_map_preview_generation(preview_info);
+                    }
+
                     Ok(())
                 }
                 Err(e) => {
