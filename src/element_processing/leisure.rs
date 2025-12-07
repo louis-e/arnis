@@ -1,5 +1,10 @@
 use crate::args::Args;
-use crate::block_definitions::*;
+use crate::block_definitions::{
+    BLACK_CONCRETE, BLUE_FLOWER, Block, COBBLESTONE, DIRT, GRASS, GRASS_BLOCK, GRAY_CONCRETE,
+    GREEN_STAINED_HARDENED_CLAY, LADDER, LIGHT_GRAY_CONCRETE, OAK_FENCE, OAK_LEAVES, OAK_PLANKS,
+    OAK_SLAB, PACKED_ICE, RED_FLOWER, RED_TERRACOTTA, SAND, SMOOTH_SANDSTONE, SMOOTH_STONE,
+    STONE_BLOCK_SLAB, STONE_BRICKS, TERRACOTTA, WATER, WHITE_FLOWER, YELLOW_FLOWER,
+};
 use crate::bresenham::bresenham_line;
 use crate::element_processing::tree::Tree;
 use crate::floodfill::flood_fill_area;
@@ -7,7 +12,7 @@ use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
+pub fn generate_leisure(editor: &mut WorldEditor<'_>, element: &ProcessedWay, args: &Args) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
         let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -91,8 +96,8 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                    let random_choice: i32 = rng.gen_range(0..1000);
+                    let mut rng: rand::prelude::ThreadRng = rand::rng();
+                    let random_choice: i32 = rng.random_range(0..1000);
 
                     match random_choice {
                         0..30 => {
@@ -123,8 +128,8 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 
                 // Add playground or recreation ground features
                 if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                    let random_choice: i32 = rng.gen_range(0..5000);
+                    let mut rng: rand::prelude::ThreadRng = rand::rng();
+                    let random_choice: i32 = rng.random_range(0..5000);
 
                     match random_choice {
                         0..10 => {
@@ -173,7 +178,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 }
 
 pub fn generate_leisure_from_relation(
-    editor: &mut WorldEditor,
+    editor: &mut WorldEditor<'_>,
     rel: &ProcessedRelation,
     args: &Args,
 ) {

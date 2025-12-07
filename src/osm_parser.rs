@@ -214,9 +214,13 @@ pub fn parse_osm_data(
 
             // Only add tagged nodes to processed_elements if they're within or near the bbox
             // This significantly improves performance by filtering out distant nodes
-            if !element.tags.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
+            if !element
+                .tags
+                .as_ref()
+                .is_none_or(std::collections::HashMap::is_empty)
+            {
                 // Node has tags, check if it's in the bbox (with some margin)
-                if xzbbox.contains(&xzpoint) {
+                if xzbbox.contains(xzpoint) {
                     processed_elements.push(ProcessedElement::Node(processed));
                 }
             }
@@ -273,7 +277,7 @@ pub fn parse_osm_data(
         // Only process multipolygons for now
         if tags.get("type").map(|x: &String| x.as_str()) != Some("multipolygon") {
             continue;
-        };
+        }
 
         // Water relations require unclipped ways for ring merging in water_areas.rs
         let is_water_relation = is_water_element(tags);
@@ -339,7 +343,7 @@ pub fn parse_osm_data(
     (processed_elements, xzbbox)
 }
 
-/// Returns true if tags indicate a water element handled by water_areas.rs.
+/// Returns true if tags indicate a water element handled by `water_areas.rs`.
 fn is_water_element(tags: &HashMap<String, String>) -> bool {
     // Check for explicit water tag
     if tags.contains_key("water") {
@@ -347,17 +351,17 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     }
 
     // Check for natural=water or natural=bay
-    if let Some(natural_val) = tags.get("natural") {
-        if natural_val == "water" || natural_val == "bay" {
-            return true;
-        }
+    if let Some(natural_val) = tags.get("natural")
+        && (natural_val == "water" || natural_val == "bay")
+    {
+        return true;
     }
 
     // Check for waterway=dock (also handled as water area)
-    if let Some(waterway_val) = tags.get("waterway") {
-        if waterway_val == "dock" {
-            return true;
-        }
+    if let Some(waterway_val) = tags.get("waterway")
+        && waterway_val == "dock"
+    {
+        return true;
     }
 
     false

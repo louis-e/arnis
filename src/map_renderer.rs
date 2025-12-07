@@ -4,7 +4,7 @@
 // showing the topmost visible block at each position.
 
 use fastanvil::Region;
-use fastnbt::{from_bytes, Value};
+use fastnbt::{Value, from_bytes};
 use fnv::FnvHashMap;
 use image::{Rgb, RgbImage};
 use once_cell::sync::Lazy;
@@ -50,32 +50,32 @@ pub fn render_world_map(
 
     // Process regions in parallel
     region_coords.par_iter().for_each(|&(region_x, region_z)| {
-        let region_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
+        let region_path = region_dir.join(format!("r.{region_x}.{region_z}.mca"));
 
         if !region_path.exists() {
             return;
         }
 
-        if let Ok(file) = File::open(&region_path) {
-            if let Ok(mut region) = Region::from_stream(file) {
-                // Collect all pixels from this region first
-                let pixels = render_region_to_pixels(
-                    &mut region,
-                    region_x,
-                    region_z,
-                    min_x,
-                    min_z,
-                    max_x,
-                    max_z,
-                );
+        if let Ok(file) = File::open(&region_path)
+            && let Ok(mut region) = Region::from_stream(file)
+        {
+            // Collect all pixels from this region first
+            let pixels = render_region_to_pixels(
+                &mut region,
+                region_x,
+                region_z,
+                min_x,
+                min_z,
+                max_x,
+                max_z,
+            );
 
-                // Then batch-write to image under lock
-                if !pixels.is_empty() {
-                    let mut img_guard = img.lock().unwrap();
-                    for (x, z, color) in pixels {
-                        if x < img_guard.width() && z < img_guard.height() {
-                            img_guard.put_pixel(x, z, color);
-                        }
+            // Then batch-write to image under lock
+            if !pixels.is_empty() {
+                let mut img_guard = img.lock().unwrap();
+                for (x, z, color) in pixels {
+                    if x < img_guard.width() && z < img_guard.height() {
+                        img_guard.put_pixel(x, z, color);
                     }
                 }
             }
@@ -87,7 +87,7 @@ pub fn render_world_map(
     img.into_inner()
         .unwrap()
         .save(&output_path)
-        .map_err(|e| format!("Failed to save map image: {}", e))?;
+        .map_err(|e| format!("Failed to save map image: {e}"))?;
 
     Ok(output_path)
 }
@@ -228,9 +228,9 @@ fn apply_elevation_shading(color: Rgb<u8>, y: i32) -> Rgb<u8> {
     let multiplier = 1.10 + elevation_adjust;
 
     Rgb([
-        (color.0[0] as f32 * multiplier).clamp(0.0, 255.0) as u8,
-        (color.0[1] as f32 * multiplier).clamp(0.0, 255.0) as u8,
-        (color.0[2] as f32 * multiplier).clamp(0.0, 255.0) as u8,
+        (f32::from(color.0[0]) * multiplier).clamp(0.0, 255.0) as u8,
+        (f32::from(color.0[1]) * multiplier).clamp(0.0, 255.0) as u8,
+        (f32::from(color.0[2]) * multiplier).clamp(0.0, 255.0) as u8,
     ])
 }
 
@@ -248,11 +248,11 @@ fn get_sections_from_chunk(chunk: &Value) -> Vec<&Value> {
         }
 
         // Try via Level wrapper (older format)
-        if let Some(Value::Compound(level)) = map.get("Level") {
-            if let Some(Value::List(secs)) = level.get("sections") {
-                for sec in secs {
-                    sections.push(sec);
-                }
+        if let Some(Value::Compound(level)) = map.get("Level")
+            && let Some(Value::List(secs)) = level.get("sections")
+        {
+            for sec in secs {
+                sections.push(sec);
             }
         }
     }
@@ -261,15 +261,15 @@ fn get_sections_from_chunk(chunk: &Value) -> Vec<&Value> {
 }
 
 /// Pre-sorts sections by Y coordinate (descending) - called once per chunk
-/// Returns Vec of (section_y, section_value) for Y tracking
+/// Returns Vec of (`section_y`, `section_value`) for Y tracking
 fn get_sorted_sections<'a>(sections: &[&'a Value]) -> Vec<(i8, &'a Value)> {
     let mut sorted: Vec<(i8, &Value)> = sections
         .iter()
         .filter_map(|s| {
-            if let Value::Compound(map) = s {
-                if let Some(Value::Byte(y)) = map.get("Y") {
-                    return Some((*y, *s));
-                }
+            if let Value::Compound(map) = s
+                && let Some(Value::Byte(y)) = map.get("Y")
+            {
+                return Some((*y, *s));
             }
             None
         })
@@ -280,19 +280,19 @@ fn get_sorted_sections<'a>(sections: &[&'a Value]) -> Vec<(i8, &'a Value)> {
 }
 
 /// Finds the topmost non-air block using pre-sorted sections
-/// Returns (block_name, world_y) where world_y is the actual Y coordinate
+/// Returns (`block_name`, `world_y`) where `world_y` is the actual Y coordinate
 fn find_top_block_sorted(
     sorted_sections: &[(i8, &Value)],
     local_x: usize,
     local_z: usize,
 ) -> Option<(String, i32)> {
     for (section_y, section) in sorted_sections {
-        if let Some((block_name, local_y)) = get_block_at_section(section, local_x, local_z) {
-            if !is_transparent_block(&block_name) {
-                // Calculate world Y: section_y * 16 + local_y
-                let world_y = (*section_y as i32) * 16 + local_y as i32;
-                return Some((block_name, world_y));
-            }
+        if let Some((block_name, local_y)) = get_block_at_section(section, local_x, local_z)
+            && !is_transparent_block(&block_name)
+        {
+            // Calculate world Y: section_y * 16 + local_y
+            let world_y = i32::from(*section_y) * 16 + local_y as i32;
+            return Some((block_name, world_y));
         }
     }
 
@@ -300,7 +300,7 @@ fn find_top_block_sorted(
 }
 
 /// Gets the topmost non-air block in a section at the given x,z
-/// Returns (block_name, local_y) where local_y is 0-15 within the section
+/// Returns (`block_name`, `local_y`) where `local_y` is 0-15 within the section
 fn get_block_at_section(
     section: &Value,
     local_x: usize,
@@ -349,12 +349,11 @@ fn get_block_at_section(
 
         let palette_index = ((data[long_index] as u64 >> bit_offset) & mask) as usize;
 
-        if palette_index < palette.len() {
-            if let Some(name) = get_block_name_from_palette(&palette[palette_index]) {
-                if !is_transparent_block(&name) {
-                    return Some((name, local_y));
-                }
-            }
+        if palette_index < palette.len()
+            && let Some(name) = get_block_name_from_palette(&palette[palette_index])
+            && !is_transparent_block(&name)
+        {
+            return Some((name, local_y));
         }
     }
 
@@ -363,10 +362,10 @@ fn get_block_at_section(
 
 /// Extracts block name from a palette entry
 fn get_block_name_from_palette(entry: &Value) -> Option<String> {
-    if let Value::Compound(map) = entry {
-        if let Some(Value::String(name)) = map.get("Name") {
-            return Some(name.clone());
-        }
+    if let Value::Compound(map) = entry
+        && let Some(Value::String(name)) = map.get("Name")
+    {
+        return Some(name.clone());
     }
     None
 }

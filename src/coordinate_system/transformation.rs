@@ -69,7 +69,7 @@ pub fn geo_distance(a: LLPoint, b: LLPoint) -> (f64, f64) {
     let z: f64 = lat_distance(a.lat(), b.lat());
 
     // distance between two lons depends on their latitude. In this case we'll just average them
-    let x: f64 = lon_distance((a.lat() + b.lat()) / 2.0, a.lng(), b.lng());
+    let x: f64 = lon_distance(f64::midpoint(a.lat(), b.lat()), a.lng(), b.lng());
 
     (z, x)
 }

@@ -8,7 +8,7 @@ use crate::map_transformation;
 use crate::osm_parser;
 use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
-use crate::telemetry::{self, send_log, LogLevel};
+use crate::telemetry::{self, LogLevel, send_log};
 use crate::version_check;
 use crate::world_editor::WorldFormat;
 use colored::Colorize;
@@ -64,8 +64,8 @@ impl Drop for SessionLock {
 
 /// Gets the area name for a given bounding box using the center point
 fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
-    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+    let center_lat = f64::midpoint(bbox.min().lat(), bbox.max().lat());
+    let center_lon = f64::midpoint(bbox.min().lng(), bbox.max().lng());
 
     match retrieve_data::fetch_area_name(center_lat, center_lon) {
         Ok(Some(name)) => name,
@@ -83,6 +83,10 @@ pub fn run_gui() {
     // Workaround WebKit2GTK issue with NVIDIA drivers and graphics issues
     // Source: https://github.com/tauri-apps/tauri/issues/10702
     #[cfg(target_os = "linux")]
+    #[expect(
+        unsafe_code,
+        reason = "Calling unsafe code to set environment variables"
+    )]
     unsafe {
         // Disable problematic GPU features that cause map loading issues
         env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
@@ -185,18 +189,16 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
                     if let Ok(file) = fs::File::open(&session_lock_path) {
                         if fs2::FileExt::try_lock_shared(&file).is_err() {
                             return Err(2); // Error code 2: The selected world is currently in use
-                        } else {
-                            // Release the lock immediately
-                            let _ = fs2::FileExt::unlock(&file);
                         }
+                        // Release the lock immediately
+                        let _ = fs2::FileExt::unlock(&file);
                     }
                 }
 
                 return Ok(path.display().to_string());
-            } else {
-                // No Minecraft directory found, generating new world in custom user selected directory
-                return create_new_world(&path).map_err(|_| 3); // Error code 3: Failed to create new world
             }
+            // No Minecraft directory found, generating new world in custom user selected directory
+            return create_new_world(&path).map_err(|_| 3); // Error code 3: Failed to create new world
         }
 
         // If no folder was selected, return an error message
@@ -259,37 +261,37 @@ fn create_new_world(base_path: &Path) -> Result<String, String> {
         .map_err(|e| format!("Failed to parse level.dat template: {e}"))?;
 
     // Modify the LevelName, LastPlayed and player position fields
-    if let Value::Compound(ref mut root) = level_data {
-        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-            // Update LevelName
-            data.insert("LevelName".to_string(), Value::String(unique_name.clone()));
+    if let Value::Compound(ref mut root) = level_data
+        && let Some(Value::Compound(data)) = root.get_mut("Data")
+    {
+        // Update LevelName
+        data.insert("LevelName".to_string(), Value::String(unique_name.clone()));
 
-            // Update LastPlayed to the current Unix time in milliseconds
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| format!("Failed to get current time: {e}"))?;
-            let current_time_millis = current_time.as_millis() as i64;
-            data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
+        // Update LastPlayed to the current Unix time in milliseconds
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("Failed to get current time: {e}"))?;
+        let current_time_millis = current_time.as_millis() as i64;
+        data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
 
-            // Update player position and rotation
-            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    if let Value::Double(ref mut x) = pos.get_mut(0).unwrap() {
-                        *x = -5.0;
-                    }
-                    if let Value::Double(ref mut y) = pos.get_mut(1).unwrap() {
-                        *y = -61.0;
-                    }
-                    if let Value::Double(ref mut z) = pos.get_mut(2).unwrap() {
-                        *z = -5.0;
-                    }
+        // Update player position and rotation
+        if let Some(Value::Compound(player)) = data.get_mut("Player") {
+            if let Some(Value::List(pos)) = player.get_mut("Pos") {
+                if let Value::Double(x) = pos.get_mut(0).unwrap() {
+                    *x = -5.0;
                 }
-
-                if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
-                    if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
-                        *x = -45.0;
-                    }
+                if let Value::Double(y) = pos.get_mut(1).unwrap() {
+                    *y = -61.0;
                 }
+                if let Value::Double(z) = pos.get_mut(2).unwrap() {
+                    *z = -5.0;
+                }
+            }
+
+            if let Some(Value::List(rot)) = player.get_mut("Rotation")
+                && let Value::Float(x) = rot.get_mut(0).unwrap()
+            {
+                *x = -45.0;
             }
         }
     }
@@ -348,7 +350,7 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
         return world_path;
     };
 
-    let Some(Value::Compound(ref data)) = root.get("Data") else {
+    let Some(Value::Compound(data)) = root.get("Data") else {
         return world_path;
     };
 
@@ -362,8 +364,8 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     }
 
     // Calculate center coordinates of bbox
-    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+    let center_lat = f64::midpoint(bbox.min().lat(), bbox.max().lat());
+    let center_lon = f64::midpoint(bbox.min().lng(), bbox.max().lng());
 
     // Try to fetch the area name
     let area_name = match retrieve_data::fetch_area_name(center_lat, center_lon) {
@@ -395,31 +397,28 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     if let Ok(level_data) = std::fs::read(&level_path) {
         let mut decoder = GzDecoder::new(level_data.as_slice());
         let mut decompressed_data = Vec::new();
-        if decoder.read_to_end(&mut decompressed_data).is_ok() {
-            if let Ok(mut nbt_data) = fastnbt::from_bytes::<Value>(&decompressed_data) {
-                // Update the level name in NBT data
-                if let Value::Compound(ref mut root) = nbt_data {
-                    if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-                        data.insert("LevelName".to_string(), Value::String(new_name));
+        if decoder.read_to_end(&mut decompressed_data).is_ok()
+            && let Ok(mut nbt_data) = fastnbt::from_bytes::<Value>(&decompressed_data)
+        {
+            // Update the level name in NBT data
+            if let Value::Compound(ref mut root) = nbt_data
+                && let Some(Value::Compound(data)) = root.get_mut("Data")
+            {
+                data.insert("LevelName".to_string(), Value::String(new_name));
 
-                        // Save the updated NBT data
-                        if let Ok(serialized_data) = fastnbt::to_bytes(&nbt_data) {
-                            let mut encoder = flate2::write::GzEncoder::new(
-                                Vec::new(),
-                                flate2::Compression::default(),
-                            );
-                            if encoder.write_all(&serialized_data).is_ok() {
-                                if let Ok(compressed_data) = encoder.finish() {
-                                    if let Err(e) = std::fs::write(&level_path, compressed_data) {
-                                        eprintln!("Failed to update level.dat with area name: {e}");
-                                        send_log(
-                                            LogLevel::Warning,
-                                            "Failed to update level.dat with area name",
-                                        );
-                                    }
-                                }
-                            }
-                        }
+                // Save the updated NBT data
+                if let Ok(serialized_data) = fastnbt::to_bytes(&nbt_data) {
+                    let mut encoder =
+                        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+                    if encoder.write_all(&serialized_data).is_ok()
+                        && let Ok(compressed_data) = encoder.finish()
+                        && let Err(e) = std::fs::write(&level_path, compressed_data)
+                    {
+                        eprintln!("Failed to update level.dat with area name: {e}");
+                        send_log(
+                            LogLevel::Warning,
+                            "Failed to update level.dat with area name",
+                        );
                     }
                 }
             }
@@ -488,26 +487,26 @@ fn update_player_position(
     };
 
     // Update player position and world spawn point
-    if let Value::Compound(ref mut root) = nbt_data {
-        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-            // Set world spawn point
-            data.insert("SpawnX".to_string(), Value::Int(xzpoint.x));
-            data.insert("SpawnY".to_string(), Value::Int(y as i32));
-            data.insert("SpawnZ".to_string(), Value::Int(xzpoint.z));
+    if let Value::Compound(ref mut root) = nbt_data
+        && let Some(Value::Compound(data)) = root.get_mut("Data")
+    {
+        // Set world spawn point
+        data.insert("SpawnX".to_string(), Value::Int(xzpoint.x));
+        data.insert("SpawnY".to_string(), Value::Int(y as i32));
+        data.insert("SpawnZ".to_string(), Value::Int(xzpoint.z));
 
-            // Update player position
-            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    if let Value::Double(ref mut pos_x) = pos.get_mut(0).unwrap() {
-                        *pos_x = xzpoint.x as f64;
-                    }
-                    if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
-                        *pos_y = y;
-                    }
-                    if let Value::Double(ref mut pos_z) = pos.get_mut(2).unwrap() {
-                        *pos_z = xzpoint.z as f64;
-                    }
-                }
+        // Update player position
+        if let Some(Value::Compound(player)) = data.get_mut("Player")
+            && let Some(Value::List(pos)) = player.get_mut("Pos")
+        {
+            if let Value::Double(pos_x) = pos.get_mut(0).unwrap() {
+                *pos_x = f64::from(xzpoint.x);
+            }
+            if let Value::Double(pos_y) = pos.get_mut(1).unwrap() {
+                *pos_y = y;
+            }
+            if let Value::Double(pos_z) = pos.get_mut(2).unwrap() {
+                *pos_z = f64::from(xzpoint.z);
             }
         }
     }
@@ -576,7 +575,7 @@ pub fn update_player_spawn_y_after_generation(
 
     // Get existing spawn coordinates and calculate new Y based on terrain
     let (existing_spawn_x, existing_spawn_z) = if let Value::Compound(ref root) = nbt_data {
-        if let Some(Value::Compound(ref data)) = root.get("Data") {
+        if let Some(Value::Compound(data)) = root.get("Data") {
             let spawn_x = data.get("SpawnX").and_then(|v| {
                 if let Value::Int(x) = v {
                     Some(*x)
@@ -624,19 +623,19 @@ pub fn update_player_spawn_y_after_generation(
     };
 
     // Update player position and world spawn point
-    if let Value::Compound(ref mut root) = nbt_data {
-        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-            // Only update the Y coordinate, keep existing X and Z
-            data.insert("SpawnY".to_string(), Value::Int(spawn_y));
+    if let Value::Compound(ref mut root) = nbt_data
+        && let Some(Value::Compound(data)) = root.get_mut("Data")
+    {
+        // Only update the Y coordinate, keep existing X and Z
+        data.insert("SpawnY".to_string(), Value::Int(spawn_y));
 
-            // Update player position - only Y coordinate
-            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    // Keep existing X and Z, only update Y
-                    if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
-                        *pos_y = spawn_y as f64;
-                    }
-                }
+        // Update player position - only Y coordinate
+        if let Some(Value::Compound(player)) = data.get_mut("Player")
+            && let Some(Value::List(pos)) = player.get_mut("Pos")
+        {
+            // Keep existing X and Z, only update Y
+            if let Value::Double(pos_y) = pos.get_mut(1).unwrap() {
+                *pos_y = f64::from(spawn_y);
             }
         }
     }
@@ -717,7 +716,7 @@ fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, St
         .ok_or("Missing maxGeoLon in metadata")?;
 
     Ok(Some(WorldMapData {
-        image_base64: format!("data:image/png;base64,{}", base64_image),
+        image_base64: format!("data:image/png;base64,{base64_image}"),
         min_lat,
         max_lat,
         min_lon,
@@ -750,7 +749,7 @@ fn gui_show_in_folder(path: String) -> Result<(), String> {
             std::process::Command::new("explorer")
                 .args(["/select,", &path])
                 .spawn()
-                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+                .map_err(|e| format!("Failed to open explorer: {e}"))?;
         }
     }
 
@@ -805,8 +804,8 @@ fn gui_start_generation(
     telemetry_consent: bool,
     world_format: String,
 ) -> Result<(), String> {
-    use progress::emit_gui_error;
     use LLBBox;
+    use progress::emit_gui_error;
 
     // Store telemetry consent for crash reporting
     telemetry::set_telemetry_consent(telemetry_consent);
@@ -892,8 +891,8 @@ fn gui_start_generation(
                 WorldFormat::BedrockMcWorld => {
                     // Bedrock: generate .mcworld in current directory with location-based name
                     let area_name = get_area_name_for_bedrock(&bbox);
-                    let filename = format!("Arnis {}.mcworld", area_name);
-                    let lvl_name = format!("Arnis World: {}", area_name);
+                    let filename = format!("Arnis {area_name}.mcworld");
+                    let lvl_name = format!("Arnis World: {area_name}");
                     let output_path = std::env::current_dir()
                         .unwrap_or_else(|_| PathBuf::from("."))
                         .join(filename);
@@ -959,10 +958,10 @@ fn gui_start_generation(
                 let parsed_elements = Vec::new();
                 let (_coord_transformer, xzbbox) =
                     CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
-                        .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
+                        .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
                 let _ = data_processing::generate_world_with_options(
-                    parsed_elements,
+                    &parsed_elements,
                     xzbbox,
                     args.bbox,
                     ground,
@@ -1005,7 +1004,7 @@ fn gui_start_generation(
                     );
 
                     let _ = data_processing::generate_world_with_options(
-                        parsed_elements,
+                        &parsed_elements,
                         xzbbox,
                         args.bbox,
                         ground,

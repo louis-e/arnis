@@ -21,7 +21,7 @@ pub(crate) use common::WorldToModify;
 #[cfg(feature = "bedrock")]
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
-use crate::block_definitions::*;
+use crate::block_definitions::{Block, BlockWithProperties, SIGN};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
@@ -35,7 +35,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 #[cfg(feature = "gui")]
-use crate::telemetry::{send_log, LogLevel};
+use crate::telemetry::{LogLevel, send_log};
 
 /// World format to generate
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -65,7 +65,7 @@ pub(crate) struct WorldMetadata {
 /// The main world editor struct for placing blocks and saving worlds.
 ///
 /// The lifetime `'a` is tied to the `XZBBox` reference, which defines
-/// the world boundaries and must outlive the WorldEditor instance.
+/// the world boundaries and must outlive the `WorldEditor` instance.
 pub struct WorldEditor<'a> {
     world_dir: PathBuf,
     world: WorldToModify,
@@ -80,7 +80,7 @@ pub struct WorldEditor<'a> {
 }
 
 impl<'a> WorldEditor<'a> {
-    /// Creates a new WorldEditor with Java Anvil format (default).
+    /// Creates a new `WorldEditor` with Java Anvil format (default).
     ///
     /// This is the default constructor used by CLI mode.
     #[allow(dead_code)]
@@ -97,7 +97,7 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
-    /// Creates a new WorldEditor with a specific format and optional level name.
+    /// Creates a new `WorldEditor` with a specific format and optional level name.
     ///
     /// Used by GUI mode to support both Java and Bedrock formats.
     #[allow(dead_code)]
@@ -128,7 +128,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Gets a reference to the ground data if available
     pub fn get_ground(&self) -> Option<&Ground> {
-        self.ground.as_ref().map(|g| g.as_ref())
+        self.ground.as_ref().map(std::convert::AsRef::as_ref)
     }
 
     /// Returns the current world format
@@ -243,7 +243,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+        if !self.xzbbox.contains(XZPoint::new(x, z)) {
             return;
         }
 
@@ -284,7 +284,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+        if !self.xzbbox.contains(XZPoint::new(x, z)) {
             return;
         }
 
@@ -322,7 +322,7 @@ impl<'a> WorldEditor<'a> {
         override_blacklist: Option<&[Block]>,
     ) {
         // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+        if !self.xzbbox.contains(XZPoint::new(x, z)) {
             return;
         }
 
@@ -429,15 +429,13 @@ impl<'a> WorldEditor<'a> {
         let absolute_y = self.get_absolute_y(x, y, z);
 
         // Retrieve the chunk modification map
-        if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            if let Some(whitelist) = whitelist {
-                if whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-                {
-                    return true; // Block is in the list
-                }
-            }
+        if let Some(existing_block) = self.world.get_block(x, absolute_y, z)
+            && let Some(whitelist) = whitelist
+            && whitelist
+                .iter()
+                .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
+        {
+            return true; // Block is in the list
         }
         false
     }
@@ -464,13 +462,12 @@ impl<'a> WorldEditor<'a> {
                 }
                 return false;
             }
-            if let Some(blacklist) = blacklist {
-                if blacklist
+            if let Some(blacklist) = blacklist
+                && blacklist
                     .iter()
                     .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-                {
-                    return true; // Block is in blacklist
-                }
+            {
+                return true; // Block is in blacklist
             }
             return whitelist.is_none() && blacklist.is_none();
         }
@@ -577,10 +574,10 @@ impl<'a> WorldEditor<'a> {
         };
 
         let contents = serde_json::to_string(&metadata)
-            .map_err(|e| format!("Failed to serialize metadata to JSON: {}", e))?;
+            .map_err(|e| format!("Failed to serialize metadata to JSON: {e}"))?;
 
-        write!(&mut file, "{}", contents)
-            .map_err(|e| format!("Failed to write metadata to file: {}", e))?;
+        write!(&mut file, "{contents}")
+            .map_err(|e| format!("Failed to write metadata to file: {e}"))?;
 
         Ok(())
     }
