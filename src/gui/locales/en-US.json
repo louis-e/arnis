@@ -38,7 +38,12 @@
   "language": "Language",
   "map_theme": "Map Theme",
   "terrain": "Terrain",
+  "generation_mode": "Generation Mode",
+  "mode_geo_terrain": "Objects + Terrain",
+  "mode_geo_only": "Objects only",
+  "mode_terrain_only": "Terrain only",
   "interior": "Interior Generation",
   "roof": "Roof Generation",
-  "fillground": "Fill Ground"
+  "fillground": "Fill Ground",
+  "bedrock_use_java": "Use Java to select worlds"
 }

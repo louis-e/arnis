@@ -63,6 +63,7 @@ a:hover {
   justify-content: center;
   align-items: stretch;
   margin-top: 5px;
+  min-height: 60vh;
 }
 
 .section {
@@ -79,6 +80,12 @@ a:hover {
   padding: 20px;
   border-radius: 8px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.map-box {
+  min-height: 400px;
 }
 
 .controls-content {
@@ -94,6 +101,8 @@ a:hover {
 .map-container {
   border: 2px solid #e0e0e0;
   border-radius: 8px;
+  flex-grow: 1;
+  min-height: 300px;
 }
 
 .section h2 {
@@ -213,6 +222,68 @@ button:hover {
   width: 100%;
 }
 
+/* World Selection Container */
+.world-selection-container {
+  width: 100%;
+}
+
+.choose-world-btn {
+  padding: 10px;
+  line-height: 1.2;
+  width: 100%;
+  border-radius: 8px 8px 0 0 !important;
+  margin-bottom: 0 !important;
+  box-shadow: none !important;
+}
+
+/* World Format Toggle */
+.format-toggle-container {
+  display: flex;
+  width: 100%;
+  gap: 0;
+  margin-top: 0;
+}
+
+.format-toggle-btn {
+  flex: 1;
+  padding: 10px;
+  font-size: 1em;
+  font-weight: 500;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  margin-top: 0;
+  border-radius: 0;
+}
+
+.format-toggle-btn:first-child {
+  border-radius: 0 0 0 8px;
+}
+
+.format-toggle-btn:last-child {
+  border-radius: 0 0 8px 0;
+}
+
+.format-toggle-btn:not(.format-active) {
+  background-color: #3a3a3a;
+  color: #b0b0b0;
+}
+
+.format-toggle-btn:not(.format-active):hover {
+  background-color: #4a4a4a;
+  color: #ffffff;
+}
+
+.format-toggle-btn.format-active {
+  background-color: var(--primary-accent);
+  color: #0f0f0f;
+  font-weight: 600;
+}
+
+.format-toggle-btn.format-active:hover {
+  background-color: var(--primary-accent-dark);
+}
+
 /* Customization Settings */
 .modal {
   position: fixed;
@@ -249,6 +320,33 @@ button:hover {
   color: #ffffff;
 }
 
+/* Modal actions/buttons */
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.btn-primary {
+  background-color: var(--primary-accent);
+  color: #1a1a1a;
+}
+
+.btn-primary:hover {
+  background-color: var(--primary-accent-dark);
+}
+
+.btn-secondary {
+  background-color: #e0e0e0;
+}
+
+@media (prefers-color-scheme: dark) {
+  .btn-secondary {
+    background-color: #3a3a3a;
+    color: #ffffff;
+  }
+}
+
 #terrain-toggle {
   accent-color: #fecc44;
 }
@@ -281,6 +379,10 @@ button:hover {
   margin: 15px 0;
 }
 
+#telemetry-toggle {
+  accent-color: #fecc44;
+}
+
 .scale-slider-container label {
   display: block;
   margin-bottom: 5px;
@@ -306,7 +408,7 @@ button:hover {
 
 #bbox-coords {
   width: 100%;
-  padding: 8px;
+  padding: 5px;
   border: 1px solid #fecc44;
   border-radius: 4px;
   font-size: 14px;
@@ -353,7 +455,7 @@ button:hover {
 
 .license-button-row {
   justify-content: center;
-  margin-top: 10px;
+  margin-top: 5px;
 }
 
 .license-button {
@@ -389,11 +491,39 @@ button:hover {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
+/* Generation mode dropdown styling */
+.generation-mode-dropdown {
+  width: 100%;
+  max-width: 180px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid #fecc44;
+  background-color: #ffffff;
+  color: #0f0f0f;
+  appearance: menulist;
+  cursor: pointer;
+  font-size: 15px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+.generation-mode-dropdown option {
+  padding: 5px;
+  font-size: 15px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .generation-mode-dropdown {
+    background-color: #0f0f0f98;
+    color: #ffffff;
+    border: 1px solid #fecc44;
+  }
+}
+
 /* Language dropdown styling */
 .language-dropdown {
   width: 100%;
   max-width: 180px;
-  padding: 5px 8px;
+  padding: 3px 8px;
   border-radius: 4px;
   border: 1px solid #fecc44;
   background-color: #ffffff;
@@ -421,7 +551,7 @@ button:hover {
 .theme-dropdown {
   width: 100%;
   max-width: 180px;
-  padding: 5px 8px;
+  padding: 3px 8px;
   border-radius: 4px;
   border: 1px solid #fecc44;
   background-color: #ffffff;

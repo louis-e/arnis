@@ -1,6 +1,6 @@
 [package]
 name = "arnis"
-version = "2.3.0"
+version = "2.4.0"
 edition = "2021"
 description = "Arnis - Generate real life cities in Minecraft"
 homepage = "https://github.com/louis-e/arnis"
@@ -14,21 +14,24 @@ overflow-checks = true
 
 [features]
 default = ["gui"]
-gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "dirs", "tauri-build"]
+gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "dirs", "tauri-build", "bedrock"]
+bedrock = ["bedrockrs_level", "bedrockrs_shared", "nbtx", "zip", "byteorder", "vek"]
 
 [build-dependencies]
 tauri-build = {version = "2", optional = true}
 
 [dependencies]
+base64 = "0.22.1"
+byteorder = { version = "1.5", optional = true }
 clap = { version = "4.5", features = ["derive", "env"] }
 colored = "3.0.0"
 dirs = {version = "6.0.0", optional = true }
 fastanvil = "0.32.0"
-fastnbt = "2.5.0"
+fastnbt = "2.6.0"
 flate2 = "1.1"
 fnv = "1.0.7"
 fs2 = "0.4"
-geo = "0.30.0"
+geo = "0.31.0"
 image = "0.25"
 indicatif = "0.17.11"
 itertools = "0.14.0"
@@ -39,16 +42,21 @@ rayon = "1.10.0"
 ndarray = "0.16.1"
 reqwest = { version = "0.12.15", features = ["blocking", "json"] }
 rfd = { version = "0.15.4", optional = true }
-semver = "1.0.26"
+semver = "1.0.27"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tauri = { version = "2", optional = true }
 tauri-plugin-log = { version = "2.6.0", optional = true }
 tauri-plugin-shell = { version = "2", optional = true }
-tokio = { version = "1.47.0", features = ["full"], optional = true }
+tokio = { version = "1.48.0", features = ["full"], optional = true }
+bedrockrs_level = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", package = "bedrockrs_level", optional = true }
+bedrockrs_shared = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", package = "bedrockrs_shared", optional = true }
+nbtx = { git = "https://github.com/bedrock-crustaceans/nbtx", optional = true }
+vek = { version = "0.17", optional = true }
+zip = { version = "0.6", default-features = false, features = ["deflate"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.1", features = ["Win32_System_Console"] }
 
 [dev-dependencies]
-tempfile = "3.21.0"
+tempfile = "3.23.0"

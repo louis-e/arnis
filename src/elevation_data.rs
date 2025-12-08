@@ -1,4 +1,6 @@
 use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
+#[cfg(feature = "gui")]
+use crate::telemetry::{send_log, LogLevel};
 use image::Rgb;
 use ndarray::Array2;
 use std::path::Path;
@@ -141,14 +143,22 @@ pub fn fetch_elevation_data(
             };
 
             if file_size < 1000 {
-                eprintln!("Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
-                         tile_path.display(), file_size);
+                eprintln!(
+                    "Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
+                    tile_path.display(),
+                    file_size
+                );
 
                 // Remove the potentially corrupted file
                 if let Err(remove_err) = std::fs::remove_file(&tile_path) {
                     eprintln!(
                         "Warning: Failed to remove corrupted tile file: {}",
                         remove_err
+                    );
+                    #[cfg(feature = "gui")]
+                    send_log(
+                        LogLevel::Warning,
+                        "Failed to remove corrupted tile file during refetching.",
                     );
                 }
 
@@ -164,13 +174,27 @@ pub fn fetch_elevation_data(
                 match image::open(&tile_path) {
                     Ok(img) => img.to_rgb8(),
                     Err(e) => {
-                        eprintln!("Warning: Cached tile at {} is corrupted or invalid: {}. Re-downloading...", tile_path.display(), e);
+                        eprintln!(
+                            "Cached tile at {} is corrupted or invalid: {}. Re-downloading...",
+                            tile_path.display(),
+                            e
+                        );
+                        #[cfg(feature = "gui")]
+                        send_log(
+                            LogLevel::Warning,
+                            "Cached tile is corrupted or invalid. Re-downloading...",
+                        );
 
                         // Remove the corrupted file
                         if let Err(remove_err) = std::fs::remove_file(&tile_path) {
                             eprintln!(
                                 "Warning: Failed to remove corrupted tile file: {}",
                                 remove_err
+                            );
+                            #[cfg(feature = "gui")]
+                            send_log(
+                                LogLevel::Warning,
+                                "Failed to remove corrupted tile file during re-download.",
                             );
                         }
 
@@ -254,25 +278,26 @@ pub fn fetch_elevation_data(
     filter_elevation_outliers(&mut height_grid);
 
     // Calculate blur sigma based on grid resolution
-    // Reference points for tuning:
-    const SMALL_GRID_REF: f64 = 100.0; // Reference grid size
-    const SMALL_SIGMA_REF: f64 = 15.0; // Sigma for 100x100 grid
-    const LARGE_GRID_REF: f64 = 1000.0; // Reference grid size
-    const LARGE_SIGMA_REF: f64 = 7.0; // Sigma for 1000x1000 grid
+    // Use sqrt scaling to maintain consistent relative smoothing across different area sizes.
+    // This prevents larger generation areas from appearing noisier than smaller ones.
+    // Reference: 100x100 grid uses sigma=5 (5% relative blur)
+    const BASE_GRID_REF: f64 = 100.0;
+    const BASE_SIGMA_REF: f64 = 5.0;
 
     let grid_size: f64 = (grid_width.min(grid_height) as f64).max(1.0);
 
-    let sigma: f64 = if grid_size <= SMALL_GRID_REF {
-        // Linear scaling for small grids
-        SMALL_SIGMA_REF * (grid_size / SMALL_GRID_REF)
-    } else {
-        // Logarithmic scaling for larger grids
-        let ln_small: f64 = SMALL_GRID_REF.ln();
-        let ln_large: f64 = LARGE_GRID_REF.ln();
-        let log_grid_size: f64 = grid_size.ln();
-        let t: f64 = (log_grid_size - ln_small) / (ln_large - ln_small);
-        SMALL_SIGMA_REF + t * (LARGE_SIGMA_REF - SMALL_SIGMA_REF)
-    };
+    // Sqrt scaling provides a good balance:
+    // - 100x100: sigma = 5 (5% relative)
+    // - 500x500: sigma ≈ 11.2 (2.2% relative)
+    // - 1000x1000: sigma ≈ 15.8 (1.6% relative)
+    // This smooths terrain proportionally while preserving more detail.
+    let sigma: f64 = BASE_SIGMA_REF * (grid_size / BASE_GRID_REF).sqrt();
+
+    let blur_percentage: f64 = (sigma / grid_size) * 100.0;
+    eprintln!(
+        "Elevation blur: grid={}x{}, sigma={:.2}, blur_percentage={:.2}%",
+        grid_width, grid_height, sigma, blur_percentage
+    );
 
     /* eprintln!(
         "Grid: {}x{}, Blur sigma: {:.2}",

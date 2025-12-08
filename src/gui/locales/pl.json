@@ -38,7 +38,12 @@
   "language": "Język",
   "map_theme": "Motyw mapy",
   "terrain": "Teren",
-  "interior": "Generowanie wnętrz",
-  "roof": "Generowanie dachów",
-  "fillground": "Wypełnij podłoże"
+  "generation_mode": "Tryb generowania",
+  "mode_geo_terrain": "Obiekty + Teren",
+  "mode_geo_only": "Tylko obiekty",
+  "mode_terrain_only": "Tylko teren",
+  "interior": "Generowanie wnętrza",
+  "roof": "Generowanie dachu",
+  "fillground": "Wypełnij podłoże",
+  "bedrock_use_java": "Użyj Java do wyboru światów"
 }

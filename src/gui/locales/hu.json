@@ -38,7 +38,12 @@
   "language": "Nyelv",
   "map_theme": "Térkép téma",
   "terrain": "Terep",
+  "generation_mode": "Generálási mód",
+  "mode_geo_terrain": "Objektumok + Terep",
+  "mode_geo_only": "Csak objektumok",
+  "mode_terrain_only": "Csak terep",
   "interior": "Belső generálás",
   "roof": "Tető generálás",
-  "fillground": "Talaj feltöltése"
+  "fillground": "Talaj feltöltése",
+  "bedrock_use_java": "Java világválasztáshoz"
 }

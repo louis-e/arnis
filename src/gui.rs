@@ -1,21 +1,25 @@
 use crate::args::Args;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::data_processing;
+use crate::coordinate_system::transformation::CoordTransformer;
+use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
-use crate::progress;
+use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
+use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
+use crate::world_editor::WorldFormat;
+use colored::Colorize;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
-use log::{error, LevelFilter};
+use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::{env, fs, io::Write, panic};
+use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
 /// Manages the session.lock file for a Minecraft world directory
@@ -58,16 +62,23 @@ impl Drop for SessionLock {
     }
 }
 
+/// Gets the area name for a given bounding box using the center point
+fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
+    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+
+    match retrieve_data::fetch_area_name(center_lat, center_lon) {
+        Ok(Some(name)) => name,
+        _ => "Unknown Location".to_string(),
+    }
+}
+
 pub fn run_gui() {
     // Launch the UI
     println!("Launching UI...");
 
-    // Set a custom panic hook to log panic information
-    panic::set_hook(Box::new(|panic_info| {
-        let message = format!("Application panicked: {panic_info:?}");
-        error!("{message}");
-        std::process::exit(1);
-    }));
+    // Install panic hook for crash reporting
+    telemetry::install_panic_hook();
 
     // Workaround WebKit2GTK issue with NVIDIA drivers and graphics issues
     // Source: https://github.com/tauri-apps/tauri/issues/10702
@@ -102,7 +113,9 @@ pub fn run_gui() {
             gui_select_world,
             gui_start_generation,
             gui_get_version,
-            gui_check_for_updates
+            gui_check_for_updates,
+            gui_get_world_map_data,
+            gui_show_in_folder
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -399,6 +412,10 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                                 if let Ok(compressed_data) = encoder.finish() {
                                     if let Err(e) = std::fs::write(&level_path, compressed_data) {
                                         eprintln!("Failed to update level.dat with area name: {e}");
+                                        send_log(
+                                            LogLevel::Warning,
+                                            "Failed to update level.dat with area name",
+                                        );
                                     }
                                 }
                             }
@@ -661,6 +678,114 @@ fn gui_check_for_updates() -> Result<bool, String> {
     }
 }
 
+/// Returns the world map image data as base64 and geo bounds for overlay display.
+/// Returns None if the map image or metadata doesn't exist.
+#[tauri::command]
+fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, String> {
+    let world_dir = PathBuf::from(&world_path);
+    let map_path = world_dir.join("arnis_world_map.png");
+    let metadata_path = world_dir.join("metadata.json");
+
+    // Check if both files exist
+    if !map_path.exists() || !metadata_path.exists() {
+        return Ok(None);
+    }
+
+    // Read and encode the map image as base64
+    let image_data = fs::read(&map_path).map_err(|e| format!("Failed to read map image: {e}"))?;
+    let base64_image =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
+
+    // Read metadata
+    let metadata_content =
+        fs::read_to_string(&metadata_path).map_err(|e| format!("Failed to read metadata: {e}"))?;
+    let metadata: serde_json::Value = serde_json::from_str(&metadata_content)
+        .map_err(|e| format!("Failed to parse metadata: {e}"))?;
+
+    // Extract geo bounds (metadata uses camelCase from serde)
+    let min_lat = metadata["minGeoLat"]
+        .as_f64()
+        .ok_or("Missing minGeoLat in metadata")?;
+    let max_lat = metadata["maxGeoLat"]
+        .as_f64()
+        .ok_or("Missing maxGeoLat in metadata")?;
+    let min_lon = metadata["minGeoLon"]
+        .as_f64()
+        .ok_or("Missing minGeoLon in metadata")?;
+    let max_lon = metadata["maxGeoLon"]
+        .as_f64()
+        .ok_or("Missing maxGeoLon in metadata")?;
+
+    Ok(Some(WorldMapData {
+        image_base64: format!("data:image/png;base64,{}", base64_image),
+        min_lat,
+        max_lat,
+        min_lon,
+        max_lon,
+    }))
+}
+
+/// Data structure for world map overlay
+#[derive(serde::Serialize)]
+struct WorldMapData {
+    image_base64: String,
+    min_lat: f64,
+    max_lat: f64,
+    min_lon: f64,
+    max_lon: f64,
+}
+
+/// Opens the file with default application (Windows) or shows in file explorer (macOS/Linux)
+#[tauri::command]
+fn gui_show_in_folder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, try to open with default application (Minecraft Bedrock)
+        // If that fails, show in Explorer
+        if std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .is_err()
+        {
+            std::process::Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, just reveal in Finder
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open Finder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, just show in file manager
+        let path_parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+
+        // Try nautilus with select first, then fall back to xdg-open on parent
+        if std::process::Command::new("nautilus")
+            .args(["--select", &path])
+            .spawn()
+            .is_err()
+        {
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&path_parent)
+                .spawn();
+        }
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_variables)]
@@ -671,17 +796,28 @@ fn gui_start_generation(
     ground_level: i32,
     floodfill_timeout: u64,
     terrain_enabled: bool,
+    skip_osm_objects: bool,
     interior_enabled: bool,
     roof_enabled: bool,
     fillground_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
+    telemetry_consent: bool,
+    world_format: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
 
+    // Store telemetry consent for crash reporting
+    telemetry::set_telemetry_consent(telemetry_consent);
+
+    // Send generation click telemetry
+    telemetry::send_generation_click();
+
     // If spawn point was chosen and the world is new, check and set the spawn point
-    if is_new_world && spawn_point.is_some() {
+    // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
+    // level.dat to modify (the spawn point will be set when the .mcworld is created)
+    if is_new_world && spawn_point.is_some() && world_format != "bedrock" {
         // Verify the spawn point is within bounds
         if let Some(coords) = spawn_point {
             let llbbox = match LLBBox::from_str(&bbox_text) {
@@ -735,19 +871,73 @@ fn gui_start_generation(
                 }
             };
 
-            // Add localized name to the world if user generated a new world
-            let updated_world_path = if is_new_world {
-                add_localized_world_name(world_path, &bbox)
+            // Determine world format from UI selection
+            let world_format = if world_format == "bedrock" {
+                WorldFormat::BedrockMcWorld
             } else {
-                world_path
+                WorldFormat::JavaAnvil
             };
 
-            // Create an Args instance with the chosen bounding box and world directory path
+            // Determine output path and level name based on format
+            let (generation_path, level_name) = match world_format {
+                WorldFormat::JavaAnvil => {
+                    // Java: use the selected world path, add localized name if new
+                    let updated_path = if is_new_world {
+                        add_localized_world_name(world_path.clone(), &bbox)
+                    } else {
+                        world_path.clone()
+                    };
+                    (updated_path, None)
+                }
+                WorldFormat::BedrockMcWorld => {
+                    // Bedrock: generate .mcworld in current directory with location-based name
+                    let area_name = get_area_name_for_bedrock(&bbox);
+                    let filename = format!("Arnis {}.mcworld", area_name);
+                    let lvl_name = format!("Arnis World: {}", area_name);
+                    let output_path = std::env::current_dir()
+                        .unwrap_or_else(|_| PathBuf::from("."))
+                        .join(filename);
+                    (output_path, Some(lvl_name))
+                }
+            };
+
+            // Calculate MC spawn coordinates from lat/lng if spawn point was provided
+            let mc_spawn_point: Option<(i32, i32)> = if let Some((lat, lng)) = spawn_point {
+                if let Ok(llpoint) = LLPoint::new(lat, lng) {
+                    if let Ok((transformer, _)) =
+                        CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+                    {
+                        let xzpoint = transformer.transform_point(llpoint);
+                        Some((xzpoint.x, xzpoint.z))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
+            // Create generation options
+            let generation_options = GenerationOptions {
+                path: generation_path.clone(),
+                format: world_format,
+                level_name,
+                spawn_point: mc_spawn_point,
+            };
+
+            // Create an Args instance with the chosen bounding box
+            // Note: path is used for Java-specific features like spawn point update
             let args: Args = Args {
                 bbox,
                 file: None,
                 save_json_file: None,
-                path: updated_world_path,
+                path: if world_format == WorldFormat::JavaAnvil {
+                    generation_path
+                } else {
+                    world_path
+                },
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
@@ -760,7 +950,44 @@ fn gui_start_generation(
                 spawn_point,
             };
 
-            // Run data fetch and world generation
+            // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
+            if skip_osm_objects {
+                // Generate ground data (terrain) for terrain-only mode
+                let ground = ground::generate_ground_data(&args);
+
+                // Create empty parsed_elements and xzbbox for terrain-only mode
+                let parsed_elements = Vec::new();
+                let (_coord_transformer, xzbbox) =
+                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                        .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
+
+                let _ = data_processing::generate_world_with_options(
+                    parsed_elements,
+                    xzbbox.clone(),
+                    args.bbox,
+                    ground,
+                    &args,
+                    generation_options.clone(),
+                );
+                // Explicitly release session lock before showing Done message
+                // so Minecraft can open the world immediately
+                drop(_session_lock);
+                emit_gui_progress_update(100.0, "Done! World generation completed.");
+                println!("{}", "Done! World generation completed.".green().bold());
+
+                // Start map preview generation silently in background (Java only)
+                if world_format == WorldFormat::JavaAnvil {
+                    let preview_info = data_processing::MapPreviewInfo::new(
+                        generation_options.path.clone(),
+                        &xzbbox,
+                    );
+                    data_processing::start_map_preview_generation(preview_info);
+                }
+
+                return Ok(());
+            }
+
+            // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox) =
@@ -787,14 +1014,29 @@ fn gui_start_generation(
                         &mut ground,
                     );
 
-                    let _ = data_processing::generate_world(
+                    let _ = data_processing::generate_world_with_options(
                         parsed_elements,
-                        xzbbox,
+                        xzbbox.clone(),
                         args.bbox,
                         ground,
                         &args,
+                        generation_options.clone(),
                     );
-                    // Session lock will be automatically released when _session_lock goes out of scope
+                    // Explicitly release session lock before showing Done message
+                    // so Minecraft can open the world immediately
+                    drop(_session_lock);
+                    emit_gui_progress_update(100.0, "Done! World generation completed.");
+                    println!("{}", "Done! World generation completed.".green().bold());
+
+                    // Start map preview generation silently in background (Java only)
+                    if world_format == WorldFormat::JavaAnvil {
+                        let preview_info = data_processing::MapPreviewInfo::new(
+                            generation_options.path.clone(),
+                            &xzbbox,
+                        );
+                        data_processing::start_map_preview_generation(preview_info);
+                    }
+
                     Ok(())
                 }
                 Err(e) => {

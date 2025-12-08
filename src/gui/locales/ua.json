@@ -38,7 +38,12 @@
   "language": "Мова",
   "map_theme": "Тема карти",
   "terrain": "Рельєф",
+  "generation_mode": "Режим генерації",
+  "mode_geo_terrain": "Об'єкти + Рельєф",
+  "mode_geo_only": "Тільки об'єкти",
+  "mode_terrain_only": "Тільки рельєф",
   "interior": "Генерація інтер'єру",
   "roof": "Генерація даху",
-  "fillground": "Заповнити землю"
+  "fillground": "Заповнити землю",
+  "bedrock_use_java": "Використовуй Java для світів"
 }

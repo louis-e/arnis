@@ -1,3 +1,5 @@
+#[cfg(feature = "gui")]
+use crate::telemetry::{send_log, LogLevel};
 use once_cell::sync::OnceCell;
 use serde_json::json;
 use tauri::{Emitter, WebviewWindow};
@@ -38,7 +40,10 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
         });
 
         if let Err(e) = window.emit("progress-update", payload) {
-            eprintln!("Failed to emit progress event: {e}");
+            let error_msg = format!("Failed to emit progress event: {}", e);
+            eprintln!("{}", error_msg);
+            #[cfg(feature = "gui")]
+            send_log(LogLevel::Warning, &error_msg);
         }
     }
 }
@@ -50,4 +55,22 @@ pub fn emit_gui_error(message: &str) {
         message
     };
     emit_gui_progress_update(0.0, &format!("Error! {truncated_message}"));
+}
+
+/// Emits an event when the world map preview is ready
+pub fn emit_map_preview_ready() {
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("map-preview-ready", ()) {
+            eprintln!("Failed to emit map-preview-ready event: {}", e);
+        }
+    }
+}
+
+/// Emits an event to open the generated mcworld file
+pub fn emit_open_mcworld_file(path: &str) {
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("open-mcworld-file", path) {
+            eprintln!("Failed to emit open-mcworld-file event: {}", e);
+        }
+    }
 }

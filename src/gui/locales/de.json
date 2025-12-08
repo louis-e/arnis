@@ -38,7 +38,12 @@
   "language": "Sprache",
   "map_theme": "Kartenstil",
   "terrain": "Terrain",
+  "generation_mode": "Generierungsmodus",
+  "mode_geo_terrain": "Objekte + Terrain",
+  "mode_geo_only": "Nur Objekte",
+  "mode_terrain_only": "Nur Terrain",
   "interior": "Innenraum Generierung",
   "roof": "Dach Generierung",
-  "fillground": "Boden füllen"
+  "fillground": "Boden füllen",
+  "bedrock_use_java": "Java für Weltauswahl nutzen"
 }

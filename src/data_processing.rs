@@ -4,13 +4,26 @@ use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
 use crate::ground::Ground;
+use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
-use crate::progress::emit_gui_progress_update;
-use crate::world_editor::WorldEditor;
+use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
+#[cfg(feature = "gui")]
+use crate::telemetry::{send_log, LogLevel};
+use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::PathBuf;
 
 pub const MIN_Y: i32 = -64;
+
+/// Generation options that can be passed separately from CLI Args
+#[derive(Clone)]
+pub struct GenerationOptions {
+    pub path: PathBuf,
+    pub format: WorldFormat,
+    pub level_name: Option<String>,
+    pub spawn_point: Option<(i32, i32)>,
+}
 
 pub fn generate_world(
     elements: Vec<ProcessedElement>,
@@ -19,9 +32,40 @@ pub fn generate_world(
     ground: Ground,
     args: &Args,
 ) -> Result<(), String> {
-    let mut editor: WorldEditor = WorldEditor::new(args.path.clone(), &xzbbox, llbbox);
+    // Default to Java format when called from CLI
+    let options = GenerationOptions {
+        path: args.path.clone(),
+        format: WorldFormat::JavaAnvil,
+        level_name: None,
+        spawn_point: None,
+    };
+    generate_world_with_options(elements, xzbbox, llbbox, ground, args, options).map(|_| ())
+}
+
+/// Generate world with explicit format options (used by GUI for Bedrock support)
+pub fn generate_world_with_options(
+    elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
+    llbbox: LLBBox,
+    ground: Ground,
+    args: &Args,
+    options: GenerationOptions,
+) -> Result<PathBuf, String> {
+    let output_path = options.path.clone();
+    let world_format = options.format;
+    let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
+        options.path,
+        &xzbbox,
+        llbbox,
+        options.format,
+        options.level_name,
+        options.spawn_point,
+    );
 
     println!("{} Processing data...", "[4/7]".bold());
+
+    // Build highway connectivity map once before processing
+    let highway_connectivity = highways::build_highway_connectivity_map(&elements);
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(&ground);
@@ -64,7 +108,7 @@ pub fn generate_world(
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                     buildings::generate_buildings(&mut editor, way, args, None);
                 } else if way.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args, &elements);
+                    highways::generate_highways(&mut editor, element, args, &highway_connectivity);
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(&mut editor, way, args);
                 } else if way.tags.contains_key("natural") {
@@ -75,8 +119,13 @@ pub fn generate_world(
                     leisure::generate_leisure(&mut editor, way, args);
                 } else if way.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element);
-                } else if way.tags.contains_key("waterway") {
-                    waterways::generate_waterways(&mut editor, way);
+                } else if let Some(val) = way.tags.get("waterway") {
+                    if val == "dock" {
+                        // docks count as water areas
+                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox);
+                    } else {
+                        waterways::generate_waterways(&mut editor, way);
+                    }
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
@@ -104,7 +153,7 @@ pub fn generate_world(
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args, &elements);
+                    highways::generate_highways(&mut editor, element, args, &highway_connectivity);
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
                 } else if node.tags.contains_key("man_made") {
@@ -115,9 +164,13 @@ pub fn generate_world(
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
                     buildings::generate_building_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("water")
-                    || rel.tags.get("natural") == Some(&"water".to_string())
+                    || rel
+                        .tags
+                        .get("natural")
+                        .map(|val| val == "water" || val == "bay")
+                        .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas(&mut editor, rel);
+                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(&mut editor, rel, args);
                 } else if rel.tags.contains_key("landuse") {
@@ -190,6 +243,8 @@ pub fn generate_world(
             editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
             block_counter += 1;
+            // Use manual % check since is_multiple_of() is unstable on stable Rust
+            #[allow(clippy::manual_is_multiple_of)]
             if block_counter % batch_size == 0 {
                 ground_pb.inc(batch_size);
             }
@@ -220,30 +275,109 @@ pub fn generate_world(
     // Save world
     editor.save();
 
+    emit_gui_progress_update(99.0, "Finalizing world...");
+
     // Update player spawn Y coordinate based on terrain height after generation
     #[cfg(feature = "gui")]
-    if let Some(spawn_coords) = &args.spawn_point {
-        use crate::gui::update_player_spawn_y_after_generation;
-        let bbox_string = format!(
-            "{},{},{},{}",
-            args.bbox.min().lng(),
-            args.bbox.min().lat(),
-            args.bbox.max().lng(),
-            args.bbox.max().lat()
-        );
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(spawn_coords) = &args.spawn_point {
+            use crate::gui::update_player_spawn_y_after_generation;
+            let bbox_string = format!(
+                "{},{},{},{}",
+                args.bbox.min().lng(),
+                args.bbox.min().lat(),
+                args.bbox.max().lng(),
+                args.bbox.max().lat()
+            );
 
-        if let Err(e) = update_player_spawn_y_after_generation(
-            &args.path,
-            Some(*spawn_coords),
-            bbox_string,
-            args.scale,
-            &ground,
-        ) {
-            eprintln!("Warning: Failed to update spawn point Y coordinate: {e}");
+            if let Err(e) = update_player_spawn_y_after_generation(
+                &args.path,
+                Some(*spawn_coords),
+                bbox_string,
+                args.scale,
+                &ground,
+            ) {
+                let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
+                eprintln!("Warning: {}", warning_msg);
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &warning_msg);
+            }
         }
     }
 
-    emit_gui_progress_update(100.0, "Done! World generation completed.");
-    println!("{}", "Done! World generation completed.".green().bold());
-    Ok(())
+    // For Bedrock format, emit event to open the mcworld file
+    if world_format == WorldFormat::BedrockMcWorld {
+        if let Some(path_str) = output_path.to_str() {
+            emit_open_mcworld_file(path_str);
+        }
+    }
+
+    Ok(output_path)
+}
+
+/// Information needed to generate a map preview after world generation is complete
+#[derive(Clone)]
+pub struct MapPreviewInfo {
+    pub world_path: PathBuf,
+    pub min_x: i32,
+    pub max_x: i32,
+    pub min_z: i32,
+    pub max_z: i32,
+    pub world_area: i64,
+}
+
+impl MapPreviewInfo {
+    /// Create MapPreviewInfo from world bounds
+    pub fn new(world_path: PathBuf, xzbbox: &XZBBox) -> Self {
+        let world_width = (xzbbox.max_x() - xzbbox.min_x()) as i64;
+        let world_height = (xzbbox.max_z() - xzbbox.min_z()) as i64;
+        Self {
+            world_path,
+            min_x: xzbbox.min_x(),
+            max_x: xzbbox.max_x(),
+            min_z: xzbbox.min_z(),
+            max_z: xzbbox.max_z(),
+            world_area: world_width * world_height,
+        }
+    }
+}
+
+/// Maximum area for which map preview generation is allowed (to avoid memory issues)
+pub const MAX_MAP_PREVIEW_AREA: i64 = 6400 * 6900;
+
+/// Start map preview generation in a background thread.
+/// This should be called AFTER the world generation is complete, the session lock is released,
+/// and the GUI has been notified of 100% completion.
+///
+/// For Java worlds only, and only if the world area is within limits.
+pub fn start_map_preview_generation(info: MapPreviewInfo) {
+    if info.world_area > MAX_MAP_PREVIEW_AREA {
+        return;
+    }
+
+    std::thread::spawn(move || {
+        // Use catch_unwind to prevent any panic from affecting the application
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            map_renderer::render_world_map(
+                &info.world_path,
+                info.min_x,
+                info.max_x,
+                info.min_z,
+                info.max_z,
+            )
+        }));
+
+        match result {
+            Ok(Ok(_path)) => {
+                // Notify the GUI that the map preview is ready
+                emit_map_preview_ready();
+            }
+            Ok(Err(e)) => {
+                eprintln!("Warning: Failed to generate map preview: {}", e);
+            }
+            Err(_) => {
+                eprintln!("Warning: Map preview generation panicked unexpectedly");
+            }
+        }
+    });
 }

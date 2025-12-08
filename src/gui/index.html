@@ -14,7 +14,7 @@
 <body>
   <main class="container">
     <div class="row">
-      <a href="https://github.com/louis-e/arnis" target="_blank">
+      <a href="https://arnismc.com" target="_blank">
         <img src="./images/logo.png" id="arnis-logo" class="logo arnis" alt="Arnis Logo" style="width: 35%; height: auto;">
       </a>
     </div>
@@ -37,15 +37,26 @@
         <div class="controls-content">
           <h2 data-localize="select_world">Select World</h2>
 
-          <!-- Updated Tooltip Structure -->
-          <div class="tooltip" style="width: 100%;">
-            <button type="button" onclick="openWorldPicker()" style="padding: 10px; line-height: 1.2; width: 100%;">
-              <span id="choose_world">Choose World</span>
-              <br>
-              <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
-                No world selected
-              </span>
-            </button>
+          <!-- World Selection Container -->
+          <div class="world-selection-container">
+            <div class="tooltip" style="width: 100%;">
+              <button type="button" id="choose-world-btn" onclick="openWorldPicker()" class="choose-world-btn">
+                <span id="choose_world">Choose World</span>
+                <br>
+                <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
+                  No world selected
+                </span>
+              </button>
+            </div>
+            <!-- World Format Toggle -->
+            <div class="format-toggle-container">
+              <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">
+                Java
+              </button>
+              <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">
+                Bedrock
+              </button>
+            </div>
           </div>
           
           <div class="button-container">
@@ -87,11 +98,15 @@
         <span class="close-button" onclick="closeSettings()">&times;</span>
         <h2 data-localize="customization_settings">Customization Settings</h2>
 
-        <!-- Terrain Toggle Button -->
+        <!-- Generation Mode Dropdown -->
         <div class="settings-row">
-          <label for="terrain-toggle" data-localize="terrain">Terrain</label>
+          <label for="generation-mode-select" data-localize="generation_mode">Generation Mode</label>
           <div class="settings-control">
-            <input type="checkbox" id="terrain-toggle" name="terrain-toggle" checked>
+            <select id="generation-mode-select" name="generation-mode-select" class="generation-mode-dropdown">
+              <option value="geo-terrain" data-localize="mode_geo_terrain">Objects + Terrain</option>
+              <option value="geo-only" data-localize="mode_geo_only">Objects only</option>
+              <option value="terrain-only" data-localize="mode_terrain_only">Terrain only</option>
+            </select>
           </div>
         </div>
 
@@ -182,6 +197,14 @@
           </div>
         </div>
 
+        <!-- Telemetry Consent Toggle -->
+        <div class="settings-row">
+          <label for="telemetry-toggle">Anonymous Crash Reports</label>
+          <div class="settings-control">
+            <input type="checkbox" id="telemetry-toggle" name="telemetry-toggle">
+          </div>
+        </div>
+
         <!-- License and Credits Button -->
         <div class="settings-row license-button-row">
           <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
@@ -195,6 +218,22 @@
           <a href="https://discord.gg/mA2g69Fhxq" target="_blank" class="discord-link">
             <img src="./images/discord.png" alt="Discord" class="discord-logo">
           </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Telemetry Consent Modal (first run) -->
+    <div id="telemetry-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <span class="close-button" onclick="rejectTelemetry()">&times;</span>
+        <h2>Help improve Arnis</h2>
+        <p style="text-align:left; margin-top:6px; color:#ececec;">
+          We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
+          <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank">No personal data or world contents are collected.</a>
+        </p>
+        <div class="modal-actions" style="margin-top:14px;">
+          <button type="button" class="btn-secondary" onclick="rejectTelemetry()">No thanks</button>
+          <button type="button" class="btn-primary" onclick="acceptTelemetry()">Allow anonymous data</button>
         </div>
       </div>
     </div>

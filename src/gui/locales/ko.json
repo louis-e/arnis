@@ -38,7 +38,12 @@
   "language": "언어",
   "map_theme": "지도 테마",
   "terrain": "지형",
+  "generation_mode": "생성 모드",
+  "mode_geo_terrain": "객체 + 지형",
+  "mode_geo_only": "객체만",
+  "mode_terrain_only": "지형만",
   "interior": "내부 생성",
   "roof": "지붕 생성",
-  "fillground": "지면 채우기"
+  "fillground": "지면 채우기",
+  "bedrock_use_java": "Java로 세계 선택"
 }

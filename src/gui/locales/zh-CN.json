@@ -38,7 +38,12 @@
   "language": "语言",
   "map_theme": "地图主题",
   "terrain": "地形",
+  "generation_mode": "生成模式",
+  "mode_geo_terrain": "对象 + 地形",
+  "mode_geo_only": "仅对象",
+  "mode_terrain_only": "仅地形",
   "interior": "内部生成",
   "roof": "屋顶生成",
-  "fillground": "填充地面"
+  "fillground": "填充地面",
+  "bedrock_use_java": "使用Java选择世界"
 }

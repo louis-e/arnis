@@ -345,3 +345,37 @@ body,
   transition: all 1s ease;
 
 }
+
+/* World Preview Button in Edit Toolbar */
+.leaflet-draw-toolbar .leaflet-draw-edit-preview {
+  background-position: -31px -2px;
+}
+
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.active {
+  background-color: #a0d0ff;
+}
+
+.world-preview-slider-container {
+  padding: 6px 8px !important;
+  background: white !important;
+  background-clip: padding-box;
+}
+
+.world-preview-slider-container a {
+  display: none !important;
+}
+
+.world-preview-slider {
+  width: 80px;
+  height: 8px;
+  cursor: pointer;
+  accent-color: #3887BE;
+  display: block;
+  margin: 0;
+}
