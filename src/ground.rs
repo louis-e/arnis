@@ -4,6 +4,7 @@ use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use image::{Rgb, RgbImage};
+use ndarray::Array2;
 
 /// Represents terrain data and elevation settings
 #[derive(Clone)]
@@ -40,6 +41,22 @@ impl Ground {
                 }
             }
         }
+    }
+
+    pub fn new_from_ndarray(ground_level: i32, arr: &Array2<i32>) -> Self {
+        Self {
+            elevation_enabled: true,
+            ground_level,
+            elevation_data: Some(ElevationData::new_from_ndarray(arr)),
+        }
+    }
+
+    pub fn ground_level(&self) -> i32 {
+        self.ground_level
+    }
+
+    pub fn elevation_data(&self) -> &Option<ElevationData> {
+        &self.elevation_data
     }
 
     /// Returns the ground level at the given coordinates
@@ -83,8 +100,10 @@ impl Ground {
     /// Interpolates height value from the elevation grid
     #[inline(always)]
     fn interpolate_height(&self, x_ratio: f64, z_ratio: f64, data: &ElevationData) -> i32 {
-        let x: usize = ((x_ratio * (data.width - 1) as f64).round() as usize).min(data.width - 1);
-        let z: usize = ((z_ratio * (data.height - 1) as f64).round() as usize).min(data.height - 1);
+        let x: usize =
+            ((x_ratio * (data.width - 1) as f64).round() as usize).clamp(0, data.width - 1);
+        let z: usize =
+            ((z_ratio * (data.height - 1) as f64).round() as usize).clamp(0, data.height - 1);
         data.heights[z][x]
     }
 

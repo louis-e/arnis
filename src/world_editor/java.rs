@@ -221,7 +221,8 @@ impl<'a> WorldEditor<'a> {
                 // Update progress at regular intervals (every ~1% or at least every 10 regions)
                 // This ensures progress is visible even with many regions
                 let update_interval = (total_regions / 10).max(1);
-                if regions_done.is_multiple_of(update_interval) || regions_done == total_regions {
+                // if regions_done.is_multiple_of(update_interval) || regions_done == total_regions {
+                if regions_done % update_interval == 0 || regions_done == total_regions {
                     let progress = 90.0 + (regions_done as f64 / total_regions as f64) * 9.0;
                     emit_gui_progress_update(progress, "Saving world...");
                 }

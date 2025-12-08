@@ -457,7 +457,8 @@ impl BedrockWriter {
                 progress_bar.inc(1);
 
                 // Update GUI progress (92% to 97% range for chunk writing)
-                if chunks_processed.is_multiple_of(10) || chunks_processed == total_chunks {
+                // if chunks_processed.is_multiple_of(10) || chunks_processed == total_chunks {
+                if chunks_processed % 10 == 0 || chunks_processed == total_chunks {
                     let chunk_progress = chunks_processed as f64 / total_chunks as f64;
                     let gui_progress = 92.0 + (chunk_progress * 5.0); // 92% to 97%
                     emit_gui_progress_update(gui_progress, "");
