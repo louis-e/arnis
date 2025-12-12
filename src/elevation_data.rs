@@ -84,8 +84,9 @@ pub fn fetch_elevation_data(
     let tiles: Vec<(u32, u32)> = get_tile_coordinates(bbox, zoom);
 
     // Match grid dimensions with Minecraft world size
-    let grid_width: usize = scale_factor_x as usize;
-    let grid_height: usize = scale_factor_z as usize;
+    // Ensure minimum grid size of 1 to prevent division by zero and indexing errors
+    let grid_width: usize = (scale_factor_x as usize).max(1);
+    let grid_height: usize = (scale_factor_z as usize).max(1);
 
     // Initialize height grid with proper dimensions
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
@@ -377,6 +378,11 @@ fn get_tile_coordinates(bbox: &LLBBox, zoom: u8) -> Vec<(u32, u32)> {
 }
 
 fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
+    // Guard against empty input
+    if heights.is_empty() || heights[0].is_empty() {
+        return heights.to_owned();
+    }
+    
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel: Vec<f64> = create_gaussian_kernel(kernel_size, sigma);
 
@@ -446,6 +452,11 @@ fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
 }
 
 fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
+    // Guard against empty grid
+    if height_grid.is_empty() || height_grid[0].is_empty() {
+        return;
+    }
+    
     let height: usize = height_grid.len();
     let width: usize = height_grid[0].len();
 
@@ -486,6 +497,11 @@ fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
 }
 
 fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
+    // Guard against empty grid
+    if height_grid.is_empty() || height_grid[0].is_empty() {
+        return;
+    }
+    
     let height = height_grid.len();
     let width = height_grid[0].len();
 
@@ -599,5 +615,47 @@ mod tests {
             .to_str()
             .unwrap()
             .contains("image"));
+    }
+
+    #[test]
+    fn test_empty_grid_handling() {
+        // Test that empty grids don't cause panics
+        let empty_grid: Vec<Vec<f64>> = vec![];
+        let result = apply_gaussian_blur(&empty_grid, 5.0);
+        assert!(result.is_empty());
+
+        // Test grid with empty rows
+        let grid_with_empty_rows: Vec<Vec<f64>> = vec![vec![]];
+        let result = apply_gaussian_blur(&grid_with_empty_rows, 5.0);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].is_empty());
+    }
+
+    #[test]
+    fn test_fill_nan_values_empty_grid() {
+        // Test that empty grids don't cause panics
+        let mut empty_grid: Vec<Vec<f64>> = vec![];
+        fill_nan_values(&mut empty_grid);
+        assert!(empty_grid.is_empty());
+
+        // Test grid with empty rows
+        let mut grid_with_empty_rows: Vec<Vec<f64>> = vec![vec![]];
+        fill_nan_values(&mut grid_with_empty_rows);
+        assert_eq!(grid_with_empty_rows.len(), 1);
+        assert!(grid_with_empty_rows[0].is_empty());
+    }
+
+    #[test]
+    fn test_filter_outliers_empty_grid() {
+        // Test that empty grids don't cause panics
+        let mut empty_grid: Vec<Vec<f64>> = vec![];
+        filter_elevation_outliers(&mut empty_grid);
+        assert!(empty_grid.is_empty());
+
+        // Test grid with empty rows
+        let mut grid_with_empty_rows: Vec<Vec<f64>> = vec![vec![]];
+        filter_elevation_outliers(&mut grid_with_empty_rows);
+        assert_eq!(grid_with_empty_rows.len(), 1);
+        assert!(grid_with_empty_rows[0].is_empty());
     }
 }
