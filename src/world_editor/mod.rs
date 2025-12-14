@@ -257,7 +257,11 @@ impl<'a> WorldEditor<'a> {
         );
         entity.insert(
             "Motion".to_string(),
-            Value::List(vec![Value::Double(0.0), Value::Double(0.0), Value::Double(0.0)]),
+            Value::List(vec![
+                Value::Double(0.0),
+                Value::Double(0.0),
+                Value::Double(0.0),
+            ]),
         );
         entity.insert(
             "Rotation".to_string(),
@@ -331,7 +335,10 @@ impl<'a> WorldEditor<'a> {
         let region_z: i32 = chunk_z >> 5;
 
         let mut chest_data = HashMap::new();
-        chest_data.insert("id".to_string(), Value::String("minecraft:chest".to_string()));
+        chest_data.insert(
+            "id".to_string(),
+            Value::String("minecraft:chest".to_string()),
+        );
         chest_data.insert("x".to_string(), Value::Int(x));
         chest_data.insert("y".to_string(), Value::Int(absolute_y));
         chest_data.insert("z".to_string(), Value::Int(z));
@@ -730,10 +737,7 @@ fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32) -> IntArray {
     }
 
     let seed_a = hash ^ (x as i64).wrapping_shl(32) ^ (y as i64).wrapping_mul(17);
-    let seed_b = hash
-        .rotate_left(7)
-        ^ (z as i64).wrapping_mul(31)
-        ^ (x as i64).wrapping_mul(13);
+    let seed_b = hash.rotate_left(7) ^ (z as i64).wrapping_mul(31) ^ (x as i64).wrapping_mul(13);
 
     IntArray::new(vec![
         (seed_a >> 32) as i32,
