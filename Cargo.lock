@@ -207,6 +207,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "rfd",
+ "rusty-leveldb",
  "semver",
  "serde",
  "serde_json",

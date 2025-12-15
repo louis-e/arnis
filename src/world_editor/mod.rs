@@ -365,11 +365,74 @@ impl<'a> WorldEditor<'a> {
         self.set_block_absolute(CHEST, x, absolute_y, z, None, None);
     }
 
-    /// Convenience helper: place a chest prefilled with one white wool block (absolute Y).
+    /// Places a block entity with items at the given coordinates (ground-relative Y).
     #[allow(dead_code)]
-    pub fn set_chest_with_white_wool_absolute(&mut self, x: i32, absolute_y: i32, z: i32) {
-        let items = vec![single_item("minecraft:white_wool", 0, 1)];
-        self.set_chest_with_items_absolute(x, absolute_y, z, items);
+    pub fn set_block_entity_with_items(
+        &mut self,
+        block_with_props: BlockWithProperties,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_entity_id: &str,
+        items: Vec<HashMap<String, Value>>,
+    ) {
+        let absolute_y = self.get_absolute_y(x, y, z);
+        self.set_block_entity_with_items_absolute(
+            block_with_props,
+            x,
+            absolute_y,
+            z,
+            block_entity_id,
+            items,
+        );
+    }
+
+    /// Places a block entity with items at the given coordinates (absolute Y).
+    #[allow(dead_code)]
+    pub fn set_block_entity_with_items_absolute(
+        &mut self,
+        block_with_props: BlockWithProperties,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        block_entity_id: &str,
+        items: Vec<HashMap<String, Value>>,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let mut block_entity = HashMap::new();
+        block_entity.insert("id".to_string(), Value::String(block_entity_id.to_string()));
+        block_entity.insert("x".to_string(), Value::Int(x));
+        block_entity.insert("y".to_string(), Value::Int(absolute_y));
+        block_entity.insert("z".to_string(), Value::Int(z));
+        block_entity.insert(
+            "Items".to_string(),
+            Value::List(items.into_iter().map(Value::Compound).collect()),
+        );
+        block_entity.insert("keepPacked".to_string(), Value::Byte(0));
+
+        let region = self.world.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        match chunk.other.entry("block_entities".to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(block_entity));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(block_entity)]));
+            }
+        }
+
+        self.set_block_with_properties_absolute(block_with_props, x, absolute_y, z, None, None);
     }
 
     /// Sets a block of the specified type at the given coordinates.
