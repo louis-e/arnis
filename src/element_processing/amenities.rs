@@ -7,7 +7,7 @@ use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use rand::{seq::SliceRandom, Rng};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
     // Skip if 'layer' or 'level' is negative in the tags
@@ -41,10 +41,12 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
 
                 if let Some(pt) = first_node {
                     let mut rng = rand::thread_rng();
-                    let items = build_recycling_items(element.tags(), &mut rng);
+                    let loot_pool = build_recycling_loot_pool(element.tags());
+                    let items = build_recycling_items(&loot_pool, &mut rng);
 
                     let properties = Value::Compound(recycling_barrel_properties());
                     let barrel_block = BlockWithProperties::new(BARREL, Some(properties));
+                    let absolute_y = editor.get_absolute_y(pt.x, 1, pt.z);
 
                     editor.set_block_entity_with_items(
                         barrel_block,
@@ -54,6 +56,20 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                         "minecraft:barrel",
                         items,
                     );
+
+                    if let Some(category) = single_loot_category(&loot_pool) {
+                        if let Some(display_item) =
+                            build_display_item_for_category(category, &mut rng)
+                        {
+                            place_item_frame_on_random_side(
+                                editor,
+                                pt.x,
+                                absolute_y,
+                                pt.z,
+                                display_item,
+                            );
+                        }
+                    }
                 }
             }
             "waste_disposal" | "waste_basket" => {
@@ -301,6 +317,7 @@ enum RecyclingLootKind {
     EmptyBucket,
     LeatherBoots,
     ScrapMetal,
+    GreenWaste,
 }
 
 #[derive(Clone, Copy)]
@@ -311,16 +328,24 @@ enum LeatherPiece {
     Boots,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum LootCategory {
+    GlassBottle,
+    Paper,
+    Glass,
+    Leather,
+    EmptyBucket,
+    ScrapMetal,
+    GreenWaste,
+}
+
 fn recycling_barrel_properties() -> HashMap<String, Value> {
     let mut props = HashMap::new();
     props.insert("facing".to_string(), Value::String("up".to_string()));
     props
 }
 
-fn build_recycling_items(
-    tags: &HashMap<String, String>,
-    rng: &mut impl Rng,
-) -> Vec<HashMap<String, Value>> {
+fn build_recycling_loot_pool(tags: &HashMap<String, String>) -> Vec<RecyclingLootKind> {
     let mut loot_pool: Vec<RecyclingLootKind> = Vec::new();
 
     if tag_enabled(tags, "recycling:glass_bottles") {
@@ -345,7 +370,17 @@ fn build_recycling_items(
     if tag_enabled(tags, "recycling:scrap_metal") {
         loot_pool.push(RecyclingLootKind::ScrapMetal);
     }
+    if tag_enabled(tags, "recycling:green_waste") {
+        loot_pool.push(RecyclingLootKind::GreenWaste);
+    }
 
+    loot_pool
+}
+
+fn build_recycling_items(
+    loot_pool: &[RecyclingLootKind],
+    rng: &mut impl Rng,
+) -> Vec<HashMap<String, Value>> {
     if loot_pool.is_empty() {
         return Vec::new();
     }
@@ -361,6 +396,153 @@ fn build_recycling_items(
     }
 
     items
+}
+
+fn kind_to_category(kind: RecyclingLootKind) -> LootCategory {
+    match kind {
+        RecyclingLootKind::GlassBottle => LootCategory::GlassBottle,
+        RecyclingLootKind::Paper => LootCategory::Paper,
+        RecyclingLootKind::GlassBlock | RecyclingLootKind::GlassPane => LootCategory::Glass,
+        RecyclingLootKind::LeatherArmor | RecyclingLootKind::LeatherBoots => LootCategory::Leather,
+        RecyclingLootKind::EmptyBucket => LootCategory::EmptyBucket,
+        RecyclingLootKind::ScrapMetal => LootCategory::ScrapMetal,
+        RecyclingLootKind::GreenWaste => LootCategory::GreenWaste,
+    }
+}
+
+fn single_loot_category(loot_pool: &[RecyclingLootKind]) -> Option<LootCategory> {
+    let mut categories: HashSet<LootCategory> = HashSet::new();
+    for kind in loot_pool {
+        categories.insert(kind_to_category(*kind));
+        if categories.len() > 1 {
+            return None;
+        }
+    }
+    categories.iter().next().copied()
+}
+
+fn build_display_item_for_category(
+    category: LootCategory,
+    rng: &mut impl Rng,
+) -> Option<HashMap<String, Value>> {
+    match category {
+        LootCategory::GlassBottle => Some(make_display_item("minecraft:glass_bottle", 1)),
+        LootCategory::Paper => Some(make_display_item("minecraft:paper", rng.gen_range(1..=4))),
+        LootCategory::Glass => Some(make_display_item("minecraft:glass", 1)),
+        LootCategory::Leather => Some(build_leather_display_item(rng)),
+        LootCategory::EmptyBucket => Some(make_display_item("minecraft:bucket", 1)),
+        LootCategory::ScrapMetal => {
+            let metals = [
+                "minecraft:copper_ingot",
+                "minecraft:iron_ingot",
+                "minecraft:gold_ingot",
+            ];
+            let metal = metals.choose(rng)?;
+            Some(make_display_item(metal, rng.gen_range(1..=2)))
+        }
+        LootCategory::GreenWaste => {
+            let options = [
+                "minecraft:oak_sapling",
+                "minecraft:birch_sapling",
+                "minecraft:tall_grass",
+                "minecraft:sweet_berries",
+                "minecraft:wheat_seeds",
+            ];
+            let choice = options.choose(rng)?;
+            Some(make_display_item(choice, rng.gen_range(1..=3)))
+        }
+    }
+}
+
+fn place_item_frame_on_random_side(
+    editor: &mut WorldEditor,
+    x: i32,
+    barrel_absolute_y: i32,
+    z: i32,
+    item: HashMap<String, Value>,
+) {
+    let mut rng = rand::thread_rng();
+    let mut directions = [
+        ((0, 0, -1), 2), // North
+        ((0, 0, 1), 3),  // South
+        ((-1, 0, 0), 4), // West
+        ((1, 0, 0), 5),  // East
+    ];
+    directions.shuffle(&mut rng);
+
+    let (min_x, min_z) = editor.get_min_coords();
+    let (max_x, max_z) = editor.get_max_coords();
+
+    let ((dx, _dy, dz), facing) = directions
+        .into_iter()
+        .find(|((dx, _dy, dz), _)| {
+            let target_x = x + dx;
+            let target_z = z + dz;
+            target_x >= min_x && target_x <= max_x && target_z >= min_z && target_z <= max_z
+        })
+        .unwrap_or(((0, 0, 1), 3)); // Fallback south if all directions are out of bounds
+
+    let target_x = x + dx;
+    let target_y = barrel_absolute_y;
+    let target_z = z + dz;
+
+    let ground_y = editor.get_absolute_y(target_x, 0, target_z);
+
+    let mut extra = HashMap::new();
+    extra.insert("Facing".to_string(), Value::Byte(facing)); // 2=north, 3=south, 4=west, 5=east
+    extra.insert("ItemRotation".to_string(), Value::Byte(0));
+    extra.insert("Item".to_string(), Value::Compound(item));
+    extra.insert("ItemDropChance".to_string(), Value::Float(1.0));
+    extra.insert(
+        "block_pos".to_string(),
+        Value::List(vec![
+            Value::Int(target_x),
+            Value::Int(target_y),
+            Value::Int(target_z),
+        ]),
+    );
+    extra.insert("TileX".to_string(), Value::Int(target_x));
+    extra.insert("TileY".to_string(), Value::Int(target_y));
+    extra.insert("TileZ".to_string(), Value::Int(target_z));
+    extra.insert("Fixed".to_string(), Value::Byte(1));
+
+    let relative_y = target_y - ground_y;
+    editor.add_entity(
+        "minecraft:item_frame",
+        target_x,
+        relative_y,
+        target_z,
+        Some(extra),
+    );
+}
+
+fn make_display_item(id: &str, count: i8) -> HashMap<String, Value> {
+    let mut item = HashMap::new();
+    item.insert("id".to_string(), Value::String(id.to_string()));
+    item.insert("Count".to_string(), Value::Byte(count));
+    item
+}
+
+fn build_leather_display_item(rng: &mut impl Rng) -> HashMap<String, Value> {
+    let mut item = make_display_item("minecraft:leather_chestplate", 1);
+    let damage = biased_damage(80, rng);
+
+    let mut tag = HashMap::new();
+    tag.insert("Damage".to_string(), Value::Int(damage));
+
+    if let Some(color) = maybe_leather_color(rng) {
+        let mut display = HashMap::new();
+        display.insert("color".to_string(), Value::Int(color));
+        tag.insert("display".to_string(), Value::Compound(display));
+    }
+
+    item.insert("tag".to_string(), Value::Compound(tag));
+
+    let mut components = HashMap::new();
+    components.insert("minecraft:damage".to_string(), Value::Int(damage));
+    item.insert("components".to_string(), Value::Compound(components));
+
+    item
 }
 
 fn build_item_for_kind(
@@ -387,6 +569,7 @@ fn build_item_for_kind(
         RecyclingLootKind::EmptyBucket => Some(make_basic_item("minecraft:bucket", slot, 1)),
         RecyclingLootKind::LeatherBoots => Some(build_leather_item(LeatherPiece::Boots, slot, rng)),
         RecyclingLootKind::ScrapMetal => Some(build_scrap_metal_item(slot, rng)),
+        RecyclingLootKind::GreenWaste => Some(build_green_waste_item(slot, rng)),
     }
 }
 
@@ -395,6 +578,35 @@ fn build_scrap_metal_item(slot: i8, rng: &mut impl Rng) -> HashMap<String, Value
     let metal = metals.choose(rng).expect("scrap metal list is non-empty");
     let count = rng.gen_range(1..=3);
     make_basic_item(&format!("minecraft:{metal}"), slot, count)
+}
+
+fn build_green_waste_item(slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
+    #[allow(clippy::match_same_arms)]
+    let (id, count) = match rng.gen_range(0..8) {
+        0 => ("minecraft:tall_grass", rng.gen_range(1..=4)),
+        1 => ("minecraft:sweet_berries", rng.gen_range(2..=6)),
+        2 => ("minecraft:oak_sapling", rng.gen_range(1..=2)),
+        3 => ("minecraft:birch_sapling", rng.gen_range(1..=2)),
+        4 => ("minecraft:spruce_sapling", rng.gen_range(1..=2)),
+        5 => ("minecraft:jungle_sapling", rng.gen_range(1..=2)),
+        6 => ("minecraft:acacia_sapling", rng.gen_range(1..=2)),
+        7 => ("minecraft:dark_oak_sapling", rng.gen_range(1..=2)),
+        _ => ("minecraft:wheat_seeds", rng.gen_range(2..=6)),
+    };
+
+    // Seeds for the default path above
+    let id = if rng.gen_bool(0.25) {
+        match rng.gen_range(0..4) {
+            0 => "minecraft:wheat_seeds",
+            1 => "minecraft:pumpkin_seeds",
+            2 => "minecraft:melon_seeds",
+            _ => "minecraft:beetroot_seeds",
+        }
+    } else {
+        id
+    };
+
+    make_basic_item(id, slot, count)
 }
 
 fn build_glass_item(is_pane: bool, slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
