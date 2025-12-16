@@ -155,7 +155,7 @@ pub fn generate_buildings(
             let lev = levels - min_level;
 
             if lev >= 1 {
-                building_height = multiply_scale(levels * 4 + 2, scale_factor);
+                building_height = multiply_scale(lev * 4 + 2, scale_factor);
                 building_height = building_height.max(3);
 
                 // Mark as tall building if more than 7 stories
@@ -540,6 +540,20 @@ pub fn generate_buildings(
             }
         }
 
+        // Detect abandoned buildings via explicit tags
+        let is_abandoned_building = element
+            .tags
+            .get("abandoned")
+            .map_or(false, |value| value == "yes")
+            || element.tags.contains_key("abandoned:building");
+
+        // Use cobwebs instead of glowstone for abandoned buildings
+        let ceiling_light_block = if is_abandoned_building {
+            COBWEB
+        } else {
+            GLOWSTONE
+        };
+
         for (x, z) in floor_area.iter().cloned() {
             if processed_points.insert((x, z)) {
                 // Create foundation columns for the floor area when using terrain
@@ -571,7 +585,7 @@ pub fn generate_buildings(
                         if x % 5 == 0 && z % 5 == 0 {
                             // Light fixtures
                             editor.set_block_absolute(
-                                GLOWSTONE,
+                                ceiling_light_block,
                                 x,
                                 h + abs_terrain_offset,
                                 z,
@@ -591,7 +605,7 @@ pub fn generate_buildings(
                     }
                 } else if x % 5 == 0 && z % 5 == 0 {
                     editor.set_block_absolute(
-                        GLOWSTONE,
+                        ceiling_light_block,
                         x,
                         start_y_offset + building_height + abs_terrain_offset,
                         z,
@@ -646,6 +660,7 @@ pub fn generate_buildings(
                     args,
                     element,
                     abs_terrain_offset,
+                    is_abandoned_building,
                 );
             }
         }
