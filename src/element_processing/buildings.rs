@@ -785,6 +785,12 @@ fn generate_roof(
     // Set base height for roof to be at least one block above building top
     let base_height = start_y_offset + building_height + 1;
 
+    // Optional OSM hint for ridge orientation
+    let roof_orientation = element
+        .tags
+        .get("roof:orientation")
+        .map(|s| s.as_str());
+
     match roof_type {
         RoofType::Flat => {
             // Simple flat roof
@@ -811,12 +817,13 @@ fn generate_roof(
             let roof_peak_height = base_height + roof_height_boost;
 
             // Pre-determine orientation and material
-            let is_wider_than_long = width > length;
-            let max_distance = if is_wider_than_long {
-                length >> 1
-            } else {
-                width >> 1
+            let width_is_longer = width >= length;
+            let ridge_runs_along_x = match roof_orientation {
+                Some(orientation) if orientation.eq_ignore_ascii_case("along") => width_is_longer,
+                Some(orientation) if orientation.eq_ignore_ascii_case("across") => !width_is_longer,
+                _ => width_is_longer,
             };
+            let max_distance = if ridge_runs_along_x { length >> 1 } else { width >> 1 };
 
             // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
@@ -832,15 +839,12 @@ fn generate_roof(
 
             // First pass: calculate all roof heights using vectorized operations
             for &(x, z) in floor_area {
-                let distance_to_ridge = if is_wider_than_long {
-                    (z - center_z).abs()
-                } else {
-                    (x - center_x).abs()
-                };
+                let distance_to_ridge =
+                    if ridge_runs_along_x { (z - center_z).abs() } else { (x - center_x).abs() };
 
                 let roof_height = if distance_to_ridge == 0
-                    && ((is_wider_than_long && z == center_z)
-                        || (!is_wider_than_long && x == center_x))
+                    && ((ridge_runs_along_x && z == center_z)
+                        || (!ridge_runs_along_x && x == center_x))
                 {
                     roof_peak_height
                 } else {
@@ -872,7 +876,7 @@ fn generate_roof(
                 for y in base_height..=roof_height {
                     if y == roof_height && has_lower_neighbor {
                         // Pre-compute stair direction
-                        let stair_block_with_props = if is_wider_than_long {
+                        let stair_block_with_props = if ridge_runs_along_x {
                             if z < center_z {
                                 create_stair_with_properties(
                                     stair_block_material,
@@ -932,7 +936,12 @@ fn generate_roof(
             // Determine if building is significantly rectangular or more square-shaped
             let is_rectangular =
                 (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
-            let long_axis_is_x = width > length;
+            let width_is_longer = width >= length;
+            let ridge_axis_is_x = match roof_orientation {
+                Some(orientation) if orientation.eq_ignore_ascii_case("along") => width_is_longer,
+                Some(orientation) if orientation.eq_ignore_ascii_case("across") => !width_is_longer,
+                _ => width_is_longer,
+            };
 
             // Make roof taller and more pointy
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
@@ -952,7 +961,7 @@ fn generate_roof(
 
                 for &(x, z) in floor_area {
                     // Calculate distance to the ridge line
-                    let distance_to_ridge = if long_axis_is_x {
+                    let distance_to_ridge = if ridge_axis_is_x {
                         // Distance in Z direction for X-axis ridge
                         (z - center_z).abs()
                     } else {
@@ -961,7 +970,7 @@ fn generate_roof(
                     };
 
                     // Calculate maximum distance from ridge to edge
-                    let max_distance_from_ridge = if long_axis_is_x {
+                    let max_distance_from_ridge = if ridge_axis_is_x {
                         (max_z - min_z) / 2
                     } else {
                         (max_x - min_x) / 2
@@ -1001,7 +1010,7 @@ fn generate_roof(
                             if has_lower_neighbor {
                                 // Determine stair direction based on ridge orientation and position
                                 let stair_block_material = get_stair_block_for_material(roof_block);
-                                let stair_block_with_props = if long_axis_is_x {
+                                let stair_block_with_props = if ridge_axis_is_x {
                                     // Ridge runs along X, slopes in Z direction
                                     if z < center_z {
                                         create_stair_with_properties(
