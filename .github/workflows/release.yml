@@ -97,13 +97,13 @@ jobs:
     runs-on: macos-latest
     steps:
     - name: Download macOS Intel build
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: macos-13-x86_64-apple-darwin-build
         path: ./intel
 
     - name: Download macOS ARM64 build
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: macos-latest-aarch64-apple-darwin-build
         path: ./arm64
@@ -127,19 +127,19 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Download Windows build artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: windows-latest-x86_64-pc-windows-msvc-build
         path: ./builds/windows
 
     - name: Download Linux build artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: ubuntu-latest-x86_64-unknown-linux-gnu-build
         path: ./builds/linux
 
     - name: Download macOS universal build artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: macos-universal-build
         path: ./builds/macos
