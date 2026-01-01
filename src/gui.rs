@@ -857,6 +857,28 @@ fn gui_start_generation(
                 WorldFormat::JavaAnvil
             };
 
+            // Check available disk space before starting generation (minimum 3GB required)
+            const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
+            let check_path = if world_format == WorldFormat::JavaAnvil {
+                world_path.clone()
+            } else {
+                // For Bedrock, check current directory where .mcworld will be created
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            };
+            match fs2::available_space(&check_path) {
+                Ok(available) if available < MIN_DISK_SPACE_BYTES => {
+                    let error_msg = "Not enough disk space available.".to_string();
+                    eprintln!("{error_msg}");
+                    emit_gui_error(&error_msg);
+                    return Err(error_msg);
+                }
+                Err(e) => {
+                    // Log warning but don't block generation if we can't check space
+                    eprintln!("Warning: Could not check disk space: {e}");
+                }
+                _ => {} // Sufficient space available
+            }
+
             // Acquire session lock for Java worlds only
             // Session lock prevents Minecraft from having the world open during generation
             // Bedrock worlds are generated as .mcworld files and don't need this lock
