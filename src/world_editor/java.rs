@@ -23,9 +23,11 @@ use crate::telemetry::{send_log, LogLevel};
 impl<'a> WorldEditor<'a> {
     /// Creates a region file for the given region coordinates.
     pub(super) fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
-        let out_path = self
-            .world_dir
-            .join(format!("region/r.{}.{}.mca", region_x, region_z));
+        let region_dir = self.world_dir.join("region");
+        let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
+
+        // Ensure region directory exists before creating region files
+        std::fs::create_dir_all(&region_dir).expect("Failed to create region directory");
 
         const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
 
