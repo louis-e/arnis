@@ -848,16 +848,30 @@ fn gui_start_generation(
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
-            // Acquire session lock for the world directory before starting generation
             let world_path = PathBuf::from(&selected_world);
-            let _session_lock = match SessionLock::acquire(&world_path) {
-                Ok(lock) => lock,
-                Err(e) => {
-                    let error_msg = format!("Failed to acquire session lock: {e}");
-                    eprintln!("{error_msg}");
-                    emit_gui_error(&error_msg);
-                    return Err(error_msg);
+
+            // Determine world format from UI selection first (needed for session lock decision)
+            let world_format = if world_format == "bedrock" {
+                WorldFormat::BedrockMcWorld
+            } else {
+                WorldFormat::JavaAnvil
+            };
+
+            // Acquire session lock for Java worlds only
+            // Session lock prevents Minecraft from having the world open during generation
+            // Bedrock worlds are generated as .mcworld files and don't need this lock
+            let _session_lock: Option<SessionLock> = if world_format == WorldFormat::JavaAnvil {
+                match SessionLock::acquire(&world_path) {
+                    Ok(lock) => Some(lock),
+                    Err(e) => {
+                        let error_msg = format!("Failed to acquire session lock: {e}");
+                        eprintln!("{error_msg}");
+                        emit_gui_error(&error_msg);
+                        return Err(error_msg);
+                    }
                 }
+            } else {
+                None
             };
 
             // Parse the bounding box from the text with proper error handling
@@ -869,13 +883,6 @@ fn gui_start_generation(
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
                 }
-            };
-
-            // Determine world format from UI selection
-            let world_format = if world_format == "bedrock" {
-                WorldFormat::BedrockMcWorld
-            } else {
-                WorldFormat::JavaAnvil
             };
 
             // Determine output path and level name based on format
