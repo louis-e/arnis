@@ -27,9 +27,7 @@ impl<'a> WorldEditor<'a> {
         let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
 
         // Ensure region directory exists before creating region files
-        if !region_dir.exists() {
-            std::fs::create_dir_all(&region_dir).expect("Failed to create region directory");
-        }
+        std::fs::create_dir_all(&region_dir).expect("Failed to create region directory");
 
         const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
 
