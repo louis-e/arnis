@@ -266,6 +266,7 @@ impl Block {
             185 => "quartz_stairs",
             186 => "polished_andesite_stairs",
             187 => "nether_brick_stairs",
+            188 => "barrel",
             _ => panic!("Invalid id"),
         }
     }
@@ -697,6 +698,7 @@ pub const SMOOTH_SANDSTONE_STAIRS: Block = Block::new(184);
 pub const QUARTZ_STAIRS: Block = Block::new(185);
 pub const POLISHED_ANDESITE_STAIRS: Block = Block::new(186);
 pub const NETHER_BRICK_STAIRS: Block = Block::new(187);
+pub const BARREL: Block = Block::new(188);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
