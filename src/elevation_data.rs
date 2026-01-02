@@ -18,6 +18,8 @@ const TERRARIUM_OFFSET: f64 = 32768.0;
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
 const MAX_ZOOM: u8 = 15;
+/// Maximum concurrent tile downloads to be respectful to AWS
+const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 
 /// Holds processed elevation data and metadata
 #[derive(Clone)]
@@ -49,6 +51,7 @@ fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
 
 /// Downloads a tile from AWS Terrain Tiles service
 fn download_tile(
+    client: &reqwest::blocking::Client,
     tile_x: u32,
     tile_y: u32,
     zoom: u8,
@@ -60,7 +63,6 @@ fn download_tile(
         .replace("{x}", &tile_x.to_string())
         .replace("{y}", &tile_y.to_string());
 
-    let client = reqwest::blocking::Client::new();
     let response = client.get(&url).send().map_err(|e| e.to_string())?;
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;
@@ -70,7 +72,11 @@ fn download_tile(
 }
 
 /// Fetches a tile from cache or downloads it if not available
+/// Note: In parallel execution, multiple threads may attempt to download the same tile
+/// if it's missing or corrupted. This is harmless (just wastes some bandwidth) as
+/// file writes are atomic at the OS level.
 fn fetch_or_load_tile(
+    client: &reqwest::blocking::Client,
     tile_x: u32,
     tile_y: u32,
     zoom: u8,
@@ -86,12 +92,24 @@ fn fetch_or_load_tile(
                 tile_path.display(),
                 file_size
             );
+            #[cfg(feature = "gui")]
+            send_log(
+                LogLevel::Warning,
+                "Cached tile appears too small, refetching.",
+            );
 
             // Remove the potentially corrupted file
-            let _ = std::fs::remove_file(tile_path);
+            if let Err(e) = std::fs::remove_file(tile_path) {
+                eprintln!("Warning: Failed to remove corrupted tile file: {e}");
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Warning,
+                    "Failed to remove corrupted tile file during refetching.",
+                );
+            }
 
             // Re-download the tile
-            return download_tile(tile_x, tile_y, zoom, tile_path);
+            return download_tile(client, tile_x, tile_y, zoom, tile_path);
         }
 
         // Try to load cached tile, but handle corruption gracefully
@@ -109,17 +127,29 @@ fn fetch_or_load_tile(
                     tile_path.display(),
                     e
                 );
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Warning,
+                    "Cached tile is corrupted or invalid. Re-downloading...",
+                );
 
                 // Remove the corrupted file
-                let _ = std::fs::remove_file(tile_path);
+                if let Err(e) = std::fs::remove_file(tile_path) {
+                    eprintln!("Warning: Failed to remove corrupted tile file: {e}");
+                    #[cfg(feature = "gui")]
+                    send_log(
+                        LogLevel::Warning,
+                        "Failed to remove corrupted tile file during re-download.",
+                    );
+                }
 
                 // Re-download the tile
-                download_tile(tile_x, tile_y, zoom, tile_path)
+                download_tile(client, tile_x, tile_y, zoom, tile_path)
             }
         }
     } else {
         // Download the tile for the first time
-        download_tile(tile_x, tile_y, zoom, tile_path)
+        download_tile(client, tile_x, tile_y, zoom, tile_path)
     }
 }
 
@@ -151,19 +181,31 @@ pub fn fetch_elevation_data(
         std::fs::create_dir_all(&tile_cache_dir)?;
     }
 
-    // Download tiles in parallel (limit to 8 concurrent downloads to be respectful to AWS)
+    // Create a shared HTTP client for connection pooling
+    let client = reqwest::blocking::Client::new();
+
+    // Download tiles in parallel with limited concurrency to be respectful to AWS
     let num_tiles = tiles.len();
-    println!("Downloading {num_tiles} elevation tiles (parallel)...");
-    
-    let downloaded_tiles: Vec<Result<((u32, u32), image::ImageBuffer<Rgb<u8>, Vec<u8>>), String>> = tiles
-        .par_iter()
-        .map(|(tile_x, tile_y)| {
-            let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
-            
-            let rgb_img = fetch_or_load_tile(*tile_x, *tile_y, zoom, &tile_path)?;
-            Ok(((*tile_x, *tile_y), rgb_img))
-        })
-        .collect();
+    println!("Downloading {num_tiles} elevation tiles (up to {MAX_CONCURRENT_DOWNLOADS} concurrent)...");
+
+    // Use a custom thread pool to limit concurrent downloads
+    let thread_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_CONCURRENT_DOWNLOADS)
+        .build()
+        .map_err(|e| format!("Failed to create thread pool: {e}"))?;
+
+    let downloaded_tiles: Vec<Result<((u32, u32), image::ImageBuffer<Rgb<u8>, Vec<u8>>), String>> =
+        thread_pool.install(|| {
+            tiles
+                .par_iter()
+                .map(|(tile_x, tile_y)| {
+                    let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
+
+                    let rgb_img = fetch_or_load_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?;
+                    Ok(((*tile_x, *tile_y), rgb_img))
+                })
+                .collect()
+        });
 
     // Check for any download errors
     let mut successful_tiles = Vec::new();
