@@ -2,7 +2,8 @@ use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance}
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use image::Rgb;
-use std::path::Path;
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
@@ -48,24 +49,78 @@ fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
 
 /// Downloads a tile from AWS Terrain Tiles service
 fn download_tile(
-    client: &reqwest::blocking::Client,
     tile_x: u32,
     tile_y: u32,
     zoom: u8,
     tile_path: &Path,
-) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, Box<dyn std::error::Error>> {
+) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
     println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from AWS Terrain Tiles");
     let url: String = AWS_TERRARIUM_URL
         .replace("{z}", &zoom.to_string())
         .replace("{x}", &tile_x.to_string())
         .replace("{y}", &tile_y.to_string());
 
-    let response: reqwest::blocking::Response = client.get(&url).send()?;
-    response.error_for_status_ref()?;
-    let bytes = response.bytes()?;
-    std::fs::write(tile_path, &bytes)?;
-    let img: image::DynamicImage = image::load_from_memory(&bytes)?;
+    let client = reqwest::blocking::Client::new();
+    let response = client.get(&url).send().map_err(|e| e.to_string())?;
+    response.error_for_status_ref().map_err(|e| e.to_string())?;
+    let bytes = response.bytes().map_err(|e| e.to_string())?;
+    std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
+    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
     Ok(img.to_rgb8())
+}
+
+/// Fetches a tile from cache or downloads it if not available
+fn fetch_or_load_tile(
+    tile_x: u32,
+    tile_y: u32,
+    zoom: u8,
+    tile_path: &Path,
+) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
+    if tile_path.exists() {
+        // Check if the cached file has a reasonable size (PNG files should be at least a few KB)
+        let file_size = std::fs::metadata(tile_path).map(|m| m.len()).unwrap_or(0);
+
+        if file_size < 1000 {
+            eprintln!(
+                "Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
+                tile_path.display(),
+                file_size
+            );
+
+            // Remove the potentially corrupted file
+            let _ = std::fs::remove_file(tile_path);
+
+            // Re-download the tile
+            return download_tile(tile_x, tile_y, zoom, tile_path);
+        }
+
+        // Try to load cached tile, but handle corruption gracefully
+        match image::open(tile_path) {
+            Ok(img) => {
+                println!(
+                    "Loading cached tile x={tile_x},y={tile_y},z={zoom} from {}",
+                    tile_path.display()
+                );
+                Ok(img.to_rgb8())
+            }
+            Err(e) => {
+                eprintln!(
+                    "Cached tile at {} is corrupted or invalid: {}. Re-downloading...",
+                    tile_path.display(),
+                    e
+                );
+
+                // Remove the corrupted file
+                let _ = std::fs::remove_file(tile_path);
+
+                // Re-download the tile
+                download_tile(tile_x, tile_y, zoom, tile_path)
+            }
+        }
+    } else {
+        // Download the tile for the first time
+        download_tile(tile_x, tile_y, zoom, tile_path)
+    }
 }
 
 pub fn fetch_elevation_data(
@@ -91,101 +146,52 @@ pub fn fetch_elevation_data(
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
     let mut extreme_values_found = Vec::new(); // Track extreme values for debugging
 
-    let client: reqwest::blocking::Client = reqwest::blocking::Client::new();
-
-    let tile_cache_dir = Path::new("./arnis-tile-cache");
+    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
     if !tile_cache_dir.exists() {
-        std::fs::create_dir_all(tile_cache_dir)?;
+        std::fs::create_dir_all(&tile_cache_dir)?;
     }
 
-    // Fetch and process each tile
-    for (tile_x, tile_y) in &tiles {
-        // Check if tile is already cached
-        let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
+    // Download tiles in parallel (limit to 8 concurrent downloads to be respectful to AWS)
+    let num_tiles = tiles.len();
+    println!("Downloading {num_tiles} elevation tiles (parallel)...");
+    
+    let downloaded_tiles: Vec<Result<((u32, u32), image::ImageBuffer<Rgb<u8>, Vec<u8>>), String>> = tiles
+        .par_iter()
+        .map(|(tile_x, tile_y)| {
+            let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
+            
+            let rgb_img = fetch_or_load_tile(*tile_x, *tile_y, zoom, &tile_path)?;
+            Ok(((*tile_x, *tile_y), rgb_img))
+        })
+        .collect();
 
-        let rgb_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = if tile_path.exists() {
-            // Check if the cached file has a reasonable size (PNG files should be at least a few KB)
-            let file_size = match std::fs::metadata(&tile_path) {
-                Ok(metadata) => metadata.len(),
-                Err(_) => 0,
-            };
-
-            if file_size < 1000 {
-                eprintln!(
-                    "Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
-                    tile_path.display(),
-                    file_size
-                );
-
-                // Remove the potentially corrupted file
-                if let Err(remove_err) = std::fs::remove_file(&tile_path) {
-                    eprintln!(
-                        "Warning: Failed to remove corrupted tile file: {}",
-                        remove_err
-                    );
-                    #[cfg(feature = "gui")]
-                    send_log(
-                        LogLevel::Warning,
-                        "Failed to remove corrupted tile file during refetching.",
-                    );
-                }
-
-                // Re-download the tile
-                download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
-            } else {
-                println!(
-                    "Loading cached tile x={tile_x},y={tile_y},z={zoom} from {}",
-                    tile_path.display()
-                );
-
-                // Try to load cached tile, but handle corruption gracefully
-                match image::open(&tile_path) {
-                    Ok(img) => img.to_rgb8(),
-                    Err(e) => {
-                        eprintln!(
-                            "Cached tile at {} is corrupted or invalid: {}. Re-downloading...",
-                            tile_path.display(),
-                            e
-                        );
-                        #[cfg(feature = "gui")]
-                        send_log(
-                            LogLevel::Warning,
-                            "Cached tile is corrupted or invalid. Re-downloading...",
-                        );
-
-                        // Remove the corrupted file
-                        if let Err(remove_err) = std::fs::remove_file(&tile_path) {
-                            eprintln!(
-                                "Warning: Failed to remove corrupted tile file: {}",
-                                remove_err
-                            );
-                            #[cfg(feature = "gui")]
-                            send_log(
-                                LogLevel::Warning,
-                                "Failed to remove corrupted tile file during re-download.",
-                            );
-                        }
-
-                        // Re-download the tile
-                        download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
-                    }
-                }
+    // Check for any download errors
+    let mut successful_tiles = Vec::new();
+    for result in downloaded_tiles {
+        match result {
+            Ok(tile_data) => successful_tiles.push(tile_data),
+            Err(e) => {
+                eprintln!("Warning: Failed to download tile: {e}");
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &format!("Failed to download elevation tile: {e}"));
             }
-        } else {
-            // Download the tile for the first time
-            download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
-        };
+        }
+    }
 
+    println!("Processing {} elevation tiles...", successful_tiles.len());
+
+    // Process tiles sequentially (writes to shared height_grid)
+    for ((tile_x, tile_y), rgb_img) in successful_tiles {
         // Only process pixels that fall within the requested bbox
         for (y, row) in rgb_img.rows().enumerate() {
             for (x, pixel) in row.enumerate() {
                 // Convert tile pixel coordinates back to geographic coordinates
-                let pixel_lng = ((*tile_x as f64 + x as f64 / 256.0) / (2.0_f64.powi(zoom as i32)))
+                let pixel_lng = ((tile_x as f64 + x as f64 / 256.0) / (2.0_f64.powi(zoom as i32)))
                     * 360.0
                     - 180.0;
                 let pixel_lat_rad = std::f64::consts::PI
                     * (1.0
-                        - 2.0 * (*tile_y as f64 + y as f64 / 256.0) / (2.0_f64.powi(zoom as i32)));
+                        - 2.0 * (tile_y as f64 + y as f64 / 256.0) / (2.0_f64.powi(zoom as i32)));
                 let pixel_lat = pixel_lat_rad.sinh().atan().to_degrees();
 
                 // Skip pixels outside the requested bounding box
