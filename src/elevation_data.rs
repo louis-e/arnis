@@ -32,6 +32,11 @@ pub struct ElevationData {
     pub(crate) height: usize,
 }
 
+/// RGB image buffer type for elevation tiles
+type TileImage = image::ImageBuffer<Rgb<u8>, Vec<u8>>;
+/// Result type for tile download operations: ((tile_x, tile_y), image) or error
+type TileDownloadResult = Result<((u32, u32), TileImage), String>;
+
 /// Calculates appropriate zoom level for the given bounding box
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
     let lat_diff: f64 = (bbox.max().lat() - bbox.min().lat()).abs();
@@ -186,7 +191,9 @@ pub fn fetch_elevation_data(
 
     // Download tiles in parallel with limited concurrency to be respectful to AWS
     let num_tiles = tiles.len();
-    println!("Downloading {num_tiles} elevation tiles (up to {MAX_CONCURRENT_DOWNLOADS} concurrent)...");
+    println!(
+        "Downloading {num_tiles} elevation tiles (up to {MAX_CONCURRENT_DOWNLOADS} concurrent)..."
+    );
 
     // Use a custom thread pool to limit concurrent downloads
     let thread_pool = rayon::ThreadPoolBuilder::new()
@@ -194,18 +201,17 @@ pub fn fetch_elevation_data(
         .build()
         .map_err(|e| format!("Failed to create thread pool: {e}"))?;
 
-    let downloaded_tiles: Vec<Result<((u32, u32), image::ImageBuffer<Rgb<u8>, Vec<u8>>), String>> =
-        thread_pool.install(|| {
-            tiles
-                .par_iter()
-                .map(|(tile_x, tile_y)| {
-                    let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
+    let downloaded_tiles: Vec<TileDownloadResult> = thread_pool.install(|| {
+        tiles
+            .par_iter()
+            .map(|(tile_x, tile_y)| {
+                let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
 
-                    let rgb_img = fetch_or_load_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?;
-                    Ok(((*tile_x, *tile_y), rgb_img))
-                })
-                .collect()
-        });
+                let rgb_img = fetch_or_load_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?;
+                Ok(((*tile_x, *tile_y), rgb_img))
+            })
+            .collect()
+    });
 
     // Check for any download errors
     let mut successful_tiles = Vec::new();
@@ -215,7 +221,10 @@ pub fn fetch_elevation_data(
             Err(e) => {
                 eprintln!("Warning: Failed to download tile: {e}");
                 #[cfg(feature = "gui")]
-                send_log(LogLevel::Warning, &format!("Failed to download elevation tile: {e}"));
+                send_log(
+                    LogLevel::Warning,
+                    &format!("Failed to download elevation tile: {e}"),
+                );
             }
         }
     }
