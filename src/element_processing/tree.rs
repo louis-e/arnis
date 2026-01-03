@@ -90,6 +90,7 @@ fn round(editor: &mut WorldEditor, material: Block, (x, y, z): Coord, block_patt
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum TreeType {
     Oak,
     Spruce,
@@ -107,7 +108,19 @@ pub struct Tree<'a> {
 }
 
 impl Tree<'_> {
-    pub fn create(editor: &mut WorldEditor, (x, y, z): Coord) {
+    pub fn create(editor: &mut WorldEditor, coords: Coord) {
+        let mut rng = rand::thread_rng();
+        let tree_type = match rng.gen_range(1..=3) {
+            1 => TreeType::Oak,
+            2 => TreeType::Spruce,
+            3 => TreeType::Birch,
+            _ => unreachable!(),
+        };
+
+        Self::create_of_type(editor, coords, tree_type);
+    }
+
+    pub fn create_of_type(editor: &mut WorldEditor, (x, y, z): Coord, tree_type: TreeType) {
         let mut blacklist: Vec<Block> = Vec::new();
         blacklist.extend(Self::get_building_wall_blocks());
         blacklist.extend(Self::get_building_floor_blocks());
@@ -115,14 +128,7 @@ impl Tree<'_> {
         blacklist.extend(Self::get_functional_blocks());
         blacklist.push(WATER);
 
-        let mut rng = rand::thread_rng();
-
-        let tree = Self::get_tree(match rng.gen_range(1..=3) {
-            1 => TreeType::Oak,
-            2 => TreeType::Spruce,
-            3 => TreeType::Birch,
-            _ => unreachable!(),
-        });
+        let tree = Self::get_tree(tree_type);
 
         // Build the logs
         editor.fill_blocks(

@@ -1,10 +1,11 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::element_processing::tree::Tree;
+use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use rand::prelude::SliceRandom;
 use rand::Rng;
 
 pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
@@ -14,7 +15,66 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                Tree::create(editor, (x, 1, z));
+                let mut trees_ok_to_generate: Vec<TreeType> = vec![];
+                if let Some(species) = element.tags().get("species") {
+                    if species.contains("Betula") {
+                        trees_ok_to_generate.push(TreeType::Birch);
+                    }
+                    if species.contains("Quercus") {
+                        trees_ok_to_generate.push(TreeType::Oak);
+                    }
+                    if species.contains("Picea") {
+                        trees_ok_to_generate.push(TreeType::Spruce);
+                    }
+                } else if let Some(genus_wikidata) = element.tags().get("genus:wikidata") {
+                    match genus_wikidata.as_str() {
+                        "Q12004" => trees_ok_to_generate.push(TreeType::Birch),
+                        "Q26782" => trees_ok_to_generate.push(TreeType::Oak),
+                        "Q25243" => trees_ok_to_generate.push(TreeType::Spruce),
+                        _ => {
+                            trees_ok_to_generate.push(TreeType::Oak);
+                            trees_ok_to_generate.push(TreeType::Spruce);
+                            trees_ok_to_generate.push(TreeType::Birch);
+                        }
+                    }
+                } else if let Some(genus) = element.tags().get("genus") {
+                    match genus.as_str() {
+                        "Betula" => trees_ok_to_generate.push(TreeType::Birch),
+                        "Quercus" => trees_ok_to_generate.push(TreeType::Oak),
+                        "Picea" => trees_ok_to_generate.push(TreeType::Spruce),
+                        _ => trees_ok_to_generate.push(TreeType::Oak),
+                    }
+                } else if let Some(leaf_type) = element.tags().get("leaf_type") {
+                    match leaf_type.as_str() {
+                        "broadleaved" => {
+                            trees_ok_to_generate.push(TreeType::Oak);
+                            trees_ok_to_generate.push(TreeType::Birch);
+                        }
+                        "needleleaved" => trees_ok_to_generate.push(TreeType::Spruce),
+                        _ => {
+                            trees_ok_to_generate.push(TreeType::Oak);
+                            trees_ok_to_generate.push(TreeType::Spruce);
+                            trees_ok_to_generate.push(TreeType::Birch);
+                        }
+                    }
+                } else {
+                    trees_ok_to_generate.push(TreeType::Oak);
+                    trees_ok_to_generate.push(TreeType::Spruce);
+                    trees_ok_to_generate.push(TreeType::Birch);
+                }
+
+                if trees_ok_to_generate.is_empty() {
+                    trees_ok_to_generate.push(TreeType::Oak);
+                    trees_ok_to_generate.push(TreeType::Spruce);
+                    trees_ok_to_generate.push(TreeType::Birch);
+                }
+
+                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                let tree_type = *trees_ok_to_generate
+                    .choose(&mut rng)
+                    .unwrap_or(&TreeType::Oak);
+
+                Tree::create_of_type(editor, (x, 1, z), tree_type);
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -78,6 +138,29 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                     .collect();
                 let filled_area: Vec<(i32, i32)> =
                     flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+                let trees_ok_to_generate: Vec<TreeType> = {
+                    let mut trees: Vec<TreeType> = vec![];
+                    if let Some(leaf_type) = element.tags().get("leaf_type") {
+                        match leaf_type.as_str() {
+                            "broadleaved" => {
+                                trees.push(TreeType::Oak);
+                                trees.push(TreeType::Birch);
+                            }
+                            "needleleaved" => trees.push(TreeType::Spruce),
+                            _ => {
+                                trees.push(TreeType::Oak);
+                                trees.push(TreeType::Spruce);
+                                trees.push(TreeType::Birch);
+                            }
+                        }
+                    } else {
+                        trees.push(TreeType::Oak);
+                        trees.push(TreeType::Spruce);
+                        trees.push(TreeType::Birch);
+                    }
+                    trees
+                };
 
                 let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
@@ -161,7 +244,10 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             }
                             let random_choice: i32 = rng.gen_range(0..30);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z));
+                                let tree_type = *trees_ok_to_generate
+                                    .choose(&mut rng)
+                                    .unwrap_or(&TreeType::Oak);
+                                Tree::create_of_type(editor, (x, 1, z), tree_type);
                             } else if random_choice == 1 {
                                 let flower_block = match rng.gen_range(1..=4) {
                                     1 => RED_FLOWER,

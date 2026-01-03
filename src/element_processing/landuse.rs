@@ -1,9 +1,10 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::element_processing::tree::Tree;
+use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use rand::prelude::SliceRandom;
 use rand::Rng;
 
 pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
@@ -47,6 +48,29 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
     // Get the area of the landuse element
     let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
     let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+
+    let trees_ok_to_generate: Vec<TreeType> = {
+        let mut trees: Vec<TreeType> = vec![];
+        if let Some(leaf_type) = element.tags.get("leaf_type") {
+            match leaf_type.as_str() {
+                "broadleaved" => {
+                    trees.push(TreeType::Oak);
+                    trees.push(TreeType::Birch);
+                }
+                "needleleaved" => trees.push(TreeType::Spruce),
+                _ => {
+                    trees.push(TreeType::Oak);
+                    trees.push(TreeType::Spruce);
+                    trees.push(TreeType::Birch);
+                }
+            }
+        } else {
+            trees.push(TreeType::Oak);
+            trees.push(TreeType::Spruce);
+            trees.push(TreeType::Birch);
+        }
+        trees
+    };
 
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
@@ -94,7 +118,10 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..30);
                     if random_choice == 20 {
-                        Tree::create(editor, (x, 1, z));
+                        let tree_type = *trees_ok_to_generate
+                            .choose(&mut rng)
+                            .unwrap_or(&TreeType::Oak);
+                        Tree::create_of_type(editor, (x, 1, z), tree_type);
                     } else if random_choice == 2 {
                         let flower_block: Block = match rng.gen_range(1..=5) {
                             1 => OAK_LEAVES,
