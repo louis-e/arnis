@@ -109,4 +109,19 @@ mod tests {
 
         assert_eq!(rng1.gen::<u64>(), rng2.gen::<u64>());
     }
+
+    #[test]
+    fn test_coord_rng_negative_coordinates() {
+        // Negative coordinates are common in Minecraft worlds
+        let mut rng1 = coord_rng(-100, -200, 12345);
+        let mut rng2 = coord_rng(-100, -200, 12345);
+
+        assert_eq!(rng1.gen::<u64>(), rng2.gen::<u64>());
+
+        // Ensure different negative coords produce different seeds
+        let mut rng3 = coord_rng(-100, -200, 12345);
+        let mut rng4 = coord_rng(-101, -200, 12345);
+
+        assert_ne!(rng3.gen::<u64>(), rng4.gen::<u64>());
+    }
 }
