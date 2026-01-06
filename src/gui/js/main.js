@@ -91,7 +91,6 @@ async function applyLocalization(localization) {
     "h2[data-localize='customization_settings']": "customization_settings",
     "label[data-localize='world_scale']": "world_scale",
     "label[data-localize='custom_bounding_box']": "custom_bounding_box",
-    "label[data-localize='floodfill_timeout']": "floodfill_timeout",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     "label[data-localize='language']": "language",
@@ -110,7 +109,6 @@ async function applyLocalization(localization) {
 
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
-    "input[id='floodfill-timeout']": "placeholder_floodfill",
     // DEPRECATED: Ground level placeholder removed
     // "input[id='ground-level']": "placeholder_ground"
   };
@@ -791,13 +789,11 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
-    var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
     var ground_level = -62;
 
-    // Validate floodfill_timeout and ground_level
-    floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
+    // Validate ground_level
     ground_level = isNaN(ground_level) || ground_level < -62 ? 20 : ground_level;
 
     // Get telemetry consent (defaults to false if not set)
@@ -809,7 +805,6 @@ async function startGeneration() {
         selectedWorld: worldPath,
         worldScale: scale,
         groundLevel: ground_level,
-        floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
         skipOsmObjects: skipOsmObjects,
         interiorEnabled: interior,
