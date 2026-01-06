@@ -10,6 +10,9 @@ use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::time::Duration;
 
+/// Type alias for member flood fill results to avoid type complexity warnings
+type MemberFloodFillResult = ((u64, u64), Vec<(i32, i32)>);
+
 /// A cache of pre-computed flood fill results, keyed by element ID.
 ///
 /// For relations with multiple members, results are stored as `relation_id:way_id`.
@@ -81,7 +84,7 @@ impl FloodFillCache {
             .collect();
 
         // Compute all member flood fills in parallel
-        let member_results: Vec<((u64, u64), Vec<(i32, i32)>)> = members_needing_fill
+        let member_results: Vec<MemberFloodFillResult> = members_needing_fill
             .par_iter()
             .map(|(rel_id, member)| {
                 let polygon_coords: Vec<(i32, i32)> =
@@ -151,6 +154,13 @@ impl FloodFillCache {
     }
 
     /// Determines if a way element needs flood fill based on its tags.
+    ///
+    /// - building/building:part → buildings::generate_buildings
+    /// - landuse → landuse::generate_landuse
+    /// - leisure → leisure::generate_leisure
+    /// - amenity → amenities::generate_amenities
+    /// - natural (except tree) → natural::generate_natural
+    /// - highway with area=yes → highways::generate_highways (area fill)
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
         way.tags.contains_key("building")
             || way.tags.contains_key("building:part")
@@ -162,11 +172,9 @@ impl FloodFillCache {
                 .get("natural")
                 .map(|v| v != "tree")
                 .unwrap_or(false)
-            || way
-                .tags
-                .get("highway")
-                .map(|v| v == "pedestrian" || v == "platform")
-                .unwrap_or(false)
+            // Highway areas (like pedestrian plazas) use flood fill when area=yes
+            || (way.tags.contains_key("highway")
+                && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
     }
 
     /// Determines if a relation needs flood fill for its members.

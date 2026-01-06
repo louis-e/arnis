@@ -67,15 +67,6 @@ pub fn generate_world_with_options(
 
     println!("{} Processing data...", "[4/7]".bold());
 
-    // Pre-compute all flood fills in parallel for better CPU utilization
-    emit_gui_progress_update(20.0, "Pre-computing polygon fills...");
-    let flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
-    println!(
-        "Pre-computed {} way fills and {} relation member fills",
-        flood_fill_cache.way_count(),
-        flood_fill_cache.member_count()
-    );
-
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
 
@@ -84,6 +75,14 @@ pub fn generate_world_with_options(
 
     println!("{} Processing terrain...", "[5/7]".bold());
     emit_gui_progress_update(25.0, "Processing terrain...");
+
+    // Pre-compute all flood fills in parallel for better CPU utilization
+    let flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
+    println!(
+        "Pre-computed {} way fills and {} relation member fills",
+        flood_fill_cache.way_count(),
+        flood_fill_cache.member_count()
+    );
 
     // Process data
     let elements_count: usize = elements.len();
