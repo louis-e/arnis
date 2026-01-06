@@ -75,6 +75,8 @@ impl FloodFillCache {
         timeout: Option<&Duration>,
     ) -> Vec<(i32, i32)> {
         if let Some(cached) = self.way_cache.get(&way.id) {
+            // Clone is intentional: each result is typically accessed once during
+            // sequential processing, so the cost is acceptable vs Arc complexity
             cached.clone()
         } else {
             // Fallback: compute on demand for synthetic/combined ways from relations
@@ -98,6 +100,12 @@ impl FloodFillCache {
 
     /// Determines if a way element needs flood fill based on its tags.
     ///
+    /// This checks for tag presence (not specific values) because:
+    /// - Only some values within each tag type actually use flood fill
+    /// - But caching extra results is harmless (small memory overhead)
+    /// - And avoids duplicating value-checking logic from processors
+    ///
+    /// Covered cases:
     /// - building/building:part -> buildings::generate_buildings (includes bridge)
     /// - landuse -> landuse::generate_landuse
     /// - leisure -> leisure::generate_leisure
