@@ -7,9 +7,8 @@ use crate::retrieve_data;
 // this is copied from main.rs
 pub fn generate_example(llbbox: LLBBox) -> (XZBBox, Vec<ProcessedElement>) {
     // Fetch data
-    let raw_data: serde_json::Value =
-        retrieve_data::fetch_data_from_overpass(llbbox, false, "requests", None)
-            .expect("Failed to fetch data");
+    let raw_data = retrieve_data::fetch_data_from_overpass(llbbox, false, "requests", None)
+        .expect("Failed to fetch data");
 
     // Parse raw data
     let (mut parsed_elements, xzbbox) = osm_parser::parse_osm_data(raw_data, llbbox, 1.0, false);

@@ -453,7 +453,7 @@ pub fn generate_natural_from_relation(
         // Generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_natural(editor, &ProcessedElement::Way(member.way.clone()), args);
+                generate_natural(editor, &ProcessedElement::Way((*member.way).clone()), args);
             }
         }
 
