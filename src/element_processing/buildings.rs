@@ -3,6 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -121,7 +122,8 @@ pub fn generate_buildings(
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
     let mut is_tall_building = false;
-    let mut rng = rand::thread_rng();
+    // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+    let mut rng = element_rng(element.id);
     let use_vertical_windows = rng.gen_bool(0.7);
     let use_accent_roof_line = rng.gen_bool(0.25);
 

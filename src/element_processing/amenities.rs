@@ -2,10 +2,12 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::deterministic_rng::element_rng;
 use crate::floodfill::flood_fill_area; // Needed for inline amenity flood fills
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
+use rand::Rng;
 
 pub fn generate_amenities(
     editor: &mut WorldEditor,
@@ -82,8 +84,10 @@ pub fn generate_amenities(
             "bench" => {
                 // Place a bench
                 if let Some(pt) = first_node {
-                    // 50% chance to 90 degrees rotate the bench using if
-                    if rand::random::<bool>() {
+                    // Use deterministic RNG for consistent bench orientation across region boundaries
+                    let mut rng = element_rng(element.id());
+                    // 50% chance to 90 degrees rotate the bench
+                    if rng.gen_bool(0.5) {
                         editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
                         editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
                         editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
