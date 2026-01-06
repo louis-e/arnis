@@ -192,6 +192,10 @@ pub fn generate_world_with_options(
 
     process_pb.finish();
 
+    // Release memory from element processing
+    drop(elements);
+    drop(highway_connectivity);
+
     // Generate ground layer
     let total_blocks: u64 = xzbbox.bounding_rect().total_blocks();
     let desired_updates: u64 = 1500;

@@ -332,6 +332,9 @@ pub fn fetch_elevation_data(
     // Continue with the existing blur and conversion to Minecraft heights...
     let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, sigma);
 
+    // Release raw height grid
+    drop(height_grid);
+
     let mut mc_heights: Vec<Vec<i32>> = Vec::with_capacity(blurred_heights.len());
 
     // Find min/max in raw data
