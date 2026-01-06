@@ -5,22 +5,15 @@
 //! sequential processing.
 
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::{ProcessedElement, ProcessedMember, ProcessedRelation, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::time::Duration;
 
-/// Type alias for member flood fill results to avoid type complexity warnings
-type MemberFloodFillResult = ((u64, u64), Vec<(i32, i32)>);
-
 /// A cache of pre-computed flood fill results, keyed by element ID.
-///
-/// For relations with multiple members, results are stored keyed by `(relation_id, way_id)` tuple.
 pub struct FloodFillCache {
     /// Cached results: element_id -> filled coordinates
     way_cache: FnvHashMap<u64, Vec<(i32, i32)>>,
-    /// Cached results for relation members: (relation_id, way_id) -> filled coordinates
-    member_cache: FnvHashMap<(u64, u64), Vec<(i32, i32)>>,
 }
 
 impl FloodFillCache {
@@ -28,7 +21,6 @@ impl FloodFillCache {
     pub fn new() -> Self {
         Self {
             way_cache: FnvHashMap::default(),
-            member_cache: FnvHashMap::default(),
         }
     }
 
@@ -51,27 +43,6 @@ impl FloodFillCache {
             })
             .collect();
 
-        // Collect all relation members that need flood fill
-        let members_needing_fill: Vec<(u64, &ProcessedMember)> = elements
-            .iter()
-            .filter_map(|el| match el {
-                ProcessedElement::Relation(rel) => {
-                    if Self::relation_needs_flood_fill(rel) {
-                        Some(
-                            rel.members
-                                .iter()
-                                .map(move |m| (rel.id, m))
-                                .collect::<Vec<_>>(),
-                        )
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            })
-            .flatten()
-            .collect();
-
         // Compute all way flood fills in parallel
         let way_results: Vec<(u64, Vec<(i32, i32)>)> = ways_needing_fill
             .par_iter()
@@ -83,24 +54,10 @@ impl FloodFillCache {
             })
             .collect();
 
-        // Compute all member flood fills in parallel
-        let member_results: Vec<MemberFloodFillResult> = members_needing_fill
-            .par_iter()
-            .map(|(rel_id, member)| {
-                let polygon_coords: Vec<(i32, i32)> =
-                    member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
-                let filled = flood_fill_area(&polygon_coords, timeout);
-                ((*rel_id, member.way.id), filled)
-            })
-            .collect();
-
         // Build the cache
         let mut cache = Self::new();
         for (id, filled) in way_results {
             cache.way_cache.insert(id, filled);
-        }
-        for (key, filled) in member_results {
-            cache.member_cache.insert(key, filled);
         }
 
         cache
@@ -136,17 +93,15 @@ impl FloodFillCache {
 
     /// Determines if a way element needs flood fill based on its tags.
     ///
-    /// - building/building:part → buildings::generate_buildings
-    /// - bridge (building type) → buildings::generate_bridge
-    /// - landuse → landuse::generate_landuse
-    /// - leisure → leisure::generate_leisure
-    /// - amenity → amenities::generate_amenities
-    /// - natural (except tree) → natural::generate_natural
-    /// - highway with area=yes → highways::generate_highways (area fill)
+    /// - building/building:part -> buildings::generate_buildings (includes bridge)
+    /// - landuse -> landuse::generate_landuse
+    /// - leisure -> leisure::generate_leisure
+    /// - amenity -> amenities::generate_amenities
+    /// - natural (except tree) -> natural::generate_natural
+    /// - highway with area=yes -> highways::generate_highways (area fill)
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
         way.tags.contains_key("building")
             || way.tags.contains_key("building:part")
-            || way.tags.contains_key("bridge") // building=bridge uses flood fill
             || way.tags.contains_key("landuse")
             || way.tags.contains_key("leisure")
             || way.tags.contains_key("amenity")
@@ -160,28 +115,9 @@ impl FloodFillCache {
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
     }
 
-    /// Determines if a relation needs flood fill for its members.
-    fn relation_needs_flood_fill(rel: &ProcessedRelation) -> bool {
-        rel.tags.contains_key("building")
-            || rel.tags.contains_key("building:part")
-            || rel.tags.contains_key("water")
-            || rel
-                .tags
-                .get("natural")
-                .map(|v| v == "water" || v == "bay" || v == "wood" || v == "scrub")
-                .unwrap_or(false)
-            || rel.tags.contains_key("landuse")
-            || rel.tags.get("leisure") == Some(&"park".to_string())
-    }
-
     /// Returns the number of cached way entries.
     pub fn way_count(&self) -> usize {
         self.way_cache.len()
-    }
-
-    /// Returns the number of cached member entries.
-    pub fn member_count(&self) -> usize {
-        self.member_cache.len()
     }
 }
 

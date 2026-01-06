@@ -1527,27 +1527,27 @@ fn generate_bridge(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     flood_fill_cache: &FloodFillCache,
-    _floodfill_timeout: Option<&Duration>,
+    floodfill_timeout: Option<&Duration>,
 ) {
     let floor_block: Block = STONE;
     let railing_block: Block = STONE_BRICKS;
+
+    // Calculate bridge level based on the "level" tag (computed once, used throughout)
+    let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
+        if let Ok(level) = level_str.parse::<i32>() {
+            (level * 3) + 1
+        } else {
+            1 // Default elevation
+        }
+    } else {
+        1 // Default elevation
+    };
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
     for node in &element.nodes {
         let x: i32 = node.x;
         let z: i32 = node.z;
-
-        // Calculate bridge level based on the "level" tag
-        let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
-            if let Ok(level) = level_str.parse::<i32>() {
-                (level * 3) + 1
-            } else {
-                1 // Default elevation
-            }
-        } else {
-            1 // Default elevation
-        };
 
         // Create bridge path using Bresenham's line
         if let Some(prev) = previous_node {
@@ -1565,18 +1565,7 @@ fn generate_bridge(
     }
 
     // Flood fill the area between the bridge path nodes (uses cache)
-    let bridge_area: Vec<(i32, i32)> = flood_fill_cache.get_or_compute(element, _floodfill_timeout);
-
-    // Calculate bridge level based on the "level" tag
-    let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
-        if let Ok(level) = level_str.parse::<i32>() {
-            (level * 3) + 1
-        } else {
-            1 // Default elevation
-        }
-    } else {
-        1 // Default elevation
-    };
+    let bridge_area: Vec<(i32, i32)> = flood_fill_cache.get_or_compute(element, floodfill_timeout);
 
     // Place floor blocks
     for (x, z) in bridge_area {

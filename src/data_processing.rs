@@ -78,11 +78,7 @@ pub fn generate_world_with_options(
 
     // Pre-compute all flood fills in parallel for better CPU utilization
     let flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
-    println!(
-        "Pre-computed {} way fills and {} relation member fills",
-        flood_fill_cache.way_count(),
-        flood_fill_cache.member_count()
-    );
+    println!("Pre-computed {} flood fills", flood_fill_cache.way_count());
 
     // Process data
     let elements_count: usize = elements.len();
