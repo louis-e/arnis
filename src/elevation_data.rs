@@ -434,55 +434,59 @@ fn get_tile_coordinates(bbox: &LLBBox, zoom: u8) -> Vec<(u32, u32)> {
 }
 
 fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
+    let height: usize = heights.len();
+    let width: usize = heights.first().map(|row| row.len()).unwrap_or(0);
+    if height == 0 || width == 0 {
+        return Vec::new();
+    }
+
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel: Vec<f64> = create_gaussian_kernel(kernel_size, sigma);
+    let half_kernel: i32 = kernel_size as i32 / 2;
 
-    // Apply blur
-    let mut blurred: Vec<Vec<f64>> = heights.to_owned();
+    let mut flat: Vec<f64> = Vec::with_capacity(width * height);
+    for row in heights {
+        flat.extend_from_slice(row);
+    }
 
-    // Horizontal pass
-    for row in blurred.iter_mut() {
-        let mut temp: Vec<f64> = row.clone();
-        for (i, val) in temp.iter_mut().enumerate() {
+    let mut scratch: Vec<f64> = vec![0.0; width * height];
+
+    // Horizontal pass: flat -> scratch
+    for y in 0..height {
+        let row_offset = y * width;
+        for x in 0..width {
             let mut sum: f64 = 0.0;
             let mut weight_sum: f64 = 0.0;
             for (j, k) in kernel.iter().enumerate() {
-                let idx: i32 = i as i32 + j as i32 - kernel_size as i32 / 2;
-                if idx >= 0 && idx < row.len() as i32 {
-                    sum += row[idx as usize] * k;
+                let idx_x = x as i32 + j as i32 - half_kernel;
+                if (0..width as i32).contains(&idx_x) {
+                    let idx = row_offset + idx_x as usize;
+                    sum += flat[idx] * k;
                     weight_sum += k;
                 }
             }
-            *val = sum / weight_sum;
+            scratch[row_offset + x] = sum / weight_sum;
         }
-        *row = temp;
     }
 
-    // Vertical pass
-    let height: usize = blurred.len();
-    let width: usize = blurred[0].len();
-    for x in 0..width {
-        let temp: Vec<_> = blurred
-            .iter()
-            .take(height)
-            .map(|row: &Vec<f64>| row[x])
-            .collect();
-
-        for (y, row) in blurred.iter_mut().enumerate().take(height) {
+    // Vertical pass: scratch -> flat
+    for y in 0..height {
+        for x in 0..width {
             let mut sum: f64 = 0.0;
             let mut weight_sum: f64 = 0.0;
             for (j, k) in kernel.iter().enumerate() {
-                let idx: i32 = y as i32 + j as i32 - kernel_size as i32 / 2;
-                if idx >= 0 && idx < height as i32 {
-                    sum += temp[idx as usize] * k;
+                let idx_y = y as i32 + j as i32 - half_kernel;
+                if (0..height as i32).contains(&idx_y) {
+                    let idx = idx_y as usize * width + x;
+                    sum += scratch[idx] * k;
                     weight_sum += k;
                 }
             }
-            row[x] = sum / weight_sum;
+            flat[y * width + x] = sum / weight_sum;
         }
     }
 
-    blurred
+    flat.chunks(width).map(|row| row.to_vec()).collect()
 }
 
 fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
