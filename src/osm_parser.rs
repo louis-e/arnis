@@ -31,9 +31,16 @@ struct OsmElement {
 
 #[derive(Debug, Deserialize)]
 pub struct OsmData {
-    pub elements: Vec<OsmElement>,
+    elements: Vec<OsmElement>,
     #[serde(default)]
     pub remark: Option<String>,
+}
+
+impl OsmData {
+    /// Returns true if there are no elements in the OSM data
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
+    }
 }
 
 struct SplitOsmData {
@@ -237,7 +244,7 @@ pub fn parse_osm_data(
         // Store unclipped way for relation assembly (clipping happens after ring merging)
         let way = Arc::new(ProcessedWay {
             id: element.id,
-            tags: tags.clone(),
+            tags,
             nodes,
         });
         ways_map.insert(element.id, Arc::clone(&way));
@@ -252,7 +259,7 @@ pub fn parse_osm_data(
 
         let processed: ProcessedWay = ProcessedWay {
             id: element.id,
-            tags,
+            tags: way.tags.clone(),
             nodes: clipped_nodes,
         };
 

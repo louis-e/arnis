@@ -189,7 +189,7 @@ pub fn fetch_data_from_overpass(
             serde_json::Deserializer::from_reader(Cursor::new(response.as_bytes()));
         let data: OsmData = OsmData::deserialize(&mut deserializer)?;
 
-        if data.elements.is_empty() {
+        if data.is_empty() {
             if let Some(remark) = data.remark.as_deref() {
                 // Check if the remark mentions memory or other runtime errors
                 if remark.contains("runtime error") && remark.contains("out of memory") {
