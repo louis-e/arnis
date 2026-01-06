@@ -57,15 +57,6 @@ pub fn emit_gui_error(message: &str) {
     emit_gui_progress_update(0.0, &format!("Error! {truncated_message}"));
 }
 
-/// Emits an event when the world map preview is ready
-pub fn emit_map_preview_ready() {
-    if let Some(window) = get_main_window() {
-        if let Err(e) = window.emit("map-preview-ready", ()) {
-            eprintln!("Failed to emit map-preview-ready event: {}", e);
-        }
-    }
-}
-
 /// Emits an event to open the generated mcworld file
 pub fn emit_open_mcworld_file(path: &str) {
     if let Some(window) = get_main_window() {

@@ -114,7 +114,6 @@ pub fn run_gui() {
             gui_start_generation,
             gui_get_version,
             gui_check_for_updates,
-            gui_get_world_map_data,
             gui_show_in_folder
         ])
         .setup(|app| {
@@ -678,63 +677,6 @@ fn gui_check_for_updates() -> Result<bool, String> {
     }
 }
 
-/// Returns the world map image data as base64 and geo bounds for overlay display.
-/// Returns None if the map image or metadata doesn't exist.
-#[tauri::command]
-fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, String> {
-    let world_dir = PathBuf::from(&world_path);
-    let map_path = world_dir.join("arnis_world_map.png");
-    let metadata_path = world_dir.join("metadata.json");
-
-    // Check if both files exist
-    if !map_path.exists() || !metadata_path.exists() {
-        return Ok(None);
-    }
-
-    // Read and encode the map image as base64
-    let image_data = fs::read(&map_path).map_err(|e| format!("Failed to read map image: {e}"))?;
-    let base64_image =
-        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
-
-    // Read metadata
-    let metadata_content =
-        fs::read_to_string(&metadata_path).map_err(|e| format!("Failed to read metadata: {e}"))?;
-    let metadata: serde_json::Value = serde_json::from_str(&metadata_content)
-        .map_err(|e| format!("Failed to parse metadata: {e}"))?;
-
-    // Extract geo bounds (metadata uses camelCase from serde)
-    let min_lat = metadata["minGeoLat"]
-        .as_f64()
-        .ok_or("Missing minGeoLat in metadata")?;
-    let max_lat = metadata["maxGeoLat"]
-        .as_f64()
-        .ok_or("Missing maxGeoLat in metadata")?;
-    let min_lon = metadata["minGeoLon"]
-        .as_f64()
-        .ok_or("Missing minGeoLon in metadata")?;
-    let max_lon = metadata["maxGeoLon"]
-        .as_f64()
-        .ok_or("Missing maxGeoLon in metadata")?;
-
-    Ok(Some(WorldMapData {
-        image_base64: format!("data:image/png;base64,{}", base64_image),
-        min_lat,
-        max_lat,
-        min_lon,
-        max_lon,
-    }))
-}
-
-/// Data structure for world map overlay
-#[derive(serde::Serialize)]
-struct WorldMapData {
-    image_base64: String,
-    min_lat: f64,
-    max_lat: f64,
-    min_lon: f64,
-    max_lon: f64,
-}
-
 /// Opens the file with default application (Windows) or shows in file explorer (macOS/Linux)
 #[tauri::command]
 fn gui_show_in_folder(path: String) -> Result<(), String> {
@@ -1004,15 +946,6 @@ fn gui_start_generation(
                 emit_gui_progress_update(100.0, "Done! World generation completed.");
                 println!("{}", "Done! World generation completed.".green().bold());
 
-                // Start map preview generation silently in background (Java only)
-                if world_format == WorldFormat::JavaAnvil {
-                    let preview_info = data_processing::MapPreviewInfo::new(
-                        generation_options.path.clone(),
-                        &xzbbox,
-                    );
-                    data_processing::start_map_preview_generation(preview_info);
-                }
-
                 return Ok(());
             }
 
@@ -1056,15 +989,6 @@ fn gui_start_generation(
                     drop(_session_lock);
                     emit_gui_progress_update(100.0, "Done! World generation completed.");
                     println!("{}", "Done! World generation completed.".green().bold());
-
-                    // Start map preview generation silently in background (Java only)
-                    if world_format == WorldFormat::JavaAnvil {
-                        let preview_info = data_processing::MapPreviewInfo::new(
-                            generation_options.path.clone(),
-                            &xzbbox,
-                        );
-                        data_processing::start_map_preview_generation(preview_info);
-                    }
 
                     Ok(())
                 }

@@ -216,12 +216,6 @@ function setupProgressListener() {
     }
   });
 
-  // Listen for map preview ready event from backend
-  window.__TAURI__.event.listen("map-preview-ready", () => {
-    console.log("Map preview ready event received");
-    showWorldPreviewButton();
-  });
-
   // Listen for open-mcworld-file event to show the generated Bedrock world in file explorer
   window.__TAURI__.event.listen("open-mcworld-file", async (event) => {
     const filePath = event.payload;
@@ -679,45 +673,12 @@ async function selectWorld(generate_new_world) {
       document.getElementById('selected-world').textContent = lastSegment;
       document.getElementById('selected-world').style.color = "#fecc44";
 
-      // Notify that world changed (reset preview)
-      notifyWorldChanged();
-
-      // If selecting an existing world, check for existing map data
-      if (!generate_new_world) {
-        await loadExistingWorldMapData();
-      }
     }
   } catch (error) {
     handleWorldSelectionError(error);
   }
 
   closeWorldPicker();
-}
-
-/**
- * Loads existing world map data if available (for existing worlds)
- * This will zoom to the location and auto-enable the preview
- */
-async function loadExistingWorldMapData() {
-  if (!worldPath) return;
-
-  try {
-    const mapData = await invoke('gui_get_world_map_data', { worldPath: worldPath });
-    if (mapData) {
-      currentWorldMapData = mapData;
-
-      // Send data to the map iframe with instruction to zoom and auto-enable
-      const mapFrame = document.querySelector('.map-container');
-      if (mapFrame && mapFrame.contentWindow) {
-        mapFrame.contentWindow.postMessage({
-          type: 'loadExistingWorldMap',
-          data: mapData
-        }, '*');
-      }
-    }
-  } catch (error) {
-    console.log("No existing world map data found:", error);
-  }
 }
 
 /**
@@ -766,9 +727,6 @@ async function startGeneration() {
       selectedWorld.style.color = "#fa7878";
       return;
     }
-
-    // Clear any existing world preview since we're generating a new one
-    notifyWorldChanged();
 
     // Get the map iframe reference
     const mapFrame = document.querySelector('.map-container');
@@ -826,62 +784,5 @@ async function startGeneration() {
   } catch (error) {
     console.error("Error starting generation:", error);
     generationButtonEnabled = true;
-  }
-}
-
-// World preview overlay state
-let worldPreviewEnabled = false;
-let currentWorldMapData = null;
-
-/**
- * Notifies the map iframe that world preview data is ready
- * Called when the backend emits the map-preview-ready event
- */
-async function showWorldPreviewButton() {
-  // Try to load the world map data
-  await loadWorldMapData();
-
-  if (currentWorldMapData) {
-    // Send data to the map iframe
-    const mapFrame = document.querySelector('.map-container');
-    if (mapFrame && mapFrame.contentWindow) {
-      mapFrame.contentWindow.postMessage({
-        type: 'worldPreviewReady',
-        data: currentWorldMapData
-      }, '*');
-      console.log("World preview data sent to map iframe");
-    }
-  } else {
-    console.warn("Map data not available yet");
-  }
-}
-
-/**
- * Notifies the map iframe that the world has changed (reset preview)
- */
-function notifyWorldChanged() {
-  currentWorldMapData = null;
-  const mapFrame = document.querySelector('.map-container');
-  if (mapFrame && mapFrame.contentWindow) {
-    mapFrame.contentWindow.postMessage({
-      type: 'worldChanged'
-    }, '*');
-  }
-}
-
-/**
- * Loads the world map data from the backend
- */
-async function loadWorldMapData() {
-  if (!worldPath) return;
-  
-  try {
-    const mapData = await invoke('gui_get_world_map_data', { worldPath: worldPath });
-    if (mapData) {
-      currentWorldMapData = mapData;
-      console.log("World map data loaded successfully");
-    }
-  } catch (error) {
-    console.error("Failed to load world map data:", error);
   }
 }
