@@ -132,6 +132,22 @@ impl FloodFillCache {
     pub fn way_count(&self) -> usize {
         self.way_cache.len()
     }
+
+    /// Removes a way's cached flood fill result, freeing memory.
+    ///
+    /// Call this after processing an element to release its cached data.
+    pub fn remove_way(&mut self, way_id: u64) {
+        self.way_cache.remove(&way_id);
+    }
+
+    /// Removes all cached flood fill results for ways in a relation.
+    ///
+    /// Relations contain multiple ways, so we need to remove all of them.
+    pub fn remove_relation_ways(&mut self, way_ids: &[u64]) {
+        for &id in way_ids {
+            self.way_cache.remove(&id);
+        }
+    }
 }
 
 impl Default for FloodFillCache {
@@ -164,12 +180,7 @@ pub fn configure_rayon_thread_pool(cpu_fraction: f64) {
         .build_global()
     {
         Ok(()) => {
-            println!(
-                "Configured thread pool: {} threads ({}% of {} cores)",
-                target_threads,
-                (cpu_fraction * 100.0) as u32,
-                available_cores
-            );
+            // Successfully configured
         }
         Err(_) => {
             // Thread pool already configured
