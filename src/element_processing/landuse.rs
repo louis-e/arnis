@@ -1,5 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::*;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -53,7 +54,8 @@ pub fn generate_landuse(
     let floor_area: Vec<(i32, i32)> =
         flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
-    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+    // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+    let mut rng = element_rng(element.id);
 
     for (x, z) in floor_area {
         if landuse_tag == "traffic_island" {

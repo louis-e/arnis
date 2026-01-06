@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -79,7 +80,8 @@ pub fn generate_natural(
                 let filled_area: Vec<(i32, i32)> =
                     flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
-                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+                let mut rng = element_rng(way.id);
 
                 for (x, z) in filled_area {
                     editor.set_block(block_type, x, 0, z, None, None);
