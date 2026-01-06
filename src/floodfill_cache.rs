@@ -15,7 +15,7 @@ type MemberFloodFillResult = ((u64, u64), Vec<(i32, i32)>);
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 ///
-/// For relations with multiple members, results are stored as `relation_id:way_id`.
+/// For relations with multiple members, results are stored keyed by `(relation_id, way_id)` tuple.
 pub struct FloodFillCache {
     /// Cached results: element_id -> filled coordinates
     way_cache: FnvHashMap<u64, Vec<(i32, i32)>>,
@@ -134,28 +134,10 @@ impl FloodFillCache {
         }
     }
 
-    /// Gets cached flood fill result for a relation member, or computes it if not cached.
-    #[allow(dead_code)]
-    pub fn get_or_compute_member(
-        &self,
-        relation_id: u64,
-        member: &ProcessedMember,
-        timeout: Option<&Duration>,
-    ) -> Vec<(i32, i32)> {
-        let key = (relation_id, member.way.id);
-        if let Some(cached) = self.member_cache.get(&key) {
-            cached.clone()
-        } else {
-            // Fallback: compute on demand
-            let polygon_coords: Vec<(i32, i32)> =
-                member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
-            flood_fill_area(&polygon_coords, timeout)
-        }
-    }
-
     /// Determines if a way element needs flood fill based on its tags.
     ///
     /// - building/building:part → buildings::generate_buildings
+    /// - bridge (building type) → buildings::generate_bridge
     /// - landuse → landuse::generate_landuse
     /// - leisure → leisure::generate_leisure
     /// - amenity → amenities::generate_amenities
@@ -164,6 +146,7 @@ impl FloodFillCache {
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
         way.tags.contains_key("building")
             || way.tags.contains_key("building:part")
+            || way.tags.contains_key("bridge") // building=bridge uses flood fill
             || way.tags.contains_key("landuse")
             || way.tags.contains_key("leisure")
             || way.tags.contains_key("amenity")
@@ -213,8 +196,12 @@ impl Default for FloodFillCache {
 /// Call this once at startup before any parallel operations.
 ///
 /// # Arguments
-/// * `cpu_fraction` - Fraction of available cores to use (e.g., 0.9 for 90%)
+/// * `cpu_fraction` - Fraction of available cores to use (e.g., 0.9 for 90%).
+///   Values are clamped to the range [0.1, 1.0].
 pub fn configure_rayon_thread_pool(cpu_fraction: f64) {
+    // Clamp cpu_fraction to valid range
+    let cpu_fraction = cpu_fraction.clamp(0.1, 1.0);
+
     let available_cores = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
@@ -223,16 +210,20 @@ pub fn configure_rayon_thread_pool(cpu_fraction: f64) {
     let target_threads = target_threads.max(1); // At least 1 thread
 
     // Only configure if we haven't already (this can only be called once)
-    if rayon::ThreadPoolBuilder::new()
+    match rayon::ThreadPoolBuilder::new()
         .num_threads(target_threads)
         .build_global()
-        .is_ok()
     {
-        println!(
-            "Configured thread pool: {} threads ({}% of {} cores)",
-            target_threads,
-            (cpu_fraction * 100.0) as u32,
-            available_cores
-        );
+        Ok(()) => {
+            println!(
+                "Configured thread pool: {} threads ({}% of {} cores)",
+                target_threads,
+                (cpu_fraction * 100.0) as u32,
+                available_cores
+            );
+        }
+        Err(_) => {
+            // Thread pool already configured
+        }
     }
 }

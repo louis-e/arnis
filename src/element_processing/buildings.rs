@@ -4,7 +4,6 @@ use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
-use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -387,7 +386,7 @@ pub fn generate_buildings(
                 building_height = ((23.0 * scale_factor) as i32).max(3);
             }
         } else if building_type == "bridge" {
-            generate_bridge(editor, element, args.timeout.as_ref());
+            generate_bridge(editor, element, flood_fill_cache, args.timeout.as_ref());
             return;
         }
     }
@@ -1527,7 +1526,8 @@ pub fn generate_building_from_relation(
 fn generate_bridge(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
-    floodfill_timeout: Option<&Duration>,
+    flood_fill_cache: &FloodFillCache,
+    _floodfill_timeout: Option<&Duration>,
 ) {
     let floor_block: Block = STONE;
     let railing_block: Block = STONE_BRICKS;
@@ -1564,10 +1564,8 @@ fn generate_bridge(
         previous_node = Some((x, z));
     }
 
-    // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
-
-    let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
+    // Flood fill the area between the bridge path nodes (uses cache)
+    let bridge_area: Vec<(i32, i32)> = flood_fill_cache.get_or_compute(element, _floodfill_timeout);
 
     // Calculate bridge level based on the "level" tag
     let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
