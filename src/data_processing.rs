@@ -13,6 +13,7 @@ use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 pub const MIN_Y: i32 = -64;
 
@@ -61,6 +62,7 @@ pub fn generate_world_with_options(
         options.level_name,
         options.spawn_point,
     );
+    let ground = Arc::new(ground);
 
     println!("{} Processing data...", "[4/7]".bold());
 
@@ -68,7 +70,7 @@ pub fn generate_world_with_options(
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
 
     // Set ground reference in the editor to enable elevation-aware block placement
-    editor.set_ground(&ground);
+    editor.set_ground(Arc::clone(&ground));
 
     println!("{} Processing terrain...", "[5/7]".bold());
     emit_gui_progress_update(25.0, "Processing terrain...");
@@ -295,7 +297,7 @@ pub fn generate_world_with_options(
                 Some(*spawn_coords),
                 bbox_string,
                 args.scale,
-                &ground,
+                ground.as_ref(),
             ) {
                 let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
                 eprintln!("Warning: {}", warning_msg);
