@@ -1,12 +1,17 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::element_processing::tree::Tree;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
+pub fn generate_landuse(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
@@ -44,9 +49,9 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
         _ => GRASS_BLOCK,
     };
 
-    // Get the area of the landuse element
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
-    let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+    // Get the area of the landuse element using cache
+    let floor_area: Vec<(i32, i32)> =
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
     let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
 
@@ -275,12 +280,13 @@ pub fn generate_landuse_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
 ) {
     if rel.tags.contains_key("landuse") {
         // Generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_landuse(editor, &member.way.clone(), args);
+                generate_landuse(editor, &member.way.clone(), args, flood_fill_cache);
             }
         }
 
@@ -302,7 +308,7 @@ pub fn generate_landuse_from_relation(
             };
 
             // Generate landuse area from combined way
-            generate_landuse(editor, &combined_way, args);
+            generate_landuse(editor, &combined_way, args, flood_fill_cache);
         }
     }
 }

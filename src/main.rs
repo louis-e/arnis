@@ -12,6 +12,7 @@ mod data_processing;
 mod element_processing;
 mod elevation_data;
 mod floodfill;
+mod floodfill_cache;
 mod ground;
 mod map_renderer;
 mod map_transformation;
@@ -49,6 +50,9 @@ mod progress {
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
 fn run_cli() {
+    // Configure thread pool with 90% CPU cap to keep system responsive
+    floodfill_cache::configure_rayon_thread_pool(0.9);
+
     let version: &str = env!("CARGO_PKG_VERSION");
     let repository: &str = env!("CARGO_PKG_REPOSITORY");
     println!(

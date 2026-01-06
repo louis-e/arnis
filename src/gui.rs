@@ -74,6 +74,9 @@ fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
 }
 
 pub fn run_gui() {
+    // Configure thread pool with 90% CPU cap to keep system responsive
+    crate::floodfill_cache::configure_rayon_thread_pool(0.9);
+
     // Launch the UI
     println!("Launching UI...");
 

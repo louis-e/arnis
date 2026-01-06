@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -16,8 +16,15 @@ pub fn generate_highways(
     element: &ProcessedElement,
     args: &Args,
     highway_connectivity: &HighwayConnectivityMap,
+    flood_fill_cache: &FloodFillCache,
 ) {
-    generate_highways_internal(editor, element, args, highway_connectivity);
+    generate_highways_internal(
+        editor,
+        element,
+        args,
+        highway_connectivity,
+        flood_fill_cache,
+    );
 }
 
 /// Build a connectivity map for highway endpoints to determine where slopes are needed.
@@ -66,6 +73,7 @@ fn generate_highways_internal(
     element: &ProcessedElement,
     args: &Args,
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
+    flood_fill_cache: &FloodFillCache,
 ) {
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
@@ -137,14 +145,9 @@ fn generate_highways_internal(
                 };
             }
 
-            // Fill the area using flood fill or by iterating through the nodes
-            let polygon_coords: Vec<(i32, i32)> = way
-                .nodes
-                .iter()
-                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                .collect();
+            // Fill the area using flood fill cache
             let filled_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
             for (x, z) in filled_area {
                 editor.set_block(surface_block, x, 0, z, None, None);

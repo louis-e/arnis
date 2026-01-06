@@ -5,6 +5,7 @@ use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -28,6 +29,7 @@ pub fn generate_buildings(
     element: &ProcessedWay,
     args: &Args,
     relation_levels: Option<i32>,
+    flood_fill_cache: &FloodFillCache,
 ) {
     // Get min_level first so we can use it both for start_level and building height calculations
     let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
@@ -43,10 +45,9 @@ pub fn generate_buildings(
     let scale_factor = args.scale;
     let min_level_offset = multiply_scale(min_level * 4, scale_factor);
 
-    // Cache floodfill result: compute once and reuse throughout
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
+    // Use pre-computed flood fill from cache
     let cached_floor_area: Vec<(i32, i32)> =
-        flood_fill_area(&polygon_coords, args.timeout.as_ref());
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
     let cached_footprint_size = cached_floor_area.len();
 
     // Use fixed starting Y coordinate based on maximum ground level when terrain is enabled
@@ -1484,6 +1485,7 @@ pub fn generate_building_from_relation(
     editor: &mut WorldEditor,
     relation: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
 ) {
     // Extract levels from relation tags
     let relation_levels = relation
@@ -1495,7 +1497,13 @@ pub fn generate_building_from_relation(
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(editor, &member.way, args, Some(relation_levels));
+            generate_buildings(
+                editor,
+                &member.way,
+                args,
+                Some(relation_levels),
+                flood_fill_cache,
+            );
         }
     }
 
