@@ -5,8 +5,8 @@ use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
-use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // Raw data from OSM
 
@@ -29,9 +29,11 @@ struct OsmElement {
     pub members: Vec<OsmMember>,
 }
 
-#[derive(Deserialize)]
-struct OsmData {
+#[derive(Debug, Deserialize)]
+pub struct OsmData {
     pub elements: Vec<OsmElement>,
+    #[serde(default)]
+    pub remark: Option<String>,
 }
 
 struct SplitOsmData {
@@ -66,11 +68,6 @@ impl SplitOsmData {
             others,
         }
     }
-}
-
-fn parse_raw_osm_data(json_data: Value) -> Result<SplitOsmData, serde_json::Error> {
-    let osm_data: OsmData = serde_json::from_value(json_data)?;
-    Ok(SplitOsmData::from_raw_osm_data(osm_data))
 }
 
 // End raw data
@@ -112,7 +109,7 @@ pub enum ProcessedMemberRole {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedMember {
     pub role: ProcessedMemberRole,
-    pub way: ProcessedWay,
+    pub way: Arc<ProcessedWay>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,7 +161,7 @@ impl ProcessedElement {
 }
 
 pub fn parse_osm_data(
-    json_data: Value,
+    osm_data: OsmData,
     bbox: LLBBox,
     scale: f64,
     debug: bool,
@@ -174,7 +171,7 @@ pub fn parse_osm_data(
     emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
-    let data = parse_raw_osm_data(json_data).expect("Failed to parse OSM data");
+    let data = SplitOsmData::from_raw_osm_data(osm_data);
 
     let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
         .unwrap_or_else(|e| {
@@ -189,7 +186,7 @@ pub fn parse_osm_data(
     }
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
-    let mut ways_map: HashMap<u64, ProcessedWay> = HashMap::new();
+    let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
 
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
@@ -238,17 +235,15 @@ pub fn parse_osm_data(
         let tags = element.tags.clone().unwrap_or_default();
 
         // Store unclipped way for relation assembly (clipping happens after ring merging)
-        ways_map.insert(
-            element.id,
-            ProcessedWay {
-                id: element.id,
-                tags: tags.clone(),
-                nodes: nodes.clone(),
-            },
-        );
+        let way = Arc::new(ProcessedWay {
+            id: element.id,
+            tags: tags.clone(),
+            nodes,
+        });
+        ways_map.insert(element.id, Arc::clone(&way));
 
         // Clip way nodes for standalone way processing (not relations)
-        let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
+        let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
 
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() {
@@ -257,8 +252,8 @@ pub fn parse_osm_data(
 
         let processed: ProcessedWay = ProcessedWay {
             id: element.id,
-            tags: tags.clone(),
-            nodes: clipped_nodes.clone(),
+            tags,
+            nodes: clipped_nodes,
         };
 
         processed_elements.push(ProcessedElement::Way(processed));
@@ -294,8 +289,8 @@ pub fn parse_osm_data(
                 };
 
                 // Check if the way exists in ways_map
-                let way: ProcessedWay = match ways_map.get(&mem.r#ref) {
-                    Some(w) => w.clone(),
+                let way = match ways_map.get(&mem.r#ref) {
+                    Some(w) => Arc::clone(w),
                     None => {
                         // Way was likely filtered out because it was completely outside the bbox
                         return None;
@@ -311,11 +306,11 @@ pub fn parse_osm_data(
                     if clipped_nodes.is_empty() {
                         return None;
                     }
-                    ProcessedWay {
+                    Arc::new(ProcessedWay {
                         id: way.id,
-                        tags: way.tags,
+                        tags: way.tags.clone(),
                         nodes: clipped_nodes,
-                    }
+                    })
                 };
 
                 Some(ProcessedMember {
@@ -335,6 +330,9 @@ pub fn parse_osm_data(
     }
 
     emit_gui_progress_update(15.0, "");
+
+    drop(nodes_map);
+    drop(ways_map);
 
     (processed_elements, xzbbox)
 }
