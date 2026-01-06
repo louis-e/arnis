@@ -381,7 +381,6 @@ pub fn generate_world_with_options(
     Ok(output_path)
 }
 
-/// Generate world using streaming mode (Java format only).
 /// Information needed to generate a map preview after world generation is complete
 #[derive(Clone)]
 pub struct MapPreviewInfo {

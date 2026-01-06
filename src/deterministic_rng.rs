@@ -58,8 +58,9 @@ pub fn element_rng_salted(element_id: u64, salt: u64) -> ChaCha8Rng {
 /// * `element_id` - The element ID for additional uniqueness
 #[inline]
 pub fn coord_rng(x: i32, z: i32, element_id: u64) -> ChaCha8Rng {
-    // Combine coordinates and element_id into a seed
-    let coord_part = ((x as i64) << 32) | (z as i64 & 0xFFFFFFFF);
+    // Combine coordinates and element_id into a seed.
+    // Cast through u32 to handle negative coordinates consistently.
+    let coord_part = ((x as u32 as i64) << 32) | (z as u32 as i64);
     let seed = (coord_part as u64) ^ element_id;
     ChaCha8Rng::seed_from_u64(seed)
 }
