@@ -74,6 +74,9 @@ fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
 }
 
 pub fn run_gui() {
+    // Configure thread pool with 90% CPU cap to keep system responsive
+    crate::floodfill_cache::configure_rayon_thread_pool(0.9);
+
     // Launch the UI
     println!("Launching UI...");
 
@@ -794,7 +797,6 @@ fn gui_start_generation(
     selected_world: String,
     world_scale: f64,
     ground_level: i32,
-    floodfill_timeout: u64,
     terrain_enabled: bool,
     skip_osm_objects: bool,
     interior_enabled: bool,
@@ -975,7 +977,7 @@ fn gui_start_generation(
                 roof: roof_enabled,
                 fillground: fillground_enabled,
                 debug: false,
-                timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
+                timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_point,
             };
 

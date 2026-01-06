@@ -3,6 +3,7 @@ use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
+use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
 use crate::map_renderer;
 use crate::osm_parser::ProcessedElement;
@@ -75,6 +76,10 @@ pub fn generate_world_with_options(
     println!("{} Processing terrain...", "[5/7]".bold());
     emit_gui_progress_update(25.0, "Processing terrain...");
 
+    // Pre-compute all flood fills in parallel for better CPU utilization
+    let flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
+    println!("Pre-computed {} flood fills", flood_fill_cache.way_count());
+
     // Process data
     let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
@@ -108,17 +113,23 @@ pub fn generate_world_with_options(
         match element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    buildings::generate_buildings(&mut editor, way, args, None);
+                    buildings::generate_buildings(&mut editor, way, args, None, &flood_fill_cache);
                 } else if way.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args, &highway_connectivity);
+                    highways::generate_highways(
+                        &mut editor,
+                        element,
+                        args,
+                        &highway_connectivity,
+                        &flood_fill_cache,
+                    );
                 } else if way.tags.contains_key("landuse") {
-                    landuse::generate_landuse(&mut editor, way, args);
+                    landuse::generate_landuse(&mut editor, way, args, &flood_fill_cache);
                 } else if way.tags.contains_key("natural") {
-                    natural::generate_natural(&mut editor, element, args);
+                    natural::generate_natural(&mut editor, element, args, &flood_fill_cache);
                 } else if way.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, element, args);
+                    amenities::generate_amenities(&mut editor, element, args, &flood_fill_cache);
                 } else if way.tags.contains_key("leisure") {
-                    leisure::generate_leisure(&mut editor, way, args);
+                    leisure::generate_leisure(&mut editor, way, args, &flood_fill_cache);
                 } else if way.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, element);
                 } else if let Some(val) = way.tags.get("waterway") {
@@ -149,13 +160,19 @@ pub fn generate_world_with_options(
                 } else if node.tags.contains_key("natural")
                     && node.tags.get("natural") == Some(&"tree".to_string())
                 {
-                    natural::generate_natural(&mut editor, element, args);
+                    natural::generate_natural(&mut editor, element, args, &flood_fill_cache);
                 } else if node.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, element, args);
+                    amenities::generate_amenities(&mut editor, element, args, &flood_fill_cache);
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
-                    highways::generate_highways(&mut editor, element, args, &highway_connectivity);
+                    highways::generate_highways(
+                        &mut editor,
+                        element,
+                        args,
+                        &highway_connectivity,
+                        &flood_fill_cache,
+                    );
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
                 } else if node.tags.contains_key("man_made") {
@@ -164,7 +181,12 @@ pub fn generate_world_with_options(
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
-                    buildings::generate_building_from_relation(&mut editor, rel, args);
+                    buildings::generate_building_from_relation(
+                        &mut editor,
+                        rel,
+                        args,
+                        &flood_fill_cache,
+                    );
                 } else if rel.tags.contains_key("water")
                     || rel
                         .tags
@@ -174,11 +196,26 @@ pub fn generate_world_with_options(
                 {
                     water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
                 } else if rel.tags.contains_key("natural") {
-                    natural::generate_natural_from_relation(&mut editor, rel, args);
+                    natural::generate_natural_from_relation(
+                        &mut editor,
+                        rel,
+                        args,
+                        &flood_fill_cache,
+                    );
                 } else if rel.tags.contains_key("landuse") {
-                    landuse::generate_landuse_from_relation(&mut editor, rel, args);
+                    landuse::generate_landuse_from_relation(
+                        &mut editor,
+                        rel,
+                        args,
+                        &flood_fill_cache,
+                    );
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
-                    leisure::generate_leisure_from_relation(&mut editor, rel, args);
+                    leisure::generate_leisure_from_relation(
+                        &mut editor,
+                        rel,
+                        args,
+                        &flood_fill_cache,
+                    );
                 } else if rel.tags.contains_key("man_made") {
                     man_made::generate_man_made(
                         &mut editor,
@@ -195,6 +232,7 @@ pub fn generate_world_with_options(
     // Release memory from element processing
     drop(elements);
     drop(highway_connectivity);
+    drop(flood_fill_cache);
 
     // Generate ground layer
     let total_blocks: u64 = xzbbox.bounding_rect().total_blocks();
