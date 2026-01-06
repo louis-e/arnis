@@ -64,6 +64,11 @@ impl FloodFillCache {
     }
 
     /// Gets cached flood fill result for a way, or computes it if not cached.
+    ///
+    /// Note: Combined ways created from relations (e.g., in `generate_natural_from_relation`)
+    /// will miss the cache and fall back to on-demand computation. This is by design,
+    /// these synthetic ways don't exist in the original element list and have relation IDs
+    /// rather than way IDs. The individual member ways are still cached.
     pub fn get_or_compute(
         &self,
         way: &ProcessedWay,
@@ -72,7 +77,7 @@ impl FloodFillCache {
         if let Some(cached) = self.way_cache.get(&way.id) {
             cached.clone()
         } else {
-            // Fallback: compute on demand (shouldn't happen if precompute was called)
+            // Fallback: compute on demand for synthetic/combined ways from relations
             let polygon_coords: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
             flood_fill_area(&polygon_coords, timeout)
         }
