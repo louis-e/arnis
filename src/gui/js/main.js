@@ -794,7 +794,7 @@ async function startGeneration() {
     var ground_level = -62;
 
     // Validate ground_level
-    ground_level = isNaN(ground_level) || ground_level < -62 ? 20 : ground_level;
+    ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
