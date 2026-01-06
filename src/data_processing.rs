@@ -221,44 +221,61 @@ pub fn generate_world_with_options(
 
     let groundlayer_block = GRASS_BLOCK;
 
-    for x in xzbbox.min_x()..=xzbbox.max_x() {
-        for z in xzbbox.min_z()..=xzbbox.max_z() {
-            // Add default dirt and grass layer if there isn't a stone layer already
-            if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
-                editor.set_block(groundlayer_block, x, 0, z, None, None);
-                editor.set_block(DIRT, x, -1, z, None, None);
-                editor.set_block(DIRT, x, -2, z, None, None);
-            }
+    // Process ground generation chunk-by-chunk for better cache locality.
+    // This keeps the same region/chunk HashMap entries hot in CPU cache,
+    // rather than jumping between regions on every Z iteration.
+    let min_chunk_x = xzbbox.min_x() >> 4;
+    let max_chunk_x = xzbbox.max_x() >> 4;
+    let min_chunk_z = xzbbox.min_z() >> 4;
+    let max_chunk_z = xzbbox.max_z() >> 4;
 
-            // Fill underground with stone
-            if args.fillground {
-                // Fill from bedrock+1 to 3 blocks below ground with stone
-                editor.fill_blocks_absolute(
-                    STONE,
-                    x,
-                    MIN_Y + 1,
-                    z,
-                    x,
-                    editor.get_absolute_y(x, -3, z),
-                    z,
-                    None,
-                    None,
-                );
-            }
-            // Generate a bedrock level at MIN_Y
-            editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+    for chunk_x in min_chunk_x..=max_chunk_x {
+        for chunk_z in min_chunk_z..=max_chunk_z {
+            // Calculate the block range for this chunk, clamped to bbox
+            let chunk_min_x = (chunk_x << 4).max(xzbbox.min_x());
+            let chunk_max_x = ((chunk_x << 4) + 15).min(xzbbox.max_x());
+            let chunk_min_z = (chunk_z << 4).max(xzbbox.min_z());
+            let chunk_max_z = ((chunk_z << 4) + 15).min(xzbbox.max_z());
 
-            block_counter += 1;
-            // Use manual % check since is_multiple_of() is unstable on stable Rust
-            #[allow(clippy::manual_is_multiple_of)]
-            if block_counter % batch_size == 0 {
-                ground_pb.inc(batch_size);
-            }
+            for x in chunk_min_x..=chunk_max_x {
+                for z in chunk_min_z..=chunk_max_z {
+                    // Add default dirt and grass layer if there isn't a stone layer already
+                    if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
+                        editor.set_block(groundlayer_block, x, 0, z, None, None);
+                        editor.set_block(DIRT, x, -1, z, None, None);
+                        editor.set_block(DIRT, x, -2, z, None, None);
+                    }
 
-            gui_progress_grnd += progress_increment_grnd;
-            if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                emit_gui_progress_update(gui_progress_grnd, "");
-                last_emitted_progress = gui_progress_grnd;
+                    // Fill underground with stone
+                    if args.fillground {
+                        // Fill from bedrock+1 to 3 blocks below ground with stone
+                        editor.fill_blocks_absolute(
+                            STONE,
+                            x,
+                            MIN_Y + 1,
+                            z,
+                            x,
+                            editor.get_absolute_y(x, -3, z),
+                            z,
+                            None,
+                            None,
+                        );
+                    }
+                    // Generate a bedrock level at MIN_Y
+                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+
+                    block_counter += 1;
+                    #[allow(clippy::manual_is_multiple_of)]
+                    if block_counter % batch_size == 0 {
+                        ground_pb.inc(batch_size);
+                    }
+
+                    gui_progress_grnd += progress_increment_grnd;
+                    if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                        emit_gui_progress_update(gui_progress_grnd, "");
+                        last_emitted_progress = gui_progress_grnd;
+                    }
+                }
             }
         }
     }
