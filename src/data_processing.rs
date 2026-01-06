@@ -95,9 +95,8 @@ pub fn generate_world_with_options(
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
-    // Process elements by draining, each element is dropped after processing,
-    // freeing its memory immediately rather than waiting until the end.
-    while let Some(element) = elements.pop() {
+    // Process elements by draining in insertion order
+    for element in elements.drain(..) {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {

@@ -180,7 +180,7 @@ pub fn configure_rayon_thread_pool(cpu_fraction: f64) {
         .build_global()
     {
         Ok(()) => {
-            // Successfully configured
+            // Successfully configured (silent to avoid cluttering output)
         }
         Err(_) => {
             // Thread pool already configured
