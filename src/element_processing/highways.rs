@@ -5,6 +5,7 @@ use crate::coordinate_system::cartesian::XZPoint;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use rayon::prelude::*;
 use std::collections::HashMap;
 
 /// Type alias for highway connectivity map
@@ -28,39 +29,44 @@ pub fn generate_highways(
 }
 
 /// Build a connectivity map for highway endpoints to determine where slopes are needed.
+/// Uses parallel processing for better performance on large element sets.
 pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayConnectivityMap {
-    let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
+    // Parallel map phase: extract connectivity data from each highway element
+    let partial_maps: Vec<Vec<((i32, i32), i32)>> = elements
+        .par_iter()
+        .filter_map(|element| {
+            if let ProcessedElement::Way(way) = element {
+                if way.tags.contains_key("highway") && !way.nodes.is_empty() {
+                    let layer_value = way
+                        .tags
+                        .get("layer")
+                        .and_then(|layer| layer.parse::<i32>().ok())
+                        .unwrap_or(0);
 
-    for element in elements {
-        if let ProcessedElement::Way(way) = element {
-            if way.tags.contains_key("highway") {
-                let layer_value = way
-                    .tags
-                    .get("layer")
-                    .and_then(|layer| layer.parse::<i32>().ok())
-                    .unwrap_or(0);
+                    // Treat negative layers as ground level (0) for connectivity
+                    let layer_value = if layer_value < 0 { 0 } else { layer_value };
 
-                // Treat negative layers as ground level (0) for connectivity
-                let layer_value = if layer_value < 0 { 0 } else { layer_value };
-
-                // Add connectivity for start and end nodes
-                if !way.nodes.is_empty() {
                     let start_node = &way.nodes[0];
                     let end_node = &way.nodes[way.nodes.len() - 1];
 
                     let start_coord = (start_node.x, start_node.z);
                     let end_coord = (end_node.x, end_node.z);
 
-                    connectivity_map
-                        .entry(start_coord)
-                        .or_default()
-                        .push(layer_value);
-                    connectivity_map
-                        .entry(end_coord)
-                        .or_default()
-                        .push(layer_value);
+                    return Some(vec![
+                        (start_coord, layer_value),
+                        (end_coord, layer_value),
+                    ]);
                 }
             }
+            None
+        })
+        .collect();
+
+    // Sequential reduce phase: merge all partial results into final map
+    let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
+    for entries in partial_maps {
+        for (coord, layer) in entries {
+            connectivity_map.entry(coord).or_default().push(layer);
         }
     }
 

@@ -69,17 +69,19 @@ pub fn generate_world_with_options(
 
     println!("{} Processing data...", "[4/7]".bold());
 
-    // Build highway connectivity map once before processing
-    let highway_connectivity = highways::build_highway_connectivity_map(&elements);
-
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(Arc::clone(&ground));
 
     println!("{} Processing terrain...", "[5/7]".bold());
     emit_gui_progress_update(25.0, "Processing terrain...");
 
-    // Pre-compute all flood fills in parallel for better CPU utilization
-    let mut flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
+    // Run both precomputations concurrently using rayon::join
+    // This overlaps highway connectivity map building with flood fill computation
+    let timeout_ref = args.timeout.as_ref();
+    let (highway_connectivity, mut flood_fill_cache) = rayon::join(
+        || highways::build_highway_connectivity_map(&elements),
+        || FloodFillCache::precompute(&elements, timeout_ref),
+    );
     println!("Pre-computed {} flood fills", flood_fill_cache.way_count());
 
     // Process data
