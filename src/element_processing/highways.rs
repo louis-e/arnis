@@ -52,10 +52,7 @@ pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayC
                     let start_coord = (start_node.x, start_node.z);
                     let end_coord = (end_node.x, end_node.z);
 
-                    return Some(vec![
-                        (start_coord, layer_value),
-                        (end_coord, layer_value),
-                    ]);
+                    return Some(vec![(start_coord, layer_value), (end_coord, layer_value)]);
                 }
             }
             None

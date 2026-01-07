@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(feature = "gui")]
@@ -130,7 +130,7 @@ impl<'a> WorldEditor<'a> {
 
                 // Emit GUI progress update periodically
                 let update_interval = (total_regions / 10).max(1);
-                if processed % update_interval == 0 || processed == total_regions {
+                if processed.is_multiple_of(update_interval) || processed == total_regions {
                     let progress = 90.0 + (processed as f64 / total_regions as f64) * 9.0;
                     emit_gui_progress_update(progress, "Saving world...");
                 }
@@ -265,7 +265,7 @@ impl<'a> WorldEditor<'a> {
 /// This is a standalone function that can be called from parallel threads
 /// since it only needs the world directory path, not a reference to WorldEditor.
 fn save_region_to_file(
-    world_dir: &PathBuf,
+    world_dir: &Path,
     region_x: i32,
     region_z: i32,
     region_to_modify: &RegionToModify,
