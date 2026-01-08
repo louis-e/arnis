@@ -316,16 +316,11 @@ pub fn fetch_elevation_data(
     // This smooths terrain proportionally while preserving more detail.
     let sigma: f64 = BASE_SIGMA_REF * (grid_size / BASE_GRID_REF).sqrt();
 
-    let blur_percentage: f64 = (sigma / grid_size) * 100.0;
-    eprintln!(
+    //let blur_percentage: f64 = (sigma / grid_size) * 100.0;
+    /*eprintln!(
         "Elevation blur: grid={}x{}, sigma={:.2}, blur_percentage={:.2}%",
         grid_width, grid_height, sigma, blur_percentage
-    );
-
-    /* eprintln!(
-        "Grid: {}x{}, Blur sigma: {:.2}",
-        grid_width, grid_height, sigma
-    ); */
+    );*/
 
     // Continue with the existing blur and conversion to Minecraft heights...
     let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, sigma);
@@ -356,7 +351,7 @@ pub fn fetch_elevation_data(
         }
     }
 
-    eprintln!("Height data range: {min_height} to {max_height} m");
+    //eprintln!("Height data range: {min_height} to {max_height} m");
     if extreme_low_count > 0 {
         eprintln!(
             "WARNING: Found {extreme_low_count} pixels with extremely low elevations (< -1000m)"
@@ -434,7 +429,7 @@ pub fn fetch_elevation_data(
             max_block_height = max_block_height.max(height);
         }
     }
-    eprintln!("Minecraft height data range: {min_block_height} to {max_block_height} blocks");
+    //eprintln!("Minecraft height data range: {min_block_height} to {max_block_height} blocks");
 
     Ok(ElevationData {
         heights: mc_heights,
@@ -594,7 +589,7 @@ fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     let min_reasonable = all_heights[p1_idx];
     let max_reasonable = all_heights[p99_idx];
 
-    eprintln!("Filtering outliers outside range: {min_reasonable:.1}m to {max_reasonable:.1}m");
+    //eprintln!("Filtering outliers outside range: {min_reasonable:.1}m to {max_reasonable:.1}m");
 
     let mut outliers_filtered = 0;
 
@@ -609,7 +604,7 @@ fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     }
 
     if outliers_filtered > 0 {
-        eprintln!("Filtered {outliers_filtered} elevation outliers, interpolating replacements...");
+        //eprintln!("Filtered {outliers_filtered} elevation outliers, interpolating replacements...");
         // Re-run the NaN filling to interpolate the filtered values
         fill_nan_values(height_grid);
     }
