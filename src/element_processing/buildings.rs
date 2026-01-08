@@ -1547,22 +1547,18 @@ fn generate_bridge(
         1 // Default elevation
     };
 
+    // Need at least 2 nodes to form a bridge
+    if element.nodes.len() < 2 {
+        return;
+    }
+
     // Get start and end node elevations and use MAX for level bridge deck
     // Using MAX ensures bridges don't dip when multiple bridge ways meet in a valley
-    let bridge_deck_ground_y = if element.nodes.len() >= 2 {
-        let start_node = &element.nodes[0];
-        let end_node = &element.nodes[element.nodes.len() - 1];
-        let start_y = editor.get_ground_level(start_node.x, start_node.z);
-        let end_y = editor.get_ground_level(end_node.x, end_node.z);
-        start_y.max(end_y)
-    } else {
-        // Fallback for single-node bridges (shouldn't happen but be safe)
-        if let Some(node) = element.nodes.first() {
-            editor.get_ground_level(node.x, node.z)
-        } else {
-            0
-        }
-    };
+    let start_node = &element.nodes[0];
+    let end_node = &element.nodes[element.nodes.len() - 1];
+    let start_y = editor.get_ground_level(start_node.x, start_node.z);
+    let end_y = editor.get_ground_level(end_node.x, end_node.z);
+    let bridge_deck_ground_y = start_y.max(end_y);
 
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;

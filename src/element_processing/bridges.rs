@@ -61,8 +61,8 @@ pub fn generate_bridges(editor: &mut WorldEditor, element: &ProcessedWay) {
                 // Calculate overall progress along the entire bridge
                 let point_distance = accumulated_length + segment_progress * segment_length;
                 let overall_progress = (point_distance / total_length).clamp(0.0, 1.0);
-                let overall_idx = (overall_progress * total_length) as usize;
                 let total_len_usize = total_length as usize;
+                let overall_idx = (overall_progress * total_len_usize as f64) as usize;
 
                 // Calculate ramp height offset
                 let ramp_offset = if overall_idx < ramp_length {

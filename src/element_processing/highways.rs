@@ -290,13 +290,17 @@ fn generate_highways_internal(
                         1
                     };
 
-                    let min_terrain_y = way
+                    // Sample terrain at intervals, then explicitly include end node
+                    // since step_by() may not land exactly on the last element
+                    let sampled_min = way
                         .nodes
                         .iter()
                         .step_by(step.max(1))
                         .map(|node| editor.get_ground_level(node.x, node.z))
                         .min()
                         .unwrap_or(max_endpoint_y);
+                    // Include end node elevation explicitly (start is always included by step_by)
+                    let min_terrain_y = sampled_min.min(end_y);
 
                     // If ANY sampled point along the bridge is significantly lower than the max endpoint,
                     // treat as valley bridge
