@@ -1071,10 +1071,9 @@ fn gui_start_generation(
                     Ok(())
                 }
                 Err(e) => {
-                    let error_msg = format!("Failed to fetch data: {e}");
-                    emit_gui_error(&error_msg);
+                    emit_gui_error(&e.to_string());
                     // Session lock will be automatically released when _session_lock goes out of scope
-                    Err(error_msg)
+                    Err(e.to_string())
                 }
             }
         })
