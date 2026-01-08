@@ -262,8 +262,8 @@ pub fn generate_world_with_options(
     let total_iterations_grnd: f64 = total_blocks as f64;
     let progress_increment_grnd: f64 = 20.0 / total_iterations_grnd;
 
-    // Check if terrain elevation is enabled (affects how we process ground blocks)
-    let terrain_enabled = ground.terrain_y_range() != (args.ground_level, args.ground_level);
+    // Check if terrain elevation is enabled - when disabled, we can skip ground level lookups entirely
+    let terrain_enabled = ground.elevation_enabled;
 
     // Process ground generation chunk-by-chunk for better cache locality.
     // This keeps the same region/chunk HashMap entries hot in CPU cache,
@@ -283,7 +283,8 @@ pub fn generate_world_with_options(
 
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
-                    // Get ground level once per block position to avoid repeated lookups
+                    // Get ground level - when terrain is enabled, look it up once per block
+                    // When disabled, use constant ground_level (no function call overhead)
                     let ground_y = if terrain_enabled {
                         editor.get_ground_level(x, z)
                     } else {

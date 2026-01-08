@@ -28,10 +28,6 @@ pub struct ElevationData {
     pub(crate) width: usize,
     /// Height of the elevation grid
     pub(crate) height: usize,
-    /// Minimum Y level in the terrain
-    pub(crate) min_y: i32,
-    /// Maximum Y level in the terrain
-    pub(crate) max_y: i32,
 }
 
 /// RGB image buffer type for elevation tiles
@@ -444,8 +440,6 @@ pub fn fetch_elevation_data(
         heights: mc_heights,
         width: grid_width,
         height: grid_height,
-        min_y: min_block_height,
-        max_y: max_block_height,
     })
 }
 
