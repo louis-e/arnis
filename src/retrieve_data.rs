@@ -36,19 +36,17 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
         }
         Err(e) => {
             if e.is_timeout() {
-                eprintln!(
-                    "{}",
-                    "Error! Request timed out. Try selecting a smaller area."
-                        .red()
-                        .bold()
-                );
-                emit_gui_error("Request timed out. Try selecting a smaller area.");
+                let msg = "Request timed out. Try selecting a smaller area.";
+                eprintln!("{}", format!("Error! {msg}").red().bold());
+                Err(msg.into())
+            } else if e.is_connect() {
+                let msg = "No internet connection.";
+                eprintln!("{}", format!("Error! {msg}").red().bold());
+                Err(msg.into())
             } else {
                 eprintln!("{}", format!("Error! {e:.52}").red().bold());
-                emit_gui_error(&format!("{:.52}", e.to_string()));
+                Err(format!("{e:.52}").into())
             }
-            // Always propagate errors
-            Err(e.into())
         }
     }
 }
