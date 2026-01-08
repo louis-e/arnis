@@ -271,36 +271,47 @@ fn generate_highways_internal(
 
             // For bridges: detect if this spans a valley by checking terrain profile
             // A valley bridge has terrain that dips significantly below the endpoints
-            // We sample terrain at intervals to find the minimum elevation
-            // Skip very short bridges (< 10 blocks) as they don't have enough terrain data
+            // Skip valley detection entirely if terrain is disabled (no valleys in flat terrain)
+            // Skip very short bridges (< 25 blocks) as they're unlikely to span significant valleys
+            let terrain_enabled = editor
+                .get_ground()
+                .map(|g| g.elevation_enabled)
+                .unwrap_or(false);
+
             let (is_valley_bridge, bridge_deck_y) =
-                if is_bridge && way.nodes.len() >= 2 && total_way_length >= 10 {
+                if is_bridge && terrain_enabled && way.nodes.len() >= 2 && total_way_length >= 25 {
                     let start_node = &way.nodes[0];
                     let end_node = &way.nodes[way.nodes.len() - 1];
                     let start_y = editor.get_ground_level(start_node.x, start_node.z);
                     let end_y = editor.get_ground_level(end_node.x, end_node.z);
                     let max_endpoint_y = start_y.max(end_y);
 
-                    // Sample terrain at intervals along the bridge to find the minimum
-                    // Use at most 10 sample points for performance (including endpoints)
-                    let sample_count = (way.nodes.len()).min(10);
-                    let step = if sample_count > 1 {
-                        (way.nodes.len() - 1) / (sample_count - 1)
+                    // Sample terrain at middle nodes only (excluding endpoints we already have)
+                    // This avoids redundant get_ground_level() calls
+                    let middle_nodes = &way.nodes[1..way.nodes.len().saturating_sub(1)];
+                    let sampled_min = if middle_nodes.is_empty() {
+                        // No middle nodes, just use endpoints
+                        start_y.min(end_y)
                     } else {
-                        1
+                        // Sample up to 3 middle points (5 total with endpoints) for performance
+                        // Valleys are wide terrain features, so sparse sampling is sufficient
+                        let sample_count = middle_nodes.len().min(3);
+                        let step = if sample_count > 1 {
+                            (middle_nodes.len() - 1) / (sample_count - 1)
+                        } else {
+                            1
+                        };
+
+                        middle_nodes
+                            .iter()
+                            .step_by(step.max(1))
+                            .map(|node| editor.get_ground_level(node.x, node.z))
+                            .min()
+                            .unwrap_or(max_endpoint_y)
                     };
 
-                    // Sample terrain at intervals, then explicitly include end node
-                    // since step_by() may not land exactly on the last element
-                    let sampled_min = way
-                        .nodes
-                        .iter()
-                        .step_by(step.max(1))
-                        .map(|node| editor.get_ground_level(node.x, node.z))
-                        .min()
-                        .unwrap_or(max_endpoint_y);
-                    // Include end node elevation explicitly (start is always included by step_by)
-                    let min_terrain_y = sampled_min.min(end_y);
+                    // Include endpoint elevations in the minimum calculation
+                    let min_terrain_y = sampled_min.min(start_y).min(end_y);
 
                     // If ANY sampled point along the bridge is significantly lower than the max endpoint,
                     // treat as valley bridge
