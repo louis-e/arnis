@@ -270,52 +270,36 @@ fn generate_highways_internal(
             // A valley bridge has terrain that dips significantly below the endpoints
             // We sample terrain at ALL nodes to find the minimum elevation
             // Skip very short bridges (< 10 blocks) as they don't have enough terrain data
-            let (is_valley_bridge, bridge_deck_y) = if is_bridge
-                && way.nodes.len() >= 2
-                && total_way_length >= 10
-            {
-                let start_node = &way.nodes[0];
-                let end_node = &way.nodes[way.nodes.len() - 1];
-                let start_y = editor.get_ground_level(start_node.x, start_node.z);
-                let end_y = editor.get_ground_level(end_node.x, end_node.z);
-                let max_endpoint_y = start_y.max(end_y);
+            let (is_valley_bridge, bridge_deck_y) =
+                if is_bridge && way.nodes.len() >= 2 && total_way_length >= 10 {
+                    let start_node = &way.nodes[0];
+                    let end_node = &way.nodes[way.nodes.len() - 1];
+                    let start_y = editor.get_ground_level(start_node.x, start_node.z);
+                    let end_y = editor.get_ground_level(end_node.x, end_node.z);
+                    let max_endpoint_y = start_y.max(end_y);
 
-                // Sample terrain at ALL nodes along the bridge to find the minimum
-                // This catches valleys regardless of where the dip occurs
-                let min_terrain_y = way
-                    .nodes
-                    .iter()
-                    .map(|node| editor.get_ground_level(node.x, node.z))
-                    .min()
-                    .unwrap_or(max_endpoint_y);
+                    // Sample terrain at ALL nodes along the bridge to find the minimum
+                    // This catches valleys regardless of where the dip occurs
+                    let min_terrain_y = way
+                        .nodes
+                        .iter()
+                        .map(|node| editor.get_ground_level(node.x, node.z))
+                        .min()
+                        .unwrap_or(max_endpoint_y);
 
-                // If ANY point along the bridge is significantly lower than the max endpoint,
-                // treat as valley bridge. Threshold: 7 blocks lower = valley
-                let valley_threshold = 7;
-                let is_valley = min_terrain_y < max_endpoint_y - valley_threshold;
+                    // If ANY point along the bridge is significantly lower than the max endpoint,
+                    // treat as valley bridge. Threshold: 7 blocks lower = valley
+                    let valley_threshold = 7;
+                    let is_valley = min_terrain_y < max_endpoint_y - valley_threshold;
 
-                // Debug output
-                eprintln!(
-                    "Bridge terrain check: id={} name={:?} highway={} length={} start_y={} end_y={} min_y={} max_endpoint={} is_valley={}",
-                    way.id,
-                    element.tags().get("name"),
-                    highway_type,
-                    total_way_length,
-                    start_y,
-                    end_y,
-                    min_terrain_y,
-                    max_endpoint_y,
-                    is_valley
-                );
-
-                if is_valley {
-                    (true, max_endpoint_y)
+                    if is_valley {
+                        (true, max_endpoint_y)
+                    } else {
+                        (false, 0)
+                    }
                 } else {
                     (false, 0)
-                }
-            } else {
-                (false, 0)
-            };
+                };
 
             // Check if this is a short isolated elevated segment - if so, treat as ground level
             // This includes short bridges which should not be elevated
@@ -760,7 +744,7 @@ fn add_highway_support_pillar(
 }
 
 /// Add support pillars for bridges using absolute Y coordinates
-/// Pillars extend from ground level down to the bridge deck
+/// Pillars extend from ground level up to the bridge deck
 fn add_highway_support_pillar_absolute(
     editor: &mut WorldEditor,
     x: i32,

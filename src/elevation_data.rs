@@ -381,27 +381,25 @@ pub fn fetch_elevation_data(
     // Determine final height scale:
     // - Use realistic 1:1 (times scale) if terrain fits within Minecraft limits
     // - Only compress if the terrain would exceed the build height
-    let (_height_scale, scaled_range): (f64, f64) = if ideal_scaled_range <= available_y_range {
+    let scaled_range: f64 = if ideal_scaled_range <= available_y_range {
         // Terrain fits! Use realistic scaling
         eprintln!(
-            "Realistic elevation: {:.1}m range -> {:.1} blocks (1:{} scale, fits within {} available blocks)",
-            height_range, ideal_scaled_range, scale, available_y_range as i32
+            "Realistic elevation: {:.1}m range fits in {} available blocks",
+            height_range, available_y_range as i32
         );
-        (scale, ideal_scaled_range)
+        ideal_scaled_range
     } else {
         // Terrain too tall - compress to fit within Minecraft limits
         let compression_factor: f64 = available_y_range / height_range;
         let compressed_range: f64 = height_range * compression_factor;
         eprintln!(
-            "Elevation compressed: {:.1}m range -> {:.1} blocks (compressed from {:.1} to fit {} available blocks)",
-            height_range, compressed_range, ideal_scaled_range, available_y_range as i32
-        );
-        eprintln!(
-            "Compression ratio: {:.2}:1 (1 block = {:.2}m real elevation)",
+            "Elevation compressed: {:.1}m range -> {:.0} blocks ({:.2}:1 ratio, 1 block = {:.2}m)",
+            height_range,
+            compressed_range,
             height_range / compressed_range,
             height_range / compressed_range
         );
-        (compression_factor, compressed_range)
+        compressed_range
     };
 
     // Convert to scaled Minecraft Y coordinates
