@@ -10,6 +10,9 @@ use std::collections::HashMap;
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
+/// Minimum terrain dip (in blocks) below max endpoint elevation to classify a bridge as valley-spanning
+const VALLEY_BRIDGE_THRESHOLD: i32 = 7;
+
 /// Generates highways with elevation support based on layer tags and connectivity analysis
 pub fn generate_highways(
     editor: &mut WorldEditor,
@@ -288,9 +291,8 @@ fn generate_highways_internal(
                         .unwrap_or(max_endpoint_y);
 
                     // If ANY point along the bridge is significantly lower than the max endpoint,
-                    // treat as valley bridge. Threshold: 7 blocks lower = valley
-                    let valley_threshold = 7;
-                    let is_valley = min_terrain_y < max_endpoint_y - valley_threshold;
+                    // treat as valley bridge
+                    let is_valley = min_terrain_y < max_endpoint_y - VALLEY_BRIDGE_THRESHOLD;
 
                     if is_valley {
                         (true, max_endpoint_y)
@@ -301,8 +303,7 @@ fn generate_highways_internal(
                     (false, 0)
                 };
 
-            // Check if this is a short isolated elevated segment - if so, treat as ground level
-            // This includes short bridges which should not be elevated
+            // Check if this is a short isolated elevated segment (layer > 0), if so, treat as ground level
             let is_short_isolated_elevated =
                 needs_start_slope && needs_end_slope && layer_value > 0 && total_way_length <= 35;
 

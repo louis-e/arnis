@@ -54,6 +54,16 @@ impl Ground {
         self.interpolate_height(x_ratio, z_ratio, data)
     }
 
+    /// Returns the min and max Y levels of the terrain (min_y, max_y)
+    /// For flat terrain, returns (ground_level, ground_level)
+    pub fn terrain_y_range(&self) -> (i32, i32) {
+        if let Some(data) = &self.elevation_data {
+            (data.min_y, data.max_y)
+        } else {
+            (self.ground_level, self.ground_level)
+        }
+    }
+
     #[allow(unused)]
     #[inline(always)]
     pub fn min_level<I: Iterator<Item = XZPoint>>(&self, coords: I) -> Option<i32> {

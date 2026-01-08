@@ -28,6 +28,10 @@ pub struct ElevationData {
     pub(crate) width: usize,
     /// Height of the elevation grid
     pub(crate) height: usize,
+    /// Minimum Y level in the terrain
+    pub(crate) min_y: i32,
+    /// Maximum Y level in the terrain
+    pub(crate) max_y: i32,
 }
 
 /// RGB image buffer type for elevation tiles
@@ -376,7 +380,9 @@ pub fn fetch_elevation_data(
     let ideal_scaled_range: f64 = height_range * scale;
 
     // Calculate available Y range in Minecraft (from ground_level to MAX_Y)
-    let available_y_range: f64 = (MAX_Y - ground_level) as f64;
+    // Leave a buffer at the top for buildings, trees, and other structures
+    const TERRAIN_HEIGHT_BUFFER: i32 = 15;
+    let available_y_range: f64 = (MAX_Y - TERRAIN_HEIGHT_BUFFER - ground_level) as f64;
 
     // Determine final height scale:
     // - Use realistic 1:1 (times scale) if terrain fits within Minecraft limits
@@ -416,8 +422,9 @@ pub fn fetch_elevation_data(
                 };
                 // Scale to Minecraft blocks and add to ground level
                 let scaled_height: f64 = relative_height * scaled_range;
-                // Clamp to valid Minecraft Y range (ground_level to MAX_Y)
-                ((ground_level as f64 + scaled_height).round() as i32).clamp(ground_level, MAX_Y)
+                // Clamp to valid Minecraft Y range (leave buffer at top for structures)
+                ((ground_level as f64 + scaled_height).round() as i32)
+                    .clamp(ground_level, MAX_Y - TERRAIN_HEIGHT_BUFFER)
             })
             .collect();
         mc_heights.push(mc_row);
@@ -437,6 +444,8 @@ pub fn fetch_elevation_data(
         heights: mc_heights,
         width: grid_width,
         height: grid_height,
+        min_y: min_block_height,
+        max_y: max_block_height,
     })
 }
 
