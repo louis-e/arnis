@@ -1525,6 +1525,8 @@ pub fn generate_building_from_relation(
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.
+/// Bridge deck is interpolated between start and end point elevations to avoid
+/// being dragged down by valleys underneath.
 fn generate_bridge(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -1534,7 +1536,7 @@ fn generate_bridge(
     let floor_block: Block = STONE;
     let railing_block: Block = STONE_BRICKS;
 
-    // Calculate bridge level based on the "level" tag (computed once, used throughout)
+    // Calculate bridge level offset based on the "level" tag
     let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
         if let Ok(level) = level_str.parse::<i32>() {
             (level * 3) + 1
@@ -1545,21 +1547,41 @@ fn generate_bridge(
         1 // Default elevation
     };
 
+    // Get start and end node elevations and use MAX for level bridge deck
+    // Using MAX ensures bridges don't dip when multiple bridge ways meet in a valley
+    let bridge_deck_ground_y = if element.nodes.len() >= 2 {
+        let start_node = &element.nodes[0];
+        let end_node = &element.nodes[element.nodes.len() - 1];
+        let start_y = editor.get_ground_level(start_node.x, start_node.z);
+        let end_y = editor.get_ground_level(end_node.x, end_node.z);
+        start_y.max(end_y)
+    } else {
+        // Fallback for single-node bridges (shouldn't happen but be safe)
+        if let Some(node) = element.nodes.first() {
+            editor.get_ground_level(node.x, node.z)
+        } else {
+            0
+        }
+    };
+
     // Process the nodes to create bridge pathways and railings
     let mut previous_node: Option<(i32, i32)> = None;
+
     for node in &element.nodes {
         let x: i32 = node.x;
         let z: i32 = node.z;
 
         // Create bridge path using Bresenham's line
         if let Some(prev) = previous_node {
-            let bridge_points: Vec<(i32, i32, i32)> =
-                bresenham_line(prev.0, bridge_y_offset, prev.1, x, bridge_y_offset, z);
+            let bridge_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, 0, prev.1, x, 0, z);
 
-            for (bx, by, bz) in bridge_points {
+            for (bx, _, bz) in bridge_points.iter() {
+                // Use fixed bridge deck height (max of endpoints)
+                let bridge_y = bridge_deck_ground_y + bridge_y_offset;
+
                 // Place railing blocks
-                editor.set_block(railing_block, bx, by + 1, bz, None, None);
-                editor.set_block(railing_block, bx, by, bz, None, None);
+                editor.set_block_absolute(railing_block, *bx, bridge_y + 1, *bz, None, None);
+                editor.set_block_absolute(railing_block, *bx, bridge_y, *bz, None, None);
             }
         }
 
@@ -1569,8 +1591,11 @@ fn generate_bridge(
     // Flood fill the area between the bridge path nodes (uses cache)
     let bridge_area: Vec<(i32, i32)> = flood_fill_cache.get_or_compute(element, floodfill_timeout);
 
+    // Use the same level bridge deck height for filled areas
+    let floor_y = bridge_deck_ground_y + bridge_y_offset;
+
     // Place floor blocks
     for (x, z) in bridge_area {
-        editor.set_block(floor_block, x, bridge_y_offset, z, None, None);
+        editor.set_block_absolute(floor_block, x, floor_y, z, None, None);
     }
 }

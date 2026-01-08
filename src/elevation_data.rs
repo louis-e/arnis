@@ -7,8 +7,6 @@ use std::path::{Path, PathBuf};
 
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
-/// Scale factor for converting real elevation to Minecraft heights
-const BASE_HEIGHT_SCALE: f64 = 0.7;
 /// AWS S3 Terrarium tiles endpoint (no API key required)
 const AWS_TERRARIUM_URL: &str =
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -371,34 +369,56 @@ pub fn fetch_elevation_data(
     }
 
     let height_range: f64 = max_height - min_height;
-    // Apply scale factor to height scaling
-    let mut height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
-    let mut scaled_range: f64 = height_range * height_scale;
 
-    // Adaptive scaling: ensure we don't exceed reasonable Y range
-    let available_y_range = (MAX_Y - ground_level) as f64;
-    let safety_margin = 0.9; // Use 90% of available range
-    let max_allowed_range = available_y_range * safety_margin;
+    // Realistic height scaling: 1 meter of real elevation = scale blocks in Minecraft
+    // At scale=1.0, 1 meter = 1 block (realistic 1:1 mapping)
+    // At scale=2.0, 1 meter = 2 blocks (exaggerated for larger worlds)
+    let ideal_scaled_range: f64 = height_range * scale;
 
-    if scaled_range > max_allowed_range {
-        let adjustment_factor = max_allowed_range / scaled_range;
-        height_scale *= adjustment_factor;
-        scaled_range = height_range * height_scale;
+    // Calculate available Y range in Minecraft (from ground_level to MAX_Y)
+    let available_y_range: f64 = (MAX_Y - ground_level) as f64;
+
+    // Determine final height scale:
+    // - Use realistic 1:1 (times scale) if terrain fits within Minecraft limits
+    // - Only compress if the terrain would exceed the build height
+    let (_height_scale, scaled_range): (f64, f64) = if ideal_scaled_range <= available_y_range {
+        // Terrain fits! Use realistic scaling
         eprintln!(
-            "Height range too large, applying scaling adjustment factor: {adjustment_factor:.3}"
+            "Realistic elevation: {:.1}m range -> {:.1} blocks (1:{} scale, fits within {} available blocks)",
+            height_range, ideal_scaled_range, scale, available_y_range as i32
         );
-        eprintln!("Adjusted scaled range: {scaled_range:.1} blocks");
-    }
+        (scale, ideal_scaled_range)
+    } else {
+        // Terrain too tall - compress to fit within Minecraft limits
+        let compression_factor: f64 = available_y_range / height_range;
+        let compressed_range: f64 = height_range * compression_factor;
+        eprintln!(
+            "Elevation compressed: {:.1}m range -> {:.1} blocks (compressed from {:.1} to fit {} available blocks)",
+            height_range, compressed_range, ideal_scaled_range, available_y_range as i32
+        );
+        eprintln!(
+            "Compression ratio: {:.2}:1 (1 block = {:.2}m real elevation)",
+            height_range / compressed_range,
+            height_range / compressed_range
+        );
+        (compression_factor, compressed_range)
+    };
 
     // Convert to scaled Minecraft Y coordinates
+    // Lowest real elevation maps to ground_level, highest maps to ground_level + scaled_range
     for row in blurred_heights {
         let mc_row: Vec<i32> = row
             .iter()
             .map(|&h| {
-                // Scale the height differences
-                let relative_height: f64 = (h - min_height) / height_range;
+                // Calculate relative position within the elevation range (0.0 to 1.0)
+                let relative_height: f64 = if height_range > 0.0 {
+                    (h - min_height) / height_range
+                } else {
+                    0.0
+                };
+                // Scale to Minecraft blocks and add to ground level
                 let scaled_height: f64 = relative_height * scaled_range;
-                // With terrain enabled, ground_level is used as the MIN_Y for terrain
+                // Clamp to valid Minecraft Y range (ground_level to MAX_Y)
                 ((ground_level as f64 + scaled_height).round() as i32).clamp(ground_level, MAX_Y)
             })
             .collect();

@@ -160,6 +160,11 @@ fn generate_highways_internal(
             let mut add_outline = false;
             let scale_factor = args.scale;
 
+            // Check if this is a bridge - bridges need special elevation handling
+            // to span across valleys instead of following terrain
+            // Accept any bridge tag value except "no" (e.g., "yes", "viaduct", "aqueduct", etc.)
+            let is_bridge = element.tags().get("bridge").is_some_and(|v| v != "no");
+
             // Parse the layer value for elevation calculation
             let layer_value = element
                 .tags()
@@ -249,6 +254,7 @@ fn generate_highways_internal(
             let base_elevation = layer_value * LAYER_HEIGHT_STEP;
 
             // Check if we need slopes at start and end
+            // This is used for overpasses that need ramps to ground-level roads
             let needs_start_slope =
                 should_add_slope_at_node(&way.nodes[0], layer_value, highway_connectivity);
             let needs_end_slope = should_add_slope_at_node(
@@ -257,10 +263,62 @@ fn generate_highways_internal(
                 highway_connectivity,
             );
 
-            // Calculate total way length for slope distribution
+            // Calculate total way length for slope distribution (needed before valley bridge check)
             let total_way_length = calculate_way_length(way);
 
+            // For bridges: detect if this spans a valley by checking terrain profile
+            // A valley bridge has terrain that dips significantly below the endpoints
+            // We sample terrain at ALL nodes to find the minimum elevation
+            // Skip very short bridges (< 10 blocks) as they don't have enough terrain data
+            let (is_valley_bridge, bridge_deck_y) = if is_bridge
+                && way.nodes.len() >= 2
+                && total_way_length >= 10
+            {
+                let start_node = &way.nodes[0];
+                let end_node = &way.nodes[way.nodes.len() - 1];
+                let start_y = editor.get_ground_level(start_node.x, start_node.z);
+                let end_y = editor.get_ground_level(end_node.x, end_node.z);
+                let max_endpoint_y = start_y.max(end_y);
+
+                // Sample terrain at ALL nodes along the bridge to find the minimum
+                // This catches valleys regardless of where the dip occurs
+                let min_terrain_y = way
+                    .nodes
+                    .iter()
+                    .map(|node| editor.get_ground_level(node.x, node.z))
+                    .min()
+                    .unwrap_or(max_endpoint_y);
+
+                // If ANY point along the bridge is significantly lower than the max endpoint,
+                // treat as valley bridge. Threshold: 7 blocks lower = valley
+                let valley_threshold = 7;
+                let is_valley = min_terrain_y < max_endpoint_y - valley_threshold;
+
+                // Debug output
+                eprintln!(
+                    "Bridge terrain check: id={} name={:?} highway={} length={} start_y={} end_y={} min_y={} max_endpoint={} is_valley={}",
+                    way.id,
+                    element.tags().get("name"),
+                    highway_type,
+                    total_way_length,
+                    start_y,
+                    end_y,
+                    min_terrain_y,
+                    max_endpoint_y,
+                    is_valley
+                );
+
+                if is_valley {
+                    (true, max_endpoint_y)
+                } else {
+                    (false, 0)
+                }
+            } else {
+                (false, 0)
+            };
+
             // Check if this is a short isolated elevated segment - if so, treat as ground level
+            // This includes short bridges which should not be elevated
             let is_short_isolated_elevated =
                 needs_start_slope && needs_end_slope && layer_value > 0 && total_way_length <= 35;
 
@@ -297,17 +355,28 @@ fn generate_highways_internal(
                     let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
 
                     for (point_index, (x, _, z)) in bresenham_points.iter().enumerate() {
-                        // Calculate Y elevation for this point based on slopes and layer
-                        let current_y = calculate_point_elevation(
-                            segment_index,
-                            point_index,
-                            segment_length,
-                            total_segments,
-                            effective_elevation,
-                            effective_start_slope,
-                            effective_end_slope,
-                            slope_length,
-                        );
+                        // Calculate Y elevation for this point
+                        // For valley bridges: use fixed deck height (max of endpoints) to stay level
+                        // For overpasses and regular roads: use terrain-relative elevation with slopes
+                        let (current_y, use_absolute_y) = if is_valley_bridge {
+                            // Valley bridge deck is level at the maximum endpoint elevation
+                            // Don't add base_elevation - the layer tag indicates it's above water/road,
+                            // not that it should be higher than the terrain endpoints
+                            (bridge_deck_y, true)
+                        } else {
+                            // Regular road or overpass: use terrain-relative calculation with ramps
+                            let y = calculate_point_elevation(
+                                segment_index,
+                                point_index,
+                                segment_length,
+                                total_segments,
+                                effective_elevation,
+                                effective_start_slope,
+                                effective_end_slope,
+                                slope_length,
+                            );
+                            (y, false)
+                        };
 
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
@@ -323,12 +392,32 @@ fn generate_highways_internal(
                                     let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
                                     if is_horizontal {
                                         if set_x % 2 < 1 {
-                                            editor.set_block(
-                                                WHITE_CONCRETE,
+                                            if use_absolute_y {
+                                                editor.set_block_absolute(
+                                                    WHITE_CONCRETE,
+                                                    set_x,
+                                                    current_y,
+                                                    set_z,
+                                                    Some(&[BLACK_CONCRETE]),
+                                                    None,
+                                                );
+                                            } else {
+                                                editor.set_block(
+                                                    WHITE_CONCRETE,
+                                                    set_x,
+                                                    current_y,
+                                                    set_z,
+                                                    Some(&[BLACK_CONCRETE]),
+                                                    None,
+                                                );
+                                            }
+                                        } else if use_absolute_y {
+                                            editor.set_block_absolute(
+                                                BLACK_CONCRETE,
                                                 set_x,
                                                 current_y,
                                                 set_z,
-                                                Some(&[BLACK_CONCRETE]),
+                                                None,
                                                 None,
                                             );
                                         } else {
@@ -342,12 +431,32 @@ fn generate_highways_internal(
                                             );
                                         }
                                     } else if set_z % 2 < 1 {
-                                        editor.set_block(
-                                            WHITE_CONCRETE,
+                                        if use_absolute_y {
+                                            editor.set_block_absolute(
+                                                WHITE_CONCRETE,
+                                                set_x,
+                                                current_y,
+                                                set_z,
+                                                Some(&[BLACK_CONCRETE]),
+                                                None,
+                                            );
+                                        } else {
+                                            editor.set_block(
+                                                WHITE_CONCRETE,
+                                                set_x,
+                                                current_y,
+                                                set_z,
+                                                Some(&[BLACK_CONCRETE]),
+                                                None,
+                                            );
+                                        }
+                                    } else if use_absolute_y {
+                                        editor.set_block_absolute(
+                                            BLACK_CONCRETE,
                                             set_x,
                                             current_y,
                                             set_z,
-                                            Some(&[BLACK_CONCRETE]),
+                                            None,
                                             None,
                                         );
                                     } else {
@@ -360,6 +469,15 @@ fn generate_highways_internal(
                                             None,
                                         );
                                     }
+                                } else if use_absolute_y {
+                                    editor.set_block_absolute(
+                                        block_type,
+                                        set_x,
+                                        current_y,
+                                        set_z,
+                                        None,
+                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                                    );
                                 } else {
                                     editor.set_block(
                                         block_type,
@@ -371,30 +489,53 @@ fn generate_highways_internal(
                                     );
                                 }
 
-                                // Add stone brick foundation underneath elevated highways for thickness
-                                if effective_elevation > 0 && current_y > 0 {
+                                // Add stone brick foundation underneath elevated highways/bridges for thickness
+                                if (effective_elevation > 0 || use_absolute_y) && current_y > 0 {
                                     // Add 1 layer of stone bricks underneath the highway surface
-                                    editor.set_block(
-                                        STONE_BRICKS,
-                                        set_x,
-                                        current_y - 1,
-                                        set_z,
-                                        None,
-                                        None,
-                                    );
+                                    if use_absolute_y {
+                                        editor.set_block_absolute(
+                                            STONE_BRICKS,
+                                            set_x,
+                                            current_y - 1,
+                                            set_z,
+                                            None,
+                                            None,
+                                        );
+                                    } else {
+                                        editor.set_block(
+                                            STONE_BRICKS,
+                                            set_x,
+                                            current_y - 1,
+                                            set_z,
+                                            None,
+                                            None,
+                                        );
+                                    }
                                 }
 
-                                // Add support pillars for elevated highways
-                                if effective_elevation != 0 && current_y > 0 {
-                                    add_highway_support_pillar(
-                                        editor,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        dx,
-                                        dz,
-                                        block_range,
-                                    );
+                                // Add support pillars for elevated highways/bridges
+                                if (effective_elevation != 0 || use_absolute_y) && current_y > 0 {
+                                    if use_absolute_y {
+                                        add_highway_support_pillar_absolute(
+                                            editor,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            dx,
+                                            dz,
+                                            block_range,
+                                        );
+                                    } else {
+                                        add_highway_support_pillar(
+                                            editor,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            dx,
+                                            dz,
+                                            block_range,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -405,27 +546,49 @@ fn generate_highways_internal(
                             for dz in -block_range..=block_range {
                                 let outline_x = x - block_range - 1;
                                 let outline_z = z + dz;
-                                editor.set_block(
-                                    LIGHT_GRAY_CONCRETE,
-                                    outline_x,
-                                    current_y,
-                                    outline_z,
-                                    None,
-                                    None,
-                                );
+                                if use_absolute_y {
+                                    editor.set_block_absolute(
+                                        LIGHT_GRAY_CONCRETE,
+                                        outline_x,
+                                        current_y,
+                                        outline_z,
+                                        None,
+                                        None,
+                                    );
+                                } else {
+                                    editor.set_block(
+                                        LIGHT_GRAY_CONCRETE,
+                                        outline_x,
+                                        current_y,
+                                        outline_z,
+                                        None,
+                                        None,
+                                    );
+                                }
                             }
                             // Right outline
                             for dz in -block_range..=block_range {
                                 let outline_x = x + block_range + 1;
                                 let outline_z = z + dz;
-                                editor.set_block(
-                                    LIGHT_GRAY_CONCRETE,
-                                    outline_x,
-                                    current_y,
-                                    outline_z,
-                                    None,
-                                    None,
-                                );
+                                if use_absolute_y {
+                                    editor.set_block_absolute(
+                                        LIGHT_GRAY_CONCRETE,
+                                        outline_x,
+                                        current_y,
+                                        outline_z,
+                                        None,
+                                        None,
+                                    );
+                                } else {
+                                    editor.set_block(
+                                        LIGHT_GRAY_CONCRETE,
+                                        outline_x,
+                                        current_y,
+                                        outline_z,
+                                        None,
+                                        None,
+                                    );
+                                }
                             }
                         }
 
@@ -434,14 +597,25 @@ fn generate_highways_internal(
                             if stripe_length < dash_length {
                                 let stripe_x: i32 = *x;
                                 let stripe_z: i32 = *z;
-                                editor.set_block(
-                                    WHITE_CONCRETE,
-                                    stripe_x,
-                                    current_y,
-                                    stripe_z,
-                                    Some(&[BLACK_CONCRETE]),
-                                    None,
-                                );
+                                if use_absolute_y {
+                                    editor.set_block_absolute(
+                                        WHITE_CONCRETE,
+                                        stripe_x,
+                                        current_y,
+                                        stripe_z,
+                                        Some(&[BLACK_CONCRETE]),
+                                        None,
+                                    );
+                                } else {
+                                    editor.set_block(
+                                        WHITE_CONCRETE,
+                                        stripe_x,
+                                        current_y,
+                                        stripe_z,
+                                        Some(&[BLACK_CONCRETE]),
+                                        None,
+                                    );
+                                }
                             }
 
                             // Increment stripe_length and reset after completing a dash and gap
@@ -580,6 +754,46 @@ fn add_highway_support_pillar(
         for base_dx in -1..=1 {
             for base_dz in -1..=1 {
                 editor.set_block(STONE_BRICKS, x + base_dx, 0, z + base_dz, None, None);
+            }
+        }
+    }
+}
+
+/// Add support pillars for bridges using absolute Y coordinates
+/// Pillars extend from ground level down to the bridge deck
+fn add_highway_support_pillar_absolute(
+    editor: &mut WorldEditor,
+    x: i32,
+    bridge_deck_y: i32,
+    z: i32,
+    dx: i32,
+    dz: i32,
+    _block_range: i32, // Keep for future use
+) {
+    // Only add pillars at specific intervals and positions
+    if dx == 0 && dz == 0 && (x + z) % 8 == 0 {
+        // Get the actual ground level at this position
+        let ground_y = editor.get_ground_level(x, z);
+
+        // Add pillar from ground up to bridge deck
+        // Only if the bridge is actually above the ground
+        if bridge_deck_y > ground_y {
+            for y in (ground_y + 1)..bridge_deck_y {
+                editor.set_block_absolute(STONE_BRICKS, x, y, z, None, None);
+            }
+
+            // Add pillar base at ground level
+            for base_dx in -1..=1 {
+                for base_dz in -1..=1 {
+                    editor.set_block_absolute(
+                        STONE_BRICKS,
+                        x + base_dx,
+                        ground_y,
+                        z + base_dz,
+                        None,
+                        None,
+                    );
+                }
             }
         }
     }
