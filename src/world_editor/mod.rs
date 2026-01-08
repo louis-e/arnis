@@ -151,6 +151,19 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    /// Get the ground level at a specific world coordinate (without any offset)
+    #[inline(always)]
+    pub fn get_ground_level(&self, x: i32, z: i32) -> i32 {
+        if let Some(ground) = &self.ground {
+            ground.level(XZPoint::new(
+                x - self.xzbbox.min_x(),
+                z - self.xzbbox.min_z(),
+            ))
+        } else {
+            0 // Default ground level if no terrain data
+        }
+    }
+
     /// Returns the minimum world coordinates
     pub fn get_min_coords(&self) -> (i32, i32) {
         (self.xzbbox.min_x(), self.xzbbox.min_z())
