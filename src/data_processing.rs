@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SNOW_BLOCK, STONE};
+use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
@@ -262,24 +262,6 @@ pub fn generate_world_with_options(
     let total_iterations_grnd: f64 = total_blocks as f64;
     let progress_increment_grnd: f64 = 20.0 / total_iterations_grnd;
 
-    // Calculate snow thresholds based on actual terrain range
-    // Snow starts at 82% of terrain height, full coverage at 90%
-    let (terrain_min_y, terrain_max_y) = ground.terrain_y_range();
-    let terrain_range = terrain_max_y - terrain_min_y;
-    let snow_start_y = if terrain_range > 30 {
-        terrain_min_y + (terrain_range as f64 * 0.82) as i32
-    } else {
-        i32::MAX // No snow for flat terrain
-    };
-    let snow_full_y = if terrain_range > 30 {
-        terrain_min_y + (terrain_range as f64 * 0.90) as i32
-    } else {
-        i32::MAX
-    };
-
-    // Check if snow is possible (only when terrain has significant elevation variation)
-    let snow_possible = terrain_range > 30;
-
     // Check if terrain elevation is enabled (affects how we process ground blocks)
     let terrain_enabled = ground.terrain_y_range() != (args.ground_level, args.ground_level);
 
@@ -308,41 +290,9 @@ pub fn generate_world_with_options(
                         args.ground_level
                     };
 
-                    // Add default dirt and grass/snow layer if there isn't a stone layer already
+                    // Add default dirt and grass layer if there isn't a stone layer already
                     if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
-                        // Determine ground block: snow at high elevation, grass otherwise
-                        let ground_block = if snow_possible && ground_y >= snow_full_y {
-                            SNOW_BLOCK
-                        } else if snow_possible && ground_y >= snow_start_y {
-                            // Transition zone: increasing chance of snow as elevation increases
-                            let snow_chance = (ground_y - snow_start_y) as u32 * 100
-                                / (snow_full_y - snow_start_y).max(1) as u32;
-                            // Simple deterministic "random" based on position
-                            let hash = ((x.wrapping_mul(374761393) ^ z.wrapping_mul(668265263))
-                                as u32)
-                                % 100;
-                            if hash < snow_chance {
-                                SNOW_BLOCK
-                            } else {
-                                GRASS_BLOCK
-                            }
-                        } else {
-                            GRASS_BLOCK
-                        };
-
-                        // For snow blocks, replace existing grass placed by element processing
-                        if ground_block == SNOW_BLOCK {
-                            editor.set_block_absolute(
-                                ground_block,
-                                x,
-                                ground_y,
-                                z,
-                                Some(&[GRASS_BLOCK]),
-                                None,
-                            );
-                        } else {
-                            editor.set_block_absolute(ground_block, x, ground_y, z, None, None);
-                        }
+                        editor.set_block_absolute(GRASS_BLOCK, x, ground_y, z, None, None);
                         editor.set_block_absolute(DIRT, x, ground_y - 1, z, None, None);
                         editor.set_block_absolute(DIRT, x, ground_y - 2, z, None, None);
                     }
