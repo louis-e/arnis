@@ -271,7 +271,7 @@ fn generate_highways_internal(
 
             // For bridges: detect if this spans a valley by checking terrain profile
             // A valley bridge has terrain that dips significantly below the endpoints
-            // We sample terrain at ALL nodes to find the minimum elevation
+            // We sample terrain at intervals to find the minimum elevation
             // Skip very short bridges (< 10 blocks) as they don't have enough terrain data
             let (is_valley_bridge, bridge_deck_y) =
                 if is_bridge && way.nodes.len() >= 2 && total_way_length >= 10 {
@@ -281,16 +281,24 @@ fn generate_highways_internal(
                     let end_y = editor.get_ground_level(end_node.x, end_node.z);
                     let max_endpoint_y = start_y.max(end_y);
 
-                    // Sample terrain at ALL nodes along the bridge to find the minimum
-                    // This catches valleys regardless of where the dip occurs
+                    // Sample terrain at intervals along the bridge to find the minimum
+                    // Use at most 10 sample points for performance (including endpoints)
+                    let sample_count = (way.nodes.len()).min(10);
+                    let step = if sample_count > 1 {
+                        (way.nodes.len() - 1) / (sample_count - 1)
+                    } else {
+                        1
+                    };
+
                     let min_terrain_y = way
                         .nodes
                         .iter()
+                        .step_by(step.max(1))
                         .map(|node| editor.get_ground_level(node.x, node.z))
                         .min()
                         .unwrap_or(max_endpoint_y);
 
-                    // If ANY point along the bridge is significantly lower than the max endpoint,
+                    // If ANY sampled point along the bridge is significantly lower than the max endpoint,
                     // treat as valley bridge
                     let is_valley = min_terrain_y < max_endpoint_y - VALLEY_BRIDGE_THRESHOLD;
 

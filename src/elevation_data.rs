@@ -395,7 +395,7 @@ pub fn fetch_elevation_data(
         );
         ideal_scaled_range
     } else {
-        // Terrain too tall - compress to fit within Minecraft limits
+        // Terrain too tall, compress to fit within Minecraft limits
         let compression_factor: f64 = available_y_range / height_range;
         let compressed_range: f64 = height_range * compression_factor;
         eprintln!(
@@ -403,7 +403,7 @@ pub fn fetch_elevation_data(
             height_range,
             compressed_range,
             height_range / compressed_range,
-            height_range / compressed_range
+            compressed_range / height_range
         );
         compressed_range
     };

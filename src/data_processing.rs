@@ -277,6 +277,12 @@ pub fn generate_world_with_options(
         i32::MAX
     };
 
+    // Check if snow is possible (only when terrain has significant elevation variation)
+    let snow_possible = terrain_range > 30;
+
+    // Check if terrain elevation is enabled (affects how we process ground blocks)
+    let terrain_enabled = ground.terrain_y_range() != (args.ground_level, args.ground_level);
+
     // Process ground generation chunk-by-chunk for better cache locality.
     // This keeps the same region/chunk HashMap entries hot in CPU cache,
     // rather than jumping between regions on every Z iteration.
@@ -295,16 +301,19 @@ pub fn generate_world_with_options(
 
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
-                    // Add default dirt and grass/snow layer if there isn't a stone layer already
-                    if !editor.check_for_block(x, 0, z, Some(&[STONE])) {
-                        // Get the actual ground Y level for snow determination
-                        let ground_y = editor.get_ground_level(x, z);
+                    // Get ground level once per block position to avoid repeated lookups
+                    let ground_y = if terrain_enabled {
+                        editor.get_ground_level(x, z)
+                    } else {
+                        args.ground_level
+                    };
 
+                    // Add default dirt and grass/snow layer if there isn't a stone layer already
+                    if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
                         // Determine ground block: snow at high elevation, grass otherwise
-                        // Transition zone uses simple hash for pseudo-random snow patches
-                        let ground_block = if ground_y >= snow_full_y {
+                        let ground_block = if snow_possible && ground_y >= snow_full_y {
                             SNOW_BLOCK
-                        } else if ground_y >= snow_start_y {
+                        } else if snow_possible && ground_y >= snow_start_y {
                             // Transition zone: increasing chance of snow as elevation increases
                             let snow_chance = (ground_y - snow_start_y) as u32 * 100
                                 / (snow_full_y - snow_start_y).max(1) as u32;
@@ -323,12 +332,19 @@ pub fn generate_world_with_options(
 
                         // For snow blocks, replace existing grass placed by element processing
                         if ground_block == SNOW_BLOCK {
-                            editor.set_block(ground_block, x, 0, z, Some(&[GRASS_BLOCK]), None);
+                            editor.set_block_absolute(
+                                ground_block,
+                                x,
+                                ground_y,
+                                z,
+                                Some(&[GRASS_BLOCK]),
+                                None,
+                            );
                         } else {
-                            editor.set_block(ground_block, x, 0, z, None, None);
+                            editor.set_block_absolute(ground_block, x, ground_y, z, None, None);
                         }
-                        editor.set_block(DIRT, x, -1, z, None, None);
-                        editor.set_block(DIRT, x, -2, z, None, None);
+                        editor.set_block_absolute(DIRT, x, ground_y - 1, z, None, None);
+                        editor.set_block_absolute(DIRT, x, ground_y - 2, z, None, None);
                     }
 
                     // Fill underground with stone
@@ -340,7 +356,7 @@ pub fn generate_world_with_options(
                             MIN_Y + 1,
                             z,
                             x,
-                            editor.get_absolute_y(x, -3, z),
+                            ground_y - 3,
                             z,
                             None,
                             None,
