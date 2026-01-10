@@ -357,12 +357,14 @@ pub fn generate_world_with_options(
     if world_format == WorldFormat::JavaAnvil {
         if let Some(spawn_coords) = &args.spawn_point {
             use crate::gui::update_player_spawn_y_after_generation;
+            // Reconstruct bbox string to match the format that GUI originally provided.
+            // This ensures LLBBox::from_str() can parse it correctly.
             let bbox_string = format!(
                 "{},{},{},{}",
-                args.bbox.min().lng(),
                 args.bbox.min().lat(),
-                args.bbox.max().lng(),
-                args.bbox.max().lat()
+                args.bbox.min().lng(),
+                args.bbox.max().lat(),
+                args.bbox.max().lng()
             );
 
             if let Err(e) = update_player_spawn_y_after_generation(
