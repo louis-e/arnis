@@ -216,7 +216,7 @@ impl BedrockWriter {
             .as_ref()
             .map(|ground| {
                 let coord = crate::coordinate_system::cartesian::XZPoint::new(spawn_x, spawn_z);
-                ground.level(coord) + 2 // Add 2 blocks above ground for safety
+                ground.level(coord) + 3 // Add 3 blocks above ground for safety
             })
             .unwrap_or(64);
 

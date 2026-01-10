@@ -433,6 +433,88 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     world_path
 }
 
+// Function to update player position in level.dat using direct Minecraft XZ coordinates
+fn update_player_position_xz(
+    world_path: &str,
+    spawn_x: i32,
+    spawn_z: i32,
+) -> Result<(), String> {
+    // Default y spawn position since terrain elevation cannot be determined yet
+    let y = 150.0;
+
+    // Read and update the level.dat file
+    let level_path = PathBuf::from(world_path).join("level.dat");
+    if !level_path.exists() {
+        return Err(format!("Level.dat not found at {level_path:?}"));
+    }
+
+    // Read the level.dat file
+    let level_data = match std::fs::read(&level_path) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to read level.dat: {e}")),
+    };
+
+    // Decompress and parse the NBT data
+    let mut decoder = GzDecoder::new(level_data.as_slice());
+    let mut decompressed_data = Vec::new();
+    if let Err(e) = decoder.read_to_end(&mut decompressed_data) {
+        return Err(format!("Failed to decompress level.dat: {e}"));
+    }
+
+    let mut nbt_data = match fastnbt::from_bytes::<Value>(&decompressed_data) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to parse level.dat NBT data: {e}")),
+    };
+
+    // Update player position and world spawn point
+    if let Value::Compound(ref mut root) = nbt_data {
+        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
+            // Set world spawn point
+            data.insert("SpawnX".to_string(), Value::Int(spawn_x));
+            data.insert("SpawnY".to_string(), Value::Int(y as i32));
+            data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+
+            // Update player position
+            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+                    if let Value::Double(ref mut pos_x) = pos.get_mut(0).unwrap() {
+                        *pos_x = spawn_x as f64;
+                    }
+                    if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
+                        *pos_y = y;
+                    }
+                    if let Value::Double(ref mut pos_z) = pos.get_mut(2).unwrap() {
+                        *pos_z = spawn_z as f64;
+                    }
+                }
+            }
+        }
+    }
+
+    // Serialize and save the updated level.dat
+    let serialized_data = match fastnbt::to_bytes(&nbt_data) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to serialize updated level.dat: {e}")),
+    };
+
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    if let Err(e) = encoder.write_all(&serialized_data) {
+        return Err(format!("Failed to compress updated level.dat: {e}"));
+    }
+
+    let compressed_data = match encoder.finish() {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to finalize compression for level.dat: {e}")),
+    };
+
+    // Write the updated level.dat file
+    if let Err(e) = std::fs::write(level_path, compressed_data) {
+        return Err(format!("Failed to write updated level.dat: {e}"));
+    }
+
+    Ok(())
+}
+
 // Function to update player position in level.dat based on spawn point coordinates
 fn update_player_position(
     world_path: &str,
@@ -540,18 +622,15 @@ fn update_player_position(
 }
 
 // Function to update player spawn Y coordinate based on terrain height after generation
+// This updates the spawn Y coordinate to be at terrain height + 2 blocks
 pub fn update_player_spawn_y_after_generation(
     world_path: &Path,
-    spawn_point: Option<(f64, f64)>,
+    _spawn_point: Option<(f64, f64)>, // Kept for API compatibility, but spawn is always set now
     bbox_text: String,
     scale: f64,
     ground: &Ground,
 ) -> Result<(), String> {
     use crate::coordinate_system::transformation::CoordTransformer;
-
-    let Some((_lat, _lng)) = spawn_point else {
-        return Ok(()); // No spawn point selected, exit early
-    };
 
     // Read the current level.dat file to get existing spawn coordinates
     let level_path = PathBuf::from(world_path).join("level.dat");
@@ -621,7 +700,7 @@ pub fn update_player_spawn_y_after_generation(
         let relative_z = existing_spawn_z - xzbbox.min_z();
         let terrain_point = XZPoint::new(relative_x, relative_z);
 
-        ground.level(terrain_point) + 2
+        ground.level(terrain_point) + 3 // Add 3 blocks above terrain for safety
     } else {
         -61 // Default Y if no terrain
     };
@@ -816,12 +895,12 @@ fn gui_start_generation(
     // Send generation click telemetry
     telemetry::send_generation_click();
 
-    // If spawn point was chosen and the world is new, check and set the spawn point
+    // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
-    if is_new_world && spawn_point.is_some() && world_format != "bedrock" {
-        // Verify the spawn point is within bounds
+    if is_new_world && world_format != "bedrock" {
         if let Some(coords) = spawn_point {
+            // User selected a spawn point - verify it's within bounds
             let llbbox = match LLBBox::from_str(&bbox_text) {
                 Ok(bbox) => bbox,
                 Err(e) => {
@@ -844,6 +923,24 @@ fn gui_start_generation(
                     world_scale,
                 )
                 .map_err(|e| format!("Failed to set spawn point: {e}"))?;
+            }
+        } else {
+            // No user-selected spawn point - use default at X=1, Z=1 relative to world origin
+            let llbbox = match LLBBox::from_str(&bbox_text) {
+                Ok(bbox) => bbox,
+                Err(e) => {
+                    let error_msg = format!("Failed to parse bounding box: {e}");
+                    eprintln!("{error_msg}");
+                    emit_gui_error(&error_msg);
+                    return Err(error_msg);
+                }
+            };
+
+            if let Ok((_, xzbbox)) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale) {
+                let default_spawn_x = xzbbox.min_x() + 1;
+                let default_spawn_z = xzbbox.min_z() + 1;
+                update_player_position_xz(&selected_world, default_spawn_x, default_spawn_z)
+                    .map_err(|e| format!("Failed to set default spawn point: {e}"))?;
             }
         }
     }
@@ -933,6 +1030,7 @@ fn gui_start_generation(
             };
 
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
+            // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
             let mc_spawn_point: Option<(i32, i32)> = if let Some((lat, lng)) = spawn_point {
                 if let Ok(llpoint) = LLPoint::new(lat, lng) {
                     if let Ok((transformer, _)) =
@@ -947,7 +1045,12 @@ fn gui_start_generation(
                     None
                 }
             } else {
-                None
+                // Default spawn point: X=1, Z=1 relative to world origin
+                if let Ok((_, xzbbox)) = CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
+                    Some((xzbbox.min_x() + 1, xzbbox.min_z() + 1))
+                } else {
+                    None
+                }
             };
 
             // Create generation options
