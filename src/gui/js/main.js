@@ -528,8 +528,10 @@ function handleBboxInput() {
         bboxInfo.textContent = "";
         bboxInfo.style.color = "";
       } else {
-        // Restore map selection display
-        displayBboxInfoText(mapSelectedBBox);
+        // Restore map selection info display but don't update input field
+        const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
+        const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
+        displayBboxSizeStatus(bboxInfo, selectedSize);
       }
       return;
     }
@@ -638,6 +640,24 @@ let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
 
+/**
+ * Displays the appropriate bbox size status message based on area thresholds
+ * @param {HTMLElement} bboxInfo - The element to display the message in
+ * @param {number} selectedSize - The calculated bbox area in square meters
+ */
+function displayBboxSizeStatus(bboxInfo, selectedSize) {
+  if (selectedSize > threshold2) {
+    localizeElement(window.localization, { element: bboxInfo }, "area_too_large");
+    bboxInfo.style.color = "#fa7878";
+  } else if (selectedSize > threshold1) {
+    localizeElement(window.localization, { element: bboxInfo }, "area_extensive");
+    bboxInfo.style.color = "#fecc44";
+  } else {
+    localizeElement(window.localization, { element: bboxInfo }, "selection_confirmed");
+    bboxInfo.style.color = "#7bd864";
+  }
+}
+
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
   let [lng1, lat1, lng2, lat2] = bboxText.split(" ").map(Number);
@@ -652,10 +672,12 @@ function displayBboxInfoText(bboxText) {
   customBBoxValid = false;
 
   const bboxInfo = document.getElementById("bbox-info");
+  const bboxCoordsInput = document.getElementById("bbox-coords");
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
     bboxInfo.textContent = "";
+    bboxCoordsInput.value = "";
     mapSelectedBBox = "";
     if (!customBBoxValid) {
       selectedBBox = "";
@@ -663,19 +685,13 @@ function displayBboxInfoText(bboxText) {
     return;
   }
 
+  // Update the custom bbox input with the map selection (comma-separated format)
+  bboxCoordsInput.value = `${lng1},${lat1},${lng2},${lat2}`;
+
   // Calculate the size of the selected bbox
   const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
 
-  if (selectedSize > threshold2) {
-    localizeElement(window.localization, { element: bboxInfo }, "area_too_large");
-    bboxInfo.style.color = "#fa7878";
-  } else if (selectedSize > threshold1) {
-    localizeElement(window.localization, { element: bboxInfo }, "area_extensive");
-    bboxInfo.style.color = "#fecc44";
-  } else {
-    localizeElement(window.localization, { element: bboxInfo }, "selection_confirmed");
-    bboxInfo.style.color = "#7bd864";
-  }
+  displayBboxSizeStatus(bboxInfo, selectedSize);
 }
 
 let worldPath = "";

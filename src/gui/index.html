@@ -100,7 +100,10 @@
 
         <!-- Generation Mode Dropdown -->
         <div class="settings-row">
-          <label for="generation-mode-select" data-localize="generation_mode">Generation Mode</label>
+          <label for="generation-mode-select">
+            <span data-localize="generation_mode">Generation Mode</span>
+            <span class="tooltip-icon" data-tooltip="Choose what to generate: buildings/roads with terrain, just objects, or terrain only">?</span>
+          </label>
           <div class="settings-control">
             <select id="generation-mode-select" name="generation-mode-select" class="generation-mode-dropdown">
               <option value="geo-terrain" data-localize="mode_geo_terrain">Objects + Terrain</option>
@@ -110,25 +113,34 @@
           </div>
         </div>
 
-        <!-- Interior Toggle Button -->
-        <div class="settings-row">
-          <label for="interior-toggle" data-localize="interior">Interior Generation</label>
-          <div class="settings-control">
-            <input type="checkbox" id="interior-toggle" name="interior-toggle">
-          </div>
-        </div>
-
         <!-- Roof Toggle Button -->
         <div class="settings-row">
-          <label for="roof-toggle" data-localize="roof">Roof Generation</label>
+          <label for="roof-toggle">
+            <span data-localize="roof">Roof Generation</span>
+            <span class="tooltip-icon" data-tooltip="Generate roofs on buildings">?</span>
+          </label>
           <div class="settings-control">
             <input type="checkbox" id="roof-toggle" name="roof-toggle" checked>
           </div>
         </div>
 
+        <!-- Interior Toggle Button -->
+        <div class="settings-row">
+          <label for="interior-toggle">
+            <span data-localize="interior">Interior Generation</span>
+            <span class="tooltip-icon" data-tooltip="Generate interior details inside buildings">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="interior-toggle" name="interior-toggle">
+          </div>
+        </div>
+
         <!-- Fill ground Toggle Button -->
         <div class="settings-row">
-          <label for="fillground-toggle" data-localize="fillground">Fill Ground</label>
+          <label for="fillground-toggle">
+            <span data-localize="fillground">Fill Ground</span>
+            <span class="tooltip-icon" data-tooltip="Fill the ground below the surface">?</span>
+          </label>
           <div class="settings-control">
             <input type="checkbox" id="fillground-toggle" name="fillground-toggle">
           </div>
@@ -136,7 +148,10 @@
 
         <!-- World Scale Slider -->
         <div class="settings-row">
-          <label for="scale-value-slider" data-localize="world_scale">World Scale</label>
+          <label for="scale-value-slider">
+            <span data-localize="world_scale">World Scale</span>
+            <span class="tooltip-icon" data-tooltip="Scale factor for the generated world (1.0 = real-world scale)">?</span>
+          </label>
           <div class="settings-control">
             <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
             <span id="slider-value">1.00</span>
@@ -145,7 +160,10 @@
 
         <!-- Bounding Box Input -->
         <div class="settings-row">
-          <label for="bbox-coords" data-localize="custom_bounding_box">Custom Bounding Box</label>
+          <label for="bbox-coords">
+            <span data-localize="custom_bounding_box">Custom Bounding Box</span>
+            <span class="tooltip-icon" data-tooltip="Manually enter coordinates (lat,lng,lat,lng) or use map selection">?</span>
+          </label>
           <div class="settings-control">
             <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" placeholder="Format: lat,lng,lat,lng">
           </div>
@@ -153,7 +171,10 @@
 
         <!-- Map Theme Selector -->
         <div class="settings-row">
-          <label for="tile-theme-select" data-localize="map_theme">Map Theme</label>
+          <label for="tile-theme-select">
+            <span data-localize="map_theme">Map Theme</span>
+            <span class="tooltip-icon" data-tooltip="Visual style of the map picker">?</span>
+          </label>
           <div class="settings-control">
             <select id="tile-theme-select" name="tile-theme-select" class="theme-dropdown">
               <option value="osm">Standard</option>
@@ -167,7 +188,10 @@
 
         <!-- Language Selector -->
         <div class="settings-row">
-          <label for="language-select" data-localize="language">Language</label>
+          <label for="language-select">
+            <span data-localize="language">Language</span>
+            <span class="tooltip-icon" data-tooltip="Interface language">?</span>
+          </label>
           <div class="settings-control">
             <select id="language-select" name="language-select" class="language-dropdown">
               <option value="en">English</option>
@@ -191,7 +215,10 @@
 
         <!-- Telemetry Consent Toggle -->
         <div class="settings-row">
-          <label for="telemetry-toggle">Anonymous Crash Reports</label>
+          <label for="telemetry-toggle" style="white-space: nowrap;">
+            <span>Anonymous Crash Reports</span>
+            <span class="tooltip-icon" data-tooltip="Send anonymous crash data to help improve Arnis">?</span>
+          </label>
           <div class="settings-control">
             <input type="checkbox" id="telemetry-toggle" name="telemetry-toggle">
           </div>

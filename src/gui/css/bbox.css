@@ -8,13 +8,9 @@ body,
   font-family: "Courier New", Courier, monospace;
 }
 
+/* Hide the BBOX coordinates display at bottom of map */
 #info-box {
-  position: absolute;
-  width: 100%;
-  height: auto;
-  bottom: 0;
-  border: 0 0 7px 0;
-  z-index: 10000;
+  display: none;
 }
 
 #coord-format {
