@@ -17,6 +17,9 @@ pub fn generate_landuse(
     let binding: String = "".to_string();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
 
+    // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+    let mut rng = element_rng(element.id);
+
     let block_type = match landuse_tag.as_str() {
         "greenfield" | "meadow" | "grass" | "orchard" | "forest" => GRASS_BLOCK,
         "farmland" => FARMLAND,
@@ -28,10 +31,10 @@ pub fn generate_landuse(
             if residential_tag == "rural" {
                 GRASS_BLOCK
             } else {
-                STONE_BRICKS
+                STONE_BRICKS // Placeholder, will be randomized per-block
             }
         }
-        "commercial" => SMOOTH_STONE,
+        "commercial" => SMOOTH_STONE, // Placeholder, will be randomized per-block
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
         "industrial" => COBBLESTONE,
@@ -54,16 +57,42 @@ pub fn generate_landuse(
     let floor_area: Vec<(i32, i32)> =
         flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
-    // Use deterministic RNG seeded by element ID for consistent results across region boundaries
-    let mut rng = element_rng(element.id);
-
     for (x, z) in floor_area {
-        if landuse_tag == "traffic_island" {
-            editor.set_block(block_type, x, 1, z, None, None);
-        } else if landuse_tag == "construction" || landuse_tag == "railway" {
-            editor.set_block(block_type, x, 0, z, None, Some(&[SPONGE]));
+        // Apply per-block randomness for certain landuse types
+        let actual_block = if landuse_tag == "residential" && block_type == STONE_BRICKS {
+            // Urban residential: mix of stone bricks, cracked stone bricks, stone, cobblestone
+            let random_value = rng.gen_range(0..100);
+            if random_value < 72 {
+                STONE_BRICKS
+            } else if random_value < 87 {
+                CRACKED_STONE_BRICKS
+            } else if random_value < 92 {
+                STONE
+            } else {
+                COBBLESTONE
+            }
+        } else if landuse_tag == "commercial" {
+            // Commercial: mix of smooth stone, stone, cobblestone, stone bricks
+            let random_value = rng.gen_range(0..100);
+            if random_value < 40 {
+                SMOOTH_STONE
+            } else if random_value < 70 {
+                STONE_BRICKS
+            } else if random_value < 90 {
+                STONE
+            } else {
+                COBBLESTONE
+            }
         } else {
-            editor.set_block(block_type, x, 0, z, None, None);
+            block_type
+        };
+
+        if landuse_tag == "traffic_island" {
+            editor.set_block(actual_block, x, 1, z, None, None);
+        } else if landuse_tag == "construction" || landuse_tag == "railway" {
+            editor.set_block(actual_block, x, 0, z, None, Some(&[SPONGE]));
+        } else {
+            editor.set_block(actual_block, x, 0, z, None, None);
         }
 
         // Add specific features for different landuse types

@@ -351,7 +351,8 @@ body,
   background-position: -31px -2px;
 }
 
-.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled {
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled,
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.editing-mode {
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
