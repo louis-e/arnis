@@ -37,7 +37,7 @@ pub fn generate_landuse(
         "commercial" => SMOOTH_STONE, // Placeholder, will be randomized per-block
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
-        "industrial" => COBBLESTONE,
+        "industrial" => STONE, // Placeholder, will be randomized per-block
         "military" => GRAY_CONCRETE,
         "railway" => GRAVEL,
         "landfill" => {
@@ -82,6 +82,16 @@ pub fn generate_landuse(
                 STONE
             } else {
                 COBBLESTONE
+            }
+        } else if landuse_tag == "industrial" {
+            // Industrial: primarily stone, with some stone bricks and smooth stone
+            let random_value = rng.gen_range(0..100);
+            if random_value < 70 {
+                STONE
+            } else if random_value < 90 {
+                STONE_BRICKS
+            } else {
+                SMOOTH_STONE
             }
         } else {
             block_type

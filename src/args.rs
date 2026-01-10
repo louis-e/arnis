@@ -58,10 +58,6 @@ pub struct Args {
     /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
-
-    /// Spawn point coordinates (lat, lng)
-    #[arg(skip)]
-    pub spawn_point: Option<(f64, f64)>,
 }
 
 fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {

@@ -369,7 +369,6 @@ pub fn generate_world_with_options(
         // Always update spawn Y since we now always set a spawn point (user-selected or default)
         if let Err(e) = update_player_spawn_y_after_generation(
             &args.path,
-            args.spawn_point,
             bbox_string,
             args.scale,
             ground.as_ref(),
