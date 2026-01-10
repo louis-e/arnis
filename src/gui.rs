@@ -434,11 +434,7 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
 }
 
 // Function to update player position in level.dat using direct Minecraft XZ coordinates
-fn update_player_position_xz(
-    world_path: &str,
-    spawn_x: i32,
-    spawn_z: i32,
-) -> Result<(), String> {
+fn update_player_position_xz(world_path: &str, spawn_x: i32, spawn_z: i32) -> Result<(), String> {
     // Default y spawn position since terrain elevation cannot be determined yet
     let y = 150.0;
 
@@ -622,7 +618,7 @@ fn update_player_position(
 }
 
 // Function to update player spawn Y coordinate based on terrain height after generation
-// This updates the spawn Y coordinate to be at terrain height + 2 blocks
+// This updates the spawn Y coordinate to be at terrain height + 3 blocks
 pub fn update_player_spawn_y_after_generation(
     world_path: &Path,
     _spawn_point: Option<(f64, f64)>, // Kept for API compatibility, but spawn is always set now
