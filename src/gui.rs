@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
@@ -433,6 +433,12 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     world_path
 }
 
+/// Calculates the default spawn point at X=1, Z=1 relative to the world origin.
+/// This is used when no spawn point is explicitly selected by the user.
+fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
+    (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
+}
+
 /// Sets the player spawn point in level.dat using Minecraft XZ coordinates.
 /// The Y coordinate is set to a temporary value (150) and will be updated
 /// after terrain generation by `update_player_spawn_y_after_generation`.
@@ -827,11 +833,11 @@ fn gui_start_generation(
                 (xzpoint.x, xzpoint.z)
             } else {
                 // Spawn point outside bounds, use default
-                (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
+                calculate_default_spawn(&xzbbox)
             }
         } else {
             // No user-selected spawn point - use default at X=1, Z=1 relative to world origin
-            (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
+            calculate_default_spawn(&xzbbox)
         };
 
         set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
@@ -940,7 +946,7 @@ fn gui_start_generation(
             } else {
                 // Default spawn point: X=1, Z=1 relative to world origin
                 if let Ok((_, xzbbox)) = CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
-                    Some((xzbbox.min_x() + 1, xzbbox.min_z() + 1))
+                    Some(calculate_default_spawn(&xzbbox))
                 } else {
                     None
                 }
