@@ -155,7 +155,7 @@ impl SectionToModify {
         let palette = unique_blocks
             .iter()
             .map(|(block, stored_props)| PaletteItem {
-                name: block.name().to_string(),
+                name: format!("{}:{}", block.namespace(), block.name()),
                 properties: stored_props.clone().or_else(|| block.properties()),
             })
             .collect();
