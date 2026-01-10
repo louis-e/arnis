@@ -1,13 +1,19 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+pub fn generate_natural(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
@@ -69,17 +75,13 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                 previous_node = Some((x, z));
             }
 
-            // If there are natural nodes, flood-fill the area
+            // If there are natural nodes, flood-fill the area using cache
             if corner_addup != (0, 0, 0) {
-                let polygon_coords: Vec<(i32, i32)> = way
-                    .nodes
-                    .iter()
-                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                    .collect();
                 let filled_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                    flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
-                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+                let mut rng = element_rng(way.id);
 
                 for (x, z) in filled_area {
                     editor.set_block(block_type, x, 0, z, None, None);
@@ -448,12 +450,18 @@ pub fn generate_natural_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
 ) {
     if rel.tags.contains_key("natural") {
         // Generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_natural(editor, &ProcessedElement::Way(member.way.clone()), args);
+                generate_natural(
+                    editor,
+                    &ProcessedElement::Way((*member.way).clone()),
+                    args,
+                    flood_fill_cache,
+                );
             }
         }
 
@@ -475,7 +483,12 @@ pub fn generate_natural_from_relation(
             };
 
             // Generate natural area from combined way
-            generate_natural(editor, &ProcessedElement::Way(combined_way), args);
+            generate_natural(
+                editor,
+                &ProcessedElement::Way(combined_way),
+                args,
+                flood_fill_cache,
+            );
         }
     }
 }

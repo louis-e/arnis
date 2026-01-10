@@ -2,12 +2,11 @@ use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance}
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use image::Rgb;
-use std::path::Path;
+use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 
 /// Maximum Y coordinate in Minecraft (build height limit)
 const MAX_Y: i32 = 319;
-/// Scale factor for converting real elevation to Minecraft heights
-const BASE_HEIGHT_SCALE: f64 = 0.7;
 /// AWS S3 Terrarium tiles endpoint (no API key required)
 const AWS_TERRARIUM_URL: &str =
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -17,6 +16,8 @@ const TERRARIUM_OFFSET: f64 = 32768.0;
 const MIN_ZOOM: u8 = 10;
 /// Maximum zoom level for terrain tiles
 const MAX_ZOOM: u8 = 15;
+/// Maximum concurrent tile downloads to be respectful to AWS
+const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 
 /// Holds processed elevation data and metadata
 #[derive(Clone)]
@@ -28,6 +29,11 @@ pub struct ElevationData {
     /// Height of the elevation grid
     pub(crate) height: usize,
 }
+
+/// RGB image buffer type for elevation tiles
+type TileImage = image::ImageBuffer<Rgb<u8>, Vec<u8>>;
+/// Result type for tile download operations: ((tile_x, tile_y), image) or error
+type TileDownloadResult = Result<((u32, u32), TileImage), String>;
 
 /// Calculates appropriate zoom level for the given bounding box
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
@@ -53,19 +59,101 @@ fn download_tile(
     tile_y: u32,
     zoom: u8,
     tile_path: &Path,
-) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, Box<dyn std::error::Error>> {
+) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
     println!("Fetching tile x={tile_x},y={tile_y},z={zoom} from AWS Terrain Tiles");
     let url: String = AWS_TERRARIUM_URL
         .replace("{z}", &zoom.to_string())
         .replace("{x}", &tile_x.to_string())
         .replace("{y}", &tile_y.to_string());
 
-    let response: reqwest::blocking::Response = client.get(&url).send()?;
-    response.error_for_status_ref()?;
-    let bytes = response.bytes()?;
-    std::fs::write(tile_path, &bytes)?;
-    let img: image::DynamicImage = image::load_from_memory(&bytes)?;
+    let response = client.get(&url).send().map_err(|e| e.to_string())?;
+    response.error_for_status_ref().map_err(|e| e.to_string())?;
+    let bytes = response.bytes().map_err(|e| e.to_string())?;
+    std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
+    let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
     Ok(img.to_rgb8())
+}
+
+/// Fetches a tile from cache or downloads it if not available
+/// Note: In parallel execution, multiple threads may attempt to download the same tile
+/// if it's missing or corrupted. This is harmless (just wastes some bandwidth) as
+/// file writes are atomic at the OS level.
+fn fetch_or_load_tile(
+    client: &reqwest::blocking::Client,
+    tile_x: u32,
+    tile_y: u32,
+    zoom: u8,
+    tile_path: &Path,
+) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
+    if tile_path.exists() {
+        // Check if the cached file has a reasonable size (PNG files should be at least a few KB)
+        let file_size = std::fs::metadata(tile_path).map(|m| m.len()).unwrap_or(0);
+
+        if file_size < 1000 {
+            eprintln!(
+                "Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
+                tile_path.display(),
+                file_size
+            );
+            #[cfg(feature = "gui")]
+            send_log(
+                LogLevel::Warning,
+                "Cached tile appears too small, refetching.",
+            );
+
+            // Remove the potentially corrupted file
+            if let Err(e) = std::fs::remove_file(tile_path) {
+                eprintln!("Warning: Failed to remove corrupted tile file: {e}");
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Warning,
+                    "Failed to remove corrupted tile file during refetching.",
+                );
+            }
+
+            // Re-download the tile
+            return download_tile(client, tile_x, tile_y, zoom, tile_path);
+        }
+
+        // Try to load cached tile, but handle corruption gracefully
+        match image::open(tile_path) {
+            Ok(img) => {
+                println!(
+                    "Loading cached tile x={tile_x},y={tile_y},z={zoom} from {}",
+                    tile_path.display()
+                );
+                Ok(img.to_rgb8())
+            }
+            Err(e) => {
+                eprintln!(
+                    "Cached tile at {} is corrupted or invalid: {}. Re-downloading...",
+                    tile_path.display(),
+                    e
+                );
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Warning,
+                    "Cached tile is corrupted or invalid. Re-downloading...",
+                );
+
+                // Remove the corrupted file
+                if let Err(e) = std::fs::remove_file(tile_path) {
+                    eprintln!("Warning: Failed to remove corrupted tile file: {e}");
+                    #[cfg(feature = "gui")]
+                    send_log(
+                        LogLevel::Warning,
+                        "Failed to remove corrupted tile file during re-download.",
+                    );
+                }
+
+                // Re-download the tile
+                download_tile(client, tile_x, tile_y, zoom, tile_path)
+            }
+        }
+    } else {
+        // Download the tile for the first time
+        download_tile(client, tile_x, tile_y, zoom, tile_path)
+    }
 }
 
 pub fn fetch_elevation_data(
@@ -91,101 +179,68 @@ pub fn fetch_elevation_data(
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
     let mut extreme_values_found = Vec::new(); // Track extreme values for debugging
 
-    let client: reqwest::blocking::Client = reqwest::blocking::Client::new();
-
-    let tile_cache_dir = Path::new("./arnis-tile-cache");
+    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
     if !tile_cache_dir.exists() {
-        std::fs::create_dir_all(tile_cache_dir)?;
+        std::fs::create_dir_all(&tile_cache_dir)?;
     }
 
-    // Fetch and process each tile
-    for (tile_x, tile_y) in &tiles {
-        // Check if tile is already cached
-        let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
+    // Create a shared HTTP client for connection pooling
+    let client = reqwest::blocking::Client::new();
 
-        let rgb_img: image::ImageBuffer<Rgb<u8>, Vec<u8>> = if tile_path.exists() {
-            // Check if the cached file has a reasonable size (PNG files should be at least a few KB)
-            let file_size = match std::fs::metadata(&tile_path) {
-                Ok(metadata) => metadata.len(),
-                Err(_) => 0,
-            };
+    // Download tiles in parallel with limited concurrency to be respectful to AWS
+    let num_tiles = tiles.len();
+    println!(
+        "Downloading {num_tiles} elevation tiles (up to {MAX_CONCURRENT_DOWNLOADS} concurrent)..."
+    );
 
-            if file_size < 1000 {
-                eprintln!(
-                    "Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
-                    tile_path.display(),
-                    file_size
+    // Use a custom thread pool to limit concurrent downloads
+    let thread_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(MAX_CONCURRENT_DOWNLOADS)
+        .build()
+        .map_err(|e| format!("Failed to create thread pool: {e}"))?;
+
+    let downloaded_tiles: Vec<TileDownloadResult> = thread_pool.install(|| {
+        tiles
+            .par_iter()
+            .map(|(tile_x, tile_y)| {
+                let tile_path = tile_cache_dir.join(format!("z{zoom}_x{tile_x}_y{tile_y}.png"));
+
+                let rgb_img = fetch_or_load_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?;
+                Ok(((*tile_x, *tile_y), rgb_img))
+            })
+            .collect()
+    });
+
+    // Check for any download errors
+    let mut successful_tiles = Vec::new();
+    for result in downloaded_tiles {
+        match result {
+            Ok(tile_data) => successful_tiles.push(tile_data),
+            Err(e) => {
+                eprintln!("Warning: Failed to download tile: {e}");
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Warning,
+                    &format!("Failed to download elevation tile: {e}"),
                 );
-
-                // Remove the potentially corrupted file
-                if let Err(remove_err) = std::fs::remove_file(&tile_path) {
-                    eprintln!(
-                        "Warning: Failed to remove corrupted tile file: {}",
-                        remove_err
-                    );
-                    #[cfg(feature = "gui")]
-                    send_log(
-                        LogLevel::Warning,
-                        "Failed to remove corrupted tile file during refetching.",
-                    );
-                }
-
-                // Re-download the tile
-                download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
-            } else {
-                println!(
-                    "Loading cached tile x={tile_x},y={tile_y},z={zoom} from {}",
-                    tile_path.display()
-                );
-
-                // Try to load cached tile, but handle corruption gracefully
-                match image::open(&tile_path) {
-                    Ok(img) => img.to_rgb8(),
-                    Err(e) => {
-                        eprintln!(
-                            "Cached tile at {} is corrupted or invalid: {}. Re-downloading...",
-                            tile_path.display(),
-                            e
-                        );
-                        #[cfg(feature = "gui")]
-                        send_log(
-                            LogLevel::Warning,
-                            "Cached tile is corrupted or invalid. Re-downloading...",
-                        );
-
-                        // Remove the corrupted file
-                        if let Err(remove_err) = std::fs::remove_file(&tile_path) {
-                            eprintln!(
-                                "Warning: Failed to remove corrupted tile file: {}",
-                                remove_err
-                            );
-                            #[cfg(feature = "gui")]
-                            send_log(
-                                LogLevel::Warning,
-                                "Failed to remove corrupted tile file during re-download.",
-                            );
-                        }
-
-                        // Re-download the tile
-                        download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
-                    }
-                }
             }
-        } else {
-            // Download the tile for the first time
-            download_tile(&client, *tile_x, *tile_y, zoom, &tile_path)?
-        };
+        }
+    }
 
+    println!("Processing {} elevation tiles...", successful_tiles.len());
+
+    // Process tiles sequentially (writes to shared height_grid)
+    for ((tile_x, tile_y), rgb_img) in successful_tiles {
         // Only process pixels that fall within the requested bbox
         for (y, row) in rgb_img.rows().enumerate() {
             for (x, pixel) in row.enumerate() {
                 // Convert tile pixel coordinates back to geographic coordinates
-                let pixel_lng = ((*tile_x as f64 + x as f64 / 256.0) / (2.0_f64.powi(zoom as i32)))
+                let pixel_lng = ((tile_x as f64 + x as f64 / 256.0) / (2.0_f64.powi(zoom as i32)))
                     * 360.0
                     - 180.0;
                 let pixel_lat_rad = std::f64::consts::PI
                     * (1.0
-                        - 2.0 * (*tile_y as f64 + y as f64 / 256.0) / (2.0_f64.powi(zoom as i32)));
+                        - 2.0 * (tile_y as f64 + y as f64 / 256.0) / (2.0_f64.powi(zoom as i32)));
                 let pixel_lat = pixel_lat_rad.sinh().atan().to_degrees();
 
                 // Skip pixels outside the requested bounding box
@@ -261,19 +316,17 @@ pub fn fetch_elevation_data(
     // This smooths terrain proportionally while preserving more detail.
     let sigma: f64 = BASE_SIGMA_REF * (grid_size / BASE_GRID_REF).sqrt();
 
-    let blur_percentage: f64 = (sigma / grid_size) * 100.0;
-    eprintln!(
+    //let blur_percentage: f64 = (sigma / grid_size) * 100.0;
+    /*eprintln!(
         "Elevation blur: grid={}x{}, sigma={:.2}, blur_percentage={:.2}%",
         grid_width, grid_height, sigma, blur_percentage
-    );
-
-    /* eprintln!(
-        "Grid: {}x{}, Blur sigma: {:.2}",
-        grid_width, grid_height, sigma
-    ); */
+    );*/
 
     // Continue with the existing blur and conversion to Minecraft heights...
     let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, sigma);
+
+    // Release raw height grid
+    drop(height_grid);
 
     let mut mc_heights: Vec<Vec<i32>> = Vec::with_capacity(blurred_heights.len());
 
@@ -298,7 +351,7 @@ pub fn fetch_elevation_data(
         }
     }
 
-    eprintln!("Height data range: {min_height} to {max_height} m");
+    //eprintln!("Height data range: {min_height} to {max_height} m");
     if extreme_low_count > 0 {
         eprintln!(
             "WARNING: Found {extreme_low_count} pixels with extremely low elevations (< -1000m)"
@@ -311,35 +364,58 @@ pub fn fetch_elevation_data(
     }
 
     let height_range: f64 = max_height - min_height;
-    // Apply scale factor to height scaling
-    let mut height_scale: f64 = BASE_HEIGHT_SCALE * scale.sqrt(); // sqrt to make height scaling less extreme
-    let mut scaled_range: f64 = height_range * height_scale;
 
-    // Adaptive scaling: ensure we don't exceed reasonable Y range
-    let available_y_range = (MAX_Y - ground_level) as f64;
-    let safety_margin = 0.9; // Use 90% of available range
-    let max_allowed_range = available_y_range * safety_margin;
+    // Realistic height scaling: 1 meter of real elevation = scale blocks in Minecraft
+    // At scale=1.0, 1 meter = 1 block (realistic 1:1 mapping)
+    // At scale=2.0, 1 meter = 2 blocks (exaggerated for larger worlds)
+    let ideal_scaled_range: f64 = height_range * scale;
 
-    if scaled_range > max_allowed_range {
-        let adjustment_factor = max_allowed_range / scaled_range;
-        height_scale *= adjustment_factor;
-        scaled_range = height_range * height_scale;
+    // Calculate available Y range in Minecraft (from ground_level to MAX_Y)
+    // Leave a buffer at the top for buildings, trees, and other structures
+    const TERRAIN_HEIGHT_BUFFER: i32 = 15;
+    let available_y_range: f64 = (MAX_Y - TERRAIN_HEIGHT_BUFFER - ground_level) as f64;
+
+    // Determine final height scale:
+    // - Use realistic 1:1 (times scale) if terrain fits within Minecraft limits
+    // - Only compress if the terrain would exceed the build height
+    let scaled_range: f64 = if ideal_scaled_range <= available_y_range {
+        // Terrain fits! Use realistic scaling
         eprintln!(
-            "Height range too large, applying scaling adjustment factor: {adjustment_factor:.3}"
+            "Realistic elevation: {:.1}m range fits in {} available blocks",
+            height_range, available_y_range as i32
         );
-        eprintln!("Adjusted scaled range: {scaled_range:.1} blocks");
-    }
+        ideal_scaled_range
+    } else {
+        // Terrain too tall, compress to fit within Minecraft limits
+        let compression_factor: f64 = available_y_range / height_range;
+        let compressed_range: f64 = height_range * compression_factor;
+        eprintln!(
+            "Elevation compressed: {:.1}m range -> {:.0} blocks ({:.2}:1 ratio, 1 block = {:.2}m)",
+            height_range,
+            compressed_range,
+            height_range / compressed_range,
+            compressed_range / height_range
+        );
+        compressed_range
+    };
 
     // Convert to scaled Minecraft Y coordinates
+    // Lowest real elevation maps to ground_level, highest maps to ground_level + scaled_range
     for row in blurred_heights {
         let mc_row: Vec<i32> = row
             .iter()
             .map(|&h| {
-                // Scale the height differences
-                let relative_height: f64 = (h - min_height) / height_range;
+                // Calculate relative position within the elevation range (0.0 to 1.0)
+                let relative_height: f64 = if height_range > 0.0 {
+                    (h - min_height) / height_range
+                } else {
+                    0.0
+                };
+                // Scale to Minecraft blocks and add to ground level
                 let scaled_height: f64 = relative_height * scaled_range;
-                // With terrain enabled, ground_level is used as the MIN_Y for terrain
-                ((ground_level as f64 + scaled_height).round() as i32).clamp(ground_level, MAX_Y)
+                // Clamp to valid Minecraft Y range (leave buffer at top for structures)
+                ((ground_level as f64 + scaled_height).round() as i32)
+                    .clamp(ground_level, MAX_Y - TERRAIN_HEIGHT_BUFFER)
             })
             .collect();
         mc_heights.push(mc_row);
@@ -353,7 +429,7 @@ pub fn fetch_elevation_data(
             max_block_height = max_block_height.max(height);
         }
     }
-    eprintln!("Minecraft height data range: {min_block_height} to {max_block_height} blocks");
+    //eprintln!("Minecraft height data range: {min_block_height} to {max_block_height} blocks");
 
     Ok(ElevationData {
         heights: mc_heights,
@@ -513,7 +589,7 @@ fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     let min_reasonable = all_heights[p1_idx];
     let max_reasonable = all_heights[p99_idx];
 
-    eprintln!("Filtering outliers outside range: {min_reasonable:.1}m to {max_reasonable:.1}m");
+    //eprintln!("Filtering outliers outside range: {min_reasonable:.1}m to {max_reasonable:.1}m");
 
     let mut outliers_filtered = 0;
 
@@ -528,7 +604,7 @@ fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     }
 
     if outliers_filtered > 0 {
-        eprintln!("Filtered {outliers_filtered} elevation outliers, interpolating replacements...");
+        //eprintln!("Filtered {outliers_filtered} elevation outliers, interpolating replacements...");
         // Re-run the NaN filling to interpolate the filtered values
         fill_nan_values(height_grid);
     }

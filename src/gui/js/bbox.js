@@ -899,6 +899,15 @@ $(document).ready(function () {
             });
         }
 
+        // If it's a rectangle, remove any existing rectangles first
+        if (e.layerType === 'rectangle') {
+            drawnItems.eachLayer(function(layer) {
+                if (layer instanceof L.Rectangle) {
+                    drawnItems.removeLayer(layer);
+                }
+            });
+        }
+
         // Check if it's a rectangle and set proper styles before adding it to the layer
         if (e.layerType === 'rectangle') {
             e.layer.setStyle({

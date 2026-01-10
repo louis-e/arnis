@@ -1,6 +1,7 @@
 //! Java Edition Anvil format world saving.
 //!
 //! This module handles saving worlds in the Java Edition Anvil (.mca) format.
+//! Supports streaming mode for memory-efficient saving of large worlds.
 
 use super::common::{Chunk, ChunkToModify, Section};
 use super::WorldEditor;
@@ -11,11 +12,9 @@ use fastanvil::Region;
 use fastnbt::Value;
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
-use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -23,9 +22,11 @@ use crate::telemetry::{send_log, LogLevel};
 impl<'a> WorldEditor<'a> {
     /// Creates a region file for the given region coordinates.
     pub(super) fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
-        let out_path = self
-            .world_dir
-            .join(format!("region/r.{}.{}.mca", region_x, region_z));
+        let region_dir = self.world_dir.join("region");
+        let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
+
+        // Ensure region directory exists before creating region files
+        std::fs::create_dir_all(&region_dir).expect("Failed to create region directory");
 
         const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
 
@@ -75,6 +76,9 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Saves the world in Java Edition Anvil format.
+    ///
+    /// Uses streaming mode: saves regions one at a time and releases memory after each,
+    /// significantly reducing peak memory usage for large worlds.
     pub(super) fn save_java(&mut self) {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
@@ -98,138 +102,154 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
 
-        let regions_processed = AtomicU64::new(0);
+        // Streaming mode: Process regions sequentially and release memory after each.
+        // This significantly reduces peak memory for large worlds (100+ regions).
+        // For small worlds, the overhead is negligible.
+        let mut regions_processed: u64 = 0;
 
-        self.world
-            .regions
-            .par_iter()
-            .for_each(|((region_x, region_z), region_to_modify)| {
-                let mut region = self.create_region(*region_x, *region_z);
-                let mut ser_buffer = Vec::with_capacity(8192);
+        // Collect region keys first to allow draining
+        let region_keys: Vec<(i32, i32)> = self.world.regions.keys().copied().collect();
 
-                for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
-                    if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
-                        // Read existing chunk data if it exists
-                        let existing_data = region
-                            .read_chunk(chunk_x as usize, chunk_z as usize)
-                            .unwrap()
-                            .unwrap_or_default();
+        for (region_x, region_z) in region_keys {
+            // Remove region from memory - this is the key to memory savings
+            if let Some(region_to_modify) = self.world.regions.remove(&(region_x, region_z)) {
+                self.save_single_region(region_x, region_z, &region_to_modify);
 
-                        // Parse existing chunk or create new one
-                        let mut chunk: Chunk = if !existing_data.is_empty() {
-                            fastnbt::from_bytes(&existing_data).unwrap()
-                        } else {
-                            Chunk {
-                                sections: Vec::new(),
-                                x_pos: chunk_x + (region_x * 32),
-                                z_pos: chunk_z + (region_z * 32),
-                                is_light_on: 0,
-                                other: FnvHashMap::default(),
-                            }
-                        };
+                // Region memory is freed when region_to_modify goes out of scope here
+            }
 
-                        // Update sections while preserving existing data
-                        let new_sections: Vec<Section> = chunk_to_modify.sections().collect();
-                        for new_section in new_sections {
-                            if let Some(existing_section) =
-                                chunk.sections.iter_mut().find(|s| s.y == new_section.y)
-                            {
-                                // Merge block states
-                                existing_section.block_states.palette =
-                                    new_section.block_states.palette;
-                                existing_section.block_states.data = new_section.block_states.data;
-                            } else {
-                                // Add new section if it doesn't exist
-                                chunk.sections.push(new_section);
-                            }
-                        }
+            regions_processed += 1;
 
-                        // Preserve existing block entities and merge with new ones
-                        if let Some(existing_entities) = chunk.other.get_mut("block_entities") {
-                            if let Some(new_entities) = chunk_to_modify.other.get("block_entities")
-                            {
-                                if let (Value::List(existing), Value::List(new)) =
-                                    (existing_entities, new_entities)
-                                {
-                                    // Remove old entities that are replaced by new ones
-                                    existing.retain(|e| {
-                                        if let Value::Compound(map) = e {
-                                            let (x, y, z) = get_entity_coords(map);
-                                            !new.iter().any(|new_e| {
-                                                if let Value::Compound(new_map) = new_e {
-                                                    let (nx, ny, nz) = get_entity_coords(new_map);
-                                                    x == nx && y == ny && z == nz
-                                                } else {
-                                                    false
-                                                }
-                                            })
-                                        } else {
-                                            true
-                                        }
-                                    });
-                                    // Add new entities
-                                    existing.extend(new.clone());
-                                }
-                            }
-                        } else {
-                            // If no existing entities, just add the new ones
-                            if let Some(new_entities) = chunk_to_modify.other.get("block_entities")
-                            {
-                                chunk
-                                    .other
-                                    .insert("block_entities".to_string(), new_entities.clone());
-                            }
-                        }
+            // Update progress at regular intervals
+            let update_interval = (total_regions / 10).max(1);
+            if regions_processed.is_multiple_of(update_interval)
+                || regions_processed == total_regions
+            {
+                let progress = 90.0 + (regions_processed as f64 / total_regions as f64) * 9.0;
+                emit_gui_progress_update(progress, "Saving world...");
+            }
 
-                        // Update chunk coordinates and flags
-                        chunk.x_pos = chunk_x + (region_x * 32);
-                        chunk.z_pos = chunk_z + (region_z * 32);
-
-                        // Create Level wrapper and save
-                        let level_data = create_level_wrapper(&chunk);
-                        ser_buffer.clear();
-                        fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
-                        region
-                            .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
-                            .unwrap();
-                    }
-                }
-
-                // Second pass: ensure all chunks exist
-                for chunk_x in 0..32 {
-                    for chunk_z in 0..32 {
-                        let abs_chunk_x = chunk_x + (region_x * 32);
-                        let abs_chunk_z = chunk_z + (region_z * 32);
-
-                        // Check if chunk exists in our modifications
-                        let chunk_exists =
-                            region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
-
-                        // If chunk doesn't exist, create it with base layer
-                        if !chunk_exists {
-                            let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
-                            region
-                                .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
-                                .unwrap();
-                        }
-                    }
-                }
-
-                // Update progress
-                let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst) + 1;
-
-                // Update progress at regular intervals (every ~1% or at least every 10 regions)
-                // This ensures progress is visible even with many regions
-                let update_interval = (total_regions / 10).max(1);
-                if regions_done.is_multiple_of(update_interval) || regions_done == total_regions {
-                    let progress = 90.0 + (regions_done as f64 / total_regions as f64) * 9.0;
-                    emit_gui_progress_update(progress, "Saving world...");
-                }
-
-                save_pb.inc(1);
-            });
+            save_pb.inc(1);
+        }
 
         save_pb.finish();
+    }
+
+    /// Saves a single region to disk.
+    ///
+    /// This is extracted to allow streaming mode to save and release regions one at a time.
+    fn save_single_region(
+        &self,
+        region_x: i32,
+        region_z: i32,
+        region_to_modify: &super::common::RegionToModify,
+    ) {
+        let mut region = self.create_region(region_x, region_z);
+        let mut ser_buffer = Vec::with_capacity(8192);
+
+        for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
+            if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
+                // Read existing chunk data if it exists
+                let existing_data = region
+                    .read_chunk(chunk_x as usize, chunk_z as usize)
+                    .unwrap()
+                    .unwrap_or_default();
+
+                // Parse existing chunk or create new one
+                let mut chunk: Chunk = if !existing_data.is_empty() {
+                    fastnbt::from_bytes(&existing_data).unwrap()
+                } else {
+                    Chunk {
+                        sections: Vec::new(),
+                        x_pos: chunk_x + (region_x * 32),
+                        z_pos: chunk_z + (region_z * 32),
+                        is_light_on: 0,
+                        other: FnvHashMap::default(),
+                    }
+                };
+
+                // Update sections while preserving existing data
+                let new_sections: Vec<Section> = chunk_to_modify.sections().collect();
+                for new_section in new_sections {
+                    if let Some(existing_section) =
+                        chunk.sections.iter_mut().find(|s| s.y == new_section.y)
+                    {
+                        // Merge block states
+                        existing_section.block_states.palette = new_section.block_states.palette;
+                        existing_section.block_states.data = new_section.block_states.data;
+                    } else {
+                        // Add new section if it doesn't exist
+                        chunk.sections.push(new_section);
+                    }
+                }
+
+                // Preserve existing block entities and merge with new ones
+                if let Some(existing_entities) = chunk.other.get_mut("block_entities") {
+                    if let Some(new_entities) = chunk_to_modify.other.get("block_entities") {
+                        if let (Value::List(existing), Value::List(new)) =
+                            (existing_entities, new_entities)
+                        {
+                            // Remove old entities that are replaced by new ones
+                            existing.retain(|e| {
+                                if let Value::Compound(map) = e {
+                                    let (x, y, z) = get_entity_coords(map);
+                                    !new.iter().any(|new_e| {
+                                        if let Value::Compound(new_map) = new_e {
+                                            let (nx, ny, nz) = get_entity_coords(new_map);
+                                            x == nx && y == ny && z == nz
+                                        } else {
+                                            false
+                                        }
+                                    })
+                                } else {
+                                    true
+                                }
+                            });
+                            // Add new entities
+                            existing.extend(new.clone());
+                        }
+                    }
+                } else {
+                    // If no existing entities, just add the new ones
+                    if let Some(new_entities) = chunk_to_modify.other.get("block_entities") {
+                        chunk
+                            .other
+                            .insert("block_entities".to_string(), new_entities.clone());
+                    }
+                }
+
+                // Update chunk coordinates and flags
+                chunk.x_pos = chunk_x + (region_x * 32);
+                chunk.z_pos = chunk_z + (region_z * 32);
+
+                // Create Level wrapper and save
+                let level_data = create_level_wrapper(&chunk);
+                ser_buffer.clear();
+                fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
+                region
+                    .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                    .unwrap();
+            }
+        }
+
+        // Second pass: ensure all chunks exist
+        for chunk_x in 0..32 {
+            for chunk_z in 0..32 {
+                let abs_chunk_x = chunk_x + (region_x * 32);
+                let abs_chunk_z = chunk_z + (region_z * 32);
+
+                // Check if chunk exists in our modifications
+                let chunk_exists = region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
+
+                // If chunk doesn't exist, create it with base layer
+                if !chunk_exists {
+                    let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
+                    region
+                        .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                        .unwrap();
+                }
+            }
+        }
     }
 }
 

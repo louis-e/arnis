@@ -33,6 +33,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -71,7 +72,7 @@ pub struct WorldEditor<'a> {
     world: WorldToModify,
     xzbbox: &'a XZBBox,
     llbbox: LLBBox,
-    ground: Option<Box<Ground>>,
+    ground: Option<Arc<Ground>>,
     format: WorldFormat,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
     bedrock_level_name: Option<String>,
@@ -122,13 +123,13 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Sets the ground reference for elevation-based block placement
-    pub fn set_ground(&mut self, ground: &Ground) {
-        self.ground = Some(Box::new(ground.clone()));
+    pub fn set_ground(&mut self, ground: Arc<Ground>) {
+        self.ground = Some(ground);
     }
 
     /// Gets a reference to the ground data if available
     pub fn get_ground(&self) -> Option<&Ground> {
-        self.ground.as_ref().map(|g| g.as_ref())
+        self.ground.as_deref()
     }
 
     /// Returns the current world format
@@ -147,6 +148,19 @@ impl<'a> WorldEditor<'a> {
             )) + y_offset
         } else {
             y_offset // If no ground reference, use y_offset as absolute Y
+        }
+    }
+
+    /// Get the ground level at a specific world coordinate (without any offset)
+    #[inline(always)]
+    pub fn get_ground_level(&self, x: i32, z: i32) -> i32 {
+        if let Some(ground) = &self.ground {
+            ground.level(XZPoint::new(
+                x - self.xzbbox.min_x(),
+                z - self.xzbbox.min_z(),
+            ))
+        } else {
+            0 // Default ground level if no terrain data
         }
     }
 

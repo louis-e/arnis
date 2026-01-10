@@ -24,6 +24,7 @@ use std::collections::HashMap as StdHashMap;
 use std::fs::{self, File};
 use std::io::{Cursor, Write as IoWrite};
 use std::path::PathBuf;
+use std::sync::Arc;
 use vek::Vec2;
 use zip::write::FileOptions;
 use zip::CompressionMethod;
@@ -122,7 +123,7 @@ pub struct BedrockWriter {
     output_dir: PathBuf,
     level_name: String,
     spawn_point: Option<(i32, i32)>,
-    ground: Option<Box<Ground>>,
+    ground: Option<Arc<Ground>>,
 }
 
 impl BedrockWriter {
@@ -131,7 +132,7 @@ impl BedrockWriter {
         output_path: PathBuf,
         level_name: String,
         spawn_point: Option<(i32, i32)>,
-        ground: Option<Box<Ground>>,
+        ground: Option<Arc<Ground>>,
     ) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files

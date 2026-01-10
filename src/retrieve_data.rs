@@ -1,12 +1,14 @@
 use crate::coordinate_system::geographic::LLBBox;
+use crate::osm_parser::OsmData;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 use colored::Colorize;
 use rand::seq::SliceRandom;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
+use serde::Deserialize;
 use serde_json::Value;
 use std::fs::File;
-use std::io::{self, BufReader, Write};
+use std::io::{self, BufReader, Cursor, Write};
 use std::process::Command;
 use std::time::Duration;
 
@@ -34,19 +36,17 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
         }
         Err(e) => {
             if e.is_timeout() {
-                eprintln!(
-                    "{}",
-                    "Error! Request timed out. Try selecting a smaller area."
-                        .red()
-                        .bold()
-                );
-                emit_gui_error("Request timed out. Try selecting a smaller area.");
+                let msg = "Request timed out. Try selecting a smaller area.";
+                eprintln!("{}", format!("Error! {msg}").red().bold());
+                Err(msg.into())
+            } else if e.is_connect() {
+                let msg = "No internet connection.";
+                eprintln!("{}", format!("Error! {msg}").red().bold());
+                Err(msg.into())
             } else {
                 eprintln!("{}", format!("Error! {e:.52}").red().bold());
-                emit_gui_error(&format!("{:.52}", e.to_string()));
+                Err(format!("{e:.52}").into())
             }
-            // Always propagate errors
-            Err(e.into())
         }
     }
 }
@@ -79,13 +79,14 @@ fn download_with_wget(url: &str, query: &str) -> io::Result<String> {
     }
 }
 
-pub fn fetch_data_from_file(file: &str) -> Result<Value, Box<dyn std::error::Error>> {
+pub fn fetch_data_from_file(file: &str) -> Result<OsmData, Box<dyn std::error::Error>> {
     println!("{} Loading data from file...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Loading data from file...");
 
     let file: File = File::open(file)?;
     let reader: BufReader<File> = BufReader::new(file);
-    let data: Value = serde_json::from_reader(reader)?;
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let data: OsmData = OsmData::deserialize(&mut deserializer)?;
     Ok(data)
 }
 
@@ -95,7 +96,7 @@ pub fn fetch_data_from_overpass(
     debug: bool,
     download_method: &str,
     save_file: Option<&str>,
-) -> Result<Value, Box<dyn std::error::Error>> {
+) -> Result<OsmData, Box<dyn std::error::Error>> {
     println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Fetching data...");
 
@@ -182,14 +183,12 @@ pub fn fetch_data_from_overpass(
             println!("API response saved to: {save_file}");
         }
 
-        let data: Value = serde_json::from_str(&response)?;
+        let mut deserializer =
+            serde_json::Deserializer::from_reader(Cursor::new(response.as_bytes()));
+        let data: OsmData = OsmData::deserialize(&mut deserializer)?;
 
-        if data["elements"]
-            .as_array()
-            .map_or(0, |elements: &Vec<Value>| elements.len())
-            == 0
-        {
-            if let Some(remark) = data["remark"].as_str() {
+        if data.is_empty() {
+            if let Some(remark) = data.remark.as_deref() {
                 // Check if the remark mentions memory or other runtime errors
                 if remark.contains("runtime error") && remark.contains("out of memory") {
                     eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
@@ -211,7 +210,7 @@ pub fn fetch_data_from_overpass(
             }
 
             if debug {
-                println!("Additional debug information: {data}");
+                println!("Additional debug information: {data:?}");
             }
 
             if !is_running_with_gui() {

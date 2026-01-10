@@ -74,6 +74,9 @@ fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
 }
 
 pub fn run_gui() {
+    // Configure thread pool with 90% CPU cap to keep system responsive
+    crate::floodfill_cache::configure_rayon_thread_pool(0.9);
+
     // Launch the UI
     println!("Launching UI...");
 
@@ -794,7 +797,6 @@ fn gui_start_generation(
     selected_world: String,
     world_scale: f64,
     ground_level: i32,
-    floodfill_timeout: u64,
     terrain_enabled: bool,
     skip_osm_objects: bool,
     interior_enabled: bool,
@@ -848,16 +850,52 @@ fn gui_start_generation(
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
-            // Acquire session lock for the world directory before starting generation
             let world_path = PathBuf::from(&selected_world);
-            let _session_lock = match SessionLock::acquire(&world_path) {
-                Ok(lock) => lock,
-                Err(e) => {
-                    let error_msg = format!("Failed to acquire session lock: {e}");
+
+            // Determine world format from UI selection first (needed for session lock decision)
+            let world_format = if world_format == "bedrock" {
+                WorldFormat::BedrockMcWorld
+            } else {
+                WorldFormat::JavaAnvil
+            };
+
+            // Check available disk space before starting generation (minimum 3GB required)
+            const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
+            let check_path = if world_format == WorldFormat::JavaAnvil {
+                world_path.clone()
+            } else {
+                // For Bedrock, check current directory where .mcworld will be created
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            };
+            match fs2::available_space(&check_path) {
+                Ok(available) if available < MIN_DISK_SPACE_BYTES => {
+                    let error_msg = "Not enough disk space available.".to_string();
                     eprintln!("{error_msg}");
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
                 }
+                Err(e) => {
+                    // Log warning but don't block generation if we can't check space
+                    eprintln!("Warning: Could not check disk space: {e}");
+                }
+                _ => {} // Sufficient space available
+            }
+
+            // Acquire session lock for Java worlds only
+            // Session lock prevents Minecraft from having the world open during generation
+            // Bedrock worlds are generated as .mcworld files and don't need this lock
+            let _session_lock: Option<SessionLock> = if world_format == WorldFormat::JavaAnvil {
+                match SessionLock::acquire(&world_path) {
+                    Ok(lock) => Some(lock),
+                    Err(e) => {
+                        let error_msg = format!("Failed to acquire session lock: {e}");
+                        eprintln!("{error_msg}");
+                        emit_gui_error(&error_msg);
+                        return Err(error_msg);
+                    }
+                }
+            } else {
+                None
             };
 
             // Parse the bounding box from the text with proper error handling
@@ -869,13 +907,6 @@ fn gui_start_generation(
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
                 }
-            };
-
-            // Determine world format from UI selection
-            let world_format = if world_format == "bedrock" {
-                WorldFormat::BedrockMcWorld
-            } else {
-                WorldFormat::JavaAnvil
             };
 
             // Determine output path and level name based on format
@@ -946,7 +977,7 @@ fn gui_start_generation(
                 roof: roof_enabled,
                 fillground: fillground_enabled,
                 debug: false,
-                timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
+                timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_point,
             };
 
@@ -963,17 +994,27 @@ fn gui_start_generation(
 
                 let _ = data_processing::generate_world_with_options(
                     parsed_elements,
-                    xzbbox,
+                    xzbbox.clone(),
                     args.bbox,
                     ground,
                     &args,
-                    generation_options,
+                    generation_options.clone(),
                 );
                 // Explicitly release session lock before showing Done message
                 // so Minecraft can open the world immediately
                 drop(_session_lock);
                 emit_gui_progress_update(100.0, "Done! World generation completed.");
                 println!("{}", "Done! World generation completed.".green().bold());
+
+                // Start map preview generation silently in background (Java only)
+                if world_format == WorldFormat::JavaAnvil {
+                    let preview_info = data_processing::MapPreviewInfo::new(
+                        generation_options.path.clone(),
+                        &xzbbox,
+                    );
+                    data_processing::start_map_preview_generation(preview_info);
+                }
+
                 return Ok(());
             }
 
@@ -1006,7 +1047,7 @@ fn gui_start_generation(
 
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,
-                        xzbbox,
+                        xzbbox.clone(),
                         args.bbox,
                         ground,
                         &args,
@@ -1017,13 +1058,22 @@ fn gui_start_generation(
                     drop(_session_lock);
                     emit_gui_progress_update(100.0, "Done! World generation completed.");
                     println!("{}", "Done! World generation completed.".green().bold());
+
+                    // Start map preview generation silently in background (Java only)
+                    if world_format == WorldFormat::JavaAnvil {
+                        let preview_info = data_processing::MapPreviewInfo::new(
+                            generation_options.path.clone(),
+                            &xzbbox,
+                        );
+                        data_processing::start_map_preview_generation(preview_info);
+                    }
+
                     Ok(())
                 }
                 Err(e) => {
-                    let error_msg = format!("Failed to fetch data: {e}");
-                    emit_gui_error(&error_msg);
+                    emit_gui_error(&e.to_string());
                     // Session lock will be automatically released when _session_lock goes out of scope
-                    Err(error_msg)
+                    Err(e.to_string())
                 }
             }
         })

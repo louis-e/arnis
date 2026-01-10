@@ -1,13 +1,19 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
+pub fn generate_leisure(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
         let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -74,15 +80,13 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             previous_node = Some((node.x, node.z));
         }
 
-        // Flood-fill the interior of the leisure area
+        // Flood-fill the interior of the leisure area using cache
         if corner_addup != (0, 0, 0) {
-            let polygon_coords: Vec<(i32, i32)> = element
-                .nodes
-                .iter()
-                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                .collect();
             let filled_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+
+            // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+            let mut rng = element_rng(element.id);
 
             for (x, z) in filled_area {
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
@@ -91,7 +95,6 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                     let random_choice: i32 = rng.gen_range(0..1000);
 
                     match random_choice {
@@ -123,7 +126,6 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 
                 // Add playground or recreation ground features
                 if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
                     let random_choice: i32 = rng.gen_range(0..5000);
 
                     match random_choice {
@@ -176,12 +178,13 @@ pub fn generate_leisure_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
 ) {
     if rel.tags.get("leisure") == Some(&"park".to_string()) {
         // First generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_leisure(editor, &member.way, args);
+                generate_leisure(editor, &member.way, args, flood_fill_cache);
             }
         }
 
@@ -201,6 +204,6 @@ pub fn generate_leisure_from_relation(
         };
 
         // Generate leisure area from combined way
-        generate_leisure(editor, &combined_way, args);
+        generate_leisure(editor, &combined_way, args, flood_fill_cache);
     }
 }
