@@ -250,6 +250,20 @@ function initSettings() {
     settingsModal.style.display = "none";
   }
 
+  // Close settings and license modals on escape key
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      if (settingsModal.style.display === "flex") {
+        closeSettings();
+      }
+      
+      const licenseModal = document.getElementById("license-modal");
+      if (licenseModal && licenseModal.style.display === "flex") {
+        closeLicense();
+      }
+    }
+  });
+
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
 

@@ -287,7 +287,7 @@ button:hover {
 /* Customization Settings */
 .modal {
   position: fixed;
-  z-index: 1000;
+  z-index: 20001;
   left: 0;
   top: 0;
   width: 100%;
@@ -606,9 +606,12 @@ button:hover {
   transition: background-color 0.3s, border-color 0.3s;
 }
 
-.settings-button .gear-icon::before {
-  content: "⚙️";
-  font-size: 18px;
+.settings-button svg {
+  stroke: white;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
 }
 
 /* Logo Animation */

@@ -379,3 +379,10 @@ body,
   display: block;
   margin: 0;
 }
+
+/* Preview button disabled during edit/delete mode */
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.editing-mode {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
