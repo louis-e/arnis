@@ -6,7 +6,7 @@
 
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::{ProcessedElement, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::time::Duration;
@@ -263,9 +263,13 @@ impl FloodFillCache {
                 ProcessedElement::Relation(rel) => {
                     if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
                         for member in &rel.members {
-                            if let Some(cached) = self.way_cache.get(&member.way.id) {
-                                for &(x, z) in cached {
-                                    footprints.set(x, z);
+                            // Only treat outer members as building footprints.
+                            // Inner members represent courtyards/holes where trees can spawn.
+                            if member.role == ProcessedMemberRole::Outer {
+                                if let Some(cached) = self.way_cache.get(&member.way.id) {
+                                    for &(x, z) in cached {
+                                        footprints.set(x, z);
+                                    }
                                 }
                             }
                         }
