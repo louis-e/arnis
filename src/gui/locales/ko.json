@@ -24,7 +24,7 @@
   "select_minecraft_world_first": "먼저 마인크래프트 세계를 선택하세요!",
   "select_location_first": "먼저 위치를 선택하세요!",
   "area_too_large": "이 지역은 매우 크고, 일반적인 계산 한계를 초과할 수 있습니다.",
-  "area_extensive": "이 지역은 꽤 광범위하여 значитель한 시간과 자원이 필요할 수 있습니다.",
+  "area_extensive": "이 지역은 꽤 광범위하여 상당한 시간과 자원이 필요할 수 있습니다.",
   "selection_confirmed": "선택이 확인되었습니다!",
   "select_area_prompt": "도구를 사용하여 지도에서 영역을 선택하세요.",
   "unknown_error": "Unknown error",
