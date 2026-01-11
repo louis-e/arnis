@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -12,6 +12,7 @@ pub fn generate_landuse(
     element: &ProcessedWay,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
@@ -130,7 +131,7 @@ pub fn generate_landuse(
                             editor.set_block(RED_FLOWER, x, 1, z, None, None);
                         }
                     } else if random_choice < 33 {
-                        Tree::create(editor, (x, 1, z));
+                        Tree::create(editor, (x, 1, z), Some(building_footprints));
                     } else if random_choice < 35 {
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                     }
@@ -140,7 +141,7 @@ pub fn generate_landuse(
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..30);
                     if random_choice == 20 {
-                        Tree::create(editor, (x, 1, z));
+                        Tree::create(editor, (x, 1, z), Some(building_footprints));
                     } else if random_choice == 2 {
                         let flower_block: Block = match rng.gen_range(1..=5) {
                             1 => OAK_LEAVES,
@@ -277,7 +278,7 @@ pub fn generate_landuse(
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
-                        Tree::create(editor, (x, 1, z));
+                        Tree::create(editor, (x, 1, z), Some(building_footprints));
                     } else if random_choice < 6 {
                         editor.set_block(RED_FLOWER, x, 1, z, None, None);
                     } else if random_choice < 9 {
@@ -291,7 +292,7 @@ pub fn generate_landuse(
             }
             "orchard" => {
                 if x % 18 == 0 && z % 10 == 0 {
-                    Tree::create(editor, (x, 1, z));
+                    Tree::create(editor, (x, 1, z), Some(building_footprints));
                 } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     match rng.gen_range(0..100) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
@@ -331,12 +332,13 @@ pub fn generate_landuse_from_relation(
     rel: &ProcessedRelation,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.contains_key("landuse") {
         // Generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_landuse(editor, &member.way.clone(), args, flood_fill_cache);
+                generate_landuse(editor, &member.way.clone(), args, flood_fill_cache, building_footprints);
             }
         }
 
@@ -358,7 +360,7 @@ pub fn generate_landuse_from_relation(
             };
 
             // Generate landuse area from combined way
-            generate_landuse(editor, &combined_way, args, flood_fill_cache);
+            generate_landuse(editor, &combined_way, args, flood_fill_cache, building_footprints);
         }
     }
 }

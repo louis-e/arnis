@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -13,6 +13,7 @@ pub fn generate_leisure(
     element: &ProcessedWay,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
@@ -118,7 +119,7 @@ pub fn generate_leisure(
                         }
                         105..120 => {
                             // Tree
-                            Tree::create(editor, (x, 1, z));
+                            Tree::create(editor, (x, 1, z), Some(building_footprints));
                         }
                         _ => {}
                     }
@@ -179,12 +180,13 @@ pub fn generate_leisure_from_relation(
     rel: &ProcessedRelation,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.get("leisure") == Some(&"park".to_string()) {
         // First generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_leisure(editor, &member.way, args, flood_fill_cache);
+                generate_leisure(editor, &member.way, args, flood_fill_cache, building_footprints);
             }
         }
 
@@ -204,6 +206,6 @@ pub fn generate_leisure_from_relation(
         };
 
         // Generate leisure area from combined way
-        generate_leisure(editor, &combined_way, args, flood_fill_cache);
+        generate_leisure(editor, &combined_way, args, flood_fill_cache, building_footprints);
     }
 }
