@@ -1,7 +1,6 @@
 //! Java Edition Anvil format world saving.
 //!
 //! This module handles saving worlds in the Java Edition Anvil (.mca) format.
-//! Supports streaming mode for memory-efficient saving of large worlds.
 
 use super::common::{Chunk, ChunkToModify, Section};
 use super::WorldEditor;
@@ -12,9 +11,11 @@ use fastanvil::Region;
 use fastnbt::Value;
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -77,8 +78,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves the world in Java Edition Anvil format.
     ///
-    /// Uses streaming mode: saves regions one at a time and releases memory after each,
-    /// significantly reducing peak memory usage for large worlds.
+    /// Uses parallel processing with rayon for fast region saving.
     pub(super) fn save_java(&mut self) {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
@@ -102,35 +102,26 @@ impl<'a> WorldEditor<'a> {
                 .progress_chars("█▓░"),
         );
 
-        // Streaming mode: Process regions sequentially and release memory after each.
-        // This significantly reduces peak memory for large worlds (100+ regions).
-        // For small worlds, the overhead is negligible.
-        let mut regions_processed: u64 = 0;
+        let regions_processed = AtomicU64::new(0);
 
-        // Collect region keys first to allow draining
-        let region_keys: Vec<(i32, i32)> = self.world.regions.keys().copied().collect();
+        self.world
+            .regions
+            .par_iter()
+            .for_each(|((region_x, region_z), region_to_modify)| {
+                self.save_single_region(*region_x, *region_z, region_to_modify);
 
-        for (region_x, region_z) in region_keys {
-            // Remove region from memory - this is the key to memory savings
-            if let Some(region_to_modify) = self.world.regions.remove(&(region_x, region_z)) {
-                self.save_single_region(region_x, region_z, &region_to_modify);
+                // Update progress
+                let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst) + 1;
 
-                // Region memory is freed when region_to_modify goes out of scope here
-            }
+                // Update progress at regular intervals (every ~10% or at least every 10 regions)
+                let update_interval = (total_regions / 10).max(1);
+                if regions_done.is_multiple_of(update_interval) || regions_done == total_regions {
+                    let progress = 90.0 + (regions_done as f64 / total_regions as f64) * 9.0;
+                    emit_gui_progress_update(progress, "Saving world...");
+                }
 
-            regions_processed += 1;
-
-            // Update progress at regular intervals
-            let update_interval = (total_regions / 10).max(1);
-            if regions_processed.is_multiple_of(update_interval)
-                || regions_processed == total_regions
-            {
-                let progress = 90.0 + (regions_processed as f64 / total_regions as f64) * 9.0;
-                emit_gui_progress_update(progress, "Saving world...");
-            }
-
-            save_pb.inc(1);
-        }
+                save_pb.inc(1);
+            });
 
         save_pb.finish();
     }
