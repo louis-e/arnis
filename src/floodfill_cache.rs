@@ -4,11 +4,118 @@
 //! before the main element processing loop, then retrieve cached results during
 //! sequential processing.
 
+use crate::coordinate_system::cartesian::XZBBox;
 use crate::floodfill::flood_fill_area;
-use crate::osm_parser::{ProcessedElement, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::time::Duration;
+
+/// A memory-efficient bitmap for storing building footprint coordinates.
+///
+/// Instead of storing each coordinate individually (~24 bytes per entry in a HashSet),
+/// this uses 1 bit per coordinate in the world bounds, reducing memory usage by ~200x.
+///
+/// For a world of size W x H blocks, the bitmap uses only (W * H) / 8 bytes.
+pub struct BuildingFootprintBitmap {
+    /// The bitmap data, where each bit represents one (x, z) coordinate
+    bits: Vec<u8>,
+    /// Minimum x coordinate (offset for indexing)
+    min_x: i32,
+    /// Minimum z coordinate (offset for indexing)
+    min_z: i32,
+    /// Width of the world (max_x - min_x + 1)
+    width: usize,
+    /// Height of the world (max_z - min_z + 1)
+    height: usize,
+    /// Number of coordinates marked as building footprints
+    count: usize,
+}
+
+impl BuildingFootprintBitmap {
+    /// Creates a new empty bitmap covering the given world bounds.
+    pub fn new(xzbbox: &XZBBox) -> Self {
+        let min_x = xzbbox.min_x();
+        let min_z = xzbbox.min_z();
+        // Use i64 to avoid overflow when world spans more than i32::MAX in either dimension
+        let width = (i64::from(xzbbox.max_x()) - i64::from(min_x) + 1) as usize;
+        let height = (i64::from(xzbbox.max_z()) - i64::from(min_z) + 1) as usize;
+
+        // Calculate number of bytes needed (round up to nearest byte)
+        let total_bits = width
+            .checked_mul(height)
+            .expect("BuildingFootprintBitmap: world size too large (width * height overflowed)");
+        let num_bytes = total_bits.div_ceil(8);
+
+        Self {
+            bits: vec![0u8; num_bytes],
+            min_x,
+            min_z,
+            width,
+            height,
+            count: 0,
+        }
+    }
+
+    /// Converts (x, z) coordinate to bit index, returning None if out of bounds.
+    #[inline]
+    fn coord_to_index(&self, x: i32, z: i32) -> Option<usize> {
+        // Use i64 arithmetic to avoid overflow when coordinates span large ranges
+        let local_x = i64::from(x) - i64::from(self.min_x);
+        let local_z = i64::from(z) - i64::from(self.min_z);
+
+        if local_x < 0 || local_z < 0 {
+            return None;
+        }
+
+        let local_x = local_x as usize;
+        let local_z = local_z as usize;
+
+        if local_x >= self.width || local_z >= self.height {
+            return None;
+        }
+
+        // Safe: bounds checks above ensure this won't overflow (max = total_bits - 1)
+        Some(local_z * self.width + local_x)
+    }
+
+    /// Sets a coordinate as part of a building footprint.
+    #[inline]
+    pub fn set(&mut self, x: i32, z: i32) {
+        if let Some(bit_index) = self.coord_to_index(x, z) {
+            let byte_index = bit_index / 8;
+            let bit_offset = bit_index % 8;
+
+            // Safety: coord_to_index already validates bounds, so byte_index is always valid
+            let mask = 1u8 << bit_offset;
+            // Only increment count if bit wasn't already set
+            if self.bits[byte_index] & mask == 0 {
+                self.bits[byte_index] |= mask;
+                self.count += 1;
+            }
+        }
+    }
+
+    /// Checks if a coordinate is part of a building footprint.
+    #[inline]
+    pub fn contains(&self, x: i32, z: i32) -> bool {
+        if let Some(bit_index) = self.coord_to_index(x, z) {
+            let byte_index = bit_index / 8;
+            let bit_offset = bit_index % 8;
+
+            // Safety: coord_to_index already validates bounds, so byte_index is always valid
+            return (self.bits[byte_index] >> bit_offset) & 1 == 1;
+        }
+        false
+    }
+
+    /// Returns true if no coordinates are marked.
+    #[must_use]
+    #[allow(dead_code)] // Standard API method for collection-like types
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+}
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
@@ -128,9 +235,51 @@ impl FloodFillCache {
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
     }
 
-    /// Returns the number of cached way entries.
-    pub fn way_count(&self) -> usize {
-        self.way_cache.len()
+    /// Collects all building footprint coordinates from the pre-computed cache.
+    ///
+    /// This should be called after precompute() and before elements are processed.
+    /// Returns a memory-efficient bitmap of all (x, z) coordinates that are part of buildings.
+    ///
+    /// The bitmap uses only 1 bit per coordinate in the world bounds, compared to ~24 bytes
+    /// per entry in a HashSet, reducing memory usage by ~200x for large worlds.
+    pub fn collect_building_footprints(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+    ) -> BuildingFootprintBitmap {
+        let mut footprints = BuildingFootprintBitmap::new(xzbbox);
+
+        for element in elements {
+            match element {
+                ProcessedElement::Way(way) => {
+                    if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+                        if let Some(cached) = self.way_cache.get(&way.id) {
+                            for &(x, z) in cached {
+                                footprints.set(x, z);
+                            }
+                        }
+                    }
+                }
+                ProcessedElement::Relation(rel) => {
+                    if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                        for member in &rel.members {
+                            // Only treat outer members as building footprints.
+                            // Inner members represent courtyards/holes where trees can spawn.
+                            if member.role == ProcessedMemberRole::Outer {
+                                if let Some(cached) = self.way_cache.get(&member.way.id) {
+                                    for &(x, z) in cached {
+                                        footprints.set(x, z);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        footprints
     }
 
     /// Removes a way's cached flood fill result, freeing memory.

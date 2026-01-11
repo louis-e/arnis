@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -13,6 +13,7 @@ pub fn generate_natural(
     element: &ProcessedElement,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
@@ -20,7 +21,7 @@ pub fn generate_natural(
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                Tree::create(editor, (x, 1, z));
+                Tree::create(editor, (x, 1, z), Some(building_footprints));
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -134,7 +135,7 @@ pub fn generate_natural(
                             }
                             let random_choice = rng.gen_range(0..500);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if random_choice == 1 {
                                 let flower_block = match rng.gen_range(1..=4) {
                                     1 => RED_FLOWER,
@@ -163,7 +164,7 @@ pub fn generate_natural(
                             }
                             let random_choice: i32 = rng.gen_range(0..30);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if random_choice == 1 {
                                 let flower_block = match rng.gen_range(1..=4) {
                                     1 => RED_FLOWER,
@@ -222,7 +223,11 @@ pub fn generate_natural(
                                         // TODO implement mangrove
                                         let random_choice: i32 = rng.gen_range(0..40);
                                         if random_choice == 0 {
-                                            Tree::create(editor, (x, 1, z));
+                                            Tree::create(
+                                                editor,
+                                                (x, 1, z),
+                                                Some(building_footprints),
+                                            );
                                         } else if random_choice < 35 {
                                             editor.set_block(GRASS, x, 1, z, None, None);
                                         }
@@ -306,6 +311,7 @@ pub fn generate_natural(
                                                         Tree::create(
                                                             editor,
                                                             (cluster_x, 1, cluster_z),
+                                                            Some(building_footprints),
                                                         );
                                                     } else if vegetation_chance < 15 {
                                                         // 15% chance for grass
@@ -418,7 +424,7 @@ pub fn generate_natural(
                             let hill_chance = rng.gen_range(0..1000);
                             if hill_chance == 0 {
                                 // 0.1% chance for rare trees
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
                                 let flower_block = match rng.gen_range(1..=4) {
@@ -451,6 +457,7 @@ pub fn generate_natural_from_relation(
     rel: &ProcessedRelation,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.contains_key("natural") {
         // Generate individual ways with their original tags
@@ -461,6 +468,7 @@ pub fn generate_natural_from_relation(
                     &ProcessedElement::Way((*member.way).clone()),
                     args,
                     flood_fill_cache,
+                    building_footprints,
                 );
             }
         }
@@ -488,6 +496,7 @@ pub fn generate_natural_from_relation(
                 &ProcessedElement::Way(combined_way),
                 args,
                 flood_fill_cache,
+                building_footprints,
             );
         }
     }
