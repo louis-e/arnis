@@ -37,11 +37,14 @@ impl BuildingFootprintBitmap {
     pub fn new(xzbbox: &XZBBox) -> Self {
         let min_x = xzbbox.min_x();
         let min_z = xzbbox.min_z();
-        let width = (xzbbox.max_x() - min_x + 1) as usize;
-        let height = (xzbbox.max_z() - min_z + 1) as usize;
+        // Use i64 to avoid overflow when world spans more than i32::MAX in either dimension
+        let width = (i64::from(xzbbox.max_x()) - i64::from(min_x) + 1) as usize;
+        let height = (i64::from(xzbbox.max_z()) - i64::from(min_z) + 1) as usize;
 
         // Calculate number of bytes needed (round up to nearest byte)
-        let total_bits = width * height;
+        let total_bits = width
+            .checked_mul(height)
+            .expect("BuildingFootprintBitmap: world size too large (width * height overflowed)");
         let num_bytes = total_bits.div_ceil(8);
 
         Self {
@@ -57,8 +60,9 @@ impl BuildingFootprintBitmap {
     /// Converts (x, z) coordinate to bit index, returning None if out of bounds.
     #[inline]
     fn coord_to_index(&self, x: i32, z: i32) -> Option<usize> {
-        let local_x = x.wrapping_sub(self.min_x);
-        let local_z = z.wrapping_sub(self.min_z);
+        // Use i64 arithmetic to avoid overflow when coordinates span large ranges
+        let local_x = i64::from(x) - i64::from(self.min_x);
+        let local_z = i64::from(z) - i64::from(self.min_z);
 
         if local_x < 0 || local_z < 0 {
             return None;
@@ -71,6 +75,7 @@ impl BuildingFootprintBitmap {
             return None;
         }
 
+        // Safe: bounds checks above ensure this won't overflow (max = total_bits - 1)
         Some(local_z * self.width + local_x)
     }
 
