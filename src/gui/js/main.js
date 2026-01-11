@@ -12,6 +12,25 @@ if (window.__TAURI__) {
 
 const DEFAULT_LOCALE_PATH = `./locales/en.json`;
 
+// Track current bbox-info localization key for language changes
+let currentBboxInfoKey = "select_area_prompt";
+let currentBboxInfoColor = "#ffffff";
+
+// Helper function to set bbox-info text and track it for language changes
+async function setBboxInfo(bboxInfoElement, localizationKey, color) {
+  currentBboxInfoKey = localizationKey;
+  currentBboxInfoColor = color;
+  
+  // Ensure localization is available
+  let localization = window.localization;
+  if (!localization) {
+    localization = await getLocalization();
+  }
+  
+  localizeElement(localization, { element: bboxInfoElement }, localizationKey);
+  bboxInfoElement.style.color = color;
+}
+
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
   registerMessageEvent();
@@ -78,13 +97,9 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 
 async function applyLocalization(localization) {
   const localizationElements = {
-    "h2[data-localize='select_location']": "select_location",
-    "#bbox-text": "zoom_in_and_choose",
-    "h2[data-localize='select_world']": "select_world",
     "span[id='choose_world']": "choose_world",
     "#selected-world": "no_world_selected",
     "#start-button": "start_generation",
-    "h2[data-localize='progress']": "progress",
     "h2[data-localize='choose_world_modal_title']": "choose_world_modal_title",
     "button[data-localize='select_existing_world']": "select_existing_world",
     "button[data-localize='generate_new_world']": "generate_new_world",
@@ -115,6 +130,13 @@ async function applyLocalization(localization) {
 
   for (const selector in localizationElements) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
+  }
+
+  // Re-apply current bbox-info text with new language
+  const bboxInfo = document.getElementById("bbox-info");
+  if (bboxInfo && currentBboxInfoKey) {
+    localizeElement(localization, { element: bboxInfo }, currentBboxInfoKey);
+    bboxInfo.style.color = currentBboxInfoColor;
   }
 
   // Update error messages
@@ -165,7 +187,7 @@ async function checkForUpdates() {
       updateMessage.style.textDecoration = "none";
 
       localizeElement(window.localization, { element: updateMessage }, "new_version_available");
-      footer.style.marginTop = "15px";
+      footer.style.marginTop = "10px";
       footer.appendChild(updateMessage);
     }
   } catch (error) {
@@ -188,7 +210,7 @@ function registerMessageEvent() {
 // Function to set up the progress bar listener
 function setupProgressListener() {
   const progressBar = document.getElementById("progress-bar");
-  const progressMessage = document.getElementById("progress-message");
+  const bboxInfo = document.getElementById("bbox-info");
   const progressDetail = document.getElementById("progress-detail");
 
   window.__TAURI__.event.listen("progress-update", (event) => {
@@ -200,16 +222,16 @@ function setupProgressListener() {
     }
 
     if (message != "") {
-      progressMessage.textContent = message;
+      bboxInfo.textContent = message;
 
       if (message.startsWith("Error!")) {
-        progressMessage.style.color = "#fa7878";
+        bboxInfo.style.color = "#fa7878";
         generationButtonEnabled = true;
       } else if (message.startsWith("Done!")) {
-        progressMessage.style.color = "#7bd864";
+        bboxInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
       } else {
-        progressMessage.style.color = "";
+        bboxInfo.style.color = "#ececec";
       }
     }
   });
@@ -525,8 +547,7 @@ function handleBboxInput() {
       
       // Clear the info text only if no map selection exists
       if (!mapSelectedBBox) {
-        bboxInfo.textContent = "";
-        bboxInfo.style.color = "";
+        setBboxInfo(bboxInfo, "select_area_prompt", "#ffffff");
       } else {
         // Restore map selection info display but don't update input field
         const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
@@ -567,8 +588,7 @@ function handleBboxInput() {
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
-        localizeElement(window.localization, { element: bboxInfo }, "custom_selection_confirmed");
-        bboxInfo.style.color = "#7bd864";
+        setBboxInfo(bboxInfo, "custom_selection_confirmed", "#7bd864");
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -578,8 +598,7 @@ function handleBboxInput() {
         } else {
           selectedBBox = mapSelectedBBox;
         }
-        localizeElement(window.localization, { element: bboxInfo }, "error_coordinates_out_of_range");
-        bboxInfo.style.color = "#fecc44";
+        setBboxInfo(bboxInfo, "error_coordinates_out_of_range", "#fecc44");
       }
     } else {
       // Input doesn't match the required format
@@ -590,8 +609,7 @@ function handleBboxInput() {
       } else {
         selectedBBox = mapSelectedBBox;
       }
-      localizeElement(window.localization, { element: bboxInfo }, "invalid_format");
-      bboxInfo.style.color = "#fecc44";
+      setBboxInfo(bboxInfo, "invalid_format", "#fecc44");
     }
   });
 }
@@ -647,14 +665,11 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  */
 function displayBboxSizeStatus(bboxInfo, selectedSize) {
   if (selectedSize > threshold2) {
-    localizeElement(window.localization, { element: bboxInfo }, "area_too_large");
-    bboxInfo.style.color = "#fa7878";
+    setBboxInfo(bboxInfo, "area_too_large", "#fa7878");
   } else if (selectedSize > threshold1) {
-    localizeElement(window.localization, { element: bboxInfo }, "area_extensive");
-    bboxInfo.style.color = "#fecc44";
+    setBboxInfo(bboxInfo, "area_extensive", "#fecc44");
   } else {
-    localizeElement(window.localization, { element: bboxInfo }, "selection_confirmed");
-    bboxInfo.style.color = "#7bd864";
+    setBboxInfo(bboxInfo, "selection_confirmed", "#7bd864");
   }
 }
 
@@ -676,7 +691,7 @@ function displayBboxInfoText(bboxText) {
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
-    bboxInfo.textContent = "";
+    setBboxInfo(bboxInfo, "select_area_prompt", "#ffffff");
     bboxCoordsInput.value = "";
     mapSelectedBBox = "";
     if (!customBBoxValid) {
@@ -782,8 +797,7 @@ async function startGeneration() {
 
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
       const bboxInfo = document.getElementById('bbox-info');
-      localizeElement(window.localization, { element: bboxInfo }, "select_location_first");
-      bboxInfo.style.color = "#fa7878";
+      setBboxInfo(bboxInfo, "select_location_first", "#fa7878");
       return;
     }
 
