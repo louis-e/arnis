@@ -80,16 +80,10 @@ pub fn generate_world_with_options(
 
     // Pre-compute all flood fills in parallel for better CPU utilization
     let mut flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
-    println!("Pre-computed {} flood fills", flood_fill_cache.way_count());
 
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
-    println!(
-        "Collected {} building footprint coordinates (~{:.2} KB bitmap)",
-        building_footprints.len(),
-        building_footprints.memory_usage_bytes() as f64 / 1024.0
-    );
 
     // Process data
     let elements_count: usize = elements.len();
@@ -136,13 +130,31 @@ pub fn generate_world_with_options(
                         &flood_fill_cache,
                     );
                 } else if way.tags.contains_key("landuse") {
-                    landuse::generate_landuse(&mut editor, way, args, &flood_fill_cache, &building_footprints);
+                    landuse::generate_landuse(
+                        &mut editor,
+                        way,
+                        args,
+                        &flood_fill_cache,
+                        &building_footprints,
+                    );
                 } else if way.tags.contains_key("natural") {
-                    natural::generate_natural(&mut editor, &element, args, &flood_fill_cache, &building_footprints);
+                    natural::generate_natural(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &building_footprints,
+                    );
                 } else if way.tags.contains_key("amenity") {
                     amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
                 } else if way.tags.contains_key("leisure") {
-                    leisure::generate_leisure(&mut editor, way, args, &flood_fill_cache, &building_footprints);
+                    leisure::generate_leisure(
+                        &mut editor,
+                        way,
+                        args,
+                        &flood_fill_cache,
+                        &building_footprints,
+                    );
                 } else if way.tags.contains_key("barrier") {
                     barriers::generate_barriers(&mut editor, &element);
                 } else if let Some(val) = way.tags.get("waterway") {
@@ -175,7 +187,13 @@ pub fn generate_world_with_options(
                 } else if node.tags.contains_key("natural")
                     && node.tags.get("natural") == Some(&"tree".to_string())
                 {
-                    natural::generate_natural(&mut editor, &element, args, &flood_fill_cache, &building_footprints);
+                    natural::generate_natural(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &building_footprints,
+                    );
                 } else if node.tags.contains_key("amenity") {
                     amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
                 } else if node.tags.contains_key("barrier") {

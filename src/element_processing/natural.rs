@@ -223,7 +223,11 @@ pub fn generate_natural(
                                         // TODO implement mangrove
                                         let random_choice: i32 = rng.gen_range(0..40);
                                         if random_choice == 0 {
-                                            Tree::create(editor, (x, 1, z), Some(building_footprints));
+                                            Tree::create(
+                                                editor,
+                                                (x, 1, z),
+                                                Some(building_footprints),
+                                            );
                                         } else if random_choice < 35 {
                                             editor.set_block(GRASS, x, 1, z, None, None);
                                         }

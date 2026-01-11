@@ -338,7 +338,13 @@ pub fn generate_landuse_from_relation(
         // Generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_landuse(editor, &member.way.clone(), args, flood_fill_cache, building_footprints);
+                generate_landuse(
+                    editor,
+                    &member.way.clone(),
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             }
         }
 
@@ -360,7 +366,13 @@ pub fn generate_landuse_from_relation(
             };
 
             // Generate landuse area from combined way
-            generate_landuse(editor, &combined_way, args, flood_fill_cache, building_footprints);
+            generate_landuse(
+                editor,
+                &combined_way,
+                args,
+                flood_fill_cache,
+                building_footprints,
+            );
         }
     }
 }

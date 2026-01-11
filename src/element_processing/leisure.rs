@@ -186,7 +186,13 @@ pub fn generate_leisure_from_relation(
         // First generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_leisure(editor, &member.way, args, flood_fill_cache, building_footprints);
+                generate_leisure(
+                    editor,
+                    &member.way,
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             }
         }
 
@@ -206,6 +212,12 @@ pub fn generate_leisure_from_relation(
         };
 
         // Generate leisure area from combined way
-        generate_leisure(editor, &combined_way, args, flood_fill_cache, building_footprints);
+        generate_leisure(
+            editor,
+            &combined_way,
+            args,
+            flood_fill_cache,
+            building_footprints,
+        );
     }
 }
