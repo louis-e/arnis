@@ -85,7 +85,7 @@ async function localizeElement(json, elementObject, localizedStringKey) {
   const attribute = localizedStringKey.startsWith("placeholder_") ? "placeholder" : "textContent";
 
   if (element) {
-    if (localizedStringKey in json) {
+    if (json && localizedStringKey in json) {
       element[attribute] = json[localizedStringKey];
     } else {
       // Fallback to default (English) string

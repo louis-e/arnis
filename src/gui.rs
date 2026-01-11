@@ -158,16 +158,20 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
 
     if generate_new {
         // Handle new world generation
-        if let Some(default_path) = &default_dir {
+        // Try Minecraft saves directory first, fall back to current directory
+        let target_path = if let Some(default_path) = &default_dir {
             if default_path.exists() {
-                // Call create_new_world and return the result
-                create_new_world(default_path).map_err(|_| 1) // Error code 1: Minecraft directory not found
+                default_path.clone()
             } else {
-                Err(1) // Error code 1: Minecraft directory not found
+                // Minecraft directory doesn't exist, use current directory
+                env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
             }
         } else {
-            Err(1) // Error code 1: Minecraft directory not found
-        }
+            // No default directory configured, use current directory
+            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        };
+
+        create_new_world(&target_path).map_err(|_| 3) // Error code 3: Failed to create new world
     } else {
         // Handle existing world selection
         // Open the directory picker dialog
