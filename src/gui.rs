@@ -77,6 +77,9 @@ pub fn run_gui() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
 
+    // Clean up old cached elevation tiles on startup
+    crate::elevation_data::cleanup_old_cached_tiles();
+
     // Launch the UI
     println!("Launching UI...");
 

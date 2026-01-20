@@ -1,4 +1,4 @@
-use crate::coordinate_system::{geographic::LLBBox, transformation::geo_distance};
+use crate::{coordinate_system::{geographic::LLBBox, transformation::geo_distance}, progress::emit_gui_progress_update};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use image::Rgb;
@@ -18,6 +18,8 @@ const MIN_ZOOM: u8 = 10;
 const MAX_ZOOM: u8 = 15;
 /// Maximum concurrent tile downloads to be respectful to AWS
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
+/// Maximum age for cached tiles in days before they are cleaned up
+const TILE_CACHE_MAX_AGE_DAYS: u64 = 7;
 
 /// Holds processed elevation data and metadata
 #[derive(Clone)]
@@ -34,6 +36,85 @@ pub struct ElevationData {
 type TileImage = image::ImageBuffer<Rgb<u8>, Vec<u8>>;
 /// Result type for tile download operations: ((tile_x, tile_y), image) or error
 type TileDownloadResult = Result<((u32, u32), TileImage), String>;
+
+/// Cleans up old cached tiles from the tile cache directory.
+/// Only deletes .png files within the arnis-tile-cache directory that are older than TILE_CACHE_MAX_AGE_DAYS.
+/// This function is safe and will not delete files outside the cache directory or fail on errors.
+pub fn cleanup_old_cached_tiles() {
+    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
+    
+    if !tile_cache_dir.exists() || !tile_cache_dir.is_dir() {
+        return; // Nothing to clean up
+    }
+
+    let max_age = std::time::Duration::from_secs(TILE_CACHE_MAX_AGE_DAYS * 24 * 60 * 60);
+    let now = std::time::SystemTime::now();
+    let mut deleted_count = 0;
+    let mut error_count = 0;
+
+    // Read directory entries
+    let entries = match std::fs::read_dir(&tile_cache_dir) {
+        Ok(entries) => entries,
+        Err(e) => {
+            return;
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        
+        // Safety check: only process .png files within the cache directory
+        if !path.is_file() {
+            continue;
+        }
+        
+        // Verify the file is a .png and follows our naming pattern (z{zoom}_x{x}_y{y}.png)
+        let file_name = match path.file_name().and_then(|n| n.to_str()) {
+            Some(name) => name,
+            None => continue,
+        };
+        
+        if !file_name.ends_with(".png") || !file_name.starts_with('z') {
+            continue; // Skip files that don't match our tile naming pattern
+        }
+
+        // Check file age
+        let metadata = match std::fs::metadata(&path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        let modified = match metadata.modified() {
+            Ok(time) => time,
+            Err(_) => continue,
+        };
+
+        let age = match now.duration_since(modified) {
+            Ok(duration) => duration,
+            Err(_) => continue, // File modified in the future? Skip it.
+        };
+
+        if age > max_age {
+            match std::fs::remove_file(&path) {
+                Ok(()) => deleted_count += 1,
+                Err(e) => {
+                    // Log but don't fail, this is a best-effort cleanup
+                    if error_count == 0 {
+                        eprintln!("Warning: Failed to delete old cached tile {}: {e}", path.display());
+                    }
+                    error_count += 1;
+                }
+            }
+        }
+    }
+
+    if deleted_count > 0 {
+        println!("Cleaned up {deleted_count} old cached elevation tiles (older than {TILE_CACHE_MAX_AGE_DAYS} days)");
+    }
+    if error_count > 1 {
+        eprintln!("Warning: Failed to delete {error_count} old cached tiles");
+    }
+}
 
 /// Calculates appropriate zoom level for the given bounding box
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
@@ -228,6 +309,7 @@ pub fn fetch_elevation_data(
     }
 
     println!("Processing {} elevation tiles...", successful_tiles.len());
+    emit_gui_progress_update(15.0, "Processing elevation...");
 
     // Process tiles sequentially (writes to shared height_grid)
     for ((tile_x, tile_y), rgb_img) in successful_tiles {

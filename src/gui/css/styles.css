@@ -116,12 +116,22 @@ a:hover {
   flex-direction: column;
 }
 
-.bbox-info-text {
+.bbox-selection-text {
   font-size: 0.9em;
   color: #ffffff;
   display: block;
   font-weight: bold;
   min-height: 2.5em;
+  line-height: 1.25em;
+  margin-top: 8px;
+}
+
+.progress-info-text {
+  font-size: 0.9em;
+  color: #ececec;
+  display: block;
+  font-weight: bold;
+  min-height: 1.5em;
   line-height: 1.25em;
   margin-bottom: 5px;
 }
@@ -179,7 +189,6 @@ button:hover {
 
 .progress-bar-container {
   flex: 1;
-  max-width: 80%;
   height: 20px;
   background-color: #e0e0e0;
   border-radius: 10px;

@@ -12,14 +12,14 @@ if (window.__TAURI__) {
 
 const DEFAULT_LOCALE_PATH = `./locales/en.json`;
 
-// Track current bbox-info localization key for language changes
-let currentBboxInfoKey = "select_area_prompt";
-let currentBboxInfoColor = "#ffffff";
+// Track current bbox selection info localization key for language changes
+let currentBboxSelectionKey = "select_area_prompt";
+let currentBboxSelectionColor = "#ffffff";
 
-// Helper function to set bbox-info text and track it for language changes
-async function setBboxInfo(bboxInfoElement, localizationKey, color) {
-  currentBboxInfoKey = localizationKey;
-  currentBboxInfoColor = color;
+// Helper function to set bbox selection info text and track it for language changes
+async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color) {
+  currentBboxSelectionKey = localizationKey;
+  currentBboxSelectionColor = color;
   
   // Ensure localization is available
   let localization = window.localization;
@@ -27,8 +27,8 @@ async function setBboxInfo(bboxInfoElement, localizationKey, color) {
     localization = await getLocalization();
   }
   
-  localizeElement(localization, { element: bboxInfoElement }, localizationKey);
-  bboxInfoElement.style.color = color;
+  localizeElement(localization, { element: bboxSelectionElement }, localizationKey);
+  bboxSelectionElement.style.color = color;
 }
 
 // Initialize elements and start the demo progress
@@ -132,11 +132,11 @@ async function applyLocalization(localization) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
   }
 
-  // Re-apply current bbox-info text with new language
-  const bboxInfo = document.getElementById("bbox-info");
-  if (bboxInfo && currentBboxInfoKey) {
-    localizeElement(localization, { element: bboxInfo }, currentBboxInfoKey);
-    bboxInfo.style.color = currentBboxInfoColor;
+  // Re-apply current bbox selection info text with new language
+  const bboxSelectionInfo = document.getElementById("bbox-selection-info");
+  if (bboxSelectionInfo && currentBboxSelectionKey) {
+    localizeElement(localization, { element: bboxSelectionInfo }, currentBboxSelectionKey);
+    bboxSelectionInfo.style.color = currentBboxSelectionColor;
   }
 
   // Update error messages
@@ -210,7 +210,7 @@ function registerMessageEvent() {
 // Function to set up the progress bar listener
 function setupProgressListener() {
   const progressBar = document.getElementById("progress-bar");
-  const bboxInfo = document.getElementById("bbox-info");
+  const progressInfo = document.getElementById("progress-info");
   const progressDetail = document.getElementById("progress-detail");
 
   window.__TAURI__.event.listen("progress-update", (event) => {
@@ -222,16 +222,16 @@ function setupProgressListener() {
     }
 
     if (message != "") {
-      bboxInfo.textContent = message;
+      progressInfo.textContent = message;
 
       if (message.startsWith("Error!")) {
-        bboxInfo.style.color = "#fa7878";
+        progressInfo.style.color = "#fa7878";
         generationButtonEnabled = true;
       } else if (message.startsWith("Done!")) {
-        bboxInfo.style.color = "#7bd864";
+        progressInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
       } else {
-        bboxInfo.style.color = "#ececec";
+        progressInfo.style.color = "#ececec";
       }
     }
   });
@@ -535,7 +535,7 @@ function initWorldPicker() {
  */
 function handleBboxInput() {
   const inputBox = document.getElementById("bbox-coords");
-  const bboxInfo = document.getElementById("bbox-info");
+  const bboxSelectionInfo = document.getElementById("bbox-selection-info");
 
   inputBox.addEventListener("input", function () {
     const input = inputBox.value.trim();
@@ -547,12 +547,12 @@ function handleBboxInput() {
       
       // Clear the info text only if no map selection exists
       if (!mapSelectedBBox) {
-        setBboxInfo(bboxInfo, "select_area_prompt", "#ffffff");
+        setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
       } else {
         // Restore map selection info display but don't update input field
         const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
         const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
-        displayBboxSizeStatus(bboxInfo, selectedSize);
+        displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
       }
       return;
     }
@@ -588,7 +588,7 @@ function handleBboxInput() {
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
-        setBboxInfo(bboxInfo, "custom_selection_confirmed", "#7bd864");
+        setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -598,7 +598,7 @@ function handleBboxInput() {
         } else {
           selectedBBox = mapSelectedBBox;
         }
-        setBboxInfo(bboxInfo, "error_coordinates_out_of_range", "#fecc44");
+        setBboxSelectionInfo(bboxSelectionInfo, "error_coordinates_out_of_range", "#fecc44");
       }
     } else {
       // Input doesn't match the required format
@@ -609,7 +609,7 @@ function handleBboxInput() {
       } else {
         selectedBBox = mapSelectedBBox;
       }
-      setBboxInfo(bboxInfo, "invalid_format", "#fecc44");
+      setBboxSelectionInfo(bboxSelectionInfo, "invalid_format", "#fecc44");
     }
   });
 }
@@ -660,16 +660,16 @@ let customBBoxValid = false;  // Tracks if custom input is valid
 
 /**
  * Displays the appropriate bbox size status message based on area thresholds
- * @param {HTMLElement} bboxInfo - The element to display the message in
+ * @param {HTMLElement} bboxSelectionElement - The element to display the message in
  * @param {number} selectedSize - The calculated bbox area in square meters
  */
-function displayBboxSizeStatus(bboxInfo, selectedSize) {
+function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
   if (selectedSize > threshold2) {
-    setBboxInfo(bboxInfo, "area_too_large", "#fa7878");
+    setBboxSelectionInfo(bboxSelectionElement, "area_too_large", "#fa7878");
   } else if (selectedSize > threshold1) {
-    setBboxInfo(bboxInfo, "area_extensive", "#fecc44");
+    setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
   } else {
-    setBboxInfo(bboxInfo, "selection_confirmed", "#7bd864");
+    setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
   }
 }
 
@@ -686,12 +686,12 @@ function displayBboxInfoText(bboxText) {
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
 
-  const bboxInfo = document.getElementById("bbox-info");
+  const bboxSelectionInfo = document.getElementById("bbox-selection-info");
   const bboxCoordsInput = document.getElementById("bbox-coords");
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
-    setBboxInfo(bboxInfo, "select_area_prompt", "#ffffff");
+    setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
     bboxCoordsInput.value = "";
     mapSelectedBBox = "";
     if (!customBBoxValid) {
@@ -706,7 +706,7 @@ function displayBboxInfoText(bboxText) {
   // Calculate the size of the selected bbox
   const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
 
-  displayBboxSizeStatus(bboxInfo, selectedSize);
+  displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
 }
 
 let worldPath = "";
@@ -796,8 +796,8 @@ async function startGeneration() {
     }
 
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
-      const bboxInfo = document.getElementById('bbox-info');
-      setBboxInfo(bboxInfo, "select_location_first", "#fa7878");
+      const bboxSelectionInfo = document.getElementById('bbox-selection-info');
+      setBboxSelectionInfo(bboxSelectionInfo, "select_location_first", "#fa7878");
       return;
     }
 

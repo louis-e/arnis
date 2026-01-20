@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::progress::emit_gui_progress_update;
+use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use image::{Rgb, RgbImage};
 
@@ -31,7 +32,11 @@ impl Ground {
             },
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
-                emit_gui_progress_update(15.0, "Elevation unavailable, using flat ground");
+                // Report telemetry warning
+                send_log(
+                    LogLevel::Warning,
+                    "Elevation unavailable, using flat ground",
+                );
                 // Graceful fallback: disable elevation and keep provided ground_level
                 Self {
                     elevation_enabled: false,
@@ -141,7 +146,7 @@ impl Ground {
 pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
         println!("{} Fetching elevation...", "[3/7]".bold());
-        emit_gui_progress_update(15.0, "Fetching elevation...");
+        emit_gui_progress_update(14.0, "Fetching elevation...");
         let ground = Ground::new_enabled(&args.bbox, args.scale, args.ground_level);
         if args.debug {
             ground.save_debug_image("elevation_debug");
