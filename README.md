@@ -39,7 +39,7 @@ GUI Build: ```cargo run```<br>
 
 After your pull request was merged, I will take care of regularly creating update releases which will include your changes.
 
-If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --terrain --path=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"
+If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --terrain --path=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`
 
 ## :star: Star History
 
