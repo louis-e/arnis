@@ -62,6 +62,13 @@ impl Drop for SessionLock {
     }
 }
 
+/// Returns the Desktop directory for Bedrock .mcworld file output.
+fn get_bedrock_output_directory() -> PathBuf {
+    dirs::desktop_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 /// Gets the area name for a given bounding box using the center point
 fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
     let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
@@ -76,6 +83,9 @@ fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
 pub fn run_gui() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
+
+    // Clean up old cached elevation tiles on startup
+    crate::elevation_data::cleanup_old_cached_tiles();
 
     // Launch the UI
     println!("Launching UI...");
@@ -102,7 +112,7 @@ pub fn run_gui() {
     tauri::Builder::default()
         .plugin(
             LogBuilder::default()
-                .level(LevelFilter::Warn)
+                .level(LevelFilter::Info)
                 .targets([
                     Target::new(TargetKind::LogDir {
                         file_name: Some("arnis".into()),
@@ -419,6 +429,7 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                                 if let Ok(compressed_data) = encoder.finish() {
                                     if let Err(e) = std::fs::write(&level_path, compressed_data) {
                                         eprintln!("Failed to update level.dat with area name: {e}");
+                                        #[cfg(feature = "gui")]
                                         send_log(
                                             LogLevel::Warning,
                                             "Failed to update level.dat with area name",
@@ -921,13 +932,12 @@ fn gui_start_generation(
                     (updated_path, None)
                 }
                 WorldFormat::BedrockMcWorld => {
-                    // Bedrock: generate .mcworld in current directory with location-based name
+                    // Bedrock: generate .mcworld on Desktop with location-based name
                     let area_name = get_area_name_for_bedrock(&bbox);
                     let filename = format!("Arnis {}.mcworld", area_name);
                     let lvl_name = format!("Arnis World: {}", area_name);
-                    let output_path = std::env::current_dir()
-                        .unwrap_or_else(|_| PathBuf::from("."))
-                        .join(filename);
+
+                    let output_path = get_bedrock_output_directory().join(&filename);
                     (output_path, Some(lvl_name))
                 }
             };

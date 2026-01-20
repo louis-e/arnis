@@ -336,7 +336,7 @@ pub fn parse_osm_data(
         }
     }
 
-    emit_gui_progress_update(15.0, "");
+    emit_gui_progress_update(14.0, "");
 
     drop(nodes_map);
     drop(ways_map);

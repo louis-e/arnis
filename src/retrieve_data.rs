@@ -1,6 +1,8 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::osm_parser::OsmData;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
+#[cfg(feature = "gui")]
+use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use rand::seq::SliceRandom;
 use reqwest::blocking::Client;
@@ -44,6 +46,11 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else {
+                #[cfg(feature = "gui")]
+                send_log(
+                    LogLevel::Error,
+                    &format!("Request error in download_with_reqwest: {e}"),
+                );
                 eprintln!("{}", format!("Error! {e:.52}").red().bold());
                 Err(format!("{e:.52}").into())
             }

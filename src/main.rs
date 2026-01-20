@@ -54,6 +54,9 @@ fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     floodfill_cache::configure_rayon_thread_pool(0.9);
 
+    // Clean up old cached elevation tiles on startup
+    elevation_data::cleanup_old_cached_tiles();
+
     let version: &str = env!("CARGO_PKG_VERSION");
     let repository: &str = env!("CARGO_PKG_REPOSITORY");
     println!(
