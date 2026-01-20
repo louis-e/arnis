@@ -1,6 +1,9 @@
-use crate::{coordinate_system::{geographic::LLBBox, transformation::geo_distance}, progress::emit_gui_progress_update};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
+use crate::{
+    coordinate_system::{geographic::LLBBox, transformation::geo_distance},
+    progress::emit_gui_progress_update,
+};
 use image::Rgb;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
@@ -42,7 +45,7 @@ type TileDownloadResult = Result<((u32, u32), TileImage), String>;
 /// This function is safe and will not delete files outside the cache directory or fail on errors.
 pub fn cleanup_old_cached_tiles() {
     let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
-    
+
     if !tile_cache_dir.exists() || !tile_cache_dir.is_dir() {
         return; // Nothing to clean up
     }
@@ -55,25 +58,25 @@ pub fn cleanup_old_cached_tiles() {
     // Read directory entries
     let entries = match std::fs::read_dir(&tile_cache_dir) {
         Ok(entries) => entries,
-        Err(e) => {
+        Err(_) => {
             return;
         }
     };
 
     for entry in entries.flatten() {
         let path = entry.path();
-        
+
         // Safety check: only process .png files within the cache directory
         if !path.is_file() {
             continue;
         }
-        
+
         // Verify the file is a .png and follows our naming pattern (z{zoom}_x{x}_y{y}.png)
         let file_name = match path.file_name().and_then(|n| n.to_str()) {
             Some(name) => name,
             None => continue,
         };
-        
+
         if !file_name.ends_with(".png") || !file_name.starts_with('z') {
             continue; // Skip files that don't match our tile naming pattern
         }
@@ -100,7 +103,10 @@ pub fn cleanup_old_cached_tiles() {
                 Err(e) => {
                     // Log but don't fail, this is a best-effort cleanup
                     if error_count == 0 {
-                        eprintln!("Warning: Failed to delete old cached tile {}: {e}", path.display());
+                        eprintln!(
+                            "Warning: Failed to delete old cached tile {}: {e}",
+                            path.display()
+                        );
                     }
                     error_count += 1;
                 }
@@ -133,7 +139,13 @@ fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
     (x, y)
 }
 
-/// Downloads a tile from AWS Terrain Tiles service
+/// Maximum number of retry attempts for tile downloads
+const TILE_DOWNLOAD_MAX_RETRIES: u32 = 3;
+
+/// Base delay in milliseconds for exponential backoff between retries
+const TILE_DOWNLOAD_RETRY_BASE_DELAY_MS: u64 = 500;
+
+/// Downloads a tile from AWS Terrain Tiles service with retry logic
 fn download_tile(
     client: &reqwest::blocking::Client,
     tile_x: u32,
@@ -147,7 +159,51 @@ fn download_tile(
         .replace("{x}", &tile_x.to_string())
         .replace("{y}", &tile_y.to_string());
 
-    let response = client.get(&url).send().map_err(|e| e.to_string())?;
+    let mut last_error: String = String::new();
+
+    for attempt in 0..TILE_DOWNLOAD_MAX_RETRIES {
+        if attempt > 0 {
+            // Exponential backoff: 500ms, 1000ms, 2000ms...
+            let delay_ms = TILE_DOWNLOAD_RETRY_BASE_DELAY_MS * (1 << (attempt - 1));
+            eprintln!(
+                "Retry attempt {}/{} for tile x={},y={},z={} after {}ms delay",
+                attempt,
+                TILE_DOWNLOAD_MAX_RETRIES - 1,
+                tile_x,
+                tile_y,
+                zoom,
+                delay_ms
+            );
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+
+        match download_tile_once(client, &url, tile_path) {
+            Ok(img) => return Ok(img),
+            Err(e) => {
+                last_error = e;
+                if attempt < TILE_DOWNLOAD_MAX_RETRIES - 1 {
+                    eprintln!(
+                        "Tile download failed for x={},y={},z={}: {}",
+                        tile_x, tile_y, zoom, last_error
+                    );
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "Failed to download tile x={},y={},z={} after {} attempts: {}",
+        tile_x, tile_y, zoom, TILE_DOWNLOAD_MAX_RETRIES, last_error
+    ))
+}
+
+/// Single download attempt for a tile (no retries)
+fn download_tile_once(
+    client: &reqwest::blocking::Client,
+    url: &str,
+    tile_path: &Path,
+) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
+    let response = client.get(url).send().map_err(|e| e.to_string())?;
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;
     std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
@@ -167,35 +223,6 @@ fn fetch_or_load_tile(
     tile_path: &Path,
 ) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
     if tile_path.exists() {
-        // Check if the cached file has a reasonable size (PNG files should be at least a few KB)
-        let file_size = std::fs::metadata(tile_path).map(|m| m.len()).unwrap_or(0);
-
-        if file_size < 1000 {
-            eprintln!(
-                "Warning: Cached tile at {} appears to be too small ({} bytes). Refetching tile.",
-                tile_path.display(),
-                file_size
-            );
-            #[cfg(feature = "gui")]
-            send_log(
-                LogLevel::Warning,
-                "Cached tile appears too small, refetching.",
-            );
-
-            // Remove the potentially corrupted file
-            if let Err(e) = std::fs::remove_file(tile_path) {
-                eprintln!("Warning: Failed to remove corrupted tile file: {e}");
-                #[cfg(feature = "gui")]
-                send_log(
-                    LogLevel::Warning,
-                    "Failed to remove corrupted tile file during refetching.",
-                );
-            }
-
-            // Re-download the tile
-            return download_tile(client, tile_x, tile_y, zoom, tile_path);
-        }
-
         // Try to load cached tile, but handle corruption gracefully
         match image::open(tile_path) {
             Ok(img) => {
@@ -661,15 +688,22 @@ fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
         return;
     }
 
-    // Sort to find percentiles
-    all_heights.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let len = all_heights.len();
 
     // Use 1st and 99th percentiles to define reasonable bounds
+    // Using quickselect (select_nth_unstable) instead of full sort: O(n) vs O(n log n)
     let p1_idx = (len as f64 * 0.01) as usize;
-    let p99_idx = (len as f64 * 0.99) as usize;
-    let min_reasonable = all_heights[p1_idx];
-    let max_reasonable = all_heights[p99_idx];
+    let p99_idx = ((len as f64 * 0.99) as usize).min(len - 1);
+
+    // Find p1 (1st percentile) - all elements before p1_idx will be <= p1
+    let (_, p1_val, _) =
+        all_heights.select_nth_unstable_by(p1_idx, |a, b| a.partial_cmp(b).unwrap());
+    let min_reasonable = *p1_val;
+
+    // Find p99 (99th percentile) - need to search in remaining slice or use separate call
+    let (_, p99_val, _) =
+        all_heights.select_nth_unstable_by(p99_idx, |a, b| a.partial_cmp(b).unwrap());
+    let max_reasonable = *p99_val;
 
     //eprintln!("Filtering outliers outside range: {min_reasonable:.1}m to {max_reasonable:.1}m");
 
