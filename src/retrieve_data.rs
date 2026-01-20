@@ -1,6 +1,7 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::osm_parser::OsmData;
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
+#[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use rand::seq::SliceRandom;

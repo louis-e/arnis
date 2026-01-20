@@ -437,28 +437,32 @@ pub fn fetch_elevation_data(
     // Release raw height grid
     drop(height_grid);
 
-    let mut mc_heights: Vec<Vec<i32>> = Vec::with_capacity(blurred_heights.len());
-
-    // Find min/max in raw data
-    let mut min_height: f64 = f64::MAX;
-    let mut max_height: f64 = f64::MIN;
-    let mut extreme_low_count = 0;
-    let mut extreme_high_count = 0;
-
-    for row in &blurred_heights {
-        for &height in row {
-            min_height = min_height.min(height);
-            max_height = max_height.max(height);
-
-            // Count extreme values that might indicate data issues
-            if height < -1000.0 {
-                extreme_low_count += 1;
+    // Find min/max in raw data using parallel reduction
+    let (min_height, max_height, extreme_low_count, extreme_high_count) = blurred_heights
+        .par_iter()
+        .map(|row| {
+            let mut local_min = f64::MAX;
+            let mut local_max = f64::MIN;
+            let mut local_low = 0usize;
+            let mut local_high = 0usize;
+            for &height in row {
+                local_min = local_min.min(height);
+                local_max = local_max.max(height);
+                if height < -1000.0 {
+                    local_low += 1;
+                }
+                if height > 10000.0 {
+                    local_high += 1;
+                }
             }
-            if height > 10000.0 {
-                extreme_high_count += 1;
-            }
-        }
-    }
+            (local_min, local_max, local_low, local_high)
+        })
+        .reduce(
+            || (f64::MAX, f64::MIN, 0usize, 0usize),
+            |(min1, max1, low1, high1), (min2, max2, low2, high2)| {
+                (min1.min(min2), max1.max(max2), low1 + low2, high1 + high2)
+            },
+        );
 
     //eprintln!("Height data range: {min_height} to {max_height} m");
     if extreme_low_count > 0 {
@@ -508,27 +512,28 @@ pub fn fetch_elevation_data(
         compressed_range
     };
 
-    // Convert to scaled Minecraft Y coordinates
+    // Convert to scaled Minecraft Y coordinates (parallelized across rows)
     // Lowest real elevation maps to ground_level, highest maps to ground_level + scaled_range
-    for row in blurred_heights {
-        let mc_row: Vec<i32> = row
-            .iter()
-            .map(|&h| {
-                // Calculate relative position within the elevation range (0.0 to 1.0)
-                let relative_height: f64 = if height_range > 0.0 {
-                    (h - min_height) / height_range
-                } else {
-                    0.0
-                };
-                // Scale to Minecraft blocks and add to ground level
-                let scaled_height: f64 = relative_height * scaled_range;
-                // Clamp to valid Minecraft Y range (leave buffer at top for structures)
-                ((ground_level as f64 + scaled_height).round() as i32)
-                    .clamp(ground_level, MAX_Y - TERRAIN_HEIGHT_BUFFER)
-            })
-            .collect();
-        mc_heights.push(mc_row);
-    }
+    let mc_heights: Vec<Vec<i32>> = blurred_heights
+        .par_iter()
+        .map(|row| {
+            row.iter()
+                .map(|&h| {
+                    // Calculate relative position within the elevation range (0.0 to 1.0)
+                    let relative_height: f64 = if height_range > 0.0 {
+                        (h - min_height) / height_range
+                    } else {
+                        0.0
+                    };
+                    // Scale to Minecraft blocks and add to ground level
+                    let scaled_height: f64 = relative_height * scaled_range;
+                    // Clamp to valid Minecraft Y range (leave buffer at top for structures)
+                    ((ground_level as f64 + scaled_height).round() as i32)
+                        .clamp(ground_level, MAX_Y - TERRAIN_HEIGHT_BUFFER)
+                })
+                .collect()
+        })
+        .collect();
 
     let mut min_block_height: i32 = i32::MAX;
     let mut max_block_height: i32 = i32::MIN;
@@ -565,48 +570,61 @@ fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel: Vec<f64> = create_gaussian_kernel(kernel_size, sigma);
 
-    // Apply blur
-    let mut blurred: Vec<Vec<f64>> = heights.to_owned();
+    let height_len = heights.len();
+    let width = heights[0].len();
 
-    // Horizontal pass
-    for row in blurred.iter_mut() {
-        let mut temp: Vec<f64> = row.clone();
-        for (i, val) in temp.iter_mut().enumerate() {
-            let mut sum: f64 = 0.0;
-            let mut weight_sum: f64 = 0.0;
-            for (j, k) in kernel.iter().enumerate() {
-                let idx: i32 = i as i32 + j as i32 - kernel_size as i32 / 2;
-                if idx >= 0 && idx < row.len() as i32 {
-                    sum += row[idx as usize] * k;
-                    weight_sum += k;
+    // Horizontal pass - parallelize across rows (each row is independent)
+    let after_horizontal: Vec<Vec<f64>> = heights
+        .par_iter()
+        .map(|row| {
+            let mut temp: Vec<f64> = vec![0.0; row.len()];
+            for (i, val) in temp.iter_mut().enumerate() {
+                let mut sum: f64 = 0.0;
+                let mut weight_sum: f64 = 0.0;
+                for (j, k) in kernel.iter().enumerate() {
+                    let idx: i32 = i as i32 + j as i32 - kernel_size as i32 / 2;
+                    if idx >= 0 && idx < row.len() as i32 {
+                        sum += row[idx as usize] * k;
+                        weight_sum += k;
+                    }
                 }
+                *val = sum / weight_sum;
             }
-            *val = sum / weight_sum;
-        }
-        *row = temp;
-    }
+            temp
+        })
+        .collect();
 
-    // Vertical pass
-    let height: usize = blurred.len();
-    let width: usize = blurred[0].len();
-    for x in 0..width {
-        let temp: Vec<_> = blurred
-            .iter()
-            .take(height)
-            .map(|row: &Vec<f64>| row[x])
-            .collect();
+    // Vertical pass - parallelize across columns (each column is independent)
+    // Process each column in parallel and collect results as column vectors
+    let blurred_columns: Vec<Vec<f64>> = (0..width)
+        .into_par_iter()
+        .map(|x| {
+            // Extract column from after_horizontal
+            let column: Vec<f64> = after_horizontal.iter().map(|row| row[x]).collect();
 
-        for (y, row) in blurred.iter_mut().enumerate().take(height) {
-            let mut sum: f64 = 0.0;
-            let mut weight_sum: f64 = 0.0;
-            for (j, k) in kernel.iter().enumerate() {
-                let idx: i32 = y as i32 + j as i32 - kernel_size as i32 / 2;
-                if idx >= 0 && idx < height as i32 {
-                    sum += temp[idx as usize] * k;
-                    weight_sum += k;
+            // Apply vertical blur to this column
+            let mut blurred_column: Vec<f64> = vec![0.0; height_len];
+            for (y, val) in blurred_column.iter_mut().enumerate() {
+                let mut sum: f64 = 0.0;
+                let mut weight_sum: f64 = 0.0;
+                for (j, k) in kernel.iter().enumerate() {
+                    let idx: i32 = y as i32 + j as i32 - kernel_size as i32 / 2;
+                    if idx >= 0 && idx < height_len as i32 {
+                        sum += column[idx as usize] * k;
+                        weight_sum += k;
+                    }
                 }
+                *val = sum / weight_sum;
             }
-            row[x] = sum / weight_sum;
+            blurred_column
+        })
+        .collect();
+
+    // Transpose columns back to row-major format
+    let mut blurred: Vec<Vec<f64>> = vec![vec![0.0; width]; height_len];
+    for (x, column) in blurred_columns.into_iter().enumerate() {
+        for (y, val) in column.into_iter().enumerate() {
+            blurred[y][x] = val;
         }
     }
 
