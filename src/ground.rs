@@ -33,7 +33,7 @@ impl Ground {
             },
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
-                // Report telemetry warning
+                #[cfg(feature = "gui")]
                 send_log(
                     LogLevel::Warning,
                     "Elevation unavailable, using flat ground",

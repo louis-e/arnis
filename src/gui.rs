@@ -429,6 +429,7 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                                 if let Ok(compressed_data) = encoder.finish() {
                                     if let Err(e) = std::fs::write(&level_path, compressed_data) {
                                         eprintln!("Failed to update level.dat with area name: {e}");
+                                        #[cfg(feature = "gui")]
                                         send_log(
                                             LogLevel::Warning,
                                             "Failed to update level.dat with area name",

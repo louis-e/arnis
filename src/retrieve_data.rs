@@ -46,6 +46,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else {
+                #[cfg(feature = "gui")]
                 send_log(
                     LogLevel::Error,
                     &format!("Request error in download_with_reqwest: {e}"),
