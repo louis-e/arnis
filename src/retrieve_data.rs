@@ -134,6 +134,9 @@ pub fn fetch_data_from_overpass(
         nwr["tourism"];
         nwr["bridge"];
         nwr["railway"];
+        nwr["subway"="yes"];
+        nwr["tunnel"="yes"];
+        nwr["public_transport"="station"];
         nwr["barrier"];
         nwr["entrance"];
         nwr["door"];
