@@ -40,12 +40,102 @@ type TileImage = image::ImageBuffer<Rgb<u8>, Vec<u8>>;
 /// Result type for tile download operations: ((tile_x, tile_y), image) or error
 type TileDownloadResult = Result<((u32, u32), TileImage), String>;
 
+/// Cache directory name for elevation tiles
+const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
+
+/// Returns a writable cache directory for elevation tiles.
+/// Tries current directory first, falls back to Desktop, then Home directory.
+fn get_tile_cache_dir() -> PathBuf {
+    // Try current directory first
+    let local_cache = PathBuf::from("./").join(TILE_CACHE_DIR_NAME);
+    if try_create_cache_dir(&local_cache) {
+        return local_cache;
+    }
+
+    // Fall back to Desktop (only available with GUI feature)
+    #[cfg(feature = "gui")]
+    if let Some(desktop) = dirs::desktop_dir() {
+        let desktop_cache = desktop.join(TILE_CACHE_DIR_NAME);
+        if try_create_cache_dir(&desktop_cache) {
+            eprintln!(
+                "Note: Using Desktop for tile cache at {}",
+                desktop_cache.display()
+            );
+            return desktop_cache;
+        }
+    }
+
+    // Fall back to Home directory (only available with GUI feature)
+    #[cfg(feature = "gui")]
+    if let Some(home) = dirs::home_dir() {
+        let home_cache = home.join(TILE_CACHE_DIR_NAME);
+        if try_create_cache_dir(&home_cache) {
+            eprintln!(
+                "Note: Using home directory for tile cache at {}",
+                home_cache.display()
+            );
+            return home_cache;
+        }
+    }
+
+    // Last resort: use current directory anyway
+    // Log a warning since this will likely fail
+    eprintln!("Warning: Could not find a writable cache directory. Tile caching may fail.");
+    local_cache
+}
+
+/// Attempts to create the cache directory and verify it's writable.
+/// Returns true if successful.
+fn try_create_cache_dir(path: &Path) -> bool {
+    // Try to create the directory
+    if std::fs::create_dir_all(path).is_err() {
+        return false;
+    }
+
+    // Verify we can write to it by creating a unique test file
+    // Use process ID and timestamp to avoid conflicts with parallel instances
+    let test_filename = format!(
+        ".arnis_write_test_{}_{:x}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let test_file = path.join(test_filename);
+
+    if std::fs::write(&test_file, b"test").is_ok() {
+        let _ = std::fs::remove_file(&test_file);
+        return true;
+    }
+
+    false
+}
+
 /// Cleans up old cached tiles from the tile cache directory.
 /// Only deletes .png files within the arnis-tile-cache directory that are older than TILE_CACHE_MAX_AGE_DAYS.
 /// This function is safe and will not delete files outside the cache directory or fail on errors.
 pub fn cleanup_old_cached_tiles() {
-    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
+    // Check all possible cache locations
+    let mut possible_locations: Vec<PathBuf> = vec![PathBuf::from("./").join(TILE_CACHE_DIR_NAME)];
 
+    #[cfg(feature = "gui")]
+    {
+        if let Some(desktop) = dirs::desktop_dir() {
+            possible_locations.push(desktop.join(TILE_CACHE_DIR_NAME));
+        }
+        if let Some(home) = dirs::home_dir() {
+            possible_locations.push(home.join(TILE_CACHE_DIR_NAME));
+        }
+    }
+
+    for location in possible_locations {
+        cleanup_cache_at_location(&location);
+    }
+}
+
+/// Cleans up old cached tiles at a specific location.
+fn cleanup_cache_at_location(tile_cache_dir: &Path) {
     if !tile_cache_dir.exists() || !tile_cache_dir.is_dir() {
         return; // Nothing to clean up
     }
@@ -56,7 +146,7 @@ pub fn cleanup_old_cached_tiles() {
     let mut error_count = 0;
 
     // Read directory entries
-    let entries = match std::fs::read_dir(&tile_cache_dir) {
+    let entries = match std::fs::read_dir(tile_cache_dir) {
         Ok(entries) => entries,
         Err(_) => {
             return;
@@ -287,10 +377,8 @@ pub fn fetch_elevation_data(
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
     let mut extreme_values_found = Vec::new(); // Track extreme values for debugging
 
-    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
-    if !tile_cache_dir.exists() {
-        std::fs::create_dir_all(&tile_cache_dir)?;
-    }
+    // Get a writable cache directory (tries current dir, falls back to Desktop/Home)
+    let tile_cache_dir = get_tile_cache_dir();
 
     // Create a shared HTTP client for connection pooling
     let client = reqwest::blocking::Client::new();
