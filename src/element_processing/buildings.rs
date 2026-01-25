@@ -546,7 +546,7 @@ pub fn generate_buildings(
         let is_abandoned_building = element
             .tags
             .get("abandoned")
-            .map_or(false, |value| value == "yes")
+            .is_some_and(|value| value == "yes")
             || element.tags.contains_key("abandoned:building");
 
         // Use cobwebs instead of glowstone for abandoned buildings

@@ -114,8 +114,7 @@ const INTERIOR2_LAYER2: [[char; 23]; 23] = [
     ['P', 'P', ' ', ' ', ' ', 'E', 'B', 'B', 'B', ' ', ' ', 'W', 'B', 'B', 'B', 'B', 'B', 'B', 'B', ' ', 'B', ' ', 'D',],
 ];
 
-/// Generic Abandoned Building Interiors
-
+// Generic Abandoned Building Interiors
 /// Interior layout for building ground floors (1st layer above floor)
 #[rustfmt::skip]
 const ABANDONED_INTERIOR1_LAYER1: [[char; 23]; 23] = [
