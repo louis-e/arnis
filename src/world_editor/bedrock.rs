@@ -24,6 +24,7 @@ use std::collections::HashMap as StdHashMap;
 use std::fs::{self, File};
 use std::io::{Cursor, Write as IoWrite};
 use std::path::PathBuf;
+use std::sync::Arc;
 use vek::Vec2;
 use zip::write::FileOptions;
 use zip::CompressionMethod;
@@ -122,7 +123,7 @@ pub struct BedrockWriter {
     output_dir: PathBuf,
     level_name: String,
     spawn_point: Option<(i32, i32)>,
-    ground: Option<Box<Ground>>,
+    ground: Option<Arc<Ground>>,
 }
 
 impl BedrockWriter {
@@ -131,7 +132,7 @@ impl BedrockWriter {
         output_path: PathBuf,
         level_name: String,
         spawn_point: Option<(i32, i32)>,
-        ground: Option<Box<Ground>>,
+        ground: Option<Arc<Ground>>,
     ) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
@@ -214,8 +215,11 @@ impl BedrockWriter {
             .ground
             .as_ref()
             .map(|ground| {
-                let coord = crate::coordinate_system::cartesian::XZPoint::new(spawn_x, spawn_z);
-                ground.level(coord) + 2 // Add 2 blocks above ground for safety
+                // Ground elevation data expects coordinates relative to the XZ bbox origin
+                let rel_x = spawn_x - xzbbox.min_x();
+                let rel_z = spawn_z - xzbbox.min_z();
+                let coord = crate::coordinate_system::cartesian::XZPoint::new(rel_x, rel_z);
+                ground.level(coord) + 3 // Add 3 blocks above ground for safety
             })
             .unwrap_or(64);
 

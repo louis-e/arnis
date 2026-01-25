@@ -8,13 +8,9 @@ body,
   font-family: "Courier New", Courier, monospace;
 }
 
+/* Hide the BBOX coordinates display at bottom of map */
 #info-box {
-  position: absolute;
-  width: 100%;
-  height: auto;
-  bottom: 0;
-  border: 0 0 7px 0;
-  z-index: 10000;
+  display: none;
 }
 
 #coord-format {
@@ -351,7 +347,8 @@ body,
   background-position: -31px -2px;
 }
 
-.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled {
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled,
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.editing-mode {
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;

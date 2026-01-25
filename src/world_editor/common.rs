@@ -4,6 +4,11 @@
 //! before they are written to either Java or Bedrock format.
 
 use crate::block_definitions::*;
+
+/// Minimum Y coordinate in Minecraft (1.18+)
+const MIN_Y: i32 = -64;
+/// Maximum Y coordinate in Minecraft (1.18+)
+const MAX_Y: i32 = 319;
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
@@ -150,7 +155,7 @@ impl SectionToModify {
         let palette = unique_blocks
             .iter()
             .map(|(block, stored_props)| PaletteItem {
-                name: block.name().to_string(),
+                name: format!("{}:{}", block.namespace(), block.name()),
                 properties: stored_props.clone().or_else(|| block.properties()),
             })
             .collect();
@@ -186,16 +191,20 @@ pub(crate) struct ChunkToModify {
 impl ChunkToModify {
     #[inline]
     pub fn get_block(&self, x: u8, y: i32, z: u8) -> Option<Block> {
-        let section_idx: i8 = (y >> 4).try_into().unwrap();
+        // Clamp Y to valid Minecraft range to prevent TryFromIntError
+        let y = y.clamp(MIN_Y, MAX_Y);
+        let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.get(&section_idx)?;
-        section.get_block(x, (y & 15).try_into().unwrap(), z)
+        section.get_block(x, (y & 15) as u8, z)
     }
 
     #[inline]
     pub fn set_block(&mut self, x: u8, y: i32, z: u8, block: Block) {
-        let section_idx: i8 = (y >> 4).try_into().unwrap();
+        // Clamp Y to valid Minecraft range to prevent TryFromIntError
+        let y = y.clamp(MIN_Y, MAX_Y);
+        let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.entry(section_idx).or_default();
-        section.set_block(x, (y & 15).try_into().unwrap(), z, block);
+        section.set_block(x, (y & 15) as u8, z, block);
     }
 
     #[inline]
@@ -206,9 +215,11 @@ impl ChunkToModify {
         z: u8,
         block_with_props: BlockWithProperties,
     ) {
-        let section_idx: i8 = (y >> 4).try_into().unwrap();
+        // Clamp Y to valid Minecraft range to prevent TryFromIntError
+        let y = y.clamp(MIN_Y, MAX_Y);
+        let section_idx: i8 = (y >> 4) as i8;
         let section = self.sections.entry(section_idx).or_default();
-        section.set_block_with_properties(x, (y & 15).try_into().unwrap(), z, block_with_props);
+        section.set_block_with_properties(x, (y & 15) as u8, z, block_with_props);
     }
 
     pub fn sections(&self) -> impl Iterator<Item = Section> + '_ {

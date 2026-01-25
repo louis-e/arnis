@@ -20,60 +20,52 @@
     </div>
 
     <div class="flex-container">
-      <!-- Left Box: Map and BBox Input -->
-      <section class="section map-box" style="margin-bottom: 0; padding-bottom: 0;">
-        <h2 data-localize="select_location">Select Location</h2>
-        <span id="bbox-text" style="font-size: 1.0em; display: block; margin-top: -8px; margin-bottom: 3px;" data-localize="zoom_in_and_choose">
-          Zoom in and choose your area using the rectangle tool
-        </span>
-        <iframe src="maps.html" width="100%" height="300" class="map-container" title="Map Picker"></iframe>
-
-        <span id="bbox-info"
-          style="font-size: 0.75em; color: #7bd864; display: block; margin-bottom: 4px; font-weight: bold; min-height: 2em;"></span>
+      <!-- Left Box: Map -->
+      <section class="section map-box">
+        <iframe src="maps.html" width="100%" height="100%" class="map-container" title="Map Picker"></iframe>
       </section>
 
       <!-- Right Box: Directory Selection, Start Button, and Progress Bar -->
       <section class="section controls-box">
         <div class="controls-content">
-          <h2 data-localize="select_world">Select World</h2>
-
-          <!-- World Selection Container -->
-          <div class="world-selection-container">
-            <div class="tooltip" style="width: 100%;">
-              <button type="button" id="choose-world-btn" onclick="openWorldPicker()" class="choose-world-btn">
-                <span id="choose_world">Choose World</span>
-                <br>
-                <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
-                  No world selected
-                </span>
+          <div class="controls-top">
+            <!-- World Selection Container -->
+            <div class="world-selection-container">
+              <div class="tooltip" style="width: 100%;">
+                <button type="button" id="choose-world-btn" onclick="openWorldPicker()" class="choose-world-btn">
+                  <span id="choose_world">Choose World</span>
+                  <br>
+                  <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
+                    No world selected
+                  </span>
+                </button>
+              </div>
+              <!-- World Format Toggle -->
+              <div class="format-toggle-container">
+                <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">
+                  Java
+                </button>
+                <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">
+                  Bedrock
+                </button>
+              </div>
+            </div>
+            
+            <div class="button-container">
+              <button type="button" id="start-button" class="start-button" onclick="startGeneration()" data-localize="start_generation">Start Generation</button>
+              <button type="button" class="settings-button" onclick="openSettings()" aria-label="Settings">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
               </button>
             </div>
-            <!-- World Format Toggle -->
-            <div class="format-toggle-container">
-              <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">
-                Java
-              </button>
-              <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">
-                Bedrock
-              </button>
-            </div>
+            <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
           </div>
-          
-          <div class="button-container">
-            <button type="button" id="start-button" class="start-button" onclick="startGeneration()" data-localize="start_generation">Start Generation</button>
-            <button type="button" class="settings-button" onclick="openSettings()">
-                <i class="gear-icon"></i>
-            </button>
-          </div>
-          <br><br>
 
           <div class="progress-section">
-            <h2 data-localize="progress">Progress</h2>
-            <div class="progress-bar-container">
-              <div class="progress-bar" id="progress-bar"></div>
-            </div>
-            <div class="progress-status">
-              <span id="progress-message"></span>
+            <span id="progress-info" class="progress-info-text"></span>
+            <div class="progress-row">
+              <div class="progress-bar-container">
+                <div class="progress-bar" id="progress-bar"></div>
+              </div>
               <span id="progress-detail">0%</span>
             </div>
           </div>
@@ -100,7 +92,10 @@
 
         <!-- Generation Mode Dropdown -->
         <div class="settings-row">
-          <label for="generation-mode-select" data-localize="generation_mode">Generation Mode</label>
+          <label for="generation-mode-select">
+            <span data-localize="generation_mode">Generation Mode</span>
+            <span class="tooltip-icon" data-tooltip="Choose what to generate: buildings/roads with terrain, just objects, or terrain only">?</span>
+          </label>
           <div class="settings-control">
             <select id="generation-mode-select" name="generation-mode-select" class="generation-mode-dropdown">
               <option value="geo-terrain" data-localize="mode_geo_terrain">Objects + Terrain</option>
@@ -110,25 +105,34 @@
           </div>
         </div>
 
-        <!-- Interior Toggle Button -->
-        <div class="settings-row">
-          <label for="interior-toggle" data-localize="interior">Interior Generation</label>
-          <div class="settings-control">
-            <input type="checkbox" id="interior-toggle" name="interior-toggle" checked>
-          </div>
-        </div>
-
         <!-- Roof Toggle Button -->
         <div class="settings-row">
-          <label for="roof-toggle" data-localize="roof">Roof Generation</label>
+          <label for="roof-toggle">
+            <span data-localize="roof">Roof Generation</span>
+            <span class="tooltip-icon" data-tooltip="Generate roofs on buildings">?</span>
+          </label>
           <div class="settings-control">
             <input type="checkbox" id="roof-toggle" name="roof-toggle" checked>
           </div>
         </div>
 
+        <!-- Interior Toggle Button -->
+        <div class="settings-row">
+          <label for="interior-toggle">
+            <span data-localize="interior">Interior Generation</span>
+            <span class="tooltip-icon" data-tooltip="Generate interior details inside buildings">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="interior-toggle" name="interior-toggle">
+          </div>
+        </div>
+
         <!-- Fill ground Toggle Button -->
         <div class="settings-row">
-          <label for="fillground-toggle" data-localize="fillground">Fill Ground</label>
+          <label for="fillground-toggle">
+            <span data-localize="fillground">Fill Ground</span>
+            <span class="tooltip-icon" data-tooltip="Fill the ground below the surface">?</span>
+          </label>
           <div class="settings-control">
             <input type="checkbox" id="fillground-toggle" name="fillground-toggle">
           </div>
@@ -136,7 +140,10 @@
 
         <!-- World Scale Slider -->
         <div class="settings-row">
-          <label for="scale-value-slider" data-localize="world_scale">World Scale</label>
+          <label for="scale-value-slider">
+            <span data-localize="world_scale">World Scale</span>
+            <span class="tooltip-icon" data-tooltip="Scale factor for the generated world (1.0 = real-world scale)">?</span>
+          </label>
           <div class="settings-control">
             <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
             <span id="slider-value">1.00</span>
@@ -145,23 +152,21 @@
 
         <!-- Bounding Box Input -->
         <div class="settings-row">
-          <label for="bbox-coords" data-localize="custom_bounding_box">Custom Bounding Box</label>
+          <label for="bbox-coords">
+            <span data-localize="custom_bounding_box">Custom Bounding Box</span>
+            <span class="tooltip-icon" data-tooltip="Manually enter coordinates (lat,lng,lat,lng) or use map selection">?</span>
+          </label>
           <div class="settings-control">
             <input type="text" id="bbox-coords" name="bbox-coords" maxlength="55" placeholder="Format: lat,lng,lat,lng">
           </div>
         </div>
 
-        <!-- Floodfill Timeout Input -->
-        <div class="settings-row">
-          <label for="floodfill-timeout" data-localize="floodfill_timeout">Floodfill Timeout (sec)</label>
-          <div class="settings-control">
-            <input type="number" id="floodfill-timeout" name="floodfill-timeout" min="0" step="1" value="20" placeholder="Seconds">
-          </div>
-        </div>
-
         <!-- Map Theme Selector -->
         <div class="settings-row">
-          <label for="tile-theme-select" data-localize="map_theme">Map Theme</label>
+          <label for="tile-theme-select">
+            <span data-localize="map_theme">Map Theme</span>
+            <span class="tooltip-icon" data-tooltip="Visual style of the map picker">?</span>
+          </label>
           <div class="settings-control">
             <select id="tile-theme-select" name="tile-theme-select" class="theme-dropdown">
               <option value="osm">Standard</option>
@@ -175,7 +180,10 @@
 
         <!-- Language Selector -->
         <div class="settings-row">
-          <label for="language-select" data-localize="language">Language</label>
+          <label for="language-select">
+            <span data-localize="language">Language</span>
+            <span class="tooltip-icon" data-tooltip="Interface language">?</span>
+          </label>
           <div class="settings-control">
             <select id="language-select" name="language-select" class="language-dropdown">
               <option value="en">English</option>
@@ -199,7 +207,10 @@
 
         <!-- Telemetry Consent Toggle -->
         <div class="settings-row">
-          <label for="telemetry-toggle">Anonymous Crash Reports</label>
+          <label for="telemetry-toggle" style="white-space: nowrap;">
+            <span>Anonymous Crash Reports</span>
+            <span class="tooltip-icon" data-tooltip="Send anonymous crash data to help improve Arnis">?</span>
+          </label>
           <div class="settings-control">
             <input type="checkbox" id="telemetry-toggle" name="telemetry-toggle">
           </div>
