@@ -1,4 +1,6 @@
 use crate::block_definitions::*;
+use crate::deterministic_rng::coord_rng;
+use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
@@ -107,7 +109,25 @@ pub struct Tree<'a> {
 }
 
 impl Tree<'_> {
-    pub fn create(editor: &mut WorldEditor, (x, y, z): Coord) {
+    /// Creates a tree at the specified coordinates.
+    ///
+    /// # Arguments
+    /// * `editor` - The world editor to place blocks
+    /// * `(x, y, z)` - The base coordinates for the tree
+    /// * `building_footprints` - Optional bitmap of (x, z) coordinates that are inside buildings.
+    ///   If provided, trees will not be placed at coordinates within this bitmap.
+    pub fn create(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+    ) {
+        // Skip if this coordinate is inside a building
+        if let Some(footprints) = building_footprints {
+            if footprints.contains(x, z) {
+                return;
+            }
+        }
+
         let mut blacklist: Vec<Block> = Vec::new();
         blacklist.extend(Self::get_building_wall_blocks());
         blacklist.extend(Self::get_building_floor_blocks());
@@ -115,7 +135,9 @@ impl Tree<'_> {
         blacklist.extend(Self::get_functional_blocks());
         blacklist.push(WATER);
 
-        let mut rng = rand::thread_rng();
+        // Use deterministic RNG based on coordinates for consistent tree types across region boundaries
+        // The element_id of 0 is used as a salt for tree-specific randomness
+        let mut rng = coord_rng(x, z, 0);
 
         let tree = Self::get_tree(match rng.gen_range(1..=3) {
             1 => TreeType::Oak,

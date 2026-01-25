@@ -2,11 +2,19 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
-use crate::floodfill::flood_fill_area;
+use crate::deterministic_rng::element_rng;
+use crate::floodfill::flood_fill_area; // Needed for inline amenity flood fills
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
+use rand::Rng;
 
-pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+pub fn generate_amenities(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -42,17 +50,13 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
                 let ground_block: Block = OAK_PLANKS;
                 let roof_block: Block = STONE_BLOCK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> = element
-                    .nodes()
-                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                    .collect();
+                // Use pre-computed flood fill from cache
+                let floor_area: Vec<(i32, i32)> =
+                    flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
-                if polygon_coords.is_empty() {
+                if floor_area.is_empty() {
                     return;
                 }
-
-                let floor_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
 
                 // Fill the floor area
                 for (x, z) in floor_area.iter() {
@@ -80,8 +84,10 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
             "bench" => {
                 // Place a bench
                 if let Some(pt) = first_node {
-                    // 50% chance to 90 degrees rotate the bench using if
-                    if rand::random::<bool>() {
+                    // Use deterministic RNG for consistent bench orientation across region boundaries
+                    let mut rng = element_rng(element.id());
+                    // 50% chance to 90 degrees rotate the bench
+                    if rng.gen_bool(0.5) {
                         editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
                         editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
                         editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
@@ -95,12 +101,9 @@ pub fn generate_amenities(editor: &mut WorldEditor, element: &ProcessedElement, 
             "shelter" => {
                 let roof_block: Block = STONE_BRICK_SLAB;
 
-                let polygon_coords: Vec<(i32, i32)> = element
-                    .nodes()
-                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                    .collect();
+                // Use pre-computed flood fill from cache
                 let roof_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                    flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 // Place fences and roof slabs at each corner node directly
                 for node in element.nodes() {

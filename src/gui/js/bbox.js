@@ -564,6 +564,7 @@ $(document).ready(function () {
     var worldOverlayEnabled = false;
     var worldPreviewAvailable = false;
     var sliderControl = null;
+    var worldOverlayHiddenForEdit = false; // Track if we hid the overlay for edit/delete mode
 
     // Create the opacity slider as a proper Leaflet control
     var SliderControl = L.Control.extend({
@@ -719,6 +720,32 @@ $(document).ready(function () {
         }
         if (sliderContainer) {
             sliderContainer.style.display = 'none';
+        }
+    }
+
+    // Temporarily hide the overlay (for edit/delete mode)
+    function hideWorldOverlayTemporarily() {
+        if (worldOverlay && worldOverlayEnabled) {
+            worldOverlayHiddenForEdit = true;
+            map.removeLayer(worldOverlay);
+        }
+        // Also visually disable the preview button during edit/delete mode
+        var btn = document.getElementById('world-preview-btn');
+        if (btn) {
+            btn.classList.add('editing-mode');
+        }
+    }
+
+    // Restore the overlay after edit/delete mode ends
+    function restoreWorldOverlay() {
+        if (worldOverlayHiddenForEdit && worldOverlay && worldOverlayEnabled) {
+            worldOverlay.addTo(map);
+            worldOverlayHiddenForEdit = false;
+        }
+        // Re-enable the preview button
+        var btn = document.getElementById('world-preview-btn');
+        if (btn) {
+            btn.classList.remove('editing-mode');
         }
     }
 
@@ -999,6 +1026,23 @@ $(document).ready(function () {
         map.fitBounds(bounds.getBounds());
     });
 
+    // Hide world preview overlay when entering edit or delete mode
+    map.on('draw:editstart', function() {
+        hideWorldOverlayTemporarily();
+    });
+
+    map.on('draw:deletestart', function() {
+        hideWorldOverlayTemporarily();
+    });
+
+    // Restore world preview overlay when exiting edit or delete mode
+    map.on('draw:editstop', function() {
+        restoreWorldOverlay();
+    });
+
+    map.on('draw:deletestop', function() {
+        restoreWorldOverlay();
+    });
     function display() {
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));

@@ -12,6 +12,25 @@ if (window.__TAURI__) {
 
 const DEFAULT_LOCALE_PATH = `./locales/en.json`;
 
+// Track current bbox selection info localization key for language changes
+let currentBboxSelectionKey = "select_area_prompt";
+let currentBboxSelectionColor = "#ffffff";
+
+// Helper function to set bbox selection info text and track it for language changes
+async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color) {
+  currentBboxSelectionKey = localizationKey;
+  currentBboxSelectionColor = color;
+  
+  // Ensure localization is available
+  let localization = window.localization;
+  if (!localization) {
+    localization = await getLocalization();
+  }
+  
+  localizeElement(localization, { element: bboxSelectionElement }, localizationKey);
+  bboxSelectionElement.style.color = color;
+}
+
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
   registerMessageEvent();
@@ -66,7 +85,7 @@ async function localizeElement(json, elementObject, localizedStringKey) {
   const attribute = localizedStringKey.startsWith("placeholder_") ? "placeholder" : "textContent";
 
   if (element) {
-    if (localizedStringKey in json) {
+    if (json && localizedStringKey in json) {
       element[attribute] = json[localizedStringKey];
     } else {
       // Fallback to default (English) string
@@ -78,20 +97,15 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 
 async function applyLocalization(localization) {
   const localizationElements = {
-    "h2[data-localize='select_location']": "select_location",
-    "#bbox-text": "zoom_in_and_choose",
-    "h2[data-localize='select_world']": "select_world",
     "span[id='choose_world']": "choose_world",
     "#selected-world": "no_world_selected",
     "#start-button": "start_generation",
-    "h2[data-localize='progress']": "progress",
     "h2[data-localize='choose_world_modal_title']": "choose_world_modal_title",
     "button[data-localize='select_existing_world']": "select_existing_world",
     "button[data-localize='generate_new_world']": "generate_new_world",
     "h2[data-localize='customization_settings']": "customization_settings",
     "label[data-localize='world_scale']": "world_scale",
     "label[data-localize='custom_bounding_box']": "custom_bounding_box",
-    "label[data-localize='floodfill_timeout']": "floodfill_timeout",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
     "label[data-localize='language']": "language",
@@ -110,13 +124,19 @@ async function applyLocalization(localization) {
 
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
-    "input[id='floodfill-timeout']": "placeholder_floodfill",
     // DEPRECATED: Ground level placeholder removed
     // "input[id='ground-level']": "placeholder_ground"
   };
 
   for (const selector in localizationElements) {
     localizeElement(localization, { selector: selector }, localizationElements[selector]);
+  }
+
+  // Re-apply current bbox selection info text with new language
+  const bboxSelectionInfo = document.getElementById("bbox-selection-info");
+  if (bboxSelectionInfo && currentBboxSelectionKey) {
+    localizeElement(localization, { element: bboxSelectionInfo }, currentBboxSelectionKey);
+    bboxSelectionInfo.style.color = currentBboxSelectionColor;
   }
 
   // Update error messages
@@ -167,7 +187,7 @@ async function checkForUpdates() {
       updateMessage.style.textDecoration = "none";
 
       localizeElement(window.localization, { element: updateMessage }, "new_version_available");
-      footer.style.marginTop = "15px";
+      footer.style.marginTop = "10px";
       footer.appendChild(updateMessage);
     }
   } catch (error) {
@@ -190,7 +210,7 @@ function registerMessageEvent() {
 // Function to set up the progress bar listener
 function setupProgressListener() {
   const progressBar = document.getElementById("progress-bar");
-  const progressMessage = document.getElementById("progress-message");
+  const progressInfo = document.getElementById("progress-info");
   const progressDetail = document.getElementById("progress-detail");
 
   window.__TAURI__.event.listen("progress-update", (event) => {
@@ -202,16 +222,16 @@ function setupProgressListener() {
     }
 
     if (message != "") {
-      progressMessage.textContent = message;
+      progressInfo.textContent = message;
 
       if (message.startsWith("Error!")) {
-        progressMessage.style.color = "#fa7878";
+        progressInfo.style.color = "#fa7878";
         generationButtonEnabled = true;
       } else if (message.startsWith("Done!")) {
-        progressMessage.style.color = "#7bd864";
+        progressInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
       } else {
-        progressMessage.style.color = "";
+        progressInfo.style.color = "#ececec";
       }
     }
   });
@@ -251,6 +271,20 @@ function initSettings() {
   function closeSettings() {
     settingsModal.style.display = "none";
   }
+
+  // Close settings and license modals on escape key
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      if (settingsModal.style.display === "flex") {
+        closeSettings();
+      }
+      
+      const licenseModal = document.getElementById("license-modal");
+      if (licenseModal && licenseModal.style.display === "flex") {
+        closeLicense();
+      }
+    }
+  });
 
   window.openSettings = openSettings;
   window.closeSettings = closeSettings;
@@ -501,7 +535,7 @@ function initWorldPicker() {
  */
 function handleBboxInput() {
   const inputBox = document.getElementById("bbox-coords");
-  const bboxInfo = document.getElementById("bbox-info");
+  const bboxSelectionInfo = document.getElementById("bbox-selection-info");
 
   inputBox.addEventListener("input", function () {
     const input = inputBox.value.trim();
@@ -513,11 +547,12 @@ function handleBboxInput() {
       
       // Clear the info text only if no map selection exists
       if (!mapSelectedBBox) {
-        bboxInfo.textContent = "";
-        bboxInfo.style.color = "";
+        setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
       } else {
-        // Restore map selection display
-        displayBboxInfoText(mapSelectedBBox);
+        // Restore map selection info display but don't update input field
+        const [lng1, lat1, lng2, lat2] = mapSelectedBBox.split(" ").map(Number);
+        const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
+        displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
       }
       return;
     }
@@ -553,8 +588,7 @@ function handleBboxInput() {
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
-        localizeElement(window.localization, { element: bboxInfo }, "custom_selection_confirmed");
-        bboxInfo.style.color = "#7bd864";
+        setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -564,8 +598,7 @@ function handleBboxInput() {
         } else {
           selectedBBox = mapSelectedBBox;
         }
-        localizeElement(window.localization, { element: bboxInfo }, "error_coordinates_out_of_range");
-        bboxInfo.style.color = "#fecc44";
+        setBboxSelectionInfo(bboxSelectionInfo, "error_coordinates_out_of_range", "#fecc44");
       }
     } else {
       // Input doesn't match the required format
@@ -576,8 +609,7 @@ function handleBboxInput() {
       } else {
         selectedBBox = mapSelectedBBox;
       }
-      localizeElement(window.localization, { element: bboxInfo }, "invalid_format");
-      bboxInfo.style.color = "#fecc44";
+      setBboxSelectionInfo(bboxSelectionInfo, "invalid_format", "#fecc44");
     }
   });
 }
@@ -626,6 +658,21 @@ let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
 
+/**
+ * Displays the appropriate bbox size status message based on area thresholds
+ * @param {HTMLElement} bboxSelectionElement - The element to display the message in
+ * @param {number} selectedSize - The calculated bbox area in square meters
+ */
+function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
+  if (selectedSize > threshold2) {
+    setBboxSelectionInfo(bboxSelectionElement, "area_too_large", "#fa7878");
+  } else if (selectedSize > threshold1) {
+    setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
+  } else {
+    setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
+  }
+}
+
 // Function to handle incoming bbox data
 function displayBboxInfoText(bboxText) {
   let [lng1, lat1, lng2, lat2] = bboxText.split(" ").map(Number);
@@ -639,11 +686,13 @@ function displayBboxInfoText(bboxText) {
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
 
-  const bboxInfo = document.getElementById("bbox-info");
+  const bboxSelectionInfo = document.getElementById("bbox-selection-info");
+  const bboxCoordsInput = document.getElementById("bbox-coords");
 
   // Reset the info text if the bbox is 0,0,0,0
   if (lng1 === 0 && lat1 === 0 && lng2 === 0 && lat2 === 0) {
-    bboxInfo.textContent = "";
+    setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
+    bboxCoordsInput.value = "";
     mapSelectedBBox = "";
     if (!customBBoxValid) {
       selectedBBox = "";
@@ -651,19 +700,13 @@ function displayBboxInfoText(bboxText) {
     return;
   }
 
+  // Update the custom bbox input with the map selection (comma-separated format)
+  bboxCoordsInput.value = `${lng1},${lat1},${lng2},${lat2}`;
+
   // Calculate the size of the selected bbox
   const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
 
-  if (selectedSize > threshold2) {
-    localizeElement(window.localization, { element: bboxInfo }, "area_too_large");
-    bboxInfo.style.color = "#fa7878";
-  } else if (selectedSize > threshold1) {
-    localizeElement(window.localization, { element: bboxInfo }, "area_extensive");
-    bboxInfo.style.color = "#fecc44";
-  } else {
-    localizeElement(window.localization, { element: bboxInfo }, "selection_confirmed");
-    bboxInfo.style.color = "#7bd864";
-  }
+  displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
 }
 
 let worldPath = "";
@@ -753,9 +796,8 @@ async function startGeneration() {
     }
 
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
-      const bboxInfo = document.getElementById('bbox-info');
-      localizeElement(window.localization, { element: bboxInfo }, "select_location_first");
-      bboxInfo.style.color = "#fa7878";
+      const bboxSelectionInfo = document.getElementById('bbox-selection-info');
+      setBboxSelectionInfo(bboxSelectionInfo, "select_location_first", "#fa7878");
       return;
     }
 
@@ -791,14 +833,12 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
-    var floodfill_timeout = parseInt(document.getElementById("floodfill-timeout").value, 10);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
     var ground_level = -62;
 
-    // Validate floodfill_timeout and ground_level
-    floodfill_timeout = isNaN(floodfill_timeout) || floodfill_timeout < 0 ? 20 : floodfill_timeout;
-    ground_level = isNaN(ground_level) || ground_level < -62 ? 20 : ground_level;
+    // Validate ground_level
+    ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
@@ -809,7 +849,6 @@ async function startGeneration() {
         selectedWorld: worldPath,
         worldScale: scale,
         groundLevel: ground_level,
-        floodfillTimeout: floodfill_timeout,
         terrainEnabled: terrain,
         skipOsmObjects: skipOsmObjects,
         interiorEnabled: interior,

@@ -1,20 +1,27 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+pub fn generate_natural(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
+) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                Tree::create(editor, (x, 1, z));
+                Tree::create(editor, (x, 1, z), Some(building_footprints));
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -69,17 +76,13 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                 previous_node = Some((x, z));
             }
 
-            // If there are natural nodes, flood-fill the area
+            // If there are natural nodes, flood-fill the area using cache
             if corner_addup != (0, 0, 0) {
-                let polygon_coords: Vec<(i32, i32)> = way
-                    .nodes
-                    .iter()
-                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                    .collect();
                 let filled_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                    flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
-                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+                let mut rng = element_rng(way.id);
 
                 for (x, z) in filled_area {
                     editor.set_block(block_type, x, 0, z, None, None);
@@ -132,7 +135,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             }
                             let random_choice = rng.gen_range(0..500);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if random_choice == 1 {
                                 let flower_block = match rng.gen_range(1..=4) {
                                     1 => RED_FLOWER,
@@ -161,7 +164,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             }
                             let random_choice: i32 = rng.gen_range(0..30);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if random_choice == 1 {
                                 let flower_block = match rng.gen_range(1..=4) {
                                     1 => RED_FLOWER,
@@ -220,7 +223,11 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                         // TODO implement mangrove
                                         let random_choice: i32 = rng.gen_range(0..40);
                                         if random_choice == 0 {
-                                            Tree::create(editor, (x, 1, z));
+                                            Tree::create(
+                                                editor,
+                                                (x, 1, z),
+                                                Some(building_footprints),
+                                            );
                                         } else if random_choice < 35 {
                                             editor.set_block(GRASS, x, 1, z, None, None);
                                         }
@@ -304,6 +311,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                                         Tree::create(
                                                             editor,
                                                             (cluster_x, 1, cluster_z),
+                                                            Some(building_footprints),
                                                         );
                                                     } else if vegetation_chance < 15 {
                                                         // 15% chance for grass
@@ -416,7 +424,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             let hill_chance = rng.gen_range(0..1000);
                             if hill_chance == 0 {
                                 // 0.1% chance for rare trees
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
                                 let flower_block = match rng.gen_range(1..=4) {
@@ -448,12 +456,20 @@ pub fn generate_natural_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.contains_key("natural") {
         // Generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_natural(editor, &ProcessedElement::Way(member.way.clone()), args);
+                generate_natural(
+                    editor,
+                    &ProcessedElement::Way((*member.way).clone()),
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             }
         }
 
@@ -475,7 +491,13 @@ pub fn generate_natural_from_relation(
             };
 
             // Generate natural area from combined way
-            generate_natural(editor, &ProcessedElement::Way(combined_way), args);
+            generate_natural(
+                editor,
+                &ProcessedElement::Way(combined_way),
+                args,
+                flood_fill_cache,
+                building_footprints,
+            );
         }
     }
 }
