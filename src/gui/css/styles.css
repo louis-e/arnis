@@ -32,9 +32,12 @@ p {
 
 .logo {
   height: 6em;
-  padding: 1.5em;
+  padding-top: 0.4em;
+  padding-bottom: 0.5em;
   will-change: filter;
   transition: 0.75s;
+  max-width: 950px;
+  max-height: 600px;
 }
 
 .logo.arnis:hover {
@@ -59,11 +62,11 @@ a:hover {
 
 .flex-container {
   display: flex;
-  gap: 20px;
+  gap: 15px;
   justify-content: center;
   align-items: stretch;
   margin-top: 5px;
-  min-height: 60vh;
+  min-height: 70vh;
 }
 
 .section {
@@ -75,34 +78,70 @@ a:hover {
 
 .map-box,
 .controls-box {
-  width: 45%;
-  background: #575757;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
   display: flex;
   flex-direction: column;
 }
 
 .map-box {
-  min-height: 400px;
+  width: 63%;
+  min-height: 420px;
+  padding: 0;
+  overflow: hidden;
+  background: #575757;
+  border-radius: 8px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.controls-box {
+  width: 32%;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .controls-content {
   display: flex;
   flex-direction: column;
   height: 100%;
+  justify-content: space-between;
 }
 
 .controls-box .progress-section {
-  margin-top: auto;
+  margin-top: 0;
+}
+
+.controls-top {
+  display: flex;
+  flex-direction: column;
+}
+
+.bbox-selection-text {
+  font-size: 0.9em;
+  color: #ffffff;
+  display: block;
+  font-weight: bold;
+  min-height: 2.5em;
+  line-height: 1.25em;
+  margin-top: 8px;
+}
+
+.progress-info-text {
+  font-size: 0.9em;
+  color: #ececec;
+  display: block;
+  font-weight: bold;
+  min-height: 1.5em;
+  line-height: 1.25em;
+  margin-bottom: 5px;
 }
 
 .map-container {
-  border: 2px solid #e0e0e0;
+  border: none;
   border-radius: 8px;
   flex-grow: 1;
-  min-height: 300px;
+  width: 100%;
+  height: 100%;
 }
 
 .section h2 {
@@ -142,18 +181,25 @@ button:hover {
   margin-top: auto;
 }
 
-.progress-section h2 {
-  margin-bottom: 8px;
-  text-align: center;
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .progress-bar-container {
-  width: 100%;
+  flex: 1;
   height: 20px;
   background-color: #e0e0e0;
   border-radius: 10px;
   overflow: hidden;
-  margin-top: 8px;
+}
+
+#progress-detail {
+  min-width: 40px;
+  text-align: right;
+  font-size: 0.9em;
+  color: #fff;
 }
 
 .progress-bar {
@@ -161,15 +207,6 @@ button:hover {
   width: 0%;
   background-color: #4caf50;
   transition: width 0.4s;
-}
-
-/* Left and right alignment for "Saving world..." text */
-.progress-status {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.9em;
-  margin-top: 8px;
-  color: #fff;
 }
 
 .footer {
@@ -190,7 +227,7 @@ button:hover {
 @media (prefers-color-scheme: dark) {
   :root {
     color: #f6f6f6;
-    background-color: #2f2f2f;
+    background-color: #333333;
   }
 
   p {
@@ -233,6 +270,7 @@ button:hover {
   width: 100%;
   border-radius: 8px 8px 0 0 !important;
   margin-bottom: 0 !important;
+  margin-top: 0 !important;
   box-shadow: none !important;
 }
 
@@ -287,7 +325,7 @@ button:hover {
 /* Customization Settings */
 .modal {
   position: fixed;
-  z-index: 1000;
+  z-index: 20001;
   left: 0;
   top: 0;
   width: 100%;
@@ -300,7 +338,7 @@ button:hover {
 }
 
 .modal-content {
-  background-color: #797979;
+  background-color: #717171;
   padding: 20px;
   border: 1px solid #797979;
   border-radius: 10px;
@@ -420,6 +458,20 @@ button:hover {
   box-shadow: 0 0 5px #fecc44;
 }
 
+#save-path {
+  width: 100%;
+  padding: 5px;
+  border: 1px solid #fecc44;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+#save-path:focus {
+  outline: none;
+  border-color: #fecc44;
+  box-shadow: 0 0 5px #fecc44;
+}
+
 /* Settings Modal Layout */
 .settings-row {
   display: flex;
@@ -431,6 +483,75 @@ button:hover {
 .settings-row label {
   text-align: left;
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Tooltip icon (question mark in circle) */
+.tooltip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background-color: rgba(254, 204, 68, 0.3);
+  color: #fecc44;
+  font-size: 11px;
+  font-weight: bold;
+  cursor: help;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.tooltip-icon:hover {
+  background-color: rgba(254, 204, 68, 0.5);
+}
+
+/* Arnis-styled tooltip box */
+.tooltip-icon::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background-color: #2a2a2a;
+  color: #fecc44;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: normal;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  border: 1px solid #fecc44;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+/* Tooltip arrow */
+.tooltip-icon::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 2px);
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: #fecc44;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  z-index: 1001;
+  pointer-events: none;
+}
+
+.tooltip-icon:hover::after,
+.tooltip-icon:hover::before {
+  opacity: 1;
+  visibility: visible;
 }
 
 .settings-control {
@@ -606,9 +727,12 @@ button:hover {
   transition: background-color 0.3s, border-color 0.3s;
 }
 
-.settings-button .gear-icon::before {
-  content: "⚙️";
-  font-size: 18px;
+.settings-button svg {
+  stroke: white;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
 }
 
 /* Logo Animation */

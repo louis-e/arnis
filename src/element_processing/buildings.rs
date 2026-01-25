@@ -3,8 +3,9 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
@@ -28,6 +29,7 @@ pub fn generate_buildings(
     element: &ProcessedWay,
     args: &Args,
     relation_levels: Option<i32>,
+    flood_fill_cache: &FloodFillCache,
 ) {
     // Get min_level first so we can use it both for start_level and building height calculations
     let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
@@ -43,10 +45,9 @@ pub fn generate_buildings(
     let scale_factor = args.scale;
     let min_level_offset = multiply_scale(min_level * 4, scale_factor);
 
-    // Cache floodfill result: compute once and reuse throughout
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
+    // Use pre-computed flood fill from cache
     let cached_floor_area: Vec<(i32, i32)> =
-        flood_fill_area(&polygon_coords, args.timeout.as_ref());
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
     let cached_footprint_size = cached_floor_area.len();
 
     // Use fixed starting Y coordinate based on maximum ground level when terrain is enabled
@@ -121,7 +122,8 @@ pub fn generate_buildings(
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
     let mut is_tall_building = false;
-    let mut rng = rand::thread_rng();
+    // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+    let mut rng = element_rng(element.id);
     let use_vertical_windows = rng.gen_bool(0.7);
     let use_accent_roof_line = rng.gen_bool(0.25);
 
@@ -155,7 +157,7 @@ pub fn generate_buildings(
             let lev = levels - min_level;
 
             if lev >= 1 {
-                building_height = multiply_scale(levels * 4 + 2, scale_factor);
+                building_height = multiply_scale(lev * 4 + 2, scale_factor);
                 building_height = building_height.max(3);
 
                 // Mark as tall building if more than 7 stories
@@ -386,7 +388,7 @@ pub fn generate_buildings(
                 building_height = ((23.0 * scale_factor) as i32).max(3);
             }
         } else if building_type == "bridge" {
-            generate_bridge(editor, element, args.timeout.as_ref());
+            generate_bridge(editor, element, flood_fill_cache, args.timeout.as_ref());
             return;
         }
     }
@@ -540,6 +542,20 @@ pub fn generate_buildings(
             }
         }
 
+        // Detect abandoned buildings via explicit tags
+        let is_abandoned_building = element
+            .tags
+            .get("abandoned")
+            .is_some_and(|value| value == "yes")
+            || element.tags.contains_key("abandoned:building");
+
+        // Use cobwebs instead of glowstone for abandoned buildings
+        let ceiling_light_block = if is_abandoned_building {
+            COBWEB
+        } else {
+            GLOWSTONE
+        };
+
         for (x, z) in floor_area.iter().cloned() {
             if processed_points.insert((x, z)) {
                 // Create foundation columns for the floor area when using terrain
@@ -571,7 +587,7 @@ pub fn generate_buildings(
                         if x % 5 == 0 && z % 5 == 0 {
                             // Light fixtures
                             editor.set_block_absolute(
-                                GLOWSTONE,
+                                ceiling_light_block,
                                 x,
                                 h + abs_terrain_offset,
                                 z,
@@ -591,7 +607,7 @@ pub fn generate_buildings(
                     }
                 } else if x % 5 == 0 && z % 5 == 0 {
                     editor.set_block_absolute(
-                        GLOWSTONE,
+                        ceiling_light_block,
                         x,
                         start_y_offset + building_height + abs_terrain_offset,
                         z,
@@ -646,6 +662,7 @@ pub fn generate_buildings(
                     args,
                     element,
                     abs_terrain_offset,
+                    is_abandoned_building,
                 );
             }
         }
@@ -770,6 +787,9 @@ fn generate_roof(
     // Set base height for roof to be at least one block above building top
     let base_height = start_y_offset + building_height + 1;
 
+    // Optional OSM hint for ridge orientation
+    let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
+
     match roof_type {
         RoofType::Flat => {
             // Simple flat roof
@@ -796,8 +816,13 @@ fn generate_roof(
             let roof_peak_height = base_height + roof_height_boost;
 
             // Pre-determine orientation and material
-            let is_wider_than_long = width > length;
-            let max_distance = if is_wider_than_long {
+            let width_is_longer = width >= length;
+            let ridge_runs_along_x = match roof_orientation {
+                Some(orientation) if orientation.eq_ignore_ascii_case("along") => width_is_longer,
+                Some(orientation) if orientation.eq_ignore_ascii_case("across") => !width_is_longer,
+                _ => width_is_longer,
+            };
+            let max_distance = if ridge_runs_along_x {
                 length >> 1
             } else {
                 width >> 1
@@ -817,15 +842,15 @@ fn generate_roof(
 
             // First pass: calculate all roof heights using vectorized operations
             for &(x, z) in floor_area {
-                let distance_to_ridge = if is_wider_than_long {
+                let distance_to_ridge = if ridge_runs_along_x {
                     (z - center_z).abs()
                 } else {
                     (x - center_x).abs()
                 };
 
                 let roof_height = if distance_to_ridge == 0
-                    && ((is_wider_than_long && z == center_z)
-                        || (!is_wider_than_long && x == center_x))
+                    && ((ridge_runs_along_x && z == center_z)
+                        || (!ridge_runs_along_x && x == center_x))
                 {
                     roof_peak_height
                 } else {
@@ -857,7 +882,7 @@ fn generate_roof(
                 for y in base_height..=roof_height {
                     if y == roof_height && has_lower_neighbor {
                         // Pre-compute stair direction
-                        let stair_block_with_props = if is_wider_than_long {
+                        let stair_block_with_props = if ridge_runs_along_x {
                             if z < center_z {
                                 create_stair_with_properties(
                                     stair_block_material,
@@ -917,7 +942,12 @@ fn generate_roof(
             // Determine if building is significantly rectangular or more square-shaped
             let is_rectangular =
                 (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
-            let long_axis_is_x = width > length;
+            let width_is_longer = width >= length;
+            let ridge_axis_is_x = match roof_orientation {
+                Some(orientation) if orientation.eq_ignore_ascii_case("along") => width_is_longer,
+                Some(orientation) if orientation.eq_ignore_ascii_case("across") => !width_is_longer,
+                _ => width_is_longer,
+            };
 
             // Make roof taller and more pointy
             let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
@@ -937,7 +967,7 @@ fn generate_roof(
 
                 for &(x, z) in floor_area {
                     // Calculate distance to the ridge line
-                    let distance_to_ridge = if long_axis_is_x {
+                    let distance_to_ridge = if ridge_axis_is_x {
                         // Distance in Z direction for X-axis ridge
                         (z - center_z).abs()
                     } else {
@@ -946,7 +976,7 @@ fn generate_roof(
                     };
 
                     // Calculate maximum distance from ridge to edge
-                    let max_distance_from_ridge = if long_axis_is_x {
+                    let max_distance_from_ridge = if ridge_axis_is_x {
                         (max_z - min_z) / 2
                     } else {
                         (max_x - min_x) / 2
@@ -986,7 +1016,7 @@ fn generate_roof(
                             if has_lower_neighbor {
                                 // Determine stair direction based on ridge orientation and position
                                 let stair_block_material = get_stair_block_for_material(roof_block);
-                                let stair_block_with_props = if long_axis_is_x {
+                                let stair_block_with_props = if ridge_axis_is_x {
                                     // Ridge runs along X, slopes in Z direction
                                     if z < center_z {
                                         create_stair_with_properties(
@@ -1484,6 +1514,7 @@ pub fn generate_building_from_relation(
     editor: &mut WorldEditor,
     relation: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
 ) {
     // Extract levels from relation tags
     let relation_levels = relation
@@ -1495,7 +1526,13 @@ pub fn generate_building_from_relation(
     // Process the outer way to create the building walls
     for member in &relation.members {
         if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(editor, &member.way, args, Some(relation_levels));
+            generate_buildings(
+                editor,
+                &member.way,
+                args,
+                Some(relation_levels),
+                flood_fill_cache,
+            );
         }
     }
 
@@ -1516,52 +1553,18 @@ pub fn generate_building_from_relation(
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.
+/// Bridge deck is interpolated between start and end point elevations to avoid
+/// being dragged down by valleys underneath.
 fn generate_bridge(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
+    flood_fill_cache: &FloodFillCache,
     floodfill_timeout: Option<&Duration>,
 ) {
     let floor_block: Block = STONE;
     let railing_block: Block = STONE_BRICKS;
 
-    // Process the nodes to create bridge pathways and railings
-    let mut previous_node: Option<(i32, i32)> = None;
-    for node in &element.nodes {
-        let x: i32 = node.x;
-        let z: i32 = node.z;
-
-        // Calculate bridge level based on the "level" tag
-        let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
-            if let Ok(level) = level_str.parse::<i32>() {
-                (level * 3) + 1
-            } else {
-                1 // Default elevation
-            }
-        } else {
-            1 // Default elevation
-        };
-
-        // Create bridge path using Bresenham's line
-        if let Some(prev) = previous_node {
-            let bridge_points: Vec<(i32, i32, i32)> =
-                bresenham_line(prev.0, bridge_y_offset, prev.1, x, bridge_y_offset, z);
-
-            for (bx, by, bz) in bridge_points {
-                // Place railing blocks
-                editor.set_block(railing_block, bx, by + 1, bz, None, None);
-                editor.set_block(railing_block, bx, by, bz, None, None);
-            }
-        }
-
-        previous_node = Some((x, z));
-    }
-
-    // Flood fill the area between the bridge path nodes
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
-
-    let bridge_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, floodfill_timeout);
-
-    // Calculate bridge level based on the "level" tag
+    // Calculate bridge level offset based on the "level" tag
     let bridge_y_offset = if let Some(level_str) = element.tags.get("level") {
         if let Ok(level) = level_str.parse::<i32>() {
             (level * 3) + 1
@@ -1572,8 +1575,51 @@ fn generate_bridge(
         1 // Default elevation
     };
 
+    // Need at least 2 nodes to form a bridge
+    if element.nodes.len() < 2 {
+        return;
+    }
+
+    // Get start and end node elevations and use MAX for level bridge deck
+    // Using MAX ensures bridges don't dip when multiple bridge ways meet in a valley
+    let start_node = &element.nodes[0];
+    let end_node = &element.nodes[element.nodes.len() - 1];
+    let start_y = editor.get_ground_level(start_node.x, start_node.z);
+    let end_y = editor.get_ground_level(end_node.x, end_node.z);
+    let bridge_deck_ground_y = start_y.max(end_y);
+
+    // Process the nodes to create bridge pathways and railings
+    let mut previous_node: Option<(i32, i32)> = None;
+
+    for node in &element.nodes {
+        let x: i32 = node.x;
+        let z: i32 = node.z;
+
+        // Create bridge path using Bresenham's line
+        if let Some(prev) = previous_node {
+            let bridge_points: Vec<(i32, i32, i32)> = bresenham_line(prev.0, 0, prev.1, x, 0, z);
+
+            for (bx, _, bz) in bridge_points.iter() {
+                // Use fixed bridge deck height (max of endpoints)
+                let bridge_y = bridge_deck_ground_y + bridge_y_offset;
+
+                // Place railing blocks
+                editor.set_block_absolute(railing_block, *bx, bridge_y + 1, *bz, None, None);
+                editor.set_block_absolute(railing_block, *bx, bridge_y, *bz, None, None);
+            }
+        }
+
+        previous_node = Some((x, z));
+    }
+
+    // Flood fill the area between the bridge path nodes (uses cache)
+    let bridge_area: Vec<(i32, i32)> = flood_fill_cache.get_or_compute(element, floodfill_timeout);
+
+    // Use the same level bridge deck height for filled areas
+    let floor_y = bridge_deck_ground_y + bridge_y_offset;
+
     // Place floor blocks
     for (x, z) in bridge_area {
-        editor.set_block(floor_block, x, bridge_y_offset, z, None, None);
+        editor.set_block_absolute(floor_block, x, floor_y, z, None, None);
     }
 }

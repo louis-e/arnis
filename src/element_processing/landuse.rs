@@ -1,15 +1,26 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::element_processing::tree::Tree;
-use crate::floodfill::flood_fill_area;
+use crate::deterministic_rng::element_rng;
+use crate::element_processing::tree::{Tree, TreeType};
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use rand::prelude::SliceRandom;
 use rand::Rng;
 
-pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
+pub fn generate_landuse(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
+) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
     let landuse_tag: &String = element.tags.get("landuse").unwrap_or(&binding);
+
+    // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+    let mut rng = element_rng(element.id);
 
     let block_type = match landuse_tag.as_str() {
         "greenfield" | "meadow" | "grass" | "orchard" | "forest" => GRASS_BLOCK,
@@ -22,13 +33,13 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             if residential_tag == "rural" {
                 GRASS_BLOCK
             } else {
-                STONE_BRICKS
+                STONE_BRICKS // Placeholder, will be randomized per-block
             }
         }
-        "commercial" => SMOOTH_STONE,
+        "commercial" => SMOOTH_STONE, // Placeholder, will be randomized per-block
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
-        "industrial" => COBBLESTONE,
+        "industrial" => STONE, // Placeholder, will be randomized per-block
         "military" => GRAY_CONCRETE,
         "railway" => GRAVEL,
         "landfill" => {
@@ -44,19 +55,79 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
         _ => GRASS_BLOCK,
     };
 
-    // Get the area of the landuse element
-    let polygon_coords: Vec<(i32, i32)> = element.nodes.iter().map(|n| (n.x, n.z)).collect();
-    let floor_area: Vec<(i32, i32)> = flood_fill_area(&polygon_coords, args.timeout.as_ref());
+    // Get the area of the landuse element using cache
+    let floor_area: Vec<(i32, i32)> =
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
-    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+    let trees_ok_to_generate: Vec<TreeType> = {
+        let mut trees: Vec<TreeType> = vec![];
+        if let Some(leaf_type) = element.tags.get("leaf_type") {
+            match leaf_type.as_str() {
+                "broadleaved" => {
+                    trees.push(TreeType::Oak);
+                    trees.push(TreeType::Birch);
+                }
+                "needleleaved" => trees.push(TreeType::Spruce),
+                _ => {
+                    trees.push(TreeType::Oak);
+                    trees.push(TreeType::Spruce);
+                    trees.push(TreeType::Birch);
+                }
+            }
+        } else {
+            trees.push(TreeType::Oak);
+            trees.push(TreeType::Spruce);
+            trees.push(TreeType::Birch);
+        }
+        trees
+    };
 
     for (x, z) in floor_area {
-        if landuse_tag == "traffic_island" {
-            editor.set_block(block_type, x, 1, z, None, None);
-        } else if landuse_tag == "construction" || landuse_tag == "railway" {
-            editor.set_block(block_type, x, 0, z, None, Some(&[SPONGE]));
+        // Apply per-block randomness for certain landuse types
+        let actual_block = if landuse_tag == "residential" && block_type == STONE_BRICKS {
+            // Urban residential: mix of stone bricks, cracked stone bricks, stone, cobblestone
+            let random_value = rng.gen_range(0..100);
+            if random_value < 72 {
+                STONE_BRICKS
+            } else if random_value < 87 {
+                CRACKED_STONE_BRICKS
+            } else if random_value < 92 {
+                STONE
+            } else {
+                COBBLESTONE
+            }
+        } else if landuse_tag == "commercial" {
+            // Commercial: mix of smooth stone, stone, cobblestone, stone bricks
+            let random_value = rng.gen_range(0..100);
+            if random_value < 40 {
+                SMOOTH_STONE
+            } else if random_value < 70 {
+                STONE_BRICKS
+            } else if random_value < 90 {
+                STONE
+            } else {
+                COBBLESTONE
+            }
+        } else if landuse_tag == "industrial" {
+            // Industrial: primarily stone, with some stone bricks and smooth stone
+            let random_value = rng.gen_range(0..100);
+            if random_value < 70 {
+                STONE
+            } else if random_value < 90 {
+                STONE_BRICKS
+            } else {
+                SMOOTH_STONE
+            }
         } else {
-            editor.set_block(block_type, x, 0, z, None, None);
+            block_type
+        };
+
+        if landuse_tag == "traffic_island" {
+            editor.set_block(actual_block, x, 1, z, None, None);
+        } else if landuse_tag == "construction" || landuse_tag == "railway" {
+            editor.set_block(actual_block, x, 0, z, None, Some(&[SPONGE]));
+        } else {
+            editor.set_block(actual_block, x, 0, z, None, None);
         }
 
         // Add specific features for different landuse types
@@ -84,7 +155,7 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                             editor.set_block(RED_FLOWER, x, 1, z, None, None);
                         }
                     } else if random_choice < 33 {
-                        Tree::create(editor, (x, 1, z));
+                        Tree::create(editor, (x, 1, z), Some(building_footprints));
                     } else if random_choice < 35 {
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                     }
@@ -94,7 +165,15 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..30);
                     if random_choice == 20 {
-                        Tree::create(editor, (x, 1, z));
+                        let tree_type = *trees_ok_to_generate
+                            .choose(&mut rng)
+                            .unwrap_or(&TreeType::Oak);
+                        Tree::create_of_type(
+                            editor,
+                            (x, 1, z),
+                            tree_type,
+                            Some(building_footprints),
+                        );
                     } else if random_choice == 2 {
                         let flower_block: Block = match rng.gen_range(1..=5) {
                             1 => OAK_LEAVES,
@@ -105,7 +184,11 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         };
                         editor.set_block(flower_block, x, 1, z, None, None);
                     } else if random_choice <= 12 {
-                        editor.set_block(GRASS, x, 1, z, None, None);
+                        if rng.gen_range(0..100) < 12 {
+                            editor.set_block(FERN, x, 1, z, None, None);
+                        } else {
+                            editor.set_block(GRASS, x, 1, z, None, None);
+                        }
                     }
                 }
             }
@@ -207,7 +290,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     match rng.gen_range(0..200) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
-                        1..=170 => editor.set_block(GRASS, x, 1, z, None, None),
+                        1..=8 => editor.set_block(FERN, x, 1, z, None, None),
+                        9..=170 => editor.set_block(GRASS, x, 1, z, None, None),
                         _ => {}
                     }
                 }
@@ -216,7 +300,8 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     match rng.gen_range(0..200) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
-                        1..=17 => editor.set_block(GRASS, x, 1, z, None, None),
+                        1..=2 => editor.set_block(FERN, x, 1, z, None, None),
+                        3..=17 => editor.set_block(GRASS, x, 1, z, None, None),
                         _ => {}
                     }
                 }
@@ -225,11 +310,13 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.gen_range(0..1001);
                     if random_choice < 5 {
-                        Tree::create(editor, (x, 1, z));
+                        Tree::create(editor, (x, 1, z), Some(building_footprints));
                     } else if random_choice < 6 {
                         editor.set_block(RED_FLOWER, x, 1, z, None, None);
                     } else if random_choice < 9 {
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                    } else if random_choice < 40 {
+                        editor.set_block(FERN, x, 1, z, None, None);
                     } else if random_choice < 800 {
                         editor.set_block(GRASS, x, 1, z, None, None);
                     }
@@ -237,11 +324,12 @@ pub fn generate_landuse(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             }
             "orchard" => {
                 if x % 18 == 0 && z % 10 == 0 {
-                    Tree::create(editor, (x, 1, z));
+                    Tree::create(editor, (x, 1, z), Some(building_footprints));
                 } else if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     match rng.gen_range(0..100) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
-                        1..=20 => editor.set_block(GRASS, x, 1, z, None, None),
+                        1..=2 => editor.set_block(FERN, x, 1, z, None, None),
+                        3..=20 => editor.set_block(GRASS, x, 1, z, None, None),
                         _ => {}
                     }
                 }
@@ -275,12 +363,20 @@ pub fn generate_landuse_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.contains_key("landuse") {
         // Generate individual ways with their original tags
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_landuse(editor, &member.way.clone(), args);
+                generate_landuse(
+                    editor,
+                    &member.way.clone(),
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             }
         }
 
@@ -302,7 +398,13 @@ pub fn generate_landuse_from_relation(
             };
 
             // Generate landuse area from combined way
-            generate_landuse(editor, &combined_way, args);
+            generate_landuse(
+                editor,
+                &combined_way,
+                args,
+                flood_fill_cache,
+                building_footprints,
+            );
         }
     }
 }
