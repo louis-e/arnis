@@ -267,6 +267,13 @@ impl Block {
             186 => "polished_andesite_stairs",
             187 => "nether_brick_stairs",
             188 => "fern",
+            189 => "cobweb",
+            190 => "chiseled_bookshelf",
+            191 => "chiseled_bookshelf",
+            192 => "chiseled_bookshelf",
+            193 => "chiseled_bookshelf",
+            194 => "chipped_anvil",
+            195 => "damaged_anvil",
             _ => panic!("Invalid id"),
         }
     }
@@ -462,6 +469,26 @@ impl Block {
             173 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            190 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map
+            })),
+            191 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map
+            })),
+            192 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map
+            })),
+            193 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
                 map
             })),
             _ => None,
@@ -699,6 +726,15 @@ pub const QUARTZ_STAIRS: Block = Block::new(185);
 pub const POLISHED_ANDESITE_STAIRS: Block = Block::new(186);
 pub const NETHER_BRICK_STAIRS: Block = Block::new(187);
 pub const FERN: Block = Block::new(188);
+pub const COBWEB: Block = Block::new(189);
+pub const CHISELLED_BOOKSHELF_NORTH: Block = Block::new(190);
+pub const CHISELLED_BOOKSHELF_EAST: Block = Block::new(191);
+pub const CHISELLED_BOOKSHELF_SOUTH: Block = Block::new(192);
+pub const CHISELLED_BOOKSHELF_WEST: Block = Block::new(193);
+// Backwards-compatible alias (defaults to north-facing)
+pub const CHISELLED_BOOKSHELF: Block = CHISELLED_BOOKSHELF_NORTH;
+pub const CHIPPED_ANVIL: Block = Block::new(194);
+pub const DAMAGED_ANVIL: Block = Block::new(195);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
