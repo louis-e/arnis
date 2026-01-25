@@ -81,12 +81,7 @@ pub fn generate_natural(
                     .choose(&mut rng)
                     .unwrap_or(&TreeType::Oak);
 
-                Tree::create_of_type(
-                    editor,
-                    (x, 1, z),
-                    tree_type,
-                    Some(building_footprints),
-                );
+                Tree::create_of_type(editor, (x, 1, z), tree_type, Some(building_footprints));
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
