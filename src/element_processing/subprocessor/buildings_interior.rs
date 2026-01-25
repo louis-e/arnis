@@ -114,7 +114,6 @@ const INTERIOR2_LAYER2: [[char; 23]; 23] = [
     ['P', 'P', ' ', ' ', ' ', 'E', 'B', 'B', 'B', ' ', ' ', 'W', 'B', 'B', 'B', 'B', 'B', 'B', 'B', ' ', 'B', ' ', 'D',],
 ];
 
-
 /// Generic Abandoned Building Interiors
 
 /// Interior layout for building ground floors (1st layer above floor)
@@ -260,19 +259,19 @@ pub fn get_interior_block(c: char, is_layer2: bool, wall_block: Block) -> Option
                 Some(DARK_OAK_DOOR_LOWER)
             }
         }
-        'J' => Some(NOTE_BLOCK),    // Note block
-        'G' => Some(GLOWSTONE),     // Glowstone
-        'N' => Some(BREWING_STAND), // Brewing Stand
-        'T' => Some(WHITE_CARPET),  // White Carpet
-        'E' => Some(OAK_LEAVES),    // Oak Leaves
-        'O' => Some(COBWEB),      // Cobweb
+        'J' => Some(NOTE_BLOCK),                // Note block
+        'G' => Some(GLOWSTONE),                 // Glowstone
+        'N' => Some(BREWING_STAND),             // Brewing Stand
+        'T' => Some(WHITE_CARPET),              // White Carpet
+        'E' => Some(OAK_LEAVES),                // Oak Leaves
+        'O' => Some(COBWEB),                    // Cobweb
         'a' => Some(CHISELLED_BOOKSHELF_NORTH), // Chiseled Bookshelf
         'b' => Some(CHISELLED_BOOKSHELF_EAST),  // Chiseled Bookshelf East
         'c' => Some(CHISELLED_BOOKSHELF_SOUTH), // Chiseled Bookshelf South
         'd' => Some(CHISELLED_BOOKSHELF_WEST),  // Chiseled Bookshelf West
-        'M' => Some(DAMAGED_ANVIL),          // Damaged Anvil
-        'Q' => Some(SCAFFOLDING),          // Scaffolding
-        _ => None,                  // Default case for unknown characters
+        'M' => Some(DAMAGED_ANVIL),             // Damaged Anvil
+        'Q' => Some(SCAFFOLDING),               // Scaffolding
+        _ => None,                              // Default case for unknown characters
     }
 }
 

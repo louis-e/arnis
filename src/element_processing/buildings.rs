@@ -788,10 +788,7 @@ fn generate_roof(
     let base_height = start_y_offset + building_height + 1;
 
     // Optional OSM hint for ridge orientation
-    let roof_orientation = element
-        .tags
-        .get("roof:orientation")
-        .map(|s| s.as_str());
+    let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
 
     match roof_type {
         RoofType::Flat => {
@@ -825,7 +822,11 @@ fn generate_roof(
                 Some(orientation) if orientation.eq_ignore_ascii_case("across") => !width_is_longer,
                 _ => width_is_longer,
             };
-            let max_distance = if ridge_runs_along_x { length >> 1 } else { width >> 1 };
+            let max_distance = if ridge_runs_along_x {
+                length >> 1
+            } else {
+                width >> 1
+            };
 
             // 50% accent block, otherwise wall block for roof
             let mut rng = rand::thread_rng();
@@ -841,8 +842,11 @@ fn generate_roof(
 
             // First pass: calculate all roof heights using vectorized operations
             for &(x, z) in floor_area {
-                let distance_to_ridge =
-                    if ridge_runs_along_x { (z - center_z).abs() } else { (x - center_x).abs() };
+                let distance_to_ridge = if ridge_runs_along_x {
+                    (z - center_z).abs()
+                } else {
+                    (x - center_x).abs()
+                };
 
                 let roof_height = if distance_to_ridge == 0
                     && ((ridge_runs_along_x && z == center_z)
