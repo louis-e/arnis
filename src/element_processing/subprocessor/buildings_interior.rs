@@ -58,7 +58,7 @@ const INTERIOR1_LAYER2: [[char; 23]; 23] = [
     ['W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
 ];
 
-/// Interior layout for building level floors (1nd layer above floor)
+/// Interior layout for building level floors (1st layer above floor)
 #[rustfmt::skip]
 const INTERIOR2_LAYER1: [[char; 23]; 23] = [
     ['W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W',],
@@ -171,7 +171,7 @@ const ABANDONED_INTERIOR1_LAYER2: [[char; 23]; 23] = [
     ['W', 'W', 'D', 'W', ' ', ' ', ' ', ' ', 'W', 'W', 'W', 'B', ' ', ' ', 'B', 'W', ' ', ' ', ' ', ' ', ' ', ' ', 'W',],
 ];
 
-/// Interior layout for building level floors (1nd layer above floor)
+/// Interior layout for building level floors (1st layer above floor)
 #[rustfmt::skip]
 const ABANDONED_INTERIOR2_LAYER1: [[char; 23]; 23] = [
     ['W', 'W', 'W', 'D', 'W', 'W', 'W', 'W', 'W', ' ', ' ', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'W', 'D', 'W', 'W', 'W',],
