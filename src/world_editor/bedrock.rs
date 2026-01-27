@@ -478,6 +478,9 @@ impl BedrockWriter {
             progress_bar.finish_with_message("Chunks written to LevelDB");
         }
 
+        // Ensure the RustyDBInterface handle is dropped before opening another DB for the same path.
+        drop(db);
+
         self.write_chunk_entities(world, &db_path)?;
 
         Ok(())
