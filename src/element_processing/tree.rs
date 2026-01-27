@@ -92,6 +92,7 @@ fn round(editor: &mut WorldEditor, material: Block, (x, y, z): Coord, block_patt
     }
 }
 
+#[derive(Clone, Copy)]
 pub enum TreeType {
     Oak,
     Spruce,
@@ -121,6 +122,27 @@ impl Tree<'_> {
         (x, y, z): Coord,
         building_footprints: Option<&BuildingFootprintBitmap>,
     ) {
+        // Use deterministic RNG based on coordinates for consistent tree types across region boundaries
+        // The element_id of 0 is used as a salt for tree-specific randomness
+        let mut rng = coord_rng(x, z, 0);
+
+        let tree_type = match rng.gen_range(1..=3) {
+            1 => TreeType::Oak,
+            2 => TreeType::Spruce,
+            3 => TreeType::Birch,
+            _ => unreachable!(),
+        };
+
+        Self::create_of_type(editor, (x, y, z), tree_type, building_footprints);
+    }
+
+    /// Creates a tree of a specific type at the specified coordinates.
+    pub fn create_of_type(
+        editor: &mut WorldEditor,
+        (x, y, z): Coord,
+        tree_type: TreeType,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+    ) {
         // Skip if this coordinate is inside a building
         if let Some(footprints) = building_footprints {
             if footprints.contains(x, z) {
@@ -135,16 +157,7 @@ impl Tree<'_> {
         blacklist.extend(Self::get_functional_blocks());
         blacklist.push(WATER);
 
-        // Use deterministic RNG based on coordinates for consistent tree types across region boundaries
-        // The element_id of 0 is used as a salt for tree-specific randomness
-        let mut rng = coord_rng(x, z, 0);
-
-        let tree = Self::get_tree(match rng.gen_range(1..=3) {
-            1 => TreeType::Oak,
-            2 => TreeType::Spruce,
-            3 => TreeType::Birch,
-            _ => unreachable!(),
-        });
+        let tree = Self::get_tree(tree_type);
 
         // Build the logs
         editor.fill_blocks(

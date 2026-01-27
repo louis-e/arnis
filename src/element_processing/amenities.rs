@@ -7,7 +7,9 @@ use crate::floodfill::flood_fill_area; // Needed for inline amenity flood fills
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
-use rand::Rng;
+use fastnbt::Value;
+use rand::{seq::SliceRandom, Rng};
+use std::collections::{HashMap, HashSet};
 
 pub fn generate_amenities(
     editor: &mut WorldEditor,
@@ -34,6 +36,49 @@ pub fn generate_amenities(
             .map(|n: &crate::osm_parser::ProcessedNode| XZPoint::new(n.x, n.z))
             .next();
         match amenity_type.as_str() {
+            "recycling" => {
+                let is_container = element
+                    .tags()
+                    .get("recycling_type")
+                    .is_some_and(|value| value == "container");
+
+                if !is_container {
+                    return;
+                }
+
+                if let Some(pt) = first_node {
+                    let mut rng = rand::thread_rng();
+                    let loot_pool = build_recycling_loot_pool(element.tags());
+                    let items = build_recycling_items(&loot_pool, &mut rng);
+
+                    let properties = Value::Compound(recycling_barrel_properties());
+                    let barrel_block = BlockWithProperties::new(BARREL, Some(properties));
+                    let absolute_y = editor.get_absolute_y(pt.x, 1, pt.z);
+
+                    editor.set_block_entity_with_items(
+                        barrel_block,
+                        pt.x,
+                        1,
+                        pt.z,
+                        "minecraft:barrel",
+                        items,
+                    );
+
+                    if let Some(category) = single_loot_category(&loot_pool) {
+                        if let Some(display_item) =
+                            build_display_item_for_category(category, &mut rng)
+                        {
+                            place_item_frame_on_random_side(
+                                editor,
+                                pt.x,
+                                absolute_y,
+                                pt.z,
+                                display_item,
+                            );
+                        }
+                    }
+                }
+            }
             "waste_disposal" | "waste_basket" => {
                 // Place a cauldron for waste disposal or waste basket
                 if let Some(pt) = first_node {
@@ -262,4 +307,421 @@ pub fn generate_amenities(
             _ => {}
         }
     }
+}
+
+#[derive(Clone, Copy)]
+enum RecyclingLootKind {
+    GlassBottle,
+    Paper,
+    GlassBlock,
+    GlassPane,
+    LeatherArmor,
+    EmptyBucket,
+    LeatherBoots,
+    ScrapMetal,
+    GreenWaste,
+}
+
+#[derive(Clone, Copy)]
+enum LeatherPiece {
+    Helmet,
+    Chestplate,
+    Leggings,
+    Boots,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum LootCategory {
+    GlassBottle,
+    Paper,
+    Glass,
+    Leather,
+    EmptyBucket,
+    ScrapMetal,
+    GreenWaste,
+}
+
+fn recycling_barrel_properties() -> HashMap<String, Value> {
+    let mut props = HashMap::new();
+    props.insert("facing".to_string(), Value::String("up".to_string()));
+    props
+}
+
+fn build_recycling_loot_pool(tags: &HashMap<String, String>) -> Vec<RecyclingLootKind> {
+    let mut loot_pool: Vec<RecyclingLootKind> = Vec::new();
+
+    if tag_enabled(tags, "recycling:glass_bottles") {
+        loot_pool.push(RecyclingLootKind::GlassBottle);
+    }
+    if tag_enabled(tags, "recycling:paper") {
+        loot_pool.push(RecyclingLootKind::Paper);
+    }
+    if tag_enabled(tags, "recycling:glass") {
+        loot_pool.push(RecyclingLootKind::GlassBlock);
+        loot_pool.push(RecyclingLootKind::GlassPane);
+    }
+    if tag_enabled(tags, "recycling:clothes") {
+        loot_pool.push(RecyclingLootKind::LeatherArmor);
+    }
+    if tag_enabled(tags, "recycling:cans") {
+        loot_pool.push(RecyclingLootKind::EmptyBucket);
+    }
+    if tag_enabled(tags, "recycling:shoes") {
+        loot_pool.push(RecyclingLootKind::LeatherBoots);
+    }
+    if tag_enabled(tags, "recycling:scrap_metal") {
+        loot_pool.push(RecyclingLootKind::ScrapMetal);
+    }
+    if tag_enabled(tags, "recycling:green_waste") {
+        loot_pool.push(RecyclingLootKind::GreenWaste);
+    }
+
+    loot_pool
+}
+
+fn build_recycling_items(
+    loot_pool: &[RecyclingLootKind],
+    rng: &mut impl Rng,
+) -> Vec<HashMap<String, Value>> {
+    if loot_pool.is_empty() {
+        return Vec::new();
+    }
+
+    let mut items = Vec::new();
+    for slot in 0..27 {
+        if rng.gen_bool(0.2) {
+            let kind = loot_pool[rng.gen_range(0..loot_pool.len())];
+            if let Some(item) = build_item_for_kind(kind, slot as i8, rng) {
+                items.push(item);
+            }
+        }
+    }
+
+    items
+}
+
+fn kind_to_category(kind: RecyclingLootKind) -> LootCategory {
+    match kind {
+        RecyclingLootKind::GlassBottle => LootCategory::GlassBottle,
+        RecyclingLootKind::Paper => LootCategory::Paper,
+        RecyclingLootKind::GlassBlock | RecyclingLootKind::GlassPane => LootCategory::Glass,
+        RecyclingLootKind::LeatherArmor | RecyclingLootKind::LeatherBoots => LootCategory::Leather,
+        RecyclingLootKind::EmptyBucket => LootCategory::EmptyBucket,
+        RecyclingLootKind::ScrapMetal => LootCategory::ScrapMetal,
+        RecyclingLootKind::GreenWaste => LootCategory::GreenWaste,
+    }
+}
+
+fn single_loot_category(loot_pool: &[RecyclingLootKind]) -> Option<LootCategory> {
+    let mut categories: HashSet<LootCategory> = HashSet::new();
+    for kind in loot_pool {
+        categories.insert(kind_to_category(*kind));
+        if categories.len() > 1 {
+            return None;
+        }
+    }
+    categories.iter().next().copied()
+}
+
+fn build_display_item_for_category(
+    category: LootCategory,
+    rng: &mut impl Rng,
+) -> Option<HashMap<String, Value>> {
+    match category {
+        LootCategory::GlassBottle => Some(make_display_item("minecraft:glass_bottle", 1)),
+        LootCategory::Paper => Some(make_display_item("minecraft:paper", rng.gen_range(1..=4))),
+        LootCategory::Glass => Some(make_display_item("minecraft:glass", 1)),
+        LootCategory::Leather => Some(build_leather_display_item(rng)),
+        LootCategory::EmptyBucket => Some(make_display_item("minecraft:bucket", 1)),
+        LootCategory::ScrapMetal => {
+            let metals = [
+                "minecraft:copper_ingot",
+                "minecraft:iron_ingot",
+                "minecraft:gold_ingot",
+            ];
+            let metal = metals.choose(rng)?;
+            Some(make_display_item(metal, rng.gen_range(1..=2)))
+        }
+        LootCategory::GreenWaste => {
+            let options = [
+                "minecraft:oak_sapling",
+                "minecraft:birch_sapling",
+                "minecraft:tall_grass",
+                "minecraft:sweet_berries",
+                "minecraft:wheat_seeds",
+            ];
+            let choice = options.choose(rng)?;
+            Some(make_display_item(choice, rng.gen_range(1..=3)))
+        }
+    }
+}
+
+fn place_item_frame_on_random_side(
+    editor: &mut WorldEditor,
+    x: i32,
+    barrel_absolute_y: i32,
+    z: i32,
+    item: HashMap<String, Value>,
+) {
+    let mut rng = rand::thread_rng();
+    let mut directions = [
+        ((0, 0, -1), 2), // North
+        ((0, 0, 1), 3),  // South
+        ((-1, 0, 0), 4), // West
+        ((1, 0, 0), 5),  // East
+    ];
+    directions.shuffle(&mut rng);
+
+    let (min_x, min_z) = editor.get_min_coords();
+    let (max_x, max_z) = editor.get_max_coords();
+
+    let ((dx, _dy, dz), facing) = directions
+        .into_iter()
+        .find(|((dx, _dy, dz), _)| {
+            let target_x = x + dx;
+            let target_z = z + dz;
+            target_x >= min_x && target_x <= max_x && target_z >= min_z && target_z <= max_z
+        })
+        .unwrap_or(((0, 0, 1), 3)); // Fallback south if all directions are out of bounds
+
+    let target_x = x + dx;
+    let target_y = barrel_absolute_y;
+    let target_z = z + dz;
+
+    let ground_y = editor.get_absolute_y(target_x, 0, target_z);
+
+    let mut extra = HashMap::new();
+    extra.insert("Facing".to_string(), Value::Byte(facing)); // 2=north, 3=south, 4=west, 5=east
+    extra.insert("ItemRotation".to_string(), Value::Byte(0));
+    extra.insert("Item".to_string(), Value::Compound(item));
+    extra.insert("ItemDropChance".to_string(), Value::Float(1.0));
+    extra.insert(
+        "block_pos".to_string(),
+        Value::List(vec![
+            Value::Int(target_x),
+            Value::Int(target_y),
+            Value::Int(target_z),
+        ]),
+    );
+    extra.insert("TileX".to_string(), Value::Int(target_x));
+    extra.insert("TileY".to_string(), Value::Int(target_y));
+    extra.insert("TileZ".to_string(), Value::Int(target_z));
+    extra.insert("Fixed".to_string(), Value::Byte(1));
+
+    let relative_y = target_y - ground_y;
+    editor.add_entity(
+        "minecraft:item_frame",
+        target_x,
+        relative_y,
+        target_z,
+        Some(extra),
+    );
+}
+
+fn make_display_item(id: &str, count: i8) -> HashMap<String, Value> {
+    let mut item = HashMap::new();
+    item.insert("id".to_string(), Value::String(id.to_string()));
+    item.insert("Count".to_string(), Value::Byte(count));
+    item
+}
+
+fn build_leather_display_item(rng: &mut impl Rng) -> HashMap<String, Value> {
+    let mut item = make_display_item("minecraft:leather_chestplate", 1);
+    let damage = biased_damage(80, rng);
+
+    let mut tag = HashMap::new();
+    tag.insert("Damage".to_string(), Value::Int(damage));
+
+    if let Some(color) = maybe_leather_color(rng) {
+        let mut display = HashMap::new();
+        display.insert("color".to_string(), Value::Int(color));
+        tag.insert("display".to_string(), Value::Compound(display));
+    }
+
+    item.insert("tag".to_string(), Value::Compound(tag));
+
+    let mut components = HashMap::new();
+    components.insert("minecraft:damage".to_string(), Value::Int(damage));
+    item.insert("components".to_string(), Value::Compound(components));
+
+    item
+}
+
+fn build_item_for_kind(
+    kind: RecyclingLootKind,
+    slot: i8,
+    rng: &mut impl Rng,
+) -> Option<HashMap<String, Value>> {
+    match kind {
+        RecyclingLootKind::GlassBottle => Some(make_basic_item(
+            "minecraft:glass_bottle",
+            slot,
+            rng.gen_range(1..=4),
+        )),
+        RecyclingLootKind::Paper => Some(make_basic_item(
+            "minecraft:paper",
+            slot,
+            rng.gen_range(1..=10),
+        )),
+        RecyclingLootKind::GlassBlock => Some(build_glass_item(false, slot, rng)),
+        RecyclingLootKind::GlassPane => Some(build_glass_item(true, slot, rng)),
+        RecyclingLootKind::LeatherArmor => {
+            Some(build_leather_item(random_leather_piece(rng), slot, rng))
+        }
+        RecyclingLootKind::EmptyBucket => Some(make_basic_item("minecraft:bucket", slot, 1)),
+        RecyclingLootKind::LeatherBoots => Some(build_leather_item(LeatherPiece::Boots, slot, rng)),
+        RecyclingLootKind::ScrapMetal => Some(build_scrap_metal_item(slot, rng)),
+        RecyclingLootKind::GreenWaste => Some(build_green_waste_item(slot, rng)),
+    }
+}
+
+fn build_scrap_metal_item(slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
+    let metals = ["copper_ingot", "iron_ingot", "gold_ingot"];
+    let metal = metals.choose(rng).expect("scrap metal list is non-empty");
+    let count = rng.gen_range(1..=3);
+    make_basic_item(&format!("minecraft:{metal}"), slot, count)
+}
+
+fn build_green_waste_item(slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
+    #[allow(clippy::match_same_arms)]
+    let (id, count) = match rng.gen_range(0..8) {
+        0 => ("minecraft:tall_grass", rng.gen_range(1..=4)),
+        1 => ("minecraft:sweet_berries", rng.gen_range(2..=6)),
+        2 => ("minecraft:oak_sapling", rng.gen_range(1..=2)),
+        3 => ("minecraft:birch_sapling", rng.gen_range(1..=2)),
+        4 => ("minecraft:spruce_sapling", rng.gen_range(1..=2)),
+        5 => ("minecraft:jungle_sapling", rng.gen_range(1..=2)),
+        6 => ("minecraft:acacia_sapling", rng.gen_range(1..=2)),
+        _ => ("minecraft:dark_oak_sapling", rng.gen_range(1..=2)),
+    };
+
+    // 25% chance to replace with seeds instead
+    let id = if rng.gen_bool(0.25) {
+        match rng.gen_range(0..4) {
+            0 => "minecraft:wheat_seeds",
+            1 => "minecraft:pumpkin_seeds",
+            2 => "minecraft:melon_seeds",
+            _ => "minecraft:beetroot_seeds",
+        }
+    } else {
+        id
+    };
+
+    make_basic_item(id, slot, count)
+}
+
+fn build_glass_item(is_pane: bool, slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
+    const GLASS_COLORS: &[&str] = &[
+        "white",
+        "orange",
+        "magenta",
+        "light_blue",
+        "yellow",
+        "lime",
+        "pink",
+        "gray",
+        "light_gray",
+        "cyan",
+        "purple",
+        "blue",
+        "brown",
+        "green",
+        "red",
+        "black",
+    ];
+
+    let use_colorless = rng.gen_bool(0.7);
+
+    let id = if use_colorless {
+        if is_pane {
+            "minecraft:glass_pane".to_string()
+        } else {
+            "minecraft:glass".to_string()
+        }
+    } else {
+        let color = GLASS_COLORS
+            .choose(rng)
+            .expect("glass color array is non-empty");
+        if is_pane {
+            format!("minecraft:{color}_stained_glass_pane")
+        } else {
+            format!("minecraft:{color}_stained_glass")
+        }
+    };
+
+    let count = if is_pane {
+        rng.gen_range(4..=16)
+    } else {
+        rng.gen_range(1..=6)
+    };
+
+    make_basic_item(&id, slot, count)
+}
+
+fn build_leather_item(piece: LeatherPiece, slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
+    let (id, max_damage) = match piece {
+        LeatherPiece::Helmet => ("minecraft:leather_helmet", 55),
+        LeatherPiece::Chestplate => ("minecraft:leather_chestplate", 80),
+        LeatherPiece::Leggings => ("minecraft:leather_leggings", 75),
+        LeatherPiece::Boots => ("minecraft:leather_boots", 65),
+    };
+
+    let mut item = make_basic_item(id, slot, 1);
+    let damage = biased_damage(max_damage, rng);
+
+    let mut tag = HashMap::new();
+    tag.insert("Damage".to_string(), Value::Int(damage));
+
+    if let Some(color) = maybe_leather_color(rng) {
+        let mut display = HashMap::new();
+        display.insert("color".to_string(), Value::Int(color));
+        tag.insert("display".to_string(), Value::Compound(display));
+    }
+
+    item.insert("tag".to_string(), Value::Compound(tag));
+
+    let mut components = HashMap::new();
+    components.insert("minecraft:damage".to_string(), Value::Int(damage));
+    item.insert("components".to_string(), Value::Compound(components));
+
+    item
+}
+
+fn biased_damage(max_damage: i32, rng: &mut impl Rng) -> i32 {
+    let safe_max = max_damage.max(1);
+    let upper = safe_max.saturating_sub(1);
+    let lower = (safe_max / 2).min(upper);
+
+    let heavy_wear = rng.gen_range(lower..=upper);
+    let random_wear = rng.gen_range(0..=upper);
+    heavy_wear.max(random_wear)
+}
+
+fn maybe_leather_color(rng: &mut impl Rng) -> Option<i32> {
+    if rng.gen_bool(0.3) {
+        Some(rng.gen_range(0..=0x00FF_FFFF))
+    } else {
+        None
+    }
+}
+
+fn random_leather_piece(rng: &mut impl Rng) -> LeatherPiece {
+    match rng.gen_range(0..4) {
+        0 => LeatherPiece::Helmet,
+        1 => LeatherPiece::Chestplate,
+        2 => LeatherPiece::Leggings,
+        _ => LeatherPiece::Boots,
+    }
+}
+
+fn make_basic_item(id: &str, slot: i8, count: i8) -> HashMap<String, Value> {
+    let mut item = HashMap::new();
+    item.insert("id".to_string(), Value::String(id.to_string()));
+    item.insert("Slot".to_string(), Value::Byte(slot));
+    item.insert("Count".to_string(), Value::Byte(count));
+    item
+}
+
+fn tag_enabled(tags: &HashMap<String, String>, key: &str) -> bool {
+    tags.get(key).is_some_and(|value| value == "yes")
 }

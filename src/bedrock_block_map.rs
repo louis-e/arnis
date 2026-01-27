@@ -578,6 +578,11 @@ pub fn to_bedrock_block_with_properties(
         return convert_stairs(java_name, props_map);
     }
 
+    // Handle barrel facing direction
+    if java_name == "barrel" {
+        return convert_barrel(java_name, props_map);
+    }
+
     // Handle slabs with type property (top/bottom/double)
     if java_name.ends_with("_slab") {
         return convert_slab(java_name, props_map);
@@ -646,6 +651,46 @@ fn convert_stairs(
 
     BedrockBlock {
         name: format!("minecraft:{bedrock_name}"),
+        states,
+    }
+}
+
+/// Convert Java barrel to Bedrock format with facing direction.
+fn convert_barrel(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let mut states = HashMap::new();
+
+    if let Some(props) = props {
+        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
+            let facing_direction = match facing.as_str() {
+                "down" => 0,
+                "up" => 1,
+                "north" => 2,
+                "south" => 3,
+                "west" => 4,
+                "east" => 5,
+                _ => 1,
+            };
+            states.insert(
+                "facing_direction".to_string(),
+                BedrockBlockStateValue::Int(facing_direction),
+            );
+        }
+    }
+
+    if !states.contains_key("facing_direction") {
+        states.insert(
+            "facing_direction".to_string(),
+            BedrockBlockStateValue::Int(1),
+        );
+    }
+
+    states.insert("open_bit".to_string(), BedrockBlockStateValue::Bool(false));
+
+    BedrockBlock {
+        name: format!("minecraft:{java_name}"),
         states,
     }
 }

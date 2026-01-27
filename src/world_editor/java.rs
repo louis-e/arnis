@@ -174,40 +174,9 @@ impl<'a> WorldEditor<'a> {
                     }
                 }
 
-                // Preserve existing block entities and merge with new ones
-                if let Some(existing_entities) = chunk.other.get_mut("block_entities") {
-                    if let Some(new_entities) = chunk_to_modify.other.get("block_entities") {
-                        if let (Value::List(existing), Value::List(new)) =
-                            (existing_entities, new_entities)
-                        {
-                            // Remove old entities that are replaced by new ones
-                            existing.retain(|e| {
-                                if let Value::Compound(map) = e {
-                                    let (x, y, z) = get_entity_coords(map);
-                                    !new.iter().any(|new_e| {
-                                        if let Value::Compound(new_map) = new_e {
-                                            let (nx, ny, nz) = get_entity_coords(new_map);
-                                            x == nx && y == ny && z == nz
-                                        } else {
-                                            false
-                                        }
-                                    })
-                                } else {
-                                    true
-                                }
-                            });
-                            // Add new entities
-                            existing.extend(new.clone());
-                        }
-                    }
-                } else {
-                    // If no existing entities, just add the new ones
-                    if let Some(new_entities) = chunk_to_modify.other.get("block_entities") {
-                        chunk
-                            .other
-                            .insert("block_entities".to_string(), new_entities.clone());
-                    }
-                }
+                // Preserve existing block entities and entities and merge with new ones
+                merge_compound_list(&mut chunk, chunk_to_modify, "block_entities");
+                merge_compound_list(&mut chunk, chunk_to_modify, "entities");
 
                 // Update chunk coordinates and flags
                 chunk.x_pos = chunk_x + (region_x * 32);
@@ -246,87 +215,129 @@ impl<'a> WorldEditor<'a> {
 
 /// Helper function to get entity coordinates
 #[inline]
-fn get_entity_coords(entity: &HashMap<String, Value>) -> (i32, i32, i32) {
-    let x = if let Value::Int(x) = entity.get("x").unwrap_or(&Value::Int(0)) {
-        *x
-    } else {
-        0
+fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)> {
+    if let Some(Value::List(pos)) = entity.get("Pos") {
+        if pos.len() == 3 {
+            if let (Some(x), Some(y), Some(z)) = (
+                value_to_i32(&pos[0]),
+                value_to_i32(&pos[1]),
+                value_to_i32(&pos[2]),
+            ) {
+                return Some((x, y, z));
+            }
+        }
+    }
+
+    let (Some(x), Some(y), Some(z)) = (
+        entity.get("x").and_then(value_to_i32),
+        entity.get("y").and_then(value_to_i32),
+        entity.get("z").and_then(value_to_i32),
+    ) else {
+        return None;
     };
-    let y = if let Value::Int(y) = entity.get("y").unwrap_or(&Value::Int(0)) {
-        *y
-    } else {
-        0
-    };
-    let z = if let Value::Int(z) = entity.get("z").unwrap_or(&Value::Int(0)) {
-        *z
-    } else {
-        0
-    };
-    (x, y, z)
+
+    Some((x, y, z))
 }
 
 /// Creates a Level wrapper for chunk data (Java Edition format)
 #[inline]
 fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
-    HashMap::from([(
-        "Level".to_string(),
-        Value::Compound(HashMap::from([
-            ("xPos".to_string(), Value::Int(chunk.x_pos)),
-            ("zPos".to_string(), Value::Int(chunk.z_pos)),
-            (
-                "isLightOn".to_string(),
-                Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
-            ),
-            (
-                "sections".to_string(),
-                Value::List(
-                    chunk
-                        .sections
-                        .iter()
-                        .map(|section| {
-                            let mut block_states = HashMap::from([(
-                                "palette".to_string(),
-                                Value::List(
-                                    section
-                                        .block_states
-                                        .palette
-                                        .iter()
-                                        .map(|item| {
-                                            let mut palette_item = HashMap::from([(
-                                                "Name".to_string(),
-                                                Value::String(item.name.clone()),
-                                            )]);
-                                            if let Some(props) = &item.properties {
-                                                palette_item.insert(
-                                                    "Properties".to_string(),
-                                                    props.clone(),
-                                                );
-                                            }
-                                            Value::Compound(palette_item)
-                                        })
-                                        .collect(),
-                                ),
-                            )]);
+    let mut level_map = HashMap::from([
+        ("xPos".to_string(), Value::Int(chunk.x_pos)),
+        ("zPos".to_string(), Value::Int(chunk.z_pos)),
+        (
+            "isLightOn".to_string(),
+            Value::Byte(i8::try_from(chunk.is_light_on).unwrap()),
+        ),
+        (
+            "sections".to_string(),
+            Value::List(
+                chunk
+                    .sections
+                    .iter()
+                    .map(|section| {
+                        let mut block_states = HashMap::from([(
+                            "palette".to_string(),
+                            Value::List(
+                                section
+                                    .block_states
+                                    .palette
+                                    .iter()
+                                    .map(|item| {
+                                        let mut palette_item = HashMap::from([(
+                                            "Name".to_string(),
+                                            Value::String(item.name.clone()),
+                                        )]);
+                                        if let Some(props) = &item.properties {
+                                            palette_item
+                                                .insert("Properties".to_string(), props.clone());
+                                        }
+                                        Value::Compound(palette_item)
+                                    })
+                                    .collect(),
+                            ),
+                        )]);
 
-                            // Only add the `data` attribute if it's non-empty
-                            // to maintain compatibility with third-party tools like Dynmap
-                            if let Some(data) = &section.block_states.data {
-                                if !data.is_empty() {
-                                    block_states.insert(
-                                        "data".to_string(),
-                                        Value::LongArray(data.to_owned()),
-                                    );
-                                }
+                        // Only add the `data` attribute if it's non-empty
+                        // to maintain compatibility with third-party tools like Dynmap
+                        if let Some(data) = &section.block_states.data {
+                            if !data.is_empty() {
+                                block_states
+                                    .insert("data".to_string(), Value::LongArray(data.to_owned()));
                             }
+                        }
 
-                            Value::Compound(HashMap::from([
-                                ("Y".to_string(), Value::Byte(section.y)),
-                                ("block_states".to_string(), Value::Compound(block_states)),
-                            ]))
-                        })
-                        .collect(),
-                ),
+                        Value::Compound(HashMap::from([
+                            ("Y".to_string(), Value::Byte(section.y)),
+                            ("block_states".to_string(), Value::Compound(block_states)),
+                        ]))
+                    })
+                    .collect(),
             ),
-        ])),
-    )])
+        ),
+    ]);
+
+    for (key, value) in &chunk.other {
+        level_map.insert(key.clone(), value.clone());
+    }
+
+    HashMap::from([("Level".to_string(), Value::Compound(level_map))])
+}
+
+fn merge_compound_list(chunk: &mut Chunk, chunk_to_modify: &ChunkToModify, key: &str) {
+    if let Some(existing_entities) = chunk.other.get_mut(key) {
+        if let Some(new_entities) = chunk_to_modify.other.get(key) {
+            if let (Value::List(existing), Value::List(new)) = (existing_entities, new_entities) {
+                existing.retain(|e| {
+                    if let Value::Compound(map) = e {
+                        if let Some((x, y, z)) = get_entity_coords(map) {
+                            return !new.iter().any(|new_e| {
+                                if let Value::Compound(new_map) = new_e {
+                                    get_entity_coords(new_map) == Some((x, y, z))
+                                } else {
+                                    false
+                                }
+                            });
+                        }
+                    }
+                    true
+                });
+                existing.extend(new.clone());
+            }
+        }
+    } else if let Some(new_entities) = chunk_to_modify.other.get(key) {
+        chunk.other.insert(key.to_string(), new_entities.clone());
+    }
+}
+
+fn value_to_i32(value: &Value) -> Option<i32> {
+    match value {
+        Value::Byte(v) => Some(i32::from(*v)),
+        Value::Short(v) => Some(i32::from(*v)),
+        Value::Int(v) => Some(*v),
+        Value::Long(v) => i32::try_from(*v).ok(),
+        Value::Float(v) => Some(*v as i32),
+        Value::Double(v) => Some(*v as i32),
+        _ => None,
+    }
 }

@@ -15,7 +15,7 @@ overflow-checks = true
 [features]
 default = ["gui"]
 gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "dirs", "tauri-build", "bedrock"]
-bedrock = ["bedrockrs_level", "bedrockrs_shared", "nbtx", "zip", "byteorder", "vek"]
+bedrock = ["bedrockrs_level", "bedrockrs_shared", "nbtx", "zip", "byteorder", "vek", "rusty-leveldb"]
 
 [build-dependencies]
 tauri-build = {version = "2", optional = true}
@@ -54,6 +54,7 @@ bedrockrs_shared = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", 
 nbtx = { git = "https://github.com/bedrock-crustaceans/nbtx", optional = true }
 vek = { version = "0.17", optional = true }
 zip = { version = "0.6", default-features = false, features = ["deflate"], optional = true }
+rusty-leveldb = { version = "3", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61.1", features = ["Win32_System_Console"] }

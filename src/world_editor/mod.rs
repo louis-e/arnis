@@ -27,9 +27,9 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
-use fastnbt::Value;
+use fastnbt::{IntArray, Value};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{hash_map::Entry, HashMap};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -241,6 +241,212 @@ impl<'a> WorldEditor<'a> {
         }
 
         self.set_block(SIGN, x, y, z, None, None);
+    }
+
+    /// Adds an entity at the given coordinates (Y is ground-relative).
+    #[allow(dead_code)]
+    pub fn add_entity(
+        &mut self,
+        id: &str,
+        x: i32,
+        y: i32,
+        z: i32,
+        extra_data: Option<HashMap<String, Value>>,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+
+        let absolute_y = self.get_absolute_y(x, y, z);
+
+        let mut entity = HashMap::new();
+        entity.insert("id".to_string(), Value::String(id.to_string()));
+        entity.insert(
+            "Pos".to_string(),
+            Value::List(vec![
+                Value::Double(x as f64 + 0.5),
+                Value::Double(absolute_y as f64),
+                Value::Double(z as f64 + 0.5),
+            ]),
+        );
+        entity.insert(
+            "Motion".to_string(),
+            Value::List(vec![
+                Value::Double(0.0),
+                Value::Double(0.0),
+                Value::Double(0.0),
+            ]),
+        );
+        entity.insert(
+            "Rotation".to_string(),
+            Value::List(vec![Value::Float(0.0), Value::Float(0.0)]),
+        );
+        entity.insert("OnGround".to_string(), Value::Byte(1));
+        entity.insert("FallDistance".to_string(), Value::Float(0.0));
+        entity.insert("Fire".to_string(), Value::Short(-20));
+        entity.insert("Air".to_string(), Value::Short(300));
+        entity.insert("PortalCooldown".to_string(), Value::Int(0));
+        entity.insert(
+            "UUID".to_string(),
+            Value::IntArray(build_deterministic_uuid(id, x, absolute_y, z)),
+        );
+
+        if let Some(extra) = extra_data {
+            for (key, value) in extra {
+                entity.insert(key, value);
+            }
+        }
+
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let region = self.world.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        match chunk.other.entry("entities".to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(entity));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(entity)]));
+            }
+        }
+    }
+
+    /// Places a chest with the provided items at the given coordinates (ground-relative Y).
+    #[allow(dead_code)]
+    pub fn set_chest_with_items(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        items: Vec<HashMap<String, Value>>,
+    ) {
+        let absolute_y = self.get_absolute_y(x, y, z);
+        self.set_chest_with_items_absolute(x, absolute_y, z, items);
+    }
+
+    /// Places a chest with the provided items at the given coordinates (absolute Y).
+    #[allow(dead_code)]
+    pub fn set_chest_with_items_absolute(
+        &mut self,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        items: Vec<HashMap<String, Value>>,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let mut chest_data = HashMap::new();
+        chest_data.insert(
+            "id".to_string(),
+            Value::String("minecraft:chest".to_string()),
+        );
+        chest_data.insert("x".to_string(), Value::Int(x));
+        chest_data.insert("y".to_string(), Value::Int(absolute_y));
+        chest_data.insert("z".to_string(), Value::Int(z));
+        chest_data.insert(
+            "Items".to_string(),
+            Value::List(items.into_iter().map(Value::Compound).collect()),
+        );
+        chest_data.insert("keepPacked".to_string(), Value::Byte(0));
+
+        let region = self.world.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        match chunk.other.entry("block_entities".to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(chest_data));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(chest_data)]));
+            }
+        }
+
+        self.set_block_absolute(CHEST, x, absolute_y, z, None, None);
+    }
+
+    /// Places a block entity with items at the given coordinates (ground-relative Y).
+    #[allow(dead_code)]
+    pub fn set_block_entity_with_items(
+        &mut self,
+        block_with_props: BlockWithProperties,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_entity_id: &str,
+        items: Vec<HashMap<String, Value>>,
+    ) {
+        let absolute_y = self.get_absolute_y(x, y, z);
+        self.set_block_entity_with_items_absolute(
+            block_with_props,
+            x,
+            absolute_y,
+            z,
+            block_entity_id,
+            items,
+        );
+    }
+
+    /// Places a block entity with items at the given coordinates (absolute Y).
+    #[allow(dead_code)]
+    pub fn set_block_entity_with_items_absolute(
+        &mut self,
+        block_with_props: BlockWithProperties,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        block_entity_id: &str,
+        items: Vec<HashMap<String, Value>>,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let mut block_entity = HashMap::new();
+        block_entity.insert("id".to_string(), Value::String(block_entity_id.to_string()));
+        block_entity.insert("x".to_string(), Value::Int(x));
+        block_entity.insert("y".to_string(), Value::Int(absolute_y));
+        block_entity.insert("z".to_string(), Value::Int(z));
+        block_entity.insert(
+            "Items".to_string(),
+            Value::List(items.into_iter().map(Value::Compound).collect()),
+        );
+        block_entity.insert("keepPacked".to_string(), Value::Byte(0));
+
+        let region = self.world.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        match chunk.other.entry("block_entities".to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(block_entity));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(block_entity)]));
+            }
+        }
+
+        self.set_block_with_properties_absolute(block_with_props, x, absolute_y, z, None, None);
     }
 
     /// Sets a block of the specified type at the given coordinates.
@@ -598,4 +804,31 @@ impl<'a> WorldEditor<'a> {
 
         Ok(())
     }
+}
+
+#[allow(dead_code)]
+fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32) -> IntArray {
+    let mut hash: i64 = 17;
+    for byte in id.bytes() {
+        hash = hash.wrapping_mul(31).wrapping_add(byte as i64);
+    }
+
+    let seed_a = hash ^ (x as i64).wrapping_shl(32) ^ (y as i64).wrapping_mul(17);
+    let seed_b = hash.rotate_left(7) ^ (z as i64).wrapping_mul(31) ^ (x as i64).wrapping_mul(13);
+
+    IntArray::new(vec![
+        (seed_a >> 32) as i32,
+        seed_a as i32,
+        (seed_b >> 32) as i32,
+        seed_b as i32,
+    ])
+}
+
+#[allow(dead_code)]
+fn single_item(id: &str, slot: i8, count: i8) -> HashMap<String, Value> {
+    let mut item = HashMap::new();
+    item.insert("id".to_string(), Value::String(id.to_string()));
+    item.insert("Slot".to_string(), Value::Byte(slot));
+    item.insert("Count".to_string(), Value::Byte(count));
+    item
 }
