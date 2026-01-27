@@ -592,11 +592,10 @@ fn build_green_waste_item(slot: i8, rng: &mut impl Rng) -> HashMap<String, Value
         4 => ("minecraft:spruce_sapling", rng.gen_range(1..=2)),
         5 => ("minecraft:jungle_sapling", rng.gen_range(1..=2)),
         6 => ("minecraft:acacia_sapling", rng.gen_range(1..=2)),
-        7 => ("minecraft:dark_oak_sapling", rng.gen_range(1..=2)),
-        _ => ("minecraft:wheat_seeds", rng.gen_range(2..=6)),
+        _ => ("minecraft:dark_oak_sapling", rng.gen_range(1..=2)),
     };
 
-    // Seeds for the default path above
+    // 25% chance to replace with seeds instead
     let id = if rng.gen_bool(0.25) {
         match rng.gen_range(0..4) {
             0 => "minecraft:wheat_seeds",
