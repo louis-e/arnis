@@ -285,6 +285,7 @@ impl FloodFillCache {
     /// Removes a way's cached flood fill result, freeing memory.
     ///
     /// Call this after processing an element to release its cached data.
+    #[allow(dead_code)]
     pub fn remove_way(&mut self, way_id: u64) {
         self.way_cache.remove(&way_id);
     }
@@ -292,6 +293,7 @@ impl FloodFillCache {
     /// Removes all cached flood fill results for ways in a relation.
     ///
     /// Relations contain multiple ways, so we need to remove all of them.
+    #[allow(dead_code)]
     pub fn remove_relation_ways(&mut self, way_ids: &[u64]) {
         for &id in way_ids {
             self.way_cache.remove(&id);

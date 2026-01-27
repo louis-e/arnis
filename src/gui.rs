@@ -6,6 +6,7 @@ use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
+use crate::parallel_processing::ParallelConfig;
 use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
 use crate::telemetry::{self, send_log, LogLevel};
@@ -994,6 +995,10 @@ fn gui_start_generation(
                 fillground: fillground_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
+                threads: 0,       // Auto-detect thread count
+                region_batch_size: 2, // Four regions per unit (default)
+                no_parallel: true, // Use sequential processing (parallel has bugs)
+                force_parallel: false,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -1014,6 +1019,7 @@ fn gui_start_generation(
                     ground,
                     &args,
                     generation_options.clone(),
+                    ParallelConfig::default(), // Use parallel processing
                 );
                 // Explicitly release session lock before showing Done message
                 // so Minecraft can open the world immediately
@@ -1067,6 +1073,7 @@ fn gui_start_generation(
                         ground,
                         &args,
                         generation_options.clone(),
+                        ParallelConfig::default(), // Use parallel processing
                     );
                     // Explicitly release session lock before showing Done message
                     // so Minecraft can open the world immediately

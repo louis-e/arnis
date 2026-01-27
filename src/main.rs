@@ -18,6 +18,7 @@ mod ground;
 mod map_renderer;
 mod map_transformation;
 mod osm_parser;
+mod parallel_processing;
 #[cfg(feature = "gui")]
 mod progress;
 mod retrieve_data;
@@ -25,6 +26,7 @@ mod retrieve_data;
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
+mod unit_processing;
 mod version_check;
 mod world_editor;
 

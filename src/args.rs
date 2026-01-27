@@ -58,6 +58,23 @@ pub struct Args {
     /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
+
+    /// Number of parallel threads (0 = auto, uses available cores - 1)
+    #[arg(long, default_value_t = 0)]
+    pub threads: usize,
+
+    /// Number of regions to batch per processing unit (1 = one region, 2 = 2x2=4 regions, etc.)
+    /// Larger batches reduce element duplication overhead but use more memory per unit
+    #[arg(long, default_value_t = 2)]
+    pub region_batch_size: usize,
+
+    /// Disable parallel processing (process sequentially) - DEFAULT due to correctness issues
+    #[arg(long, default_value_t = true)]
+    pub no_parallel: bool,
+    
+    /// Force parallel processing (experimental, may have visual bugs)
+    #[arg(long)]
+    pub force_parallel: bool,
 }
 
 fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {

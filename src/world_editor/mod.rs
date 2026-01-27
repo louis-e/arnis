@@ -516,6 +516,18 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    /// Saves regions silently without progress messages (for parallel unit processing).
+    /// Does not save metadata - call save_metadata() separately if needed.
+    pub fn save_silent(&mut self) {
+        match self.format {
+            WorldFormat::JavaAnvil => self.save_java_silent(),
+            WorldFormat::BedrockMcWorld => {
+                // For Bedrock, use normal save since it's not called per-unit
+                self.save_bedrock();
+            }
+        }
+    }
+
     #[allow(unreachable_code)]
     fn save_bedrock(&mut self) {
         println!("{} Saving Bedrock world...", "[7/7]".bold());

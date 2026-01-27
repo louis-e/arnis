@@ -1,4 +1,4 @@
-mod xzbbox;
+pub mod xzbbox;
 mod xzpoint;
 mod xzvector;
 
