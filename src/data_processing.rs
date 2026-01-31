@@ -98,6 +98,10 @@ pub fn generate_world_with_options(
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
+    // Collect boundary elements to process after all other elements
+    // This ensures boundaries don't overwrite any landuse/leisure/etc ground blocks
+    let mut boundary_elements: Vec<ProcessedElement> = Vec::new();
+
     // Process elements by draining in insertion order
     for element in elements.drain(..) {
         process_pb.inc(1);
@@ -129,6 +133,9 @@ pub fn generate_world_with_options(
                         &highway_connectivity,
                         &flood_fill_cache,
                     );
+                } else if way.tags.contains_key("boundary") {
+                    // Defer boundary processing to after all other elements
+                    boundary_elements.push(element.clone());
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(
                         &mut editor,
@@ -236,6 +243,9 @@ pub fn generate_world_with_options(
                         &flood_fill_cache,
                         &building_footprints,
                     );
+                } else if rel.tags.contains_key("boundary") {
+                    // Defer boundary processing to after all other elements
+                    boundary_elements.push(element.clone());
                 } else if rel.tags.contains_key("landuse") {
                     landuse::generate_landuse_from_relation(
                         &mut editor,
@@ -264,6 +274,28 @@ pub fn generate_world_with_options(
     }
 
     process_pb.finish();
+
+    // Process deferred boundary elements after all other elements
+    // This ensures boundaries only fill empty areas, they won't overwrite
+    // any ground blocks set by landuse, leisure, natural, etc.
+    if !boundary_elements.is_empty() {
+        for element in boundary_elements {
+            match &element {
+                ProcessedElement::Way(way) => {
+                    boundaries::generate_boundary(&mut editor, way, args, &flood_fill_cache);
+                }
+                ProcessedElement::Relation(rel) => {
+                    boundaries::generate_boundary_from_relation(
+                        &mut editor,
+                        rel,
+                        args,
+                        &flood_fill_cache,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
 
     // Drop remaining caches
     drop(highway_connectivity);

@@ -137,6 +137,7 @@ pub fn fetch_data_from_overpass(
         nwr["barrier"];
         nwr["entrance"];
         nwr["door"];
+        nwr["boundary"];
         way;
     )->.relsinbbox;
     (
