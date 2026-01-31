@@ -85,9 +85,15 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
+    // Partition elements: separate boundary elements for deferred processing
+    // This avoids cloning by moving elements instead of copying them
+    let (boundary_elements, other_elements): (Vec<_>, Vec<_>) =
+        elements.into_iter().partition(|element| {
+            element.tags().contains_key("boundary")
+        });
+
     // Process data
-    let elements_count: usize = elements.len();
-    let mut elements = elements; // Take ownership for consuming
+    let elements_count: usize = other_elements.len() + boundary_elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
     process_pb.set_style(ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
@@ -98,12 +104,8 @@ pub fn generate_world_with_options(
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
-    // Collect boundary elements to process after all other elements
-    // This ensures boundaries don't overwrite any landuse/leisure/etc ground blocks
-    let mut boundary_elements: Vec<ProcessedElement> = Vec::new();
-
-    // Process elements by draining in insertion order
-    for element in elements.drain(..) {
+    // Process non-boundary elements first
+    for element in other_elements.into_iter() {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {
@@ -133,9 +135,6 @@ pub fn generate_world_with_options(
                         &highway_connectivity,
                         &flood_fill_cache,
                     );
-                } else if way.tags.contains_key("boundary") {
-                    // Defer boundary processing to after all other elements
-                    boundary_elements.push(element.clone());
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(
                         &mut editor,
@@ -243,9 +242,6 @@ pub fn generate_world_with_options(
                         &flood_fill_cache,
                         &building_footprints,
                     );
-                } else if rel.tags.contains_key("boundary") {
-                    // Defer boundary processing to after all other elements
-                    boundary_elements.push(element.clone());
                 } else if rel.tags.contains_key("landuse") {
                     landuse::generate_landuse_from_relation(
                         &mut editor,
@@ -278,24 +274,28 @@ pub fn generate_world_with_options(
     // Process deferred boundary elements after all other elements
     // This ensures boundaries only fill empty areas, they won't overwrite
     // any ground blocks set by landuse, leisure, natural, etc.
-    if !boundary_elements.is_empty() {
-        for element in boundary_elements {
-            match &element {
-                ProcessedElement::Way(way) => {
-                    boundaries::generate_boundary(&mut editor, way, args, &flood_fill_cache);
-                }
-                ProcessedElement::Relation(rel) => {
-                    boundaries::generate_boundary_from_relation(
-                        &mut editor,
-                        rel,
-                        args,
-                        &flood_fill_cache,
-                        &xzbbox,
-                    );
-                }
-                _ => {}
+    for element in boundary_elements.into_iter() {
+        match &element {
+            ProcessedElement::Way(way) => {
+                boundaries::generate_boundary(&mut editor, way, args, &flood_fill_cache);
+                // Clean up cache entry for consistency with other element processing
+                flood_fill_cache.remove_way(way.id);
             }
+            ProcessedElement::Relation(rel) => {
+                boundaries::generate_boundary_from_relation(
+                    &mut editor,
+                    rel,
+                    args,
+                    &flood_fill_cache,
+                    &xzbbox,
+                );
+                // Clean up cache entries for consistency with other element processing
+                let way_ids: Vec<u64> = rel.members.iter().map(|m| m.way.id).collect();
+                flood_fill_cache.remove_relation_ways(&way_ids);
+            }
+            _ => {}
         }
+        // Element is dropped here, freeing its memory immediately
     }
 
     // Drop remaining caches

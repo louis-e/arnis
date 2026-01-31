@@ -3,8 +3,9 @@
 //! This module handles boundary elements that define urban areas (cities, boroughs, etc.)
 //! and sets appropriate ground blocks for them.
 //!
-//! Boundaries are processed BEFORE landuse elements, so more specific landuse areas
-//! (parks, residential, etc.) can override the general urban ground.
+//! Boundaries are processed last but only fill empty areas, allowing more specific
+//! landuse areas (parks, residential, etc.) to take priority over the general
+//! urban ground.
 
 use crate::args::Args;
 use crate::block_definitions::*;
