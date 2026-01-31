@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS, GRASS_BLOCK, SMOOTH_STONE, STONE, STONE_BRICK_SLAB};
+use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
