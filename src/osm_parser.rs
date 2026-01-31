@@ -272,13 +272,17 @@ pub fn parse_osm_data(
             continue;
         };
 
-        // Only process multipolygons for now
-        if tags.get("type").map(|x: &String| x.as_str()) != Some("multipolygon") {
+        // Process multipolygons and boundary relations
+        let relation_type = tags.get("type").map(|x: &String| x.as_str());
+        if relation_type != Some("multipolygon") && relation_type != Some("boundary") {
             continue;
         };
 
         // Water relations require unclipped ways for ring merging in water_areas.rs
+        // Boundary relations also require unclipped ways for proper ring assembly
         let is_water_relation = is_water_element(tags);
+        let is_boundary_relation = tags.contains_key("boundary");
+        let keep_unclipped = is_water_relation || is_boundary_relation;
 
         let members: Vec<ProcessedMember> = element
             .members
@@ -304,9 +308,9 @@ pub fn parse_osm_data(
                     }
                 };
 
-                // Water relations: keep unclipped for ring merging
-                // Non-water relations: clip member ways now
-                let final_way = if is_water_relation {
+                // Water and boundary relations: keep unclipped for ring merging
+                // Other relations: clip member ways now
+                let final_way = if keep_unclipped {
                     way
                 } else {
                     let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);

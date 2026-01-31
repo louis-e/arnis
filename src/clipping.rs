@@ -14,6 +14,9 @@ pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Process
         return Vec::new();
     }
 
+    // Get way ID for ID generation
+    let way_id = nodes.first().map(|n| n.id).unwrap_or(0);
+
     let is_closed = is_closed_polygon(nodes);
 
     if !is_closed {
@@ -54,12 +57,13 @@ pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Process
     }
 
     let polygon = insert_bbox_corners(polygon, min_x, min_z, max_x, max_z);
+
     let polygon = remove_consecutive_duplicates(polygon);
+
     if polygon.len() < 3 {
         return Vec::new();
     }
 
-    let way_id = nodes.first().map(|n| n.id).unwrap_or(0);
     assign_node_ids_preserving_endpoints(nodes, polygon, way_id)
 }
 
@@ -496,12 +500,15 @@ fn find_bbox_intersections(
 
 /// Returns which bbox edge a point lies on: 0=bottom, 1=right, 2=top, 3=left, -1=interior.
 fn get_bbox_edge(point: (f64, f64), min_x: f64, min_z: f64, max_x: f64, max_z: f64) -> i32 {
-    let eps = 0.5;
+    // Use a slightly larger epsilon to handle floating-point errors from Sutherland-Hodgman.
+    // Points should be clamped to bbox before this function is called, so any point
+    // at or very near the boundary should be considered ON that edge.
+    let eps = 1.0;
 
-    let on_left = (point.0 - min_x).abs() < eps;
-    let on_right = (point.0 - max_x).abs() < eps;
-    let on_bottom = (point.1 - min_z).abs() < eps;
-    let on_top = (point.1 - max_z).abs() < eps;
+    let on_left = (point.0 - min_x).abs() <= eps;
+    let on_right = (point.0 - max_x).abs() <= eps;
+    let on_bottom = (point.1 - min_z).abs() <= eps;
+    let on_top = (point.1 - max_z).abs() <= eps;
 
     // Handle corners (assign to edge in counter-clockwise order)
     if on_bottom && on_left {
@@ -556,20 +563,21 @@ fn get_corners_between_edges(
     let ccw_dist = ((edge2 - edge1 + 4) % 4) as usize;
     let cw_dist = ((edge1 - edge2 + 4) % 4) as usize;
 
-    // Opposite edges: don't insert corners
-    if ccw_dist == 2 && cw_dist == 2 {
-        return Vec::new();
-    }
+    // For opposite edges (distance = 2), we need to pick a direction.
+    // Use counter-clockwise by default to ensure corners are inserted.
+    // This prevents diagonal lines when polygon spans opposite bbox edges.
 
     let mut result = Vec::new();
 
     if ccw_dist <= cw_dist {
+        // Go counter-clockwise
         let mut current = edge1;
         for _ in 0..ccw_dist {
             result.push(corners[current as usize]);
             current = (current + 1) % 4;
         }
     } else {
+        // Go clockwise
         let mut current = edge1;
         for _ in 0..cw_dist {
             current = (current + 4 - 1) % 4;
@@ -578,6 +586,12 @@ fn get_corners_between_edges(
     }
 
     result
+}
+
+/// Checks if two points are approximately equal (within epsilon tolerance).
+fn points_approx_equal(p1: (f64, f64), p2: (f64, f64)) -> bool {
+    let eps = 1.0;
+    (p1.0 - p2.0).abs() <= eps && (p1.1 - p2.1).abs() <= eps
 }
 
 /// Inserts bbox corners where polygon transitions between different bbox edges.
@@ -604,8 +618,13 @@ fn insert_bbox_corners(
         let edge2 = get_bbox_edge(next, min_x, min_z, max_x, max_z);
 
         if edge1 >= 0 && edge2 >= 0 && edge1 != edge2 {
-            for corner in get_corners_between_edges(edge1, edge2, min_x, min_z, max_x, max_z) {
-                result.push(corner);
+            let corners = get_corners_between_edges(edge1, edge2, min_x, min_z, max_x, max_z);
+
+            // Filter out corners that match the current point or the next point
+            for corner in corners {
+                if !points_approx_equal(corner, current) && !points_approx_equal(corner, next) {
+                    result.push(corner);
+                }
             }
         }
     }

@@ -275,6 +275,8 @@ impl Block {
             194 => "chiseled_bookshelf",
             195 => "chipped_anvil",
             196 => "damaged_anvil",
+            197 => "large_fern",
+            198 => "large_fern",
             _ => panic!("Invalid id"),
         }
     }
@@ -490,6 +492,17 @@ impl Block {
             194 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("facing".to_string(), Value::String("west".to_string()));
+                map
+            })),
+
+            197 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            197 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
             _ => None,
@@ -737,6 +750,8 @@ pub const CHISELLED_BOOKSHELF_WEST: Block = Block::new(194);
 pub const CHISELLED_BOOKSHELF: Block = CHISELLED_BOOKSHELF_NORTH;
 pub const CHIPPED_ANVIL: Block = Block::new(195);
 pub const DAMAGED_ANVIL: Block = Block::new(196);
+pub const LARGE_FERN_LOWER: Block = Block::new(197);
+pub const LARGE_FERN_UPPER: Block = Block::new(198);
 
 /// Maps a block to its corresponding stair variant
 #[inline]

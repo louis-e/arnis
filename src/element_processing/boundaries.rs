@@ -8,8 +8,10 @@
 
 use crate::args::Args;
 use crate::block_definitions::*;
+use crate::clipping::clip_way_to_bbox;
+use crate::coordinate_system::cartesian::XZBBox;
 use crate::floodfill_cache::FloodFillCache;
-use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
+use crate::osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 
 /// Checks if a boundary element represents an urban area that should have stone ground.
@@ -77,37 +79,148 @@ pub fn generate_boundary_from_relation(
     rel: &ProcessedRelation,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    xzbbox: &XZBBox,
 ) {
     // Check if this is an urban boundary
     if !is_urban_boundary(&rel.tags) {
         return;
     }
 
-    // Generate individual ways with their original tags
-    for member in &rel.members {
-        if member.role == ProcessedMemberRole::Outer {
-            generate_boundary(editor, &member.way.clone(), args, flood_fill_cache);
-        }
+    // Collect outer ways (unclipped) for merging
+    let mut outers: Vec<Vec<ProcessedNode>> = rel
+        .members
+        .iter()
+        .filter(|m| m.role == ProcessedMemberRole::Outer)
+        .map(|m| m.way.nodes.clone())
+        .collect();
+
+    if outers.is_empty() {
+        return;
     }
 
-    // Combine all outer ways into one with relation tags
-    let mut combined_nodes = Vec::new();
-    for member in &rel.members {
-        if member.role == ProcessedMemberRole::Outer {
-            combined_nodes.extend(member.way.nodes.clone());
-        }
-    }
+    // Merge way segments into closed rings
+    merge_way_segments(&mut outers);
 
-    // Only process if we have nodes
-    if !combined_nodes.is_empty() {
-        // Create combined way with relation tags
-        let combined_way = ProcessedWay {
+    // Clip each merged ring to bbox and process
+    for ring in outers {
+        if ring.len() < 3 {
+            continue;
+        }
+
+        // Clip the merged ring to bbox
+        let clipped_nodes = clip_way_to_bbox(&ring, xzbbox);
+        if clipped_nodes.len() < 3 {
+            continue;
+        }
+
+        // Create a ProcessedWay for the clipped ring
+        let clipped_way = ProcessedWay {
             id: rel.id,
-            nodes: combined_nodes,
+            nodes: clipped_nodes,
             tags: rel.tags.clone(),
         };
 
-        // Generate boundary area from combined way
-        generate_boundary(editor, &combined_way, args, flood_fill_cache);
+        // Generate boundary area from clipped way
+        generate_boundary(editor, &clipped_way, args, flood_fill_cache);
+    }
+}
+
+/// Merges way segments that share endpoints into closed rings.
+/// This is the same algorithm used by water_areas.rs.
+fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
+    let mut removed: Vec<usize> = vec![];
+    let mut merged: Vec<Vec<ProcessedNode>> = vec![];
+
+    // Match nodes by ID or proximity (handles synthetic nodes from bbox clipping)
+    let nodes_match = |a: &ProcessedNode, b: &ProcessedNode| -> bool {
+        if a.id == b.id {
+            return true;
+        }
+        let dx = (a.x - b.x).abs();
+        let dz = (a.z - b.z).abs();
+        dx <= 1 && dz <= 1
+    };
+
+    for i in 0..rings.len() {
+        for j in 0..rings.len() {
+            if i == j {
+                continue;
+            }
+
+            if removed.contains(&i) || removed.contains(&j) {
+                continue;
+            }
+
+            let x: &Vec<ProcessedNode> = &rings[i];
+            let y: &Vec<ProcessedNode> = &rings[j];
+
+            // Skip empty rings
+            if x.is_empty() || y.is_empty() {
+                continue;
+            }
+
+            let x_first = &x[0];
+            let x_last = x.last().unwrap();
+            let y_first = &y[0];
+            let y_last = y.last().unwrap();
+
+            // Skip already-closed rings
+            if nodes_match(x_first, x_last) {
+                continue;
+            }
+
+            if nodes_match(y_first, y_last) {
+                continue;
+            }
+
+            if nodes_match(x_first, y_first) {
+                removed.push(i);
+                removed.push(j);
+
+                let mut x: Vec<ProcessedNode> = x.clone();
+                x.reverse();
+                x.extend(y.iter().skip(1).cloned());
+                merged.push(x);
+            } else if nodes_match(x_last, y_last) {
+                removed.push(i);
+                removed.push(j);
+
+                let mut x: Vec<ProcessedNode> = x.clone();
+                x.extend(y.iter().rev().skip(1).cloned());
+
+                merged.push(x);
+            } else if nodes_match(x_first, y_last) {
+                removed.push(i);
+                removed.push(j);
+
+                let mut y: Vec<ProcessedNode> = y.clone();
+                y.extend(x.iter().skip(1).cloned());
+
+                merged.push(y);
+            } else if nodes_match(x_last, y_first) {
+                removed.push(i);
+                removed.push(j);
+
+                let mut x: Vec<ProcessedNode> = x.clone();
+                x.extend(y.iter().skip(1).cloned());
+
+                merged.push(x);
+            }
+        }
+    }
+
+    removed.sort();
+
+    for r in removed.iter().rev() {
+        rings.remove(*r);
+    }
+
+    let merged_len: usize = merged.len();
+    for m in merged {
+        rings.push(m);
+    }
+
+    if merged_len > 0 {
+        merge_way_segments(rings);
     }
 }

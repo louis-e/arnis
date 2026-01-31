@@ -158,6 +158,11 @@ pub fn generate_landuse(
                         Tree::create(editor, (x, 1, z), Some(building_footprints));
                     } else if random_choice < 35 {
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                    } else if random_choice < 37 {
+                        editor.set_block(FERN, x, 1, z, None, None);
+                    } else if random_choice < 41 {
+                        editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
+                        editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
                     }
                 }
             }
@@ -175,11 +180,12 @@ pub fn generate_landuse(
                             Some(building_footprints),
                         );
                     } else if random_choice == 2 {
-                        let flower_block: Block = match rng.gen_range(1..=5) {
+                        let flower_block: Block = match rng.gen_range(1..=6) {
                             1 => OAK_LEAVES,
                             2 => RED_FLOWER,
                             3 => BLUE_FLOWER,
                             4 => YELLOW_FLOWER,
+                            5 => FERN,
                             _ => WHITE_FLOWER,
                         };
                         editor.set_block(flower_block, x, 1, z, None, None);
@@ -301,7 +307,7 @@ pub fn generate_landuse(
                     match rng.gen_range(0..200) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
                         1..=2 => editor.set_block(FERN, x, 1, z, None, None),
-                        3..=17 => editor.set_block(GRASS, x, 1, z, None, None),
+                        3..=16 => editor.set_block(GRASS, x, 1, z, None, None),
                         _ => {}
                     }
                 }
@@ -317,7 +323,10 @@ pub fn generate_landuse(
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                     } else if random_choice < 40 {
                         editor.set_block(FERN, x, 1, z, None, None);
-                    } else if random_choice < 800 {
+                    } else if random_choice < 65 {
+                        editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
+                        editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
+                    } else if random_choice < 825 {
                         editor.set_block(GRASS, x, 1, z, None, None);
                     }
                 }

@@ -69,7 +69,7 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
             barrier_material = LIGHT_GRAY_CONCRETE;
         }
         if barrier_mat == "metal" {
-            barrier_material = STONE_BRICK_WALL; // IRON_BARS
+            barrier_material = STONE_BRICK_WALL;
         }
     }
 
@@ -80,7 +80,8 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
             .get("height")
             .and_then(|height: &String| height.parse::<f32>().ok())
             .map(|height: f32| height.round() as i32)
-            .unwrap_or(barrier_height);
+            .unwrap_or(barrier_height)
+            .max(2); // Minimum height of 2
 
         // Process nodes to create the barrier wall
         for i in 1..way.nodes.len() {

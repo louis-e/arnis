@@ -100,14 +100,16 @@ pub fn generate_leisure(
 
                     match random_choice {
                         0..30 => {
-                            // Flowers
-                            let flower_choice = match random_choice {
-                                0..10 => RED_FLOWER,
-                                10..20 => YELLOW_FLOWER,
-                                20..30 => BLUE_FLOWER,
-                                _ => WHITE_FLOWER,
+                            // Plants
+                            let plant_choice = match random_choice {
+                                0..5 => RED_FLOWER,
+                                5..10 => YELLOW_FLOWER,
+                                10..16 => BLUE_FLOWER,
+                                16..22 => WHITE_FLOWER,
+                                22..30 => FERN,
+                                _ => unreachable!(),
                             };
-                            editor.set_block(flower_choice, x, 1, z, None, None);
+                            editor.set_block(plant_choice, x, 1, z, None, None);
                         }
                         30..90 => {
                             // Grass

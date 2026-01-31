@@ -1,0 +1,421 @@
+========== DEBUG clip_way_to_bbox (way_id=3765190261) ==========
+BBOX corners: bottom-left=(0, 0), bottom-right=(301, 0), top-right=(301, 447), top-left=(0, 447)
+INPUT polygon bounding box: x=[-514, 826], z=[-1016, 116]
+INPUT polygon surrounds user bbox: false
+INPUT: 173 nodes, is_closed=true
+First 10 input nodes:
+  [0] id=3765190261, (529, 30) inside=false
+  [1] id=3765209149, (529, 34) inside=false
+  [2] id=3765189256, (529, 37) inside=false
+  [3] id=3765189253, (529, 39) inside=false
+  [4] id=3765209113, (529, 40) inside=false
+  [5] id=3765209103, (529, 42) inside=false
+  [6] id=3765189252, (529, 48) inside=false
+  [7] id=3765189251, (530, 53) inside=false
+  [8] id=3765189247, (530, 55) inside=false
+  [9] id=3765189246, (530, 56) inside=false
+  ... (163 more nodes)
+Last 5 input nodes:
+  [168] id=1973883218, (533, -79) inside=false
+  [169] id=20821179, (530, -59) inside=false
+  [170] id=20821180, (527, -6) inside=false
+  [171] id=3765220266, (527, 18) inside=false
+  [172] id=3765190261, (529, 30) inside=false
+AFTER Sutherland-Hodgman: 25 points
+  [0] (286.00, 99.00) edge=-1
+  [1] (242.00, 100.00) edge=-1
+  [2] (166.00, 109.00) edge=-1
+  [3] (164.00, 104.00) edge=-1
+  [4] (157.00, 105.00) edge=-1
+  [5] (155.00, 105.00) edge=-1
+  [6] (154.00, 105.00) edge=-1
+  [7] (152.00, 105.00) edge=-1
+  [8] (150.00, 105.00) edge=-1
+  [9] (143.00, 106.00) edge=-1
+  [10] (138.00, 107.00) edge=-1
+  [11] (136.00, 107.00) edge=-1
+  [12] (134.00, 107.00) edge=-1
+  [13] (131.00, 108.00) edge=-1
+  [14] (128.00, 108.00) edge=-1
+  [15] (126.00, 114.00) edge=-1
+  [16] (118.00, 116.00) edge=-1
+  [17] (75.00, 115.00) edge=-1
+  [18] (11.00, 114.00) edge=-1
+  [19] (1.00, 114.00) edge=3
+  [20] (0.00, 113.73) edge=3
+  [21] (0.00, 0.00) edge=3
+  [22] (301.00, 0.00) edge=0
+  [23] (301.00, 101.00) edge=1
+  [24] (286.00, 101.00) edge=-1
+BEFORE corner insertion: 25 points
+  [0] (286.00, 99.00) edge=-1
+  [1] (242.00, 100.00) edge=-1
+  [2] (166.00, 109.00) edge=-1
+  [3] (164.00, 104.00) edge=-1
+  [4] (157.00, 105.00) edge=-1
+  [5] (155.00, 105.00) edge=-1
+  [6] (154.00, 105.00) edge=-1
+  [7] (152.00, 105.00) edge=-1
+  [8] (150.00, 105.00) edge=-1
+  [9] (143.00, 106.00) edge=-1
+  [10] (138.00, 107.00) edge=-1
+  [11] (136.00, 107.00) edge=-1
+  [12] (134.00, 107.00) edge=-1
+  [13] (131.00, 108.00) edge=-1
+  [14] (128.00, 108.00) edge=-1
+  [15] (126.00, 114.00) edge=-1
+  [16] (118.00, 116.00) edge=-1
+  [17] (75.00, 115.00) edge=-1
+  [18] (11.00, 114.00) edge=-1
+  [19] (1.00, 114.00) edge=3
+  [20] (0.00, 113.73) edge=3
+  [21] (0.00, 0.00) edge=3
+  [22] (301.00, 0.00) edge=0
+  [23] (301.00, 101.00) edge=1
+  [24] (286.00, 101.00) edge=-1
+  Corner check: (0.00, 0.00) edge=3 -> (301.00, 0.00) edge=0
+    Raw corners to insert: [(0.0, 0.0)]
+    Filtering corner (0.0, 0.0): eq_current=true, eq_next=false
+    After filtering: []
+  Corner check: (301.00, 0.00) edge=0 -> (301.00, 101.00) edge=1
+    Raw corners to insert: [(301.0, 0.0)]
+    Filtering corner (301.0, 0.0): eq_current=true, eq_next=false
+    After filtering: []
+AFTER corner insertion: 25 points
+  [0] (286.00, 99.00) edge=-1
+  [1] (242.00, 100.00) edge=-1
+  [2] (166.00, 109.00) edge=-1
+  [3] (164.00, 104.00) edge=-1
+  [4] (157.00, 105.00) edge=-1
+  [5] (155.00, 105.00) edge=-1
+  [6] (154.00, 105.00) edge=-1
+  [7] (152.00, 105.00) edge=-1
+  [8] (150.00, 105.00) edge=-1
+  [9] (143.00, 106.00) edge=-1
+  [10] (138.00, 107.00) edge=-1
+  [11] (136.00, 107.00) edge=-1
+  [12] (134.00, 107.00) edge=-1
+  [13] (131.00, 108.00) edge=-1
+  [14] (128.00, 108.00) edge=-1
+  [15] (126.00, 114.00) edge=-1
+  [16] (118.00, 116.00) edge=-1
+  [17] (75.00, 115.00) edge=-1
+  [18] (11.00, 114.00) edge=-1
+  [19] (1.00, 114.00) edge=3
+  [20] (0.00, 113.73) edge=3
+  [21] (0.00, 0.00) edge=3
+  [22] (301.00, 0.00) edge=0
+  [23] (301.00, 101.00) edge=1
+  [24] (286.00, 101.00) edge=-1
+FINAL OUTPUT: 25 points
+  [0] (286.00, 99.00) edge=-1
+  [1] (242.00, 100.00) edge=-1
+  [2] (166.00, 109.00) edge=-1
+  [3] (164.00, 104.00) edge=-1
+  [4] (157.00, 105.00) edge=-1
+  [5] (155.00, 105.00) edge=-1
+  [6] (154.00, 105.00) edge=-1
+  [7] (152.00, 105.00) edge=-1
+  [8] (150.00, 105.00) edge=-1
+  [9] (143.00, 106.00) edge=-1
+  [10] (138.00, 107.00) edge=-1
+  [11] (136.00, 107.00) edge=-1
+  [12] (134.00, 107.00) edge=-1
+  [13] (131.00, 108.00) edge=-1
+  [14] (128.00, 108.00) edge=-1
+  [15] (126.00, 114.00) edge=-1
+  [16] (118.00, 116.00) edge=-1
+  [17] (75.00, 115.00) edge=-1
+  [18] (11.00, 114.00) edge=-1
+  [19] (1.00, 114.00) edge=3
+  [20] (0.00, 113.73) edge=3
+  [21] (0.00, 0.00) edge=3
+  [22] (301.00, 0.00) edge=0
+  [23] (301.00, 101.00) edge=1
+  [24] (286.00, 101.00) edge=-1
+========== END DEBUG ==========
+
+FINAL ProcessedNodes (integer coords):
+  [0] id=37651902610000000 x=286 z=99
+  [1] id=37651902610000001 x=242 z=100
+  [2] id=37651902610000002 x=166 z=109
+  [3] id=37651902610000003 x=164 z=104
+  [4] id=37651902610000004 x=157 z=105
+  [5] id=37651902610000005 x=155 z=105
+  [6] id=37651902610000006 x=154 z=105
+  [7] id=37651902610000007 x=152 z=105
+  [8] id=37651902610000008 x=150 z=105
+  [9] id=37651902610000009 x=143 z=106
+  [10] id=37651902610000010 x=138 z=107
+  [11] id=37651902610000011 x=136 z=107
+  [12] id=37651902610000012 x=134 z=107
+  [13] id=37651902610000013 x=131 z=108
+  [14] id=37651902610000014 x=128 z=108
+  [15] id=37651902610000015 x=126 z=114
+  [16] id=37651902610000016 x=118 z=116
+  [17] id=37651902610000017 x=75 z=115
+  [18] id=37651902610000018 x=11 z=114
+  [19] id=37651902610000019 x=1 z=114
+  [20] id=37651902610000020 x=0 z=114
+  [21] id=37651902610000021 x=0 z=0
+  [22] id=37651902610000022 x=301 z=0
+  [23] id=37651902610000023 x=301 z=101
+  [24] id=37651902610000024 x=286 z=101
+Integer bbox: x=[0, 301], z=[0, 447]
+Polygon signed area: -65101.00 (positive=CW, negative=CCW)
+========== END DEBUG (ProcessedNodes) ==========
+
+
+========== DEBUG clip_way_to_bbox (way_id=1436361378) ==========
+BBOX corners: bottom-left=(0, 0), bottom-right=(301, 0), top-right=(301, 447), top-left=(0, 447)
+INPUT polygon bounding box: x=[-141, 516], z=[-215, 115]
+INPUT polygon surrounds user bbox: false
+INPUT: 158 nodes, is_closed=true
+First 10 input nodes:
+  [0] id=1436361378, (2, -70) inside=false
+  [1] id=1436361379, (3, -44) inside=false
+  [2] id=1436361312, (1, -8) inside=false
+  [3] id=1436361246, (-4, 0) inside=false
+  [4] id=1436361342, (-11, 13) inside=false
+  [5] id=1436361315, (-32, 19) inside=false
+  [6] id=1436361288, (-38, 6) inside=false
+  [7] id=1436361344, (-51, 3) inside=false
+  [8] id=1436361348, (-77, 10) inside=false
+  [9] id=1436361289, (-90, 13) inside=false
+  ... (148 more nodes)
+Last 5 input nodes:
+  [153] id=1436361310, (40, -58) inside=false
+  [154] id=1436361321, (42, -76) inside=false
+  [155] id=1436361275, (29, -82) inside=false
+  [156] id=1436361364, (20, -82) inside=false
+  [157] id=1436361378, (2, -70) inside=false
+AFTER Sutherland-Hodgman: 22 points
+  [0] (0.00, 113.72) edge=3
+  [1] (1.00, 114.00) edge=3
+  [2] (11.00, 114.00) edge=-1
+  [3] (75.00, 115.00) edge=-1
+  [4] (82.00, 101.00) edge=-1
+  [5] (81.00, 95.00) edge=-1
+  [6] (68.00, 94.00) edge=-1
+  [7] (53.00, 94.00) edge=-1
+  [8] (32.00, 102.00) edge=-1
+  [9] (25.00, 55.00) edge=-1
+  [10] (28.00, 47.00) edge=-1
+  [11] (97.00, 41.00) edge=-1
+  [12] (230.00, 21.00) edge=-1
+  [13] (271.00, 24.00) edge=-1
+  [14] (273.00, 14.00) edge=-1
+  [15] (271.00, 3.00) edge=-1
+  [16] (270.60, 0.00) edge=0
+  [17] (51.93, 0.00) edge=0
+  [18] (43.00, 2.00) edge=-1
+  [19] (29.00, 4.00) edge=-1
+  [20] (30.00, 0.00) edge=0
+  [21] (0.00, 0.00) edge=3
+BEFORE corner insertion: 22 points
+  [0] (0.00, 113.72) edge=3
+  [1] (1.00, 114.00) edge=3
+  [2] (11.00, 114.00) edge=-1
+  [3] (75.00, 115.00) edge=-1
+  [4] (82.00, 101.00) edge=-1
+  [5] (81.00, 95.00) edge=-1
+  [6] (68.00, 94.00) edge=-1
+  [7] (53.00, 94.00) edge=-1
+  [8] (32.00, 102.00) edge=-1
+  [9] (25.00, 55.00) edge=-1
+  [10] (28.00, 47.00) edge=-1
+  [11] (97.00, 41.00) edge=-1
+  [12] (230.00, 21.00) edge=-1
+  [13] (271.00, 24.00) edge=-1
+  [14] (273.00, 14.00) edge=-1
+  [15] (271.00, 3.00) edge=-1
+  [16] (270.60, 0.00) edge=0
+  [17] (51.93, 0.00) edge=0
+  [18] (43.00, 2.00) edge=-1
+  [19] (29.00, 4.00) edge=-1
+  [20] (30.00, 0.00) edge=0
+  [21] (0.00, 0.00) edge=3
+  Corner check: (30.00, 0.00) edge=0 -> (0.00, 0.00) edge=3
+    Raw corners to insert: [(0.0, 0.0)]
+    Filtering corner (0.0, 0.0): eq_current=false, eq_next=true
+    After filtering: []
+AFTER corner insertion: 22 points
+  [0] (0.00, 113.72) edge=3
+  [1] (1.00, 114.00) edge=3
+  [2] (11.00, 114.00) edge=-1
+  [3] (75.00, 115.00) edge=-1
+  [4] (82.00, 101.00) edge=-1
+  [5] (81.00, 95.00) edge=-1
+  [6] (68.00, 94.00) edge=-1
+  [7] (53.00, 94.00) edge=-1
+  [8] (32.00, 102.00) edge=-1
+  [9] (25.00, 55.00) edge=-1
+  [10] (28.00, 47.00) edge=-1
+  [11] (97.00, 41.00) edge=-1
+  [12] (230.00, 21.00) edge=-1
+  [13] (271.00, 24.00) edge=-1
+  [14] (273.00, 14.00) edge=-1
+  [15] (271.00, 3.00) edge=-1
+  [16] (270.60, 0.00) edge=0
+  [17] (51.93, 0.00) edge=0
+  [18] (43.00, 2.00) edge=-1
+  [19] (29.00, 4.00) edge=-1
+  [20] (30.00, 0.00) edge=0
+  [21] (0.00, 0.00) edge=3
+FINAL OUTPUT: 22 points
+  [0] (0.00, 113.72) edge=3
+  [1] (1.00, 114.00) edge=3
+  [2] (11.00, 114.00) edge=-1
+  [3] (75.00, 115.00) edge=-1
+  [4] (82.00, 101.00) edge=-1
+  [5] (81.00, 95.00) edge=-1
+  [6] (68.00, 94.00) edge=-1
+  [7] (53.00, 94.00) edge=-1
+  [8] (32.00, 102.00) edge=-1
+  [9] (25.00, 55.00) edge=-1
+  [10] (28.00, 47.00) edge=-1
+  [11] (97.00, 41.00) edge=-1
+  [12] (230.00, 21.00) edge=-1
+  [13] (271.00, 24.00) edge=-1
+  [14] (273.00, 14.00) edge=-1
+  [15] (271.00, 3.00) edge=-1
+  [16] (270.60, 0.00) edge=0
+  [17] (51.93, 0.00) edge=0
+  [18] (43.00, 2.00) edge=-1
+  [19] (29.00, 4.00) edge=-1
+  [20] (30.00, 0.00) edge=0
+  [21] (0.00, 0.00) edge=3
+========== END DEBUG ==========
+
+FINAL ProcessedNodes (integer coords):
+  [0] id=14363613780000000 x=0 z=114
+  [1] id=14363613780000001 x=1 z=114
+  [2] id=14363613780000002 x=11 z=114
+  [3] id=14363613780000003 x=75 z=115
+  [4] id=14363613780000004 x=82 z=101
+  [5] id=14363613780000005 x=81 z=95
+  [6] id=14363613780000006 x=68 z=94
+  [7] id=14363613780000007 x=53 z=94
+  [8] id=14363613780000008 x=32 z=102
+  [9] id=14363613780000009 x=25 z=55
+  [10] id=14363613780000010 x=28 z=47
+  [11] id=14363613780000011 x=97 z=41
+  [12] id=14363613780000012 x=230 z=21
+  [13] id=14363613780000013 x=271 z=24
+  [14] id=14363613780000014 x=273 z=14
+  [15] id=14363613780000015 x=271 z=3
+  [16] id=14363613780000016 x=271 z=0
+  [17] id=14363613780000017 x=52 z=0
+  [18] id=14363613780000018 x=43 z=2
+  [19] id=14363613780000019 x=29 z=4
+  [20] id=14363613780000020 x=30 z=0
+  [21] id=14363613780000021 x=0 z=0
+Integer bbox: x=[0, 301], z=[0, 447]
+Polygon signed area: 24401.00 (positive=CW, negative=CCW)
+========== END DEBUG (ProcessedNodes) ==========
+
+[3/7] Fetching elevation...
+Downloading 2 elevation tiles (up to 8 concurrent)...
+Loading cached tile x=16367,y=10896,z=15 from ./arnis-tile-cache\z15_x16367_y10896.png
+Loading cached tile x=16367,y=10897,z=15 from ./arnis-tile-cache\z15_x16367_y10897.png
+Processing 2 elevation tiles...
+Realistic elevation: 13.2m range fits in 366 available blocks
+[4/7] Transforming map...
+[4/7] Processing data...
+[5/7] Processing terrain...
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 82 -> -82)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 200 -> -200)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 262 -> -262)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 43 -> -43)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 120 -> -120)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 333 -> -333)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 264 -> -264)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 96 -> -96)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 100 -> -100)
+[FloodFill] Corrected CW winding to CCW for polygon with 12 points (area: 929 -> -929)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 141 -> -141)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 82 -> -82)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 102 -> -102)
+[FloodFill] Corrected CW winding to CCW for polygon with 13 points (area: 573 -> -573)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 50 -> -50)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 236 -> -236)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 218 -> -218)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 62 -> -62)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 106 -> -106)
+[FloodFill] Corrected CW winding to CCW for polygon with 12 points (area: 517 -> -517)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 100 -> -100)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 232 -> -232)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 80 -> -80)
+[FloodFill] Corrected CW winding to CCW for polygon with 10 points (area: 1003 -> -1003)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 136 -> -136)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 42 -> -42)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 290 -> -290)
+[FloodFill] Corrected CW winding to CCW for polygon with 20 points (area: 1012 -> -1012)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 39 -> -39)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 244 -> -244)
+[FloodFill] Corrected CW winding to CCW for polygon with 22 points (area: 12200 -> -12200)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 50 -> -50)
+[FloodFill] Corrected CW winding to CCW for polygon with 27 points (area: 394 -> -394)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 108 -> -108)
+[FloodFill] Corrected CW winding to CCW for polygon with 11 points (area: 192 -> -192)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 158 -> -158)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 60 -> -60)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 48 -> -48)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 52 -> -52)
+[FloodFill] Corrected CW winding to CCW for polygon with 4 points (area: 298 -> -298)
+[FloodFill] Corrected CW winding to CCW for polygon with 19 points (area: 245 -> -245)
+[FloodFill] Corrected CW winding to CCW for polygon with 11 points (area: 133 -> -133)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 100 -> -100)
+[FloodFill] Corrected CW winding to CCW for polygon with 16 points (area: 1029 -> -1029)
+[FloodFill] Corrected CW winding to CCW for polygon with 43 points (area: 4818 -> -4818)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 40 -> -40)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 245 -> -245)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 86 -> -86)
+[FloodFill] Corrected CW winding to CCW for polygon with 11 points (area: 160 -> -160)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 127 -> -127)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 94 -> -94)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 71 -> -71)
+[FloodFill] Corrected CW winding to CCW for polygon with 13 points (area: 226 -> -226)
+[FloodFill] Corrected CW winding to CCW for polygon with 3 points (area: 4 -> -4)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 110 -> -110)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 126 -> -126)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 6 -> -6)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 404 -> -404)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 36 -> -36)
+[FloodFill] Corrected CW winding to CCW for polygon with 8 points (area: 45 -> -45)
+[FloodFill] Corrected CW winding to CCW for polygon with 14 points (area: 306 -> -306)
+[FloodFill] Corrected CW winding to CCW for polygon with 17 points (area: 279 -> -279)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 191 -> -191)
+[FloodFill] Corrected CW winding to CCW for polygon with 11 points (area: 313 -> -313)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 31 -> -31)
+[FloodFill] Corrected CW winding to CCW for polygon with 16 points (area: 2247 -> -2247)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 99 -> -99)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 41922 -> -41922)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 99 -> -99)
+[FloodFill] Corrected CW winding to CCW for polygon with 11 points (area: 538 -> -538)
+[FloodFill] Corrected CW winding to CCW for polygon with 13 points (area: 1246 -> -1246)
+[FloodFill] Corrected CW winding to CCW for polygon with 12 points (area: 1844 -> -1844)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 64 -> -64)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 54 -> -54)
+[FloodFill] Corrected CW winding to CCW for polygon with 16 points (area: 314 -> -314)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 264 -> -264)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 195 -> -195)
+[FloodFill] Corrected CW winding to CCW for polygon with 14 points (area: 270 -> -270)
+[FloodFill] Corrected CW winding to CCW for polygon with 4 points (area: 4 -> -4)
+[FloodFill] Corrected CW winding to CCW for polygon with 4 points (area: 630 -> -630)
+[FloodFill] Corrected CW winding to CCW for polygon with 13 points (area: 240 -> -240)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 47 -> -47)
+[FloodFill] Corrected CW winding to CCW for polygon with 15 points (area: 992 -> -992)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 195 -> -195)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 40 -> -40)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 16 -> -16)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 130 -> -130)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 62 -> -62)
+[FloodFill] Corrected CW winding to CCW for polygon with 4 points (area: 16 -> -16)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 30 -> -30)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 36 -> -36)
+[FloodFill] Corrected CW winding to CCW for polygon with 7 points (area: 164 -> -164)
+[FloodFill] Corrected CW winding to CCW for polygon with 6 points (area: 14 -> -14)
+[FloodFill] Corrected CW winding to CCW for polygon with 5 points (area: 72 -> -72)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 188 -> -188)
+[FloodFill] Corrected CW winding to CCW for polygon with 9 points (area: 158 -> -158)
