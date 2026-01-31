@@ -58,14 +58,14 @@ pub fn generate_water_areas_from_relation(
     }
 
     // Preserve OSM-defined outer/inner roles without modification
-    merge_way_segments(&mut outers);
+    super::merge_way_segments(&mut outers);
 
     // Clip assembled rings to bbox (must happen after merging to preserve ring connectivity)
     outers = outers
         .into_iter()
         .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
         .collect();
-    merge_way_segments(&mut inners);
+    super::merge_way_segments(&mut inners);
     inners = inners
         .into_iter()
         .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
@@ -112,7 +112,7 @@ pub fn generate_water_areas_from_relation(
         }
     }
 
-    merge_way_segments(&mut inners);
+    super::merge_way_segments(&mut inners);
     if !verify_closed_rings(&inners) {
         println!("Skipping relation {} due to invalid polygon", element.id);
         return;
@@ -164,105 +164,6 @@ fn generate_water_areas(
         .collect();
 
     inverse_floodfill(min_x, min_z, max_x, max_z, outers_xz, inners_xz, editor);
-}
-
-/// Merges way segments that share endpoints into closed rings.
-fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
-    let mut removed: Vec<usize> = vec![];
-    let mut merged: Vec<Vec<ProcessedNode>> = vec![];
-
-    // Match nodes by ID or proximity (handles synthetic nodes from bbox clipping)
-    let nodes_match = |a: &ProcessedNode, b: &ProcessedNode| -> bool {
-        if a.id == b.id {
-            return true;
-        }
-        let dx = (a.x - b.x).abs();
-        let dz = (a.z - b.z).abs();
-        dx <= 1 && dz <= 1
-    };
-
-    for i in 0..rings.len() {
-        for j in 0..rings.len() {
-            if i == j {
-                continue;
-            }
-
-            if removed.contains(&i) || removed.contains(&j) {
-                continue;
-            }
-
-            let x: &Vec<ProcessedNode> = &rings[i];
-            let y: &Vec<ProcessedNode> = &rings[j];
-
-            // Skip empty rings (can happen after clipping)
-            if x.is_empty() || y.is_empty() {
-                continue;
-            }
-
-            let x_first = &x[0];
-            let x_last = x.last().unwrap();
-            let y_first = &y[0];
-            let y_last = y.last().unwrap();
-
-            // Skip already-closed rings
-            if nodes_match(x_first, x_last) {
-                continue;
-            }
-
-            if nodes_match(y_first, y_last) {
-                continue;
-            }
-
-            if nodes_match(x_first, y_first) {
-                removed.push(i);
-                removed.push(j);
-
-                let mut x: Vec<ProcessedNode> = x.clone();
-                x.reverse();
-                x.extend(y.iter().skip(1).cloned());
-                merged.push(x);
-            } else if nodes_match(x_last, y_last) {
-                removed.push(i);
-                removed.push(j);
-
-                let mut x: Vec<ProcessedNode> = x.clone();
-                x.extend(y.iter().rev().skip(1).cloned());
-
-                merged.push(x);
-            } else if nodes_match(x_first, y_last) {
-                removed.push(i);
-                removed.push(j);
-
-                let mut y: Vec<ProcessedNode> = y.clone();
-                y.extend(x.iter().skip(1).cloned());
-
-                merged.push(y);
-            } else if nodes_match(x_last, y_first) {
-                removed.push(i);
-                removed.push(j);
-
-                let mut x: Vec<ProcessedNode> = x.clone();
-                x.extend(y.iter().skip(1).cloned());
-
-                merged.push(x);
-            }
-        }
-    }
-
-    removed.sort();
-
-    for r in removed.iter().rev() {
-        rings.remove(*r);
-    }
-
-    let merged_len: usize = merged.len();
-    for m in merged {
-        rings.push(m);
-    }
-
-    if merged_len > 0 {
-        merge_way_segments(rings);
-    }
 }
 
 /// Verifies all rings are properly closed (first node matches last).

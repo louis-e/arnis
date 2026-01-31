@@ -372,9 +372,8 @@ fn is_water_element(tags: &HashMap<String, String>) -> bool {
     false
 }
 
-const PRIORITY_ORDER: [&str; 10] = [
-    "entrance", "building", "highway", "waterway", "water", "barrier", "landuse", "leisure",
-    "natural", "amenity",
+const PRIORITY_ORDER: [&str; 6] = [
+    "entrance", "building", "highway", "waterway", "water", "barrier"
 ];
 
 // Function to determine the priority of each element

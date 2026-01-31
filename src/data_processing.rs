@@ -87,10 +87,9 @@ pub fn generate_world_with_options(
 
     // Partition elements: separate boundary elements for deferred processing
     // This avoids cloning by moving elements instead of copying them
-    let (boundary_elements, other_elements): (Vec<_>, Vec<_>) =
-        elements.into_iter().partition(|element| {
-            element.tags().contains_key("boundary")
-        });
+    let (boundary_elements, other_elements): (Vec<_>, Vec<_>) = elements
+        .into_iter()
+        .partition(|element| element.tags().contains_key("boundary"));
 
     // Process data
     let elements_count: usize = other_elements.len() + boundary_elements.len();
