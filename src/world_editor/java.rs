@@ -141,7 +141,7 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves a single region to disk.
     ///
-    /// Optimized for new world creation - writes chunks directly without reading existing data.
+    /// Optimized for new world creation, writes chunks directly without reading existing data.
     /// This assumes we're creating a fresh world, not modifying an existing one.
     fn save_single_region(
         &self,
@@ -155,7 +155,7 @@ impl<'a> WorldEditor<'a> {
         // First pass: write all chunks that have content
         for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
             if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
-                // Create chunk directly - we're writing to a fresh region file
+                // Create chunk directly, we're writing to a fresh region file
                 // so there's no existing data to preserve
                 let chunk = Chunk {
                     sections: chunk_to_modify.sections().collect(),

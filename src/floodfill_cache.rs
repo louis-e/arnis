@@ -222,6 +222,7 @@ impl FloodFillCache {
     fn way_needs_flood_fill(way: &ProcessedWay) -> bool {
         way.tags.contains_key("building")
             || way.tags.contains_key("building:part")
+            || way.tags.contains_key("boundary")
             || way.tags.contains_key("landuse")
             || way.tags.contains_key("leisure")
             || way.tags.contains_key("amenity")
