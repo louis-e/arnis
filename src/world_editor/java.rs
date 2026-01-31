@@ -16,6 +16,24 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+
+/// Cached base chunk sections (grass at Y=-62)
+/// Computed once on first use and reused for all empty chunks
+static BASE_CHUNK_SECTIONS: OnceLock<Vec<Section>> = OnceLock::new();
+
+/// Get or create the cached base chunk sections
+fn get_base_chunk_sections() -> &'static [Section] {
+    BASE_CHUNK_SECTIONS.get_or_init(|| {
+        let mut chunk = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                chunk.set_block(x, -62, z, GRASS_BLOCK);
+            }
+        }
+        chunk.sections().collect()
+    })
+}
 
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -47,23 +65,18 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Helper function to create a base chunk with grass blocks at Y -62
+    /// Uses cached sections for efficiency - only serialization happens per chunk
     pub(super) fn create_base_chunk(abs_chunk_x: i32, abs_chunk_z: i32) -> (Vec<u8>, bool) {
-        let mut chunk = ChunkToModify::default();
+        // Use cached sections (computed once on first call)
+        let sections = get_base_chunk_sections();
 
-        // Fill the bottom layer with grass blocks at Y -62
-        for x in 0..16 {
-            for z in 0..16 {
-                chunk.set_block(x, -62, z, GRASS_BLOCK);
-            }
-        }
-
-        // Prepare chunk data
+        // Prepare chunk data with cloned sections
         let chunk_data = Chunk {
-            sections: chunk.sections().collect(),
+            sections: sections.to_vec(),
             x_pos: abs_chunk_x,
             z_pos: abs_chunk_z,
             is_light_on: 0,
-            other: chunk.other,
+            other: FnvHashMap::default(),
         };
 
         // Create the Level wrapper
@@ -128,7 +141,8 @@ impl<'a> WorldEditor<'a> {
 
     /// Saves a single region to disk.
     ///
-    /// This is extracted to allow streaming mode to save and release regions one at a time.
+    /// Optimized for new world creation - writes chunks directly without reading existing data.
+    /// This assumes we're creating a fresh world, not modifying an existing one.
     fn save_single_region(
         &self,
         region_x: i32,
@@ -138,49 +152,18 @@ impl<'a> WorldEditor<'a> {
         let mut region = self.create_region(region_x, region_z);
         let mut ser_buffer = Vec::with_capacity(8192);
 
+        // First pass: write all chunks that have content
         for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
             if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
-                // Read existing chunk data if it exists
-                let existing_data = region
-                    .read_chunk(chunk_x as usize, chunk_z as usize)
-                    .unwrap()
-                    .unwrap_or_default();
-
-                // Parse existing chunk or create new one
-                let mut chunk: Chunk = if !existing_data.is_empty() {
-                    fastnbt::from_bytes(&existing_data).unwrap()
-                } else {
-                    Chunk {
-                        sections: Vec::new(),
-                        x_pos: chunk_x + (region_x * 32),
-                        z_pos: chunk_z + (region_z * 32),
-                        is_light_on: 0,
-                        other: FnvHashMap::default(),
-                    }
+                // Create chunk directly - we're writing to a fresh region file
+                // so there's no existing data to preserve
+                let chunk = Chunk {
+                    sections: chunk_to_modify.sections().collect(),
+                    x_pos: chunk_x + (region_x * 32),
+                    z_pos: chunk_z + (region_z * 32),
+                    is_light_on: 0,
+                    other: chunk_to_modify.other.clone(),
                 };
-
-                // Update sections while preserving existing data
-                let new_sections: Vec<Section> = chunk_to_modify.sections().collect();
-                for new_section in new_sections {
-                    if let Some(existing_section) =
-                        chunk.sections.iter_mut().find(|s| s.y == new_section.y)
-                    {
-                        // Merge block states
-                        existing_section.block_states.palette = new_section.block_states.palette;
-                        existing_section.block_states.data = new_section.block_states.data;
-                    } else {
-                        // Add new section if it doesn't exist
-                        chunk.sections.push(new_section);
-                    }
-                }
-
-                // Preserve existing block entities and entities and merge with new ones
-                merge_compound_list(&mut chunk, chunk_to_modify, "block_entities");
-                merge_compound_list(&mut chunk, chunk_to_modify, "entities");
-
-                // Update chunk coordinates and flags
-                chunk.x_pos = chunk_x + (region_x * 32);
-                chunk.z_pos = chunk_z + (region_z * 32);
 
                 // Create Level wrapper and save
                 let level_data = create_level_wrapper(&chunk);
@@ -192,7 +175,7 @@ impl<'a> WorldEditor<'a> {
             }
         }
 
-        // Second pass: ensure all chunks exist
+        // Second pass: ensure all chunks exist (fill with base layer if not)
         for chunk_x in 0..32 {
             for chunk_z in 0..32 {
                 let abs_chunk_x = chunk_x + (region_x * 32);
@@ -214,7 +197,9 @@ impl<'a> WorldEditor<'a> {
 }
 
 /// Helper function to get entity coordinates
+/// Note: Currently unused since we write directly without merging, but kept for potential future use
 #[inline]
+#[allow(dead_code)]
 fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)> {
     if let Some(Value::List(pos)) = entity.get("Pos") {
         if pos.len() == 3 {
@@ -304,6 +289,9 @@ fn create_level_wrapper(chunk: &Chunk) -> HashMap<String, Value> {
     HashMap::from([("Level".to_string(), Value::Compound(level_map))])
 }
 
+/// Merge compound lists (entities, block_entities) from chunk_to_modify into chunk
+/// Note: Currently unused since we write directly without merging, but kept for potential future use
+#[allow(dead_code)]
 fn merge_compound_list(chunk: &mut Chunk, chunk_to_modify: &ChunkToModify, key: &str) {
     if let Some(existing_entities) = chunk.other.get_mut(key) {
         if let Some(new_entities) = chunk_to_modify.other.get(key) {
@@ -330,6 +318,9 @@ fn merge_compound_list(chunk: &mut Chunk, chunk_to_modify: &ChunkToModify, key: 
     }
 }
 
+/// Convert NBT Value to i32
+/// Note: Currently unused since we write directly without merging, but kept for potential future use
+#[allow(dead_code)]
 fn value_to_i32(value: &Value) -> Option<i32> {
     match value {
         Value::Byte(v) => Some(i32::from(*v)),

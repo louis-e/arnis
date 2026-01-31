@@ -27,7 +27,7 @@ pub(crate) struct Chunk {
 }
 
 /// Section within a chunk (16x16x16 blocks)
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct Section {
     pub block_states: Blockstates,
     #[serde(rename = "Y")]
@@ -37,7 +37,7 @@ pub(crate) struct Section {
 }
 
 /// Block states within a section
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct Blockstates {
     pub palette: Vec<PaletteItem>,
     pub data: Option<LongArray>,
@@ -46,7 +46,7 @@ pub(crate) struct Blockstates {
 }
 
 /// Palette item for block state encoding
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub(crate) struct PaletteItem {
     #[serde(rename = "Name")]
     pub name: String,
