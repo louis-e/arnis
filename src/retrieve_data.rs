@@ -138,6 +138,10 @@ pub fn fetch_data_from_overpass(
         nwr["entrance"];
         nwr["door"];
         nwr["boundary"];
+        nwr["power"];
+        nwr["historic"];
+        nwr["emergency"];
+        nwr["advertising"];
         way;
     )->.relsinbbox;
     (

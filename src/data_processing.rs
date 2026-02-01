@@ -182,6 +182,8 @@ pub fn generate_world_with_options(
                     highways::generate_siding(&mut editor, way);
                 } else if way.tags.contains_key("man_made") {
                     man_made::generate_man_made(&mut editor, &element, args);
+                } else if way.tags.contains_key("power") {
+                    power::generate_power(&mut editor, &element);
                 }
                 // Release flood fill cache entry for this way
                 flood_fill_cache.remove_way(way.id);
@@ -215,6 +217,14 @@ pub fn generate_world_with_options(
                     tourisms::generate_tourisms(&mut editor, node);
                 } else if node.tags.contains_key("man_made") {
                     man_made::generate_man_made_nodes(&mut editor, node);
+                } else if node.tags.contains_key("power") {
+                    power::generate_power_nodes(&mut editor, node);
+                } else if node.tags.contains_key("historic") {
+                    historic::generate_historic(&mut editor, node);
+                } else if node.tags.contains_key("emergency") {
+                    emergency::generate_emergency(&mut editor, node);
+                } else if node.tags.contains_key("advertising") {
+                    advertising::generate_advertising(&mut editor, node);
                 }
             }
             ProcessedElement::Relation(rel) => {
