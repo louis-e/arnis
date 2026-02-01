@@ -193,8 +193,8 @@ fn generate_power_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
     editor.set_block(LIGHTNING_ROD, x, height + 1, z, None, None);
 
     // Concrete foundation at base
-    for dx in -2..=2 {
-        for dz in -2..=2 {
+    for dx in -3..=3 {
+        for dz in -3..=3 {
             editor.set_block(GRAY_CONCRETE, x + dx, 0, z + dz, None, None);
         }
     }
