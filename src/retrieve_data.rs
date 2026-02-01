@@ -124,6 +124,7 @@ pub fn fetch_data_from_overpass(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
         nwr["building"];
+        nwr["building:part"];
         nwr["highway"];
         nwr["landuse"];
         nwr["natural"];
@@ -134,10 +135,17 @@ pub fn fetch_data_from_overpass(
         nwr["tourism"];
         nwr["bridge"];
         nwr["railway"];
+        nwr["roller_coaster"];
         nwr["barrier"];
         nwr["entrance"];
         nwr["door"];
         nwr["boundary"];
+        nwr["power"];
+        nwr["historic"];
+        nwr["emergency"];
+        nwr["advertising"];
+        nwr["man_made"];
+        nwr["aeroway"];
         way;
     )->.relsinbbox;
     (

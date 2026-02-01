@@ -42,5 +42,6 @@
   "interior": "Sisätilan luonti",
   "roof": "Katon luonti",
   "fillground": "Täytä maa",
+  "city_boundaries": "Kaupungin maa",
   "bedrock_use_java": "Käytä Javaa maailmojen valintaan"
 }

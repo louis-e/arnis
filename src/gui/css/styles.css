@@ -417,6 +417,10 @@ button:hover {
   margin: 15px 0;
 }
 
+#city-boundaries-toggle {
+  accent-color: #fecc44;
+}
+
 #telemetry-toggle {
   accent-color: #fecc44;
 }

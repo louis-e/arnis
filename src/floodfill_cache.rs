@@ -11,13 +11,13 @@ use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::time::Duration;
 
-/// A memory-efficient bitmap for storing building footprint coordinates.
+/// A memory-efficient bitmap for storing coordinates.
 ///
 /// Instead of storing each coordinate individually (~24 bytes per entry in a HashSet),
 /// this uses 1 bit per coordinate in the world bounds, reducing memory usage by ~200x.
 ///
 /// For a world of size W x H blocks, the bitmap uses only (W * H) / 8 bytes.
-pub struct BuildingFootprintBitmap {
+pub struct CoordinateBitmap {
     /// The bitmap data, where each bit represents one (x, z) coordinate
     bits: Vec<u8>,
     /// Minimum x coordinate (offset for indexing)
@@ -27,12 +27,13 @@ pub struct BuildingFootprintBitmap {
     /// Width of the world (max_x - min_x + 1)
     width: usize,
     /// Height of the world (max_z - min_z + 1)
+    #[allow(dead_code)]
     height: usize,
-    /// Number of coordinates marked as building footprints
+    /// Number of coordinates marked
     count: usize,
 }
 
-impl BuildingFootprintBitmap {
+impl CoordinateBitmap {
     /// Creates a new empty bitmap covering the given world bounds.
     pub fn new(xzbbox: &XZBBox) -> Self {
         let min_x = xzbbox.min_x();
@@ -44,7 +45,7 @@ impl BuildingFootprintBitmap {
         // Calculate number of bytes needed (round up to nearest byte)
         let total_bits = width
             .checked_mul(height)
-            .expect("BuildingFootprintBitmap: world size too large (width * height overflowed)");
+            .expect("CoordinateBitmap: world size too large (width * height overflowed)");
         let num_bytes = total_bits.div_ceil(8);
 
         Self {
@@ -79,7 +80,7 @@ impl BuildingFootprintBitmap {
         Some(local_z * self.width + local_x)
     }
 
-    /// Sets a coordinate as part of a building footprint.
+    /// Sets a coordinate.
     #[inline]
     pub fn set(&mut self, x: i32, z: i32) {
         if let Some(bit_index) = self.coord_to_index(x, z) {
@@ -96,7 +97,7 @@ impl BuildingFootprintBitmap {
         }
     }
 
-    /// Checks if a coordinate is part of a building footprint.
+    /// Checks if a coordinate is set.
     #[inline]
     pub fn contains(&self, x: i32, z: i32) -> bool {
         if let Some(bit_index) = self.coord_to_index(x, z) {
@@ -111,11 +112,118 @@ impl BuildingFootprintBitmap {
 
     /// Returns true if no coordinates are marked.
     #[must_use]
-    #[allow(dead_code)] // Standard API method for collection-like types
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }
+
+    /// Returns the number of coordinates that are set.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    /// Counts how many coordinates from the given iterator are set in this bitmap.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn count_contained<'a, I>(&self, coords: I) -> usize
+    where
+        I: Iterator<Item = &'a (i32, i32)>,
+    {
+        coords.filter(|(x, z)| self.contains(*x, *z)).count()
+    }
+
+    /// Counts the number of set bits in a rectangular range.
+    ///
+    /// This is optimized to iterate row-by-row and use `count_ones()` on bytes
+    /// where possible, which is much faster than checking individual coordinates.
+    ///
+    /// Returns `(urban_count, total_count)` for the given range.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn count_in_range(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> (usize, usize) {
+        let mut urban_count = 0usize;
+        let mut total_count = 0usize;
+
+        for z in min_z..=max_z {
+            // Calculate local z coordinate
+            let local_z = i64::from(z) - i64::from(self.min_z);
+            if local_z < 0 || local_z >= self.height as i64 {
+                // Row is out of bounds, still counts toward total
+                total_count += (i64::from(max_x) - i64::from(min_x) + 1) as usize;
+                continue;
+            }
+            let local_z = local_z as usize;
+
+            // Calculate x range in local coordinates
+            let local_min_x = (i64::from(min_x) - i64::from(self.min_x)).max(0) as usize;
+            let local_max_x =
+                ((i64::from(max_x) - i64::from(self.min_x)) as usize).min(self.width - 1);
+
+            // Count out-of-bounds x coordinates toward total
+            let x_start_offset = (i64::from(self.min_x) - i64::from(min_x)).max(0) as usize;
+            let x_end_offset = (i64::from(max_x) - i64::from(self.min_x) - (self.width as i64 - 1))
+                .max(0) as usize;
+            total_count += x_start_offset + x_end_offset;
+
+            if local_min_x > local_max_x {
+                continue;
+            }
+
+            // Process this row
+            let row_start_bit = local_z * self.width + local_min_x;
+            let row_end_bit = local_z * self.width + local_max_x;
+            let num_bits = row_end_bit - row_start_bit + 1;
+            total_count += num_bits;
+
+            // Count set bits using byte-wise popcount where possible
+            let start_byte = row_start_bit / 8;
+            let end_byte = row_end_bit / 8;
+            let start_bit_in_byte = row_start_bit % 8;
+            let end_bit_in_byte = row_end_bit % 8;
+
+            if start_byte == end_byte {
+                // All bits are in the same byte
+                let byte = self.bits[start_byte];
+                // Create mask for bits from start_bit to end_bit (inclusive)
+                let num_bits_in_mask = end_bit_in_byte - start_bit_in_byte + 1;
+                let mask = if num_bits_in_mask >= 8 {
+                    0xFFu8
+                } else {
+                    ((1u16 << num_bits_in_mask) - 1) as u8
+                };
+                let masked = (byte >> start_bit_in_byte) & mask;
+                urban_count += masked.count_ones() as usize;
+            } else {
+                // First partial byte
+                let first_byte = self.bits[start_byte];
+                let first_mask = !((1u8 << start_bit_in_byte) - 1); // bits from start_bit to 7
+                urban_count += (first_byte & first_mask).count_ones() as usize;
+
+                // Full bytes in between
+                for byte_idx in (start_byte + 1)..end_byte {
+                    urban_count += self.bits[byte_idx].count_ones() as usize;
+                }
+
+                // Last partial byte
+                let last_byte = self.bits[end_byte];
+                // Handle case where end_bit_in_byte is 7 (would overflow 1u8 << 8)
+                let last_mask = if end_bit_in_byte >= 7 {
+                    0xFFu8
+                } else {
+                    (1u8 << (end_bit_in_byte + 1)) - 1
+                };
+                urban_count += (last_byte & last_mask).count_ones() as usize;
+            }
+        }
+
+        (urban_count, total_count)
+    }
 }
+
+/// Type alias for building footprint bitmap (for backwards compatibility).
+pub type BuildingFootprintBitmap = CoordinateBitmap;
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
@@ -281,6 +389,61 @@ impl FloodFillCache {
         }
 
         footprints
+    }
+
+    /// Collects centroids of all buildings from the pre-computed cache.
+    ///
+    /// This is used for urban ground detection - building clusters are identified
+    /// using their centroids, and a concave hull is computed around dense clusters
+    /// to determine where city ground (smooth stone) should be placed.
+    ///
+    /// Returns a vector of (x, z) centroid coordinates for all buildings.
+    pub fn collect_building_centroids(&self, elements: &[ProcessedElement]) -> Vec<(i32, i32)> {
+        let mut centroids = Vec::new();
+
+        for element in elements {
+            match element {
+                ProcessedElement::Way(way) => {
+                    if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+                        if let Some(cached) = self.way_cache.get(&way.id) {
+                            if let Some(centroid) = Self::compute_centroid(cached) {
+                                centroids.push(centroid);
+                            }
+                        }
+                    }
+                }
+                ProcessedElement::Relation(rel) => {
+                    if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                        // For building relations, compute centroid from outer ways
+                        let mut all_coords = Vec::new();
+                        for member in &rel.members {
+                            if member.role == ProcessedMemberRole::Outer {
+                                if let Some(cached) = self.way_cache.get(&member.way.id) {
+                                    all_coords.extend(cached.iter().copied());
+                                }
+                            }
+                        }
+                        if let Some(centroid) = Self::compute_centroid(&all_coords) {
+                            centroids.push(centroid);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        centroids
+    }
+
+    /// Computes the centroid of a set of coordinates.
+    fn compute_centroid(coords: &[(i32, i32)]) -> Option<(i32, i32)> {
+        if coords.is_empty() {
+            return None;
+        }
+        let sum_x: i64 = coords.iter().map(|(x, _)| i64::from(*x)).sum();
+        let sum_z: i64 = coords.iter().map(|(_, z)| i64::from(*z)).sum();
+        let len = coords.len() as i64;
+        Some(((sum_x / len) as i32, (sum_z / len) as i32))
     }
 
     /// Removes a way's cached flood fill result, freeing memory.

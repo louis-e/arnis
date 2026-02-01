@@ -42,5 +42,6 @@
   "interior": "Belső generálás",
   "roof": "Tető generálás",
   "fillground": "Talaj feltöltése",
+  "city_boundaries": "Városi talaj",
   "bedrock_use_java": "Java világválasztáshoz"
 }

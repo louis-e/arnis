@@ -815,6 +815,7 @@ fn gui_start_generation(
     interior_enabled: bool,
     roof_enabled: bool,
     fillground_enabled: bool,
+    city_boundaries_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
@@ -1007,6 +1008,7 @@ fn gui_start_generation(
                 interior: interior_enabled,
                 roof: roof_enabled,
                 fillground: fillground_enabled,
+                city_boundaries: city_boundaries_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
             };

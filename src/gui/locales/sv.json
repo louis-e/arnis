@@ -42,5 +42,6 @@
   "interior": "Interiörgenerering",
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
+  "city_boundaries": "Stadsmark",
   "bedrock_use_java": "Använd Java för världar"
 }

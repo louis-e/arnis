@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
+use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SMOOTH_STONE, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
@@ -10,6 +10,7 @@ use crate::osm_parser::ProcessedElement;
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
+use crate::urban_ground;
 use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -85,14 +86,16 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
-    // Partition elements: separate boundary elements for deferred processing
-    // This avoids cloning by moving elements instead of copying them
-    let (boundary_elements, other_elements): (Vec<_>, Vec<_>) = elements
-        .into_iter()
-        .partition(|element| element.tags().contains_key("boundary"));
+    // Collect building centroids for urban ground generation (only if enabled)
+    // This must be done before the processing loop clears the flood fill cache
+    let building_centroids = if args.city_boundaries {
+        flood_fill_cache.collect_building_centroids(&elements)
+    } else {
+        Vec::new()
+    };
 
-    // Process data
-    let elements_count: usize = other_elements.len() + boundary_elements.len();
+    // Process all elements (no longer need to partition boundaries)
+    let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
     process_pb.set_style(ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
@@ -103,8 +106,8 @@ pub fn generate_world_with_options(
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
-    // Process non-boundary elements first
-    for element in other_elements.into_iter() {
+    // Process all elements
+    for element in elements.into_iter() {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {
@@ -182,6 +185,8 @@ pub fn generate_world_with_options(
                     highways::generate_siding(&mut editor, way);
                 } else if way.tags.contains_key("man_made") {
                     man_made::generate_man_made(&mut editor, &element, args);
+                } else if way.tags.contains_key("power") {
+                    power::generate_power(&mut editor, &element);
                 }
                 // Release flood fill cache entry for this way
                 flood_fill_cache.remove_way(way.id);
@@ -215,6 +220,14 @@ pub fn generate_world_with_options(
                     tourisms::generate_tourisms(&mut editor, node);
                 } else if node.tags.contains_key("man_made") {
                     man_made::generate_man_made_nodes(&mut editor, node);
+                } else if node.tags.contains_key("power") {
+                    power::generate_power_nodes(&mut editor, node);
+                } else if node.tags.contains_key("historic") {
+                    historic::generate_historic(&mut editor, node);
+                } else if node.tags.contains_key("emergency") {
+                    emergency::generate_emergency(&mut editor, node);
+                } else if node.tags.contains_key("advertising") {
+                    advertising::generate_advertising(&mut editor, node);
                 }
             }
             ProcessedElement::Relation(rel) => {
@@ -270,32 +283,15 @@ pub fn generate_world_with_options(
 
     process_pb.finish();
 
-    // Process deferred boundary elements after all other elements
-    // This ensures boundaries only fill empty areas, they won't overwrite
-    // any ground blocks set by landuse, leisure, natural, etc.
-    for element in boundary_elements.into_iter() {
-        match &element {
-            ProcessedElement::Way(way) => {
-                boundaries::generate_boundary(&mut editor, way, args, &flood_fill_cache);
-                // Clean up cache entry for consistency with other element processing
-                flood_fill_cache.remove_way(way.id);
-            }
-            ProcessedElement::Relation(rel) => {
-                boundaries::generate_boundary_from_relation(
-                    &mut editor,
-                    rel,
-                    args,
-                    &flood_fill_cache,
-                    &xzbbox,
-                );
-                // Clean up cache entries for consistency with other element processing
-                let way_ids: Vec<u64> = rel.members.iter().map(|m| m.way.id).collect();
-                flood_fill_cache.remove_relation_ways(&way_ids);
-            }
-            _ => {}
-        }
-        // Element is dropped here, freeing its memory immediately
-    }
+    // Compute urban ground lookup (if enabled)
+    // Uses a compact cell-based representation instead of storing all coordinates.
+    // Memory usage: ~270 KB vs ~560 MB for coordinate-based approach.
+    let urban_lookup = if args.city_boundaries && !building_centroids.is_empty() {
+        urban_ground::compute_urban_ground_lookup(building_centroids, &xzbbox)
+    } else {
+        urban_ground::UrbanGroundLookup::empty()
+    };
+    let has_urban_ground = !urban_lookup.is_empty();
 
     // Drop remaining caches
     drop(highway_connectivity);
@@ -353,9 +349,18 @@ pub fn generate_world_with_options(
                         args.ground_level
                     };
 
+                    // Check if this coordinate is in an urban area (O(1) lookup)
+                    let is_urban = has_urban_ground && urban_lookup.is_urban(x, z);
+
                     // Add default dirt and grass layer if there isn't a stone layer already
                     if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
-                        editor.set_block_absolute(GRASS_BLOCK, x, ground_y, z, None, None);
+                        if is_urban {
+                            // Urban area: smooth stone ground
+                            editor.set_block_absolute(SMOOTH_STONE, x, ground_y, z, None, None);
+                        } else {
+                            // Rural/natural area: grass and dirt
+                            editor.set_block_absolute(GRASS_BLOCK, x, ground_y, z, None, None);
+                        }
                         editor.set_block_absolute(DIRT, x, ground_y - 1, z, None, None);
                         editor.set_block_absolute(DIRT, x, ground_y - 2, z, None, None);
                     }

@@ -104,20 +104,21 @@ async function applyLocalization(localization) {
     "button[data-localize='select_existing_world']": "select_existing_world",
     "button[data-localize='generate_new_world']": "generate_new_world",
     "h2[data-localize='customization_settings']": "customization_settings",
-    "label[data-localize='world_scale']": "world_scale",
-    "label[data-localize='custom_bounding_box']": "custom_bounding_box",
+    "span[data-localize='world_scale']": "world_scale",
+    "span[data-localize='custom_bounding_box']": "custom_bounding_box",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
-    "label[data-localize='language']": "language",
-    "label[data-localize='generation_mode']": "generation_mode",
+    "span[data-localize='language']": "language",
+    "span[data-localize='generation_mode']": "generation_mode",
     "option[data-localize='mode_geo_terrain']": "mode_geo_terrain",
     "option[data-localize='mode_geo_only']": "mode_geo_only",
     "option[data-localize='mode_terrain_only']": "mode_terrain_only",
-    "label[data-localize='terrain']": "terrain",
-    "label[data-localize='interior']": "interior",
-    "label[data-localize='roof']": "roof",
-    "label[data-localize='fillground']": "fillground",
-    "label[data-localize='map_theme']": "map_theme",
+    "span[data-localize='terrain']": "terrain",
+    "span[data-localize='interior']": "interior",
+    "span[data-localize='roof']": "roof",
+    "span[data-localize='fillground']": "fillground",
+    "span[data-localize='city_boundaries']": "city_boundaries",
+    "span[data-localize='map_theme']": "map_theme",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -832,6 +833,7 @@ async function startGeneration() {
     var interior = document.getElementById("interior-toggle").checked;
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
+    var city_boundaries = document.getElementById("city-boundaries-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -854,6 +856,7 @@ async function startGeneration() {
         interiorEnabled: interior,
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
+        cityBoundariesEnabled: city_boundaries,
         isNewWorld: isNewWorld,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,

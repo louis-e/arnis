@@ -42,5 +42,6 @@
   "interior": "توليد الداخلية",
   "roof": "توليد السقف",
   "fillground": "ملء الأرض",
+  "city_boundaries": "أرضية المدينة",
   "bedrock_use_java": "استخدم Java لاختيار العوالم"
 }

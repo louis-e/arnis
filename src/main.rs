@@ -25,6 +25,7 @@ mod retrieve_data;
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
+mod urban_ground;
 mod version_check;
 mod world_editor;
 

@@ -40,16 +40,22 @@ pub struct Args {
     pub terrain: bool,
 
     /// Enable interior generation (optional)
-    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
+    #[arg(long, default_value_t = true)]
     pub interior: bool,
 
     /// Enable roof generation (optional)
-    #[arg(long, default_value_t = true, action = clap::ArgAction::SetTrue)]
+    #[arg(long, default_value_t = true)]
     pub roof: bool,
 
     /// Enable filling ground (optional)
-    #[arg(long, default_value_t = false, action = clap::ArgAction::SetFalse)]
+    #[arg(long, default_value_t = false)]
     pub fillground: bool,
+
+    /// Enable city boundary ground generation (optional)
+    /// When enabled, detects building clusters and places stone ground in urban areas.
+    /// Isolated buildings in rural areas will keep grass around them.
+    #[arg(long, default_value_t = true)]
+    pub city_boundaries: bool,
 
     /// Enable debug mode (optional)
     #[arg(long)]

@@ -42,5 +42,6 @@
   "interior": "内部生成",
   "roof": "屋顶生成",
   "fillground": "填充地面",
+  "city_boundaries": "城市地面",
   "bedrock_use_java": "使用Java选择世界"
 }

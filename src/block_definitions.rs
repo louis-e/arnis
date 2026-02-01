@@ -277,6 +277,19 @@ impl Block {
             196 => "damaged_anvil",
             197 => "large_fern",
             198 => "large_fern",
+            199 => "chain",
+            200 => "end_rod",
+            201 => "lightning_rod",
+            202 => "gold_block",
+            203 => "sea_lantern",
+            204 => "orange_concrete",
+            205 => "orange_wool",
+            206 => "blue_wool",
+            207 => "green_concrete",
+            208 => "brick_wall",
+            209 => "redstone_block",
+            210 => "chain",
+            211 => "chain",
             _ => panic!("Invalid id"),
         }
     }
@@ -503,6 +516,17 @@ impl Block {
             198 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+
+            210 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("axis".to_string(), Value::String("x".to_string()));
+                map
+            })),
+            211 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("axis".to_string(), Value::String("z".to_string()));
                 map
             })),
             _ => None,
@@ -752,6 +776,19 @@ pub const CHIPPED_ANVIL: Block = Block::new(195);
 pub const DAMAGED_ANVIL: Block = Block::new(196);
 pub const LARGE_FERN_LOWER: Block = Block::new(197);
 pub const LARGE_FERN_UPPER: Block = Block::new(198);
+pub const CHAIN: Block = Block::new(199);
+pub const END_ROD: Block = Block::new(200);
+pub const LIGHTNING_ROD: Block = Block::new(201);
+pub const GOLD_BLOCK: Block = Block::new(202);
+pub const SEA_LANTERN: Block = Block::new(203);
+pub const ORANGE_CONCRETE: Block = Block::new(204);
+pub const ORANGE_WOOL: Block = Block::new(205);
+pub const BLUE_WOOL: Block = Block::new(206);
+pub const GREEN_CONCRETE: Block = Block::new(207);
+pub const BRICK_WALL: Block = Block::new(208);
+pub const REDSTONE_BLOCK: Block = Block::new(209);
+pub const CHAIN_X: Block = Block::new(210);
+pub const CHAIN_Z: Block = Block::new(211);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
