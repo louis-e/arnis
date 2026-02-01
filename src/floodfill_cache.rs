@@ -133,6 +133,80 @@ impl CoordinateBitmap {
     {
         coords.filter(|(x, z)| self.contains(*x, *z)).count()
     }
+
+    /// Counts the number of set bits in a rectangular range.
+    ///
+    /// This is optimized to iterate row-by-row and use `count_ones()` on bytes
+    /// where possible, which is much faster than checking individual coordinates.
+    ///
+    /// Returns `(urban_count, total_count)` for the given range.
+    #[inline]
+    pub fn count_in_range(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> (usize, usize) {
+        let mut urban_count = 0usize;
+        let mut total_count = 0usize;
+
+        for z in min_z..=max_z {
+            // Calculate local z coordinate
+            let local_z = i64::from(z) - i64::from(self.min_z);
+            if local_z < 0 || local_z >= self.height as i64 {
+                // Row is out of bounds, still counts toward total
+                total_count += (max_x - min_x + 1) as usize;
+                continue;
+            }
+            let local_z = local_z as usize;
+
+            // Calculate x range in local coordinates
+            let local_min_x = (i64::from(min_x) - i64::from(self.min_x)).max(0) as usize;
+            let local_max_x = ((i64::from(max_x) - i64::from(self.min_x)) as usize).min(self.width - 1);
+
+            // Count out-of-bounds x coordinates toward total
+            let x_start_offset = (i64::from(self.min_x) - i64::from(min_x)).max(0) as usize;
+            let x_end_offset = (i64::from(max_x) - i64::from(self.min_x) - (self.width as i64 - 1)).max(0) as usize;
+            total_count += x_start_offset + x_end_offset;
+
+            if local_min_x > local_max_x {
+                continue;
+            }
+
+            // Process this row
+            let row_start_bit = local_z * self.width + local_min_x;
+            let row_end_bit = local_z * self.width + local_max_x;
+            let num_bits = row_end_bit - row_start_bit + 1;
+            total_count += num_bits;
+
+            // Count set bits using byte-wise popcount where possible
+            let start_byte = row_start_bit / 8;
+            let end_byte = row_end_bit / 8;
+            let start_bit_in_byte = row_start_bit % 8;
+            let end_bit_in_byte = row_end_bit % 8;
+
+            if start_byte == end_byte {
+                // All bits are in the same byte
+                let byte = self.bits[start_byte];
+                // Create mask for bits from start_bit to end_bit (inclusive)
+                let mask = ((1u16 << (end_bit_in_byte - start_bit_in_byte + 1)) - 1) as u8;
+                let masked = (byte >> start_bit_in_byte) & mask;
+                urban_count += masked.count_ones() as usize;
+            } else {
+                // First partial byte
+                let first_byte = self.bits[start_byte];
+                let first_mask = !((1u8 << start_bit_in_byte) - 1); // bits from start_bit to 7
+                urban_count += (first_byte & first_mask).count_ones() as usize;
+
+                // Full bytes in between
+                for byte_idx in (start_byte + 1)..end_byte {
+                    urban_count += self.bits[byte_idx].count_ones() as usize;
+                }
+
+                // Last partial byte
+                let last_byte = self.bits[end_byte];
+                let last_mask = (1u8 << (end_bit_in_byte + 1)) - 1; // bits 0 to end_bit
+                urban_count += (last_byte & last_mask).count_ones() as usize;
+            }
+        }
+
+        (urban_count, total_count)
+    }
 }
 
 /// Type alias for building footprint bitmap (for backwards compatibility).
@@ -187,8 +261,11 @@ impl UrbanDensityGrid {
         let width = ((world_width + i64::from(cell_size) - 1) / i64::from(cell_size)) as usize;
         let height = ((world_height + i64::from(cell_size) - 1) / i64::from(cell_size)) as usize;
 
-        // Calculate density for each cell
-        let mut cells = vec![0.0f32; width * height];
+        // Calculate density for each cell using efficient bitmap counting
+        let cell_count = width
+            .checked_mul(height)
+            .expect("UrbanDensityGrid: grid dimensions too large");
+        let mut cells = vec![0.0f32; cell_count];
 
         for cell_z in 0..height {
             for cell_x in 0..width {
@@ -198,17 +275,9 @@ impl UrbanDensityGrid {
                 let cell_max_x = (cell_min_x + cell_size - 1).min(xzbbox.max_x());
                 let cell_max_z = (cell_min_z + cell_size - 1).min(xzbbox.max_z());
 
-                let mut urban_count = 0;
-                let mut total_count = 0;
-
-                for z in cell_min_z..=cell_max_z {
-                    for x in cell_min_x..=cell_max_x {
-                        total_count += 1;
-                        if coverage.contains(x, z) {
-                            urban_count += 1;
-                        }
-                    }
-                }
+                // Use optimized bitmap counting instead of iterating every coordinate
+                let (urban_count, total_count) =
+                    coverage.count_in_range(cell_min_x, cell_min_z, cell_max_x, cell_max_z);
 
                 let density = if total_count > 0 {
                     urban_count as f32 / total_count as f32

@@ -86,34 +86,44 @@ pub fn generate_power_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
     }
 
     if let Some(power_type) = node.tags.get("power") {
-        let element = ProcessedElement::Node(node.clone());
         match power_type.as_str() {
-            "tower" => generate_power_tower(editor, &element),
-            "pole" => generate_power_pole(editor, &element),
+            "tower" => generate_power_tower_from_node(editor, node),
+            "pole" => generate_power_pole_from_node(editor, node),
             _ => {}
         }
     }
 }
 
-/// Generate a high-voltage transmission tower (pylon)
-///
-/// Creates a realistic lattice tower structure using iron bars and iron blocks.
-/// The design is a tapered lattice tower with cross-bracing and insulators.
+/// Generate a high-voltage transmission tower (pylon) from a ProcessedElement
 fn generate_power_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
     let Some(first_node) = element.nodes().next() else {
         return;
     };
-
-    let x = first_node.x;
-    let z = first_node.z;
-
-    // Extract height from tags, default to 25 blocks (represents ~25-40m real towers)
     let height = element
         .tags()
         .get("height")
         .and_then(|h| h.parse::<i32>().ok())
         .unwrap_or(25)
         .clamp(15, 40);
+    generate_power_tower_impl(editor, first_node.x, first_node.z, height);
+}
+
+/// Generate a high-voltage transmission tower (pylon) from a ProcessedNode
+fn generate_power_tower_from_node(editor: &mut WorldEditor, node: &ProcessedNode) {
+    let height = node
+        .tags
+        .get("height")
+        .and_then(|h| h.parse::<i32>().ok())
+        .unwrap_or(25)
+        .clamp(15, 40);
+    generate_power_tower_impl(editor, node.x, node.z, height);
+}
+
+/// Generate a high-voltage transmission tower (pylon)
+///
+/// Creates a realistic lattice tower structure using iron bars and iron blocks.
+/// The design is a tapered lattice tower with cross-bracing and insulators.
+fn generate_power_tower_impl(editor: &mut WorldEditor, x: i32, z: i32, height: i32) {
 
     // Tower design constants
     let base_width = 3; // Half-width at base (so 7x7 footprint)
@@ -222,31 +232,45 @@ fn generate_power_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
     }
 }
 
-/// Generate a wooden/concrete power pole
-///
-/// Creates a simpler single-pole structure for lower voltage distribution lines.
+/// Generate a wooden/concrete power pole from a ProcessedElement
 fn generate_power_pole(editor: &mut WorldEditor, element: &ProcessedElement) {
     let Some(first_node) = element.nodes().next() else {
         return;
     };
-
-    let x = first_node.x;
-    let z = first_node.z;
-
-    // Extract height from tags, default to 10 blocks
     let height = element
         .tags()
         .get("height")
         .and_then(|h| h.parse::<i32>().ok())
         .unwrap_or(10)
         .clamp(6, 15);
-
-    // Determine pole material from tags
     let pole_material = element
         .tags()
         .get("material")
         .map(|m| m.as_str())
         .unwrap_or("wood");
+    generate_power_pole_impl(editor, first_node.x, first_node.z, height, pole_material);
+}
+
+/// Generate a wooden/concrete power pole from a ProcessedNode
+fn generate_power_pole_from_node(editor: &mut WorldEditor, node: &ProcessedNode) {
+    let height = node
+        .tags
+        .get("height")
+        .and_then(|h| h.parse::<i32>().ok())
+        .unwrap_or(10)
+        .clamp(6, 15);
+    let pole_material = node
+        .tags
+        .get("material")
+        .map(|m| m.as_str())
+        .unwrap_or("wood");
+    generate_power_pole_impl(editor, node.x, node.z, height, pole_material);
+}
+
+/// Generate a wooden/concrete power pole
+///
+/// Creates a simpler single-pole structure for lower voltage distribution lines.
+fn generate_power_pole_impl(editor: &mut WorldEditor, x: i32, z: i32, height: i32, pole_material: &str) {
 
     let pole_block = match pole_material {
         "concrete" => LIGHT_GRAY_CONCRETE,
