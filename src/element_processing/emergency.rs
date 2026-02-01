@@ -23,9 +23,8 @@ pub fn generate_emergency(editor: &mut WorldEditor, node: &ProcessedNode) {
     }
 
     if let Some(emergency_type) = node.tags.get("emergency") {
-        match emergency_type.as_str() {
-            "fire_hydrant" => generate_fire_hydrant(editor, node),
-            _ => {}
+        if emergency_type.as_str() == "fire_hydrant" {
+            generate_fire_hydrant(editor, node)
         }
     }
 }

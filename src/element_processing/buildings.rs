@@ -1517,6 +1517,20 @@ pub fn generate_building_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
 ) {
+    // Skip building:part relations if layer or level is -1 or lower (underground parts)
+    if relation.tags.contains_key("building:part") {
+        if let Some(layer) = relation.tags.get("layer") {
+            if layer.parse::<i32>().unwrap_or(0) <= -1 {
+                return;
+            }
+        }
+        if let Some(level) = relation.tags.get("level") {
+            if level.parse::<i32>().unwrap_or(0) <= -1 {
+                return;
+            }
+        }
+    }
+
     // Extract levels from relation tags
     let relation_levels = relation
         .tags

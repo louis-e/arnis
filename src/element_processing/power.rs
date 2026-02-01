@@ -26,10 +26,20 @@ pub fn generate_power(editor: &mut WorldEditor, element: &ProcessedElement) {
     }
 
     // Skip underground power infrastructure
-    if element.tags().get("location").map(|v| v == "underground" || v == "underwater").unwrap_or(false) {
+    if element
+        .tags()
+        .get("location")
+        .map(|v| v == "underground" || v == "underwater")
+        .unwrap_or(false)
+    {
         return;
     }
-    if element.tags().get("tunnel").map(|v| v == "yes").unwrap_or(false) {
+    if element
+        .tags()
+        .get("tunnel")
+        .map(|v| v == "yes")
+        .unwrap_or(false)
+    {
         return;
     }
 
@@ -63,7 +73,12 @@ pub fn generate_power_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
     }
 
     // Skip underground power infrastructure
-    if node.tags.get("location").map(|v| v == "underground" || v == "underwater").unwrap_or(false) {
+    if node
+        .tags
+        .get("location")
+        .map(|v| v == "underground" || v == "underwater")
+        .unwrap_or(false)
+    {
         return;
     }
     if node.tags.get("tunnel").map(|v| v == "yes").unwrap_or(false) {
@@ -139,8 +154,8 @@ fn generate_power_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
 
         // Add diagonal bracing between cross-brace levels
         if y % 5 >= 1 && y % 5 <= 4 && y > 1 && y < height - 2 {
-            let prev_width =
-                base_width - ((base_width - top_width) as f32 * ((y - 1) as f32 / height as f32)) as i32;
+            let prev_width = base_width
+                - ((base_width - top_width) as f32 * ((y - 1) as f32 / height as f32)) as i32;
 
             // Only add center vertical support if the width changed
             if current_width != prev_width || y % 5 == 2 {
@@ -157,7 +172,14 @@ fn generate_power_tower(editor: &mut WorldEditor, element: &ProcessedElement) {
             let arm_x = if arm_offset < 0 { x - dx } else { x + dx };
             editor.set_block(IRON_BLOCK, arm_x, arm_height, z, None, None);
             // Add second arm perpendicular
-            editor.set_block(IRON_BLOCK, x, arm_height, z + if arm_offset < 0 { -dx } else { dx }, None, None);
+            editor.set_block(
+                IRON_BLOCK,
+                x,
+                arm_height,
+                z + if arm_offset < 0 { -dx } else { dx },
+                None,
+                None,
+            );
         }
 
         // Insulators hanging from arm ends (end rods to simulate ceramic insulators)
