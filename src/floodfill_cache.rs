@@ -126,6 +126,7 @@ impl CoordinateBitmap {
 
     /// Counts how many coordinates from the given iterator are set in this bitmap.
     #[inline]
+    #[allow(dead_code)]
     pub fn count_contained<'a, I>(&self, coords: I) -> usize
     where
         I: Iterator<Item = &'a (i32, i32)>,
@@ -140,6 +141,165 @@ pub type BuildingFootprintBitmap = CoordinateBitmap;
 /// Bitmap tracking urban coverage (buildings, roads, paved areas, etc.)
 /// Used to determine if a boundary area is actually urbanized.
 pub type UrbanCoverageBitmap = CoordinateBitmap;
+
+/// Grid-based urban density map for efficient per-coordinate urban checks.
+///
+/// Divides the world into cells and pre-calculates the urban density of each cell.
+/// Uses distance-based smoothing to create organic boundaries around urban areas
+/// instead of blocky grid edges.
+pub struct UrbanDensityGrid {
+    /// Density value (0.0 to 1.0) for each cell, stored in row-major order
+    cells: Vec<f32>,
+    /// Size of each cell in blocks
+    cell_size: i32,
+    /// Minimum x coordinate of the grid (world coordinates)
+    min_x: i32,
+    /// Minimum z coordinate of the grid (world coordinates)
+    min_z: i32,
+    /// Number of cells in the x direction
+    width: usize,
+    /// Number of cells in the z direction
+    height: usize,
+    /// Density threshold for considering a cell "urban"
+    threshold: f32,
+    /// Buffer distance in blocks around urban areas
+    buffer_radius: i32,
+}
+
+impl UrbanDensityGrid {
+    /// Cell size in blocks
+    const DEFAULT_CELL_SIZE: i32 = 64;
+    /// Default density threshold (25%)
+    const DEFAULT_THRESHOLD: f32 = 0.25;
+    /// Buffer radius around urban areas in blocks
+    const DEFAULT_BUFFER_RADIUS: i32 = 20;
+
+    /// Creates a new urban density grid from the urban coverage bitmap.
+    pub fn from_coverage(coverage: &UrbanCoverageBitmap, xzbbox: &XZBBox) -> Self {
+        let cell_size = Self::DEFAULT_CELL_SIZE;
+        let min_x = xzbbox.min_x();
+        let min_z = xzbbox.min_z();
+
+        // Calculate grid dimensions (round up to cover entire bbox)
+        let world_width = xzbbox.max_x() - min_x + 1;
+        let world_height = xzbbox.max_z() - min_z + 1;
+        let width = ((world_width + cell_size - 1) / cell_size) as usize;
+        let height = ((world_height + cell_size - 1) / cell_size) as usize;
+
+        // Calculate density for each cell
+        let mut cells = vec![0.0f32; width * height];
+
+        for cell_z in 0..height {
+            for cell_x in 0..width {
+                let cell_min_x = min_x + (cell_x as i32) * cell_size;
+                let cell_min_z = min_z + (cell_z as i32) * cell_size;
+                let cell_max_x = (cell_min_x + cell_size - 1).min(xzbbox.max_x());
+                let cell_max_z = (cell_min_z + cell_size - 1).min(xzbbox.max_z());
+
+                let mut urban_count = 0;
+                let mut total_count = 0;
+
+                for z in cell_min_z..=cell_max_z {
+                    for x in cell_min_x..=cell_max_x {
+                        total_count += 1;
+                        if coverage.contains(x, z) {
+                            urban_count += 1;
+                        }
+                    }
+                }
+
+                let density = if total_count > 0 {
+                    urban_count as f32 / total_count as f32
+                } else {
+                    0.0
+                };
+
+                cells[cell_z * width + cell_x] = density;
+            }
+        }
+
+        Self {
+            cells,
+            cell_size,
+            min_x,
+            min_z,
+            width,
+            height,
+            threshold: Self::DEFAULT_THRESHOLD,
+            buffer_radius: Self::DEFAULT_BUFFER_RADIUS,
+        }
+    }
+
+    /// Converts world coordinates to cell coordinates.
+    #[inline]
+    fn coord_to_cell(&self, x: i32, z: i32) -> (i32, i32) {
+        let cell_x = (x - self.min_x) / self.cell_size;
+        let cell_z = (z - self.min_z) / self.cell_size;
+        (cell_x, cell_z)
+    }
+
+    /// Checks if a cell is considered urban (above density threshold).
+    #[inline]
+    fn is_urban_cell(&self, cell_x: i32, cell_z: i32) -> bool {
+        if cell_x < 0 || cell_z < 0 {
+            return false;
+        }
+        let cx = cell_x as usize;
+        let cz = cell_z as usize;
+        if cx >= self.width || cz >= self.height {
+            return false;
+        }
+        self.cells[cz * self.width + cx] >= self.threshold
+    }
+
+    /// Determines if a coordinate should have stone ground placed.
+    ///
+    /// Uses distance-based smoothing: a point gets stone if it's within
+    /// `buffer_radius` blocks of any urban cell's edge.
+    #[inline]
+    pub fn should_place_stone(&self, x: i32, z: i32) -> bool {
+        let (cell_x, cell_z) = self.coord_to_cell(x, z);
+
+        // If this cell is urban, always place stone
+        if self.is_urban_cell(cell_x, cell_z) {
+            return true;
+        }
+
+        // Check distance to nearby urban cells
+        // We only need to check cells within buffer_radius distance
+        let cells_to_check = (self.buffer_radius / self.cell_size) + 2;
+        let buffer_sq = self.buffer_radius * self.buffer_radius;
+
+        for dz in -cells_to_check..=cells_to_check {
+            for dx in -cells_to_check..=cells_to_check {
+                let check_x = cell_x + dx;
+                let check_z = cell_z + dz;
+
+                if self.is_urban_cell(check_x, check_z) {
+                    // Calculate distance from point to nearest edge of this urban cell
+                    let cell_min_x = self.min_x + check_x * self.cell_size;
+                    let cell_max_x = cell_min_x + self.cell_size - 1;
+                    let cell_min_z = self.min_z + check_z * self.cell_size;
+                    let cell_max_z = cell_min_z + self.cell_size - 1;
+
+                    // Distance to nearest point on the cell's bounding box
+                    let nearest_x = x.clamp(cell_min_x, cell_max_x);
+                    let nearest_z = z.clamp(cell_min_z, cell_max_z);
+
+                    let dist_x = x - nearest_x;
+                    let dist_z = z - nearest_z;
+                    let dist_sq = dist_x * dist_x + dist_z * dist_z;
+
+                    if dist_sq <= buffer_sq {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+}
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {

@@ -89,6 +89,10 @@ pub fn generate_world_with_options(
     // This helps avoid placing stone ground in rural areas within city boundaries
     let urban_coverage = flood_fill_cache.collect_urban_coverage(&elements, &xzbbox);
 
+    // Build urban density grid for efficient per-coordinate urban checks with rounded edges
+    let urban_density_grid =
+        crate::floodfill_cache::UrbanDensityGrid::from_coverage(&urban_coverage, &xzbbox);
+
     // Partition elements: separate boundary elements for deferred processing
     // This avoids cloning by moving elements instead of copying them
     let (boundary_elements, other_elements): (Vec<_>, Vec<_>) = elements
@@ -295,7 +299,7 @@ pub fn generate_world_with_options(
                     way,
                     args,
                     &flood_fill_cache,
-                    &urban_coverage,
+                    &urban_density_grid,
                 );
                 // Clean up cache entry for consistency with other element processing
                 flood_fill_cache.remove_way(way.id);
@@ -306,7 +310,7 @@ pub fn generate_world_with_options(
                     rel,
                     args,
                     &flood_fill_cache,
-                    &urban_coverage,
+                    &urban_density_grid,
                     &xzbbox,
                 );
                 // Clean up cache entries for consistency with other element processing
