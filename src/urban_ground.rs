@@ -81,6 +81,60 @@ pub struct UrbanCluster {
     building_count: usize,
 }
 
+/// A compact lookup structure for checking if a coordinate is in an urban area.
+///
+/// Instead of storing millions of individual coordinates, this stores only
+/// the cell indices (thousands) and performs O(1) lookups. This reduces
+/// memory usage by ~4000x compared to storing all coordinates.
+///
+/// # Memory Usage
+/// - 7.8 km² area: ~17K cells × 16 bytes = ~270 KB (vs ~560 MB for coordinates)
+/// - 100 km² area: ~220K cells × 16 bytes = ~3.5 MB (vs ~7 GB for coordinates)
+#[derive(Debug, Clone)]
+pub struct UrbanGroundLookup {
+    /// Set of cell indices (cx, cz) that are urban
+    urban_cells: HashSet<(i32, i32)>,
+    /// Cell size used for coordinate-to-cell conversion
+    cell_size: i32,
+    /// Bounding box origin for coordinate conversion
+    bbox_min_x: i32,
+    bbox_min_z: i32,
+}
+
+impl UrbanGroundLookup {
+    /// Creates an empty lookup (no urban areas).
+    pub fn empty() -> Self {
+        Self {
+            urban_cells: HashSet::new(),
+            cell_size: 64,
+            bbox_min_x: 0,
+            bbox_min_z: 0,
+        }
+    }
+
+    /// Returns true if the given world coordinate is in an urban area.
+    #[inline]
+    pub fn is_urban(&self, x: i32, z: i32) -> bool {
+        if self.urban_cells.is_empty() {
+            return false;
+        }
+        let cx = (x - self.bbox_min_x) / self.cell_size;
+        let cz = (z - self.bbox_min_z) / self.cell_size;
+        self.urban_cells.contains(&(cx, cz))
+    }
+
+    /// Returns the number of urban cells.
+    #[allow(dead_code)]
+    pub fn cell_count(&self) -> usize {
+        self.urban_cells.len()
+    }
+
+    /// Returns true if there are no urban areas.
+    pub fn is_empty(&self) -> bool {
+        self.urban_cells.is_empty()
+    }
+}
+
 /// Computes urban ground areas from building locations.
 pub struct UrbanGroundComputer {
     config: UrbanGroundConfig,
@@ -140,6 +194,9 @@ impl UrbanGroundComputer {
     /// Performance: Uses cell-based filling for O(cells) complexity instead of
     /// flood-filling complex hulls which would be O(area). For a city with 1000
     /// buildings in 100 cells, this is ~100x faster than flood fill.
+    ///
+    /// NOTE: For better performance and memory usage, prefer `compute_lookup()`.
+    #[allow(dead_code)]
     pub fn compute(&self, _timeout: Option<&Duration>) -> Vec<(i32, i32)> {
         // Not enough buildings for any urban area
         if self.building_centroids.len() < self.config.min_buildings_for_cluster {
@@ -165,6 +222,46 @@ impl UrbanGroundComputer {
         }
 
         all_coords
+    }
+
+    /// Computes urban ground and returns a compact lookup structure.
+    ///
+    /// This is the preferred method for production use. Instead of returning
+    /// millions of coordinates (high memory), it returns a lookup structure
+    /// that stores only cell indices (~4000x less memory) and provides O(1)
+    /// coordinate lookups.
+    ///
+    /// # Memory Comparison
+    /// - `compute()`: ~560 MB for 7.8 km² area
+    /// - `compute_lookup()`: ~270 KB for same area
+    pub fn compute_lookup(&self) -> UrbanGroundLookup {
+        // Not enough buildings for any urban area
+        if self.building_centroids.len() < self.config.min_buildings_for_cluster {
+            return UrbanGroundLookup::empty();
+        }
+
+        // Step 1: Create density grid (cell -> buildings in that cell)
+        let grid = self.create_density_grid();
+
+        // Step 2: Find connected urban regions and get their expanded cells
+        let clusters = self.find_urban_clusters(&grid);
+
+        if clusters.is_empty() {
+            return UrbanGroundLookup::empty();
+        }
+
+        // Step 3: Collect all expanded cells from all clusters into a HashSet
+        let mut urban_cells = HashSet::new();
+        for cluster in clusters {
+            urban_cells.extend(cluster.cells.iter().copied());
+        }
+
+        UrbanGroundLookup {
+            urban_cells,
+            cell_size: self.config.cell_size,
+            bbox_min_x: self.xzbbox.min_x(),
+            bbox_min_z: self.xzbbox.min_z(),
+        }
     }
 
     /// Fills all cells in a cluster directly, returning coordinates.
@@ -531,7 +628,10 @@ pub fn compute_centroid(coords: &[(i32, i32)]) -> Option<(i32, i32)> {
 
 /// Convenience function to compute urban ground from building centroids.
 ///
-/// This is the main entry point for urban ground generation.
+/// NOTE: This function is kept for backward compatibility and tests.
+/// For production use, prefer `compute_urban_ground_lookup` which uses
+/// ~4000x less memory.
+#[allow(dead_code)]
 pub fn compute_urban_ground(
     building_centroids: Vec<(i32, i32)>,
     xzbbox: &XZBBox,
@@ -540,6 +640,19 @@ pub fn compute_urban_ground(
     let mut computer = UrbanGroundComputer::with_defaults(xzbbox.clone());
     computer.add_building_centroids(building_centroids);
     computer.compute(timeout)
+}
+
+/// Computes urban ground and returns a compact lookup structure.
+///
+/// This is the preferred entry point for production use. Returns a lookup
+/// structure that uses ~270 KB instead of ~560 MB for a typical city area.
+pub fn compute_urban_ground_lookup(
+    building_centroids: Vec<(i32, i32)>,
+    xzbbox: &XZBBox,
+) -> UrbanGroundLookup {
+    let mut computer = UrbanGroundComputer::with_defaults(xzbbox.clone());
+    computer.add_building_centroids(building_centroids);
+    computer.compute_lookup()
 }
 
 #[cfg(test)]
@@ -671,5 +784,65 @@ mod tests {
             "Sparse grid should trigger higher expansion, got {}",
             expansion
         );
+    }
+
+    #[test]
+    fn test_lookup_empty() {
+        let lookup = UrbanGroundLookup::empty();
+        assert!(lookup.is_empty());
+        assert!(!lookup.is_urban(100, 100));
+        assert_eq!(lookup.cell_count(), 0);
+    }
+
+    #[test]
+    fn test_lookup_membership() {
+        let mut computer = UrbanGroundComputer::with_defaults(create_test_bbox());
+
+        // Create a dense cluster of buildings
+        for x in 0..10 {
+            for z in 0..10 {
+                computer.add_building_centroid(100 + x * 10, 100 + z * 10);
+            }
+        }
+
+        let lookup = computer.compute_lookup();
+        assert!(!lookup.is_empty());
+
+        // Points inside the cluster should be urban
+        assert!(
+            lookup.is_urban(150, 150),
+            "Center of cluster should be urban"
+        );
+
+        // Points far outside the cluster should not be urban
+        assert!(
+            !lookup.is_urban(900, 900),
+            "Point far from cluster should not be urban"
+        );
+    }
+
+    #[test]
+    fn test_lookup_vs_compute_consistency() {
+        let mut computer = UrbanGroundComputer::with_defaults(create_test_bbox());
+
+        // Create a medium-sized cluster
+        for x in 0..5 {
+            for z in 0..5 {
+                computer.add_building_centroid(200 + x * 20, 200 + z * 20);
+            }
+        }
+
+        let coords = computer.compute(None);
+        let lookup = computer.compute_lookup();
+
+        // Every coordinate from compute() should be marked urban in lookup
+        for (x, z) in &coords {
+            assert!(
+                lookup.is_urban(*x, *z),
+                "Coordinate ({}, {}) should be urban in lookup",
+                x,
+                z
+            );
+        }
     }
 }

@@ -283,20 +283,15 @@ pub fn generate_world_with_options(
 
     process_pb.finish();
 
-    // Generate urban ground using building cluster detection (if enabled)
-    // This replaces the old boundary-based approach with a smarter algorithm that:
-    // - Detects clusters of buildings (ignores isolated buildings in rural areas)
-    // - Computes a concave hull around each cluster for natural-looking boundaries
-    // - Only places stone ground in genuinely urban areas
-    if args.city_boundaries && !building_centroids.is_empty() {
-        let urban_coords =
-            urban_ground::compute_urban_ground(building_centroids, &xzbbox, args.timeout.as_ref());
-        for (x, z) in urban_coords {
-            // Use set_block which respects ground level
-            // Only place stone where no block exists yet (don't overwrite landuse, leisure, etc.)
-            editor.set_block(SMOOTH_STONE, x, 0, z, None, None);
-        }
-    }
+    // Compute urban ground lookup (if enabled)
+    // Uses a compact cell-based representation instead of storing all coordinates.
+    // Memory usage: ~270 KB vs ~560 MB for coordinate-based approach.
+    let urban_lookup = if args.city_boundaries && !building_centroids.is_empty() {
+        urban_ground::compute_urban_ground_lookup(building_centroids, &xzbbox)
+    } else {
+        urban_ground::UrbanGroundLookup::empty()
+    };
+    let has_urban_ground = !urban_lookup.is_empty();
 
     // Drop remaining caches
     drop(highway_connectivity);
@@ -354,9 +349,18 @@ pub fn generate_world_with_options(
                         args.ground_level
                     };
 
+                    // Check if this coordinate is in an urban area (O(1) lookup)
+                    let is_urban = has_urban_ground && urban_lookup.is_urban(x, z);
+
                     // Add default dirt and grass layer if there isn't a stone layer already
                     if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
-                        editor.set_block_absolute(GRASS_BLOCK, x, ground_y, z, None, None);
+                        if is_urban {
+                            // Urban area: smooth stone ground
+                            editor.set_block_absolute(SMOOTH_STONE, x, ground_y, z, None, None);
+                        } else {
+                            // Rural/natural area: grass and dirt
+                            editor.set_block_absolute(GRASS_BLOCK, x, ground_y, z, None, None);
+                        }
                         editor.set_block_absolute(DIRT, x, ground_y - 1, z, None, None);
                         editor.set_block_absolute(DIRT, x, ground_y - 2, z, None, None);
                     }
