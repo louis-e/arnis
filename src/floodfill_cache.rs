@@ -157,11 +157,13 @@ impl CoordinateBitmap {
 
             // Calculate x range in local coordinates
             let local_min_x = (i64::from(min_x) - i64::from(self.min_x)).max(0) as usize;
-            let local_max_x = ((i64::from(max_x) - i64::from(self.min_x)) as usize).min(self.width - 1);
+            let local_max_x =
+                ((i64::from(max_x) - i64::from(self.min_x)) as usize).min(self.width - 1);
 
             // Count out-of-bounds x coordinates toward total
             let x_start_offset = (i64::from(self.min_x) - i64::from(min_x)).max(0) as usize;
-            let x_end_offset = (i64::from(max_x) - i64::from(self.min_x) - (self.width as i64 - 1)).max(0) as usize;
+            let x_end_offset = (i64::from(max_x) - i64::from(self.min_x) - (self.width as i64 - 1))
+                .max(0) as usize;
             total_count += x_start_offset + x_end_offset;
 
             if local_min_x > local_max_x {
@@ -184,7 +186,12 @@ impl CoordinateBitmap {
                 // All bits are in the same byte
                 let byte = self.bits[start_byte];
                 // Create mask for bits from start_bit to end_bit (inclusive)
-                let mask = ((1u16 << (end_bit_in_byte - start_bit_in_byte + 1)) - 1) as u8;
+                let num_bits_in_mask = end_bit_in_byte - start_bit_in_byte + 1;
+                let mask = if num_bits_in_mask >= 8 {
+                    0xFFu8
+                } else {
+                    ((1u16 << num_bits_in_mask) - 1) as u8
+                };
                 let masked = (byte >> start_bit_in_byte) & mask;
                 urban_count += masked.count_ones() as usize;
             } else {
@@ -200,7 +207,12 @@ impl CoordinateBitmap {
 
                 // Last partial byte
                 let last_byte = self.bits[end_byte];
-                let last_mask = (1u8 << (end_bit_in_byte + 1)) - 1; // bits 0 to end_bit
+                // Handle case where end_bit_in_byte is 7 (would overflow 1u8 << 8)
+                let last_mask = if end_bit_in_byte >= 7 {
+                    0xFFu8
+                } else {
+                    (1u8 << (end_bit_in_byte + 1)) - 1
+                };
                 urban_count += (last_byte & last_mask).count_ones() as usize;
             }
         }

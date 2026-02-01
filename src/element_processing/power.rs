@@ -124,7 +124,6 @@ fn generate_power_tower_from_node(editor: &mut WorldEditor, node: &ProcessedNode
 /// Creates a realistic lattice tower structure using iron bars and iron blocks.
 /// The design is a tapered lattice tower with cross-bracing and insulators.
 fn generate_power_tower_impl(editor: &mut WorldEditor, x: i32, z: i32, height: i32) {
-
     // Tower design constants
     let base_width = 3; // Half-width at base (so 7x7 footprint)
     let top_width = 1; // Half-width at top (so 3x3)
@@ -270,8 +269,13 @@ fn generate_power_pole_from_node(editor: &mut WorldEditor, node: &ProcessedNode)
 /// Generate a wooden/concrete power pole
 ///
 /// Creates a simpler single-pole structure for lower voltage distribution lines.
-fn generate_power_pole_impl(editor: &mut WorldEditor, x: i32, z: i32, height: i32, pole_material: &str) {
-
+fn generate_power_pole_impl(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    height: i32,
+    pole_material: &str,
+) {
     let pole_block = match pole_material {
         "concrete" => LIGHT_GRAY_CONCRETE,
         "steel" | "metal" => IRON_BLOCK,
