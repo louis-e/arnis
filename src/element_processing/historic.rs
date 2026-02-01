@@ -116,7 +116,7 @@ fn generate_memorial(editor: &mut WorldEditor, node: &ProcessedNode) {
             editor.set_block(STONE_BRICK_SLAB, x - 1, 3, z + 1, None, None);
             editor.set_block(STONE_BRICK_SLAB, x + 1, 3, z + 1, None, None);
 
-            // Main shaft, fixed height of 3 blocks (Y=3 to Y=5)
+            // Main shaft, fixed height of 4 blocks (Y=3 to Y=6)
             for y in 3..=6 {
                 editor.set_block(SMOOTH_QUARTZ, x, y, z, None, None);
             }

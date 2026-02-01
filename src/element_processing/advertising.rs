@@ -114,7 +114,7 @@ fn generate_poster_box(editor: &mut WorldEditor, node: &ProcessedNode) {
     editor.set_block(SEA_LANTERN, x, 3, z, None, None);
     editor.set_block(SEA_LANTERN, x + 1, 3, z, None, None);
 
-    // Y=4: Two polished diorite slabs
+    // Y=4: Two polished stone brick slabs
     editor.set_block(STONE_BRICK_SLAB, x, 4, z, None, None);
     editor.set_block(STONE_BRICK_SLAB, x + 1, 4, z, None, None);
 }
