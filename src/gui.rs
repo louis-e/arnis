@@ -717,12 +717,22 @@ fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, St
         .as_f64()
         .ok_or("Missing maxGeoLon in metadata")?;
 
+    // Extract Minecraft coordinate bounds
+    let min_mc_x = metadata["minMcX"].as_i64().unwrap_or(0) as i32;
+    let max_mc_x = metadata["maxMcX"].as_i64().unwrap_or(0) as i32;
+    let min_mc_z = metadata["minMcZ"].as_i64().unwrap_or(0) as i32;
+    let max_mc_z = metadata["maxMcZ"].as_i64().unwrap_or(0) as i32;
+
     Ok(Some(WorldMapData {
         image_base64: format!("data:image/png;base64,{}", base64_image),
         min_lat,
         max_lat,
         min_lon,
         max_lon,
+        min_mc_x,
+        max_mc_x,
+        min_mc_z,
+        max_mc_z,
     }))
 }
 
@@ -734,6 +744,11 @@ struct WorldMapData {
     max_lat: f64,
     min_lon: f64,
     max_lon: f64,
+    // Minecraft coordinate bounds for coordinate copying
+    min_mc_x: i32,
+    max_mc_x: i32,
+    min_mc_z: i32,
+    max_mc_z: i32,
 }
 
 /// Opens the file with default application (Windows) or shows in file explorer (macOS/Linux)
