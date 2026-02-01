@@ -171,7 +171,7 @@ pub fn generate_world_with_options(
                     }
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
-                } else if way.tags.contains_key("railway") {
+                } else if way.tags.contains_key("railway") || way.tags.contains_key("subway") {
                     railways::generate_railways(&mut editor, way);
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);
