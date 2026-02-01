@@ -11,7 +11,7 @@
 //!
 //! To avoid placing stone ground in rural areas that happen to fall within city
 //! administrative boundaries, we use a grid-based density check. The world is divided
-//! into cells (32×32 blocks = 1 Minecraft chunk), and each cell's urban density is
+//! into cells (64×64 blocks = 4×4 Minecraft chunks), and each cell's urban density is
 //! pre-calculated.
 //!
 //! Stone ground is only placed in cells that exceed the density threshold, with

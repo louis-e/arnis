@@ -324,13 +324,16 @@ fn generate_power_line(editor: &mut WorldEditor, way: &ProcessedWay) {
 
         for (idx, (lx, _, lz)) in line_points.iter().enumerate() {
             // Calculate position along the span (0.0 to 1.0)
-            let t = idx as f64 / line_points.len().max(1) as f64;
+            // Use len-1 as denominator so last point reaches t=1.0
+            let denom = (line_points.len().saturating_sub(1)).max(1) as f64;
+            let t = idx as f64 / denom;
 
             // Catenary approximation: sag is maximum at center, zero at ends
             // Using parabola: sag = 4 * max_sag * t * (1 - t)
             let sag = (4.0 * max_sag as f64 * t * (1.0 - t)) as i32;
 
-            let wire_y = base_height - sag;
+            // Ensure wire doesn't go underground (minimum height of 3 blocks above ground)
+            let wire_y = (base_height - sag).max(3);
 
             // Place the wire block (chain aligned with line direction)
             editor.set_block(chain_block, *lx, wire_y, *lz, None, None);

@@ -181,18 +181,20 @@ impl UrbanDensityGrid {
         let min_z = xzbbox.min_z();
 
         // Calculate grid dimensions (round up to cover entire bbox)
-        let world_width = xzbbox.max_x() - min_x + 1;
-        let world_height = xzbbox.max_z() - min_z + 1;
-        let width = ((world_width + cell_size - 1) / cell_size) as usize;
-        let height = ((world_height + cell_size - 1) / cell_size) as usize;
+        // Use i64 to avoid overflow when world spans more than i32::MAX in either dimension
+        let world_width = i64::from(xzbbox.max_x()) - i64::from(min_x) + 1;
+        let world_height = i64::from(xzbbox.max_z()) - i64::from(min_z) + 1;
+        let width = ((world_width + i64::from(cell_size) - 1) / i64::from(cell_size)) as usize;
+        let height = ((world_height + i64::from(cell_size) - 1) / i64::from(cell_size)) as usize;
 
         // Calculate density for each cell
         let mut cells = vec![0.0f32; width * height];
 
         for cell_z in 0..height {
             for cell_x in 0..width {
-                let cell_min_x = min_x + (cell_x as i32) * cell_size;
-                let cell_min_z = min_z + (cell_z as i32) * cell_size;
+                // Use i64 for intermediate calculations to prevent overflow
+                let cell_min_x = (i64::from(min_x) + (cell_x as i64) * i64::from(cell_size)) as i32;
+                let cell_min_z = (i64::from(min_z) + (cell_z as i64) * i64::from(cell_size)) as i32;
                 let cell_max_x = (cell_min_x + cell_size - 1).min(xzbbox.max_x());
                 let cell_max_z = (cell_min_z + cell_size - 1).min(xzbbox.max_z());
 
@@ -277,9 +279,14 @@ impl UrbanDensityGrid {
 
                 if self.is_urban_cell(check_x, check_z) {
                     // Calculate distance from point to nearest edge of this urban cell
-                    let cell_min_x = self.min_x + check_x * self.cell_size;
+                    // Use i64 for intermediate calculations to prevent overflow
+                    let cell_min_x = (i64::from(self.min_x)
+                        + i64::from(check_x) * i64::from(self.cell_size))
+                        as i32;
                     let cell_max_x = cell_min_x + self.cell_size - 1;
-                    let cell_min_z = self.min_z + check_z * self.cell_size;
+                    let cell_min_z = (i64::from(self.min_z)
+                        + i64::from(check_z) * i64::from(self.cell_size))
+                        as i32;
                     let cell_max_z = cell_min_z + self.cell_size - 1;
 
                     // Distance to nearest point on the cell's bounding box

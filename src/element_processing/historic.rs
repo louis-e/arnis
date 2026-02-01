@@ -196,8 +196,8 @@ fn generate_cross(editor: &mut WorldEditor, x: i32, z: i32, height: i32) {
         editor.set_block(STONE_BRICK_WALL, x, y, z, None, None);
     }
 
-    // Horizontal beam (cross arm) at 2/3 height, but at least one block below top
-    let arm_y = (2 + (height * 2 / 3)).min(height - 1);
+    // Horizontal beam (cross arm) at approximately 2/3 height, but at least one block below top
+    let arm_y = ((height * 2 + 2) / 3).min(height - 1);
     editor.set_block(STONE_BRICK_WALL, x - 1, arm_y, z, None, None);
     editor.set_block(STONE_BRICK_WALL, x + 1, arm_y, z, None, None);
 }
