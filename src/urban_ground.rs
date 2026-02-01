@@ -30,28 +30,29 @@ use std::time::Duration;
 #[derive(Debug, Clone)]
 pub struct UrbanGroundConfig {
     /// Grid cell size for density analysis (in blocks).
-    /// Smaller = more precise but slower. Default: 48 blocks (3 chunks).
+    /// Smaller = more precise but slower. Default: 64 blocks (4 chunks).
     pub cell_size: i32,
 
     /// Minimum buildings per cell to consider it potentially urban.
-    /// Cells below this threshold are ignored. Default: 3.
+    /// Cells below this threshold are ignored. Default: 1.
     pub min_buildings_per_cell: usize,
 
     /// Minimum total buildings in a connected cluster to be considered urban.
-    /// Small clusters (villages, isolated buildings) won't get stone ground. Default: 20.
+    /// Small clusters (villages, isolated buildings) won't get stone ground. Default: 5.
     pub min_buildings_for_cluster: usize,
 
-    /// Concavity parameter for hull computation.
+    /// Concavity parameter for hull computation (used in legacy hull-based method).
     /// Lower = tighter fit to buildings (more concave), Higher = smoother (more convex).
     /// Range: 1.0 (very tight) to 10.0 (almost convex). Default: 2.0.
     pub concavity: f64,
 
-    /// Whether to expand the hull slightly beyond building boundaries.
+    /// Whether to expand the hull slightly beyond building boundaries (used in legacy method).
     /// This creates a small buffer zone around the urban area. Default: true.
     pub expand_hull: bool,
 
-    /// Number of cells to expand the urban region before hull computation.
-    /// This helps fill small gaps between buildings. Default: 1.
+    /// Base number of cells to expand the urban region.
+    /// This helps fill small gaps between buildings. Adaptive expansion may increase this.
+    /// Default: 2.
     pub cell_expansion: i32,
 }
 
