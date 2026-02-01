@@ -136,6 +136,7 @@ fn generate_memorial(editor: &mut WorldEditor, node: &ProcessedNode) {
         }
         _ => {
             // Default: simple stone pillar monument
+            editor.set_block(STONE_BRICKS, x, 1, z, None, None);
             editor.set_block(STONE_BRICKS, x, 2, z, None, None);
             editor.set_block(CHISELED_STONE_BRICKS, x, 3, z, None, None);
             editor.set_block(STONE_BRICK_SLAB, x, 4, z, None, None);
@@ -196,8 +197,11 @@ fn generate_cross(editor: &mut WorldEditor, x: i32, z: i32, height: i32) {
         editor.set_block(STONE_BRICK_WALL, x, y, z, None, None);
     }
 
-    // Horizontal beam (cross arm) at approximately 2/3 height, but at least one block below top
-    let arm_y = ((height * 2 + 2) / 3).min(height - 1);
-    editor.set_block(STONE_BRICK_WALL, x - 1, arm_y, z, None, None);
-    editor.set_block(STONE_BRICK_WALL, x + 1, arm_y, z, None, None);
+    // Horizontal beam (cross arm) at approximately 2/3 height, but at least 2 and at most height-1
+    let arm_y = ((height * 2 + 2) / 3).clamp(2, height - 1);
+    // Only place horizontal arms if height allows for them (height >= 3)
+    if height >= 3 {
+        editor.set_block(STONE_BRICK_WALL, x - 1, arm_y, z, None, None);
+        editor.set_block(STONE_BRICK_WALL, x + 1, arm_y, z, None, None);
+    }
 }

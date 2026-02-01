@@ -151,7 +151,7 @@ impl CoordinateBitmap {
             let local_z = i64::from(z) - i64::from(self.min_z);
             if local_z < 0 || local_z >= self.height as i64 {
                 // Row is out of bounds, still counts toward total
-                total_count += (max_x - min_x + 1) as usize;
+                total_count += (i64::from(max_x) - i64::from(min_x) + 1) as usize;
                 continue;
             }
             let local_z = local_z as usize;
