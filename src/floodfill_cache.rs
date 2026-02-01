@@ -141,6 +141,7 @@ impl CoordinateBitmap {
     ///
     /// Returns `(urban_count, total_count)` for the given range.
     #[inline]
+    #[allow(dead_code)]
     pub fn count_in_range(&self, min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> (usize, usize) {
         let mut urban_count = 0usize;
         let mut total_count = 0usize;
@@ -223,171 +224,6 @@ impl CoordinateBitmap {
 
 /// Type alias for building footprint bitmap (for backwards compatibility).
 pub type BuildingFootprintBitmap = CoordinateBitmap;
-
-/// Bitmap tracking urban coverage (buildings, roads, paved areas, etc.)
-/// Used to determine if a boundary area is actually urbanized.
-pub type UrbanCoverageBitmap = CoordinateBitmap;
-
-/// Grid-based urban density map for efficient per-coordinate urban checks.
-///
-/// Divides the world into cells and pre-calculates the urban density of each cell.
-/// Uses distance-based smoothing to create organic boundaries around urban areas
-/// instead of blocky grid edges.
-pub struct UrbanDensityGrid {
-    /// Density value (0.0 to 1.0) for each cell, stored in row-major order
-    cells: Vec<f32>,
-    /// Size of each cell in blocks
-    cell_size: i32,
-    /// Minimum x coordinate of the grid (world coordinates)
-    min_x: i32,
-    /// Minimum z coordinate of the grid (world coordinates)
-    min_z: i32,
-    /// Number of cells in the x direction
-    width: usize,
-    /// Number of cells in the z direction
-    height: usize,
-    /// Density threshold for considering a cell "urban"
-    threshold: f32,
-    /// Buffer distance in blocks around urban areas
-    buffer_radius: i32,
-}
-
-impl UrbanDensityGrid {
-    /// Cell size in blocks
-    const DEFAULT_CELL_SIZE: i32 = 64;
-    /// Default density threshold (25%)
-    const DEFAULT_THRESHOLD: f32 = 0.25;
-    /// Buffer radius around urban areas in blocks
-    const DEFAULT_BUFFER_RADIUS: i32 = 20;
-
-    /// Creates a new urban density grid from the urban coverage bitmap.
-    pub fn from_coverage(coverage: &UrbanCoverageBitmap, xzbbox: &XZBBox) -> Self {
-        let cell_size = Self::DEFAULT_CELL_SIZE;
-        let min_x = xzbbox.min_x();
-        let min_z = xzbbox.min_z();
-
-        // Calculate grid dimensions (round up to cover entire bbox)
-        // Use i64 to avoid overflow when world spans more than i32::MAX in either dimension
-        let world_width = i64::from(xzbbox.max_x()) - i64::from(min_x) + 1;
-        let world_height = i64::from(xzbbox.max_z()) - i64::from(min_z) + 1;
-        let width = ((world_width + i64::from(cell_size) - 1) / i64::from(cell_size)) as usize;
-        let height = ((world_height + i64::from(cell_size) - 1) / i64::from(cell_size)) as usize;
-
-        // Calculate density for each cell using efficient bitmap counting
-        let cell_count = width
-            .checked_mul(height)
-            .expect("UrbanDensityGrid: grid dimensions too large");
-        let mut cells = vec![0.0f32; cell_count];
-
-        for cell_z in 0..height {
-            for cell_x in 0..width {
-                // Use i64 for intermediate calculations to prevent overflow
-                let cell_min_x = (i64::from(min_x) + (cell_x as i64) * i64::from(cell_size)) as i32;
-                let cell_min_z = (i64::from(min_z) + (cell_z as i64) * i64::from(cell_size)) as i32;
-                let cell_max_x = (cell_min_x + cell_size - 1).min(xzbbox.max_x());
-                let cell_max_z = (cell_min_z + cell_size - 1).min(xzbbox.max_z());
-
-                // Use optimized bitmap counting instead of iterating every coordinate
-                let (urban_count, total_count) =
-                    coverage.count_in_range(cell_min_x, cell_min_z, cell_max_x, cell_max_z);
-
-                let density = if total_count > 0 {
-                    urban_count as f32 / total_count as f32
-                } else {
-                    0.0
-                };
-
-                cells[cell_z * width + cell_x] = density;
-            }
-        }
-
-        Self {
-            cells,
-            cell_size,
-            min_x,
-            min_z,
-            width,
-            height,
-            threshold: Self::DEFAULT_THRESHOLD,
-            buffer_radius: Self::DEFAULT_BUFFER_RADIUS,
-        }
-    }
-
-    /// Converts world coordinates to cell coordinates.
-    #[inline]
-    fn coord_to_cell(&self, x: i32, z: i32) -> (i32, i32) {
-        let cell_x = (x - self.min_x) / self.cell_size;
-        let cell_z = (z - self.min_z) / self.cell_size;
-        (cell_x, cell_z)
-    }
-
-    /// Checks if a cell is considered urban (above density threshold).
-    #[inline]
-    fn is_urban_cell(&self, cell_x: i32, cell_z: i32) -> bool {
-        if cell_x < 0 || cell_z < 0 {
-            return false;
-        }
-        let cx = cell_x as usize;
-        let cz = cell_z as usize;
-        if cx >= self.width || cz >= self.height {
-            return false;
-        }
-        self.cells[cz * self.width + cx] >= self.threshold
-    }
-
-    /// Determines if a coordinate should have stone ground placed.
-    ///
-    /// Uses distance-based smoothing: a point gets stone if it's within
-    /// `buffer_radius` blocks of any urban cell's edge.
-    #[inline]
-    pub fn should_place_stone(&self, x: i32, z: i32) -> bool {
-        let (cell_x, cell_z) = self.coord_to_cell(x, z);
-
-        // If this cell is urban, always place stone
-        if self.is_urban_cell(cell_x, cell_z) {
-            return true;
-        }
-
-        // Check distance to nearby urban cells
-        // We only need to check cells within buffer_radius distance
-        let cells_to_check = (self.buffer_radius / self.cell_size) + 2;
-        let buffer_sq = self.buffer_radius * self.buffer_radius;
-
-        for dz in -cells_to_check..=cells_to_check {
-            for dx in -cells_to_check..=cells_to_check {
-                let check_x = cell_x + dx;
-                let check_z = cell_z + dz;
-
-                if self.is_urban_cell(check_x, check_z) {
-                    // Calculate distance from point to nearest edge of this urban cell
-                    // Use i64 for intermediate calculations to prevent overflow
-                    let cell_min_x = (i64::from(self.min_x)
-                        + i64::from(check_x) * i64::from(self.cell_size))
-                        as i32;
-                    let cell_max_x = cell_min_x + self.cell_size - 1;
-                    let cell_min_z = (i64::from(self.min_z)
-                        + i64::from(check_z) * i64::from(self.cell_size))
-                        as i32;
-                    let cell_max_z = cell_min_z + self.cell_size - 1;
-
-                    // Distance to nearest point on the cell's bounding box
-                    let nearest_x = x.clamp(cell_min_x, cell_max_x);
-                    let nearest_z = z.clamp(cell_min_z, cell_max_z);
-
-                    let dist_x = x - nearest_x;
-                    let dist_z = z - nearest_z;
-                    let dist_sq = dist_x * dist_x + dist_z * dist_z;
-
-                    if dist_sq <= buffer_sq {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        false
-    }
-}
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
@@ -555,65 +391,40 @@ impl FloodFillCache {
         footprints
     }
 
-    /// Collects all urban coverage coordinates from the pre-computed cache.
+    /// Collects centroids of all buildings from the pre-computed cache.
     ///
-    /// Urban coverage includes buildings, roads (as line areas), and urban landuse types.
-    /// This is used to determine if a boundary area is truly urbanized or just rural
-    /// land that happens to be within administrative city limits.
+    /// This is used for urban ground detection - building clusters are identified
+    /// using their centroids, and a concave hull is computed around dense clusters
+    /// to determine where city ground (smooth stone) should be placed.
     ///
-    /// # Coverage includes:
-    /// - Buildings and building:parts
-    /// - Urban landuse types: residential, commercial, industrial, retail, etc.
-    /// - Amenities with areas (parking lots, schools, etc.)
-    ///
-    /// # Note on highways:
-    /// Linear highways are NOT included because they use bresenham lines, not flood fill.
-    /// However, urban areas typically have enough buildings + urban landuse to provide
-    /// adequate coverage signal.
-    pub fn collect_urban_coverage(
-        &self,
-        elements: &[ProcessedElement],
-        xzbbox: &XZBBox,
-    ) -> UrbanCoverageBitmap {
-        let mut coverage = UrbanCoverageBitmap::new(xzbbox);
+    /// Returns a vector of (x, z) centroid coordinates for all buildings.
+    pub fn collect_building_centroids(&self, elements: &[ProcessedElement]) -> Vec<(i32, i32)> {
+        let mut centroids = Vec::new();
 
         for element in elements {
             match element {
                 ProcessedElement::Way(way) => {
-                    // Check if this is an urban element
-                    if Self::is_urban_coverage_element(way) {
+                    if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                         if let Some(cached) = self.way_cache.get(&way.id) {
-                            for &(x, z) in cached {
-                                coverage.set(x, z);
+                            if let Some(centroid) = Self::compute_centroid(cached) {
+                                centroids.push(centroid);
                             }
                         }
                     }
                 }
                 ProcessedElement::Relation(rel) => {
-                    // Check buildings
                     if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                        // For building relations, compute centroid from outer ways
+                        let mut all_coords = Vec::new();
                         for member in &rel.members {
                             if member.role == ProcessedMemberRole::Outer {
                                 if let Some(cached) = self.way_cache.get(&member.way.id) {
-                                    for &(x, z) in cached {
-                                        coverage.set(x, z);
-                                    }
+                                    all_coords.extend(cached.iter().copied());
                                 }
                             }
                         }
-                    }
-                    // Check urban landuse relations
-                    else if let Some(landuse) = rel.tags.get("landuse") {
-                        if Self::is_urban_landuse(landuse) {
-                            for member in &rel.members {
-                                if member.role == ProcessedMemberRole::Outer {
-                                    if let Some(cached) = self.way_cache.get(&member.way.id) {
-                                        for &(x, z) in cached {
-                                            coverage.set(x, z);
-                                        }
-                                    }
-                                }
-                            }
+                        if let Some(centroid) = Self::compute_centroid(&all_coords) {
+                            centroids.push(centroid);
                         }
                     }
                 }
@@ -621,52 +432,18 @@ impl FloodFillCache {
             }
         }
 
-        coverage
+        centroids
     }
 
-    /// Checks if a way element contributes to urban coverage.
-    fn is_urban_coverage_element(way: &ProcessedWay) -> bool {
-        // Buildings are always urban
-        if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-            return true;
+    /// Computes the centroid of a set of coordinates.
+    fn compute_centroid(coords: &[(i32, i32)]) -> Option<(i32, i32)> {
+        if coords.is_empty() {
+            return None;
         }
-
-        // Urban landuse types
-        if let Some(landuse) = way.tags.get("landuse") {
-            if Self::is_urban_landuse(landuse) {
-                return true;
-            }
-        }
-
-        // Amenities with areas (parking, schools, etc.)
-        if way.tags.contains_key("amenity") {
-            return true;
-        }
-
-        // Highway areas (pedestrian plazas, etc.)
-        if way.tags.contains_key("highway")
-            && way.tags.get("area").map(|v| v == "yes").unwrap_or(false)
-        {
-            return true;
-        }
-
-        false
-    }
-
-    /// Checks if a landuse type is considered urban.
-    fn is_urban_landuse(landuse: &str) -> bool {
-        matches!(
-            landuse,
-            "residential"
-                | "commercial"
-                | "industrial"
-                | "retail"
-                | "railway"
-                | "construction"
-                | "education"
-                | "religious"
-                | "military"
-        )
+        let sum_x: i64 = coords.iter().map(|(x, _)| i64::from(*x)).sum();
+        let sum_z: i64 = coords.iter().map(|(_, z)| i64::from(*z)).sum();
+        let len = coords.len() as i64;
+        Some(((sum_x / len) as i32, (sum_z / len) as i32))
     }
 
     /// Removes a way's cached flood fill result, freeing memory.

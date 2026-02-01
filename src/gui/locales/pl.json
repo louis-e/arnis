@@ -42,5 +42,6 @@
   "interior": "Generowanie wnętrza",
   "roof": "Generowanie dachu",
   "fillground": "Wypełnij podłoże",
+  "city_boundaries": "Podłoże miejskie",
   "bedrock_use_java": "Użyj Java do wyboru światów"
 }

@@ -42,5 +42,6 @@
   "interior": "Generación Interior",
   "roof": "Generación de Tejado",
   "fillground": "Rellenar Suelo",
+  "city_boundaries": "Suelo Urbano",
   "bedrock_use_java": "Usa Java para elegir mundos"
 }

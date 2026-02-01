@@ -42,5 +42,6 @@
   "interior": "Génération d'intérieur",
   "roof": "Génération de toit",
   "fillground": "Remplir le sol",
+  "city_boundaries": "Sol urbain",
   "bedrock_use_java": "Utilisez Java pour les mondes"
 }

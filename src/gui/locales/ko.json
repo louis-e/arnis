@@ -42,5 +42,6 @@
   "interior": "내부 생성",
   "roof": "지붕 생성",
   "fillground": "지면 채우기",
+  "city_boundaries": "도시 지면",
   "bedrock_use_java": "Java로 세계 선택"
 }

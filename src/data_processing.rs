@@ -1,5 +1,5 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, STONE};
+use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SMOOTH_STONE, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
@@ -10,6 +10,7 @@ use crate::osm_parser::ProcessedElement;
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
+use crate::urban_ground;
 use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -85,35 +86,16 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
-    // Only compute urban coverage and density grid if city boundaries are enabled
-    // This saves significant processing time when the feature is disabled
-    let urban_density_grid = if args.city_boundaries {
-        // Collect urban coverage to determine if boundary areas are truly urbanized
-        // This helps avoid placing stone ground in rural areas within city boundaries
-        let urban_coverage = flood_fill_cache.collect_urban_coverage(&elements, &xzbbox);
-
-        // Build urban density grid for efficient per-coordinate urban checks with rounded edges
-        Some(crate::floodfill_cache::UrbanDensityGrid::from_coverage(
-            &urban_coverage,
-            &xzbbox,
-        ))
+    // Collect building centroids for urban ground generation (only if enabled)
+    // This must be done before the processing loop clears the flood fill cache
+    let building_centroids = if args.city_boundaries {
+        flood_fill_cache.collect_building_centroids(&elements)
     } else {
-        None
+        Vec::new()
     };
 
-    // Partition elements: separate boundary elements for deferred processing
-    // This avoids cloning by moving elements instead of copying them
-    let (boundary_elements, other_elements): (Vec<_>, Vec<_>) = if args.city_boundaries {
-        elements
-            .into_iter()
-            .partition(|element| element.tags().contains_key("boundary"))
-    } else {
-        // If city boundaries disabled, treat all elements as non-boundary
-        (Vec::new(), elements)
-    };
-
-    // Process data
-    let elements_count: usize = other_elements.len() + boundary_elements.len();
+    // Process all elements (no longer need to partition boundaries)
+    let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
     process_pb.set_style(ProgressStyle::default_bar()
         .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
@@ -124,8 +106,8 @@ pub fn generate_world_with_options(
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
-    // Process non-boundary elements first
-    for element in other_elements.into_iter() {
+    // Process all elements
+    for element in elements.into_iter() {
         process_pb.inc(1);
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {
@@ -301,39 +283,18 @@ pub fn generate_world_with_options(
 
     process_pb.finish();
 
-    // Process deferred boundary elements after all other elements (only if city boundaries enabled)
-    // This ensures boundaries only fill empty areas, they won't overwrite
-    // any ground blocks set by landuse, leisure, natural, etc.
-    if let Some(ref density_grid) = urban_density_grid {
-        for element in boundary_elements.into_iter() {
-            match &element {
-                ProcessedElement::Way(way) => {
-                    boundaries::generate_boundary(
-                        &mut editor,
-                        way,
-                        args,
-                        &flood_fill_cache,
-                        density_grid,
-                    );
-                    // Clean up cache entry for consistency with other element processing
-                    flood_fill_cache.remove_way(way.id);
-                }
-                ProcessedElement::Relation(rel) => {
-                    boundaries::generate_boundary_from_relation(
-                        &mut editor,
-                        rel,
-                        args,
-                        &flood_fill_cache,
-                        density_grid,
-                        &xzbbox,
-                    );
-                    // Clean up cache entries for consistency with other element processing
-                    let way_ids: Vec<u64> = rel.members.iter().map(|m| m.way.id).collect();
-                    flood_fill_cache.remove_relation_ways(&way_ids);
-                }
-                _ => {}
-            }
-            // Element is dropped here, freeing its memory immediately
+    // Generate urban ground using building cluster detection (if enabled)
+    // This replaces the old boundary-based approach with a smarter algorithm that:
+    // - Detects clusters of buildings (ignores isolated buildings in rural areas)
+    // - Computes a concave hull around each cluster for natural-looking boundaries
+    // - Only places stone ground in genuinely urban areas
+    if args.city_boundaries && !building_centroids.is_empty() {
+        let urban_coords =
+            urban_ground::compute_urban_ground(building_centroids, &xzbbox, args.timeout.as_ref());
+        for (x, z) in urban_coords {
+            // Use set_block which respects ground level
+            // Only place stone where no block exists yet (don't overwrite landuse, leisure, etc.)
+            editor.set_block(SMOOTH_STONE, x, 0, z, None, None);
         }
     }
 
