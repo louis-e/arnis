@@ -85,6 +85,10 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
+    // Collect urban coverage to determine if boundary areas are truly urbanized
+    // This helps avoid placing stone ground in rural areas within city boundaries
+    let urban_coverage = flood_fill_cache.collect_urban_coverage(&elements, &xzbbox);
+
     // Partition elements: separate boundary elements for deferred processing
     // This avoids cloning by moving elements instead of copying them
     let (boundary_elements, other_elements): (Vec<_>, Vec<_>) = elements
@@ -286,7 +290,13 @@ pub fn generate_world_with_options(
     for element in boundary_elements.into_iter() {
         match &element {
             ProcessedElement::Way(way) => {
-                boundaries::generate_boundary(&mut editor, way, args, &flood_fill_cache);
+                boundaries::generate_boundary(
+                    &mut editor,
+                    way,
+                    args,
+                    &flood_fill_cache,
+                    &urban_coverage,
+                );
                 // Clean up cache entry for consistency with other element processing
                 flood_fill_cache.remove_way(way.id);
             }
@@ -296,6 +306,7 @@ pub fn generate_world_with_options(
                     rel,
                     args,
                     &flood_fill_cache,
+                    &urban_coverage,
                     &xzbbox,
                 );
                 // Clean up cache entries for consistency with other element processing

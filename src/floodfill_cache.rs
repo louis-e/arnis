@@ -11,13 +11,13 @@ use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::time::Duration;
 
-/// A memory-efficient bitmap for storing building footprint coordinates.
+/// A memory-efficient bitmap for storing coordinates.
 ///
 /// Instead of storing each coordinate individually (~24 bytes per entry in a HashSet),
 /// this uses 1 bit per coordinate in the world bounds, reducing memory usage by ~200x.
 ///
 /// For a world of size W x H blocks, the bitmap uses only (W * H) / 8 bytes.
-pub struct BuildingFootprintBitmap {
+pub struct CoordinateBitmap {
     /// The bitmap data, where each bit represents one (x, z) coordinate
     bits: Vec<u8>,
     /// Minimum x coordinate (offset for indexing)
@@ -27,12 +27,13 @@ pub struct BuildingFootprintBitmap {
     /// Width of the world (max_x - min_x + 1)
     width: usize,
     /// Height of the world (max_z - min_z + 1)
+    #[allow(dead_code)]
     height: usize,
-    /// Number of coordinates marked as building footprints
+    /// Number of coordinates marked
     count: usize,
 }
 
-impl BuildingFootprintBitmap {
+impl CoordinateBitmap {
     /// Creates a new empty bitmap covering the given world bounds.
     pub fn new(xzbbox: &XZBBox) -> Self {
         let min_x = xzbbox.min_x();
@@ -44,7 +45,7 @@ impl BuildingFootprintBitmap {
         // Calculate number of bytes needed (round up to nearest byte)
         let total_bits = width
             .checked_mul(height)
-            .expect("BuildingFootprintBitmap: world size too large (width * height overflowed)");
+            .expect("CoordinateBitmap: world size too large (width * height overflowed)");
         let num_bytes = total_bits.div_ceil(8);
 
         Self {
@@ -79,7 +80,7 @@ impl BuildingFootprintBitmap {
         Some(local_z * self.width + local_x)
     }
 
-    /// Sets a coordinate as part of a building footprint.
+    /// Sets a coordinate.
     #[inline]
     pub fn set(&mut self, x: i32, z: i32) {
         if let Some(bit_index) = self.coord_to_index(x, z) {
@@ -96,7 +97,7 @@ impl BuildingFootprintBitmap {
         }
     }
 
-    /// Checks if a coordinate is part of a building footprint.
+    /// Checks if a coordinate is set.
     #[inline]
     pub fn contains(&self, x: i32, z: i32) -> bool {
         if let Some(bit_index) = self.coord_to_index(x, z) {
@@ -111,11 +112,34 @@ impl BuildingFootprintBitmap {
 
     /// Returns true if no coordinates are marked.
     #[must_use]
-    #[allow(dead_code)] // Standard API method for collection-like types
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.count == 0
     }
+
+    /// Returns the number of coordinates that are set.
+    #[inline]
+    #[allow(dead_code)]
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    /// Counts how many coordinates from the given iterator are set in this bitmap.
+    #[inline]
+    pub fn count_contained<'a, I>(&self, coords: I) -> usize
+    where
+        I: Iterator<Item = &'a (i32, i32)>,
+    {
+        coords.filter(|(x, z)| self.contains(*x, *z)).count()
+    }
 }
+
+/// Type alias for building footprint bitmap (for backwards compatibility).
+pub type BuildingFootprintBitmap = CoordinateBitmap;
+
+/// Bitmap tracking urban coverage (buildings, roads, paved areas, etc.)
+/// Used to determine if a boundary area is actually urbanized.
+pub type UrbanCoverageBitmap = CoordinateBitmap;
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
@@ -281,6 +305,120 @@ impl FloodFillCache {
         }
 
         footprints
+    }
+
+    /// Collects all urban coverage coordinates from the pre-computed cache.
+    ///
+    /// Urban coverage includes buildings, roads (as line areas), and urban landuse types.
+    /// This is used to determine if a boundary area is truly urbanized or just rural
+    /// land that happens to be within administrative city limits.
+    ///
+    /// # Coverage includes:
+    /// - Buildings and building:parts
+    /// - Urban landuse types: residential, commercial, industrial, retail, etc.
+    /// - Amenities with areas (parking lots, schools, etc.)
+    ///
+    /// # Note on highways:
+    /// Linear highways are NOT included because they use bresenham lines, not flood fill.
+    /// However, urban areas typically have enough buildings + urban landuse to provide
+    /// adequate coverage signal.
+    pub fn collect_urban_coverage(
+        &self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+    ) -> UrbanCoverageBitmap {
+        let mut coverage = UrbanCoverageBitmap::new(xzbbox);
+
+        for element in elements {
+            match element {
+                ProcessedElement::Way(way) => {
+                    // Check if this is an urban element
+                    if Self::is_urban_coverage_element(way) {
+                        if let Some(cached) = self.way_cache.get(&way.id) {
+                            for &(x, z) in cached {
+                                coverage.set(x, z);
+                            }
+                        }
+                    }
+                }
+                ProcessedElement::Relation(rel) => {
+                    // Check buildings
+                    if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                        for member in &rel.members {
+                            if member.role == ProcessedMemberRole::Outer {
+                                if let Some(cached) = self.way_cache.get(&member.way.id) {
+                                    for &(x, z) in cached {
+                                        coverage.set(x, z);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Check urban landuse relations
+                    else if let Some(landuse) = rel.tags.get("landuse") {
+                        if Self::is_urban_landuse(landuse) {
+                            for member in &rel.members {
+                                if member.role == ProcessedMemberRole::Outer {
+                                    if let Some(cached) = self.way_cache.get(&member.way.id) {
+                                        for &(x, z) in cached {
+                                            coverage.set(x, z);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        coverage
+    }
+
+    /// Checks if a way element contributes to urban coverage.
+    fn is_urban_coverage_element(way: &ProcessedWay) -> bool {
+        // Buildings are always urban
+        if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+            return true;
+        }
+
+        // Urban landuse types
+        if let Some(landuse) = way.tags.get("landuse") {
+            if Self::is_urban_landuse(landuse) {
+                return true;
+            }
+        }
+
+        // Amenities with areas (parking, schools, etc.)
+        if way.tags.contains_key("amenity") {
+            return true;
+        }
+
+        // Highway areas (pedestrian plazas, etc.)
+        if way.tags.contains_key("highway")
+            && way.tags.get("area").map(|v| v == "yes").unwrap_or(false)
+        {
+            return true;
+        }
+
+        false
+    }
+
+    /// Checks if a landuse type is considered urban.
+    fn is_urban_landuse(landuse: &str) -> bool {
+        matches!(
+            landuse,
+            "residential"
+                | "commercial"
+                | "industrial"
+                | "retail"
+                | "railway"
+                | "construction"
+                | "education"
+                | "religious"
+                | "military"
+        )
     }
 
     /// Removes a way's cached flood fill result, freeing memory.

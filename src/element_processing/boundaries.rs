@@ -6,14 +6,30 @@
 //! Boundaries are processed last but only fill empty areas, allowing more specific
 //! landuse areas (parks, residential, etc.) to take priority over the general
 //! urban ground.
+//!
+//! # Urban Density Check
+//!
+//! To avoid placing stone ground in rural areas that happen to fall within city
+//! administrative boundaries, we check the urban density of each boundary area.
+//! If less than a threshold percentage of the area is covered by urban elements
+//! (buildings, urban landuse, amenities), we skip setting stone ground.
 
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::clipping::clip_way_to_bbox;
 use crate::coordinate_system::cartesian::XZBBox;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{FloodFillCache, UrbanCoverageBitmap};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+
+/// Minimum percentage of urban coverage required for a boundary area to be considered
+/// truly urban and receive stone ground. Areas below this threshold are left as grass.
+///
+/// This threshold is intentionally low because:
+/// - Urban areas often have parks, rivers, and other non-building spaces
+/// - Not all urban elements (like linear roads) are captured in the coverage bitmap
+/// - We want to be inclusive of mixed urban areas while excluding clearly rural ones
+const URBAN_DENSITY_THRESHOLD: f64 = 0.25; // 25%
 
 /// Checks if a boundary element represents an urban area that should have stone ground.
 ///
@@ -51,12 +67,31 @@ fn is_urban_boundary(tags: &std::collections::HashMap<String, String>) -> bool {
     }
 }
 
+/// Calculates the urban density of an area and determines if it should receive stone ground.
+///
+/// Returns true if the area is sufficiently urbanized (above threshold), false otherwise.
+fn is_sufficiently_urban(floor_area: &[(i32, i32)], urban_coverage: &UrbanCoverageBitmap) -> bool {
+    if floor_area.is_empty() {
+        return false;
+    }
+
+    // Count how many coordinates in the floor area are covered by urban elements
+    let urban_count = urban_coverage.count_contained(floor_area.iter());
+    let total_count = floor_area.len();
+
+    // Calculate density as a fraction
+    let density = urban_count as f64 / total_count as f64;
+
+    density >= URBAN_DENSITY_THRESHOLD
+}
+
 /// Generate ground blocks for an urban boundary way.
 pub fn generate_boundary(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    urban_coverage: &UrbanCoverageBitmap,
 ) {
     // Check if this is an urban boundary
     if !is_urban_boundary(&element.tags) {
@@ -66,6 +101,12 @@ pub fn generate_boundary(
     // Get the area of the boundary element using cache
     let floor_area: Vec<(i32, i32)> =
         flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+
+    // Check if this area is sufficiently urbanized to warrant stone ground
+    // This prevents rural areas within city boundaries from getting stone
+    if !is_sufficiently_urban(&floor_area, urban_coverage) {
+        return;
+    }
 
     // Fill the area with smooth stone as ground block
     // Use None, None to only set where no block exists yet - don't overwrite anything
@@ -80,6 +121,7 @@ pub fn generate_boundary_from_relation(
     rel: &ProcessedRelation,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    urban_coverage: &UrbanCoverageBitmap,
     xzbbox: &XZBBox,
 ) {
     // Check if this is an urban boundary
@@ -122,6 +164,6 @@ pub fn generate_boundary_from_relation(
         };
 
         // Generate boundary area from clipped way
-        generate_boundary(editor, &clipped_way, args, flood_fill_cache);
+        generate_boundary(editor, &clipped_way, args, flood_fill_cache, urban_coverage);
     }
 }
