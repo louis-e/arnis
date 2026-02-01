@@ -42,5 +42,6 @@
   "interior": "Interior Generation",
   "roof": "Roof Generation",
   "fillground": "Fill Ground",
+  "city_boundaries": "City Ground",
   "bedrock_use_java": "Use Java to select worlds"
 }

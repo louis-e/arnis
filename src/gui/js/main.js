@@ -832,6 +832,7 @@ async function startGeneration() {
     var interior = document.getElementById("interior-toggle").checked;
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
+    var city_boundaries = document.getElementById("city-boundaries-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -854,6 +855,7 @@ async function startGeneration() {
         interiorEnabled: interior,
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
+        cityBoundariesEnabled: city_boundaries,
         isNewWorld: isNewWorld,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,

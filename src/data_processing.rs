@@ -85,19 +85,32 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
-    // Collect urban coverage to determine if boundary areas are truly urbanized
-    // This helps avoid placing stone ground in rural areas within city boundaries
-    let urban_coverage = flood_fill_cache.collect_urban_coverage(&elements, &xzbbox);
+    // Only compute urban coverage and density grid if city boundaries are enabled
+    // This saves significant processing time when the feature is disabled
+    let urban_density_grid = if args.city_boundaries {
+        // Collect urban coverage to determine if boundary areas are truly urbanized
+        // This helps avoid placing stone ground in rural areas within city boundaries
+        let urban_coverage = flood_fill_cache.collect_urban_coverage(&elements, &xzbbox);
 
-    // Build urban density grid for efficient per-coordinate urban checks with rounded edges
-    let urban_density_grid =
-        crate::floodfill_cache::UrbanDensityGrid::from_coverage(&urban_coverage, &xzbbox);
+        // Build urban density grid for efficient per-coordinate urban checks with rounded edges
+        Some(crate::floodfill_cache::UrbanDensityGrid::from_coverage(
+            &urban_coverage,
+            &xzbbox,
+        ))
+    } else {
+        None
+    };
 
     // Partition elements: separate boundary elements for deferred processing
     // This avoids cloning by moving elements instead of copying them
-    let (boundary_elements, other_elements): (Vec<_>, Vec<_>) = elements
-        .into_iter()
-        .partition(|element| element.tags().contains_key("boundary"));
+    let (boundary_elements, other_elements): (Vec<_>, Vec<_>) = if args.city_boundaries {
+        elements
+            .into_iter()
+            .partition(|element| element.tags().contains_key("boundary"))
+    } else {
+        // If city boundaries disabled, treat all elements as non-boundary
+        (Vec::new(), elements)
+    };
 
     // Process data
     let elements_count: usize = other_elements.len() + boundary_elements.len();
@@ -288,38 +301,40 @@ pub fn generate_world_with_options(
 
     process_pb.finish();
 
-    // Process deferred boundary elements after all other elements
+    // Process deferred boundary elements after all other elements (only if city boundaries enabled)
     // This ensures boundaries only fill empty areas, they won't overwrite
     // any ground blocks set by landuse, leisure, natural, etc.
-    for element in boundary_elements.into_iter() {
-        match &element {
-            ProcessedElement::Way(way) => {
-                boundaries::generate_boundary(
-                    &mut editor,
-                    way,
-                    args,
-                    &flood_fill_cache,
-                    &urban_density_grid,
-                );
-                // Clean up cache entry for consistency with other element processing
-                flood_fill_cache.remove_way(way.id);
+    if let Some(ref density_grid) = urban_density_grid {
+        for element in boundary_elements.into_iter() {
+            match &element {
+                ProcessedElement::Way(way) => {
+                    boundaries::generate_boundary(
+                        &mut editor,
+                        way,
+                        args,
+                        &flood_fill_cache,
+                        density_grid,
+                    );
+                    // Clean up cache entry for consistency with other element processing
+                    flood_fill_cache.remove_way(way.id);
+                }
+                ProcessedElement::Relation(rel) => {
+                    boundaries::generate_boundary_from_relation(
+                        &mut editor,
+                        rel,
+                        args,
+                        &flood_fill_cache,
+                        density_grid,
+                        &xzbbox,
+                    );
+                    // Clean up cache entries for consistency with other element processing
+                    let way_ids: Vec<u64> = rel.members.iter().map(|m| m.way.id).collect();
+                    flood_fill_cache.remove_relation_ways(&way_ids);
+                }
+                _ => {}
             }
-            ProcessedElement::Relation(rel) => {
-                boundaries::generate_boundary_from_relation(
-                    &mut editor,
-                    rel,
-                    args,
-                    &flood_fill_cache,
-                    &urban_density_grid,
-                    &xzbbox,
-                );
-                // Clean up cache entries for consistency with other element processing
-                let way_ids: Vec<u64> = rel.members.iter().map(|m| m.way.id).collect();
-                flood_fill_cache.remove_relation_ways(&way_ids);
-            }
-            _ => {}
+            // Element is dropped here, freeing its memory immediately
         }
-        // Element is dropped here, freeing its memory immediately
     }
 
     // Drop remaining caches
