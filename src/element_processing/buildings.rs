@@ -693,6 +693,35 @@ pub fn generate_buildings(
                 &cached_floor_area,
                 abs_terrain_offset,
             );
+
+            // Add chimney for suitable buildings
+            let building_type = element
+                .tags
+                .get("building")
+                .map(|s| s.as_str())
+                .unwrap_or("yes");
+            let mut chimney_rng = element_rng(element.id);
+            if should_have_chimney(building_type, roof_type, cached_footprint_size, &mut chimney_rng) {
+                // Calculate roof peak height for chimney placement
+                let width = max_x - min_x;
+                let length = max_z - min_z;
+                let building_size = width.max(length);
+                let base_height = start_y_offset + building_height + 1;
+                let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
+                let roof_peak_height = base_height + roof_height_boost;
+
+                generate_chimney(
+                    editor,
+                    &cached_floor_area,
+                    min_x,
+                    max_x,
+                    min_z,
+                    max_z,
+                    roof_peak_height,
+                    abs_terrain_offset,
+                    element.id,
+                );
+            }
         } else {
             // Handle buildings without explicit roof:shape tag
             let building_type = element
@@ -727,6 +756,30 @@ pub fn generate_buildings(
                         &cached_floor_area,
                         abs_terrain_offset,
                     );
+
+                    // Add chimney for suitable buildings
+                    let mut chimney_rng = element_rng(element.id);
+                    if should_have_chimney(building_type, RoofType::Gabled, footprint_size, &mut chimney_rng) {
+                        // Calculate roof peak height for chimney placement
+                        let width = max_x - min_x;
+                        let length = max_z - min_z;
+                        let building_size = width.max(length);
+                        let base_height = start_y_offset + building_height + 1;
+                        let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
+                        let roof_peak_height = base_height + roof_height_boost;
+
+                        generate_chimney(
+                            editor,
+                            &cached_floor_area,
+                            min_x,
+                            max_x,
+                            min_z,
+                            max_z,
+                            roof_peak_height,
+                            abs_terrain_offset,
+                            element.id,
+                        );
+                    }
                 }
                 // If footprint too large or not selected for gabled roof, building gets default flat roof (no action needed)
             }
@@ -749,6 +802,136 @@ fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
         let result = (value as f64) * scale_factor;
         result.floor() as i32
     }
+}
+
+/// Generate a chimney on a building roof
+///
+/// Creates a small brick chimney (1x1) typically found on residential buildings.
+/// Chimneys are placed within the actual building footprint near a corner.
+fn generate_chimney(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    roof_peak_height: i32,
+    abs_terrain_offset: i32,
+    element_id: u64,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    // Use deterministic RNG based on element ID for consistent placement
+    let mut rng = element_rng(element_id);
+
+    // Find a position within the actual floor area near a corner
+    // Calculate center point
+    let center_x = (min_x + max_x) / 2;
+    let center_z = (min_z + max_z) / 2;
+
+    // Choose which quadrant to place the chimney (deterministically)
+    let quadrant = rng.gen_range(0..4);
+
+    // Filter floor area points to the chosen quadrant and find one that's
+    // offset from the edge (so it's actually on the roof, not at the wall)
+    let candidate_points: Vec<(i32, i32)> = floor_area
+        .iter()
+        .filter(|(x, z)| {
+            let in_quadrant = match quadrant {
+                0 => *x < center_x && *z < center_z, // NW
+                1 => *x >= center_x && *z < center_z, // NE
+                2 => *x < center_x && *z >= center_z, // SW
+                _ => *x >= center_x && *z >= center_z, // SE
+            };
+            // Must be at least 1 block from building edge
+            let away_from_edge = *x > min_x && *x < max_x && *z > min_z && *z < max_z;
+            in_quadrant && away_from_edge
+        })
+        .copied()
+        .collect();
+
+    // If no good candidates in the quadrant, try any interior point
+    let final_candidates = if candidate_points.is_empty() {
+        floor_area
+            .iter()
+            .filter(|(x, z)| *x > min_x + 1 && *x < max_x - 1 && *z > min_z + 1 && *z < max_z - 1)
+            .copied()
+            .collect::<Vec<_>>()
+    } else {
+        candidate_points
+    };
+
+    if final_candidates.is_empty() {
+        return;
+    }
+
+    // Pick a point from candidates
+    let (chimney_x, chimney_z) = final_candidates[rng.gen_range(0..final_candidates.len())];
+
+    // Chimney starts 1 block below roof peak to sit properly in the roof
+    // Height is exactly 3 brick blocks with a slab cap on top
+    let chimney_base = roof_peak_height - 1;
+    let chimney_height = 3;
+
+    // Build the chimney shaft (1x1 brick column, exactly 3 blocks tall)
+    for y in chimney_base..(chimney_base + chimney_height) {
+        editor.set_block_absolute(
+            BRICK,
+            chimney_x,
+            y + abs_terrain_offset,
+            chimney_z,
+            None,
+            None,
+        );
+    }
+
+    // Add stone brick slab cap on top
+    editor.set_block_absolute(
+        STONE_BRICK_SLAB,
+        chimney_x,
+        chimney_base + chimney_height + abs_terrain_offset,
+        chimney_z,
+        None,
+        None,
+    );
+}
+
+/// Determines if a building should have a chimney based on type, size, and roof shape
+fn should_have_chimney(
+    building_type: &str,
+    roof_type: RoofType,
+    footprint_size: usize,
+    rng: &mut impl Rng,
+) -> bool {
+    // Only residential-type buildings get chimneys
+    let is_residential = matches!(
+        building_type,
+        "house" | "residential" | "detached" | "semidetached_house" | "terrace" | "farm" | "cabin" | "bungalow" | "villa" | "yes"
+    );
+
+    if !is_residential {
+        return false;
+    }
+
+    // Only certain roof types look good with chimneys
+    let suitable_roof = matches!(roof_type, RoofType::Gabled | RoofType::Hipped);
+
+    if !suitable_roof {
+        return false;
+    }
+
+    // Building shouldn't be too large (mansions/large buildings look odd with single chimney)
+    // and shouldn't be too small (tiny sheds don't need chimneys)
+    let suitable_size = footprint_size >= 30 && footprint_size <= 400;
+
+    if !suitable_size {
+        return false;
+    }
+
+    // 55% chance to add a chimney to suitable buildings
+    rng.gen_bool(0.55)
 }
 
 /// Unified function to generate various roof types
