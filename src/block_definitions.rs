@@ -840,58 +840,83 @@ pub static WINDOW_VARIATIONS: [Block; 7] = [
     TINTED_GLASS,
 ];
 
-// Window types for different building styles
+// Residential window options
+pub static RESIDENTIAL_WINDOW_OPTIONS: [Block; 4] = [
+    GLASS,
+    WHITE_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+    BROWN_STAINED_GLASS,
+];
+
+// Institutional window options (hospital, school, etc.)
+pub static INSTITUTIONAL_WINDOW_OPTIONS: [Block; 3] = [
+    GLASS,
+    WHITE_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+];
+
+// Hospitality window options (hotel, restaurant)
+pub static HOSPITALITY_WINDOW_OPTIONS: [Block; 2] = [GLASS, WHITE_STAINED_GLASS];
+
+// Industrial window options
+pub static INDUSTRIAL_WINDOW_OPTIONS: [Block; 4] = [
+    GLASS,
+    GRAY_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+    BROWN_STAINED_GLASS,
+];
+
+// Window types for different building styles (non-deterministic, for backwards compatibility)
 pub fn get_window_block_for_building_type(building_type: &str) -> Block {
     use rand::Rng;
     let mut rng = rand::thread_rng();
+    get_window_block_for_building_type_with_rng(building_type, &mut rng)
+}
 
+/// Deterministic window block selection using provided RNG
+pub fn get_window_block_for_building_type_with_rng(
+    building_type: &str,
+    rng: &mut impl rand::Rng,
+) -> Block {
     match building_type {
-        "residential" | "house" | "apartment" => {
-            let residential_windows = [
-                GLASS,
-                WHITE_STAINED_GLASS,
-                LIGHT_GRAY_STAINED_GLASS,
-                BROWN_STAINED_GLASS,
-            ];
-            residential_windows[rng.gen_range(0..residential_windows.len())]
+        "residential" | "house" | "apartment" | "apartments" => {
+            RESIDENTIAL_WINDOW_OPTIONS[rng.gen_range(0..RESIDENTIAL_WINDOW_OPTIONS.len())]
         }
         "hospital" | "school" | "university" => {
-            let institutional_windows = [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
-            institutional_windows[rng.gen_range(0..institutional_windows.len())]
+            INSTITUTIONAL_WINDOW_OPTIONS[rng.gen_range(0..INSTITUTIONAL_WINDOW_OPTIONS.len())]
         }
         "hotel" | "restaurant" => {
-            let hospitality_windows = [GLASS, WHITE_STAINED_GLASS];
-            hospitality_windows[rng.gen_range(0..hospitality_windows.len())]
+            HOSPITALITY_WINDOW_OPTIONS[rng.gen_range(0..HOSPITALITY_WINDOW_OPTIONS.len())]
         }
         "industrial" | "warehouse" => {
-            let industrial_windows = [
-                GLASS,
-                GRAY_STAINED_GLASS,
-                LIGHT_GRAY_STAINED_GLASS,
-                BROWN_STAINED_GLASS,
-            ];
-            industrial_windows[rng.gen_range(0..industrial_windows.len())]
+            INDUSTRIAL_WINDOW_OPTIONS[rng.gen_range(0..INDUSTRIAL_WINDOW_OPTIONS.len())]
         }
         _ => WINDOW_VARIATIONS[rng.gen_range(0..WINDOW_VARIATIONS.len())],
     }
 }
 
-// Random floor block selection
+// Floor block options for buildings
+pub static FLOOR_BLOCK_OPTIONS: [Block; 8] = [
+    WHITE_CONCRETE,
+    GRAY_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    POLISHED_ANDESITE,
+    SMOOTH_STONE,
+    STONE_BRICKS,
+    MUD_BRICKS,
+    OAK_PLANKS,
+];
+
+// Random floor block selection (non-deterministic, for backwards compatibility)
 pub fn get_random_floor_block() -> Block {
     use rand::Rng;
     let mut rng = rand::thread_rng();
+    FLOOR_BLOCK_OPTIONS[rng.gen_range(0..FLOOR_BLOCK_OPTIONS.len())]
+}
 
-    let floor_options = [
-        WHITE_CONCRETE,
-        GRAY_CONCRETE,
-        LIGHT_GRAY_CONCRETE,
-        POLISHED_ANDESITE,
-        SMOOTH_STONE,
-        STONE_BRICKS,
-        MUD_BRICKS,
-        OAK_PLANKS,
-    ];
-    floor_options[rng.gen_range(0..floor_options.len())]
+/// Deterministic floor block selection using provided RNG
+pub fn get_floor_block_with_rng(rng: &mut impl rand::Rng) -> Block {
+    FLOOR_BLOCK_OPTIONS[rng.gen_range(0..FLOOR_BLOCK_OPTIONS.len())]
 }
 
 // Define all predefined colors with their blocks
