@@ -1098,7 +1098,6 @@ pub fn get_fallback_building_block() -> Block {
         STONE_BRICKS,
         WHITE_CONCRETE,
         WHITE_TERRACOTTA,
-        OAK_PLANKS,
     ];
     fallback_options[rng.gen_range(0..fallback_options.len())]
 }
