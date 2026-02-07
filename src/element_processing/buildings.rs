@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
-use crate::deterministic_rng::element_rng;
+use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -182,21 +182,47 @@ pub enum BuildingCategory {
     Religious, // Churches, mosques, temples, etc.
 
     // Special types
-    Skyscraper, // Tall buildings (>7 floors or >28m)
-    Historic,   // Castles, ruins, historic buildings
-    Garage,     // Garages and carports
-    Shed,       // Sheds, huts, simple storage
-    Greenhouse, // Greenhouses and glasshouses
+    TallBuilding,     // Tall buildings (>7 floors or >28m)
+    GlassySkyscraper, // Glass-facade skyscrapers (50% of true skyscrapers)
+    ModernSkyscraper, // Horizontal-window skyscrapers with stone bands (35%)
+    Historic,         // Castles, ruins, historic buildings
+    Tower,            // man_made=tower or building=tower (stone towers)
+    Garage,           // Garages and carports
+    Shed,             // Sheds, huts, simple storage
+    Greenhouse,       // Greenhouses and glasshouses
 
     Default, // Unknown or generic buildings
 }
 
 impl BuildingCategory {
     /// Determines the building category from OSM tags and calculated properties
-    fn from_element(element: &ProcessedWay, is_tall_building: bool) -> Self {
-        // Check for skyscraper first (based on height/levels from OSM tags)
+    fn from_element(element: &ProcessedWay, is_tall_building: bool, building_height: i32) -> Self {
+        // Check for man_made=tower before anything else
+        if element.tags.get("man_made").map(|s| s.as_str()) == Some("tower") {
+            return BuildingCategory::Tower;
+        }
+
         if is_tall_building {
-            return BuildingCategory::Skyscraper;
+            // Check if this qualifies as a true skyscraper:
+            // Must be significantly tall AND have skyscraper proportions
+            // (taller than twice its longest side dimension)
+            let is_true_skyscraper = Self::has_skyscraper_proportions(element, building_height);
+
+            if is_true_skyscraper {
+                // Deterministic variant selection based on element ID
+                let hash = element.id.wrapping_mul(2654435761); // Knuth multiplicative hash
+                let roll = hash % 100;
+                return if roll < 50 {
+                    BuildingCategory::GlassySkyscraper
+                } else if roll < 85 {
+                    BuildingCategory::ModernSkyscraper
+                } else {
+                    // 15% use the standard TallBuilding preset
+                    BuildingCategory::TallBuilding
+                };
+            }
+
+            return BuildingCategory::TallBuilding;
         }
 
         // Check for historic buildings
@@ -253,6 +279,9 @@ impl BuildingCategory {
                 BuildingCategory::Religious
             }
 
+            // Towers
+            "tower" | "clock_tower" | "transformer_tower" => BuildingCategory::Tower,
+
             // Historic structures
             "castle" | "ruins" | "fort" | "bunker" => BuildingCategory::Historic,
 
@@ -272,6 +301,26 @@ impl BuildingCategory {
             _ => BuildingCategory::Default,
         }
     }
+
+    /// Checks if a tall building has skyscraper proportions:
+    /// building height >= 40 blocks AND height >= 2× the longest side of its bounding box.
+    fn has_skyscraper_proportions(element: &ProcessedWay, building_height: i32) -> bool {
+        if building_height < 160 {
+            return false;
+        }
+
+        if element.nodes.len() < 3 {
+            return false;
+        }
+
+        let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+        let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+        let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
+        let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+
+        let longest_side = (max_x - min_x).max(max_z - min_z).max(1);
+        building_height as f64 / longest_side as f64 >= 2.0
+    }
 }
 
 /// A partial style specification where `None` means "pick randomly".
@@ -288,7 +337,8 @@ pub struct BuildingStylePreset {
 
     // Window style
     pub use_vertical_windows: Option<bool>,
-    pub has_windows: Option<bool>, // Whether to generate windows at all
+    pub use_horizontal_windows: Option<bool>, // Full-width horizontal window bands (modern skyscrapers)
+    pub has_windows: Option<bool>,            // Whether to generate windows at all
 
     // Accent features
     pub use_accent_roof_line: Option<bool>,
@@ -320,13 +370,42 @@ impl BuildingStylePreset {
         }
     }
 
-    /// Preset for skyscrapers and tall buildings
-    pub fn skyscraper() -> Self {
+    /// Preset for tall buildings (>7 floors, not true skyscrapers)
+    pub fn tall_building() -> Self {
         Self {
             use_vertical_windows: Some(true), // Always vertical windows
             roof_type: Some(RoofType::Flat),  // Always flat roof
-            has_chimney: Some(false),         // No chimneys on skyscrapers
+            has_chimney: Some(false),         // No chimneys on tall buildings
             use_accent_roof_line: Some(true), // Usually have accent roof line
+            ..Default::default()
+        }
+    }
+
+    /// Preset for modern skyscrapers with horizontal window bands
+    pub fn modern_skyscraper() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            use_accent_roof_line: Some(true),
+            use_vertical_accent: Some(false),
+            // has_windows, use_accent_lines, and use_horizontal_windows
+            // are resolved in BuildingStyle::resolve() with category-specific logic
+            ..Default::default()
+        }
+    }
+
+    /// Preset for glass-facade skyscrapers
+    pub fn glassy_skyscraper() -> Self {
+        Self {
+            has_windows: Some(false), // The wall IS glass, no extra windows
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat), // Always flat roof
+            generate_roof: Some(true),       // Generate the flat cap
+            has_chimney: Some(false),
+            // accent_lines, accent_block and floor_block are resolved randomly in resolve()
+            // with GlassySkyscraper-specific palettes
             ..Default::default()
         }
     }
@@ -442,6 +521,20 @@ impl BuildingStylePreset {
         }
     }
 
+    /// Preset for towers (man_made=tower) — solid stone walls, no windows
+    pub fn tower() -> Self {
+        Self {
+            has_windows: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
     /// Preset for garages and carports
     pub fn garage() -> Self {
         Self {
@@ -514,10 +607,13 @@ impl BuildingStylePreset {
             BuildingCategory::Hospital => Self::hospital(),
             BuildingCategory::Religious => Self::religious(),
             BuildingCategory::Historic => Self::historic(),
+            BuildingCategory::Tower => Self::tower(),
             BuildingCategory::Garage => Self::garage(),
             BuildingCategory::Shed => Self::shed(),
             BuildingCategory::Greenhouse => Self::greenhouse(),
-            BuildingCategory::Skyscraper => Self::skyscraper(),
+            BuildingCategory::TallBuilding => Self::tall_building(),
+            BuildingCategory::GlassySkyscraper => Self::glassy_skyscraper(),
+            BuildingCategory::ModernSkyscraper => Self::modern_skyscraper(),
             BuildingCategory::Default => Self::empty(),
         }
     }
@@ -536,7 +632,8 @@ pub struct BuildingStyle {
 
     // Window style
     pub use_vertical_windows: bool,
-    pub has_windows: bool, // Whether to generate windows
+    pub use_horizontal_windows: bool, // Full-width horizontal window bands
+    pub has_windows: bool,            // Whether to generate windows
 
     // Accent features
     pub use_accent_roof_line: bool,
@@ -583,9 +680,19 @@ impl BuildingStyle {
             .unwrap_or_else(|| determine_wall_block(element, category, rng));
 
         // Floor block: from preset or random
-        let floor_block = preset
-            .floor_block
-            .unwrap_or_else(|| get_floor_block_with_rng(rng));
+        // For glassy/modern skyscrapers, use dark cap materials for the flat roof
+        let floor_block = preset.floor_block.unwrap_or_else(|| {
+            if matches!(
+                category,
+                BuildingCategory::GlassySkyscraper | BuildingCategory::ModernSkyscraper
+            ) {
+                const SKYSCRAPER_ROOF_CAP_OPTIONS: [Block; 3] =
+                    [POLISHED_ANDESITE, BLACKSTONE, NETHER_BRICK];
+                SKYSCRAPER_ROOF_CAP_OPTIONS[rng.gen_range(0..SKYSCRAPER_ROOF_CAP_OPTIONS.len())]
+            } else {
+                get_floor_block_with_rng(rng)
+            }
+        });
 
         // Window block: from preset or random based on building type
         let window_block = preset
@@ -593,15 +700,36 @@ impl BuildingStyle {
             .unwrap_or_else(|| get_window_block_for_building_type_with_rng(building_type, rng));
 
         // Accent block: from preset or random
-        let accent_block = preset
-            .accent_block
-            .unwrap_or_else(|| ACCENT_BLOCK_OPTIONS[rng.gen_range(0..ACCENT_BLOCK_OPTIONS.len())]);
+        // For glassy skyscrapers, use white stained glass or blackstone
+        // For modern skyscrapers, use stone separation band materials
+        let accent_block = preset.accent_block.unwrap_or_else(|| {
+            if category == BuildingCategory::GlassySkyscraper {
+                const GLASSY_ACCENT_OPTIONS: [Block; 2] = [WHITE_STAINED_GLASS, BLACKSTONE];
+                GLASSY_ACCENT_OPTIONS[rng.gen_range(0..GLASSY_ACCENT_OPTIONS.len())]
+            } else if category == BuildingCategory::ModernSkyscraper {
+                const MODERN_ACCENT_OPTIONS: [Block; 5] = [
+                    POLISHED_ANDESITE,
+                    SMOOTH_STONE,
+                    BLACKSTONE,
+                    NETHER_BRICK,
+                    STONE_BRICKS,
+                ];
+                MODERN_ACCENT_OPTIONS[rng.gen_range(0..MODERN_ACCENT_OPTIONS.len())]
+            } else {
+                ACCENT_BLOCK_OPTIONS[rng.gen_range(0..ACCENT_BLOCK_OPTIONS.len())]
+            }
+        });
 
         // === Window Style ===
 
         let use_vertical_windows = preset
             .use_vertical_windows
             .unwrap_or_else(|| rng.gen_bool(0.7));
+
+        // Horizontal windows: full-width bands, used by modern skyscrapers
+        let use_horizontal_windows = preset
+            .use_horizontal_windows
+            .unwrap_or_else(|| category == BuildingCategory::ModernSkyscraper);
 
         // === Accent Features ===
 
@@ -610,9 +738,16 @@ impl BuildingStyle {
             .unwrap_or_else(|| rng.gen_bool(0.25));
 
         // Accent lines only for multi-floor buildings
-        let use_accent_lines = preset
-            .use_accent_lines
-            .unwrap_or_else(|| has_multiple_floors && rng.gen_bool(0.2));
+        // Glassy skyscrapers get 60% chance, Modern skyscrapers always have them
+        let use_accent_lines = preset.use_accent_lines.unwrap_or_else(|| {
+            if category == BuildingCategory::ModernSkyscraper {
+                true // Stone bands always present on modern skyscrapers
+            } else if category == BuildingCategory::GlassySkyscraper {
+                rng.gen_bool(0.6)
+            } else {
+                has_multiple_floors && rng.gen_bool(0.2)
+            }
+        });
 
         // Vertical accent: only if no accent lines and multi-floor
         let use_vertical_accent = preset
@@ -621,14 +756,16 @@ impl BuildingStyle {
 
         // === Roof ===
 
-        // Determine roof type from preset, tags, or auto-generation
-        let (roof_type, generate_roof) = if let Some(rt) = preset.roof_type {
-            // Preset forces a specific roof type
+        // Determine roof type from preset, tags, or auto-generation.
+        // An explicit roof:shape OSM tag ALWAYS takes priority over preset defaults,
+        // since the mapper knows the actual shape of the building.
+        let (roof_type, generate_roof) = if let Some(roof_shape) = element.tags.get("roof:shape") {
+            // OSM tag always wins — the mapper explicitly specified the roof shape
+            (parse_roof_type(roof_shape), true)
+        } else if let Some(rt) = preset.roof_type {
+            // Preset default (used when no OSM tag is present)
             let should_generate = preset.generate_roof.unwrap_or(rt != RoofType::Flat);
             (rt, should_generate)
-        } else if let Some(roof_shape) = element.tags.get("roof:shape") {
-            // Use OSM tag
-            (parse_roof_type(roof_shape), true)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             // Auto-generate gabled roof for residential buildings
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
@@ -679,6 +816,7 @@ impl BuildingStyle {
             accent_block,
             roof_block,
             use_vertical_windows,
+            use_horizontal_windows,
             has_windows,
             use_accent_roof_line,
             use_accent_lines,
@@ -706,6 +844,7 @@ struct BuildingConfig {
     #[allow(dead_code)] // Reserved for future use in roof generation
     roof_block: Option<Block>,
     use_vertical_windows: bool,
+    use_horizontal_windows: bool,
     use_accent_roof_line: bool,
     use_accent_lines: bool,
     use_vertical_accent: bool,
@@ -823,10 +962,13 @@ fn determine_wall_block(
         return get_castle_wall_block();
     }
 
-    // Try to get wall block from building:colour tag first
-    if let Some(building_colour) = element.tags.get("building:colour") {
-        if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
-            return get_building_wall_block_for_color(rgb);
+    // Try to get wall block from building:colour tag first.
+    // Skip for GlassySkyscraper: its wall MUST be glass (has_windows=false relies on this).
+    if category != BuildingCategory::GlassySkyscraper {
+        if let Some(building_colour) = element.tags.get("building:colour") {
+            if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
+                return get_building_wall_block_for_color(rgb);
+            }
         }
     }
 
@@ -860,12 +1002,47 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
             GARAGE_WALL_OPTIONS[rng.gen_range(0..GARAGE_WALL_OPTIONS.len())]
         }
         BuildingCategory::Shed => SHED_WALL_OPTIONS[rng.gen_range(0..SHED_WALL_OPTIONS.len())],
+        BuildingCategory::Tower => {
+            const TOWER_WALL_OPTIONS: [Block; 8] = [
+                STONE_BRICKS,
+                COBBLESTONE,
+                CRACKED_STONE_BRICKS,
+                BRICK,
+                POLISHED_ANDESITE,
+                ANDESITE,
+                DEEPSLATE_BRICKS,
+                SMOOTH_STONE,
+            ];
+            TOWER_WALL_OPTIONS[rng.gen_range(0..TOWER_WALL_OPTIONS.len())]
+        }
         BuildingCategory::Greenhouse => {
             GREENHOUSE_WALL_OPTIONS[rng.gen_range(0..GREENHOUSE_WALL_OPTIONS.len())]
         }
-        BuildingCategory::Skyscraper => {
-            // Skyscrapers use commercial palette (glass, concrete, stone)
+        BuildingCategory::TallBuilding => {
+            // Tall buildings use commercial palette (glass, concrete, stone)
             COMMERCIAL_WALL_OPTIONS[rng.gen_range(0..COMMERCIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::ModernSkyscraper => {
+            // Modern skyscrapers use clean concrete/stone wall materials
+            const MODERN_SKYSCRAPER_WALL_OPTIONS: [Block; 6] = [
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
+                POLISHED_ANDESITE,
+                SMOOTH_STONE,
+                QUARTZ_BLOCK,
+            ];
+            MODERN_SKYSCRAPER_WALL_OPTIONS[rng.gen_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::GlassySkyscraper => {
+            // Glass-facade skyscrapers use stained glass as wall material
+            const GLASSY_WALL_OPTIONS: [Block; 4] = [
+                GRAY_STAINED_GLASS,
+                CYAN_STAINED_GLASS,
+                BLUE_STAINED_GLASS,
+                LIGHT_BLUE_STAINED_GLASS,
+            ];
+            GLASSY_WALL_OPTIONS[rng.gen_range(0..GLASSY_WALL_OPTIONS.len())]
         }
         BuildingCategory::Default => get_fallback_building_block(),
     }
@@ -1236,7 +1413,14 @@ fn generate_special_doors(
 
                 // Place the double door (lower and upper parts)
                 // Use empty blacklist to overwrite existing wall blocks
-                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door1_x, door_y, door1_z, None, Some(&[]));
+                editor.set_block_absolute(
+                    SPRUCE_DOOR_LOWER,
+                    door1_x,
+                    door_y,
+                    door1_z,
+                    None,
+                    Some(&[]),
+                );
                 editor.set_block_absolute(
                     SPRUCE_DOOR_UPPER,
                     door1_x,
@@ -1245,7 +1429,14 @@ fn generate_special_doors(
                     None,
                     Some(&[]),
                 );
-                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door2_x, door_y, door2_z, None, Some(&[]));
+                editor.set_block_absolute(
+                    SPRUCE_DOOR_LOWER,
+                    door2_x,
+                    door_y,
+                    door2_z,
+                    None,
+                    Some(&[]),
+                );
                 editor.set_block_absolute(
                     SPRUCE_DOOR_UPPER,
                     door2_x,
@@ -1287,9 +1478,21 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
 
     let above_floor = h > config.start_y_offset + 1;
 
-    if config.is_tall_building && config.use_vertical_windows {
-        // Tall building pattern - narrower windows with continuous vertical strips
-        if above_floor && (bx + bz) % 3 == 0 {
+    if config.use_horizontal_windows {
+        // Modern skyscraper pattern: continuous horizontal window bands
+        // with stone separation bands at floor levels (every 4th block)
+        if above_floor && h % 4 == 0 {
+            // Floor-level separation band (stone/accent material)
+            config.accent_block
+        } else if above_floor {
+            // Full-width window band
+            config.window_block
+        } else {
+            config.wall_block
+        }
+    } else if config.is_tall_building && config.use_vertical_windows {
+        // Tall building pattern - vertical window strips alternating with wall columns
+        if above_floor && (bx + bz) % 2 == 0 {
             config.window_block
         } else {
             config.wall_block
@@ -1531,7 +1734,7 @@ pub fn generate_buildings(
     building_height = adjust_height_for_building_type(building_type, building_height, scale_factor);
 
     // Determine building category and get appropriate style preset
-    let category = BuildingCategory::from_element(element, is_tall_building);
+    let category = BuildingCategory::from_element(element, is_tall_building, building_height);
     let preset = BuildingStylePreset::for_category(category);
 
     // Resolve style with deterministic RNG
@@ -1567,6 +1770,7 @@ pub fn generate_buildings(
         accent_block: style.accent_block,
         roof_block: style.roof_block,
         use_vertical_windows: style.use_vertical_windows,
+        use_horizontal_windows: style.use_horizontal_windows,
         use_accent_roof_line: style.use_accent_roof_line,
         use_accent_lines: style.use_accent_lines,
         use_vertical_accent: style.use_vertical_accent,
@@ -1634,11 +1838,13 @@ pub fn generate_buildings(
 
     // Process roof generation using style decisions
     if args.roof && style.generate_roof {
-        generate_building_roof(editor, element, &config, &style, &bounds, &roof_area);
+        generate_building_roof(
+            editor, element, &config, &style, &bounds, &roof_area, category,
+        );
     }
 }
 
-/// Handles roof generation including chimney placement
+/// Handles roof generation including chimney placement and rooftop equipment
 fn generate_building_roof(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -1646,6 +1852,7 @@ fn generate_building_roof(
     style: &BuildingStyle,
     bounds: &BuildingBounds,
     cached_floor_area: &[(i32, i32)],
+    category: BuildingCategory,
 ) {
     // Generate the roof using the pre-determined roof type from style
     generate_roof(
@@ -1675,6 +1882,31 @@ fn generate_building_roof(
             roof_peak_height,
             config.abs_terrain_offset,
             element.id,
+        );
+    }
+
+    // Add roof terrace on flat-roofed tall building:part elements
+    if should_generate_roof_terrace(element, config, style.roof_type) {
+        let roof_y = config.start_y_offset + config.building_height;
+        generate_roof_terrace(
+            editor,
+            element,
+            cached_floor_area,
+            bounds,
+            roof_y,
+            config.abs_terrain_offset,
+        );
+    }
+
+    // Add sparse rooftop equipment on flat-roofed commercial/institutional buildings
+    if should_generate_rooftop_equipment(config, style.roof_type, category) {
+        let roof_y = config.start_y_offset + config.building_height;
+        generate_rooftop_equipment(
+            editor,
+            element,
+            cached_floor_area,
+            roof_y,
+            config.abs_terrain_offset,
         );
     }
 }
@@ -1795,6 +2027,365 @@ fn generate_chimney(
         None,
         Some(replace_any), // Empty blacklist = replace any block
     );
+}
+
+// ============================================================================
+// Roof Terrace Generation
+// ============================================================================
+
+/// Generates a roof terrace on top of flat-roofed tall buildings (building:part).
+///
+/// Includes:
+/// - Stone brick railing around the perimeter
+/// - Scattered rooftop furniture/equipment (tables, ventilation units, planters, seating, antenna)
+#[allow(clippy::too_many_arguments)]
+fn generate_roof_terrace(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    floor_area: &[(i32, i32)],
+    bounds: &BuildingBounds,
+    roof_y: i32,
+    abs_terrain_offset: i32,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    let replace_any: &[Block] = &[];
+    // Flat roof is placed at (start_y_offset + building_height + 1 + abs_terrain_offset)
+    // roof_y = start_y_offset + building_height, so terrace must be at roof_y + 2 to sit ON TOP of the roof
+    let terrace_y = roof_y + abs_terrain_offset + 2;
+
+    // Build a set for O(1) lookup of floor positions
+    let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+
+    // --- Step 1: Railing around the perimeter ---
+    // A perimeter block is one that has at least one cardinal neighbor NOT in the floor set
+    for &(x, z) in floor_area {
+        let neighbors = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)];
+        let is_edge = neighbors.iter().any(|n| !floor_set.contains(n));
+
+        if is_edge {
+            editor.set_block_absolute(STONE_BRICKS, x, terrace_y, z, None, Some(replace_any));
+        }
+    }
+
+    // --- Step 2: Collect interior positions (non-edge blocks at least 1 from edge) ---
+    let interior: Vec<(i32, i32)> = floor_area
+        .iter()
+        .filter(|&&(x, z)| {
+            let neighbors = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)];
+            neighbors.iter().all(|n| floor_set.contains(n))
+        })
+        .copied()
+        .collect();
+
+    if interior.is_empty() {
+        return;
+    }
+
+    // --- Step 3: Place rooftop furniture deterministically ---
+    // Use coord_rng so each position is independently and deterministically decorated.
+    // The low placement probability (15%) naturally creates spacing between items.
+
+    // We iterate over interior positions and use coord_rng to decide what goes where.
+    // This avoids RNG ordering issues and is fully deterministic per-position.
+    for &(x, z) in &interior {
+        // Deterministic per-position decision using coord_rng
+        let mut rng = coord_rng(x, z, element.id);
+        let roll: u32 = rng.gen_range(0..100);
+
+        // ~85% of interior tiles are empty (open terrace space)
+        if roll >= 15 {
+            continue;
+        }
+
+        // Among the 15% that get furniture, distribute types
+        match roll {
+            0..=2 => {
+                // Ventilation unit: iron block with a slab on top
+                editor.set_block_absolute(IRON_BLOCK, x, terrace_y, z, None, Some(replace_any));
+                editor.set_block_absolute(
+                    SMOOTH_STONE_SLAB,
+                    x,
+                    terrace_y + 1,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+            }
+            3..=5 => {
+                // Planter: leaf block on top of cauldron
+                editor.set_block_absolute(CAULDRON, x, terrace_y, z, None, Some(replace_any));
+                // Vary the leaf type
+                let leaf = match rng.gen_range(0..3) {
+                    0 => OAK_LEAVES,
+                    1 => BIRCH_LEAVES,
+                    _ => SPRUCE_LEAVES,
+                };
+                editor.set_block_absolute(leaf, x, terrace_y + 1, z, None, Some(replace_any));
+            }
+            6..=8 => {
+                // Table: oak slab on top of an oak fence
+                editor.set_block_absolute(OAK_FENCE, x, terrace_y, z, None, Some(replace_any));
+                editor.set_block_absolute(OAK_SLAB, x, terrace_y + 1, z, None, Some(replace_any));
+            }
+            9..=10 => {
+                // Seating: stairs block (looks like a bench/chair)
+                editor.set_block_absolute(OAK_STAIRS, x, terrace_y, z, None, Some(replace_any));
+            }
+            11..=12 => {
+                // Antenna / lightning rod
+                editor.set_block_absolute(LIGHTNING_ROD, x, terrace_y, z, None, Some(replace_any));
+            }
+            13 => {
+                // Cauldron (rain collector / decorative)
+                editor.set_block_absolute(CAULDRON, x, terrace_y, z, None, Some(replace_any));
+            }
+            _ => {
+                // Sea lantern (subtle rooftop light)
+                editor.set_block_absolute(SEA_LANTERN, x, terrace_y, z, None, Some(replace_any));
+            }
+        }
+    }
+
+    // --- Step 4: Always place a lightning rod or antenna near the center (if space) ---
+    let center_x = (bounds.min_x + bounds.max_x) / 2;
+    let center_z = (bounds.min_z + bounds.max_z) / 2;
+
+    // Find the interior point closest to center
+    if let Some(&(cx, cz)) = interior
+        .iter()
+        .min_by_key(|&&(x, z)| (x - center_x).pow(2) + (z - center_z).pow(2))
+    {
+        // Tall antenna: 6 iron bars + lightning rod on top
+        for dy in 0..6 {
+            editor.set_block_absolute(IRON_BARS, cx, terrace_y + dy, cz, None, Some(replace_any));
+        }
+        editor.set_block_absolute(
+            LIGHTNING_ROD,
+            cx,
+            terrace_y + 6,
+            cz,
+            None,
+            Some(replace_any),
+        );
+    }
+}
+
+/// Determines whether a building should get a roof terrace.
+///
+/// Conditions:
+/// - The element is a `building:part` (composite building component)
+/// - Has a flat roof
+/// - Is tall enough (skyscraper-class or very tall: height >= 28 blocks)
+fn should_generate_roof_terrace(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    roof_type: RoofType,
+) -> bool {
+    let is_building_part = element.tags.contains_key("building:part");
+    let is_flat = roof_type == RoofType::Flat;
+    let is_very_tall = config.building_height >= 28;
+
+    is_building_part && is_flat && is_very_tall
+}
+
+/// Determines whether a building should get sparse rooftop equipment (HVAC, solar panels).
+///
+/// Applies to flat-roofed commercial, office, industrial, warehouse, hospital, and hotel
+/// buildings that are at least a few floors tall.
+fn should_generate_rooftop_equipment(
+    config: &BuildingConfig,
+    roof_type: RoofType,
+    category: BuildingCategory,
+) -> bool {
+    let is_flat = roof_type == RoofType::Flat;
+    let is_multi_floor = config.building_height >= 8;
+    let suitable_category = matches!(
+        category,
+        BuildingCategory::Commercial
+            | BuildingCategory::Office
+            | BuildingCategory::Hotel
+            | BuildingCategory::Industrial
+            | BuildingCategory::Warehouse
+            | BuildingCategory::Hospital
+            | BuildingCategory::School
+    );
+
+    is_flat && is_multi_floor && suitable_category
+}
+
+/// Generates sparse rooftop equipment on flat-roofed commercial/institutional buildings.
+///
+/// Much sparser than the skyscraper roof terrace (~0.6% of interior tiles).
+/// Typical equipment:
+/// - HVAC / ventilation units (iron block + slab)
+/// - Solar panel clusters (daylight detectors in four 5×4 fields arranged 2×2 with 1-block gaps)
+/// - Antenna masts (iron bars + lightning rod, rare)
+fn generate_rooftop_equipment(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    floor_area: &[(i32, i32)],
+    roof_y: i32,
+    abs_terrain_offset: i32,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    let replace_any: &[Block] = &[];
+    let equip_y = roof_y + abs_terrain_offset + 2; // On top of the flat roof surface
+
+    // Build set for edge detection
+    let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+
+    // Collect interior positions (skip edge tiles to avoid overhanging equipment)
+    let interior: Vec<(i32, i32)> = floor_area
+        .iter()
+        .filter(|&&(x, z)| {
+            let neighbors = [
+                (x - 1, z),
+                (x + 1, z),
+                (x, z - 1),
+                (x, z + 1),
+                (x - 1, z - 1),
+                (x + 1, z + 1),
+                (x - 1, z + 1),
+                (x + 1, z - 1),
+            ];
+            neighbors.iter().all(|n| floor_set.contains(n))
+        })
+        .copied()
+        .collect();
+
+    if interior.is_empty() {
+        return;
+    }
+
+    // Track which positions are already used (for solar panel clusters)
+    let mut used: HashSet<(i32, i32)> = HashSet::new();
+
+    for &(x, z) in &interior {
+        if used.contains(&(x, z)) {
+            continue;
+        }
+
+        let mut rng = coord_rng(x, z, element.id);
+        let roll: u32 = rng.gen_range(0..1200);
+
+        // ~99.4% of tiles are empty, very sparse
+        if roll >= 7 {
+            continue;
+        }
+
+        match roll {
+            0..=2 => {
+                // HVAC / ventilation unit: iron block + smooth stone slab
+                editor.set_block_absolute(IRON_BLOCK, x, equip_y, z, None, Some(replace_any));
+                editor.set_block_absolute(
+                    SMOOTH_STONE_SLAB,
+                    x,
+                    equip_y + 1,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+                used.insert((x, z));
+            }
+            3..=5 => {
+                // Solar panel cluster: four 5×4 fields in a 2×2 grid with 1-block gaps
+                // Layout (top view, 11 wide × 9 deep):
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   ..... . .....
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                let quad_offsets: [(i32, i32); 4] = [(0, 0), (6, 0), (0, 5), (6, 5)];
+                let quad_panels: Vec<(i32, i32)> = quad_offsets
+                    .iter()
+                    .flat_map(|&(ox, oz)| {
+                        (0..5).flat_map(move |dx| (0..4).map(move |dz| (x + ox + dx, z + oz + dz)))
+                    })
+                    .collect();
+                // Check that the entire 11×9 bounding box fits on the roof
+                let bbox: Vec<(i32, i32)> = (0..11)
+                    .flat_map(|dx| (0..9).map(move |dz| (x + dx, z + dz)))
+                    .collect();
+                let quad_ok = bbox
+                    .iter()
+                    .all(|pos| floor_set.contains(pos) && !used.contains(pos));
+
+                if quad_ok {
+                    for &(cx, cz) in &quad_panels {
+                        editor.set_block_absolute(
+                            DAYLIGHT_DETECTOR,
+                            cx,
+                            equip_y,
+                            cz,
+                            None,
+                            Some(replace_any),
+                        );
+                    }
+                    // Reserve the whole bounding box so nothing overlaps
+                    for &(cx, cz) in &bbox {
+                        used.insert((cx, cz));
+                    }
+                } else {
+                    // Fall back to a single 5×4 field
+                    let single_field: Vec<(i32, i32)> = (0..5)
+                        .flat_map(|dx| (0..4).map(move |dz| (x + dx, z + dz)))
+                        .collect();
+                    let single_ok = single_field
+                        .iter()
+                        .all(|pos| floor_set.contains(pos) && !used.contains(pos));
+
+                    if single_ok {
+                        for &(cx, cz) in &single_field {
+                            editor.set_block_absolute(
+                                DAYLIGHT_DETECTOR,
+                                cx,
+                                equip_y,
+                                cz,
+                                None,
+                                Some(replace_any),
+                            );
+                            used.insert((cx, cz));
+                        }
+                    } else {
+                        // Not enough room, place a single daylight detector
+                        editor.set_block_absolute(
+                            DAYLIGHT_DETECTOR,
+                            x,
+                            equip_y,
+                            z,
+                            None,
+                            Some(replace_any),
+                        );
+                        used.insert((x, z));
+                    }
+                }
+            }
+            _ => {
+                // Small antenna mast: 2 iron bars + lightning rod (1/3 of previous chance)
+                editor.set_block_absolute(IRON_BARS, x, equip_y, z, None, Some(replace_any));
+                editor.set_block_absolute(IRON_BARS, x, equip_y + 1, z, None, Some(replace_any));
+                editor.set_block_absolute(
+                    LIGHTNING_ROD,
+                    x,
+                    equip_y + 2,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+                used.insert((x, z));
+            }
+        }
+    }
 }
 
 // ============================================================================

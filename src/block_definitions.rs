@@ -304,6 +304,10 @@ impl Block {
             223 => "acacia_log",
             224 => "acacia_leaves",
             225 => "spruce_leaves",
+            226 => "cyan_stained_glass",
+            227 => "blue_stained_glass",
+            228 => "light_blue_stained_glass",
+            229 => "daylight_detector",
             _ => panic!("Invalid id"),
         }
     }
@@ -878,6 +882,10 @@ pub const JUNGLE_LEAVES: Block = Block::new(222);
 pub const ACACIA_LOG: Block = Block::new(223);
 pub const ACACIA_LEAVES: Block = Block::new(224);
 pub const SPRUCE_LEAVES: Block = Block::new(225);
+pub const CYAN_STAINED_GLASS: Block = Block::new(226);
+pub const BLUE_STAINED_GLASS: Block = Block::new(227);
+pub const LIGHT_BLUE_STAINED_GLASS: Block = Block::new(228);
+pub const DAYLIGHT_DETECTOR: Block = Block::new(229);
 
 /// Maps a block to its corresponding stair variant
 #[inline]

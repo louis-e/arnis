@@ -283,11 +283,7 @@ impl Tree<'_> {
                 leaves_block: JUNGLE_LEAVES,
                 leaves_fill: &JUNGLE_LEAVES_FILL,
                 // Canopy only near the top of the tree
-                round_ranges: [
-                    (7..=11).rev().collect(),
-                    (8..=10).rev().collect(),
-                    vec![],
-                ],
+                round_ranges: [(7..=11).rev().collect(), (8..=10).rev().collect(), vec![]],
             },
 
             TreeType::Acacia => Self {
@@ -438,6 +434,9 @@ impl Tree<'_> {
             GRAY_STAINED_GLASS,
             LIGHT_GRAY_STAINED_GLASS,
             BROWN_STAINED_GLASS,
+            CYAN_STAINED_GLASS,
+            BLUE_STAINED_GLASS,
+            LIGHT_BLUE_STAINED_GLASS,
             TINTED_GLASS,
             // Carpets
             WHITE_CARPET,

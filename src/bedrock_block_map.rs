@@ -509,6 +509,22 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "stained_glass",
             vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
         ),
+        "cyan_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![("color", BedrockBlockStateValue::String("cyan".to_string()))],
+        ),
+        "blue_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
+        ),
+        "light_blue_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("light_blue".to_string()),
+            )],
+        ),
+        "daylight_detector" => BedrockBlock::simple("daylight_detector"),
 
         // Planks - Bedrock uses single "planks" block with wood_type state
         "oak_planks" => BedrockBlock::with_states(
