@@ -188,12 +188,7 @@ pub fn generate_world_with_options(
                 } else if way.tags.contains_key("power") {
                     power::generate_power(&mut editor, &element);
                 } else if way.tags.contains_key("place") {
-                    landuse::generate_place(
-                        &mut editor,
-                        way,
-                        args,
-                        &flood_fill_cache,
-                    );
+                    landuse::generate_place(&mut editor, way, args, &flood_fill_cache);
                 }
                 // Release flood fill cache entry for this way
                 flood_fill_cache.remove_way(way.id);

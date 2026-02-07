@@ -355,6 +355,13 @@ impl Block {
                 map
             })),
 
+            // Oak door lower
+            159 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+
             116 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert(
@@ -893,11 +900,8 @@ pub static RESIDENTIAL_WINDOW_OPTIONS: [Block; 4] = [
 ];
 
 // Institutional window options (hospital, school, etc.)
-pub static INSTITUTIONAL_WINDOW_OPTIONS: [Block; 3] = [
-    GLASS,
-    WHITE_STAINED_GLASS,
-    LIGHT_GRAY_STAINED_GLASS,
-];
+pub static INSTITUTIONAL_WINDOW_OPTIONS: [Block; 3] =
+    [GLASS, WHITE_STAINED_GLASS, LIGHT_GRAY_STAINED_GLASS];
 
 // Hospitality window options (hotel, restaurant)
 pub static HOSPITALITY_WINDOW_OPTIONS: [Block; 2] = [GLASS, WHITE_STAINED_GLASS];
