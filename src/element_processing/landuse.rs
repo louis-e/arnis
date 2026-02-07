@@ -417,3 +417,30 @@ pub fn generate_landuse_from_relation(
         }
     }
 }
+
+/// Generates ground blocks for place=* areas (squares, neighbourhoods, etc.)
+pub fn generate_place(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    let binding = String::new();
+    let place_tag = element.tags.get("place").unwrap_or(&binding);
+
+    // Determine block type based on place tag
+    let block_type = match place_tag.as_str() {
+        "square" => STONE_BRICKS,
+        "neighbourhood" | "city_block" | "quarter" | "suburb" => SMOOTH_STONE,
+        _ => return,
+    };
+
+    // Get the area using flood fill cache
+    let floor_area: Vec<(i32, i32)> =
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+
+    // Place ground blocks
+    for (x, z) in floor_area {
+        editor.set_block(block_type, x, 0, z, None, None);
+    }
+}
