@@ -194,8 +194,8 @@ pub enum BuildingCategory {
 impl BuildingCategory {
     /// Determines the building category from OSM tags and calculated properties
     fn from_element(element: &ProcessedWay, is_tall_building: bool, building_height: i32) -> Self {
-        // Check for skyscraper first (based on height)
-        if is_tall_building || building_height > 28 {
+        // Check for skyscraper first (based on height/levels from OSM tags)
+        if is_tall_building {
             return BuildingCategory::Skyscraper;
         }
 
@@ -1235,23 +1235,24 @@ fn generate_special_doors(
                 };
 
                 // Place the double door (lower and upper parts)
-                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door1_x, door_y, door1_z, None, None);
+                // Use empty blacklist to overwrite existing wall blocks
+                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door1_x, door_y, door1_z, None, Some(&[]));
                 editor.set_block_absolute(
                     SPRUCE_DOOR_UPPER,
                     door1_x,
                     door_y + 1,
                     door1_z,
                     None,
-                    None,
+                    Some(&[]),
                 );
-                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door2_x, door_y, door2_z, None, None);
+                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door2_x, door_y, door2_z, None, Some(&[]));
                 editor.set_block_absolute(
                     SPRUCE_DOOR_UPPER,
                     door2_x,
                     door_y + 1,
                     door2_z,
                     None,
-                    None,
+                    Some(&[]),
                 );
 
                 break; // Only place one set of garage doors
@@ -1264,9 +1265,9 @@ fn generate_special_doors(
             let door_idx = rng.gen_range(0..wall_outline.len());
             let (door_x, door_z) = wall_outline[door_idx];
 
-            // Place single oak door
-            editor.set_block_absolute(OAK_DOOR, door_x, door_y, door_z, None, None);
-            editor.set_block_absolute(OAK_DOOR_UPPER, door_x, door_y + 1, door_z, None, None);
+            // Place single oak door (empty blacklist to overwrite wall blocks)
+            editor.set_block_absolute(OAK_DOOR, door_x, door_y, door_z, None, Some(&[]));
+            editor.set_block_absolute(OAK_DOOR_UPPER, door_x, door_y + 1, door_z, None, Some(&[]));
         }
     }
 }
@@ -2577,6 +2578,10 @@ fn generate_roof(
     roof_area: &[(i32, i32)],
     abs_terrain_offset: i32,
 ) {
+    if roof_area.is_empty() {
+        return;
+    }
+
     let config = RoofConfig::from_roof_area(
         roof_area,
         element.id,
