@@ -290,6 +290,13 @@ impl Block {
             209 => "redstone_block",
             210 => "chain",
             211 => "chain",
+            212 => "spruce_door",
+            213 => "spruce_door",
+            214 => "smooth_stone_slab",
+            215 => "glass_pane",
+            216 => "light_gray_terracotta",
+            217 => "oak_slab",
+            218 => "oak_door",
             _ => panic!("Invalid id"),
         }
     }
@@ -527,6 +534,36 @@ impl Block {
             211 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("axis".to_string(), Value::String("z".to_string()));
+                map
+            })),
+            // Spruce door lower
+            212 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("lower".to_string()));
+                map
+            })),
+            // Spruce door upper
+            213 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Smooth stone slab (bottom by default)
+            214 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("type".to_string(), Value::String("bottom".to_string()));
+                map
+            })),
+            // Oak slab top
+            217 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("type".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            // Oak door upper
+            218 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
             _ => None,
@@ -789,6 +826,13 @@ pub const BRICK_WALL: Block = Block::new(208);
 pub const REDSTONE_BLOCK: Block = Block::new(209);
 pub const CHAIN_X: Block = Block::new(210);
 pub const CHAIN_Z: Block = Block::new(211);
+pub const SPRUCE_DOOR_LOWER: Block = Block::new(212);
+pub const SPRUCE_DOOR_UPPER: Block = Block::new(213);
+pub const SMOOTH_STONE_SLAB: Block = Block::new(214);
+pub const GLASS_PANE: Block = Block::new(215);
+pub const LIGHT_GRAY_TERRACOTTA: Block = Block::new(216);
+pub const OAK_SLAB_TOP: Block = Block::new(217);
+pub const OAK_DOOR_UPPER: Block = Block::new(218);
 
 /// Maps a block to its corresponding stair variant
 #[inline]

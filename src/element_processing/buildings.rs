@@ -37,17 +37,164 @@ const ACCENT_BLOCK_OPTIONS: [Block; 6] = [
     CHISELED_STONE_BRICKS,
 ];
 
+// ============================================================================
+// Wall Block Palettes for Different Building Types
+// ============================================================================
+
+/// Wall blocks suitable for residential buildings (warm, homey materials)
+const RESIDENTIAL_WALL_OPTIONS: [Block; 24] = [
+    BRICK,
+    STONE_BRICKS,
+    WHITE_TERRACOTTA,
+    BROWN_TERRACOTTA,
+    SANDSTONE,
+    SMOOTH_SANDSTONE,
+    QUARTZ_BRICKS,
+    MUD_BRICKS,
+    POLISHED_GRANITE,
+    END_STONE_BRICKS,
+    BROWN_CONCRETE,
+    DEEPSLATE_BRICKS,
+    GRAY_CONCRETE,
+    GRAY_TERRACOTTA,
+    LIGHT_BLUE_TERRACOTTA,
+    LIGHT_GRAY_CONCRETE,
+    LIGHT_GRAY_TERRACOTTA,
+    NETHER_BRICK,
+    POLISHED_ANDESITE,
+    POLISHED_BLACKSTONE,
+    POLISHED_BLACKSTONE_BRICKS,
+    POLISHED_DEEPSLATE,
+    QUARTZ_BLOCK,
+    WHITE_CONCRETE,
+];
+
+/// Wall blocks suitable for commercial/office buildings (modern, clean look)
+const COMMERCIAL_WALL_OPTIONS: [Block; 8] = [
+    WHITE_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    GRAY_CONCRETE,
+    POLISHED_ANDESITE,
+    SMOOTH_STONE,
+    QUARTZ_BLOCK,
+    QUARTZ_BRICKS,
+    STONE_BRICKS,
+];
+
+/// Wall blocks suitable for industrial buildings (utilitarian)
+const INDUSTRIAL_WALL_OPTIONS: [Block; 7] = [
+    GRAY_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    STONE,
+    SMOOTH_STONE,
+    POLISHED_ANDESITE,
+    DEEPSLATE_BRICKS,
+    BLACKSTONE,
+];
+
+/// Wall blocks suitable for religious buildings (ornate, traditional)
+const RELIGIOUS_WALL_OPTIONS: [Block; 8] = [
+    STONE_BRICKS,
+    CHISELED_STONE_BRICKS,
+    QUARTZ_BLOCK,
+    WHITE_CONCRETE,
+    SANDSTONE,
+    SMOOTH_SANDSTONE,
+    POLISHED_DIORITE,
+    END_STONE_BRICKS,
+];
+
+/// Wall blocks suitable for institutional buildings (formal, clean)
+const INSTITUTIONAL_WALL_OPTIONS: [Block; 8] = [
+    WHITE_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    QUARTZ_BRICKS,
+    STONE_BRICKS,
+    POLISHED_ANDESITE,
+    SMOOTH_STONE,
+    SANDSTONE,
+    END_STONE_BRICKS,
+];
+
+/// Wall blocks suitable for farm/agricultural buildings (rustic)
+const FARM_WALL_OPTIONS: [Block; 6] = [
+    OAK_PLANKS,
+    SPRUCE_PLANKS,
+    DARK_OAK_PLANKS,
+    COBBLESTONE,
+    STONE,
+    MUD_BRICKS,
+];
+
+/// Wall blocks suitable for historic/castle buildings
+const HISTORIC_WALL_OPTIONS: [Block; 10] = [
+    STONE_BRICKS,
+    CRACKED_STONE_BRICKS,
+    CHISELED_STONE_BRICKS,
+    COBBLESTONE,
+    MOSSY_COBBLESTONE,
+    DEEPSLATE_BRICKS,
+    POLISHED_ANDESITE,
+    ANDESITE,
+    SMOOTH_STONE,
+    BRICK,
+];
+
+/// Wall blocks for garages (sturdy, simple)
+const GARAGE_WALL_OPTIONS: [Block; 3] = [
+    BRICK,
+    STONE_BRICKS,
+    POLISHED_ANDESITE,
+];
+
+/// Wall blocks for sheds (wooden)
+const SHED_WALL_OPTIONS: [Block; 1] = [
+    OAK_LOG,
+];
+
+/// Wall blocks for greenhouses (glass variants)
+const GREENHOUSE_WALL_OPTIONS: [Block; 4] = [
+    GLASS,
+    GLASS_PANE,
+    WHITE_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+];
+
+// ============================================================================
+// Building Category System
+// ============================================================================
+
 /// Building category determines which preset rules to apply.
 /// This is derived from OSM tags and can influence style choices.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BuildingCategory {
-    Residential,    // Houses, apartments, detached homes
-    Commercial,     // Shops, offices, retail
-    Industrial,     // Warehouses, factories
-    Institutional,  // Schools, hospitals, government
-    Skyscraper,     // Tall buildings (>7 floors or >28m)
-    Historic,       // Castles, historic buildings
-    Default,        // Unknown or generic buildings
+    // Residential types
+    Residential,        // Generic residential (apartments, etc.)
+    House,              // Single-family homes
+    Farm,               // Farmhouses and agricultural dwellings
+    
+    // Commercial types
+    Commercial,         // Shops, retail, supermarkets
+    Office,             // Office buildings
+    Hotel,              // Hotels and accommodation
+    
+    // Industrial types
+    Industrial,         // Factories, manufacturing
+    Warehouse,          // Storage and logistics
+    
+    // Institutional types
+    School,             // Schools, kindergartens, colleges
+    Hospital,           // Healthcare buildings
+    Religious,          // Churches, mosques, temples, etc.
+    
+    // Special types
+    Skyscraper,         // Tall buildings (>7 floors or >28m)
+    Historic,           // Castles, ruins, historic buildings
+    Garage,             // Garages and carports
+    Shed,               // Sheds, huts, simple storage
+    Greenhouse,         // Greenhouses and glasshouses
+    
+    Default,            // Unknown or generic buildings
 }
 
 impl BuildingCategory {
@@ -72,26 +219,61 @@ impl BuildingCategory {
             .unwrap_or("yes");
 
         match building_type {
-            // Residential types
-            "residential" | "house" | "apartments" | "detached" | "semidetached_house"
-            | "terrace" | "farm" | "cabin" | "bungalow" | "villa" | "dormitory" => {
-                BuildingCategory::Residential
+            // Single-family homes
+            "house" | "detached" | "semidetached_house" | "terrace" | "bungalow" | "villa" 
+            | "cabin" | "hut" => BuildingCategory::House,
+            
+            // Multi-family residential
+            "residential" | "apartments" | "dormitory" => BuildingCategory::Residential,
+            
+            // Farm and agricultural
+            "farm" | "farm_auxiliary" | "barn" | "stable" | "cowshed" | "sty" | "sheepfold" => {
+                BuildingCategory::Farm
             }
-            // Commercial types
-            "commercial" | "retail" | "office" | "supermarket" | "kiosk" | "shop" => {
+            
+            // Commercial/retail
+            "commercial" | "retail" | "supermarket" | "kiosk" | "shop" => {
                 BuildingCategory::Commercial
             }
-            // Industrial types
-            "industrial" | "warehouse" | "factory" | "manufacture" | "storage_tank" => {
-                BuildingCategory::Industrial
+            
+            // Office buildings
+            "office" => BuildingCategory::Office,
+            
+            // Hotels and accommodation
+            "hotel" => BuildingCategory::Hotel,
+            
+            // Industrial/manufacturing
+            "industrial" | "factory" | "manufacture" | "hangar" => BuildingCategory::Industrial,
+            
+            // Warehouses and storage
+            "warehouse" | "storage_tank" => BuildingCategory::Warehouse,
+            
+            // Schools and education
+            "school" | "kindergarten" | "college" | "university" => BuildingCategory::School,
+            
+            // Healthcare
+            "hospital" => BuildingCategory::Hospital,
+            
+            // Religious buildings
+            "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple" => {
+                BuildingCategory::Religious
             }
-            // Institutional types
-            "hospital" | "school" | "university" | "college" | "public" | "government"
-            | "civic" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple" => {
-                BuildingCategory::Institutional
-            }
-            // Historic (also check building type)
+            
+            // Historic structures
             "castle" | "ruins" | "fort" | "bunker" => BuildingCategory::Historic,
+            
+            // Garages
+            "garage" | "garages" | "carport" => BuildingCategory::Garage,
+            
+            // Simple storage structures
+            "shed" => BuildingCategory::Shed,
+            
+            // Greenhouses
+            "greenhouse" | "glasshouse" => BuildingCategory::Greenhouse,
+            
+            // Public/civic (map to appropriate institutional)
+            "public" | "government" | "civic" => BuildingCategory::School, // Use school style for generic institutional
+            
             // Default for unknown types
             _ => BuildingCategory::Default,
         }
@@ -108,9 +290,11 @@ pub struct BuildingStylePreset {
     pub floor_block: Option<Block>,
     pub window_block: Option<Block>,
     pub accent_block: Option<Block>,
+    pub roof_block: Option<Block>, // Material for roof (used in gabled roofs, etc.)
 
     // Window style
     pub use_vertical_windows: Option<bool>,
+    pub has_windows: Option<bool>, // Whether to generate windows at all
 
     // Accent features
     pub use_accent_roof_line: Option<bool>,
@@ -121,6 +305,10 @@ pub struct BuildingStylePreset {
     pub roof_type: Option<RoofType>,
     pub has_chimney: Option<bool>,
     pub generate_roof: Option<bool>,
+    
+    // Special features
+    pub has_garage_door: Option<bool>, // Generate double door on front face
+    pub has_single_door: Option<bool>, // Generate a single door somewhere
 }
 
 impl BuildingStylePreset {
@@ -160,15 +348,6 @@ impl BuildingStylePreset {
         }
     }
 
-    /// Preset for institutional buildings (hospitals, schools)
-    pub fn institutional() -> Self {
-        Self {
-            use_vertical_windows: Some(false),
-            use_accent_roof_line: Some(true),
-            ..Default::default()
-        }
-    }
-
     /// Preset for historic buildings (castles, etc.)
     pub fn historic() -> Self {
         Self {
@@ -181,15 +360,171 @@ impl BuildingStylePreset {
         }
     }
 
+    /// Preset for single-family houses
+    pub fn house() -> Self {
+        Self {
+            use_vertical_windows: Some(false),
+            use_accent_lines: Some(false),
+            use_accent_roof_line: Some(true),
+            has_chimney: Some(true), // Houses often have chimneys
+            ..Default::default()
+        }
+    }
+
+    /// Preset for farm buildings (barns, stables, etc.)
+    pub fn farm() -> Self {
+        Self {
+            use_vertical_windows: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for office buildings
+    pub fn office() -> Self {
+        Self {
+            use_vertical_windows: Some(true), // Office buildings typically have vertical windows
+            use_accent_roof_line: Some(true),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for hotels
+    pub fn hotel() -> Self {
+        Self {
+            use_vertical_windows: Some(true),
+            use_accent_roof_line: Some(true),
+            use_accent_lines: Some(true), // Hotels often have floor-separating lines
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for warehouses
+    pub fn warehouse() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            use_vertical_windows: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for schools and educational buildings
+    pub fn school() -> Self {
+        Self {
+            use_vertical_windows: Some(false), // Schools usually have regular windows
+            use_accent_roof_line: Some(true),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for hospitals
+    pub fn hospital() -> Self {
+        Self {
+            use_vertical_windows: Some(true),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat), // Hospitals typically have flat roofs
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for religious buildings (churches, mosques, etc.)
+    pub fn religious() -> Self {
+        Self {
+            use_vertical_windows: Some(true), // Tall stained glass windows
+            use_accent_roof_line: Some(true),
+            use_accent_lines: Some(false),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for garages and carports
+    pub fn garage() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            roof_block: Some(POLISHED_ANDESITE), // Always polished andesite roof
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            generate_roof: Some(true),
+            has_windows: Some(false), // No windows on garages
+            has_garage_door: Some(true), // Generate double door on front
+            ..Default::default()
+        }
+    }
+
+    /// Preset for sheds and small storage structures
+    pub fn shed() -> Self {
+        Self {
+            wall_block: Some(OAK_LOG), // Oak logs for walls
+            roof_block: Some(OAK_PLANKS), // Oak planks for roof
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            has_windows: Some(false), // No windows on sheds
+            has_single_door: Some(true), // One door somewhere
+            ..Default::default()
+        }
+    }
+
+    /// Preset for greenhouses
+    pub fn greenhouse() -> Self {
+        Self {
+            // Wall block is randomly chosen from GREENHOUSE_WALL_OPTIONS
+            roof_block: Some(SMOOTH_STONE_SLAB), // Slab roof (will randomize between oak and smooth stone)
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_windows: Some(false), // The walls themselves are glass
+            has_single_door: Some(true), // One entrance door
+            ..Default::default()
+        }
+    }
+
+    /// Preset for commercial buildings (retail, shops)
+    pub fn commercial() -> Self {
+        Self {
+            use_vertical_windows: Some(false),
+            use_accent_roof_line: Some(true),
+            ..Default::default()
+        }
+    }
+
     /// Gets the appropriate preset for a building category
     pub fn for_category(category: BuildingCategory) -> Self {
         match category {
+            BuildingCategory::House => Self::house(),
             BuildingCategory::Residential => Self::residential(),
-            BuildingCategory::Skyscraper => Self::skyscraper(),
+            BuildingCategory::Farm => Self::farm(),
+            BuildingCategory::Commercial => Self::commercial(),
+            BuildingCategory::Office => Self::office(),
+            BuildingCategory::Hotel => Self::hotel(),
             BuildingCategory::Industrial => Self::industrial(),
-            BuildingCategory::Institutional => Self::institutional(),
+            BuildingCategory::Warehouse => Self::warehouse(),
+            BuildingCategory::School => Self::school(),
+            BuildingCategory::Hospital => Self::hospital(),
+            BuildingCategory::Religious => Self::religious(),
             BuildingCategory::Historic => Self::historic(),
-            BuildingCategory::Commercial | BuildingCategory::Default => Self::empty(),
+            BuildingCategory::Garage => Self::garage(),
+            BuildingCategory::Shed => Self::shed(),
+            BuildingCategory::Greenhouse => Self::greenhouse(),
+            BuildingCategory::Skyscraper => Self::skyscraper(),
+            BuildingCategory::Default => Self::empty(),
         }
     }
 }
@@ -203,9 +538,11 @@ pub struct BuildingStyle {
     pub floor_block: Block,
     pub window_block: Block,
     pub accent_block: Block,
+    pub roof_block: Option<Block>, // Optional specific roof material
 
     // Window style
     pub use_vertical_windows: bool,
+    pub has_windows: bool, // Whether to generate windows
 
     // Accent features
     pub use_accent_roof_line: bool,
@@ -216,6 +553,10 @@ pub struct BuildingStyle {
     pub roof_type: RoofType,
     pub has_chimney: bool,
     pub generate_roof: bool,
+    
+    // Special features
+    pub has_garage_door: bool,
+    pub has_single_door: bool,
 }
 
 impl BuildingStyle {
@@ -226,6 +567,7 @@ impl BuildingStyle {
     /// * `preset` - The style preset (partial specification)
     /// * `element` - The OSM element (used for tag-based decisions)
     /// * `building_type` - The building type string from tags
+    /// * `category` - The resolved building category
     /// * `has_multiple_floors` - Whether building has more than 6 height units
     /// * `footprint_size` - The building's floor area in blocks
     /// * `rng` - Deterministic RNG seeded by element ID
@@ -234,16 +576,17 @@ impl BuildingStyle {
         preset: &BuildingStylePreset,
         element: &ProcessedWay,
         building_type: &str,
+        category: BuildingCategory,
         has_multiple_floors: bool,
         footprint_size: usize,
         rng: &mut impl Rng,
     ) -> Self {
         // === Block Palette ===
 
-        // Wall block: from tags or preset
+        // Wall block: from tags, preset, or category palette
         let wall_block = preset
             .wall_block
-            .unwrap_or_else(|| determine_wall_block(element));
+            .unwrap_or_else(|| determine_wall_block(element, category, rng));
 
         // Floor block: from preset or random
         let floor_block = preset
@@ -315,18 +658,32 @@ impl BuildingStyle {
             is_residential && suitable_roof && suitable_size && rng.gen_bool(0.55)
         });
 
+        // Roof block: specific material for roofs
+        let roof_block = preset.roof_block;
+
+        // Windows: default to true unless explicitly disabled
+        let has_windows = preset.has_windows.unwrap_or(true);
+
+        // Special door features
+        let has_garage_door = preset.has_garage_door.unwrap_or(false);
+        let has_single_door = preset.has_single_door.unwrap_or(false);
+
         Self {
             wall_block,
             floor_block,
             window_block,
             accent_block,
+            roof_block,
             use_vertical_windows,
+            has_windows,
             use_accent_roof_line,
             use_accent_lines,
             use_vertical_accent,
             roof_type,
             has_chimney,
             generate_roof,
+            has_garage_door,
+            has_single_door,
         }
     }
 }
@@ -342,11 +699,15 @@ struct BuildingConfig {
     floor_block: Block,
     window_block: Block,
     accent_block: Block,
+    roof_block: Option<Block>,
     use_vertical_windows: bool,
     use_accent_roof_line: bool,
     use_accent_lines: bool,
     use_vertical_accent: bool,
     is_abandoned_building: bool,
+    has_windows: bool,
+    has_garage_door: bool,
+    has_single_door: bool,
 }
 
 /// Building bounds calculated from nodes
@@ -432,18 +793,61 @@ fn calculate_start_y_offset(
 }
 
 /// Determines the wall block based on building tags
-fn determine_wall_block(element: &ProcessedWay) -> Block {
+fn determine_wall_block(element: &ProcessedWay, category: BuildingCategory, rng: &mut impl Rng) -> Block {
+    // Historic castles have their own special treatment
     if element.tags.get("historic") == Some(&"castle".to_string()) {
-        get_castle_wall_block()
-    } else {
-        element
-            .tags
-            .get("building:colour")
-            .and_then(|building_colour: &String| {
-                color_text_to_rgb_tuple(building_colour)
-                    .map(|rgb: (u8, u8, u8)| get_building_wall_block_for_color(rgb))
-            })
-            .unwrap_or_else(get_fallback_building_block)
+        return get_castle_wall_block();
+    }
+    
+    // Try to get wall block from building:colour tag first
+    if let Some(building_colour) = element.tags.get("building:colour") {
+        if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
+            return get_building_wall_block_for_color(rgb);
+        }
+    }
+    
+    // Otherwise, select from category-specific palette
+    get_wall_block_for_category(category, rng)
+}
+
+/// Selects a wall block from the appropriate category palette
+fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -> Block {
+    match category {
+        BuildingCategory::House | BuildingCategory::Residential => {
+            RESIDENTIAL_WALL_OPTIONS[rng.gen_range(0..RESIDENTIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Commercial | BuildingCategory::Office | BuildingCategory::Hotel => {
+            COMMERCIAL_WALL_OPTIONS[rng.gen_range(0..COMMERCIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Industrial | BuildingCategory::Warehouse => {
+            INDUSTRIAL_WALL_OPTIONS[rng.gen_range(0..INDUSTRIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Religious => {
+            RELIGIOUS_WALL_OPTIONS[rng.gen_range(0..RELIGIOUS_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::School | BuildingCategory::Hospital => {
+            INSTITUTIONAL_WALL_OPTIONS[rng.gen_range(0..INSTITUTIONAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Farm => {
+            FARM_WALL_OPTIONS[rng.gen_range(0..FARM_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Historic => {
+            HISTORIC_WALL_OPTIONS[rng.gen_range(0..HISTORIC_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Garage => {
+            GARAGE_WALL_OPTIONS[rng.gen_range(0..GARAGE_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Shed => {
+            SHED_WALL_OPTIONS[rng.gen_range(0..SHED_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Greenhouse => {
+            GREENHOUSE_WALL_OPTIONS[rng.gen_range(0..GREENHOUSE_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Skyscraper => {
+            // Skyscrapers use commercial palette (glass, concrete, stone)
+            COMMERCIAL_WALL_OPTIONS[rng.gen_range(0..COMMERCIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Default => get_fallback_building_block(),
     }
 }
 
@@ -754,6 +1158,76 @@ fn generate_building_walls(
     (current_building, corner_addup)
 }
 
+/// Generates special doors for garages (double door) and sheds (single door)
+fn generate_special_doors(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    wall_outline: &[(i32, i32)],
+) {
+    if wall_outline.is_empty() {
+        return;
+    }
+    
+    // Find the front-facing wall segment (longest or first significant segment)
+    // We'll use the first wall segment from the element nodes
+    let nodes = &element.nodes;
+    if nodes.len() < 2 {
+        return;
+    }
+
+    let mut rng = element_rng(element.id);
+    let door_y = config.start_y_offset + config.abs_terrain_offset + 1;
+    
+    if config.has_garage_door {
+        // Place double spruce door on front face
+        // Find a suitable wall segment (first one with enough length)
+        for i in 0..nodes.len().saturating_sub(1) {
+            let (x1, z1) = (nodes[i].x, nodes[i].z);
+            let (x2, z2) = (nodes[i + 1].x, nodes[i + 1].z);
+            
+            let dx = (x2 - x1).abs();
+            let dz = (z2 - z1).abs();
+            let segment_len = dx.max(dz);
+            
+            // Need at least 2 blocks for double door
+            if segment_len >= 2 {
+                // Place doors in the middle of this segment
+                let mid_x = (x1 + x2) / 2;
+                let mid_z = (z1 + z2) / 2;
+                
+                // Determine door offset based on wall orientation
+                let (door1_x, door1_z, door2_x, door2_z) = if dx > dz {
+                    // Wall runs along X axis
+                    (mid_x, mid_z, mid_x + 1, mid_z)
+                } else {
+                    // Wall runs along Z axis
+                    (mid_x, mid_z, mid_x, mid_z + 1)
+                };
+                
+                // Place the double door (lower and upper parts)
+                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door1_x, door_y, door1_z, None, None);
+                editor.set_block_absolute(SPRUCE_DOOR_UPPER, door1_x, door_y + 1, door1_z, None, None);
+                editor.set_block_absolute(SPRUCE_DOOR_LOWER, door2_x, door_y, door2_z, None, None);
+                editor.set_block_absolute(SPRUCE_DOOR_UPPER, door2_x, door_y + 1, door2_z, None, None);
+                
+                break; // Only place one set of garage doors
+            }
+        }
+    } else if config.has_single_door {
+        // Place a single oak door somewhere on the wall
+        // Pick a random position from the wall outline
+        if !wall_outline.is_empty() {
+            let door_idx = rng.gen_range(0..wall_outline.len());
+            let (door_x, door_z) = wall_outline[door_idx];
+            
+            // Place single oak door
+            editor.set_block_absolute(OAK_DOOR, door_x, door_y, door_z, None, None);
+            editor.set_block_absolute(OAK_DOOR_UPPER, door_x, door_y + 1, door_z, None, None);
+        }
+    }
+}
+
 /// Determines which block to place at a specific wall position (wall, window, or accent)
 #[inline]
 fn determine_wall_block_at_position(
@@ -762,6 +1236,16 @@ fn determine_wall_block_at_position(
     bz: i32,
     config: &BuildingConfig,
 ) -> Block {
+    // If windows are disabled, always use wall block (with possible accent)
+    if !config.has_windows {
+        let above_floor = h > config.start_y_offset + 1;
+        let use_accent_line = config.use_accent_lines && above_floor && h % 4 == 0;
+        if use_accent_line {
+            return config.accent_block;
+        }
+        return config.wall_block;
+    }
+
     let above_floor = h > config.start_y_offset + 1;
 
     if config.is_tall_building && config.use_vertical_windows {
@@ -1015,6 +1499,7 @@ pub fn generate_buildings(
         &preset,
         element,
         building_type,
+        category,
         has_multiple_floors,
         cached_footprint_size,
         &mut rng,
@@ -1038,16 +1523,30 @@ pub fn generate_buildings(
         floor_block: style.floor_block,
         window_block: style.window_block,
         accent_block: style.accent_block,
+        roof_block: style.roof_block,
         use_vertical_windows: style.use_vertical_windows,
         use_accent_roof_line: style.use_accent_roof_line,
         use_accent_lines: style.use_accent_lines,
         use_vertical_accent: style.use_vertical_accent,
         is_abandoned_building,
+        has_windows: style.has_windows,
+        has_garage_door: style.has_garage_door,
+        has_single_door: style.has_single_door,
     };
 
     // Generate walls - pass whether this building will have a sloped roof
     let has_sloped_roof = args.roof && style.generate_roof;
     let (wall_outline, corner_addup) = generate_building_walls(editor, element, &config, args, has_sloped_roof);
+
+    // Generate special doors (garage doors, shed doors)
+    if config.has_garage_door || config.has_single_door {
+        generate_special_doors(
+            editor,
+            element,
+            &config,
+            &wall_outline,
+        );
+    }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
     let roof_area: Vec<(i32, i32)> = {
