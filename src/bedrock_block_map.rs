@@ -129,6 +129,81 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             )],
         ),
 
+        // Dark oak log with axis
+        "dark_oak_log" => BedrockBlock::with_states(
+            "dark_oak_log",
+            vec![(
+                "pillar_axis",
+                BedrockBlockStateValue::String("y".to_string()),
+            )],
+        ),
+
+        // Jungle log with axis
+        "jungle_log" => BedrockBlock::with_states(
+            "jungle_log",
+            vec![(
+                "pillar_axis",
+                BedrockBlockStateValue::String("y".to_string()),
+            )],
+        ),
+
+        // Acacia log with axis
+        "acacia_log" => BedrockBlock::with_states(
+            "acacia_log",
+            vec![(
+                "pillar_axis",
+                BedrockBlockStateValue::String("y".to_string()),
+            )],
+        ),
+
+        // Spruce leaves with persistence
+        "spruce_leaves" => BedrockBlock::with_states(
+            "leaves",
+            vec![
+                (
+                    "old_leaf_type",
+                    BedrockBlockStateValue::String("spruce".to_string()),
+                ),
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+            ],
+        ),
+
+        // Dark oak leaves with persistence
+        "dark_oak_leaves" => BedrockBlock::with_states(
+            "leaves2",
+            vec![
+                (
+                    "new_leaf_type",
+                    BedrockBlockStateValue::String("dark_oak".to_string()),
+                ),
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+            ],
+        ),
+
+        // Jungle leaves with persistence
+        "jungle_leaves" => BedrockBlock::with_states(
+            "leaves",
+            vec![
+                (
+                    "old_leaf_type",
+                    BedrockBlockStateValue::String("jungle".to_string()),
+                ),
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+            ],
+        ),
+
+        // Acacia leaves with persistence
+        "acacia_leaves" => BedrockBlock::with_states(
+            "leaves2",
+            vec![
+                (
+                    "new_leaf_type",
+                    BedrockBlockStateValue::String("acacia".to_string()),
+                ),
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+            ],
+        ),
+
         // Stone slab (bottom half by default)
         "stone_slab" => BedrockBlock::with_states(
             "stone_block_slab",

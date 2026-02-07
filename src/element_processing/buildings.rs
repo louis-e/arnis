@@ -193,7 +193,7 @@ pub enum BuildingCategory {
 
 impl BuildingCategory {
     /// Determines the building category from OSM tags and calculated properties
-    fn from_element(element: &ProcessedWay, is_tall_building: bool, building_height: i32) -> Self {
+    fn from_element(element: &ProcessedWay, is_tall_building: bool) -> Self {
         // Check for skyscraper first (based on height/levels from OSM tags)
         if is_tall_building {
             return BuildingCategory::Skyscraper;
@@ -1531,7 +1531,7 @@ pub fn generate_buildings(
     building_height = adjust_height_for_building_type(building_type, building_height, scale_factor);
 
     // Determine building category and get appropriate style preset
-    let category = BuildingCategory::from_element(element, is_tall_building, building_height);
+    let category = BuildingCategory::from_element(element, is_tall_building);
     let preset = BuildingStylePreset::for_category(category);
 
     // Resolve style with deterministic RNG

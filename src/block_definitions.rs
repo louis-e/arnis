@@ -297,6 +297,13 @@ impl Block {
             216 => "light_gray_terracotta",
             217 => "oak_slab",
             218 => "oak_door",
+            219 => "dark_oak_log",
+            220 => "dark_oak_leaves",
+            221 => "jungle_log",
+            222 => "jungle_leaves",
+            223 => "acacia_log",
+            224 => "acacia_leaves",
+            225 => "spruce_leaves",
             _ => panic!("Invalid id"),
         }
     }
@@ -573,6 +580,30 @@ impl Block {
                 map.insert("half".to_string(), Value::String("upper".to_string()));
                 map
             })),
+            // Dark oak leaves
+            220 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("persistent".to_string(), Value::String("true".to_string()));
+                map
+            })),
+            // Jungle leaves
+            222 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("persistent".to_string(), Value::String("true".to_string()));
+                map
+            })),
+            // Acacia leaves
+            224 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("persistent".to_string(), Value::String("true".to_string()));
+                map
+            })),
+            // Spruce leaves
+            225 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("persistent".to_string(), Value::String("true".to_string()));
+                map
+            })),
             _ => None,
         }
     }
@@ -840,6 +871,13 @@ pub const GLASS_PANE: Block = Block::new(215);
 pub const LIGHT_GRAY_TERRACOTTA: Block = Block::new(216);
 pub const OAK_SLAB_TOP: Block = Block::new(217);
 pub const OAK_DOOR_UPPER: Block = Block::new(218);
+pub const DARK_OAK_LOG: Block = Block::new(219);
+pub const DARK_OAK_LEAVES: Block = Block::new(220);
+pub const JUNGLE_LOG: Block = Block::new(221);
+pub const JUNGLE_LEAVES: Block = Block::new(222);
+pub const ACACIA_LOG: Block = Block::new(223);
+pub const ACACIA_LEAVES: Block = Block::new(224);
+pub const SPRUCE_LEAVES: Block = Block::new(225);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
