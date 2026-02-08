@@ -83,6 +83,33 @@ const BIRCH_LEAVES_FILL: [(Coord, Coord); 5] = [
     ((0, 7, 0), (0, 8, 0)),
 ];
 
+/// Dark oak: short but wide canopy, leaves start at y=3 up to y=6 with a cap
+const DARK_OAK_LEAVES_FILL: [(Coord, Coord); 5] = [
+    ((-1, 3, 0), (-1, 6, 0)),
+    ((1, 3, 0), (1, 6, 0)),
+    ((0, 3, -1), (0, 6, -1)),
+    ((0, 3, 1), (0, 6, 1)),
+    ((0, 6, 0), (0, 7, 0)),
+];
+
+/// Jungle: tall tree with canopy only near the top, leaves from y=7 to y=11
+const JUNGLE_LEAVES_FILL: [(Coord, Coord); 5] = [
+    ((-1, 7, 0), (-1, 11, 0)),
+    ((1, 7, 0), (1, 11, 0)),
+    ((0, 7, -1), (0, 11, -1)),
+    ((0, 7, 1), (0, 11, 1)),
+    ((0, 11, 0), (0, 12, 0)),
+];
+
+/// Acacia: umbrella-shaped canopy with a gentle dome, leaves from y=5 to y=8
+const ACACIA_LEAVES_FILL: [(Coord, Coord); 5] = [
+    ((-1, 5, 0), (-1, 8, 0)),
+    ((1, 5, 0), (1, 8, 0)),
+    ((0, 5, -1), (0, 8, -1)),
+    ((0, 5, 1), (0, 8, 1)),
+    ((0, 8, 0), (0, 9, 0)),
+];
+
 //////////////////////////////////////////////////
 
 /// Helper function to set blocks in various patterns.
@@ -97,6 +124,9 @@ pub enum TreeType {
     Oak,
     Spruce,
     Birch,
+    DarkOak,
+    Jungle,
+    Acacia,
 }
 
 // TODO what should be moved in, and what should be referenced?
@@ -126,10 +156,13 @@ impl Tree<'_> {
         // The element_id of 0 is used as a salt for tree-specific randomness
         let mut rng = coord_rng(x, z, 0);
 
-        let tree_type = match rng.gen_range(1..=3) {
-            1 => TreeType::Oak,
-            2 => TreeType::Spruce,
-            3 => TreeType::Birch,
+        let tree_type = match rng.gen_range(1..=10) {
+            1..=3 => TreeType::Oak,
+            4..=5 => TreeType::Spruce,
+            6..=7 => TreeType::Birch,
+            8 => TreeType::DarkOak,
+            9 => TreeType::Jungle,
+            10 => TreeType::Acacia,
             _ => unreachable!(),
         };
 
@@ -214,9 +247,9 @@ impl Tree<'_> {
                 // kind,
                 log_block: SPRUCE_LOG,
                 log_height: 9,
-                leaves_block: BIRCH_LEAVES, // TODO Is this correct?
+                leaves_block: SPRUCE_LEAVES,
                 leaves_fill: &SPRUCE_LEAVES_FILL,
-                // TODO can I omit the third empty vec? May cause issues with iter zip
+                // Conical shape: wide at bottom, narrow at top
                 round_ranges: [vec![9, 7, 6, 4, 3], vec![6, 3], vec![]],
             },
 
@@ -227,6 +260,44 @@ impl Tree<'_> {
                 leaves_block: BIRCH_LEAVES,
                 leaves_fill: &BIRCH_LEAVES_FILL,
                 round_ranges: [(2..=6).rev().collect(), (2..=4).collect(), vec![]],
+            },
+
+            TreeType::DarkOak => Self {
+                // Short trunk with a very wide, bushy canopy
+                log_block: DARK_OAK_LOG,
+                log_height: 5,
+                leaves_block: DARK_OAK_LEAVES,
+                leaves_fill: &DARK_OAK_LEAVES_FILL,
+                // All 3 round patterns used for maximum width
+                round_ranges: [
+                    (3..=6).rev().collect(),
+                    (3..=5).rev().collect(),
+                    (4..=5).rev().collect(),
+                ],
+            },
+
+            TreeType::Jungle => Self {
+                // Tall trunk, canopy clustered at the top
+                log_block: JUNGLE_LOG,
+                log_height: 10,
+                leaves_block: JUNGLE_LEAVES,
+                leaves_fill: &JUNGLE_LEAVES_FILL,
+                // Canopy only near the top of the tree
+                round_ranges: [(7..=11).rev().collect(), (8..=10).rev().collect(), vec![]],
+            },
+
+            TreeType::Acacia => Self {
+                // Medium trunk with umbrella-shaped canopy, domed center
+                log_block: ACACIA_LOG,
+                log_height: 6,
+                leaves_block: ACACIA_LEAVES,
+                leaves_fill: &ACACIA_LEAVES_FILL,
+                // Inner rounds reach higher → gentle dome, outer stays low → wide brim
+                round_ranges: [
+                    (5..=8).rev().collect(),
+                    (5..=7).rev().collect(),
+                    (6..=7).rev().collect(),
+                ],
             },
         } // match
     } // fn get_tree
@@ -363,6 +434,9 @@ impl Tree<'_> {
             GRAY_STAINED_GLASS,
             LIGHT_GRAY_STAINED_GLASS,
             BROWN_STAINED_GLASS,
+            CYAN_STAINED_GLASS,
+            BLUE_STAINED_GLASS,
+            LIGHT_BLUE_STAINED_GLASS,
             TINTED_GLASS,
             // Carpets
             WHITE_CARPET,

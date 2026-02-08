@@ -146,6 +146,7 @@ pub fn fetch_data_from_overpass(
         nwr["advertising"];
         nwr["man_made"];
         nwr["aeroway"];
+        way["place"];
         way;
     )->.relsinbbox;
     (

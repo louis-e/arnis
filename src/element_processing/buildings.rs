@@ -3,18 +3,19 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
-use crate::deterministic_rng::element_rng;
+use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use fastnbt::Value;
 use rand::Rng;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 /// Enum representing different roof types
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum RoofType {
+pub(crate) enum RoofType {
     Gabled,    // Two sloping sides meeting at a ridge
     Hipped, // All sides slope downwards to walls (including Half-hipped, Gambrel, Mansard variations)
     Skillion, // Single sloping surface
@@ -23,36 +24,924 @@ enum RoofType {
     Flat,   // Default flat roof
 }
 
+// ============================================================================
+// Building Style System
+// ============================================================================
+
+/// Accent block options for building decoration
+const ACCENT_BLOCK_OPTIONS: [Block; 6] = [
+    POLISHED_ANDESITE,
+    SMOOTH_STONE,
+    STONE_BRICKS,
+    MUD_BRICKS,
+    ANDESITE,
+    CHISELED_STONE_BRICKS,
+];
+
+// ============================================================================
+// Wall Block Palettes for Different Building Types
+// ============================================================================
+
+/// Wall blocks suitable for residential buildings (warm, homey materials)
+const RESIDENTIAL_WALL_OPTIONS: [Block; 24] = [
+    BRICK,
+    STONE_BRICKS,
+    WHITE_TERRACOTTA,
+    BROWN_TERRACOTTA,
+    SANDSTONE,
+    SMOOTH_SANDSTONE,
+    QUARTZ_BRICKS,
+    MUD_BRICKS,
+    POLISHED_GRANITE,
+    END_STONE_BRICKS,
+    BROWN_CONCRETE,
+    DEEPSLATE_BRICKS,
+    GRAY_CONCRETE,
+    GRAY_TERRACOTTA,
+    LIGHT_BLUE_TERRACOTTA,
+    LIGHT_GRAY_CONCRETE,
+    LIGHT_GRAY_TERRACOTTA,
+    NETHER_BRICK,
+    POLISHED_ANDESITE,
+    POLISHED_BLACKSTONE,
+    POLISHED_BLACKSTONE_BRICKS,
+    POLISHED_DEEPSLATE,
+    QUARTZ_BLOCK,
+    WHITE_CONCRETE,
+];
+
+/// Wall blocks suitable for commercial/office buildings (modern, clean look)
+const COMMERCIAL_WALL_OPTIONS: [Block; 8] = [
+    WHITE_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    GRAY_CONCRETE,
+    POLISHED_ANDESITE,
+    SMOOTH_STONE,
+    QUARTZ_BLOCK,
+    QUARTZ_BRICKS,
+    STONE_BRICKS,
+];
+
+/// Wall blocks suitable for industrial buildings (utilitarian)
+const INDUSTRIAL_WALL_OPTIONS: [Block; 7] = [
+    GRAY_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    STONE,
+    SMOOTH_STONE,
+    POLISHED_ANDESITE,
+    DEEPSLATE_BRICKS,
+    BLACKSTONE,
+];
+
+/// Wall blocks suitable for religious buildings (ornate, traditional)
+const RELIGIOUS_WALL_OPTIONS: [Block; 8] = [
+    STONE_BRICKS,
+    CHISELED_STONE_BRICKS,
+    QUARTZ_BLOCK,
+    WHITE_CONCRETE,
+    SANDSTONE,
+    SMOOTH_SANDSTONE,
+    POLISHED_DIORITE,
+    END_STONE_BRICKS,
+];
+
+/// Wall blocks suitable for institutional buildings (formal, clean)
+const INSTITUTIONAL_WALL_OPTIONS: [Block; 8] = [
+    WHITE_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    QUARTZ_BRICKS,
+    STONE_BRICKS,
+    POLISHED_ANDESITE,
+    SMOOTH_STONE,
+    SANDSTONE,
+    END_STONE_BRICKS,
+];
+
+/// Wall blocks suitable for farm/agricultural buildings (rustic)
+const FARM_WALL_OPTIONS: [Block; 6] = [
+    OAK_PLANKS,
+    SPRUCE_PLANKS,
+    DARK_OAK_PLANKS,
+    COBBLESTONE,
+    STONE,
+    MUD_BRICKS,
+];
+
+/// Wall blocks suitable for historic/castle buildings
+const HISTORIC_WALL_OPTIONS: [Block; 10] = [
+    STONE_BRICKS,
+    CRACKED_STONE_BRICKS,
+    CHISELED_STONE_BRICKS,
+    COBBLESTONE,
+    POLISHED_BLACKSTONE_BRICKS,
+    DEEPSLATE_BRICKS,
+    POLISHED_ANDESITE,
+    ANDESITE,
+    SMOOTH_STONE,
+    BRICK,
+];
+
+/// Wall blocks for garages (sturdy, simple)
+const GARAGE_WALL_OPTIONS: [Block; 3] = [BRICK, STONE_BRICKS, POLISHED_ANDESITE];
+
+/// Wall blocks for sheds (wooden)
+const SHED_WALL_OPTIONS: [Block; 1] = [OAK_LOG];
+
+/// Wall blocks for greenhouses (glass variants)
+const GREENHOUSE_WALL_OPTIONS: [Block; 4] = [
+    GLASS,
+    CYAN_STAINED_GLASS,
+    WHITE_STAINED_GLASS,
+    LIGHT_GRAY_STAINED_GLASS,
+];
+
+// ============================================================================
+// Building Category System
+// ============================================================================
+
+/// Building category determines which preset rules to apply.
+/// This is derived from OSM tags and can influence style choices.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BuildingCategory {
+    // Residential types
+    Residential, // Generic residential (apartments, etc.)
+    House,       // Single-family homes
+    Farm,        // Farmhouses and agricultural dwellings
+
+    // Commercial types
+    Commercial, // Shops, retail, supermarkets
+    Office,     // Office buildings
+    Hotel,      // Hotels and accommodation
+
+    // Industrial types
+    Industrial, // Factories, manufacturing
+    Warehouse,  // Storage and logistics
+
+    // Institutional types
+    School,    // Schools, kindergartens, colleges
+    Hospital,  // Healthcare buildings
+    Religious, // Churches, mosques, temples, etc.
+
+    // Special types
+    TallBuilding,     // Tall buildings (>7 floors or >28m)
+    GlassySkyscraper, // Glass-facade skyscrapers (50% of true skyscrapers)
+    ModernSkyscraper, // Horizontal-window skyscrapers with stone bands (35%)
+    Historic,         // Castles, ruins, historic buildings
+    Tower,            // man_made=tower or building=tower (stone towers)
+    Garage,           // Garages and carports
+    Shed,             // Sheds, huts, simple storage
+    Greenhouse,       // Greenhouses and glasshouses
+
+    Default, // Unknown or generic buildings
+}
+
+impl BuildingCategory {
+    /// Determines the building category from OSM tags and calculated properties
+    fn from_element(element: &ProcessedWay, is_tall_building: bool, building_height: i32) -> Self {
+        // Check for man_made=tower before anything else
+        if element.tags.get("man_made").map(|s| s.as_str()) == Some("tower") {
+            return BuildingCategory::Tower;
+        }
+
+        if is_tall_building {
+            // Check if this qualifies as a true skyscraper:
+            // Must be significantly tall AND have skyscraper proportions
+            // (taller than twice its longest side dimension)
+            let is_true_skyscraper = building_height >= 160
+                && Self::has_skyscraper_proportions(element, building_height);
+
+            if is_true_skyscraper {
+                // Deterministic variant selection based on element ID
+                let hash = element.id.wrapping_mul(2654435761); // Knuth multiplicative hash
+                let roll = hash % 100;
+                return if roll < 50 {
+                    BuildingCategory::GlassySkyscraper
+                } else if roll < 85 {
+                    BuildingCategory::ModernSkyscraper
+                } else {
+                    // 15% use the standard TallBuilding preset
+                    BuildingCategory::TallBuilding
+                };
+            }
+
+            return BuildingCategory::TallBuilding;
+        }
+
+        // Check for religious buildings BEFORE the generic historic check.
+        // A church/mosque/temple that also carries a heritage tag should still
+        // be styled as Religious — its function defines its architecture.
+        let building_type = element
+            .tags
+            .get("building")
+            .or_else(|| element.tags.get("building:part"))
+            .map(|s| s.as_str())
+            .unwrap_or("yes");
+
+        let is_religious_building = matches!(
+            building_type,
+            "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple"
+        );
+        let is_religious_amenity =
+            element.tags.get("amenity").map(|s| s.as_str()) == Some("place_of_worship");
+
+        if is_religious_building || is_religious_amenity {
+            return BuildingCategory::Religious;
+        }
+
+        // Check for historic buildings (only after ruling out religious ones)
+        if element.tags.contains_key("historic") {
+            return BuildingCategory::Historic;
+        }
+
+        match building_type {
+            // Single-family homes
+            "house" | "detached" | "semidetached_house" | "terrace" | "bungalow" | "villa"
+            | "cabin" | "hut" => BuildingCategory::House,
+
+            // Multi-family residential
+            "residential" | "apartments" | "dormitory" => BuildingCategory::Residential,
+
+            // Farm and agricultural
+            "farm" | "farm_auxiliary" | "barn" | "stable" | "cowshed" | "sty" | "sheepfold" => {
+                BuildingCategory::Farm
+            }
+
+            // Commercial/retail
+            "commercial" | "retail" | "supermarket" | "kiosk" | "shop" => {
+                BuildingCategory::Commercial
+            }
+
+            // Office buildings
+            "office" => BuildingCategory::Office,
+
+            // Hotels and accommodation
+            "hotel" => BuildingCategory::Hotel,
+
+            // Industrial/manufacturing
+            "industrial" | "factory" | "manufacture" | "hangar" => BuildingCategory::Industrial,
+
+            // Warehouses and storage
+            "warehouse" | "storage_tank" => BuildingCategory::Warehouse,
+
+            // Schools and education
+            "school" | "kindergarten" | "college" | "university" => BuildingCategory::School,
+
+            // Healthcare
+            "hospital" => BuildingCategory::Hospital,
+
+            // Religious buildings
+            "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple" => {
+                BuildingCategory::Religious
+            }
+
+            // Towers
+            "tower" | "clock_tower" | "transformer_tower" => BuildingCategory::Tower,
+
+            // Historic structures
+            "castle" | "ruins" | "fort" | "bunker" => BuildingCategory::Historic,
+
+            // Garages
+            "garage" | "garages" | "carport" => BuildingCategory::Garage,
+
+            // Simple storage structures
+            "shed" => BuildingCategory::Shed,
+
+            // Greenhouses
+            "greenhouse" | "glasshouse" => BuildingCategory::Greenhouse,
+
+            // Public/civic (map to appropriate institutional)
+            "public" | "government" | "civic" => BuildingCategory::School, // Use school style for generic institutional
+
+            // Default for unknown types
+            _ => BuildingCategory::Default,
+        }
+    }
+
+    /// Checks if a tall building has skyscraper proportions:
+    /// building height >= 40 blocks AND height >= 2× the longest side of its bounding box.
+    fn has_skyscraper_proportions(element: &ProcessedWay, building_height: i32) -> bool {
+        if building_height < 40 {
+            return false;
+        }
+
+        if element.nodes.len() < 3 {
+            return false;
+        }
+
+        let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+        let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+        let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
+        let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+
+        let longest_side = (max_x - min_x).max(max_z - min_z).max(1);
+        building_height as f64 / longest_side as f64 >= 2.0
+    }
+}
+
+/// A partial style specification where `None` means "pick randomly".
+/// Use this to create building presets that enforce certain properties
+/// while allowing variation in others.
+#[derive(Debug, Clone, Default)]
+pub struct BuildingStylePreset {
+    // Block palette (None = randomly chosen)
+    pub wall_block: Option<Block>,
+    pub floor_block: Option<Block>,
+    pub window_block: Option<Block>,
+    pub accent_block: Option<Block>,
+    pub roof_block: Option<Block>, // Material for roof (used in gabled roofs, etc.)
+
+    // Window style
+    pub use_vertical_windows: Option<bool>,
+    pub use_horizontal_windows: Option<bool>, // Full-width horizontal window bands (modern skyscrapers)
+    pub has_windows: Option<bool>,            // Whether to generate windows at all
+
+    // Accent features
+    pub use_accent_roof_line: Option<bool>,
+    pub use_accent_lines: Option<bool>,
+    pub use_vertical_accent: Option<bool>,
+
+    // Roof
+    pub roof_type: Option<RoofType>,
+    pub has_chimney: Option<bool>,
+    pub generate_roof: Option<bool>,
+
+    // Special features
+    pub has_garage_door: Option<bool>, // Generate double door on front face
+    pub has_single_door: Option<bool>, // Generate a single door somewhere
+}
+
+impl BuildingStylePreset {
+    /// Creates an empty preset (all random)
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Preset for residential buildings (houses, apartments)
+    pub fn residential() -> Self {
+        Self {
+            use_vertical_windows: Some(false),
+            use_accent_lines: Some(false), // Residential buildings rarely have accent lines
+            ..Default::default()
+        }
+    }
+
+    /// Preset for tall buildings (>7 floors, not true skyscrapers)
+    pub fn tall_building() -> Self {
+        Self {
+            use_vertical_windows: Some(true), // Always vertical windows
+            roof_type: Some(RoofType::Flat),  // Always flat roof
+            has_chimney: Some(false),         // No chimneys on tall buildings
+            use_accent_roof_line: Some(true), // Usually have accent roof line
+            ..Default::default()
+        }
+    }
+
+    /// Preset for modern skyscrapers with horizontal window bands
+    pub fn modern_skyscraper() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            use_accent_roof_line: Some(true),
+            use_vertical_accent: Some(false),
+            // has_windows, use_accent_lines, and use_horizontal_windows
+            // are resolved in BuildingStyle::resolve() with category-specific logic
+            ..Default::default()
+        }
+    }
+
+    /// Preset for glass-facade skyscrapers
+    pub fn glassy_skyscraper() -> Self {
+        Self {
+            has_windows: Some(false), // The wall IS glass, no extra windows
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat), // Always flat roof
+            generate_roof: Some(true),       // Generate the flat cap
+            has_chimney: Some(false),
+            // accent_lines, accent_block and floor_block are resolved randomly in resolve()
+            // with GlassySkyscraper-specific palettes
+            ..Default::default()
+        }
+    }
+
+    /// Preset for industrial buildings (warehouses, factories)
+    pub fn industrial() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for historic buildings (castles, etc.)
+    pub fn historic() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for single-family houses
+    pub fn house() -> Self {
+        Self {
+            use_vertical_windows: Some(false),
+            use_accent_lines: Some(false),
+            use_accent_roof_line: Some(true),
+            has_chimney: Some(true), // Houses often have chimneys
+            ..Default::default()
+        }
+    }
+
+    /// Preset for farm buildings (barns, stables, etc.)
+    pub fn farm() -> Self {
+        Self {
+            use_vertical_windows: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for office buildings
+    pub fn office() -> Self {
+        Self {
+            use_vertical_windows: Some(true), // Office buildings typically have vertical windows
+            use_accent_roof_line: Some(true),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for hotels
+    pub fn hotel() -> Self {
+        Self {
+            use_vertical_windows: Some(true),
+            use_accent_roof_line: Some(true),
+            use_accent_lines: Some(true), // Hotels often have floor-separating lines
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for warehouses
+    pub fn warehouse() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            use_vertical_windows: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for schools and educational buildings
+    pub fn school() -> Self {
+        Self {
+            use_vertical_windows: Some(false), // Schools usually have regular windows
+            use_accent_roof_line: Some(true),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for hospitals
+    pub fn hospital() -> Self {
+        Self {
+            use_vertical_windows: Some(true),
+            use_accent_roof_line: Some(true),
+            roof_type: Some(RoofType::Flat), // Hospitals typically have flat roofs
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for religious buildings (churches, mosques, etc.)
+    pub fn religious() -> Self {
+        Self {
+            use_vertical_windows: Some(true), // Tall stained glass windows
+            use_accent_roof_line: Some(true),
+            use_accent_lines: Some(false),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for towers (man_made=tower) — solid stone walls, no windows
+    pub fn tower() -> Self {
+        Self {
+            has_windows: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_chimney: Some(false),
+            ..Default::default()
+        }
+    }
+
+    /// Preset for garages and carports
+    pub fn garage() -> Self {
+        Self {
+            roof_type: Some(RoofType::Flat),
+            roof_block: Some(POLISHED_ANDESITE), // Always polished andesite roof
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            generate_roof: Some(true),
+            has_windows: Some(false),    // No windows on garages
+            has_garage_door: Some(true), // Generate double door on front
+            ..Default::default()
+        }
+    }
+
+    /// Preset for sheds and small storage structures
+    pub fn shed() -> Self {
+        Self {
+            wall_block: Some(OAK_LOG),    // Oak logs for walls
+            roof_block: Some(OAK_PLANKS), // Oak planks for roof
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            has_windows: Some(false),    // No windows on sheds
+            has_single_door: Some(true), // One door somewhere
+            ..Default::default()
+        }
+    }
+
+    /// Preset for greenhouses
+    pub fn greenhouse() -> Self {
+        Self {
+            // Wall block is randomly chosen from GREENHOUSE_WALL_OPTIONS
+            roof_block: Some(SMOOTH_STONE_SLAB), // Smooth stone slab roof
+            has_chimney: Some(false),
+            use_accent_lines: Some(false),
+            use_vertical_accent: Some(false),
+            use_accent_roof_line: Some(false),
+            roof_type: Some(RoofType::Flat),
+            generate_roof: Some(true),
+            has_windows: Some(false),    // The walls themselves are glass
+            has_single_door: Some(true), // One entrance door
+            ..Default::default()
+        }
+    }
+
+    /// Preset for commercial buildings (retail, shops)
+    pub fn commercial() -> Self {
+        Self {
+            use_vertical_windows: Some(false),
+            use_accent_roof_line: Some(true),
+            ..Default::default()
+        }
+    }
+
+    /// Gets the appropriate preset for a building category
+    pub fn for_category(category: BuildingCategory) -> Self {
+        match category {
+            BuildingCategory::House => Self::house(),
+            BuildingCategory::Residential => Self::residential(),
+            BuildingCategory::Farm => Self::farm(),
+            BuildingCategory::Commercial => Self::commercial(),
+            BuildingCategory::Office => Self::office(),
+            BuildingCategory::Hotel => Self::hotel(),
+            BuildingCategory::Industrial => Self::industrial(),
+            BuildingCategory::Warehouse => Self::warehouse(),
+            BuildingCategory::School => Self::school(),
+            BuildingCategory::Hospital => Self::hospital(),
+            BuildingCategory::Religious => Self::religious(),
+            BuildingCategory::Historic => Self::historic(),
+            BuildingCategory::Tower => Self::tower(),
+            BuildingCategory::Garage => Self::garage(),
+            BuildingCategory::Shed => Self::shed(),
+            BuildingCategory::Greenhouse => Self::greenhouse(),
+            BuildingCategory::TallBuilding => Self::tall_building(),
+            BuildingCategory::GlassySkyscraper => Self::glassy_skyscraper(),
+            BuildingCategory::ModernSkyscraper => Self::modern_skyscraper(),
+            BuildingCategory::Default => Self::empty(),
+        }
+    }
+}
+
+/// Fully resolved building style with all parameters determined.
+/// Created by resolving a `BuildingStylePreset` with deterministic RNG.
+#[derive(Debug, Clone)]
+pub struct BuildingStyle {
+    // Block palette
+    pub wall_block: Block,
+    pub floor_block: Block,
+    pub window_block: Block,
+    pub accent_block: Block,
+    pub roof_block: Option<Block>, // Optional specific roof material
+
+    // Window style
+    pub use_vertical_windows: bool,
+    pub use_horizontal_windows: bool, // Full-width horizontal window bands
+    pub has_windows: bool,            // Whether to generate windows
+
+    // Accent features
+    pub use_accent_roof_line: bool,
+    pub use_accent_lines: bool,
+    pub use_vertical_accent: bool,
+
+    // Roof
+    pub roof_type: RoofType,
+    pub has_chimney: bool,
+    pub generate_roof: bool,
+
+    // Special features
+    pub has_garage_door: bool,
+    pub has_single_door: bool,
+}
+
+impl BuildingStyle {
+    /// Resolves a preset into a fully determined style using deterministic RNG.
+    /// Parameters not specified in the preset are randomly chosen.
+    ///
+    /// # Arguments
+    /// * `preset` - The style preset (partial specification)
+    /// * `element` - The OSM element (used for tag-based decisions)
+    /// * `building_type` - The building type string from tags
+    /// * `category` - The resolved building category
+    /// * `has_multiple_floors` - Whether building has more than 6 height units
+    /// * `footprint_size` - The building's floor area in blocks
+    /// * `rng` - Deterministic RNG seeded by element ID
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve(
+        preset: &BuildingStylePreset,
+        element: &ProcessedWay,
+        building_type: &str,
+        category: BuildingCategory,
+        has_multiple_floors: bool,
+        footprint_size: usize,
+        rng: &mut impl Rng,
+    ) -> Self {
+        // === Block Palette ===
+
+        // Wall block: from tags, preset, or category palette
+        let wall_block = preset
+            .wall_block
+            .unwrap_or_else(|| determine_wall_block(element, category, rng));
+
+        // Floor block: from preset or random
+        // For glassy/modern skyscrapers, use dark cap materials for the flat roof
+        let floor_block = preset.floor_block.unwrap_or_else(|| {
+            if matches!(
+                category,
+                BuildingCategory::GlassySkyscraper | BuildingCategory::ModernSkyscraper
+            ) {
+                const SKYSCRAPER_ROOF_CAP_OPTIONS: [Block; 3] =
+                    [POLISHED_ANDESITE, BLACKSTONE, NETHER_BRICK];
+                SKYSCRAPER_ROOF_CAP_OPTIONS[rng.gen_range(0..SKYSCRAPER_ROOF_CAP_OPTIONS.len())]
+            } else {
+                get_floor_block_with_rng(rng)
+            }
+        });
+
+        // Window block: from preset or random based on building type
+        let window_block = preset
+            .window_block
+            .unwrap_or_else(|| get_window_block_for_building_type_with_rng(building_type, rng));
+
+        // Accent block: from preset or random
+        // For glassy skyscrapers, use white stained glass or blackstone
+        // For modern skyscrapers, use stone separation band materials
+        let accent_block = preset.accent_block.unwrap_or_else(|| {
+            if category == BuildingCategory::GlassySkyscraper {
+                const GLASSY_ACCENT_OPTIONS: [Block; 2] = [WHITE_STAINED_GLASS, BLACKSTONE];
+                GLASSY_ACCENT_OPTIONS[rng.gen_range(0..GLASSY_ACCENT_OPTIONS.len())]
+            } else if category == BuildingCategory::ModernSkyscraper {
+                const MODERN_ACCENT_OPTIONS: [Block; 5] = [
+                    POLISHED_ANDESITE,
+                    SMOOTH_STONE,
+                    BLACKSTONE,
+                    NETHER_BRICK,
+                    STONE_BRICKS,
+                ];
+                MODERN_ACCENT_OPTIONS[rng.gen_range(0..MODERN_ACCENT_OPTIONS.len())]
+            } else {
+                ACCENT_BLOCK_OPTIONS[rng.gen_range(0..ACCENT_BLOCK_OPTIONS.len())]
+            }
+        });
+
+        // === Window Style ===
+
+        let use_vertical_windows = preset
+            .use_vertical_windows
+            .unwrap_or_else(|| rng.gen_bool(0.7));
+
+        // Horizontal windows: full-width bands, used by modern skyscrapers
+        let use_horizontal_windows = preset
+            .use_horizontal_windows
+            .unwrap_or_else(|| category == BuildingCategory::ModernSkyscraper);
+
+        // === Accent Features ===
+
+        let use_accent_roof_line = preset
+            .use_accent_roof_line
+            .unwrap_or_else(|| rng.gen_bool(0.25));
+
+        // Accent lines only for multi-floor buildings
+        // Glassy skyscrapers get 60% chance, Modern skyscrapers always have them
+        let use_accent_lines = preset.use_accent_lines.unwrap_or_else(|| {
+            if category == BuildingCategory::ModernSkyscraper {
+                true // Stone bands always present on modern skyscrapers
+            } else if category == BuildingCategory::GlassySkyscraper {
+                rng.gen_bool(0.6)
+            } else {
+                has_multiple_floors && rng.gen_bool(0.2)
+            }
+        });
+
+        // Vertical accent: only if no accent lines and multi-floor
+        let use_vertical_accent = preset
+            .use_vertical_accent
+            .unwrap_or_else(|| has_multiple_floors && !use_accent_lines && rng.gen_bool(0.1));
+
+        // === Roof ===
+
+        // Determine roof type from preset, tags, or auto-generation.
+        // An explicit roof:shape OSM tag ALWAYS takes priority over preset defaults,
+        // since the mapper knows the actual shape of the building.
+        let (roof_type, generate_roof) = if let Some(roof_shape) = element.tags.get("roof:shape") {
+            // OSM tag always wins — the mapper explicitly specified the roof shape
+            (parse_roof_type(roof_shape), true)
+        } else if let Some(rt) = preset.roof_type {
+            // Preset default (used when no OSM tag is present)
+            let should_generate = preset.generate_roof.unwrap_or(rt != RoofType::Flat);
+            (rt, should_generate)
+        } else if qualifies_for_auto_gabled_roof(building_type) {
+            // Auto-generate gabled roof for residential buildings
+            const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
+            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED && rng.gen_bool(0.9) {
+                (RoofType::Gabled, true)
+            } else {
+                (RoofType::Flat, false)
+            }
+        } else {
+            (RoofType::Flat, false)
+        };
+
+        // Chimney: only for residential with gabled/hipped roofs
+        let has_chimney = preset.has_chimney.unwrap_or_else(|| {
+            let is_residential = matches!(
+                building_type,
+                "house"
+                    | "residential"
+                    | "detached"
+                    | "semidetached_house"
+                    | "terrace"
+                    | "farm"
+                    | "cabin"
+                    | "bungalow"
+                    | "villa"
+                    | "yes"
+            );
+            let suitable_roof = matches!(roof_type, RoofType::Gabled | RoofType::Hipped);
+            let suitable_size = (30..=400).contains(&footprint_size);
+
+            is_residential && suitable_roof && suitable_size && rng.gen_bool(0.55)
+        });
+
+        // Roof block: specific material for roofs
+        let roof_block = preset.roof_block;
+
+        // Windows: default to true unless explicitly disabled
+        let has_windows = preset.has_windows.unwrap_or(true);
+
+        // Special door features
+        let has_garage_door = preset.has_garage_door.unwrap_or(false);
+        let has_single_door = preset.has_single_door.unwrap_or(false);
+
+        Self {
+            wall_block,
+            floor_block,
+            window_block,
+            accent_block,
+            roof_block,
+            use_vertical_windows,
+            use_horizontal_windows,
+            has_windows,
+            use_accent_roof_line,
+            use_accent_lines,
+            use_vertical_accent,
+            roof_type,
+            has_chimney,
+            generate_roof,
+            has_garage_door,
+            has_single_door,
+        }
+    }
+}
+
+/// Building configuration derived from OSM tags and args
+struct BuildingConfig {
+    min_level: i32,
+    building_height: i32,
+    is_tall_building: bool,
+    start_y_offset: i32,
+    abs_terrain_offset: i32,
+    wall_block: Block,
+    floor_block: Block,
+    window_block: Block,
+    accent_block: Block,
+    roof_block: Option<Block>,
+    use_vertical_windows: bool,
+    use_horizontal_windows: bool,
+    use_accent_roof_line: bool,
+    use_accent_lines: bool,
+    use_vertical_accent: bool,
+    is_abandoned_building: bool,
+    has_windows: bool,
+    has_garage_door: bool,
+    has_single_door: bool,
+    category: BuildingCategory,
+}
+
+/// Building bounds calculated from nodes
+struct BuildingBounds {
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+}
+
+impl BuildingBounds {
+    fn from_nodes(nodes: &[crate::osm_parser::ProcessedNode]) -> Self {
+        Self {
+            min_x: nodes.iter().map(|n| n.x).min().unwrap_or(0),
+            max_x: nodes.iter().map(|n| n.x).max().unwrap_or(0),
+            min_z: nodes.iter().map(|n| n.z).min().unwrap_or(0),
+            max_z: nodes.iter().map(|n| n.z).max().unwrap_or(0),
+        }
+    }
+
+    fn width(&self) -> i32 {
+        self.max_x - self.min_x
+    }
+
+    fn length(&self) -> i32 {
+        self.max_z - self.min_z
+    }
+}
+
+// ============================================================================
+// Helper Functions for Building Configuration
+// ============================================================================
+
+/// Checks if a building should be skipped (underground structures)
 #[inline]
-pub fn generate_buildings(
-    editor: &mut WorldEditor,
+fn should_skip_underground_building(element: &ProcessedWay) -> bool {
+    // Check layer tag, negative means underground
+    if let Some(layer) = element.tags.get("layer") {
+        if layer.parse::<i32>().unwrap_or(0) < 0 {
+            return true;
+        }
+    }
+
+    // Check level tag, negative means underground
+    if let Some(level) = element.tags.get("level") {
+        if level.parse::<i32>().unwrap_or(0) < 0 {
+            return true;
+        }
+    }
+
+    // Check location tag
+    if let Some(location) = element.tags.get("location") {
+        if location == "underground" || location == "subway" {
+            return true;
+        }
+    }
+
+    // Check building:levels:underground, if this is the only levels tag, it's underground
+    if element.tags.contains_key("building:levels:underground")
+        && !element.tags.contains_key("building:levels")
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Calculates the starting Y offset based on terrain and min_level
+fn calculate_start_y_offset(
+    editor: &WorldEditor,
     element: &ProcessedWay,
     args: &Args,
-    relation_levels: Option<i32>,
-    flood_fill_cache: &FloodFillCache,
-) {
-    // Get min_level first so we can use it both for start_level and building height calculations
-    let min_level = if let Some(min_level_str) = element.tags.get("building:min_level") {
-        min_level_str.parse::<i32>().unwrap_or(0)
-    } else {
-        0
-    };
-
-    // Calculate y-offset for non-terrain mode for absolute positioning
-    let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
-
-    // Calculate starting y-offset from min_level
-    let scale_factor = args.scale;
-    let min_level_offset = multiply_scale(min_level * 4, scale_factor);
-
-    // Use pre-computed flood fill from cache
-    let cached_floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
-    let cached_footprint_size = cached_floor_area.len();
-
-    // Use fixed starting Y coordinate based on maximum ground level when terrain is enabled
-    let start_y_offset = if args.terrain {
-        // Get nodes' XZ points to find maximum elevation
+    min_level_offset: i32,
+) -> i32 {
+    if args.terrain {
         let building_points: Vec<XZPoint> = element
             .nodes
             .iter()
@@ -64,104 +953,133 @@ pub fn generate_buildings(
             })
             .collect();
 
-        // Calculate maximum and minimum ground level across all nodes
         let mut max_ground_level = args.ground_level;
-
         for point in &building_points {
             if let Some(ground) = editor.get_ground() {
                 let level = ground.level(*point);
                 max_ground_level = max_ground_level.max(level);
             }
         }
-
-        // Use the maximum level + min_level offset as the fixed base for the entire building
         max_ground_level + min_level_offset
     } else {
-        // When terrain is disabled, just use min_level_offset
         min_level_offset
-    };
+    }
+}
 
-    // Calculate building bounds and floor area before processing interior
-    let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-    let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-    let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-    let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+/// Determines the wall block based on building tags
+fn determine_wall_block(
+    element: &ProcessedWay,
+    category: BuildingCategory,
+    rng: &mut impl Rng,
+) -> Block {
+    // Historic castles have their own special treatment
+    if element.tags.get("historic") == Some(&"castle".to_string()) {
+        return get_castle_wall_block();
+    }
 
-    let mut previous_node: Option<(i32, i32)> = None;
-    let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
-    let mut current_building: Vec<(i32, i32)> = vec![];
-
-    // Get building type for type-specific block selection
-    let building_type = element
-        .tags
-        .get("building")
-        .or_else(|| element.tags.get("building:part"))
-        .map(|s| s.as_str())
-        .unwrap_or("yes");
-
-    let wall_block: Block = if element.tags.get("historic") == Some(&"castle".to_string()) {
-        // Historic forts and castles should use stone/brick materials
-        get_castle_wall_block()
-    } else {
-        element
-            .tags
-            .get("building:colour")
-            .and_then(|building_colour: &String| {
-                color_text_to_rgb_tuple(building_colour)
-                    .map(|rgb: (u8, u8, u8)| get_building_wall_block_for_color(rgb))
-            })
-            .unwrap_or_else(get_fallback_building_block)
-    };
-
-    let floor_block: Block = get_random_floor_block();
-
-    // Select window type based on building type
-    let window_block: Block = get_window_block_for_building_type(building_type);
-
-    // Set to store processed flood fill points
-    let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
-    let mut building_height: i32 = ((6.0 * scale_factor) as i32).max(3); // Default building height with scale and minimum
-    let mut is_tall_building = false;
-    // Use deterministic RNG seeded by element ID for consistent results across region boundaries
-    let mut rng = element_rng(element.id);
-    let use_vertical_windows = rng.gen_bool(0.7);
-    let use_accent_roof_line = rng.gen_bool(0.25);
-
-    // Random accent block selection for this building
-    let accent_blocks = [
-        POLISHED_ANDESITE,
-        SMOOTH_STONE,
-        STONE_BRICKS,
-        MUD_BRICKS,
-        ANDESITE,
-        CHISELED_STONE_BRICKS,
-    ];
-    let accent_block = accent_blocks[rng.gen_range(0..accent_blocks.len())];
-
-    // Skip building:part if 'layer' or 'level' is negative (underground parts)
-    if element.tags.contains_key("building:part") {
-        if let Some(layer) = element.tags.get("layer") {
-            if layer.parse::<i32>().unwrap_or(0) < 0 {
-                return;
-            }
-        }
-        if let Some(level) = element.tags.get("level") {
-            if level.parse::<i32>().unwrap_or(0) < 0 {
-                return;
+    // Try to get wall block from building:colour tag first.
+    // Skip for GlassySkyscraper: its wall MUST be glass (has_windows=false relies on this).
+    if category != BuildingCategory::GlassySkyscraper {
+        if let Some(building_colour) = element.tags.get("building:colour") {
+            if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
+                return get_building_wall_block_for_color(rgb);
             }
         }
     }
 
-    // Determine building height from tags
+    // Otherwise, select from category-specific palette
+    get_wall_block_for_category(category, rng)
+}
+
+/// Selects a wall block from the appropriate category palette
+fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -> Block {
+    match category {
+        BuildingCategory::House | BuildingCategory::Residential => {
+            RESIDENTIAL_WALL_OPTIONS[rng.gen_range(0..RESIDENTIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Commercial | BuildingCategory::Office | BuildingCategory::Hotel => {
+            COMMERCIAL_WALL_OPTIONS[rng.gen_range(0..COMMERCIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Industrial | BuildingCategory::Warehouse => {
+            INDUSTRIAL_WALL_OPTIONS[rng.gen_range(0..INDUSTRIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Religious => {
+            RELIGIOUS_WALL_OPTIONS[rng.gen_range(0..RELIGIOUS_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::School | BuildingCategory::Hospital => {
+            INSTITUTIONAL_WALL_OPTIONS[rng.gen_range(0..INSTITUTIONAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Farm => FARM_WALL_OPTIONS[rng.gen_range(0..FARM_WALL_OPTIONS.len())],
+        BuildingCategory::Historic => {
+            HISTORIC_WALL_OPTIONS[rng.gen_range(0..HISTORIC_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Garage => {
+            GARAGE_WALL_OPTIONS[rng.gen_range(0..GARAGE_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Shed => SHED_WALL_OPTIONS[rng.gen_range(0..SHED_WALL_OPTIONS.len())],
+        BuildingCategory::Tower => {
+            const TOWER_WALL_OPTIONS: [Block; 8] = [
+                STONE_BRICKS,
+                COBBLESTONE,
+                CRACKED_STONE_BRICKS,
+                BRICK,
+                POLISHED_ANDESITE,
+                ANDESITE,
+                DEEPSLATE_BRICKS,
+                SMOOTH_STONE,
+            ];
+            TOWER_WALL_OPTIONS[rng.gen_range(0..TOWER_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Greenhouse => {
+            GREENHOUSE_WALL_OPTIONS[rng.gen_range(0..GREENHOUSE_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::TallBuilding => {
+            // Tall buildings use commercial palette (glass, concrete, stone)
+            COMMERCIAL_WALL_OPTIONS[rng.gen_range(0..COMMERCIAL_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::ModernSkyscraper => {
+            // Modern skyscrapers use clean concrete/stone wall materials
+            const MODERN_SKYSCRAPER_WALL_OPTIONS: [Block; 6] = [
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
+                POLISHED_ANDESITE,
+                SMOOTH_STONE,
+                QUARTZ_BLOCK,
+            ];
+            MODERN_SKYSCRAPER_WALL_OPTIONS[rng.gen_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::GlassySkyscraper => {
+            // Glass-facade skyscrapers use stained glass as wall material
+            const GLASSY_WALL_OPTIONS: [Block; 4] = [
+                GRAY_STAINED_GLASS,
+                CYAN_STAINED_GLASS,
+                BLUE_STAINED_GLASS,
+                LIGHT_BLUE_STAINED_GLASS,
+            ];
+            GLASSY_WALL_OPTIONS[rng.gen_range(0..GLASSY_WALL_OPTIONS.len())]
+        }
+        BuildingCategory::Default => get_fallback_building_block(),
+    }
+}
+
+/// Determines building height from OSM tags
+fn calculate_building_height(
+    element: &ProcessedWay,
+    min_level: i32,
+    scale_factor: f64,
+    relation_levels: Option<i32>,
+) -> (i32, bool) {
+    let default_height = ((6.0 * scale_factor) as i32).max(3);
+    let mut building_height = default_height;
+    let mut is_tall_building = false;
+
+    // From building:levels tag
     if let Some(levels_str) = element.tags.get("building:levels") {
         if let Ok(levels) = levels_str.parse::<i32>() {
             let lev = levels - min_level;
-
             if lev >= 1 {
-                building_height = multiply_scale(lev * 4 + 2, scale_factor);
-                building_height = building_height.max(3);
-
-                // Mark as tall building if more than 7 stories
+                building_height = multiply_scale(lev * 4 + 2, scale_factor).max(3);
                 if levels > 7 {
                     is_tall_building = true;
                 }
@@ -169,245 +1087,231 @@ pub fn generate_buildings(
         }
     }
 
+    // From height tag (overrides levels)
     if let Some(height_str) = element.tags.get("height") {
         if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
             building_height = (height * scale_factor) as i32;
             building_height = building_height.max(3);
-
-            // Mark as tall building if height suggests more than 7 stories
             if height > 28.0 {
                 is_tall_building = true;
             }
         }
     }
 
+    // From relation levels (highest priority)
     if let Some(levels) = relation_levels {
-        building_height = multiply_scale(levels * 4 + 2, scale_factor);
-        building_height = building_height.max(3);
-
-        // Mark as tall building if more than 7 stories
+        building_height = multiply_scale(levels * 4 + 2, scale_factor).max(3);
         if levels > 7 {
             is_tall_building = true;
         }
     }
 
-    // Determine accent line usage based on whether building has multiple floors
-    let has_multiple_floors = building_height > 6;
-    let use_accent_lines = has_multiple_floors && rng.gen_bool(0.2);
-    let use_vertical_accent = has_multiple_floors && !use_accent_lines && rng.gen_bool(0.1);
+    (building_height, is_tall_building)
+}
 
-    if let Some(amenity_type) = element.tags.get("amenity") {
-        if amenity_type == "shelter" {
-            let roof_block: Block = STONE_BRICK_SLAB;
-
-            // Use cached floor area instead of recalculating
-            let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
-
-            // Place fences and roof slabs at each corner node directly
-            for node in &element.nodes {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
-
-                for shelter_y in 1..=multiply_scale(4, scale_factor) {
-                    editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
-                }
-                editor.set_block(roof_block, x, 5, z, None, None);
-            }
-
-            // Flood fill the roof area
-            for (x, z) in roof_area.iter() {
-                editor.set_block(roof_block, *x, 5, *z, None, None);
-            }
-
-            return;
-        }
+/// Adjusts building height for specific building types
+fn adjust_height_for_building_type(
+    building_type: &str,
+    building_height: i32,
+    scale_factor: f64,
+) -> i32 {
+    let default_height = ((6.0 * scale_factor) as i32).max(3);
+    match building_type {
+        "garage" | "shed" => ((2.0 * scale_factor) as i32).max(3),
+        "apartments" if building_height == default_height => ((15.0 * scale_factor) as i32).max(3),
+        "hospital" if building_height == default_height => ((23.0 * scale_factor) as i32).max(3),
+        _ => building_height,
     }
+}
 
-    if let Some(building_type) = element.tags.get("building") {
-        if building_type == "garage" {
-            building_height = ((2.0 * scale_factor) as i32).max(3);
-        } else if building_type == "shed" {
-            building_height = ((2.0 * scale_factor) as i32).max(3);
+// ============================================================================
+// Special Building Type Generators
+// ============================================================================
 
-            if element.tags.contains_key("bicycle_parking") {
-                let ground_block: Block = OAK_PLANKS;
-                let roof_block: Block = STONE_BLOCK_SLAB;
+/// Generates a shelter structure with fence posts and roof
+fn generate_shelter(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    cached_floor_area: &[(i32, i32)],
+    scale_factor: f64,
+) {
+    let roof_block = STONE_BRICK_SLAB;
 
-                // Use cached floor area instead of recalculating
-                let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
-
-                // Fill the floor area
-                for (x, z) in floor_area.iter() {
-                    editor.set_block(ground_block, *x, 0, *z, None, None);
-                }
-
-                // Place fences and roof slabs at each corner node directly
-                for node in &element.nodes {
-                    let x: i32 = node.x;
-                    let z: i32 = node.z;
-
-                    for dy in 1..=4 {
-                        editor.set_block(OAK_FENCE, x, dy, z, None, None);
-                    }
-                    editor.set_block(roof_block, x, 5, z, None, None);
-                }
-
-                // Flood fill the roof area
-                for (x, z) in floor_area.iter() {
-                    editor.set_block(roof_block, *x, 5, *z, None, None);
-                }
-
-                return;
-            }
-        } else if building_type == "parking"
-            || element
-                .tags
-                .get("parking")
-                .is_some_and(|p| p == "multi-storey")
-        {
-            // Parking building structure
-
-            // Ensure minimum height
-            building_height = building_height.max(16);
-
-            // Use cached floor area instead of recalculating
-            let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
-
-            for level in 0..=(building_height / 4) {
-                let current_level_y = level * 4;
-
-                // Build walls
-                for node in &element.nodes {
-                    let x: i32 = node.x;
-                    let z: i32 = node.z;
-
-                    // Build walls up to the current level
-                    for y in (current_level_y + 1)..=(current_level_y + 4) {
-                        editor.set_block(STONE_BRICKS, x, y, z, None, None);
-                    }
-                }
-
-                // Fill the floor area for each level
-                for (x, z) in floor_area {
-                    if level == 0 {
-                        editor.set_block(SMOOTH_STONE, *x, current_level_y, *z, None, None);
-                    } else {
-                        editor.set_block(COBBLESTONE, *x, current_level_y, *z, None, None);
-                    }
-                }
-            }
-
-            // Outline for each level
-            for level in 0..=(building_height / 4) {
-                let current_level_y = level * 4;
-
-                // Use the nodes to create the outline
-                let mut prev_outline = None;
-                for node in &element.nodes {
-                    let x = node.x;
-                    let z = node.z;
-
-                    if let Some((prev_x, prev_z)) = prev_outline {
-                        let outline_points =
-                            bresenham_line(prev_x, current_level_y, prev_z, x, current_level_y, z);
-                        for (bx, _, bz) in outline_points {
-                            editor.set_block(
-                                SMOOTH_STONE,
-                                bx,
-                                current_level_y,
-                                bz,
-                                Some(&[COBBLESTONE, COBBLESTONE_WALL]),
-                                None,
-                            );
-                            editor.set_block(
-                                STONE_BRICK_SLAB,
-                                bx,
-                                current_level_y + 2,
-                                bz,
-                                None,
-                                None,
-                            );
-                            if bx % 2 == 0 {
-                                editor.set_block(
-                                    COBBLESTONE_WALL,
-                                    bx,
-                                    current_level_y + 1,
-                                    bz,
-                                    None,
-                                    None,
-                                );
-                            }
-                        }
-                    }
-                    prev_outline = Some((x, z));
-                }
-            }
-
-            return;
-        } else if building_type == "roof" {
-            let roof_height: i32 = 5;
-
-            // Iterate through the nodes to create the roof edges using Bresenham's line algorithm
-            for node in &element.nodes {
-                let x: i32 = node.x;
-                let z: i32 = node.z;
-
-                if let Some(prev) = previous_node {
-                    let bresenham_points: Vec<(i32, i32, i32)> =
-                        bresenham_line(prev.0, roof_height, prev.1, x, roof_height, z);
-                    for (bx, _, bz) in bresenham_points {
-                        editor.set_block(STONE_BRICK_SLAB, bx, roof_height, bz, None, None);
-                        // Set roof block at edge
-                    }
-                }
-
-                for y in 1..=(roof_height - 1) {
-                    editor.set_block(COBBLESTONE_WALL, x, y, z, None, None);
-                }
-
-                previous_node = Some((x, z));
-            }
-
-            // Use cached floor area
-            let roof_area: &Vec<(i32, i32)> = &cached_floor_area;
-
-            // Fill the interior of the roof with STONE_BRICK_SLAB
-            for (x, z) in roof_area.iter() {
-                editor.set_block(STONE_BRICK_SLAB, *x, roof_height, *z, None, None);
-                // Set roof block
-            }
-
-            return;
-        } else if building_type == "apartments" {
-            // If building has no height attribute, assign a defined height
-            if building_height == ((6.0 * scale_factor) as i32).max(3) {
-                building_height = ((15.0 * scale_factor) as i32).max(3);
-            }
-        } else if building_type == "hospital" {
-            // If building has no height attribute, assign a defined height
-            if building_height == ((6.0 * scale_factor) as i32).max(3) {
-                building_height = ((23.0 * scale_factor) as i32).max(3);
-            }
-        } else if building_type == "bridge" {
-            generate_bridge(editor, element, flood_fill_cache, args.timeout.as_ref());
-            return;
-        }
-    }
-
-    // Process nodes to create walls and corners
     for node in &element.nodes {
-        let x: i32 = node.x;
-        let z: i32 = node.z;
+        let x = node.x;
+        let z = node.z;
+        for shelter_y in 1..=multiply_scale(4, scale_factor) {
+            editor.set_block(OAK_FENCE, x, shelter_y, z, None, None);
+        }
+        editor.set_block(roof_block, x, 5, z, None, None);
+    }
+
+    for &(x, z) in cached_floor_area {
+        editor.set_block(roof_block, x, 5, z, None, None);
+    }
+}
+
+/// Generates a bicycle parking shed structure
+fn generate_bicycle_parking_shed(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    cached_floor_area: &[(i32, i32)],
+) {
+    let ground_block = OAK_PLANKS;
+    let roof_block = STONE_BLOCK_SLAB;
+
+    // Fill the floor area
+    for &(x, z) in cached_floor_area {
+        editor.set_block(ground_block, x, 0, z, None, None);
+    }
+
+    // Place fences and roof slabs at each corner node
+    for node in &element.nodes {
+        let x = node.x;
+        let z = node.z;
+        for dy in 1..=4 {
+            editor.set_block(OAK_FENCE, x, dy, z, None, None);
+        }
+        editor.set_block(roof_block, x, 5, z, None, None);
+    }
+
+    // Flood fill the roof area
+    for &(x, z) in cached_floor_area {
+        editor.set_block(roof_block, x, 5, z, None, None);
+    }
+}
+
+/// Generates a multi-storey parking building structure
+fn generate_parking_building(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    cached_floor_area: &[(i32, i32)],
+    building_height: i32,
+) {
+    let building_height = building_height.max(16);
+
+    for level in 0..=(building_height / 4) {
+        let current_level_y = level * 4;
+
+        // Build walls
+        for node in &element.nodes {
+            let x = node.x;
+            let z = node.z;
+            for y in (current_level_y + 1)..=(current_level_y + 4) {
+                editor.set_block(STONE_BRICKS, x, y, z, None, None);
+            }
+        }
+
+        // Fill the floor area for each level
+        for &(x, z) in cached_floor_area {
+            let floor_block = if level == 0 {
+                SMOOTH_STONE
+            } else {
+                COBBLESTONE
+            };
+            editor.set_block(floor_block, x, current_level_y, z, None, None);
+        }
+    }
+
+    // Outline for each level
+    for level in 0..=(building_height / 4) {
+        let current_level_y = level * 4;
+        let mut prev_outline = None;
+
+        for node in &element.nodes {
+            let x = node.x;
+            let z = node.z;
+
+            if let Some((prev_x, prev_z)) = prev_outline {
+                let outline_points =
+                    bresenham_line(prev_x, current_level_y, prev_z, x, current_level_y, z);
+
+                for (bx, _, bz) in outline_points {
+                    editor.set_block(
+                        SMOOTH_STONE,
+                        bx,
+                        current_level_y,
+                        bz,
+                        Some(&[COBBLESTONE, COBBLESTONE_WALL]),
+                        None,
+                    );
+                    editor.set_block(STONE_BRICK_SLAB, bx, current_level_y + 2, bz, None, None);
+                    if bx % 2 == 0 {
+                        editor.set_block(COBBLESTONE_WALL, bx, current_level_y + 1, bz, None, None);
+                    }
+                }
+            }
+            prev_outline = Some((x, z));
+        }
+    }
+}
+
+/// Generates a roof-only structure (covered walkway, etc.)
+fn generate_roof_only_structure(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    cached_floor_area: &[(i32, i32)],
+) {
+    let roof_height: i32 = 5;
+    let mut previous_node: Option<(i32, i32)> = None;
+
+    for node in &element.nodes {
+        let x = node.x;
+        let z = node.z;
 
         if let Some(prev) = previous_node {
-            // Calculate walls and corners using Bresenham line
-            let bresenham_points =
-                bresenham_line(prev.0, start_y_offset, prev.1, x, start_y_offset, z);
+            let bresenham_points = bresenham_line(prev.0, roof_height, prev.1, x, roof_height, z);
             for (bx, _, bz) in bresenham_points {
-                // Create foundation pillars from ground up to building base if needed
-                // Only create foundations for buildings without min_level (elevated buildings shouldn't have foundations)
-                if args.terrain && min_level == 0 {
-                    // Calculate actual ground level at this position
+                editor.set_block(STONE_BRICK_SLAB, bx, roof_height, bz, None, None);
+            }
+        }
+
+        for y in 1..=(roof_height - 1) {
+            editor.set_block(COBBLESTONE_WALL, x, y, z, None, None);
+        }
+
+        previous_node = Some((x, z));
+    }
+
+    for &(x, z) in cached_floor_area {
+        editor.set_block(STONE_BRICK_SLAB, x, roof_height, z, None, None);
+    }
+}
+
+// ============================================================================
+// Building Component Generators
+// ============================================================================
+
+/// Generates the walls of a building including foundations, windows, and accent blocks
+#[allow(clippy::too_many_arguments)]
+fn generate_building_walls(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    args: &Args,
+    has_sloped_roof: bool,
+) -> (Vec<(i32, i32)>, (i32, i32, i32)) {
+    let mut previous_node: Option<(i32, i32)> = None;
+    let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
+    let mut current_building: Vec<(i32, i32)> = Vec::new();
+
+    for node in &element.nodes {
+        let x = node.x;
+        let z = node.z;
+
+        if let Some(prev) = previous_node {
+            let bresenham_points = bresenham_line(
+                prev.0,
+                config.start_y_offset,
+                prev.1,
+                x,
+                config.start_y_offset,
+                z,
+            );
+
+            for (bx, _, bz) in bresenham_points {
+                // Create foundation pillars when using terrain
+                if args.terrain && config.min_level == 0 {
                     let local_ground_level = if let Some(ground) = editor.get_ground() {
                         ground.level(XZPoint::new(
                             bx - editor.get_min_coords().0,
@@ -417,12 +1321,11 @@ pub fn generate_buildings(
                         args.ground_level
                     };
 
-                    // Add foundation blocks from ground to building base
-                    for y in local_ground_level..start_y_offset + 1 {
+                    for y in local_ground_level..config.start_y_offset + 1 {
                         editor.set_block_absolute(
-                            wall_block,
+                            config.wall_block,
                             bx,
-                            y + abs_terrain_offset,
+                            y + config.abs_terrain_offset,
                             bz,
                             None,
                             None,
@@ -430,87 +1333,40 @@ pub fn generate_buildings(
                     }
                 }
 
-                for h in (start_y_offset + 1)..=(start_y_offset + building_height) {
-                    // Add windows to the walls at intervals
-                    // Use different window patterns for tall buildings
-                    if is_tall_building && use_vertical_windows {
-                        // Tall building pattern - narrower windows with continuous vertical strips
-                        if h > start_y_offset + 1 && (bx + bz) % 3 == 0 {
-                            editor.set_block_absolute(
-                                window_block,
-                                bx,
-                                h + abs_terrain_offset,
-                                bz,
-                                None,
-                                None,
-                            );
-                        } else {
-                            editor.set_block_absolute(
-                                wall_block,
-                                bx,
-                                h + abs_terrain_offset,
-                                bz,
-                                None,
-                                None,
-                            );
-                        }
-                    } else {
-                        // Original pattern for regular buildings (non-vertical windows)
-                        if h > start_y_offset + 1 && h % 4 != 0 && (bx + bz) % 6 < 3 {
-                            editor.set_block_absolute(
-                                window_block,
-                                bx,
-                                h + abs_terrain_offset,
-                                bz,
-                                None,
-                                None,
-                            );
-                        } else {
-                            // Use accent block line between windows if enabled for this building
-                            let use_accent_line =
-                                use_accent_lines && h > start_y_offset + 1 && h % 4 == 0;
-                            // Use vertical accent block pattern (where windows would be, but on non-window Y levels) if enabled
-                            let use_vertical_accent_here = use_vertical_accent
-                                && h > start_y_offset + 1
-                                && h % 4 == 0
-                                && (bx + bz) % 6 < 3;
-
-                            if use_accent_line || use_vertical_accent_here {
-                                editor.set_block_absolute(
-                                    accent_block,
-                                    bx,
-                                    h + abs_terrain_offset,
-                                    bz,
-                                    None,
-                                    None,
-                                );
-                            } else {
-                                editor.set_block_absolute(
-                                    wall_block,
-                                    bx,
-                                    h + abs_terrain_offset,
-                                    bz,
-                                    None,
-                                    None,
-                                );
-                            }
-                        }
-                    }
+                // Generate wall blocks with windows
+                for h in
+                    (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height)
+                {
+                    let block = determine_wall_block_at_position(bx, h, bz, config);
+                    editor.set_block_absolute(
+                        block,
+                        bx,
+                        h + config.abs_terrain_offset,
+                        bz,
+                        None,
+                        None,
+                    );
                 }
 
-                let roof_line_block = if use_accent_roof_line {
-                    accent_block
-                } else {
-                    wall_block
-                };
-                editor.set_block_absolute(
-                    roof_line_block,
-                    bx,
-                    start_y_offset + building_height + abs_terrain_offset + 1,
-                    bz,
-                    None,
-                    None,
-                );
+                // Add roof line only for flat roofs, sloped roofs will cover this area
+                if !has_sloped_roof {
+                    let roof_line_block = if config.use_accent_roof_line {
+                        config.accent_block
+                    } else {
+                        config.wall_block
+                    };
+                    editor.set_block_absolute(
+                        roof_line_block,
+                        bx,
+                        config.start_y_offset
+                            + config.building_height
+                            + config.abs_terrain_offset
+                            + 1,
+                        bz,
+                        None,
+                        None,
+                    );
+                }
 
                 current_building.push((bx, bz));
                 corner_addup = (corner_addup.0 + bx, corner_addup.1 + bz, corner_addup.2 + 1);
@@ -520,145 +1376,953 @@ pub fn generate_buildings(
         previous_node = Some((x, z));
     }
 
-    // Flood-fill interior with floor variation
-    if corner_addup != (0, 0, 0) {
-        // Use cached floor area
-        let floor_area: &Vec<(i32, i32)> = &cached_floor_area;
+    (current_building, corner_addup)
+}
 
-        // Calculate floor heights for each level based on building height
-        let mut floor_levels = Vec::new();
+/// Generates special doors for garages (double door) and sheds (single door)
+fn generate_special_doors(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    wall_outline: &[(i32, i32)],
+) {
+    if wall_outline.is_empty() {
+        return;
+    }
 
-        // Always add the ground floor
-        floor_levels.push(start_y_offset);
+    // Find the front-facing wall segment (longest or first significant segment)
+    // We'll use the first wall segment from the element nodes
+    let nodes = &element.nodes;
+    if nodes.len() < 2 {
+        return;
+    }
 
-        // Calculate additional floors if building has sufficient height
-        if building_height > 6 {
-            // Determine number of floors (approximately 1 floor per 4 blocks of height)
-            let num_upper_floors = (building_height / 4).max(1);
+    let mut rng = element_rng(element.id);
+    let door_y = config.start_y_offset + config.abs_terrain_offset + 1;
 
-            // Add Y coordinates for each upper floor - match the intermediate floor placement
-            // Main building code places intermediate floors at start_y_offset + 2 + 4, start_y_offset + 2 + 8, etc.
-            for floor in 1..num_upper_floors {
-                floor_levels.push(start_y_offset + 2 + (floor * 4));
-            }
-        }
+    if config.has_garage_door {
+        // Place double spruce door on front face
+        // Find a suitable wall segment (first one with enough length)
+        for i in 0..nodes.len().saturating_sub(1) {
+            let (x1, z1) = (nodes[i].x, nodes[i].z);
+            let (x2, z2) = (nodes[i + 1].x, nodes[i + 1].z);
 
-        // Detect abandoned buildings via explicit tags
-        let is_abandoned_building = element
-            .tags
-            .get("abandoned")
-            .is_some_and(|value| value == "yes")
-            || element.tags.contains_key("abandoned:building");
+            let dx = (x2 - x1).abs();
+            let dz = (z2 - z1).abs();
+            let segment_len = dx.max(dz);
 
-        // Use cobwebs instead of glowstone for abandoned buildings
-        let ceiling_light_block = if is_abandoned_building {
-            COBWEB
-        } else {
-            GLOWSTONE
-        };
+            // Need at least 2 blocks for double door
+            if segment_len >= 2 {
+                // Place doors in the middle of this segment
+                let mid_x = (x1 + x2) / 2;
+                let mid_z = (z1 + z2) / 2;
 
-        for (x, z) in floor_area.iter().cloned() {
-            if processed_points.insert((x, z)) {
-                // Create foundation columns for the floor area when using terrain
-                if args.terrain {
-                    // Calculate actual ground level at this position
-                    if let Some(ground) = editor.get_ground() {
-                        ground.level(XZPoint::new(
-                            x - editor.get_min_coords().0,
-                            z - editor.get_min_coords().1,
-                        ))
-                    } else {
-                        args.ground_level
-                    };
-                }
+                // Determine door offset based on wall orientation
+                let (door1_x, door1_z, door2_x, door2_z) = if dx > dz {
+                    // Wall runs along X axis
+                    (mid_x, mid_z, mid_x + 1, mid_z)
+                } else {
+                    // Wall runs along Z axis
+                    (mid_x, mid_z, mid_x, mid_z + 1)
+                };
 
-                // Set floor at start_y_offset
+                // Place the double door (lower and upper parts)
+                // Use empty blacklist to overwrite existing wall blocks
                 editor.set_block_absolute(
-                    floor_block,
-                    x,
-                    start_y_offset + abs_terrain_offset,
-                    z,
+                    SPRUCE_DOOR_LOWER,
+                    door1_x,
+                    door_y,
+                    door1_z,
                     None,
+                    Some(&[]),
+                );
+                editor.set_block_absolute(
+                    SPRUCE_DOOR_UPPER,
+                    door1_x,
+                    door_y + 1,
+                    door1_z,
                     None,
+                    Some(&[]),
+                );
+                editor.set_block_absolute(
+                    SPRUCE_DOOR_LOWER,
+                    door2_x,
+                    door_y,
+                    door2_z,
+                    None,
+                    Some(&[]),
+                );
+                editor.set_block_absolute(
+                    SPRUCE_DOOR_UPPER,
+                    door2_x,
+                    door_y + 1,
+                    door2_z,
+                    None,
+                    Some(&[]),
                 );
 
-                // Set level ceilings if height > 4
-                if building_height > 4 {
-                    for h in (start_y_offset + 2 + 4..start_y_offset + building_height).step_by(4) {
-                        if x % 5 == 0 && z % 5 == 0 {
-                            // Light fixtures
-                            editor.set_block_absolute(
-                                ceiling_light_block,
-                                x,
-                                h + abs_terrain_offset,
-                                z,
-                                None,
-                                None,
-                            );
-                        } else {
-                            editor.set_block_absolute(
-                                floor_block,
-                                x,
-                                h + abs_terrain_offset,
-                                z,
-                                None,
-                                None,
-                            );
+                break; // Only place one set of garage doors
+            }
+        }
+    } else if config.has_single_door {
+        // Place a single oak door somewhere on the wall
+        // Pick a random position from the wall outline
+        if !wall_outline.is_empty() {
+            let door_idx = rng.gen_range(0..wall_outline.len());
+            let (door_x, door_z) = wall_outline[door_idx];
+
+            // Place single oak door (empty blacklist to overwrite wall blocks)
+            editor.set_block_absolute(OAK_DOOR, door_x, door_y, door_z, None, Some(&[]));
+            editor.set_block_absolute(OAK_DOOR_UPPER, door_x, door_y + 1, door_z, None, Some(&[]));
+        }
+    }
+}
+
+/// Determines which block to place at a specific wall position (wall, window, or accent)
+#[inline]
+fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingConfig) -> Block {
+    // If windows are disabled, always use wall block (with possible accent)
+    if !config.has_windows {
+        let above_floor = h > config.start_y_offset + 1;
+        let use_accent_line = config.use_accent_lines && above_floor && h % 4 == 0;
+        if use_accent_line {
+            return config.accent_block;
+        }
+        return config.wall_block;
+    }
+
+    let above_floor = h > config.start_y_offset + 1;
+
+    if config.use_horizontal_windows {
+        // Modern skyscraper pattern: continuous horizontal window bands
+        // with stone separation bands at floor levels (every 4th block)
+        if above_floor && h % 4 == 0 {
+            // Floor-level separation band (stone/accent material)
+            config.accent_block
+        } else if above_floor {
+            // Full-width window band
+            config.window_block
+        } else {
+            config.wall_block
+        }
+    } else if config.is_tall_building && config.use_vertical_windows {
+        // Tall building pattern, vertical window strips alternating with wall columns
+        if above_floor && (bx + bz) % 2 == 0 {
+            config.window_block
+        } else {
+            config.wall_block
+        }
+    } else {
+        // Regular building pattern
+        let is_window_position = above_floor && h % 4 != 0 && (bx + bz) % 6 < 3;
+
+        if is_window_position {
+            config.window_block
+        } else {
+            let use_accent_line = config.use_accent_lines && above_floor && h % 4 == 0;
+            let use_vertical_accent_here =
+                config.use_vertical_accent && above_floor && h % 4 == 0 && (bx + bz) % 6 < 3;
+
+            if use_accent_line || use_vertical_accent_here {
+                config.accent_block
+            } else {
+                config.wall_block
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Residential Window Decorations (Shutters & Window Boxes)
+// ============================================================================
+
+/// Trapdoor base blocks available for shutters (chosen once per building).
+const SHUTTER_TRAPDOOR_OPTIONS: [Block; 4] = [
+    OAK_TRAPDOOR_OPEN_NORTH, // re-used just for its name "oak_trapdoor"
+    DARK_OAK_TRAPDOOR,
+    SPRUCE_TRAPDOOR,
+    BIRCH_TRAPDOOR,
+];
+
+/// Slab base blocks available for window sills (chosen once per building).
+const SILL_SLAB_OPTIONS: [Block; 5] = [
+    QUARTZ_SLAB_TOP,  // quartz_slab
+    STONE_BRICK_SLAB, // stone_brick_slab
+    MUD_BRICK_SLAB,   // mud_brick_slab
+    OAK_SLAB,         // oak_slab
+    BRICK_SLAB,       // brick_slab
+];
+
+/// Potted plant options for window boxes (chosen randomly per pot).
+const POTTED_PLANT_OPTIONS: [Block; 4] = [
+    FLOWER_POT, // potted_poppy
+    POTTED_RED_TULIP,
+    POTTED_DANDELION,
+    POTTED_BLUE_ORCHID,
+];
+
+/// Creates a `BlockWithProperties` for an open trapdoor with the given
+/// base block and facing direction string.
+fn make_open_trapdoor(base: Block, facing: &str) -> BlockWithProperties {
+    let mut map: HashMap<String, Value> = HashMap::new();
+    map.insert("facing".to_string(), Value::String(facing.to_string()));
+    map.insert("open".to_string(), Value::String("true".to_string()));
+    map.insert("half".to_string(), Value::String("top".to_string()));
+    BlockWithProperties::new(base, Some(Value::Compound(map)))
+}
+
+/// Creates a `BlockWithProperties` for a top-half slab.
+fn make_top_slab(base: Block) -> BlockWithProperties {
+    let mut map: HashMap<String, Value> = HashMap::new();
+    map.insert("type".to_string(), Value::String("top".to_string()));
+    BlockWithProperties::new(base, Some(Value::Compound(map)))
+}
+
+/// Returns the facing string for the wall's outward normal.
+fn facing_for_normal(nx: i32, nz: i32) -> &'static str {
+    match (nx, nz) {
+        (1, _) => "east",
+        (-1, _) => "west",
+        (_, 1) => "south",
+        _ => "north",
+    }
+}
+
+/// Adds shutters and window sills (with occasional flower pots) to
+/// **non-tall residential / house** buildings.
+///
+/// *Shutters* – open trapdoors placed one block outward from the wall
+/// beside windows.  Both sides always appear together.  The trapdoor
+/// material is chosen randomly per building.
+///
+/// *Window sills* – slabs spanning the full window width, one block outward
+/// at the floor row below each window band.  A flower pot sits on one or
+/// two of the three slab positions.  Slab material is random per building.
+fn generate_residential_window_decorations(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+) {
+    // Only non-tall residential / house buildings get decorations.
+    if config.is_tall_building {
+        return;
+    }
+    if !matches!(
+        config.category,
+        BuildingCategory::Residential | BuildingCategory::House
+    ) {
+        return;
+    }
+    if !config.has_windows {
+        return;
+    }
+
+    // --- Per-building random material choices ---
+    let mut rng = element_rng(element.id);
+    let trapdoor_base = SHUTTER_TRAPDOOR_OPTIONS[rng.gen_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())];
+    let sill_base = SILL_SLAB_OPTIONS[rng.gen_range(0..SILL_SLAB_OPTIONS.len())];
+    let sill_block = make_top_slab(sill_base);
+
+    // We need the building centroid so we can figure out which side of
+    // each wall segment is "outside".
+    let (cx, cz) = {
+        let mut sx: i64 = 0;
+        let mut sz: i64 = 0;
+        let n = element.nodes.len() as i64;
+        for node in &element.nodes {
+            sx += node.x as i64;
+            sz += node.z as i64;
+        }
+        if n == 0 {
+            return;
+        }
+        ((sx / n) as i32, (sz / n) as i32)
+    };
+
+    let mut previous_node: Option<(i32, i32)> = None;
+
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            // Direction along the wall segment
+            let seg_dx = x2 - x1;
+            let seg_dz = z2 - z1;
+
+            // Candidate outward normal (perpendicular to segment direction)
+            let (na_x, na_z) = (-seg_dz, seg_dx);
+
+            // Mid-point of the segment
+            let mid_x = (x1 + x2) / 2;
+            let mid_z = (z1 + z2) / 2;
+
+            // Pick the normal that points AWAY from the centroid.
+            let dot = (mid_x - cx) as i64 * na_x as i64 + (mid_z - cz) as i64 * na_z as i64;
+            let (raw_nx, raw_nz) = if dot >= 0 {
+                (na_x, na_z)
+            } else {
+                (-na_x, -na_z)
+            };
+
+            // Snap to the dominant axis so the normal is always one of
+            // (±1, 0) or (0, ±1).
+            let (out_nx, out_nz) = if raw_nx.abs() >= raw_nz.abs() {
+                (raw_nx.signum(), 0)
+            } else {
+                (0, raw_nz.signum())
+            };
+
+            // Skip degenerate normals (zero-length segment)
+            if out_nx == 0 && out_nz == 0 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+
+            let facing = facing_for_normal(out_nx, out_nz);
+            let trapdoor_bwp = make_open_trapdoor(trapdoor_base, facing);
+
+            // Wall tangent (axis-aligned): perpendicular to the outward
+            // normal inside the XZ plane.
+            let (tan_x, tan_z) = (-out_nz, out_nx);
+
+            // Walk the bresenham points of this wall segment
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+
+            for (bx, _, bz) in &points {
+                let bx = *bx;
+                let bz = *bz;
+
+                let mod6 = ((bx + bz) % 6 + 6) % 6; // always 0..5
+
+                // --- Shutters ---
+                // mod6 == 3 or 5 are the wall blocks flanking a window strip.
+                // Both sides share the same roll (seeded on window centre).
+                if mod6 == 3 || mod6 == 5 {
+                    let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
+                    let shutter_roll =
+                        coord_rng(centre_sum, centre_sum, element.id).gen_range(0u32..100);
+                    if shutter_roll < 12 {
+                        for h in (config.start_y_offset + 1)
+                            ..=(config.start_y_offset + config.building_height)
+                        {
+                            let above_floor = h > config.start_y_offset + 1;
+                            if above_floor && h % 4 != 0 {
+                                editor.set_block_with_properties_absolute(
+                                    trapdoor_bwp.clone(),
+                                    bx + out_nx,
+                                    h + config.abs_terrain_offset,
+                                    bz + out_nz,
+                                    Some(&[AIR]),
+                                    None,
+                                );
+                            }
                         }
                     }
-                } else if x % 5 == 0 && z % 5 == 0 {
-                    editor.set_block_absolute(
-                        ceiling_light_block,
-                        x,
-                        start_y_offset + building_height + abs_terrain_offset,
-                        z,
-                        None,
-                        None,
-                    );
                 }
 
-                // Only set ceiling at proper height if we don't use a specific roof shape or roof generation is disabled
-                if !args.roof
-                    || !element.tags.contains_key("roof:shape")
-                    || element.tags.get("roof:shape").unwrap() == "flat"
-                {
-                    editor.set_block_absolute(
-                        floor_block,
-                        x,
-                        start_y_offset + building_height + abs_terrain_offset + 1,
-                        z,
-                        None,
-                        None,
-                    );
+                // --- Window Sills / Balconies ---
+                // Window columns are mod6 ∈ {0, 1, 2}.
+                // At each floor's h % 4 == 0 row we decide once per window
+                // whether this floor gets a sill OR a balcony (mutually
+                // exclusive).  The decision is shared across all three
+                // columns via a seed derived from the window centre.
+                if mod6 < 3 {
+                    // Stop 3 rows before the top so every sill has a
+                    // full window (h+1..h+3) above it, avoids placing
+                    // sills at the roof line.
+                    let sill_max = config.start_y_offset + config.building_height - 3;
+                    for h in (config.start_y_offset + 2)..=sill_max {
+                        if h % 4 == 0 {
+                            let floor_idx = h / 4;
+
+                            // Shared roll seeded from the window centre.
+                            let centre_sum = match mod6 {
+                                0 => bx + bz + 1,
+                                1 => bx + bz,
+                                _ => bx + bz - 1,
+                            };
+                            let decoration_roll = coord_rng(
+                                centre_sum.wrapping_add(floor_idx * 3),
+                                centre_sum.wrapping_add(floor_idx * 5),
+                                element.id,
+                            )
+                            .gen_range(0u32..100);
+
+                            let abs_y = h + config.abs_terrain_offset;
+
+                            if decoration_roll < 6 {
+                                // ── Window sill ──
+                                let lx = bx + out_nx;
+                                let lz = bz + out_nz;
+
+                                editor.set_block_with_properties_absolute(
+                                    sill_block.clone(),
+                                    lx,
+                                    abs_y,
+                                    lz,
+                                    Some(&[AIR]),
+                                    None,
+                                );
+
+                                let mut pot_rng =
+                                    coord_rng(bx, bz.wrapping_add(floor_idx), element.id);
+                                let pot_here = if mod6 == 1 {
+                                    pot_rng.gen_range(0u32..100) < 70
+                                } else {
+                                    pot_rng.gen_range(0u32..100) < 25
+                                };
+                                if pot_here {
+                                    let plant = POTTED_PLANT_OPTIONS
+                                        [pot_rng.gen_range(0..POTTED_PLANT_OPTIONS.len())];
+                                    editor.set_block_absolute(
+                                        plant,
+                                        lx,
+                                        abs_y + 1,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+                            } else if decoration_roll < 10 && mod6 == 1 {
+                                // ── Balcony (placed once from centre col) ──
+                                // A small 3-wide × 2-deep platform with
+                                // open-trapdoor railing around the outer
+                                // edge and occasional furniture.
+                                //
+                                // Top-down layout (outward = up):
+                                //  depth 3:  [Tf] [Tf] [Tf]  front fence
+                                //  depth 2:  [ f] [ f] [ f]  floor
+                                //  depth 1:  [ f] [ f] [ f]  floor
+                                //            wall wall wall
+                                // Side fences at t=±2, depths 1–2.
+
+                                let balcony_floor = make_top_slab(SMOOTH_STONE_SLAB);
+
+                                // Facing strings for fences:
+                                // Front fence faces back toward building
+                                let front_facing = facing_for_normal(out_nx, out_nz);
+                                // Side fences face inward along tangent
+                                let left_facing = facing_for_normal(-tan_x, -tan_z);
+                                let right_facing = facing_for_normal(tan_x, tan_z);
+
+                                let front_fence = make_open_trapdoor(trapdoor_base, front_facing);
+                                let left_fence = make_open_trapdoor(trapdoor_base, left_facing);
+                                let right_fence = make_open_trapdoor(trapdoor_base, right_facing);
+
+                                // Place floor slabs (3 wide × 2 deep)
+                                for t in -1i32..=1 {
+                                    let fx = bx + tan_x * t;
+                                    let fz = bz + tan_z * t;
+
+                                    for depth in 1i32..=2 {
+                                        let px = fx + out_nx * depth;
+                                        let pz = fz + out_nz * depth;
+
+                                        editor.set_block_with_properties_absolute(
+                                            balcony_floor.clone(),
+                                            px,
+                                            abs_y,
+                                            pz,
+                                            Some(&[AIR]),
+                                            None,
+                                        );
+                                    }
+                                }
+
+                                // Front fence: trapdoors at depth 3
+                                for t in -1i32..=1 {
+                                    let fx = bx + tan_x * t + out_nx * 3;
+                                    let fz = bz + tan_z * t + out_nz * 3;
+                                    editor.set_block_with_properties_absolute(
+                                        front_fence.clone(),
+                                        fx,
+                                        abs_y + 1,
+                                        fz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+
+                                // Side fences: trapdoors at t=±2, depths 1–2
+                                for depth in 1i32..=2 {
+                                    // Left side (t = -2)
+                                    let lx = bx + tan_x * -2 + out_nx * depth;
+                                    let lz = bz + tan_z * -2 + out_nz * depth;
+                                    editor.set_block_with_properties_absolute(
+                                        left_fence.clone(),
+                                        lx,
+                                        abs_y + 1,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+
+                                    // Right side (t = +2)
+                                    let rx = bx + tan_x * 2 + out_nx * depth;
+                                    let rz = bz + tan_z * 2 + out_nz * depth;
+                                    editor.set_block_with_properties_absolute(
+                                        right_fence.clone(),
+                                        rx,
+                                        abs_y + 1,
+                                        rz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+
+                                // Occasional furniture on the balcony floor
+                                let mut furn_rng = coord_rng(
+                                    bx.wrapping_add(floor_idx * 11),
+                                    bz.wrapping_add(floor_idx * 17),
+                                    element.id,
+                                );
+                                let furniture_roll = furn_rng.gen_range(0u32..100);
+
+                                if furniture_roll < 30 {
+                                    // Cauldron "planter" with a leaf block
+                                    // on top, placed at depth 1 on one side
+                                    let side = if furn_rng.gen_bool(0.5) { -1i32 } else { 1 };
+                                    let cx = bx + tan_x * side + out_nx;
+                                    let cz = bz + tan_z * side + out_nz;
+                                    editor.set_block_absolute(
+                                        CAULDRON,
+                                        cx,
+                                        abs_y + 1,
+                                        cz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                    editor.set_block_absolute(
+                                        OAK_LEAVES,
+                                        cx,
+                                        abs_y + 2,
+                                        cz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                } else if furniture_roll < 55 {
+                                    // Stair "chair" facing outward
+                                    let side = if furn_rng.gen_bool(0.5) { -1i32 } else { 1 };
+                                    let sx = bx + tan_x * side + out_nx;
+                                    let sz = bz + tan_z * side + out_nz;
+                                    let stair_facing = match facing_for_normal(-out_nx, -out_nz) {
+                                        "north" => StairFacing::North,
+                                        "south" => StairFacing::South,
+                                        "east" => StairFacing::East,
+                                        _ => StairFacing::West,
+                                    };
+                                    let chair = create_stair_with_properties(
+                                        OAK_STAIRS,
+                                        stair_facing,
+                                        StairShape::Straight,
+                                    );
+                                    editor.set_block_with_properties_absolute(
+                                        chair,
+                                        sx,
+                                        abs_y + 1,
+                                        sz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
+
+        previous_node = Some((x2, z2));
+    }
+}
+
+// ============================================================================
+// Hospital Decorations
+// ============================================================================
+
+/// Generates a helipad marking on the flat roof of a hospital.
+///
+/// Layout (7×7 yellow concrete pad with a 5×5 "H" pattern):
+/// The pad is placed near the centre of the roof surface.
+fn generate_hospital_helipad(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    floor_area: &[(i32, i32)],
+    config: &BuildingConfig,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+
+    // Roof surface Y (on top of the flat roof)
+    let roof_y = config.start_y_offset + config.building_height + config.abs_terrain_offset + 1;
+
+    // Find centre of the building footprint
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+    let center_x = (bounds.min_x + bounds.max_x) / 2;
+    let center_z = (bounds.min_z + bounds.max_z) / 2;
+
+    let pad_half = 3; // 7×7 pad → half-size = 3
+
+    // Verify the 7×7 area fits within the roof
+    let pad_fits = (-pad_half..=pad_half).all(|dx| {
+        (-pad_half..=pad_half).all(|dz| floor_set.contains(&(center_x + dx, center_z + dz)))
+    });
+
+    if !pad_fits {
+        return;
+    }
+
+    let replace_any: &[Block] = &[];
+
+    // The "H" character in a 5×5 grid (centred inside the 7×7 pad)
+    // Rows/cols indexed -2..=2
+    let is_h = |col: i32, row: i32| -> bool {
+        let ac = col.abs();
+        let ar = row.abs();
+        // Two vertical bars at col ±2, plus horizontal bar at row 0
+        ac == 2 || (ar == 0 && ac <= 2)
+    };
+
+    for dx in -pad_half..=pad_half {
+        for dz in -pad_half..=pad_half {
+            let bx = center_x + dx;
+            let bz = center_z + dz;
+
+            // Outer ring is always yellow
+            let is_border = dx.abs() == pad_half || dz.abs() == pad_half;
+
+            let block = if is_border {
+                YELLOW_CONCRETE
+            } else if is_h(dx, dz) {
+                WHITE_CONCRETE
+            } else {
+                YELLOW_CONCRETE
+            };
+
+            editor.set_block_absolute(block, bx, roof_y, bz, None, Some(replace_any));
+        }
+    }
+}
+
+/// Generates floors and ceilings for the building interior
+#[allow(clippy::too_many_arguments)]
+fn generate_floors_and_ceilings(
+    editor: &mut WorldEditor,
+    cached_floor_area: &[(i32, i32)],
+    config: &BuildingConfig,
+    args: &Args,
+    generate_non_flat_roof: bool,
+) -> HashSet<(i32, i32)> {
+    let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
+    let ceiling_light_block = if config.is_abandoned_building {
+        COBWEB
+    } else {
+        GLOWSTONE
+    };
+
+    for &(x, z) in cached_floor_area {
+        if !processed_points.insert((x, z)) {
+            continue;
+        }
+
+        // Set ground floor
+        editor.set_block_absolute(
+            config.floor_block,
+            x,
+            config.start_y_offset + config.abs_terrain_offset,
+            z,
+            None,
+            None,
+        );
+
+        // Set intermediate ceilings with light fixtures
+        if config.building_height > 4 {
+            for h in (config.start_y_offset + 2 + 4..config.start_y_offset + config.building_height)
+                .step_by(4)
+            {
+                let block = if x % 5 == 0 && z % 5 == 0 {
+                    ceiling_light_block
+                } else {
+                    config.floor_block
+                };
+                editor.set_block_absolute(block, x, h + config.abs_terrain_offset, z, None, None);
+            }
+        } else if x % 5 == 0 && z % 5 == 0 {
+            // Single floor building with ceiling light
+            editor.set_block_absolute(
+                ceiling_light_block,
+                x,
+                config.start_y_offset + config.building_height + config.abs_terrain_offset,
+                z,
+                None,
+                None,
+            );
+        }
+
+        // Set top ceiling (only if flat roof or no roof generation)
+        // Use the resolved style flag, not just the OSM tag, since auto-gabled roofs
+        // may be generated for residential buildings without a roof:shape tag
+        let has_flat_roof = !args.roof || !generate_non_flat_roof;
+
+        if has_flat_roof {
+            editor.set_block_absolute(
+                config.floor_block,
+                x,
+                config.start_y_offset + config.building_height + config.abs_terrain_offset + 1,
+                z,
+                None,
+                None,
+            );
+        }
+    }
+
+    processed_points
+}
+
+/// Calculates floor levels for multi-story buildings
+fn calculate_floor_levels(start_y_offset: i32, building_height: i32) -> Vec<i32> {
+    let mut floor_levels = vec![start_y_offset];
+
+    if building_height > 6 {
+        let num_upper_floors = (building_height / 4).max(1);
+        for floor in 1..num_upper_floors {
+            floor_levels.push(start_y_offset + 2 + (floor * 4));
+        }
+    }
+
+    floor_levels
+}
+
+/// Calculates roof peak height for chimney placement
+fn calculate_roof_peak_height(
+    bounds: &BuildingBounds,
+    start_y_offset: i32,
+    building_height: i32,
+) -> i32 {
+    let building_size = bounds.width().max(bounds.length());
+    let base_height = start_y_offset + building_height;
+    let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
+    base_height + roof_height_boost
+}
+
+/// Parses roof:shape tag into RoofType enum
+fn parse_roof_type(roof_shape: &str) -> RoofType {
+    match roof_shape {
+        "gabled" => RoofType::Gabled,
+        "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" => RoofType::Hipped,
+        "skillion" => RoofType::Skillion,
+        "pyramidal" => RoofType::Pyramidal,
+        "dome" | "onion" | "cone" => RoofType::Dome,
+        _ => RoofType::Flat,
+    }
+}
+
+/// Checks if building type qualifies for automatic gabled roof
+fn qualifies_for_auto_gabled_roof(building_type: &str) -> bool {
+    matches!(
+        building_type,
+        "apartments" | "residential" | "house" | "yes"
+    )
+}
+
+// ============================================================================
+// Main Building Generation Function
+// ============================================================================
+
+#[inline]
+pub fn generate_buildings(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    relation_levels: Option<i32>,
+    flood_fill_cache: &FloodFillCache,
+) {
+    // Early return for underground buildings
+    if should_skip_underground_building(element) {
+        return;
+    }
+
+    // Parse min_level from tags
+    let min_level = element
+        .tags
+        .get("building:min_level")
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(0);
+
+    let scale_factor = args.scale;
+    let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
+    let min_level_offset = multiply_scale(min_level * 4, scale_factor);
+
+    // Get cached floor area
+    let cached_floor_area: Vec<(i32, i32)> =
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let cached_footprint_size = cached_floor_area.len();
+
+    // Calculate start Y offset
+    let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
+
+    // Calculate building bounds
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+
+    // Get building type
+    let building_type = element
+        .tags
+        .get("building")
+        .or_else(|| element.tags.get("building:part"))
+        .map(|s| s.as_str())
+        .unwrap_or("yes");
+
+    // Handle shelter amenity
+    if element.tags.get("amenity") == Some(&"shelter".to_string()) {
+        generate_shelter(editor, element, &cached_floor_area, scale_factor);
+        return;
+    }
+
+    // Handle special building types with early returns
+    if let Some(btype) = element.tags.get("building") {
+        match btype.as_str() {
+            "shed" if element.tags.contains_key("bicycle_parking") => {
+                generate_bicycle_parking_shed(editor, element, &cached_floor_area);
+                return;
+            }
+            "parking" => {
+                let (height, _) =
+                    calculate_building_height(element, min_level, scale_factor, relation_levels);
+                generate_parking_building(editor, element, &cached_floor_area, height);
+                return;
+            }
+            "roof" => {
+                generate_roof_only_structure(editor, element, &cached_floor_area);
+                return;
+            }
+            "bridge" => {
+                generate_bridge(editor, element, flood_fill_cache, args.timeout.as_ref());
+                return;
+            }
+            _ => {}
+        }
+
+        // Also check for multi-storey parking
+        if element
+            .tags
+            .get("parking")
+            .is_some_and(|p| p == "multi-storey")
+        {
+            let (height, _) =
+                calculate_building_height(element, min_level, scale_factor, relation_levels);
+            generate_parking_building(editor, element, &cached_floor_area, height);
+            return;
+        }
+    }
+
+    // Calculate building height with type-specific adjustments
+    let (mut building_height, is_tall_building) =
+        calculate_building_height(element, min_level, scale_factor, relation_levels);
+    building_height = adjust_height_for_building_type(building_type, building_height, scale_factor);
+
+    // Determine building category and get appropriate style preset
+    let category = BuildingCategory::from_element(element, is_tall_building, building_height);
+    let preset = BuildingStylePreset::for_category(category);
+
+    // Resolve style with deterministic RNG
+    let mut rng = element_rng(element.id);
+    let has_multiple_floors = building_height > 6;
+    let style = BuildingStyle::resolve(
+        &preset,
+        element,
+        building_type,
+        category,
+        has_multiple_floors,
+        cached_footprint_size,
+        &mut rng,
+    );
+
+    // Detect abandoned buildings
+    let is_abandoned_building = element
+        .tags
+        .get("abandoned")
+        .is_some_and(|value| value == "yes")
+        || element.tags.contains_key("abandoned:building");
+
+    // Create config struct for cleaner function calls
+    let config = BuildingConfig {
+        min_level,
+        building_height,
+        is_tall_building,
+        start_y_offset,
+        abs_terrain_offset,
+        wall_block: style.wall_block,
+        floor_block: style.floor_block,
+        window_block: style.window_block,
+        accent_block: style.accent_block,
+        roof_block: style.roof_block,
+        use_vertical_windows: style.use_vertical_windows,
+        use_horizontal_windows: style.use_horizontal_windows,
+        use_accent_roof_line: style.use_accent_roof_line,
+        use_accent_lines: style.use_accent_lines,
+        use_vertical_accent: style.use_vertical_accent,
+        is_abandoned_building,
+        has_windows: style.has_windows,
+        has_garage_door: style.has_garage_door,
+        has_single_door: style.has_single_door,
+        category,
+    };
+
+    // Generate walls, pass whether this building will have a sloped roof
+    let has_sloped_roof = args.roof && style.generate_roof && style.roof_type != RoofType::Flat;
+    let (wall_outline, corner_addup) =
+        generate_building_walls(editor, element, &config, args, has_sloped_roof);
+
+    // Generate special doors (garage doors, shed doors)
+    if config.has_garage_door || config.has_single_door {
+        generate_special_doors(editor, element, &config, &wall_outline);
+    }
+
+    // Add shutters and window boxes to small residential buildings
+    generate_residential_window_decorations(editor, element, &config);
+
+    // Create roof area = floor area + wall outline (so roof covers the walls too)
+    let roof_area: Vec<(i32, i32)> = {
+        let mut area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+        area.extend(wall_outline.iter().copied());
+        // Sort to ensure deterministic iteration order across runs/platforms
+        let mut v: Vec<(i32, i32)> = area.into_iter().collect();
+        v.sort_unstable();
+        v
+    };
+
+    // Generate floors and ceilings
+    if corner_addup != (0, 0, 0) {
+        generate_floors_and_ceilings(
+            editor,
+            &cached_floor_area,
+            &config,
+            args,
+            style.generate_roof,
+        );
 
         // Generate interior features
         if args.interior {
-            // Only generate interiors for buildings that aren't special types
-            let building_type = element
-                .tags
-                .get("building")
-                .map(|s| s.as_str())
-                .unwrap_or("yes");
             let skip_interior = matches!(
                 building_type,
                 "garage" | "shed" | "parking" | "roof" | "bridge"
             );
 
-            if !skip_interior && floor_area.len() > 100 {
-                // Only for buildings with sufficient floor area
+            if !skip_interior && cached_floor_area.len() > 100 {
+                let floor_levels = calculate_floor_levels(start_y_offset, building_height);
                 generate_building_interior(
                     editor,
-                    floor_area,
-                    min_x,
-                    min_z,
-                    max_x,
-                    max_z,
+                    &cached_floor_area,
+                    bounds.min_x,
+                    bounds.min_z,
+                    bounds.max_x,
+                    bounds.max_z,
                     start_y_offset,
                     building_height,
-                    wall_block,
+                    style.wall_block,
                     &floor_levels,
                     args,
                     element,
@@ -669,71 +2333,84 @@ pub fn generate_buildings(
         }
     }
 
-    // Process roof shapes if specified and roof generation is enabled
-    if args.roof {
-        if let Some(roof_shape) = element.tags.get("roof:shape") {
-            let roof_type = match roof_shape.as_str() {
-                "gabled" => RoofType::Gabled,
-                "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" => RoofType::Hipped,
-                "skillion" => RoofType::Skillion,
-                "pyramidal" => RoofType::Pyramidal,
-                "dome" | "onion" | "cone" => RoofType::Dome,
-                _ => RoofType::Flat,
-            };
+    // Process roof generation using style decisions
+    if args.roof && style.generate_roof {
+        generate_building_roof(
+            editor, element, &config, &style, &bounds, &roof_area, category,
+        );
+    }
+}
 
-            generate_roof(
-                editor,
-                element,
-                start_y_offset,
-                building_height,
-                floor_block,
-                wall_block,
-                accent_block,
-                roof_type,
-                &cached_floor_area,
-                abs_terrain_offset,
-            );
-        } else {
-            // Handle buildings without explicit roof:shape tag
-            let building_type = element
-                .tags
-                .get("building")
-                .map(|s| s.as_str())
-                .unwrap_or("yes");
+/// Handles roof generation including chimney placement and rooftop equipment
+fn generate_building_roof(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    style: &BuildingStyle,
+    bounds: &BuildingBounds,
+    roof_area: &[(i32, i32)],
+    category: BuildingCategory,
+) {
+    // Generate the roof using the pre-determined roof type from style
+    generate_roof(
+        editor,
+        element,
+        config.start_y_offset,
+        config.building_height,
+        config.floor_block,
+        config.wall_block,
+        config.accent_block,
+        config.roof_block,
+        style.roof_type,
+        roof_area,
+        config.abs_terrain_offset,
+    );
 
-            // For apartments, give 80% chance to generate a gabled roof only if building footprint is not too large
-            if building_type == "apartments"
-                || building_type == "residential"
-                || building_type == "house"
-                || building_type == "yes"
-            {
-                // Use cached footprint area and size instead of recalculating
-                let footprint_size = cached_footprint_size;
+    // Add chimney if style says so
+    if style.has_chimney {
+        let roof_peak_height =
+            calculate_roof_peak_height(bounds, config.start_y_offset, config.building_height);
+        generate_chimney(
+            editor,
+            roof_area,
+            bounds.min_x,
+            bounds.max_x,
+            bounds.min_z,
+            bounds.max_z,
+            roof_peak_height,
+            config.abs_terrain_offset,
+            element.id,
+        );
+    }
 
-                // Maximum footprint size threshold for gabled roofs
-                let max_footprint_for_gabled = 800;
+    // Add roof terrace on flat-roofed tall building:part elements
+    if should_generate_roof_terrace(element, config, style.roof_type) {
+        let roof_y = config.start_y_offset + config.building_height;
+        generate_roof_terrace(
+            editor,
+            element,
+            roof_area,
+            bounds,
+            roof_y,
+            config.abs_terrain_offset,
+        );
+    }
 
-                let mut rng = rand::thread_rng();
-                if footprint_size <= max_footprint_for_gabled && rng.gen_bool(0.9) {
-                    generate_roof(
-                        editor,
-                        element,
-                        start_y_offset,
-                        building_height,
-                        floor_block,
-                        wall_block,
-                        accent_block,
-                        RoofType::Gabled,
-                        &cached_floor_area,
-                        abs_terrain_offset,
-                    );
-                }
-                // If footprint too large or not selected for gabled roof, building gets default flat roof (no action needed)
-            }
-            // Other building types without roof:shape get default flat roof (no action needed)
-        }
-    } else {
-        // Default flat roof - already handled by the building generation code
+    // Add sparse rooftop equipment on flat-roofed commercial/institutional buildings
+    if should_generate_rooftop_equipment(config, style.roof_type, category) {
+        let roof_y = config.start_y_offset + config.building_height;
+        generate_rooftop_equipment(
+            editor,
+            element,
+            roof_area,
+            roof_y,
+            config.abs_terrain_offset,
+        );
+    }
+
+    // Hospital helipad on the flat roof
+    if category == BuildingCategory::Hospital && style.roof_type == RoofType::Flat {
+        generate_hospital_helipad(editor, element, roof_area, config);
     }
 }
 
@@ -751,6 +2428,1235 @@ fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
     }
 }
 
+/// Generate a chimney on a building roof
+///
+/// Creates a small brick chimney (1x1) typically found on residential buildings.
+/// Chimneys are placed within the actual building footprint near a corner.
+#[allow(clippy::too_many_arguments)]
+fn generate_chimney(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    roof_peak_height: i32,
+    abs_terrain_offset: i32,
+    element_id: u64,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    // Use deterministic RNG based on element ID for consistent placement
+    let mut rng = element_rng(element_id);
+
+    // Find a position within the actual floor area near a corner
+    // Calculate center point
+    let center_x = (min_x + max_x) / 2;
+    let center_z = (min_z + max_z) / 2;
+
+    // Choose which quadrant to place the chimney (deterministically)
+    let quadrant = rng.gen_range(0..4);
+
+    // Filter floor area points to the chosen quadrant and find one that's
+    // offset from the edge (so it's actually on the roof, not at the wall)
+    let candidate_points: Vec<(i32, i32)> = floor_area
+        .iter()
+        .filter(|(x, z)| {
+            let in_quadrant = match quadrant {
+                0 => *x < center_x && *z < center_z,   // NW
+                1 => *x >= center_x && *z < center_z,  // NE
+                2 => *x < center_x && *z >= center_z,  // SW
+                _ => *x >= center_x && *z >= center_z, // SE
+            };
+            // Must be at least 1 block from building edge
+            let away_from_edge = *x > min_x && *x < max_x && *z > min_z && *z < max_z;
+            in_quadrant && away_from_edge
+        })
+        .copied()
+        .collect();
+
+    // If no good candidates in the quadrant, try any interior point
+    let final_candidates = if candidate_points.is_empty() {
+        floor_area
+            .iter()
+            .filter(|(x, z)| *x > min_x + 1 && *x < max_x - 1 && *z > min_z + 1 && *z < max_z - 1)
+            .copied()
+            .collect::<Vec<_>>()
+    } else {
+        candidate_points
+    };
+
+    if final_candidates.is_empty() {
+        return;
+    }
+
+    // Pick a point from candidates
+    let (chimney_x, chimney_z) = final_candidates[rng.gen_range(0..final_candidates.len())];
+
+    // Chimney starts 2 blocks below roof peak to replace roof blocks properly
+    // Height is exactly 4 brick blocks with a slab cap on top
+    let chimney_base = roof_peak_height - 2;
+    let chimney_height = 4;
+
+    // Blocks that the chimney is allowed to replace (roof materials and stairs)
+    // We pass None for whitelist and use a blacklist that excludes nothing,
+    // which means we ALWAYS overwrite. But set_block_absolute with None, None
+    // won't overwrite existing blocks. So we need to specify that ANY existing
+    // block should be replaced.
+    // Since set_block_absolute only overwrites when whitelist matches or blacklist doesn't,
+    // we use an empty blacklist to mean "blacklist nothing" = overwrite everything.
+    let replace_any: &[Block] = &[];
+
+    // Build the chimney shaft (1x1 brick column, exactly 3 blocks tall)
+    for y in chimney_base..(chimney_base + chimney_height) {
+        editor.set_block_absolute(
+            BRICK,
+            chimney_x,
+            y + abs_terrain_offset,
+            chimney_z,
+            None,
+            Some(replace_any), // Empty blacklist = replace any block
+        );
+    }
+
+    // Add stone brick slab cap on top
+    editor.set_block_absolute(
+        STONE_BRICK_SLAB,
+        chimney_x,
+        chimney_base + chimney_height + abs_terrain_offset,
+        chimney_z,
+        None,
+        Some(replace_any), // Empty blacklist = replace any block
+    );
+}
+
+// ============================================================================
+// Roof Terrace Generation
+// ============================================================================
+
+/// Generates a roof terrace on top of flat-roofed tall buildings (building:part).
+///
+/// Includes:
+/// - Stone brick railing around the perimeter
+/// - Scattered rooftop furniture/equipment (tables, ventilation units, planters, seating, antenna)
+#[allow(clippy::too_many_arguments)]
+fn generate_roof_terrace(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    floor_area: &[(i32, i32)],
+    bounds: &BuildingBounds,
+    roof_y: i32,
+    abs_terrain_offset: i32,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    let replace_any: &[Block] = &[];
+    // Flat roof is placed at (start_y_offset + building_height + 1 + abs_terrain_offset)
+    // roof_y = start_y_offset + building_height, so terrace must be at roof_y + 2 to sit ON TOP of the roof
+    let terrace_y = roof_y + abs_terrain_offset + 2;
+
+    // Build a set for O(1) lookup of floor positions
+    let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+
+    // --- Step 1: Railing around the perimeter ---
+    // A perimeter block is one that has at least one cardinal neighbor NOT in the floor set
+    for &(x, z) in floor_area {
+        let neighbors = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)];
+        let is_edge = neighbors.iter().any(|n| !floor_set.contains(n));
+
+        if is_edge {
+            editor.set_block_absolute(STONE_BRICKS, x, terrace_y, z, None, Some(replace_any));
+        }
+    }
+
+    // --- Step 2: Collect interior positions (non-edge blocks at least 1 from edge) ---
+    let interior: Vec<(i32, i32)> = floor_area
+        .iter()
+        .filter(|&&(x, z)| {
+            let neighbors = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)];
+            neighbors.iter().all(|n| floor_set.contains(n))
+        })
+        .copied()
+        .collect();
+
+    if interior.is_empty() {
+        return;
+    }
+
+    // --- Step 3: Place rooftop furniture deterministically ---
+    // Use coord_rng so each position is independently and deterministically decorated.
+    // The low placement probability (15%) naturally creates spacing between items.
+
+    // We iterate over interior positions and use coord_rng to decide what goes where.
+    // This avoids RNG ordering issues and is fully deterministic per-position.
+    for &(x, z) in &interior {
+        // Deterministic per-position decision using coord_rng
+        let mut rng = coord_rng(x, z, element.id);
+        let roll: u32 = rng.gen_range(0..100);
+
+        // ~85% of interior tiles are empty (open terrace space)
+        if roll >= 15 {
+            continue;
+        }
+
+        // Among the 15% that get furniture, distribute types
+        match roll {
+            0..=2 => {
+                // Ventilation unit: iron block with a slab on top
+                editor.set_block_absolute(IRON_BLOCK, x, terrace_y, z, None, Some(replace_any));
+                editor.set_block_absolute(
+                    SMOOTH_STONE_SLAB,
+                    x,
+                    terrace_y + 1,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+            }
+            3..=5 => {
+                // Planter: leaf block on top of cauldron
+                editor.set_block_absolute(CAULDRON, x, terrace_y, z, None, Some(replace_any));
+                // Vary the leaf type
+                let leaf = match rng.gen_range(0..3) {
+                    0 => OAK_LEAVES,
+                    1 => BIRCH_LEAVES,
+                    _ => SPRUCE_LEAVES,
+                };
+                editor.set_block_absolute(leaf, x, terrace_y + 1, z, None, Some(replace_any));
+            }
+            6..=8 => {
+                // Table: oak slab on top of an oak fence
+                editor.set_block_absolute(OAK_FENCE, x, terrace_y, z, None, Some(replace_any));
+                editor.set_block_absolute(OAK_SLAB, x, terrace_y + 1, z, None, Some(replace_any));
+            }
+            9..=10 => {
+                // Seating: stairs block (looks like a bench/chair)
+                editor.set_block_absolute(OAK_STAIRS, x, terrace_y, z, None, Some(replace_any));
+            }
+            11..=12 => {
+                // Antenna / lightning rod
+                editor.set_block_absolute(LIGHTNING_ROD, x, terrace_y, z, None, Some(replace_any));
+            }
+            13 => {
+                // Cauldron (rain collector / decorative)
+                editor.set_block_absolute(CAULDRON, x, terrace_y, z, None, Some(replace_any));
+            }
+            _ => {
+                // Sea lantern (subtle rooftop light)
+                editor.set_block_absolute(SEA_LANTERN, x, terrace_y, z, None, Some(replace_any));
+            }
+        }
+    }
+
+    // --- Step 4: Always place a lightning rod or antenna near the center (if space) ---
+    let center_x = (bounds.min_x + bounds.max_x) / 2;
+    let center_z = (bounds.min_z + bounds.max_z) / 2;
+
+    // Find the interior point closest to center
+    if let Some(&(cx, cz)) = interior
+        .iter()
+        .min_by_key(|&&(x, z)| (x - center_x).pow(2) + (z - center_z).pow(2))
+    {
+        // Tall antenna: 6 iron bars + lightning rod on top
+        for dy in 0..6 {
+            editor.set_block_absolute(IRON_BARS, cx, terrace_y + dy, cz, None, Some(replace_any));
+        }
+        editor.set_block_absolute(
+            LIGHTNING_ROD,
+            cx,
+            terrace_y + 6,
+            cz,
+            None,
+            Some(replace_any),
+        );
+    }
+}
+
+/// Determines whether a building should get a roof terrace.
+///
+/// Conditions:
+/// - The element is a `building:part` (composite building component)
+/// - Has a flat roof
+/// - Is tall enough (skyscraper-class or very tall: height >= 28 blocks)
+fn should_generate_roof_terrace(
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    roof_type: RoofType,
+) -> bool {
+    let is_building_part = element.tags.contains_key("building:part");
+    let is_flat = roof_type == RoofType::Flat;
+    let is_very_tall = config.building_height >= 28;
+
+    is_building_part && is_flat && is_very_tall
+}
+
+/// Determines whether a building should get sparse rooftop equipment (HVAC, solar panels).
+///
+/// Applies to flat-roofed commercial, office, industrial, warehouse, hospital, and hotel
+/// buildings that are at least a few floors tall.
+fn should_generate_rooftop_equipment(
+    config: &BuildingConfig,
+    roof_type: RoofType,
+    category: BuildingCategory,
+) -> bool {
+    let is_flat = roof_type == RoofType::Flat;
+    let is_multi_floor = config.building_height >= 8;
+    let suitable_category = matches!(
+        category,
+        BuildingCategory::Commercial
+            | BuildingCategory::Office
+            | BuildingCategory::Hotel
+            | BuildingCategory::Industrial
+            | BuildingCategory::Warehouse
+            | BuildingCategory::Hospital
+            | BuildingCategory::School
+    );
+
+    is_flat && is_multi_floor && suitable_category
+}
+
+/// Generates sparse rooftop equipment on flat-roofed commercial/institutional buildings.
+///
+/// Much sparser than the skyscraper roof terrace (~0.6% of interior tiles).
+/// Typical equipment:
+/// - HVAC / ventilation units (iron block + slab)
+/// - Solar panel clusters (daylight detectors in four 5×4 fields arranged 2×2 with 1-block gaps)
+/// - Antenna masts (iron bars + lightning rod, rare)
+fn generate_rooftop_equipment(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    floor_area: &[(i32, i32)],
+    roof_y: i32,
+    abs_terrain_offset: i32,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    let replace_any: &[Block] = &[];
+    let equip_y = roof_y + abs_terrain_offset + 2; // On top of the flat roof surface
+
+    // Build set for edge detection
+    let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+
+    // Collect interior positions (skip edge tiles to avoid overhanging equipment)
+    let interior: Vec<(i32, i32)> = floor_area
+        .iter()
+        .filter(|&&(x, z)| {
+            let neighbors = [
+                (x - 1, z),
+                (x + 1, z),
+                (x, z - 1),
+                (x, z + 1),
+                (x - 1, z - 1),
+                (x + 1, z + 1),
+                (x - 1, z + 1),
+                (x + 1, z - 1),
+            ];
+            neighbors.iter().all(|n| floor_set.contains(n))
+        })
+        .copied()
+        .collect();
+
+    if interior.is_empty() {
+        return;
+    }
+
+    // Track which positions are already used (for solar panel clusters)
+    let mut used: HashSet<(i32, i32)> = HashSet::new();
+
+    for &(x, z) in &interior {
+        if used.contains(&(x, z)) {
+            continue;
+        }
+
+        let mut rng = coord_rng(x, z, element.id);
+        let roll: u32 = rng.gen_range(0..1200);
+
+        // ~99.4% of tiles are empty, very sparse
+        if roll >= 7 {
+            continue;
+        }
+
+        match roll {
+            0..=2 => {
+                // HVAC / ventilation unit: iron block + smooth stone slab
+                editor.set_block_absolute(IRON_BLOCK, x, equip_y, z, None, Some(replace_any));
+                editor.set_block_absolute(
+                    SMOOTH_STONE_SLAB,
+                    x,
+                    equip_y + 1,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+                used.insert((x, z));
+            }
+            3..=5 => {
+                // Solar panel cluster: four 5×4 fields in a 2×2 grid with 1-block gaps
+                // Layout (top view, 11 wide × 9 deep):
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   ..... . .....
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                //   SSSSS . SSSSS
+                let quad_offsets: [(i32, i32); 4] = [(0, 0), (6, 0), (0, 5), (6, 5)];
+                let quad_panels: Vec<(i32, i32)> = quad_offsets
+                    .iter()
+                    .flat_map(|&(ox, oz)| {
+                        (0..5).flat_map(move |dx| (0..4).map(move |dz| (x + ox + dx, z + oz + dz)))
+                    })
+                    .collect();
+                // Check that the entire 11×9 bounding box fits on the roof
+                let bbox: Vec<(i32, i32)> = (0..11)
+                    .flat_map(|dx| (0..9).map(move |dz| (x + dx, z + dz)))
+                    .collect();
+                let quad_ok = bbox
+                    .iter()
+                    .all(|pos| floor_set.contains(pos) && !used.contains(pos));
+
+                if quad_ok {
+                    for &(cx, cz) in &quad_panels {
+                        editor.set_block_absolute(
+                            DAYLIGHT_DETECTOR,
+                            cx,
+                            equip_y,
+                            cz,
+                            None,
+                            Some(replace_any),
+                        );
+                    }
+                    // Reserve the whole bounding box so nothing overlaps
+                    for &(cx, cz) in &bbox {
+                        used.insert((cx, cz));
+                    }
+                } else {
+                    // Fall back to a single 5×4 field
+                    let single_field: Vec<(i32, i32)> = (0..5)
+                        .flat_map(|dx| (0..4).map(move |dz| (x + dx, z + dz)))
+                        .collect();
+                    let single_ok = single_field
+                        .iter()
+                        .all(|pos| floor_set.contains(pos) && !used.contains(pos));
+
+                    if single_ok {
+                        for &(cx, cz) in &single_field {
+                            editor.set_block_absolute(
+                                DAYLIGHT_DETECTOR,
+                                cx,
+                                equip_y,
+                                cz,
+                                None,
+                                Some(replace_any),
+                            );
+                            used.insert((cx, cz));
+                        }
+                    } else {
+                        // Not enough room, place a single daylight detector
+                        editor.set_block_absolute(
+                            DAYLIGHT_DETECTOR,
+                            x,
+                            equip_y,
+                            z,
+                            None,
+                            Some(replace_any),
+                        );
+                        used.insert((x, z));
+                    }
+                }
+            }
+            _ => {
+                // Small antenna mast: 2 iron bars + lightning rod (1/3 of previous chance)
+                editor.set_block_absolute(IRON_BARS, x, equip_y, z, None, Some(replace_any));
+                editor.set_block_absolute(IRON_BARS, x, equip_y + 1, z, None, Some(replace_any));
+                editor.set_block_absolute(
+                    LIGHTNING_ROD,
+                    x,
+                    equip_y + 2,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+                used.insert((x, z));
+            }
+        }
+    }
+}
+
+// ============================================================================
+// Roof Generation
+// ============================================================================
+
+/// Configuration for roof generation
+struct RoofConfig {
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+    center_x: i32,
+    center_z: i32,
+    base_height: i32,
+    abs_terrain_offset: i32,
+    roof_block: Block,
+}
+
+impl RoofConfig {
+    /// Creates RoofConfig from roof area (includes wall outline for proper coverage)
+    fn from_roof_area(
+        roof_area: &[(i32, i32)],
+        element_id: u64,
+        start_y_offset: i32,
+        building_height: i32,
+        wall_block: Block,
+        accent_block: Block,
+        abs_terrain_offset: i32,
+    ) -> Self {
+        // Calculate bounds from the actual roof area (floor + walls)
+        let (min_x, max_x, min_z, max_z) = roof_area.iter().fold(
+            (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
+            |(min_x, max_x, min_z, max_z), &(x, z)| {
+                (min_x.min(x), max_x.max(x), min_z.min(z), max_z.max(z))
+            },
+        );
+
+        let center_x = (min_x + max_x) >> 1;
+        let center_z = (min_z + max_z) >> 1;
+
+        // Roof base_height is always at the roof line level (top of walls + 1)
+        // This ensures the roof sits on top of the building consistently
+        let base_height = start_y_offset + building_height + 1;
+
+        // 90% wall block, 10% accent block for variety (deterministic based on element ID)
+        let mut rng = element_rng(element_id);
+        // Advance RNG state to get different value than other style choices
+        let _ = rng.gen::<u32>();
+        let roof_block = if rng.gen_bool(0.1) {
+            accent_block
+        } else {
+            wall_block
+        };
+
+        Self {
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+            center_x,
+            center_z,
+            base_height,
+            abs_terrain_offset,
+            roof_block,
+        }
+    }
+
+    fn width(&self) -> i32 {
+        self.max_x - self.min_x
+    }
+
+    fn length(&self) -> i32 {
+        self.max_z - self.min_z
+    }
+
+    fn building_size(&self) -> i32 {
+        self.width().max(self.length())
+    }
+}
+
+/// Checks if a point has any neighbor with lower height
+#[inline]
+fn has_lower_neighbor(
+    x: i32,
+    z: i32,
+    roof_height: i32,
+    roof_heights: &HashMap<(i32, i32), i32>,
+) -> bool {
+    [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
+        .iter()
+        .any(|(nx, nz)| {
+            roof_heights
+                .get(&(*nx, *nz))
+                .is_some_and(|&nh| nh < roof_height)
+        })
+}
+
+/// Places roof blocks for a given height map
+fn place_roof_blocks_with_stairs(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    roof_heights: &HashMap<(i32, i32), i32>,
+    config: &RoofConfig,
+    stair_direction_fn: impl Fn(i32, i32, i32) -> BlockWithProperties,
+) {
+    // Use empty blacklist to allow overwriting wall/ceiling blocks
+    let replace_any: &[Block] = &[];
+
+    for &(x, z) in floor_area {
+        let roof_height = roof_heights[&(x, z)];
+
+        for y in config.base_height..=roof_height {
+            if y == roof_height {
+                let has_lower = has_lower_neighbor(x, z, roof_height, roof_heights);
+                if has_lower {
+                    let stair_block = stair_direction_fn(x, z, roof_height);
+                    editor.set_block_with_properties_absolute(
+                        stair_block,
+                        x,
+                        y + config.abs_terrain_offset,
+                        z,
+                        None,
+                        Some(replace_any),
+                    );
+                } else {
+                    editor.set_block_absolute(
+                        config.roof_block,
+                        x,
+                        y + config.abs_terrain_offset,
+                        z,
+                        None,
+                        Some(replace_any),
+                    );
+                }
+            } else {
+                editor.set_block_absolute(
+                    config.roof_block,
+                    x,
+                    y + config.abs_terrain_offset,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+            }
+        }
+    }
+}
+
+/// Generates a flat roof
+fn generate_flat_roof(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    floor_block: Block,
+    base_height: i32,
+    abs_terrain_offset: i32,
+) {
+    // Use empty blacklist to allow overwriting wall/ceiling blocks
+    let replace_any: &[Block] = &[];
+    for &(x, z) in floor_area {
+        editor.set_block_absolute(
+            floor_block,
+            x,
+            base_height + abs_terrain_offset,
+            z,
+            None,
+            Some(replace_any),
+        );
+    }
+}
+
+/// Generates a gabled roof
+fn generate_gabled_roof(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    config: &RoofConfig,
+    roof_orientation: Option<&str>,
+) {
+    // Create a HashSet for O(1) footprint lookups, this is the actual building shape
+    let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+
+    let width_is_longer = config.width() >= config.length();
+    let ridge_runs_along_x = match roof_orientation {
+        Some(o) if o.eq_ignore_ascii_case("along") => width_is_longer,
+        Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
+        _ => width_is_longer,
+    };
+
+    // Use the full distance from center to edge, accounting for odd sizes
+    let max_distance = if ridge_runs_along_x {
+        (config.max_z - config.center_z)
+            .max(config.center_z - config.min_z)
+            .max(1)
+    } else {
+        (config.max_x - config.center_x)
+            .max(config.center_x - config.min_x)
+            .max(1)
+    };
+
+    // Calculate roof height boost, but limit it to max_distance so the slope
+    // is at most 1 block per row (creates a proper diagonal line)
+    let raw_roof_height_boost = (3.0 + (config.building_size() as f64 * 0.15).ln().max(1.0)) as i32;
+    let roof_height_boost = raw_roof_height_boost.min(max_distance);
+    let roof_peak_height = config.base_height + roof_height_boost;
+
+    // Calculate roof heights only for positions in the actual footprint
+    let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
+    for &(x, z) in floor_area {
+        let distance_to_ridge = if ridge_runs_along_x {
+            (z - config.center_z).abs()
+        } else {
+            (x - config.center_x).abs()
+        };
+
+        let roof_height = if distance_to_ridge == 0 {
+            roof_peak_height
+        } else {
+            let slope_ratio = (distance_to_ridge as f64 / max_distance as f64).min(1.0);
+            (roof_peak_height as f64 - (slope_ratio * roof_height_boost as f64)) as i32
+        }
+        .max(config.base_height);
+
+        roof_heights.insert((x, z), roof_height);
+    }
+
+    let stair_block_material = get_stair_block_for_material(config.roof_block);
+    let replace_any: &[Block] = &[];
+
+    // Helper to determine stair facing for outer edges (faces away from building center)
+    let get_outer_edge_stair = |x: i32, z: i32| -> BlockWithProperties {
+        if ridge_runs_along_x {
+            if !footprint.contains(&(x, z - 1)) {
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::South,
+                    StairShape::Straight,
+                )
+            } else {
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::North,
+                    StairShape::Straight,
+                )
+            }
+        } else if !footprint.contains(&(x - 1, z)) {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::East,
+                StairShape::Straight,
+            )
+        } else {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::West,
+                StairShape::Straight,
+            )
+        }
+    };
+
+    // Helper to determine stair facing for slope (faces toward lower side)
+    let get_slope_stair = |x: i32, z: i32| -> BlockWithProperties {
+        if ridge_runs_along_x {
+            if z < config.center_z {
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::South,
+                    StairShape::Straight,
+                )
+            } else {
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::North,
+                    StairShape::Straight,
+                )
+            }
+        } else if x < config.center_x {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::East,
+                StairShape::Straight,
+            )
+        } else {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::West,
+                StairShape::Straight,
+            )
+        }
+    };
+
+    for &(x, z) in floor_area {
+        let roof_height = roof_heights[&(x, z)];
+
+        // Check if position is at outer edge (neighbor perpendicular to ridge is missing)
+        let is_outer_edge = if ridge_runs_along_x {
+            !footprint.contains(&(x, z - 1)) || !footprint.contains(&(x, z + 1))
+        } else {
+            !footprint.contains(&(x - 1, z)) || !footprint.contains(&(x + 1, z))
+        };
+
+        if is_outer_edge {
+            // Outer edge: single stair at base_height, overwrites existing blocks
+            editor.set_block_with_properties_absolute(
+                get_outer_edge_stair(x, z),
+                x,
+                config.base_height + config.abs_terrain_offset,
+                z,
+                None,
+                Some(replace_any),
+            );
+        } else {
+            // Inner positions: fill from base_height to roof_height
+            let has_lower_neighbor =
+                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
+                    .iter()
+                    .any(|&(nx, nz)| {
+                        roof_heights
+                            .get(&(nx, nz))
+                            .is_some_and(|&nh| nh < roof_height)
+                    });
+
+            for y in config.base_height..=roof_height {
+                if y == roof_height && has_lower_neighbor {
+                    editor.set_block_with_properties_absolute(
+                        get_slope_stair(x, z),
+                        x,
+                        y + config.abs_terrain_offset,
+                        z,
+                        None,
+                        None,
+                    );
+                } else {
+                    editor.set_block_absolute(
+                        config.roof_block,
+                        x,
+                        y + config.abs_terrain_offset,
+                        z,
+                        None,
+                        None,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// Generates a hipped roof for rectangular buildings
+/// A hipped roof slopes on ALL four sides, unlike a gabled roof which only slopes on two.
+/// For rectangular buildings, it has a ridge along the longer axis, and the shorter
+/// ends also slope upward to meet the ridge.
+fn generate_hipped_roof_rectangular(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    config: &RoofConfig,
+    ridge_axis_is_x: bool,
+    roof_peak_height: i32,
+) {
+    let mut roof_heights = HashMap::new();
+
+    // For a hipped roof, height is determined by the MINIMUM distance to any edge
+    // The ridge runs along one axis, but the ends also slope
+    let half_width = config.width() / 2;
+    let half_length = config.length() / 2;
+
+    for &(x, z) in floor_area {
+        // Distance from each edge
+        let dist_from_min_x = x - config.min_x;
+        let dist_from_max_x = config.max_x - x;
+        let dist_from_min_z = z - config.min_z;
+        let dist_from_max_z = config.max_z - z;
+
+        // Minimum distance to any edge determines height (closer to edge = lower)
+        let min_dist_to_edge = dist_from_min_x
+            .min(dist_from_max_x)
+            .min(dist_from_min_z)
+            .min(dist_from_max_z);
+
+        // Max possible distance to edge (from center to edge along shorter axis)
+        let max_dist_to_edge = if ridge_axis_is_x {
+            half_length
+        } else {
+            half_width
+        };
+
+        // Calculate slope factor (0 at edge, 1 at ridge/center)
+        let slope_factor = if max_dist_to_edge > 0 {
+            (min_dist_to_edge as f64 / max_dist_to_edge as f64).min(1.0)
+        } else {
+            1.0
+        };
+
+        let roof_height = config.base_height
+            + (slope_factor * (roof_peak_height - config.base_height) as f64) as i32;
+        roof_heights.insert((x, z), roof_height.max(config.base_height));
+    }
+
+    let stair_block_material = get_stair_block_for_material(config.roof_block);
+    let min_x = config.min_x;
+    let max_x = config.max_x;
+    let min_z = config.min_z;
+    let max_z = config.max_z;
+
+    // For stair direction, determine which edge the point is closest to
+    place_roof_blocks_with_stairs(editor, floor_area, &roof_heights, config, |x, z, _| {
+        let dist_from_min_x = x - min_x;
+        let dist_from_max_x = max_x - x;
+        let dist_from_min_z = z - min_z;
+        let dist_from_max_z = max_z - z;
+
+        // Find which edge is closest
+        let min_dist = dist_from_min_x
+            .min(dist_from_max_x)
+            .min(dist_from_min_z)
+            .min(dist_from_max_z);
+
+        if dist_from_min_x == min_dist {
+            // Closest to west edge, stair faces east (toward center)
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::East,
+                StairShape::Straight,
+            )
+        } else if dist_from_max_x == min_dist {
+            // Closest to east edge, stair faces west
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::West,
+                StairShape::Straight,
+            )
+        } else if dist_from_min_z == min_dist {
+            // Closest to north edge, stair faces south
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::South,
+                StairShape::Straight,
+            )
+        } else {
+            // Closest to south edge, stair faces north
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::North,
+                StairShape::Straight,
+            )
+        }
+    });
+}
+
+/// Generates a hipped roof for square/complex buildings using distance from center
+fn generate_hipped_roof_square(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    config: &RoofConfig,
+    roof_peak_height: i32,
+) {
+    let mut roof_heights = HashMap::new();
+
+    // Calculate max distance from center to any corner
+    let max_distance = {
+        let corner_distances = [
+            ((config.min_x - config.center_x).pow(2) + (config.min_z - config.center_z).pow(2))
+                as f64,
+            ((config.min_x - config.center_x).pow(2) + (config.max_z - config.center_z).pow(2))
+                as f64,
+            ((config.max_x - config.center_x).pow(2) + (config.min_z - config.center_z).pow(2))
+                as f64,
+            ((config.max_x - config.center_x).pow(2) + (config.max_z - config.center_z).pow(2))
+                as f64,
+        ];
+        corner_distances
+            .iter()
+            .fold(0.0f64, |a, &b| a.max(b))
+            .sqrt()
+    };
+
+    for &(x, z) in floor_area {
+        let dx = (x - config.center_x) as f64;
+        let dz = (z - config.center_z) as f64;
+        let distance_from_center = (dx * dx + dz * dz).sqrt();
+
+        let distance_factor = if max_distance > 0.0 {
+            (distance_from_center / max_distance).min(1.0)
+        } else {
+            0.0
+        };
+
+        let roof_height = roof_peak_height
+            - (distance_factor * (roof_peak_height - config.base_height) as f64) as i32;
+        roof_heights.insert((x, z), roof_height.max(config.base_height));
+    }
+
+    let stair_block_material = get_stair_block_for_material(config.roof_block);
+    let center_x = config.center_x;
+    let center_z = config.center_z;
+
+    place_roof_blocks_with_stairs(editor, floor_area, &roof_heights, config, |x, z, _| {
+        let center_dx = x - center_x;
+        let center_dz = z - center_z;
+
+        if center_dx.abs() > center_dz.abs() {
+            if center_dx > 0 {
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::West,
+                    StairShape::Straight,
+                )
+            } else {
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::East,
+                    StairShape::Straight,
+                )
+            }
+        } else if center_dz > 0 {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::North,
+                StairShape::Straight,
+            )
+        } else {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::South,
+                StairShape::Straight,
+            )
+        }
+    });
+}
+
+/// Generates a skillion (mono-pitch) roof
+fn generate_skillion_roof(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    config: &RoofConfig,
+) {
+    let width = config.width().max(1);
+    let max_roof_height = (config.building_size() / 3).clamp(4, 10);
+
+    let mut roof_heights = HashMap::new();
+    for &(x, z) in floor_area {
+        let slope_progress = (x - config.min_x) as f64 / width as f64;
+        let roof_height = config.base_height + (slope_progress * max_roof_height as f64) as i32;
+        roof_heights.insert((x, z), roof_height);
+    }
+
+    let stair_block_material = get_stair_block_for_material(config.roof_block);
+
+    place_roof_blocks_with_stairs(editor, floor_area, &roof_heights, config, |_, _, _| {
+        create_stair_with_properties(
+            stair_block_material,
+            StairFacing::East,
+            StairShape::Straight,
+        )
+    });
+}
+
+/// Generates a pyramidal roof
+fn generate_pyramidal_roof(
+    editor: &mut WorldEditor,
+    floor_area: &[(i32, i32)],
+    config: &RoofConfig,
+) {
+    let peak_height = config.base_height + (config.building_size() / 3).clamp(3, 8);
+    let max_distance = (config.width() / 2).max(config.length() / 2) as f64;
+
+    let mut roof_heights = HashMap::new();
+    for &(x, z) in floor_area {
+        let dx = (x - config.center_x).abs() as f64;
+        let dz = (z - config.center_z).abs() as f64;
+        let distance_to_edge = dx.max(dz);
+
+        let height_factor = if max_distance > 0.0 {
+            (1.0 - (distance_to_edge / max_distance)).max(0.0)
+        } else {
+            1.0
+        };
+
+        let roof_height =
+            config.base_height + (height_factor * (peak_height - config.base_height) as f64) as i32;
+        roof_heights.insert((x, z), roof_height);
+    }
+
+    // Place blocks with complex stair logic for pyramid corners
+    // Use empty blacklist to allow overwriting wall/ceiling blocks
+    let replace_any: &[Block] = &[];
+    let stair_block_material = get_stair_block_for_material(config.roof_block);
+
+    for &(x, z) in floor_area {
+        let roof_height = roof_heights[&(x, z)];
+
+        for y in config.base_height..=roof_height {
+            if y == roof_height {
+                let stair_block = determine_pyramidal_stair_block(
+                    x,
+                    z,
+                    roof_height,
+                    &roof_heights,
+                    config,
+                    stair_block_material,
+                );
+                editor.set_block_with_properties_absolute(
+                    stair_block,
+                    x,
+                    y + config.abs_terrain_offset,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+            } else {
+                editor.set_block_absolute(
+                    config.roof_block,
+                    x,
+                    y + config.abs_terrain_offset,
+                    z,
+                    None,
+                    Some(replace_any),
+                );
+            }
+        }
+    }
+}
+
+/// Determines the appropriate stair block for pyramidal roof corners and edges
+fn determine_pyramidal_stair_block(
+    x: i32,
+    z: i32,
+    roof_height: i32,
+    roof_heights: &HashMap<(i32, i32), i32>,
+    config: &RoofConfig,
+    stair_block_material: Block,
+) -> BlockWithProperties {
+    let dx = x - config.center_x;
+    let dz = z - config.center_z;
+
+    let north_height = roof_heights
+        .get(&(x, z - 1))
+        .copied()
+        .unwrap_or(config.base_height);
+    let south_height = roof_heights
+        .get(&(x, z + 1))
+        .copied()
+        .unwrap_or(config.base_height);
+    let west_height = roof_heights
+        .get(&(x - 1, z))
+        .copied()
+        .unwrap_or(config.base_height);
+    let east_height = roof_heights
+        .get(&(x + 1, z))
+        .copied()
+        .unwrap_or(config.base_height);
+
+    let has_lower_north = north_height < roof_height;
+    let has_lower_south = south_height < roof_height;
+    let has_lower_west = west_height < roof_height;
+    let has_lower_east = east_height < roof_height;
+
+    // Corner situations
+    if has_lower_north && has_lower_west {
+        create_stair_with_properties(
+            stair_block_material,
+            StairFacing::East,
+            StairShape::OuterRight,
+        )
+    } else if has_lower_north && has_lower_east {
+        create_stair_with_properties(
+            stair_block_material,
+            StairFacing::South,
+            StairShape::OuterRight,
+        )
+    } else if has_lower_south && has_lower_west {
+        create_stair_with_properties(
+            stair_block_material,
+            StairFacing::East,
+            StairShape::OuterLeft,
+        )
+    } else if has_lower_south && has_lower_east {
+        create_stair_with_properties(
+            stair_block_material,
+            StairFacing::North,
+            StairShape::OuterLeft,
+        )
+    } else if dx.abs() > dz.abs() {
+        // Primary slope in X direction
+        if dx > 0 && east_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::West,
+                StairShape::Straight,
+            )
+        } else if dx < 0 && west_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::East,
+                StairShape::Straight,
+            )
+        } else if dz > 0 && south_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::North,
+                StairShape::Straight,
+            )
+        } else if dz < 0 && north_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::South,
+                StairShape::Straight,
+            )
+        } else {
+            BlockWithProperties::simple(config.roof_block)
+        }
+    } else {
+        // Primary slope in Z direction
+        if dz > 0 && south_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::North,
+                StairShape::Straight,
+            )
+        } else if dz < 0 && north_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::South,
+                StairShape::Straight,
+            )
+        } else if dx > 0 && east_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::West,
+                StairShape::Straight,
+            )
+        } else if dx < 0 && west_height < roof_height {
+            create_stair_with_properties(
+                stair_block_material,
+                StairFacing::East,
+                StairShape::Straight,
+            )
+        } else {
+            BlockWithProperties::simple(config.roof_block)
+        }
+    }
+}
+
+/// Generates a dome roof
+fn generate_dome_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], config: &RoofConfig) {
+    let radius = (config.building_size() / 2) as f64;
+    // Use empty blacklist to allow overwriting wall/ceiling blocks
+    let replace_any: &[Block] = &[];
+
+    for &(x, z) in floor_area {
+        let distance_from_center =
+            ((x - config.center_x).pow(2) + (z - config.center_z).pow(2)) as f64;
+        let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
+
+        let height_factor = (1.0 - normalized_distance * normalized_distance).sqrt();
+        let surface_height = config.base_height + (height_factor * (radius * 0.8)) as i32;
+
+        for y in config.base_height..=surface_height {
+            editor.set_block_absolute(
+                config.roof_block,
+                x,
+                y + config.abs_terrain_offset,
+                z,
+                None,
+                Some(replace_any),
+            );
+        }
+    }
+}
+
 /// Unified function to generate various roof types
 #[allow(clippy::too_many_arguments)]
 #[inline]
@@ -762,751 +3668,87 @@ fn generate_roof(
     floor_block: Block,
     wall_block: Block,
     accent_block: Block,
+    roof_block_override: Option<Block>,
     roof_type: RoofType,
-    cached_floor_area: &[(i32, i32)],
+    roof_area: &[(i32, i32)],
     abs_terrain_offset: i32,
 ) {
-    // Use the provided cached floor area instead of recalculating
-    let floor_area = cached_floor_area;
+    if roof_area.is_empty() {
+        return;
+    }
 
-    // Pre-calculate building bounds once
-    let (min_x, max_x, min_z, max_z) = element.nodes.iter().fold(
-        (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
-        |(min_x, max_x, min_z, max_z), n| {
-            (
-                min_x.min(n.x),
-                max_x.max(n.x),
-                min_z.min(n.z),
-                max_z.max(n.z),
-            )
-        },
+    let mut config = RoofConfig::from_roof_area(
+        roof_area,
+        element.id,
+        start_y_offset,
+        building_height,
+        wall_block,
+        accent_block,
+        abs_terrain_offset,
     );
 
-    let center_x = (min_x + max_x) >> 1; // Bit shift is faster than division
-    let center_z = (min_z + max_z) >> 1;
+    // If a preset specifies a dedicated roof block, use it instead of
+    // the randomly-derived wall/accent block.
+    if let Some(override_block) = roof_block_override {
+        config.roof_block = override_block;
+    }
 
-    // Set base height for roof to be at least one block above building top
-    let base_height = start_y_offset + building_height + 1;
-
-    // Optional OSM hint for ridge orientation
     let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
+
+    // For flat roofs, also honour the override so preset flat-roof
+    // materials (e.g. greenhouse smooth-stone slab) are respected.
+    let flat_roof_block = roof_block_override.unwrap_or(floor_block);
 
     match roof_type {
         RoofType::Flat => {
-            // Simple flat roof
-            for &(x, z) in floor_area {
-                editor.set_block_absolute(
-                    floor_block,
-                    x,
-                    base_height + abs_terrain_offset,
-                    z,
-                    None,
-                    None,
-                );
-            }
+            generate_flat_roof(
+                editor,
+                roof_area,
+                flat_roof_block,
+                config.base_height,
+                abs_terrain_offset,
+            );
         }
 
         RoofType::Gabled => {
-            // Pre-calculate building dimensions once
-            let width = max_x - min_x;
-            let length = max_z - min_z;
-            let building_size = width.max(length);
-
-            // Enhanced logarithmic scaling with increased base values for taller roofs
-            let roof_height_boost = (3.0 + (building_size as f64 * 0.15).ln().max(1.0)) as i32;
-            let roof_peak_height = base_height + roof_height_boost;
-
-            // Pre-determine orientation and material
-            let width_is_longer = width >= length;
-            let ridge_runs_along_x = match roof_orientation {
-                Some(orientation) if orientation.eq_ignore_ascii_case("along") => width_is_longer,
-                Some(orientation) if orientation.eq_ignore_ascii_case("across") => !width_is_longer,
-                _ => width_is_longer,
-            };
-            let max_distance = if ridge_runs_along_x {
-                length >> 1
-            } else {
-                width >> 1
-            };
-
-            // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
-                accent_block
-            } else {
-                wall_block
-            };
-
-            // Pre-allocate with capacity hint for better performance
-            let mut roof_heights = Vec::with_capacity(floor_area.len());
-            let mut blocks_to_place = Vec::with_capacity(floor_area.len() * 4);
-
-            // First pass: calculate all roof heights using vectorized operations
-            for &(x, z) in floor_area {
-                let distance_to_ridge = if ridge_runs_along_x {
-                    (z - center_z).abs()
-                } else {
-                    (x - center_x).abs()
-                };
-
-                let roof_height = if distance_to_ridge == 0
-                    && ((ridge_runs_along_x && z == center_z)
-                        || (!ridge_runs_along_x && x == center_x))
-                {
-                    roof_peak_height
-                } else {
-                    let slope_ratio = distance_to_ridge as f64 / max_distance.max(1) as f64;
-                    (roof_peak_height as f64 - (slope_ratio * roof_height_boost as f64)) as i32
-                }
-                .max(base_height);
-
-                roof_heights.push(((x, z), roof_height));
-            }
-
-            // Second pass: batch process blocks with pre-computed stair materials
-            let stair_block_material = get_stair_block_for_material(roof_block);
-
-            for &((x, z), roof_height) in &roof_heights {
-                // Check neighboring heights efficiently using iterator
-                let has_lower_neighbor = roof_heights
-                    .iter()
-                    .filter_map(|&((nx, nz), nh)| {
-                        if (nx - x).abs() + (nz - z).abs() == 1 {
-                            Some(nh)
-                        } else {
-                            None
-                        }
-                    })
-                    .any(|nh| nh < roof_height);
-
-                // Fill from base height to calculated roof height
-                for y in base_height..=roof_height {
-                    if y == roof_height && has_lower_neighbor {
-                        // Pre-compute stair direction
-                        let stair_block_with_props = if ridge_runs_along_x {
-                            if z < center_z {
-                                create_stair_with_properties(
-                                    stair_block_material,
-                                    StairFacing::South,
-                                    StairShape::Straight,
-                                )
-                            } else {
-                                create_stair_with_properties(
-                                    stair_block_material,
-                                    StairFacing::North,
-                                    StairShape::Straight,
-                                )
-                            }
-                        } else if x < center_x {
-                            create_stair_with_properties(
-                                stair_block_material,
-                                StairFacing::East,
-                                StairShape::Straight,
-                            )
-                        } else {
-                            create_stair_with_properties(
-                                stair_block_material,
-                                StairFacing::West,
-                                StairShape::Straight,
-                            )
-                        };
-
-                        blocks_to_place.push((x, y, z, roof_block, Some(stair_block_with_props)));
-                    } else {
-                        blocks_to_place.push((x, y, z, roof_block, None));
-                    }
-                }
-            }
-
-            // Batch place all blocks to reduce function call overhead
-            for (x, y, z, block, stair_props) in blocks_to_place {
-                if let Some(stair_block) = stair_props {
-                    editor.set_block_with_properties_absolute(
-                        stair_block,
-                        x,
-                        y + abs_terrain_offset,
-                        z,
-                        None,
-                        None,
-                    );
-                } else {
-                    editor.set_block_absolute(block, x, y + abs_terrain_offset, z, None, None);
-                }
-            }
+            generate_gabled_roof(editor, roof_area, &config, roof_orientation);
         }
 
         RoofType::Hipped => {
-            // Calculate building dimensions and determine the long axis
-            let width = max_x - min_x;
-            let length = max_z - min_z;
-
-            // Determine if building is significantly rectangular or more square-shaped
-            let is_rectangular =
-                (width as f64 / length as f64 > 1.3) || (length as f64 / width as f64 > 1.3);
-            let width_is_longer = width >= length;
+            let is_rectangular = (config.width() as f64 / config.length() as f64 > 1.3)
+                || (config.length() as f64 / config.width() as f64 > 1.3);
+            let width_is_longer = config.width() >= config.length();
             let ridge_axis_is_x = match roof_orientation {
-                Some(orientation) if orientation.eq_ignore_ascii_case("along") => width_is_longer,
-                Some(orientation) if orientation.eq_ignore_ascii_case("across") => !width_is_longer,
+                Some(o) if o.eq_ignore_ascii_case("along") => width_is_longer,
+                Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
                 _ => width_is_longer,
             };
+            let roof_peak_height =
+                config.base_height + if config.building_size() > 20 { 7 } else { 5 };
 
-            // Make roof taller and more pointy
-            let roof_peak_height = base_height + if width.max(length) > 20 { 7 } else { 5 };
-
-            // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
-                accent_block
-            } else {
-                wall_block
-            };
-
-            // Find the building's approximate center line along the long axis
             if is_rectangular {
-                // First pass: calculate all roof heights
-                let mut roof_heights = std::collections::HashMap::new();
-
-                for &(x, z) in floor_area {
-                    // Calculate distance to the ridge line
-                    let distance_to_ridge = if ridge_axis_is_x {
-                        // Distance in Z direction for X-axis ridge
-                        (z - center_z).abs()
-                    } else {
-                        // Distance in X direction for Z-axis ridge
-                        (x - center_x).abs()
-                    };
-
-                    // Calculate maximum distance from ridge to edge
-                    let max_distance_from_ridge = if ridge_axis_is_x {
-                        (max_z - min_z) / 2
-                    } else {
-                        (max_x - min_x) / 2
-                    };
-
-                    // Create proper slope from ridge (high) to edges (low)
-                    let slope_factor = if max_distance_from_ridge > 0 {
-                        distance_to_ridge as f64 / max_distance_from_ridge as f64
-                    } else {
-                        0.0
-                    };
-
-                    // Ridge gets peak height, edges get base height
-                    let roof_height = roof_peak_height
-                        - (slope_factor * (roof_peak_height - base_height) as f64) as i32;
-                    let roof_y = roof_height.max(base_height);
-                    roof_heights.insert((x, z), roof_y);
-                }
-
-                // Second pass: place blocks with stairs at height transitions
-                for &(x, z) in floor_area {
-                    let roof_height = roof_heights[&(x, z)];
-
-                    // Fill from base to calculated height
-                    for y in base_height..=roof_height {
-                        if y == roof_height {
-                            // Check if this is a height transition point by looking at neighboring blocks
-                            let has_lower_neighbor =
-                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)].iter().any(
-                                    |(nx, nz)| {
-                                        roof_heights
-                                            .get(&(*nx, *nz))
-                                            .is_some_and(|&nh| nh < roof_height)
-                                    },
-                                );
-
-                            if has_lower_neighbor {
-                                // Determine stair direction based on ridge orientation and position
-                                let stair_block_material = get_stair_block_for_material(roof_block);
-                                let stair_block_with_props = if ridge_axis_is_x {
-                                    // Ridge runs along X, slopes in Z direction
-                                    if z < center_z {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::South,
-                                            StairShape::Straight,
-                                        ) // Facing toward center (south)
-                                    } else {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::North,
-                                            StairShape::Straight,
-                                        ) // Facing toward center (north)
-                                    }
-                                } else {
-                                    // Ridge runs along Z, slopes in X direction
-                                    if x < center_x {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::East,
-                                            StairShape::Straight,
-                                        ) // Facing toward center (east)
-                                    } else {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::West,
-                                            StairShape::Straight,
-                                        ) // Facing toward center (west)
-                                    }
-                                };
-                                editor.set_block_with_properties_absolute(
-                                    stair_block_with_props,
-                                    x,
-                                    y + abs_terrain_offset,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                            } else {
-                                // Use regular roof block where height doesn't change (ridge area)
-                                editor.set_block_absolute(
-                                    roof_block,
-                                    x,
-                                    y + abs_terrain_offset,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                            }
-                        } else {
-                            // Fill interior with solid blocks
-                            editor.set_block_absolute(
-                                roof_block,
-                                x,
-                                y + abs_terrain_offset,
-                                z,
-                                None,
-                                None,
-                            );
-                        }
-                    }
-                }
+                generate_hipped_roof_rectangular(
+                    editor,
+                    roof_area,
+                    &config,
+                    ridge_axis_is_x,
+                    roof_peak_height,
+                );
             } else {
-                // For more complex or square buildings, use distance from center approach
-
-                // First pass: calculate all roof heights based on distance from center
-                let mut roof_heights = std::collections::HashMap::new();
-
-                for &(x, z) in floor_area {
-                    // Calculate distance from center point
-                    let dx = (x - center_x) as f64;
-                    let dz = (z - center_z) as f64;
-                    let distance_from_center = (dx * dx + dz * dz).sqrt();
-
-                    // Calculate maximum possible distance from center to any corner
-                    let max_distance = {
-                        let corner_distances = [
-                            ((min_x - center_x).pow(2) + (min_z - center_z).pow(2)) as f64,
-                            ((min_x - center_x).pow(2) + (max_z - center_z).pow(2)) as f64,
-                            ((max_x - center_x).pow(2) + (min_z - center_z).pow(2)) as f64,
-                            ((max_x - center_x).pow(2) + (max_z - center_z).pow(2)) as f64,
-                        ];
-                        corner_distances
-                            .iter()
-                            .fold(0.0f64, |a, &b| a.max(b))
-                            .sqrt()
-                    };
-
-                    // Create slope from center (high) to edges (low)
-                    let distance_factor = if max_distance > 0.0 {
-                        (distance_from_center / max_distance).min(1.0)
-                    } else {
-                        0.0
-                    };
-
-                    // Center gets peak height, edges get base height
-                    let roof_height = roof_peak_height
-                        - (distance_factor * (roof_peak_height - base_height) as f64) as i32;
-                    let roof_y = roof_height.max(base_height);
-                    roof_heights.insert((x, z), roof_y);
-                }
-
-                // Second pass: place blocks with stairs at height transitions
-                for &(x, z) in floor_area {
-                    let roof_height = roof_heights[&(x, z)];
-
-                    // Fill from base height to calculated roof height
-                    for y in base_height..=roof_height {
-                        if y == roof_height {
-                            // Check if this is a height transition point by looking at neighboring blocks
-                            let has_lower_neighbor =
-                                [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)].iter().any(
-                                    |(nx, nz)| {
-                                        roof_heights
-                                            .get(&(*nx, *nz))
-                                            .is_some_and(|&nh| nh < roof_height)
-                                    },
-                                );
-
-                            if has_lower_neighbor {
-                                // For complex buildings, determine stair direction based on slope toward center
-                                let center_dx = x - center_x;
-                                let center_dz = z - center_z;
-
-                                let stair_block_material = get_stair_block_for_material(roof_block);
-                                let stair_block = if center_dx.abs() > center_dz.abs() {
-                                    // Primary slope is in X direction
-                                    if center_dx > 0 {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::West,
-                                            StairShape::Straight,
-                                        ) // Facing toward center
-                                    } else {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::East,
-                                            StairShape::Straight,
-                                        ) // Facing toward center
-                                    }
-                                } else {
-                                    // Primary slope is in Z direction
-                                    if center_dz > 0 {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::North,
-                                            StairShape::Straight,
-                                        ) // Facing toward center
-                                    } else {
-                                        create_stair_with_properties(
-                                            stair_block_material,
-                                            StairFacing::South,
-                                            StairShape::Straight,
-                                        ) // Facing toward center
-                                    }
-                                };
-
-                                editor.set_block_with_properties_absolute(
-                                    stair_block,
-                                    x,
-                                    y + abs_terrain_offset,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                            } else {
-                                // Use regular roof block where height doesn't change
-                                editor.set_block_absolute(
-                                    roof_block,
-                                    x,
-                                    y + abs_terrain_offset,
-                                    z,
-                                    None,
-                                    None,
-                                );
-                            }
-                        } else {
-                            // Fill interior with solid blocks
-                            editor.set_block_absolute(
-                                roof_block,
-                                x,
-                                y + abs_terrain_offset,
-                                z,
-                                None,
-                                None,
-                            );
-                        }
-                    }
-                }
+                generate_hipped_roof_square(editor, roof_area, &config, roof_peak_height);
             }
         }
 
         RoofType::Skillion => {
-            // Skillion roof - single sloping surface
-            let width = (max_x - min_x).max(1);
-            let building_size = (max_x - min_x).max(max_z - min_z);
-
-            // Scale roof height based on building size (4-10 blocks)
-            let max_roof_height = (building_size / 3).clamp(4, 10);
-
-            // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
-                accent_block
-            } else {
-                wall_block
-            };
-
-            // First pass: calculate all roof heights
-            let mut roof_heights = std::collections::HashMap::new();
-            for &(x, z) in floor_area {
-                let slope_progress = (x - min_x) as f64 / width as f64;
-                let roof_height = base_height + (slope_progress * max_roof_height as f64) as i32;
-                roof_heights.insert((x, z), roof_height);
-            }
-
-            // Second pass: place blocks with stairs only where height increases
-            for &(x, z) in floor_area {
-                let roof_height = roof_heights[&(x, z)];
-
-                // Fill from base height to calculated roof height to create solid roof
-                for y in base_height..=roof_height {
-                    if y == roof_height {
-                        // Check if this is a height transition point by looking at neighboring blocks
-                        let has_lower_neighbor = [(x - 1, z), (x + 1, z), (x, z - 1), (x, z + 1)]
-                            .iter()
-                            .any(|(nx, nz)| {
-                                roof_heights
-                                    .get(&(*nx, *nz))
-                                    .is_some_and(|&nh| nh < roof_height)
-                            });
-
-                        if has_lower_neighbor {
-                            // Place stairs at height transitions for a stepped appearance
-                            let stair_block_material = get_stair_block_for_material(roof_block);
-                            let stair_block_with_props = create_stair_with_properties(
-                                stair_block_material,
-                                StairFacing::East,
-                                StairShape::Straight,
-                            );
-                            editor.set_block_with_properties_absolute(
-                                stair_block_with_props,
-                                x,
-                                y + abs_terrain_offset,
-                                z,
-                                None,
-                                None,
-                            );
-                        } else {
-                            // Use regular roof material where height doesn't change
-                            editor.set_block_absolute(
-                                roof_block,
-                                x,
-                                y + abs_terrain_offset,
-                                z,
-                                None,
-                                None,
-                            );
-                        }
-                    } else {
-                        // Fill interior with solid blocks
-                        editor.set_block_absolute(
-                            roof_block,
-                            x,
-                            y + abs_terrain_offset,
-                            z,
-                            None,
-                            None,
-                        );
-                    }
-                }
-            }
+            generate_skillion_roof(editor, roof_area, &config);
         }
 
         RoofType::Pyramidal => {
-            // Pyramidal roof - all sides slope to a single central peak point
-            let building_size = (max_x - min_x).max(max_z - min_z);
-
-            // Calculate peak height based on building size (taller peak for larger buildings)
-            let peak_height = base_height + (building_size / 3).clamp(3, 8);
-
-            // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
-                accent_block
-            } else {
-                wall_block
-            };
-
-            // First pass: calculate all roof heights
-            let mut roof_heights = std::collections::HashMap::new();
-            for &(x, z) in floor_area {
-                // Calculate distance from this point to the center
-                let dx = (x - center_x).abs() as f64;
-                let dz = (z - center_z).abs() as f64;
-
-                // Use the maximum distance to either edge to determine slope
-                // This creates the pyramid effect where all sides slope equally
-                let distance_to_edge = dx.max(dz);
-
-                // Calculate maximum distance from center to any edge
-                let max_distance = ((max_x - min_x) / 2).max((max_z - min_z) / 2) as f64;
-
-                // Calculate height based on distance from center
-                // Points closer to center are higher, creating the pyramid slope
-                let height_factor = if max_distance > 0.0 {
-                    (1.0 - (distance_to_edge / max_distance)).max(0.0f64)
-                } else {
-                    1.0
-                };
-
-                let roof_height =
-                    base_height + (height_factor * (peak_height - base_height) as f64) as i32;
-                roof_heights.insert((x, z), roof_height);
-            }
-
-            // Second pass: place blocks with stairs at the surface
-            for &(x, z) in floor_area {
-                let roof_height = roof_heights[&(x, z)];
-
-                // Fill from base height to calculated roof height to create solid pyramid
-                for y in base_height..=roof_height {
-                    if y == roof_height {
-                        // Place stairs at the surface with correct facing direction
-                        // Determine which direction the stairs should face based on the slope
-                        let dx = x - center_x;
-                        let dz = z - center_z;
-
-                        // Check if there are higher neighbors to determine stair orientation
-                        let north_height = roof_heights
-                            .get(&(x, z - 1))
-                            .copied()
-                            .unwrap_or(base_height);
-                        let south_height = roof_heights
-                            .get(&(x, z + 1))
-                            .copied()
-                            .unwrap_or(base_height);
-                        let west_height = roof_heights
-                            .get(&(x - 1, z))
-                            .copied()
-                            .unwrap_or(base_height);
-                        let east_height = roof_heights
-                            .get(&(x + 1, z))
-                            .copied()
-                            .unwrap_or(base_height);
-
-                        // Check for corner situations where two directions have lower neighbors
-                        let has_lower_north = north_height < roof_height;
-                        let has_lower_south = south_height < roof_height;
-                        let has_lower_west = west_height < roof_height;
-                        let has_lower_east = east_height < roof_height;
-
-                        // Check for corner situations (two adjacent directions are lower)
-                        let stair_block_material = get_stair_block_for_material(roof_block);
-                        let stair_block = if has_lower_north && has_lower_west {
-                            create_stair_with_properties(
-                                stair_block_material,
-                                StairFacing::East,
-                                StairShape::OuterRight,
-                            )
-                        } else if has_lower_north && has_lower_east {
-                            create_stair_with_properties(
-                                stair_block_material,
-                                StairFacing::South,
-                                StairShape::OuterRight,
-                            )
-                        } else if has_lower_south && has_lower_west {
-                            create_stair_with_properties(
-                                stair_block_material,
-                                StairFacing::East,
-                                StairShape::OuterLeft,
-                            )
-                        } else if has_lower_south && has_lower_east {
-                            create_stair_with_properties(
-                                stair_block_material,
-                                StairFacing::North,
-                                StairShape::OuterLeft,
-                            )
-                        } else {
-                            // Single direction
-                            if dx.abs() > dz.abs() {
-                                // Primary slope is in X direction
-                                if dx > 0 && east_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::West,
-                                        StairShape::Straight,
-                                    ) // Facing west (stairs face toward center)
-                                } else if dx < 0 && west_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::East,
-                                        StairShape::Straight,
-                                    ) // Facing east (stairs face toward center)
-                                } else if dz > 0 && south_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::North,
-                                        StairShape::Straight,
-                                    ) // Facing north (stairs face toward center)
-                                } else if dz < 0 && north_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::South,
-                                        StairShape::Straight,
-                                    ) // Facing south (stairs face toward center)
-                                } else {
-                                    BlockWithProperties::simple(roof_block) // Use regular block if no clear slope direction
-                                }
-                            } else {
-                                // Primary slope is in Z direction
-                                if dz > 0 && south_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::North,
-                                        StairShape::Straight,
-                                    ) // Facing north (stairs face toward center)
-                                } else if dz < 0 && north_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::South,
-                                        StairShape::Straight,
-                                    ) // Facing south (stairs face toward center)
-                                } else if dx > 0 && east_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::West,
-                                        StairShape::Straight,
-                                    ) // Facing west (stairs face toward center)
-                                } else if dx < 0 && west_height < roof_height {
-                                    create_stair_with_properties(
-                                        stair_block_material,
-                                        StairFacing::East,
-                                        StairShape::Straight,
-                                    ) // Facing east (stairs face toward center)
-                                } else {
-                                    BlockWithProperties::simple(roof_block) // Use regular block if no clear slope direction
-                                }
-                            }
-                        };
-
-                        editor.set_block_with_properties_absolute(
-                            stair_block,
-                            x,
-                            y + abs_terrain_offset,
-                            z,
-                            None,
-                            None,
-                        );
-                    } else {
-                        // Fill interior with solid blocks
-                        editor.set_block_absolute(
-                            roof_block,
-                            x,
-                            y + abs_terrain_offset,
-                            z,
-                            None,
-                            None,
-                        );
-                    }
-                }
-            }
+            generate_pyramidal_roof(editor, roof_area, &config);
         }
 
         RoofType::Dome => {
-            // Dome roof - rounded hemispherical structure
-            let radius = ((max_x - min_x).max(max_z - min_z) / 2) as f64;
-
-            // 50% accent block, otherwise wall block for roof
-            let mut rng = rand::thread_rng();
-            let roof_block = if rng.gen_bool(0.5) {
-                accent_block
-            } else {
-                wall_block
-            };
-
-            for &(x, z) in floor_area {
-                let distance_from_center = ((x - center_x).pow(2) + (z - center_z).pow(2)) as f64;
-                let normalized_distance = (distance_from_center.sqrt() / radius).min(1.0);
-
-                // Use hemisphere equation to determine the height
-                let height_factor = (1.0 - normalized_distance * normalized_distance).sqrt();
-                let surface_height = base_height + (height_factor * (radius * 0.8)) as i32;
-
-                // Fill from the base to the surface
-                for y in base_height..=surface_height {
-                    editor.set_block_absolute(roof_block, x, y + abs_terrain_offset, z, None, None);
-                }
-            }
+            generate_dome_roof(editor, roof_area, &config);
         }
     }
 }
@@ -1517,18 +3759,30 @@ pub fn generate_building_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
 ) {
-    // Skip building:part relations if layer or level is negative (underground parts)
-    if relation.tags.contains_key("building:part") {
-        if let Some(layer) = relation.tags.get("layer") {
-            if layer.parse::<i32>().unwrap_or(0) < 0 {
-                return;
-            }
+    // Skip underground buildings/building parts
+    // Check layer tag
+    if let Some(layer) = relation.tags.get("layer") {
+        if layer.parse::<i32>().unwrap_or(0) < 0 {
+            return;
         }
-        if let Some(level) = relation.tags.get("level") {
-            if level.parse::<i32>().unwrap_or(0) < 0 {
-                return;
-            }
+    }
+    // Check level tag
+    if let Some(level) = relation.tags.get("level") {
+        if level.parse::<i32>().unwrap_or(0) < 0 {
+            return;
         }
+    }
+    // Check location tag
+    if let Some(location) = relation.tags.get("location") {
+        if location == "underground" || location == "subway" {
+            return;
+        }
+    }
+    // Check building:levels:underground without building:levels
+    if relation.tags.contains_key("building:levels:underground")
+        && !relation.tags.contains_key("building:levels")
+    {
+        return;
     }
 
     // Extract levels from relation tags
