@@ -630,6 +630,8 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         // Oak items mapped to dark_oak in Bedrock (or generic equivalents)
         "oak_pressure_plate" => BedrockBlock::simple("wooden_pressure_plate"),
         "oak_door" => BedrockBlock::simple("wooden_door"),
+        "spruce_door" => BedrockBlock::simple("spruce_door"),
+        "dark_oak_door" => BedrockBlock::simple("dark_oak_door"),
         "oak_trapdoor" => BedrockBlock::simple("trapdoor"),
 
         // Bed (Bedrock uses single "bed" block with color state)
@@ -655,8 +657,14 @@ pub fn to_bedrock_block_with_properties(
 ) -> BedrockBlock {
     let java_name = block.name();
 
+    // If no stored properties were passed, fall back to block.properties()
+    // so that blocks placed via set_block_absolute (e.g. doors with half=upper/lower)
+    // still get their default properties forwarded to the Bedrock converter.
+    let fallback_props = block.properties();
+    let effective_properties = java_properties.or(fallback_props.as_ref());
+
     // Extract Java properties as a map if present
-    let props_map = java_properties.and_then(|v| {
+    let props_map = effective_properties.and_then(|v| {
         if let fastnbt::Value::Compound(map) = v {
             Some(map)
         } else {
@@ -682,6 +690,11 @@ pub fn to_bedrock_block_with_properties(
     // Handle logs with axis property
     if java_name.ends_with("_log") || java_name.ends_with("_wood") {
         return convert_log(java_name, props_map);
+    }
+
+    // Handle doors with half property (upper/lower → upper_block_bit)
+    if java_name.ends_with("_door") && java_name != "iron_door" {
+        return convert_door(java_name, props_map);
     }
 
     // Fall back to basic conversion without properties
@@ -877,6 +890,85 @@ fn convert_log(
         states.insert(
             "pillar_axis".to_string(),
             BedrockBlockStateValue::String("y".to_string()),
+        );
+    }
+
+    BedrockBlock {
+        name: format!("minecraft:{bedrock_name}"),
+        states,
+    }
+}
+
+/// Convert Java door block to Bedrock format with upper_block_bit.
+///
+/// Java doors use `half=upper/lower`, Bedrock uses `upper_block_bit` (bool).
+/// Also maps door names: `oak_door` → `wooden_door`, others keep their names.
+fn convert_door(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let bedrock_name = match java_name {
+        "oak_door" => "wooden_door",
+        _ => java_name, // spruce_door, dark_oak_door, etc. keep their name
+    };
+
+    let mut states = HashMap::new();
+
+    if let Some(props) = props {
+        // Convert half: Java "upper"/"lower" → Bedrock upper_block_bit true/false
+        if let Some(fastnbt::Value::String(half)) = props.get("half") {
+            let is_upper = half == "upper";
+            states.insert(
+                "upper_block_bit".to_string(),
+                BedrockBlockStateValue::Bool(is_upper),
+            );
+        }
+
+        // Convert facing if present
+        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
+            let direction = match facing.as_str() {
+                "east" => 0,
+                "south" => 1,
+                "west" => 2,
+                "north" => 3,
+                _ => 0,
+            };
+            states.insert(
+                "direction".to_string(),
+                BedrockBlockStateValue::Int(direction),
+            );
+        }
+
+        // Convert hinge if present
+        if let Some(fastnbt::Value::String(hinge)) = props.get("hinge") {
+            let door_hinge = hinge == "right";
+            states.insert(
+                "door_hinge_bit".to_string(),
+                BedrockBlockStateValue::Bool(door_hinge),
+            );
+        }
+
+        // Convert open if present
+        if let Some(fastnbt::Value::String(open)) = props.get("open") {
+            let is_open = open == "true";
+            states.insert(
+                "open_bit".to_string(),
+                BedrockBlockStateValue::Bool(is_open),
+            );
+        }
+    }
+
+    // Defaults if no properties were set
+    if !states.contains_key("upper_block_bit") {
+        states.insert(
+            "upper_block_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
+    }
+    if !states.contains_key("direction") {
+        states.insert(
+            "direction".to_string(),
+            BedrockBlockStateValue::Int(0),
         );
     }
 

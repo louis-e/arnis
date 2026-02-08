@@ -308,6 +308,17 @@ impl Block {
             227 => "blue_stained_glass",
             228 => "light_blue_stained_glass",
             229 => "daylight_detector",
+            230 => "red_stained_glass",
+            231 => "yellow_stained_glass",
+            232 => "purple_stained_glass",
+            233 => "orange_stained_glass",
+            234 => "magenta_stained_glass",
+            235 => "flower_pot",
+            236 => "oak_trapdoor",
+            237 => "oak_trapdoor",
+            238 => "oak_trapdoor",
+            239 => "oak_trapdoor",
+            240 => "quartz_slab",
             _ => panic!("Invalid id"),
         }
     }
@@ -608,6 +619,44 @@ impl Block {
                 map.insert("persistent".to_string(), Value::String("true".to_string()));
                 map
             })),
+            // Quartz slab (top half) used as window sill
+            240 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("type".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            // Open oak trapdoor facing north (hangs flat against wall, looks like shutter)
+            236 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("north".to_string()));
+                map.insert("open".to_string(), Value::String("true".to_string()));
+                map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            // Open oak trapdoor facing south
+            237 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("south".to_string()));
+                map.insert("open".to_string(), Value::String("true".to_string()));
+                map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            // Open oak trapdoor facing east
+            238 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("east".to_string()));
+                map.insert("open".to_string(), Value::String("true".to_string()));
+                map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
+            // Open oak trapdoor facing west
+            239 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("facing".to_string(), Value::String("west".to_string()));
+                map.insert("open".to_string(), Value::String("true".to_string()));
+                map.insert("half".to_string(), Value::String("top".to_string()));
+                map
+            })),
             _ => None,
         }
     }
@@ -886,6 +935,17 @@ pub const CYAN_STAINED_GLASS: Block = Block::new(226);
 pub const BLUE_STAINED_GLASS: Block = Block::new(227);
 pub const LIGHT_BLUE_STAINED_GLASS: Block = Block::new(228);
 pub const DAYLIGHT_DETECTOR: Block = Block::new(229);
+pub const RED_STAINED_GLASS: Block = Block::new(230);
+pub const YELLOW_STAINED_GLASS: Block = Block::new(231);
+pub const PURPLE_STAINED_GLASS: Block = Block::new(232);
+pub const ORANGE_STAINED_GLASS: Block = Block::new(233);
+pub const MAGENTA_STAINED_GLASS: Block = Block::new(234);
+pub const FLOWER_POT: Block = Block::new(235);
+pub const OAK_TRAPDOOR_OPEN_NORTH: Block = Block::new(236);
+pub const OAK_TRAPDOOR_OPEN_SOUTH: Block = Block::new(237);
+pub const OAK_TRAPDOOR_OPEN_EAST: Block = Block::new(238);
+pub const OAK_TRAPDOOR_OPEN_WEST: Block = Block::new(239);
+pub const QUARTZ_SLAB_TOP: Block = Block::new(240);
 
 /// Maps a block to its corresponding stair variant
 #[inline]

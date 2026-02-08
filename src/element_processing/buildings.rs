@@ -225,18 +225,34 @@ impl BuildingCategory {
             return BuildingCategory::TallBuilding;
         }
 
-        // Check for historic buildings
-        if element.tags.contains_key("historic") {
-            return BuildingCategory::Historic;
-        }
-
-        // Get building type tag
+        // Check for religious buildings BEFORE the generic historic check.
+        // A church/mosque/temple that also carries a heritage tag should still
+        // be styled as Religious — its function defines its architecture.
         let building_type = element
             .tags
             .get("building")
             .or_else(|| element.tags.get("building:part"))
             .map(|s| s.as_str())
             .unwrap_or("yes");
+
+        let is_religious_building = matches!(
+            building_type,
+            "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple"
+        );
+        let is_religious_amenity = element
+            .tags
+            .get("amenity")
+            .map(|s| s.as_str())
+            == Some("place_of_worship");
+
+        if is_religious_building || is_religious_amenity {
+            return BuildingCategory::Religious;
+        }
+
+        // Check for historic buildings (only after ruling out religious ones)
+        if element.tags.contains_key("historic") {
+            return BuildingCategory::Historic;
+        }
 
         match building_type {
             // Single-family homes
@@ -852,6 +868,7 @@ struct BuildingConfig {
     has_windows: bool,
     has_garage_door: bool,
     has_single_door: bool,
+    category: BuildingCategory,
 }
 
 /// Building bounds calculated from nodes
@@ -1517,6 +1534,290 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
     }
 }
 
+// ============================================================================
+// Residential Window Decorations (Shutters & Window Boxes)
+// ============================================================================
+
+/// Picks the correct open-trapdoor block for the wall's **outward** normal.
+///
+/// The trapdoor `facing` must match the outward direction so that it hangs
+/// flat against the exterior wall surface.
+///
+/// `(nx, nz)` is an axis-aligned unit normal: exactly one of them is ±1,
+/// the other is 0.
+fn trapdoor_for_normal(nx: i32, nz: i32) -> Block {
+    match (nx, nz) {
+        (1, _) => OAK_TRAPDOOR_OPEN_EAST,   // wall faces east  (+X)
+        (-1, _) => OAK_TRAPDOOR_OPEN_WEST,  // wall faces west  (-X)
+        (_, 1) => OAK_TRAPDOOR_OPEN_SOUTH,  // wall faces south (+Z)
+        _ => OAK_TRAPDOOR_OPEN_NORTH,       // wall faces north (-Z)
+    }
+}
+
+/// Adds shutters and window boxes to **non-tall residential / house** buildings.
+///
+/// *Shutters* – open oak-trapdoors placed one block outward from the wall
+/// beside windows (at the wall blocks flanking a window strip).
+/// Both sides of a window always appear together.
+/// They appear only rarely (~12 % of eligible windows) and span all floors.
+///
+/// *Window boxes* – a flower pot placed one block outward at the floor row
+/// directly below a window strip.  They appear occasionally (~10 %).
+fn generate_residential_window_decorations(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+) {
+    // Only non-tall residential / house buildings get decorations.
+    if config.is_tall_building {
+        return;
+    }
+    if !matches!(
+        config.category,
+        BuildingCategory::Residential | BuildingCategory::House
+    ) {
+        return;
+    }
+    if !config.has_windows {
+        return;
+    }
+
+    // We need the building centroid so we can figure out which side of
+    // each wall segment is "outside".
+    let (cx, cz) = {
+        let mut sx: i64 = 0;
+        let mut sz: i64 = 0;
+        let n = element.nodes.len() as i64;
+        for node in &element.nodes {
+            sx += node.x as i64;
+            sz += node.z as i64;
+        }
+        if n == 0 {
+            return;
+        }
+        ((sx / n) as i32, (sz / n) as i32)
+    };
+
+    let mut previous_node: Option<(i32, i32)> = None;
+
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            // Direction along the wall segment
+            let seg_dx = x2 - x1;
+            let seg_dz = z2 - z1;
+
+            // Candidate outward normal (perpendicular to segment direction)
+            let (na_x, na_z) = (-seg_dz, seg_dx);
+
+            // Mid-point of the segment
+            let mid_x = (x1 + x2) / 2;
+            let mid_z = (z1 + z2) / 2;
+
+            // Pick the normal that points AWAY from the centroid.
+            // The test is: does (mid - centroid) point in the same
+            // half-plane as na?  If yes, na is already outward.
+            let dot = (mid_x - cx) as i64 * na_x as i64
+                + (mid_z - cz) as i64 * na_z as i64;
+            let (raw_nx, raw_nz) = if dot >= 0 {
+                (na_x, na_z)
+            } else {
+                (-na_x, -na_z)
+            };
+
+            // Snap to the dominant axis so the normal is always one of
+            // (±1, 0) or (0, ±1).  This avoids diagonal normals on
+            // walls that are slightly off-axis.
+            let (out_nx, out_nz) = if raw_nx.abs() >= raw_nz.abs() {
+                (raw_nx.signum(), 0)
+            } else {
+                (0, raw_nz.signum())
+            };
+
+            // Skip degenerate normals (zero-length segment)
+            if out_nx == 0 && out_nz == 0 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+
+            let trapdoor_block = trapdoor_for_normal(out_nx, out_nz);
+
+            // Walk the bresenham points of this wall segment
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+
+            for (bx, _, bz) in &points {
+                let bx = *bx;
+                let bz = *bz;
+
+                // Window pattern uses (bx + bz) % 6.
+                // Windows:  mod6 ∈ {0, 1, 2}
+                // Wall:     mod6 ∈ {3, 4, 5}
+                // Shutter-eligible positions are the wall blocks directly
+                // adjacent to a window strip: mod6 == 3 (right of window)
+                // and mod6 == 5 (left of next window).
+                let mod6 = ((bx + bz) % 6 + 6) % 6; // always 0..5
+
+                // --- Shutters ---
+                // Both sides of the same window must get the same random
+                // roll so they always appear as a matching pair.
+                // We derive the seed from the window centre (mod6 == 1):
+                //   mod6 == 3  →  centre_sum = (bx+bz) - 2
+                //   mod6 == 5  →  centre_sum = (bx+bz) + 2
+                if mod6 == 3 || mod6 == 5 {
+                    let centre_sum = if mod6 == 3 {
+                        bx + bz - 2
+                    } else {
+                        bx + bz + 2
+                    };
+                    let shutter_roll =
+                        coord_rng(centre_sum, centre_sum, element.id).gen_range(0u32..100);
+                    if shutter_roll < 12 {
+                        // Place an open trapdoor one block outward at every
+                        // window-height row (h % 4 != 0) on all floors.
+                        for h in (config.start_y_offset + 1)
+                            ..=(config.start_y_offset + config.building_height)
+                        {
+                            let above_floor = h > config.start_y_offset + 1;
+                            if above_floor && h % 4 != 0 {
+                                editor.set_block_absolute(
+                                    trapdoor_block,
+                                    bx + out_nx,
+                                    h + config.abs_terrain_offset,
+                                    bz + out_nz,
+                                    Some(&[AIR]),
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                }
+
+                // --- Window Boxes (sill + flower pot) ---
+                // Window columns are mod6 ∈ {0, 1, 2}.
+                // At each floor's h % 4 == 0 row (the wall row directly
+                // below that floor's window band) we:
+                //   • always place a quartz-slab sill one block outward
+                //     (spans the full window width),
+                //   • randomly (~10 %) also place a flower pot on it.
+                if mod6 < 3 {
+                    for h in (config.start_y_offset + 2)
+                        ..=(config.start_y_offset + config.building_height)
+                    {
+                        if h % 4 == 0 {
+                            let floor_idx = h / 4;
+                            let box_roll = coord_rng(
+                                bx.wrapping_add(floor_idx * 7),
+                                bz.wrapping_add(floor_idx * 13),
+                                element.id,
+                            )
+                            .gen_range(0u32..100);
+                            if box_roll < 10 {
+                                let lx = bx + out_nx;
+                                let lz = bz + out_nz;
+                                let abs_y = h + config.abs_terrain_offset;
+                                // Quartz slab sill (top-half) sitting
+                                // outside the wall at the floor row.
+                                editor.set_block_absolute(
+                                    QUARTZ_SLAB_TOP,
+                                    lx,
+                                    abs_y,
+                                    lz,
+                                    Some(&[AIR]),
+                                    None,
+                                );
+                                // Flower pot one block above the sill.
+                                editor.set_block_absolute(
+                                    FLOWER_POT,
+                                    lx,
+                                    abs_y + 1,
+                                    lz,
+                                    Some(&[AIR]),
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        previous_node = Some((x2, z2));
+    }
+}
+
+// ============================================================================
+// Hospital Decorations
+// ============================================================================
+
+/// Generates a helipad marking on the flat roof of a hospital.
+///
+/// Layout (7×7 yellow concrete pad with a 5×5 "H" pattern):
+/// The pad is placed near the centre of the roof surface.
+fn generate_hospital_helipad(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    floor_area: &[(i32, i32)],
+    config: &BuildingConfig,
+) {
+    if floor_area.is_empty() {
+        return;
+    }
+
+    let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
+
+    // Roof surface Y (on top of the flat roof)
+    let roof_y =
+        config.start_y_offset + config.building_height + config.abs_terrain_offset + 1;
+
+    // Find centre of the building footprint
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+    let center_x = (bounds.min_x + bounds.max_x) / 2;
+    let center_z = (bounds.min_z + bounds.max_z) / 2;
+
+    let pad_half = 3; // 7×7 pad → half-size = 3
+
+    // Verify the 7×7 area fits within the roof
+    let pad_fits = (-pad_half..=pad_half).all(|dx| {
+        (-pad_half..=pad_half).all(|dz| floor_set.contains(&(center_x + dx, center_z + dz)))
+    });
+
+    if !pad_fits {
+        return;
+    }
+
+    let replace_any: &[Block] = &[];
+
+    // The "H" character in a 5×5 grid (centred inside the 7×7 pad)
+    // Rows/cols indexed -2..=2
+    let is_h = |col: i32, row: i32| -> bool {
+        let ac = col.abs();
+        let ar = row.abs();
+        // Two vertical bars at col ±2, plus horizontal bar at row 0
+        ac == 2 || (ar == 0 && ac <= 2)
+    };
+
+    for dx in -pad_half..=pad_half {
+        for dz in -pad_half..=pad_half {
+            let bx = center_x + dx;
+            let bz = center_z + dz;
+
+            // Outer ring is always yellow
+            let is_border = dx.abs() == pad_half || dz.abs() == pad_half;
+
+            let block = if is_border {
+                YELLOW_CONCRETE
+            } else if is_h(dx, dz) {
+                WHITE_CONCRETE
+            } else {
+                YELLOW_CONCRETE
+            };
+
+            editor.set_block_absolute(block, bx, roof_y, bz, None, Some(replace_any));
+        }
+    }
+}
+
 /// Generates floors and ceilings for the building interior
 #[allow(clippy::too_many_arguments)]
 fn generate_floors_and_ceilings(
@@ -1778,6 +2079,7 @@ pub fn generate_buildings(
         has_windows: style.has_windows,
         has_garage_door: style.has_garage_door,
         has_single_door: style.has_single_door,
+        category,
     };
 
     // Generate walls - pass whether this building will have a sloped roof
@@ -1789,6 +2091,9 @@ pub fn generate_buildings(
     if config.has_garage_door || config.has_single_door {
         generate_special_doors(editor, element, &config, &wall_outline);
     }
+
+    // Add shutters and window boxes to small residential buildings
+    generate_residential_window_decorations(editor, element, &config);
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
     let roof_area: Vec<(i32, i32)> = {
@@ -1908,6 +2213,11 @@ fn generate_building_roof(
             roof_y,
             config.abs_terrain_offset,
         );
+    }
+
+    // Hospital helipad on the flat roof
+    if category == BuildingCategory::Hospital && style.roof_type == RoofType::Flat {
+        generate_hospital_helipad(editor, element, cached_floor_area, config);
     }
 }
 
