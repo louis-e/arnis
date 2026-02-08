@@ -219,7 +219,7 @@ fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
     }
     match dialog.pick_folder() {
         Some(folder) => Ok(folder.display().to_string()),
-        None => Err("No folder selected.".to_string()),
+        None => Ok(start_path),
     }
 }
 

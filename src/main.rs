@@ -191,22 +191,27 @@ fn run_cli() {
     };
 
     // Generate world
-    let _ = data_processing::generate_world_with_options(
+    match data_processing::generate_world_with_options(
         parsed_elements,
         xzbbox,
         args.bbox,
         ground,
         &args,
         generation_options,
-    );
-
-    // Print output path for Bedrock worlds
-    if args.bedrock {
-        println!(
-            "{} Bedrock world saved to: {}",
-            "Done!".green().bold(),
-            generation_path.display()
-        );
+    ) {
+        Ok(_) => {
+            if args.bedrock {
+                println!(
+                    "{} Bedrock world saved to: {}",
+                    "Done!".green().bold(),
+                    generation_path.display()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("{} {}", "Error:".red().bold(), e);
+            std::process::exit(1);
+        }
     }
 }
 

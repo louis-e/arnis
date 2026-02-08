@@ -1,6 +1,6 @@
 use crate::coordinate_system::geographic::LLBBox;
 use clap::Parser;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Command-line arguments parser
@@ -70,19 +70,18 @@ pub struct Args {
     pub timeout: Option<Duration>,
 }
 
-fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {
-    let mc_world_path = PathBuf::from(path);
-    if !mc_world_path.exists() {
-        return Err(format!("Path does not exist: {path}"));
+fn validate_minecraft_world_path(path: &Path) -> Result<(), String> {
+    if !path.exists() {
+        return Err(format!("Path does not exist: {}", path.display()));
     }
-    if !mc_world_path.is_dir() {
-        return Err(format!("Path is not a directory: {path}"));
+    if !path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path.display()));
     }
-    let region = mc_world_path.join("region");
+    let region = path.join("region");
     if !region.is_dir() {
-        return Err(format!("No Minecraft world found at {region:?}"));
+        return Err(format!("No Minecraft world found at {}", region.display()));
     }
-    Ok(mc_world_path)
+    Ok(())
 }
 
 /// Validates CLI arguments after parsing.
@@ -106,7 +105,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 );
             }
             Some(ref path) => {
-                validate_minecraft_world_path(path.to_str().unwrap_or(""))?;
+                validate_minecraft_world_path(path)?;
             }
         }
     }
