@@ -2273,7 +2273,7 @@ pub fn generate_buildings(
     };
 
     // Generate walls, pass whether this building will have a sloped roof
-    let has_sloped_roof = args.roof && style.generate_roof;
+    let has_sloped_roof = args.roof && style.generate_roof && style.roof_type != RoofType::Flat;
     let (wall_outline, corner_addup) =
         generate_building_walls(editor, element, &config, args, has_sloped_roof);
 
