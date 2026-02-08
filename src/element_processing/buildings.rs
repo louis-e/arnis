@@ -133,7 +133,7 @@ const HISTORIC_WALL_OPTIONS: [Block; 10] = [
     CRACKED_STONE_BRICKS,
     CHISELED_STONE_BRICKS,
     COBBLESTONE,
-    MOSSY_COBBLESTONE,
+    POLISHED_BLACKSTONE_BRICKS,
     DEEPSLATE_BRICKS,
     POLISHED_ANDESITE,
     ANDESITE,
@@ -207,7 +207,8 @@ impl BuildingCategory {
             // Check if this qualifies as a true skyscraper:
             // Must be significantly tall AND have skyscraper proportions
             // (taller than twice its longest side dimension)
-            let is_true_skyscraper = Self::has_skyscraper_proportions(element, building_height);
+            let is_true_skyscraper = building_height >= 160
+                && Self::has_skyscraper_proportions(element, building_height);
 
             if is_true_skyscraper {
                 // Deterministic variant selection based on element ID
