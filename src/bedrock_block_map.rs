@@ -290,6 +290,13 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
                 BedrockBlockStateValue::String("stone_brick".to_string()),
             )],
         ),
+        "brick_wall" => BedrockBlock::with_states(
+            "cobblestone_wall",
+            vec![(
+                "wall_block_type",
+                BedrockBlockStateValue::String("brick".to_string()),
+            )],
+        ),
 
         // Flowers - poppy is just "red_flower" in Bedrock
         "poppy" => BedrockBlock::with_states(
@@ -396,6 +403,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "concrete",
             vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
         ),
+        "green_concrete" => BedrockBlock::with_states(
+            "concrete",
+            vec![("color", BedrockBlockStateValue::String("green".to_string()))],
+        ),
 
         // Terracotta colors
         "white_terracotta" => BedrockBlock::with_states(
@@ -447,6 +458,13 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "stained_hardened_clay",
             vec![("color", BedrockBlockStateValue::String("black".to_string()))],
         ),
+        "light_gray_terracotta" => BedrockBlock::with_states(
+            "stained_hardened_clay",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("silver".to_string()),
+            )],
+        ),
         // Plain terracotta
         "terracotta" => BedrockBlock::simple("hardened_clay"),
 
@@ -477,6 +495,17 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
                 "color",
                 BedrockBlockStateValue::String("yellow".to_string()),
             )],
+        ),
+        "orange_wool" => BedrockBlock::with_states(
+            "wool",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("orange".to_string()),
+            )],
+        ),
+        "blue_wool" => BedrockBlock::with_states(
+            "wool",
+            vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
         ),
 
         // Carpets
@@ -522,6 +551,38 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             vec![(
                 "color",
                 BedrockBlockStateValue::String("light_blue".to_string()),
+            )],
+        ),
+        "red_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![("color", BedrockBlockStateValue::String("red".to_string()))],
+        ),
+        "yellow_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("yellow".to_string()),
+            )],
+        ),
+        "purple_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("purple".to_string()),
+            )],
+        ),
+        "orange_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("orange".to_string()),
+            )],
+        ),
+        "magenta_stained_glass" => BedrockBlock::with_states(
+            "stained_glass",
+            vec![(
+                "color",
+                BedrockBlockStateValue::String("magenta".to_string()),
             )],
         ),
         "daylight_detector" => BedrockBlock::simple("daylight_detector"),
@@ -633,6 +694,30 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "spruce_door" => BedrockBlock::simple("spruce_door"),
         "dark_oak_door" => BedrockBlock::simple("dark_oak_door"),
         "oak_trapdoor" => BedrockBlock::simple("trapdoor"),
+
+        // Vegetation with different Bedrock names
+        "fern" => BedrockBlock::with_states(
+            "tallgrass",
+            vec![(
+                "tall_grass_type",
+                BedrockBlockStateValue::String("fern".to_string()),
+            )],
+        ),
+        "large_fern" => BedrockBlock::with_states(
+            "double_plant",
+            vec![(
+                "double_plant_type",
+                BedrockBlockStateValue::String("fern".to_string()),
+            )],
+        ),
+        "cobweb" => BedrockBlock::simple("web"),
+
+        // Potted plants (Bedrock uses "flower_pot" for all variants;
+        // the contained plant is a block entity, not a block state)
+        "potted_poppy" => BedrockBlock::simple("flower_pot"),
+        "potted_red_tulip" => BedrockBlock::simple("flower_pot"),
+        "potted_dandelion" => BedrockBlock::simple("flower_pot"),
+        "potted_blue_orchid" => BedrockBlock::simple("flower_pot"),
 
         // Bed (Bedrock uses single "bed" block with color state)
         "red_bed" => BedrockBlock::with_states(
