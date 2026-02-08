@@ -1,6 +1,6 @@
 {
-  "choose_world": "Выбрать мир",
-  "no_world_selected": "Мир не выбран",
+  "create_world": "Создать мир",
+  "no_world_selected": "Мир не создан",
   "start_generation": "Начать генерацию",
   "custom_selection_confirmed": "Пользовательский выбор подтвержден!",
   "error_coordinates_out_of_range": "Ошибка: Координаты находятся вне зоны действия или указаны в неправильном порядке (сначала широта, затем долгота)",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Пользовательская ограничивающая рамка",
   "floodfill_timeout": "Тайм-аут заливки (сек)",
   "ground_level": "Уровень земли",
-  "choose_world_modal_title": "Выбрать мир",
-  "select_existing_world": "Выбрать существующий мир",
-  "generate_new_world": "Создать новый мир",
   "customization_settings": "Настройки персонализации",
   "footer_text": "© {year} Arnis v{version} от louis-e",
   "new_version_available": "Доступна новая версия! Нажмите здесь, чтобы скачать",
@@ -21,7 +18,7 @@
   "world_in_use": "Выбранный мир уже используется",
   "failed_to_create_world": "Не удалось создать новый мир",
   "no_world_selected_error": "Мир не выбран",
-  "select_minecraft_world_first": "Сначала выберите мир Minecraft!",
+  "create_world_first": "Сначала создайте мир!",
   "select_location_first": "Сначала выберите местоположение!",
   "area_too_large": "Эта область слишком велика и может превысить типичные вычислительные ограничения",
   "area_extensive": "Область довольно обширна и может потребовать значительного времени и ресурсов",
@@ -43,5 +40,6 @@
   "roof": "Генерация Крыши",
   "fillground": "Заполнить Землю",
   "city_boundaries": "Городской грунт",
-  "bedrock_use_java": "Используйте Java для миров"
+  "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",
+  "save_path": "Путь сохранения"
 }

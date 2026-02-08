@@ -1,6 +1,6 @@
 {
-  "choose_world": "Elegir mundo",
-  "no_world_selected": "Ningún mundo seleccionado",
+  "create_world": "Crear mundo",
+  "no_world_selected": "Ningún mundo creado",
   "start_generation": "Iniciar generación",
   "custom_selection_confirmed": "¡Selección personalizada confirmada!",
   "error_coordinates_out_of_range": "Error: Las coordenadas están fuera de rango o están ordenadas incorrectamente (Lat antes de Lng requerido).",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Caja delimitadora personalizada",
   "floodfill_timeout": "Tiempo de espera de relleno (seg)",
   "ground_level": "Nivel del suelo",
-  "choose_world_modal_title": "Elegir mundo",
-  "select_existing_world": "Seleccionar mundo existente",
-  "generate_new_world": "Generar nuevo mundo",
   "customization_settings": "Configuración de personalización",
   "footer_text": "© {year} Arnis v{version} por louis-e",
   "new_version_available": "¡Hay una nueva versión disponible! Haga clic aquí para descargarla.",
@@ -21,7 +18,7 @@
   "world_in_use": "El mundo seleccionado está en uso",
   "failed_to_create_world": "No se pudo crear un nuevo mundo",
   "no_world_selected_error": "Ningún mundo seleccionado",
-  "select_minecraft_world_first": "¡Seleccione un mundo de Minecraft primero!",
+  "create_world_first": "¡Crea un mundo primero!",
   "select_location_first": "¡Seleccione una ubicación primero!",
   "area_too_large": "Esta área es muy grande y podría exceder los límites típicos de computación.",
   "area_extensive": "El área es bastante extensa y puede requerir mucho tiempo y recursos.",
@@ -43,5 +40,6 @@
   "roof": "Generación de Tejado",
   "fillground": "Rellenar Suelo",
   "city_boundaries": "Suelo Urbano",
-  "bedrock_use_java": "Usa Java para elegir mundos"
+  "bedrock_auto_generated": "El mundo Bedrock se genera automáticamente",
+  "save_path": "Ruta de guardado"
 }

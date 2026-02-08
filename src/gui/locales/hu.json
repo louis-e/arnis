@@ -1,6 +1,6 @@
 {
-  "choose_world": "Világ kiválasztása",
-  "no_world_selected": "Nincs világ kiválasztva",
+  "create_world": "Világ létrehozása",
+  "no_world_selected": "Nincs világ létrehozva",
   "start_generation": "Generálás indítása",
   "custom_selection_confirmed": "Egyéni kiválasztás megerősítve",
   "error_coordinates_out_of_range": "Hiba: A koordináták tartományon kívül vannak vagy hibásan rendezettek (a szélességi foknak a hosszúsági fok előtt kell lennie)",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Egyéni határoló keret",
   "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Földszint",
-  "choose_world_modal_title": "Világ kiválasztása",
-  "select_existing_world": "Már létező világ kiválasztása",
-  "generate_new_world": "Új világ generálása",
   "customization_settings": "Testreszabási lehetőségek",
   "footer_text": "© {year} Arnis v{version} by louis-e",
   "new_version_available": "Egy új verzió elérhető kattints ide hogy letöltsd",
@@ -21,7 +18,7 @@
   "world_in_use": "A kiválasztott világ már használatban van",
   "failed_to_create_world": "Nem sikerült új világot létrehozni",
   "no_world_selected_error": "Nincs kiválasztott világ",
-  "select_minecraft_world_first": "Válassz ki egy Minecraft világot először!",
+  "create_world_first": "Először hozz létre egy világot!",
   "select_location_first": "Válassz egy helyet először!",
   "area_too_large": "Ez a terület nagyon nagy, és meghaladhatja a szokásos számítási korlátokat.",
   "area_extensive": "A terület meglehetősen kiterjedt, és jelentős időt és erőforrásokat igényelhet.",
@@ -43,5 +40,6 @@
   "roof": "Tető generálás",
   "fillground": "Talaj feltöltése",
   "city_boundaries": "Városi talaj",
-  "bedrock_use_java": "Java világválasztáshoz"
+  "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
+  "save_path": "Mentési útvonal"
 }

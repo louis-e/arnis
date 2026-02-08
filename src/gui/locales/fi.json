@@ -1,6 +1,6 @@
 {
-  "choose_world": "Valitse maailma",
-  "no_world_selected": "Maailmaa ei valittu",
+  "create_world": "Luo maailma",
+  "no_world_selected": "Maailmaa ei luotu",
   "start_generation": "Aloita generointi",
   "custom_selection_confirmed": "Mukautettu valinta vahvistettu!",
   "error_coordinates_out_of_range": "Virhe: Koordinaatit ovat kantaman ulkopuolella tai vääriin aseteltu (Lat ennen Lng vaadittu).",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Mukautettu rajoituslaatikko",
   "floodfill_timeout": "Täytön aikakatkaisu (sec)",
   "ground_level": "Maataso",
-  "choose_world_modal_title": "Valitse maailma",
-  "select_existing_world": "Valitse olemassa oleva maailma",
-  "generate_new_world": "Luo uusi maailma",
   "customization_settings": "Kustomisaatio-asetukset",
   "footer_text": "© {year} Arnis v{version} tekijänä louis-e",
   "new_version_available": "Uusi versio on saatavilla! Paina tästä ladataksesi sen.",
@@ -21,7 +18,7 @@
   "world_in_use": "Valittu maailma käytössä.",
   "failed_to_create_world": "Uuden maailman luonti epäonnistui",
   "no_world_selected_error": "Maailmaa ei valittu",
-  "select_minecraft_world_first": "Valitse Minecraft-maailma ensin!",
+  "create_world_first": "Luo ensin maailma!",
   "select_location_first": "Valitse paikka ensin!",
   "area_too_large": "Tämä alue on todella iso ja voi ylittää tyypilliset laskentarajat.",
   "area_extensive": "Alue on aika laaja ja voi viedä pitkän ajan ja resursseja.",
@@ -43,5 +40,6 @@
   "roof": "Katon luonti",
   "fillground": "Täytä maa",
   "city_boundaries": "Kaupungin maa",
-  "bedrock_use_java": "Käytä Javaa maailmojen valintaan"
+  "bedrock_auto_generated": "Bedrock-maailma luodaan automaattisesti",
+  "save_path": "Tallennuspolku"
 }

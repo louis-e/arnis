@@ -32,11 +32,11 @@
             <!-- World Selection Container -->
             <div class="world-selection-container">
               <div class="tooltip" style="width: 100%;">
-                <button type="button" id="choose-world-btn" onclick="openWorldPicker()" class="choose-world-btn">
-                  <span id="choose_world">Choose World</span>
+                <button type="button" id="choose-world-btn" onclick="createWorld()" class="choose-world-btn">
+                  <span id="choose_world">Create World</span>
                   <br>
                   <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
-                    No world selected
+                    No world created
                   </span>
                 </button>
               </div>
@@ -71,17 +71,6 @@
           </div>
         </div>
       </section>
-    </div>
-
-    <!-- World Picker Modal -->
-    <div id="world-modal" class="modal" style="display: none;">
-      <div class="modal-content">
-        <span class="close-button" onclick="closeWorldPicker()">&times;</span>
-        <h2 data-localize="choose_world_modal_title">Choose World</h2>
-
-        <button type="button" id="select-world-button" class="select-world-button" onclick="selectWorld(false)" data-localize="select_existing_world">Select existing world</button>
-        <button type="button" id="generate-world-button" class="generate-world-button" onclick="selectWorld(true)" data-localize="generate_new_world">Generate new world</button>
-      </div>
     </div>
 
     <!-- Settings Modal -->
@@ -186,6 +175,20 @@
               <option value="stadia-bright">Smooth Bright</option>
               <option value="stadia-dark">Smooth Dark</option>
             </select>
+          </div>
+        </div>
+
+        <!-- Save Path -->
+        <div class="settings-row">
+          <label for="save-path-input">
+            <span data-localize="save_path">Save Path</span>
+            <span class="tooltip-icon" data-tooltip="Directory where new Minecraft worlds are created">?</span>
+          </label>
+          <div class="settings-control save-path-control">
+            <input type="text" id="save-path-input" name="save-path-input" class="save-path-input" placeholder="Minecraft saves directory">
+            <button type="button" id="save-path-browse" class="save-path-browse" title="Browse...">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>
+            </button>
           </div>
         </div>
 

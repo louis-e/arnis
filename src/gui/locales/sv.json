@@ -1,6 +1,6 @@
 {
-  "choose_world": "Välj värld",
-  "no_world_selected": "Ingen värld vald",
+  "create_world": "Skapa värld",
+  "no_world_selected": "Ingen värld skapad",
   "start_generation": "Starta generering",
   "custom_selection_confirmed": "Anpassad markering bekräftad!",
   "error_coordinates_out_of_range": "Fel: Koordinater är utanför området eller felaktigt ordnade (Lat före Lng krävs).",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Anpassad begränsningsram",
   "floodfill_timeout": "Floodfill-tidsgräns (sek)",
   "ground_level": "Marknivå",
-  "choose_world_modal_title": "Välj värld",
-  "select_existing_world": "Välj existerande värld",
-  "generate_new_world": "Generera ny värld",
   "customization_settings": "Anpassningsinställningar",
   "footer_text": "© {year} Arnis v{version} by louis-e",
   "new_version_available": "Det finns en ny version tillgänglig! Klicka här för att ladda ner den.",
@@ -21,7 +18,7 @@
   "world_in_use": "Den valda världen används just nu",
   "failed_to_create_world": "Misslyckades att skapa ny värld",
   "no_world_selected_error": "Ingen värld vald fel",
-  "select_minecraft_world_first": "Välj Minecraft-värld först!",
+  "create_world_first": "Skapa en värld först!",
   "select_location_first": "Välj plats först!",
   "area_too_large": "Detta område är mycket stort och kan överskrida vanliga beräkningsgränser.",
   "area_extensive": "Området är ganska extensivt och kan ta betydande tid och resurser.",
@@ -43,5 +40,6 @@
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
   "city_boundaries": "Stadsmark",
-  "bedrock_use_java": "Använd Java för världar"
+  "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
+  "save_path": "Sökväg"
 }

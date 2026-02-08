@@ -123,7 +123,10 @@ pub fn run_gui() {
         )
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
-            gui_select_world,
+            gui_create_world,
+            gui_get_default_save_path,
+            gui_set_save_path,
+            gui_pick_save_directory,
             gui_start_generation,
             gui_get_version,
             gui_check_for_updates,
@@ -141,15 +144,17 @@ pub fn run_gui() {
         .expect("Error while starting the application UI (Tauri)");
 }
 
-#[tauri::command]
-fn gui_select_world(generate_new: bool) -> Result<String, i32> {
-    // Determine the default Minecraft 'saves' directory based on the OS
-    let default_dir: Option<PathBuf> = if cfg!(target_os = "windows") {
+/// Detects the default Minecraft Java Edition saves directory for the current OS.
+/// Checks standard install paths including Flatpak on Linux.
+/// Falls back to Desktop, then current directory.
+fn detect_minecraft_saves_directory() -> PathBuf {
+    // Try standard Minecraft saves directories per OS
+    let mc_saves: Option<PathBuf> = if cfg!(target_os = "windows") {
         env::var("APPDATA")
             .ok()
-            .map(|appdata: String| PathBuf::from(appdata).join(".minecraft").join("saves"))
+            .map(|appdata| PathBuf::from(appdata).join(".minecraft").join("saves"))
     } else if cfg!(target_os = "macos") {
-        dirs::home_dir().map(|home: PathBuf| {
+        dirs::home_dir().map(|home| {
             home.join("Library/Application Support/minecraft")
                 .join("saves")
         })
@@ -166,59 +171,67 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
         None
     };
 
-    if generate_new {
-        // Handle new world generation
-        // Try Minecraft saves directory first, fall back to current directory
-        let target_path = if let Some(default_path) = &default_dir {
-            if default_path.exists() {
-                default_path.clone()
-            } else {
-                // Minecraft directory doesn't exist, use current directory
-                env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-            }
-        } else {
-            // No default directory configured, use current directory
-            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        };
-
-        create_new_world(&target_path).map_err(|_| 3) // Error code 3: Failed to create new world
-    } else {
-        // Handle existing world selection
-        // Open the directory picker dialog
-        let dialog: FileDialog = FileDialog::new();
-        let dialog: FileDialog = if let Some(start_dir) = default_dir.filter(|dir| dir.exists()) {
-            dialog.set_directory(start_dir)
-        } else {
-            dialog
-        };
-
-        if let Some(path) = dialog.pick_folder() {
-            // Check if the "region" folder exists within the selected directory
-            if path.join("region").exists() {
-                // Check the 'session.lock' file
-                let session_lock_path = path.join("session.lock");
-                if session_lock_path.exists() {
-                    // Try to acquire a lock on the session.lock file
-                    if let Ok(file) = fs::File::open(&session_lock_path) {
-                        if fs2::FileExt::try_lock_shared(&file).is_err() {
-                            return Err(2); // Error code 2: The selected world is currently in use
-                        } else {
-                            // Release the lock immediately
-                            let _ = fs2::FileExt::unlock(&file);
-                        }
-                    }
-                }
-
-                return Ok(path.display().to_string());
-            } else {
-                // No Minecraft directory found, generating new world in custom user selected directory
-                return create_new_world(&path).map_err(|_| 3); // Error code 3: Failed to create new world
-            }
+    if let Some(saves_dir) = mc_saves {
+        if saves_dir.exists() {
+            return saves_dir;
         }
-
-        // If no folder was selected, return an error message
-        Err(4) // Error code 4: No world selected
     }
+
+    // Fallback to Desktop
+    if let Some(desktop) = dirs::desktop_dir() {
+        if desktop.exists() {
+            return desktop;
+        }
+    }
+
+    // Last resort: current directory
+    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Returns the default save path (auto-detected on first run).
+/// The frontend stores/retrieves this via localStorage and passes it here for validation.
+#[tauri::command]
+fn gui_get_default_save_path() -> String {
+    detect_minecraft_saves_directory().display().to_string()
+}
+
+/// Validates and returns a user-provided save path.
+/// Returns the path string if valid, or an error message.
+#[tauri::command]
+fn gui_set_save_path(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Path does not exist.".to_string());
+    }
+    if !p.is_dir() {
+        return Err("Path is not a directory.".to_string());
+    }
+    Ok(path)
+}
+
+/// Opens a native folder-picker dialog and returns the chosen path.
+#[tauri::command]
+fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
+    let start = PathBuf::from(&start_path);
+    let mut dialog = FileDialog::new();
+    if start.is_dir() {
+        dialog = dialog.set_directory(&start);
+    }
+    match dialog.pick_folder() {
+        Some(folder) => Ok(folder.display().to_string()),
+        None => Err("No folder selected.".to_string()),
+    }
+}
+
+/// Creates a new Java Edition world in the given base save directory.
+/// Called when the user clicks "Create World".
+#[tauri::command]
+fn gui_create_world(save_path: String) -> Result<String, i32> {
+    let base = PathBuf::from(&save_path);
+    if !base.is_dir() {
+        return Err(3); // Error code 3: Failed to create new world
+    }
+    create_new_world(&base).map_err(|_| 3)
 }
 
 fn create_new_world(base_path: &Path) -> Result<String, String> {
@@ -996,11 +1009,12 @@ fn gui_start_generation(
                 bbox,
                 file: None,
                 save_json_file: None,
-                path: if world_format == WorldFormat::JavaAnvil {
+                path: Some(if world_format == WorldFormat::JavaAnvil {
                     generation_path
                 } else {
                     world_path
-                },
+                }),
+                bedrock: world_format == WorldFormat::BedrockMcWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,

@@ -34,11 +34,11 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
   registerMessageEvent();
-  window.selectWorld = selectWorld;
+  window.createWorld = createWorld;
   window.startGeneration = startGeneration;
   setupProgressListener();
   initSettings();
-  initWorldPicker();
+  await initSavePath();
   initTelemetryConsent();
   handleBboxInput();
   const localization = await getLocalization();
@@ -97,12 +97,9 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 
 async function applyLocalization(localization) {
   const localizationElements = {
-    "span[id='choose_world']": "choose_world",
+    "span[id='choose_world']": "create_world",
     "#selected-world": "no_world_selected",
     "#start-button": "start_generation",
-    "h2[data-localize='choose_world_modal_title']": "choose_world_modal_title",
-    "button[data-localize='select_existing_world']": "select_existing_world",
-    "button[data-localize='generate_new_world']": "generate_new_world",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
@@ -119,6 +116,7 @@ async function applyLocalization(localization) {
     "span[data-localize='fillground']": "fillground",
     "span[data-localize='city_boundaries']": "city_boundaries",
     "span[data-localize='map_theme']": "map_theme",
+    "span[data-localize='save_path']": "save_path",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -298,6 +296,9 @@ function initSettings() {
   // World format toggle (Java/Bedrock)
   initWorldFormatToggle();
 
+  // Save path setting
+  initSavePathSetting();
+
   // Language selector
   const languageSelect = document.getElementById("language-select");
   const availableOptions = Array.from(languageSelect.options).map(opt => opt.value);
@@ -431,22 +432,22 @@ function updateFormatToggleUI(format) {
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
-    // Enable Choose World button for Java
+    // Enable Create World button for Java
     if (chooseWorldBtn) {
       chooseWorldBtn.disabled = false;
       chooseWorldBtn.style.opacity = '1';
       chooseWorldBtn.style.cursor = 'pointer';
     }
-    // Show default text (world was cleared when switching to Bedrock)
-    if (selectedWorldText) {
-      const noWorldText = window.localization?.no_world_selected || 'No world selected';
+    // Show appropriate text based on whether a world was already created
+    if (selectedWorldText && !worldPath) {
+      const noWorldText = window.localization?.no_world_selected || 'No world created';
       selectedWorldText.textContent = noWorldText;
       selectedWorldText.style.color = '#fecc44';
     }
   } else {
     javaBtn.classList.remove('format-active');
     bedrockBtn.classList.add('format-active');
-    // Disable Choose World button for Bedrock and clear any selected world
+    // Disable Create World button for Bedrock
     if (chooseWorldBtn) {
       chooseWorldBtn.disabled = true;
       chooseWorldBtn.style.opacity = '0.5';
@@ -454,9 +455,8 @@ function updateFormatToggleUI(format) {
     }
     // Clear world selection and show Bedrock info message
     worldPath = "";
-    isNewWorld = false;
     if (selectedWorldText) {
-      const bedrockText = window.localization?.bedrock_use_java || 'Use Java to select worlds';
+      const bedrockText = window.localization?.bedrock_auto_generated || 'Bedrock world is auto-generated';
       selectedWorldText.textContent = bedrockText;
       selectedWorldText.style.color = '#fecc44';
     }
@@ -509,24 +509,85 @@ function initTelemetryConsent() {
   };
 }
 
-function initWorldPicker() {
-  // World Picker
-  const worldPickerModal = document.getElementById("world-modal");
+/// Save path management
+let savePath = "";
 
-  // Open world picker modal
-  function openWorldPicker() {
-    worldPickerModal.style.display = "flex";
-    worldPickerModal.style.justifyContent = "center";
-    worldPickerModal.style.alignItems = "center";
+async function initSavePath() {
+  // Check if user has a saved path in localStorage
+  const saved = localStorage.getItem('arnis-save-path');
+  if (saved) {
+    // Validate the saved path still exists (handles upgrades / moved directories)
+    try {
+      await invoke('gui_set_save_path', { path: saved });
+      savePath = saved;
+    } catch (_) {
+      // Saved path is no longer valid – re-detect
+      console.warn("Stored save path no longer valid, re-detecting...");
+      localStorage.removeItem('arnis-save-path');
+      try {
+        savePath = await invoke('gui_get_default_save_path');
+        localStorage.setItem('arnis-save-path', savePath);
+      } catch (error) {
+        console.error("Failed to detect save path:", error);
+      }
+    }
+  } else {
+    // Auto-detect on first run
+    try {
+      savePath = await invoke('gui_get_default_save_path');
+      localStorage.setItem('arnis-save-path', savePath);
+    } catch (error) {
+      console.error("Failed to detect save path:", error);
+    }
   }
 
-  // Close world picker modal
-  function closeWorldPicker() {
-    worldPickerModal.style.display = "none";
+  // Populate the save path input in settings
+  const savePathInput = document.getElementById('save-path-input');
+  if (savePathInput) {
+    savePathInput.value = savePath;
   }
+}
 
-  window.openWorldPicker = openWorldPicker;
-  window.closeWorldPicker = closeWorldPicker;
+function initSavePathSetting() {
+  const savePathInput = document.getElementById('save-path-input');
+  if (!savePathInput) return;
+
+  savePathInput.value = savePath;
+
+  // Manual text input – validate on change, revert if invalid
+  savePathInput.addEventListener('change', async () => {
+    const newPath = savePathInput.value.trim();
+    if (!newPath) {
+      savePathInput.value = savePath;
+      return;
+    }
+
+    try {
+      const validated = await invoke('gui_set_save_path', { path: newPath });
+      savePath = validated;
+      localStorage.setItem('arnis-save-path', savePath);
+    } catch (_) {
+      // Invalid path – silently revert to previous value
+      savePathInput.value = savePath;
+    }
+  });
+
+  // Folder picker button
+  const browseBtn = document.getElementById('save-path-browse');
+  if (browseBtn) {
+    browseBtn.addEventListener('click', async () => {
+      try {
+        const picked = await invoke('gui_pick_save_directory', { startPath: savePath });
+        if (picked) {
+          savePath = picked;
+          savePathInput.value = savePath;
+          localStorage.setItem('arnis-save-path', savePath);
+        }
+      } catch (error) {
+        console.error("Folder picker failed:", error);
+      }
+    });
+  }
 }
 
 /**
@@ -711,56 +772,24 @@ function displayBboxInfoText(bboxText) {
 }
 
 let worldPath = "";
-let isNewWorld = false;
 
-async function selectWorld(generate_new_world) {
+async function createWorld() {
+  // Don't create if format is Bedrock (button should be disabled)
+  if (selectedWorldFormat === 'bedrock') return;
+
   try {
-    const worldName = await invoke('gui_select_world', { generateNew: generate_new_world });
+    const worldName = await invoke('gui_create_world', { savePath: savePath });
     if (worldName) {
       worldPath = worldName;
-      isNewWorld = generate_new_world;
       const lastSegment = worldName.split(/[\\/]/).pop();
       document.getElementById('selected-world').textContent = lastSegment;
       document.getElementById('selected-world').style.color = "#fecc44";
 
       // Notify that world changed (reset preview)
       notifyWorldChanged();
-
-      // If selecting an existing world, check for existing map data
-      if (!generate_new_world) {
-        await loadExistingWorldMapData();
-      }
     }
   } catch (error) {
     handleWorldSelectionError(error);
-  }
-
-  closeWorldPicker();
-}
-
-/**
- * Loads existing world map data if available (for existing worlds)
- * This will zoom to the location and auto-enable the preview
- */
-async function loadExistingWorldMapData() {
-  if (!worldPath) return;
-
-  try {
-    const mapData = await invoke('gui_get_world_map_data', { worldPath: worldPath });
-    if (mapData) {
-      currentWorldMapData = mapData;
-
-      // Send data to the map iframe with instruction to zoom and auto-enable
-      const mapFrame = document.querySelector('.map-container');
-      if (mapFrame && mapFrame.contentWindow) {
-        mapFrame.contentWindow.postMessage({
-          type: 'loadExistingWorldMap',
-          data: mapData
-        }, '*');
-      }
-    }
-  } catch (error) {
-    console.log("No existing world map data found:", error);
   }
 }
 
@@ -802,10 +831,10 @@ async function startGeneration() {
       return;
     }
 
-    // Only require world selection for Java format (Bedrock generates a new .mcworld file)
+    // Only require world creation for Java format (Bedrock generates a new .mcworld file)
     if (selectedWorldFormat === 'java' && (!worldPath || worldPath === "")) {
       const selectedWorld = document.getElementById('selected-world');
-      localizeElement(window.localization, { element: selectedWorld }, "select_minecraft_world_first");
+      localizeElement(window.localization, { element: selectedWorld }, "create_world_first");
       selectedWorld.style.color = "#fa7878";
       return;
     }
@@ -857,7 +886,7 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         cityBoundariesEnabled: city_boundaries,
-        isNewWorld: isNewWorld,
+        isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: selectedWorldFormat

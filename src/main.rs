@@ -32,10 +32,30 @@ mod world_editor;
 use args::Args;
 use clap::Parser;
 use colored::*;
+use coordinate_system::geographic::LLBBox;
+use std::path::PathBuf;
 use std::{env, fs, io::Write};
 
 #[cfg(feature = "gui")]
 mod gui;
+
+/// Returns the Desktop directory for Bedrock .mcworld file output.
+fn get_bedrock_output_directory() -> PathBuf {
+    dirs::desktop_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Gets the area name for a given bounding box using the center point
+fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
+    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+
+    match retrieve_data::fetch_area_name(center_lat, center_lon) {
+        Ok(Some(name)) => name,
+        _ => "Unknown Location".to_string(),
+    }
+}
 
 // If the user does not want the GUI, it's easiest to just mock the progress module to do nothing
 #[cfg(not(feature = "gui"))]
@@ -91,6 +111,37 @@ fn run_cli() {
     // Parse input arguments
     let args: Args = Args::parse();
 
+    // Validate arguments (path requirements differ between Java and Bedrock)
+    if let Err(e) = args::validate_args(&args) {
+        eprintln!("{}: {}", "Error".red().bold(), e);
+        std::process::exit(1);
+    }
+
+    // Determine world format and output path
+    let world_format = if args.bedrock {
+        world_editor::WorldFormat::BedrockMcWorld
+    } else {
+        world_editor::WorldFormat::JavaAnvil
+    };
+
+    // Build the generation output path and level name
+    let (generation_path, level_name) = if args.bedrock {
+        // Bedrock: generate .mcworld file in user-specified path or Desktop
+        let area_name = get_area_name_for_bedrock(&args.bbox);
+        let filename = format!("Arnis {}.mcworld", area_name);
+        let lvl_name = format!("Arnis World: {}", area_name);
+
+        let output_dir = args
+            .path
+            .clone()
+            .unwrap_or_else(get_bedrock_output_directory);
+        let output_path = output_dir.join(&filename);
+        (output_path, Some(lvl_name))
+    } else {
+        // Java: use the provided world path directly
+        (args.path.clone().unwrap(), None)
+    };
+
     // Fetch data
     let raw_data = match &args.file {
         Some(file) => retrieve_data::fetch_data_from_file(file),
@@ -131,8 +182,32 @@ fn run_cli() {
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
+    // Build generation options
+    let generation_options = data_processing::GenerationOptions {
+        path: generation_path.clone(),
+        format: world_format,
+        level_name,
+        spawn_point: None,
+    };
+
     // Generate world
-    let _ = data_processing::generate_world(parsed_elements, xzbbox, args.bbox, ground, &args);
+    let _ = data_processing::generate_world_with_options(
+        parsed_elements,
+        xzbbox,
+        args.bbox,
+        ground,
+        &args,
+        generation_options,
+    );
+
+    // Print output path for Bedrock worlds
+    if args.bedrock {
+        println!(
+            "{} Bedrock world saved to: {}",
+            "Done!".green().bold(),
+            generation_path.display()
+        );
+    }
 }
 
 fn main() {

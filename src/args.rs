@@ -19,9 +19,13 @@ pub struct Args {
     #[arg(long, group = "location")]
     pub save_json_file: Option<String>,
 
-    /// Path to the Minecraft world (required)
-    #[arg(long, value_parser = validate_minecraft_world_path)]
-    pub path: PathBuf,
+    /// Path to the Minecraft world (required for Java, optional for Bedrock)
+    #[arg(long)]
+    pub path: Option<PathBuf>,
+
+    /// Generate a Bedrock Edition world (.mcworld) instead of Java Edition
+    #[arg(long)]
+    pub bedrock: bool,
 
     /// Downloader method (requests/curl/wget) (optional)
     #[arg(long, default_value = "requests")]
@@ -81,6 +85,34 @@ fn validate_minecraft_world_path(path: &str) -> Result<PathBuf, String> {
     Ok(mc_world_path)
 }
 
+/// Validates CLI arguments after parsing.
+/// For Java Edition: `--path` is required and must point to an existing Minecraft world with a `region` subdirectory.
+/// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
+pub fn validate_args(args: &Args) -> Result<(), String> {
+    if args.bedrock {
+        // Bedrock: path is optional; if provided, it must be an existing directory
+        if let Some(ref path) = args.path {
+            if !path.is_dir() {
+                return Err(format!("Path is not a directory: {}", path.display()));
+            }
+        }
+    } else {
+        // Java: path is required and must be a valid Minecraft world
+        match &args.path {
+            None => {
+                return Err(
+                    "The --path argument is required for Java Edition. Use --bedrock for Bedrock Edition output."
+                        .to_string(),
+                );
+            }
+            Some(ref path) => {
+                validate_minecraft_world_path(path.to_str().unwrap_or(""))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntError> {
     let seconds = arg.parse()?;
     Ok(std::time::Duration::from_secs(seconds))
@@ -120,6 +152,26 @@ mod tests {
         let args = Args::parse_from(cmd.iter());
         assert!(!args.debug);
         assert!(!args.terrain);
+        assert!(!args.bedrock);
+    }
+
+    #[test]
+    fn test_bedrock_flag() {
+        // Bedrock mode doesn't require --path
+        let cmd = ["arnis", "--bedrock", "--bbox", "1,2,3,4"];
+        let args = Args::parse_from(cmd.iter());
+        assert!(args.bedrock);
+        assert!(args.path.is_none());
+        assert!(validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn test_java_requires_path() {
+        let cmd = ["arnis", "--bbox", "1,2,3,4"];
+        let args = Args::parse_from(cmd.iter());
+        assert!(!args.bedrock);
+        assert!(args.path.is_none());
+        assert!(validate_args(&args).is_err());
     }
 
     #[test]
@@ -131,7 +183,8 @@ mod tests {
         assert!(Args::try_parse_from(cmd.iter()).is_err());
 
         let cmd = ["arnis", "--path", tmp_path, "--bbox", "1,2,3,4"];
-        assert!(Args::try_parse_from(cmd.iter()).is_ok());
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_ok());
 
         let cmd = ["arnis", "--path", tmp_path, "--file", ""];
         assert!(Args::try_parse_from(cmd.iter()).is_err());
