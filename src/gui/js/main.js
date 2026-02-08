@@ -337,6 +337,14 @@ function initSettings() {
     // Reload localization with the new language
     const localization = await fetchLanguage(selectedLanguage);
     await applyLocalization(localization);
+
+    // Restore correct #selected-world text after localization overwrites it
+    updateFormatToggleUI(selectedWorldFormat);
+    // If a world was already created, show its name
+    if (worldPath) {
+      const lastSegment = worldPath.split(/[\\/]/).pop();
+      document.getElementById('selected-world').textContent = lastSegment;
+    }
   });
 
   // Tile theme selector
@@ -518,8 +526,9 @@ async function initSavePath() {
   if (saved) {
     // Validate the saved path still exists (handles upgrades / moved directories)
     try {
-      await invoke('gui_set_save_path', { path: saved });
-      savePath = saved;
+      const normalized = await invoke('gui_set_save_path', { path: saved });
+      savePath = normalized;
+      localStorage.setItem('arnis-save-path', savePath);
     } catch (_) {
       // Saved path is no longer valid – re-detect
       console.warn("Stored save path no longer valid, re-detecting...");
@@ -776,6 +785,12 @@ let worldPath = "";
 async function createWorld() {
   // Don't create if format is Bedrock (button should be disabled)
   if (selectedWorldFormat === 'bedrock') return;
+
+  // Don't create if save path hasn't been initialized
+  if (!savePath) {
+    console.warn("Cannot create world: save path not set");
+    return;
+  }
 
   try {
     const worldName = await invoke('gui_create_world', { savePath: savePath });

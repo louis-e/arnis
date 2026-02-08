@@ -62,24 +62,6 @@ impl Drop for SessionLock {
     }
 }
 
-/// Returns the Desktop directory for Bedrock .mcworld file output.
-fn get_bedrock_output_directory() -> PathBuf {
-    dirs::desktop_dir()
-        .or_else(dirs::home_dir)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-/// Gets the area name for a given bounding box using the center point
-fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
-    let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
-    let center_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-
-    match retrieve_data::fetch_area_name(center_lat, center_lon) {
-        Ok(Some(name)) => name,
-        _ => "Unknown Location".to_string(),
-    }
-}
-
 pub fn run_gui() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
@@ -227,7 +209,11 @@ fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
 /// Called when the user clicks "Create World".
 #[tauri::command]
 fn gui_create_world(save_path: String) -> Result<String, i32> {
-    let base = PathBuf::from(&save_path);
+    let trimmed = save_path.trim();
+    if trimmed.is_empty() {
+        return Err(3);
+    }
+    let base = PathBuf::from(trimmed);
     if !base.is_dir() {
         return Err(3); // Error code 3: Failed to create new world
     }
@@ -962,11 +948,9 @@ fn gui_start_generation(
                 }
                 WorldFormat::BedrockMcWorld => {
                     // Bedrock: generate .mcworld on Desktop with location-based name
-                    let area_name = get_area_name_for_bedrock(&bbox);
-                    let filename = format!("Arnis {}.mcworld", area_name);
-                    let lvl_name = format!("Arnis World: {}", area_name);
-
-                    let output_path = get_bedrock_output_directory().join(&filename);
+                    let output_dir = crate::bedrock_utils::get_bedrock_output_directory();
+                    let (output_path, lvl_name) =
+                        crate::bedrock_utils::build_bedrock_output(&bbox, output_dir);
                     (output_path, Some(lvl_name))
                 }
             };
