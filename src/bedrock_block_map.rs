@@ -966,10 +966,7 @@ fn convert_door(
         );
     }
     if !states.contains_key("direction") {
-        states.insert(
-            "direction".to_string(),
-            BedrockBlockStateValue::Int(0),
-        );
+        states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
     }
 
     BedrockBlock {

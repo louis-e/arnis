@@ -313,12 +313,20 @@ impl Block {
             232 => "purple_stained_glass",
             233 => "orange_stained_glass",
             234 => "magenta_stained_glass",
-            235 => "flower_pot",
+            235 => "potted_poppy",
             236 => "oak_trapdoor",
             237 => "oak_trapdoor",
             238 => "oak_trapdoor",
             239 => "oak_trapdoor",
             240 => "quartz_slab",
+            241 => "dark_oak_trapdoor",
+            242 => "spruce_trapdoor",
+            243 => "birch_trapdoor",
+            244 => "mud_brick_slab",
+            245 => "brick_slab",
+            246 => "potted_red_tulip",
+            247 => "potted_dandelion",
+            248 => "potted_blue_orchid",
             _ => panic!("Invalid id"),
         }
     }
@@ -946,6 +954,14 @@ pub const OAK_TRAPDOOR_OPEN_SOUTH: Block = Block::new(237);
 pub const OAK_TRAPDOOR_OPEN_EAST: Block = Block::new(238);
 pub const OAK_TRAPDOOR_OPEN_WEST: Block = Block::new(239);
 pub const QUARTZ_SLAB_TOP: Block = Block::new(240);
+pub const DARK_OAK_TRAPDOOR: Block = Block::new(241);
+pub const SPRUCE_TRAPDOOR: Block = Block::new(242);
+pub const BIRCH_TRAPDOOR: Block = Block::new(243);
+pub const MUD_BRICK_SLAB: Block = Block::new(244);
+pub const BRICK_SLAB: Block = Block::new(245);
+pub const POTTED_RED_TULIP: Block = Block::new(246);
+pub const POTTED_DANDELION: Block = Block::new(247);
+pub const POTTED_BLUE_ORCHID: Block = Block::new(248);
 
 /// Maps a block to its corresponding stair variant
 #[inline]

@@ -8,6 +8,7 @@ use crate::element_processing::subprocessor::buildings_interior::generate_buildi
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use fastnbt::Value;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -239,11 +240,8 @@ impl BuildingCategory {
             building_type,
             "religious" | "church" | "cathedral" | "chapel" | "mosque" | "synagogue" | "temple"
         );
-        let is_religious_amenity = element
-            .tags
-            .get("amenity")
-            .map(|s| s.as_str())
-            == Some("place_of_worship");
+        let is_religious_amenity =
+            element.tags.get("amenity").map(|s| s.as_str()) == Some("place_of_worship");
 
         if is_religious_building || is_religious_amenity {
             return BuildingCategory::Religious;
@@ -926,7 +924,7 @@ fn should_skip_underground_building(element: &ProcessedWay) -> bool {
         }
     }
 
-    // Check building:levels:underground - if this is the only levels tag, it's underground
+    // Check building:levels:underground, if this is the only levels tag, it's underground
     if element.tags.contains_key("building:levels:underground")
         && !element.tags.contains_key("building:levels")
     {
@@ -1350,7 +1348,7 @@ fn generate_building_walls(
                     );
                 }
 
-                // Add roof line only for flat roofs - sloped roofs will cover this area
+                // Add roof line only for flat roofs, sloped roofs will cover this area
                 if !has_sloped_roof {
                     let roof_line_block = if config.use_accent_roof_line {
                         config.accent_block
@@ -1508,7 +1506,7 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
             config.wall_block
         }
     } else if config.is_tall_building && config.use_vertical_windows {
-        // Tall building pattern - vertical window strips alternating with wall columns
+        // Tall building patter, vertical window strips alternating with wall columns
         if above_floor && (bx + bz) % 2 == 0 {
             config.window_block
         } else {
@@ -1538,31 +1536,68 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
 // Residential Window Decorations (Shutters & Window Boxes)
 // ============================================================================
 
-/// Picks the correct open-trapdoor block for the wall's **outward** normal.
-///
-/// The trapdoor `facing` must match the outward direction so that it hangs
-/// flat against the exterior wall surface.
-///
-/// `(nx, nz)` is an axis-aligned unit normal: exactly one of them is ±1,
-/// the other is 0.
-fn trapdoor_for_normal(nx: i32, nz: i32) -> Block {
+/// Trapdoor base blocks available for shutters (chosen once per building).
+const SHUTTER_TRAPDOOR_OPTIONS: [Block; 4] = [
+    OAK_TRAPDOOR_OPEN_NORTH, // re-used just for its name "oak_trapdoor"
+    DARK_OAK_TRAPDOOR,
+    SPRUCE_TRAPDOOR,
+    BIRCH_TRAPDOOR,
+];
+
+/// Slab base blocks available for window sills (chosen once per building).
+const SILL_SLAB_OPTIONS: [Block; 5] = [
+    QUARTZ_SLAB_TOP,  // quartz_slab
+    STONE_BRICK_SLAB, // stone_brick_slab
+    MUD_BRICK_SLAB,   // mud_brick_slab
+    OAK_SLAB,         // oak_slab
+    BRICK_SLAB,       // brick_slab
+];
+
+/// Potted plant options for window boxes (chosen randomly per pot).
+const POTTED_PLANT_OPTIONS: [Block; 4] = [
+    FLOWER_POT, // potted_poppy
+    POTTED_RED_TULIP,
+    POTTED_DANDELION,
+    POTTED_BLUE_ORCHID,
+];
+
+/// Creates a `BlockWithProperties` for an open trapdoor with the given
+/// base block and facing direction string.
+fn make_open_trapdoor(base: Block, facing: &str) -> BlockWithProperties {
+    let mut map: HashMap<String, Value> = HashMap::new();
+    map.insert("facing".to_string(), Value::String(facing.to_string()));
+    map.insert("open".to_string(), Value::String("true".to_string()));
+    map.insert("half".to_string(), Value::String("top".to_string()));
+    BlockWithProperties::new(base, Some(Value::Compound(map)))
+}
+
+/// Creates a `BlockWithProperties` for a top-half slab.
+fn make_top_slab(base: Block) -> BlockWithProperties {
+    let mut map: HashMap<String, Value> = HashMap::new();
+    map.insert("type".to_string(), Value::String("top".to_string()));
+    BlockWithProperties::new(base, Some(Value::Compound(map)))
+}
+
+/// Returns the facing string for the wall's outward normal.
+fn facing_for_normal(nx: i32, nz: i32) -> &'static str {
     match (nx, nz) {
-        (1, _) => OAK_TRAPDOOR_OPEN_EAST,   // wall faces east  (+X)
-        (-1, _) => OAK_TRAPDOOR_OPEN_WEST,  // wall faces west  (-X)
-        (_, 1) => OAK_TRAPDOOR_OPEN_SOUTH,  // wall faces south (+Z)
-        _ => OAK_TRAPDOOR_OPEN_NORTH,       // wall faces north (-Z)
+        (1, _) => "east",
+        (-1, _) => "west",
+        (_, 1) => "south",
+        _ => "north",
     }
 }
 
-/// Adds shutters and window boxes to **non-tall residential / house** buildings.
+/// Adds shutters and window sills (with occasional flower pots) to
+/// **non-tall residential / house** buildings.
 ///
-/// *Shutters* – open oak-trapdoors placed one block outward from the wall
-/// beside windows (at the wall blocks flanking a window strip).
-/// Both sides of a window always appear together.
-/// They appear only rarely (~12 % of eligible windows) and span all floors.
+/// *Shutters* – open trapdoors placed one block outward from the wall
+/// beside windows.  Both sides always appear together.  The trapdoor
+/// material is chosen randomly per building.
 ///
-/// *Window boxes* – a flower pot placed one block outward at the floor row
-/// directly below a window strip.  They appear occasionally (~10 %).
+/// *Window sills* – slabs spanning the full window width, one block outward
+/// at the floor row below each window band.  A flower pot sits on one or
+/// two of the three slab positions.  Slab material is random per building.
 fn generate_residential_window_decorations(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -1581,6 +1616,12 @@ fn generate_residential_window_decorations(
     if !config.has_windows {
         return;
     }
+
+    // --- Per-building random material choices ---
+    let mut rng = element_rng(element.id);
+    let trapdoor_base = SHUTTER_TRAPDOOR_OPTIONS[rng.gen_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())];
+    let sill_base = SILL_SLAB_OPTIONS[rng.gen_range(0..SILL_SLAB_OPTIONS.len())];
+    let sill_block = make_top_slab(sill_base);
 
     // We need the building centroid so we can figure out which side of
     // each wall segment is "outside".
@@ -1615,10 +1656,7 @@ fn generate_residential_window_decorations(
             let mid_z = (z1 + z2) / 2;
 
             // Pick the normal that points AWAY from the centroid.
-            // The test is: does (mid - centroid) point in the same
-            // half-plane as na?  If yes, na is already outward.
-            let dot = (mid_x - cx) as i64 * na_x as i64
-                + (mid_z - cz) as i64 * na_z as i64;
+            let dot = (mid_x - cx) as i64 * na_x as i64 + (mid_z - cz) as i64 * na_z as i64;
             let (raw_nx, raw_nz) = if dot >= 0 {
                 (na_x, na_z)
             } else {
@@ -1626,8 +1664,7 @@ fn generate_residential_window_decorations(
             };
 
             // Snap to the dominant axis so the normal is always one of
-            // (±1, 0) or (0, ±1).  This avoids diagonal normals on
-            // walls that are slightly off-axis.
+            // (±1, 0) or (0, ±1).
             let (out_nx, out_nz) = if raw_nx.abs() >= raw_nz.abs() {
                 (raw_nx.signum(), 0)
             } else {
@@ -1640,7 +1677,12 @@ fn generate_residential_window_decorations(
                 continue;
             }
 
-            let trapdoor_block = trapdoor_for_normal(out_nx, out_nz);
+            let facing = facing_for_normal(out_nx, out_nz);
+            let trapdoor_bwp = make_open_trapdoor(trapdoor_base, facing);
+
+            // Wall tangent (axis-aligned): perpendicular to the outward
+            // normal inside the XZ plane.
+            let (tan_x, tan_z) = (-out_nz, out_nx);
 
             // Walk the bresenham points of this wall segment
             let points =
@@ -1650,38 +1692,23 @@ fn generate_residential_window_decorations(
                 let bx = *bx;
                 let bz = *bz;
 
-                // Window pattern uses (bx + bz) % 6.
-                // Windows:  mod6 ∈ {0, 1, 2}
-                // Wall:     mod6 ∈ {3, 4, 5}
-                // Shutter-eligible positions are the wall blocks directly
-                // adjacent to a window strip: mod6 == 3 (right of window)
-                // and mod6 == 5 (left of next window).
                 let mod6 = ((bx + bz) % 6 + 6) % 6; // always 0..5
 
                 // --- Shutters ---
-                // Both sides of the same window must get the same random
-                // roll so they always appear as a matching pair.
-                // We derive the seed from the window centre (mod6 == 1):
-                //   mod6 == 3  →  centre_sum = (bx+bz) - 2
-                //   mod6 == 5  →  centre_sum = (bx+bz) + 2
+                // mod6 == 3 or 5 are the wall blocks flanking a window strip.
+                // Both sides share the same roll (seeded on window centre).
                 if mod6 == 3 || mod6 == 5 {
-                    let centre_sum = if mod6 == 3 {
-                        bx + bz - 2
-                    } else {
-                        bx + bz + 2
-                    };
+                    let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
                     let shutter_roll =
                         coord_rng(centre_sum, centre_sum, element.id).gen_range(0u32..100);
                     if shutter_roll < 12 {
-                        // Place an open trapdoor one block outward at every
-                        // window-height row (h % 4 != 0) on all floors.
                         for h in (config.start_y_offset + 1)
                             ..=(config.start_y_offset + config.building_height)
                         {
                             let above_floor = h > config.start_y_offset + 1;
                             if above_floor && h % 4 != 0 {
-                                editor.set_block_absolute(
-                                    trapdoor_block,
+                                editor.set_block_with_properties_absolute(
+                                    trapdoor_bwp.clone(),
                                     bx + out_nx,
                                     h + config.abs_terrain_offset,
                                     bz + out_nz,
@@ -1693,48 +1720,213 @@ fn generate_residential_window_decorations(
                     }
                 }
 
-                // --- Window Boxes (sill + flower pot) ---
+                // --- Window Sills / Balconies ---
                 // Window columns are mod6 ∈ {0, 1, 2}.
-                // At each floor's h % 4 == 0 row (the wall row directly
-                // below that floor's window band) we:
-                //   • always place a quartz-slab sill one block outward
-                //     (spans the full window width),
-                //   • randomly (~10 %) also place a flower pot on it.
+                // At each floor's h % 4 == 0 row we decide once per window
+                // whether this floor gets a sill OR a balcony (mutually
+                // exclusive).  The decision is shared across all three
+                // columns via a seed derived from the window centre.
                 if mod6 < 3 {
-                    for h in (config.start_y_offset + 2)
-                        ..=(config.start_y_offset + config.building_height)
-                    {
+                    // Stop 3 rows before the top so every sill has a
+                    // full window (h+1..h+3) above it, avoids placing
+                    // sills at the roof line.
+                    let sill_max = config.start_y_offset + config.building_height - 3;
+                    for h in (config.start_y_offset + 2)..=sill_max {
                         if h % 4 == 0 {
                             let floor_idx = h / 4;
-                            let box_roll = coord_rng(
-                                bx.wrapping_add(floor_idx * 7),
-                                bz.wrapping_add(floor_idx * 13),
+
+                            // Shared roll seeded from the window centre.
+                            let centre_sum = match mod6 {
+                                0 => bx + bz + 1,
+                                1 => bx + bz,
+                                _ => bx + bz - 1,
+                            };
+                            let decoration_roll = coord_rng(
+                                centre_sum.wrapping_add(floor_idx * 3),
+                                centre_sum.wrapping_add(floor_idx * 5),
                                 element.id,
                             )
                             .gen_range(0u32..100);
-                            if box_roll < 10 {
+
+                            let abs_y = h + config.abs_terrain_offset;
+
+                            if decoration_roll < 6 {
+                                // ── Window sill ──
                                 let lx = bx + out_nx;
                                 let lz = bz + out_nz;
-                                let abs_y = h + config.abs_terrain_offset;
-                                // Quartz slab sill (top-half) sitting
-                                // outside the wall at the floor row.
-                                editor.set_block_absolute(
-                                    QUARTZ_SLAB_TOP,
+
+                                editor.set_block_with_properties_absolute(
+                                    sill_block.clone(),
                                     lx,
                                     abs_y,
                                     lz,
                                     Some(&[AIR]),
                                     None,
                                 );
-                                // Flower pot one block above the sill.
-                                editor.set_block_absolute(
-                                    FLOWER_POT,
-                                    lx,
-                                    abs_y + 1,
-                                    lz,
-                                    Some(&[AIR]),
-                                    None,
+
+                                let mut pot_rng =
+                                    coord_rng(bx, bz.wrapping_add(floor_idx), element.id);
+                                let pot_here = if mod6 == 1 {
+                                    pot_rng.gen_range(0u32..100) < 70
+                                } else {
+                                    pot_rng.gen_range(0u32..100) < 25
+                                };
+                                if pot_here {
+                                    let plant = POTTED_PLANT_OPTIONS
+                                        [pot_rng.gen_range(0..POTTED_PLANT_OPTIONS.len())];
+                                    editor.set_block_absolute(
+                                        plant,
+                                        lx,
+                                        abs_y + 1,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+                            } else if decoration_roll < 10 && mod6 == 1 {
+                                // ── Balcony (placed once from centre col) ──
+                                // ── Balcony (placed once from centre col) ──
+                                // A small 3-wide × 2-deep platform with
+                                // open-trapdoor railing around the outer
+                                // edge and occasional furniture.
+                                //
+                                // Top-down layout (outward = up):
+                                //  depth 3:  [Tf] [Tf] [Tf]  front fence
+                                //  depth 2:  [ f] [ f] [ f]  floor
+                                //  depth 1:  [ f] [ f] [ f]  floor
+                                //            wall wall wall
+                                // Side fences at t=±2, depths 1–2.
+
+                                let balcony_floor = make_top_slab(SMOOTH_STONE_SLAB);
+
+                                // Facing strings for fences:
+                                // Front fence faces back toward building
+                                let front_facing = facing_for_normal(out_nx, out_nz);
+                                // Side fences face inward along tangent
+                                let left_facing = facing_for_normal(-tan_x, -tan_z);
+                                let right_facing = facing_for_normal(tan_x, tan_z);
+
+                                let front_fence = make_open_trapdoor(trapdoor_base, front_facing);
+                                let left_fence = make_open_trapdoor(trapdoor_base, left_facing);
+                                let right_fence = make_open_trapdoor(trapdoor_base, right_facing);
+
+                                // Place floor slabs (3 wide × 2 deep)
+                                for t in -1i32..=1 {
+                                    let fx = bx + tan_x * t;
+                                    let fz = bz + tan_z * t;
+
+                                    for depth in 1i32..=2 {
+                                        let px = fx + out_nx * depth;
+                                        let pz = fz + out_nz * depth;
+
+                                        editor.set_block_with_properties_absolute(
+                                            balcony_floor.clone(),
+                                            px,
+                                            abs_y,
+                                            pz,
+                                            Some(&[AIR]),
+                                            None,
+                                        );
+                                    }
+                                }
+
+                                // Front fence: trapdoors at depth 3
+                                for t in -1i32..=1 {
+                                    let fx = bx + tan_x * t + out_nx * 3;
+                                    let fz = bz + tan_z * t + out_nz * 3;
+                                    editor.set_block_with_properties_absolute(
+                                        front_fence.clone(),
+                                        fx,
+                                        abs_y + 1,
+                                        fz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+
+                                // Side fences: trapdoors at t=±2, depths 1–2
+                                for depth in 1i32..=2 {
+                                    // Left side (t = -2)
+                                    let lx = bx + tan_x * -2 + out_nx * depth;
+                                    let lz = bz + tan_z * -2 + out_nz * depth;
+                                    editor.set_block_with_properties_absolute(
+                                        left_fence.clone(),
+                                        lx,
+                                        abs_y + 1,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+
+                                    // Right side (t = +2)
+                                    let rx = bx + tan_x * 2 + out_nx * depth;
+                                    let rz = bz + tan_z * 2 + out_nz * depth;
+                                    editor.set_block_with_properties_absolute(
+                                        right_fence.clone(),
+                                        rx,
+                                        abs_y + 1,
+                                        rz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+
+                                // Occasional furniture on the balcony floor
+                                let mut furn_rng = coord_rng(
+                                    bx.wrapping_add(floor_idx * 11),
+                                    bz.wrapping_add(floor_idx * 17),
+                                    element.id,
                                 );
+                                let furniture_roll = furn_rng.gen_range(0u32..100);
+
+                                if furniture_roll < 30 {
+                                    // Cauldron "planter" with a leaf block
+                                    // on top, placed at depth 1 on one side
+                                    let side = if furn_rng.gen_bool(0.5) { -1i32 } else { 1 };
+                                    let cx = bx + tan_x * side + out_nx;
+                                    let cz = bz + tan_z * side + out_nz;
+                                    editor.set_block_absolute(
+                                        CAULDRON,
+                                        cx,
+                                        abs_y + 1,
+                                        cz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                    editor.set_block_absolute(
+                                        OAK_LEAVES,
+                                        cx,
+                                        abs_y + 2,
+                                        cz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                } else if furniture_roll < 55 {
+                                    // Stair "chair" facing outward, placed
+                                    // at depth 1 on one side
+                                    let side = if furn_rng.gen_bool(0.5) { -1i32 } else { 1 };
+                                    let sx = bx + tan_x * side + out_nx;
+                                    let sz = bz + tan_z * side + out_nz;
+                                    let stair_facing = match facing_for_normal(out_nx, out_nz) {
+                                        "north" => StairFacing::North,
+                                        "south" => StairFacing::South,
+                                        "east" => StairFacing::East,
+                                        _ => StairFacing::West,
+                                    };
+                                    let chair = create_stair_with_properties(
+                                        OAK_STAIRS,
+                                        stair_facing,
+                                        StairShape::Straight,
+                                    );
+                                    editor.set_block_with_properties_absolute(
+                                        chair,
+                                        sx,
+                                        abs_y + 1,
+                                        sz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
                             }
                         }
                     }
@@ -1767,8 +1959,7 @@ fn generate_hospital_helipad(
     let floor_set: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
     // Roof surface Y (on top of the flat roof)
-    let roof_y =
-        config.start_y_offset + config.building_height + config.abs_terrain_offset + 1;
+    let roof_y = config.start_y_offset + config.building_height + config.abs_terrain_offset + 1;
 
     // Find centre of the building footprint
     let bounds = BuildingBounds::from_nodes(&element.nodes);
@@ -2082,7 +2273,7 @@ pub fn generate_buildings(
         category,
     };
 
-    // Generate walls - pass whether this building will have a sloped roof
+    // Generate walls, pass whether this building will have a sloped roof
     let has_sloped_roof = args.roof && style.generate_roof;
     let (wall_outline, corner_addup) =
         generate_building_walls(editor, element, &config, args, has_sloped_roof);
@@ -2874,7 +3065,7 @@ fn generate_gabled_roof(
     config: &RoofConfig,
     roof_orientation: Option<&str>,
 ) {
-    // Create a HashSet for O(1) footprint lookups - this is the actual building shape
+    // Create a HashSet for O(1) footprint lookups, this is the actual building shape
     let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
     let width_is_longer = config.width() >= config.length();
