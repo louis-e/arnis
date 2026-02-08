@@ -2289,7 +2289,10 @@ pub fn generate_buildings(
     let roof_area: Vec<(i32, i32)> = {
         let mut area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
         area.extend(wall_outline.iter().copied());
-        area.into_iter().collect()
+        // Sort to ensure deterministic iteration order across runs/platforms
+        let mut v: Vec<(i32, i32)> = area.into_iter().collect();
+        v.sort_unstable();
+        v
     };
 
     // Generate floors and ceilings
@@ -2346,7 +2349,7 @@ fn generate_building_roof(
     config: &BuildingConfig,
     style: &BuildingStyle,
     bounds: &BuildingBounds,
-    cached_floor_area: &[(i32, i32)],
+    roof_area: &[(i32, i32)],
     category: BuildingCategory,
 ) {
     // Generate the roof using the pre-determined roof type from style
@@ -2360,7 +2363,7 @@ fn generate_building_roof(
         config.accent_block,
         config.roof_block,
         style.roof_type,
-        cached_floor_area,
+        roof_area,
         config.abs_terrain_offset,
     );
 
@@ -2370,7 +2373,7 @@ fn generate_building_roof(
             calculate_roof_peak_height(bounds, config.start_y_offset, config.building_height);
         generate_chimney(
             editor,
-            cached_floor_area,
+            roof_area,
             bounds.min_x,
             bounds.max_x,
             bounds.min_z,
@@ -2387,7 +2390,7 @@ fn generate_building_roof(
         generate_roof_terrace(
             editor,
             element,
-            cached_floor_area,
+            roof_area,
             bounds,
             roof_y,
             config.abs_terrain_offset,
@@ -2400,7 +2403,7 @@ fn generate_building_roof(
         generate_rooftop_equipment(
             editor,
             element,
-            cached_floor_area,
+            roof_area,
             roof_y,
             config.abs_terrain_offset,
         );
@@ -2408,7 +2411,7 @@ fn generate_building_roof(
 
     // Hospital helipad on the flat roof
     if category == BuildingCategory::Hospital && style.roof_type == RoofType::Flat {
-        generate_hospital_helipad(editor, element, cached_floor_area, config);
+        generate_hospital_helipad(editor, element, roof_area, config);
     }
 }
 
