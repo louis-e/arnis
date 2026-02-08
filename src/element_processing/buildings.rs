@@ -1784,7 +1784,6 @@ fn generate_residential_window_decorations(
                                 }
                             } else if decoration_roll < 10 && mod6 == 1 {
                                 // ── Balcony (placed once from centre col) ──
-                                // ── Balcony (placed once from centre col) ──
                                 // A small 3-wide × 2-deep platform with
                                 // open-trapdoor railing around the outer
                                 // edge and occasional furniture.
@@ -1901,12 +1900,11 @@ fn generate_residential_window_decorations(
                                         None,
                                     );
                                 } else if furniture_roll < 55 {
-                                    // Stair "chair" facing outward, placed
-                                    // at depth 1 on one side
+                                    // Stair "chair" facing outward
                                     let side = if furn_rng.gen_bool(0.5) { -1i32 } else { 1 };
                                     let sx = bx + tan_x * side + out_nx;
                                     let sz = bz + tan_z * side + out_nz;
-                                    let stair_facing = match facing_for_normal(out_nx, out_nz) {
+                                    let stair_facing = match facing_for_normal(-out_nx, -out_nz) {
                                         "north" => StairFacing::North,
                                         "south" => StairFacing::South,
                                         "east" => StairFacing::East,
