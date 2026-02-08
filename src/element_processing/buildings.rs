@@ -150,7 +150,7 @@ const SHED_WALL_OPTIONS: [Block; 1] = [OAK_LOG];
 /// Wall blocks for greenhouses (glass variants)
 const GREENHOUSE_WALL_OPTIONS: [Block; 4] = [
     GLASS,
-    GLASS_PANE,
+    CYAN_STAINED_GLASS,
     WHITE_STAINED_GLASS,
     LIGHT_GRAY_STAINED_GLASS,
 ];
@@ -319,7 +319,7 @@ impl BuildingCategory {
     /// Checks if a tall building has skyscraper proportions:
     /// building height >= 40 blocks AND height >= 2× the longest side of its bounding box.
     fn has_skyscraper_proportions(element: &ProcessedWay, building_height: i32) -> bool {
-        if building_height < 160 {
+        if building_height < 40 {
             return false;
         }
 
@@ -584,7 +584,7 @@ impl BuildingStylePreset {
     pub fn greenhouse() -> Self {
         Self {
             // Wall block is randomly chosen from GREENHOUSE_WALL_OPTIONS
-            roof_block: Some(SMOOTH_STONE_SLAB), // Slab roof (will randomize between oak and smooth stone)
+            roof_block: Some(SMOOTH_STONE_SLAB), // Smooth stone slab roof
             has_chimney: Some(false),
             use_accent_lines: Some(false),
             use_vertical_accent: Some(false),
@@ -855,7 +855,6 @@ struct BuildingConfig {
     floor_block: Block,
     window_block: Block,
     accent_block: Block,
-    #[allow(dead_code)] // Reserved for future use in roof generation
     roof_block: Option<Block>,
     use_vertical_windows: bool,
     use_horizontal_windows: bool,
@@ -1506,7 +1505,7 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
             config.wall_block
         }
     } else if config.is_tall_building && config.use_vertical_windows {
-        // Tall building patter, vertical window strips alternating with wall columns
+        // Tall building pattern, vertical window strips alternating with wall columns
         if above_floor && (bx + bz) % 2 == 0 {
             config.window_block
         } else {
@@ -2359,6 +2358,7 @@ fn generate_building_roof(
         config.floor_block,
         config.wall_block,
         config.accent_block,
+        config.roof_block,
         style.roof_type,
         cached_floor_area,
         config.abs_terrain_offset,
@@ -3666,6 +3666,7 @@ fn generate_roof(
     floor_block: Block,
     wall_block: Block,
     accent_block: Block,
+    roof_block_override: Option<Block>,
     roof_type: RoofType,
     roof_area: &[(i32, i32)],
     abs_terrain_offset: i32,
@@ -3674,7 +3675,7 @@ fn generate_roof(
         return;
     }
 
-    let config = RoofConfig::from_roof_area(
+    let mut config = RoofConfig::from_roof_area(
         roof_area,
         element.id,
         start_y_offset,
@@ -3684,14 +3685,24 @@ fn generate_roof(
         abs_terrain_offset,
     );
 
+    // If a preset specifies a dedicated roof block, use it instead of
+    // the randomly-derived wall/accent block.
+    if let Some(override_block) = roof_block_override {
+        config.roof_block = override_block;
+    }
+
     let roof_orientation = element.tags.get("roof:orientation").map(|s| s.as_str());
+
+    // For flat roofs, also honour the override so preset flat-roof
+    // materials (e.g. greenhouse smooth-stone slab) are respected.
+    let flat_roof_block = roof_block_override.unwrap_or(floor_block);
 
     match roof_type {
         RoofType::Flat => {
             generate_flat_roof(
                 editor,
                 roof_area,
-                floor_block,
+                flat_roof_block,
                 config.base_height,
                 abs_terrain_offset,
             );

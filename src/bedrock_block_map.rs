@@ -697,6 +697,11 @@ pub fn to_bedrock_block_with_properties(
         return convert_door(java_name, props_map);
     }
 
+    // Handle trapdoors with facing/open/half properties
+    if java_name.ends_with("_trapdoor") {
+        return convert_trapdoor(java_name, props_map);
+    }
+
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
 }
@@ -967,6 +972,76 @@ fn convert_door(
     }
     if !states.contains_key("direction") {
         states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
+    }
+
+    BedrockBlock {
+        name: format!("minecraft:{bedrock_name}"),
+        states,
+    }
+}
+
+/// Convert Java trapdoor block to Bedrock format with facing/open/half states.
+fn convert_trapdoor(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    // Map Java trapdoor names to Bedrock equivalents
+    let bedrock_name = match java_name {
+        "oak_trapdoor" => "trapdoor",
+        "iron_trapdoor" => "iron_trapdoor",
+        _ => java_name, // spruce_trapdoor, dark_oak_trapdoor, birch_trapdoor, etc.
+    };
+
+    let mut states = HashMap::new();
+
+    if let Some(props) = props {
+        // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3)
+        // Bedrock trapdoor: 0=south, 1=north, 2=east, 3=west
+        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
+            let direction = match facing.as_str() {
+                "south" => 0,
+                "north" => 1,
+                "east" => 2,
+                "west" => 3,
+                _ => 0,
+            };
+            states.insert(
+                "direction".to_string(),
+                BedrockBlockStateValue::Int(direction),
+            );
+        }
+
+        // Convert open: Java "true"/"false" → Bedrock open_bit
+        if let Some(fastnbt::Value::String(open)) = props.get("open") {
+            let is_open = open == "true";
+            states.insert(
+                "open_bit".to_string(),
+                BedrockBlockStateValue::Bool(is_open),
+            );
+        }
+
+        // Convert half: Java "top"/"bottom" → Bedrock upside_down_bit
+        if let Some(fastnbt::Value::String(half)) = props.get("half") {
+            let upside_down = half == "top";
+            states.insert(
+                "upside_down_bit".to_string(),
+                BedrockBlockStateValue::Bool(upside_down),
+            );
+        }
+    }
+
+    // Defaults if no properties were set
+    if !states.contains_key("direction") {
+        states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
+    }
+    if !states.contains_key("open_bit") {
+        states.insert("open_bit".to_string(), BedrockBlockStateValue::Bool(false));
+    }
+    if !states.contains_key("upside_down_bit") {
+        states.insert(
+            "upside_down_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
     }
 
     BedrockBlock {
