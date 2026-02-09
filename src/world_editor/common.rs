@@ -228,20 +228,24 @@ impl SectionToModify {
     /// Convert to Java Edition section format
     pub fn to_section(&self, y: i8) -> Section {
         // Fast path: Uniform section → single palette entry, no data array needed.
-        if let BlockStorage::Uniform(block) = &self.storage {
-            let palette_item = PaletteItem {
-                name: format!("{}:{}", block.namespace(), block.name()),
-                properties: block.properties(),
-            };
-            return Section {
-                block_states: Blockstates {
-                    palette: vec![palette_item],
-                    data: None,
+        // Only valid when no per-index properties exist, otherwise we must
+        // fall through to the general path so every index is checked.
+        if self.properties.is_empty() {
+            if let BlockStorage::Uniform(block) = &self.storage {
+                let palette_item = PaletteItem {
+                    name: format!("{}:{}", block.namespace(), block.name()),
+                    properties: block.properties(),
+                };
+                return Section {
+                    block_states: Blockstates {
+                        palette: vec![palette_item],
+                        data: None,
+                        other: FnvHashMap::default(),
+                    },
+                    y,
                     other: FnvHashMap::default(),
-                },
-                y,
-                other: FnvHashMap::default(),
-            };
+                };
+            }
         }
 
         // General path: mixed blocks.
@@ -557,11 +561,6 @@ impl WorldToModify {
                 }
             }
         }
-        if compacted > 0 {
-            eprintln!(
-                "[BlockStorage] Compacted {} section(s) from Full to Uniform",
-                compacted
-            );
-        }
+        let _ = compacted;
     }
 }

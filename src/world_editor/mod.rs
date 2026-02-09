@@ -716,7 +716,8 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, absolute_y, z).is_some()
     }
 
-    /// Sets a block only if the position is currently empty (AIR).
+    /// Sets a block only if no modification has been recorded yet at this
+    /// position (i.e. the in-memory overlay still holds AIR).
     ///
     /// This is faster than `set_block_absolute` with `None` whitelists/blacklists
     /// because it avoids the double HashMap traversal.
