@@ -342,6 +342,8 @@ impl FloodFillCache {
             // Highway areas (like pedestrian plazas) use flood fill when area=yes
             || (way.tags.contains_key("highway")
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
+            // Historic tomb polygons (e.g. tomb=pyramid)
+            || way.tags.contains_key("tomb")
     }
 
     /// Collects all building footprint coordinates from the pre-computed cache.

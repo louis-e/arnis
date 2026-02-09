@@ -3,9 +3,11 @@
 //! This module handles historic OSM elements including:
 //! - `historic=memorial` - Memorials, monuments, and commemorative structures
 
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::deterministic_rng::element_rng;
-use crate::osm_parser::ProcessedNode;
+use crate::floodfill_cache::FloodFillCache;
+use crate::osm_parser::{ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
@@ -204,4 +206,100 @@ fn generate_cross(editor: &mut WorldEditor, x: i32, z: i32, height: i32) {
         editor.set_block(STONE_BRICK_WALL, x - 1, arm_y, z, None, None);
         editor.set_block(STONE_BRICK_WALL, x + 1, arm_y, z, None, None);
     }
+}
+
+// ============================================================================
+// Pyramid Generation (tomb=pyramid)
+// ============================================================================
+
+/// Generates a solid sandstone pyramid from a way outline.
+///
+/// The pyramid is built by flood-filling the footprint at ground level,
+/// then shrinking the filled area inward by one block per layer until
+/// only a single apex block (or nothing) remains.
+pub fn generate_pyramid(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    if element.nodes.len() < 3 {
+        return;
+    }
+
+    // Get the footprint via flood fill
+    let footprint: Vec<(i32, i32)> =
+        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    if footprint.is_empty() {
+        return;
+    }
+
+    // Determine base Y from terrain or ground level
+    // Use the MINIMUM ground level so the pyramid sits on the lowest point
+    // and doesn't float in areas with elevation differences
+    let base_y = if args.terrain {
+        footprint
+            .iter()
+            .map(|&(x, z)| editor.get_ground_level(x, z))
+            .min()
+            .unwrap_or(args.ground_level)
+    } else {
+        args.ground_level
+    };
+
+    // Bounding box of the footprint
+    let min_x = footprint.iter().map(|&(x, _)| x).min().unwrap();
+    let max_x = footprint.iter().map(|&(x, _)| x).max().unwrap();
+    let min_z = footprint.iter().map(|&(_, z)| z).min().unwrap();
+    let max_z = footprint.iter().map(|&(_, z)| z).max().unwrap();
+
+    let center_x = (min_x + max_x) as f64 / 2.0;
+    let center_z = (min_z + max_z) as f64 / 2.0;
+
+    // The pyramid height is half the shorter side of the bounding box (classic proportions)
+    let width = (max_x - min_x + 1) as f64;
+    let length = (max_z - min_z + 1) as f64;
+    let half_base = width.min(length) / 2.0;
+    let pyramid_height = (half_base * args.scale).max(3.0) as i32;
+
+    // Build the pyramid layer by layer.
+    // For each layer, only place blocks whose Chebyshev distance from the
+    // footprint centre is within the shrinking radius AND that were in the
+    // original footprint.
+    for layer in 0..pyramid_height {
+        // The allowed radius shrinks linearly from half_base at layer 0 to 0
+        let radius = half_base * (1.0 - layer as f64 / pyramid_height as f64);
+        if radius < 0.0 {
+            break;
+        }
+
+        let y = base_y + 1 + layer;
+        let mut placed = false;
+
+        for &(x, z) in &footprint {
+            let dx = (x as f64 - center_x).abs();
+            let dz = (z as f64 - center_z).abs();
+
+            // Use Chebyshev distance (max of dx, dz) for a square-footprint pyramid
+            if dx <= radius && dz <= radius {
+                editor.set_block_absolute(SANDSTONE, x, y, z, None, None);
+                placed = true;
+            }
+        }
+
+        if !placed {
+            break; // Nothing placed, we've reached the apex
+        }
+    }
+
+    // Cap with smooth sandstone at the very top
+    let apex_y = base_y + 1 + pyramid_height;
+    editor.set_block_absolute(
+        SMOOTH_SANDSTONE,
+        center_x.round() as i32,
+        apex_y,
+        center_z.round() as i32,
+        None,
+        None,
+    );
 }

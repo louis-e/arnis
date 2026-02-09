@@ -93,7 +93,7 @@ pub fn generate_world_with_options(
     // Pre-scan: detect building relation outlines that should be suppressed.
     // Only applies to type=building relations (NOT type=multipolygon).
     // When a type=building relation has "part" members, the outline way should not
-    // render as a standalone building — the individual parts render instead.
+    // render as a standalone building, the individual parts render instead.
     let suppressed_building_outlines: HashSet<u64> = {
         let mut outlines = HashSet::new();
         for element in &elements {
@@ -204,6 +204,8 @@ pub fn generate_world_with_options(
                     highways::generate_aeroway(&mut editor, way, args);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
                     highways::generate_siding(&mut editor, way);
+                } else if way.tags.get("tomb") == Some(&"pyramid".to_string()) {
+                    historic::generate_pyramid(&mut editor, way, args, &flood_fill_cache);
                 } else if way.tags.contains_key("man_made") {
                     man_made::generate_man_made(&mut editor, &element, args);
                 } else if way.tags.contains_key("power") {

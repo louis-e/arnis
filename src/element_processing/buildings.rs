@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::{coord_rng, element_rng};
+use crate::element_processing::historic;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -2142,6 +2143,12 @@ pub fn generate_buildings(
     relation_levels: Option<i32>,
     flood_fill_cache: &FloodFillCache,
 ) {
+    // Intercept tomb=pyramid: generate a sandstone pyramid instead of a building
+    if element.tags.get("tomb").map(|v| v.as_str()) == Some("pyramid") {
+        historic::generate_pyramid(editor, element, args, flood_fill_cache);
+        return;
+    }
+
     // Early return for underground buildings
     if should_skip_underground_building(element) {
         return;
