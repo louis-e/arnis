@@ -73,7 +73,7 @@ fn generate_memorial(editor: &mut WorldEditor, node: &ProcessedNode) {
             editor.set_block(CHISELED_STONE_BRICKS, x, 2, z, None, None);
 
             // Use polished andesite for bronze/metal statue appearance
-            let statue_block = if rng.gen_bool(0.5) {
+            let statue_block = if rng.random_bool(0.5) {
                 POLISHED_ANDESITE
             } else {
                 POLISHED_DIORITE

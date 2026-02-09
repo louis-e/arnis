@@ -703,7 +703,7 @@ impl BuildingStyle {
             ) {
                 const SKYSCRAPER_ROOF_CAP_OPTIONS: [Block; 3] =
                     [POLISHED_ANDESITE, BLACKSTONE, NETHER_BRICK];
-                SKYSCRAPER_ROOF_CAP_OPTIONS[rng.gen_range(0..SKYSCRAPER_ROOF_CAP_OPTIONS.len())]
+                SKYSCRAPER_ROOF_CAP_OPTIONS[rng.random_range(0..SKYSCRAPER_ROOF_CAP_OPTIONS.len())]
             } else {
                 get_floor_block_with_rng(rng)
             }
@@ -720,7 +720,7 @@ impl BuildingStyle {
         let accent_block = preset.accent_block.unwrap_or_else(|| {
             if category == BuildingCategory::GlassySkyscraper {
                 const GLASSY_ACCENT_OPTIONS: [Block; 2] = [WHITE_STAINED_GLASS, BLACKSTONE];
-                GLASSY_ACCENT_OPTIONS[rng.gen_range(0..GLASSY_ACCENT_OPTIONS.len())]
+                GLASSY_ACCENT_OPTIONS[rng.random_range(0..GLASSY_ACCENT_OPTIONS.len())]
             } else if category == BuildingCategory::ModernSkyscraper {
                 const MODERN_ACCENT_OPTIONS: [Block; 5] = [
                     POLISHED_ANDESITE,
@@ -729,9 +729,9 @@ impl BuildingStyle {
                     NETHER_BRICK,
                     STONE_BRICKS,
                 ];
-                MODERN_ACCENT_OPTIONS[rng.gen_range(0..MODERN_ACCENT_OPTIONS.len())]
+                MODERN_ACCENT_OPTIONS[rng.random_range(0..MODERN_ACCENT_OPTIONS.len())]
             } else {
-                ACCENT_BLOCK_OPTIONS[rng.gen_range(0..ACCENT_BLOCK_OPTIONS.len())]
+                ACCENT_BLOCK_OPTIONS[rng.random_range(0..ACCENT_BLOCK_OPTIONS.len())]
             }
         });
 
@@ -739,7 +739,7 @@ impl BuildingStyle {
 
         let use_vertical_windows = preset
             .use_vertical_windows
-            .unwrap_or_else(|| rng.gen_bool(0.7));
+            .unwrap_or_else(|| rng.random_bool(0.7));
 
         // Horizontal windows: full-width bands, used by modern skyscrapers
         let use_horizontal_windows = preset
@@ -750,7 +750,7 @@ impl BuildingStyle {
 
         let use_accent_roof_line = preset
             .use_accent_roof_line
-            .unwrap_or_else(|| rng.gen_bool(0.25));
+            .unwrap_or_else(|| rng.random_bool(0.25));
 
         // Accent lines only for multi-floor buildings
         // Glassy skyscrapers get 60% chance, Modern skyscrapers always have them
@@ -758,16 +758,16 @@ impl BuildingStyle {
             if category == BuildingCategory::ModernSkyscraper {
                 true // Stone bands always present on modern skyscrapers
             } else if category == BuildingCategory::GlassySkyscraper {
-                rng.gen_bool(0.6)
+                rng.random_bool(0.6)
             } else {
-                has_multiple_floors && rng.gen_bool(0.2)
+                has_multiple_floors && rng.random_bool(0.2)
             }
         });
 
         // Vertical accent: only if no accent lines and multi-floor
         let use_vertical_accent = preset
             .use_vertical_accent
-            .unwrap_or_else(|| has_multiple_floors && !use_accent_lines && rng.gen_bool(0.1));
+            .unwrap_or_else(|| has_multiple_floors && !use_accent_lines && rng.random_bool(0.1));
 
         // === Roof ===
 
@@ -784,7 +784,7 @@ impl BuildingStyle {
         } else if qualifies_for_auto_gabled_roof(building_type) {
             // Auto-generate gabled roof for residential buildings
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
-            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED && rng.gen_bool(0.9) {
+            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED && rng.random_bool(0.9) {
                 (RoofType::Gabled, true)
             } else {
                 (RoofType::Flat, false)
@@ -811,7 +811,7 @@ impl BuildingStyle {
             let suitable_roof = matches!(roof_type, RoofType::Gabled | RoofType::Hipped);
             let suitable_size = (30..=400).contains(&footprint_size);
 
-            is_residential && suitable_roof && suitable_size && rng.gen_bool(0.55)
+            is_residential && suitable_roof && suitable_size && rng.random_bool(0.55)
         });
 
         // Roof block: specific material for roofs
@@ -995,28 +995,28 @@ fn determine_wall_block(
 fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -> Block {
     match category {
         BuildingCategory::House | BuildingCategory::Residential => {
-            RESIDENTIAL_WALL_OPTIONS[rng.gen_range(0..RESIDENTIAL_WALL_OPTIONS.len())]
+            RESIDENTIAL_WALL_OPTIONS[rng.random_range(0..RESIDENTIAL_WALL_OPTIONS.len())]
         }
         BuildingCategory::Commercial | BuildingCategory::Office | BuildingCategory::Hotel => {
-            COMMERCIAL_WALL_OPTIONS[rng.gen_range(0..COMMERCIAL_WALL_OPTIONS.len())]
+            COMMERCIAL_WALL_OPTIONS[rng.random_range(0..COMMERCIAL_WALL_OPTIONS.len())]
         }
         BuildingCategory::Industrial | BuildingCategory::Warehouse => {
-            INDUSTRIAL_WALL_OPTIONS[rng.gen_range(0..INDUSTRIAL_WALL_OPTIONS.len())]
+            INDUSTRIAL_WALL_OPTIONS[rng.random_range(0..INDUSTRIAL_WALL_OPTIONS.len())]
         }
         BuildingCategory::Religious => {
-            RELIGIOUS_WALL_OPTIONS[rng.gen_range(0..RELIGIOUS_WALL_OPTIONS.len())]
+            RELIGIOUS_WALL_OPTIONS[rng.random_range(0..RELIGIOUS_WALL_OPTIONS.len())]
         }
         BuildingCategory::School | BuildingCategory::Hospital => {
-            INSTITUTIONAL_WALL_OPTIONS[rng.gen_range(0..INSTITUTIONAL_WALL_OPTIONS.len())]
+            INSTITUTIONAL_WALL_OPTIONS[rng.random_range(0..INSTITUTIONAL_WALL_OPTIONS.len())]
         }
-        BuildingCategory::Farm => FARM_WALL_OPTIONS[rng.gen_range(0..FARM_WALL_OPTIONS.len())],
+        BuildingCategory::Farm => FARM_WALL_OPTIONS[rng.random_range(0..FARM_WALL_OPTIONS.len())],
         BuildingCategory::Historic => {
-            HISTORIC_WALL_OPTIONS[rng.gen_range(0..HISTORIC_WALL_OPTIONS.len())]
+            HISTORIC_WALL_OPTIONS[rng.random_range(0..HISTORIC_WALL_OPTIONS.len())]
         }
         BuildingCategory::Garage => {
-            GARAGE_WALL_OPTIONS[rng.gen_range(0..GARAGE_WALL_OPTIONS.len())]
+            GARAGE_WALL_OPTIONS[rng.random_range(0..GARAGE_WALL_OPTIONS.len())]
         }
-        BuildingCategory::Shed => SHED_WALL_OPTIONS[rng.gen_range(0..SHED_WALL_OPTIONS.len())],
+        BuildingCategory::Shed => SHED_WALL_OPTIONS[rng.random_range(0..SHED_WALL_OPTIONS.len())],
         BuildingCategory::Tower => {
             const TOWER_WALL_OPTIONS: [Block; 8] = [
                 STONE_BRICKS,
@@ -1028,14 +1028,14 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
                 DEEPSLATE_BRICKS,
                 SMOOTH_STONE,
             ];
-            TOWER_WALL_OPTIONS[rng.gen_range(0..TOWER_WALL_OPTIONS.len())]
+            TOWER_WALL_OPTIONS[rng.random_range(0..TOWER_WALL_OPTIONS.len())]
         }
         BuildingCategory::Greenhouse => {
-            GREENHOUSE_WALL_OPTIONS[rng.gen_range(0..GREENHOUSE_WALL_OPTIONS.len())]
+            GREENHOUSE_WALL_OPTIONS[rng.random_range(0..GREENHOUSE_WALL_OPTIONS.len())]
         }
         BuildingCategory::TallBuilding => {
             // Tall buildings use commercial palette (glass, concrete, stone)
-            COMMERCIAL_WALL_OPTIONS[rng.gen_range(0..COMMERCIAL_WALL_OPTIONS.len())]
+            COMMERCIAL_WALL_OPTIONS[rng.random_range(0..COMMERCIAL_WALL_OPTIONS.len())]
         }
         BuildingCategory::ModernSkyscraper => {
             // Modern skyscrapers use clean concrete/stone wall materials
@@ -1047,7 +1047,7 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
                 SMOOTH_STONE,
                 QUARTZ_BLOCK,
             ];
-            MODERN_SKYSCRAPER_WALL_OPTIONS[rng.gen_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
+            MODERN_SKYSCRAPER_WALL_OPTIONS[rng.random_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
         }
         BuildingCategory::GlassySkyscraper => {
             // Glass-facade skyscrapers use stained glass as wall material
@@ -1057,7 +1057,7 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
                 BLUE_STAINED_GLASS,
                 LIGHT_BLUE_STAINED_GLASS,
             ];
-            GLASSY_WALL_OPTIONS[rng.gen_range(0..GLASSY_WALL_OPTIONS.len())]
+            GLASSY_WALL_OPTIONS[rng.random_range(0..GLASSY_WALL_OPTIONS.len())]
         }
         BuildingCategory::Default => get_fallback_building_block(),
     }
@@ -1468,7 +1468,7 @@ fn generate_special_doors(
         // Place a single oak door somewhere on the wall
         // Pick a random position from the wall outline
         if !wall_outline.is_empty() {
-            let door_idx = rng.gen_range(0..wall_outline.len());
+            let door_idx = rng.random_range(0..wall_outline.len());
             let (door_x, door_z) = wall_outline[door_idx];
 
             // Place single oak door (empty blacklist to overwrite wall blocks)
@@ -1619,8 +1619,8 @@ fn generate_residential_window_decorations(
 
     // --- Per-building random material choices ---
     let mut rng = element_rng(element.id);
-    let trapdoor_base = SHUTTER_TRAPDOOR_OPTIONS[rng.gen_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())];
-    let sill_base = SILL_SLAB_OPTIONS[rng.gen_range(0..SILL_SLAB_OPTIONS.len())];
+    let trapdoor_base = SHUTTER_TRAPDOOR_OPTIONS[rng.random_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())];
+    let sill_base = SILL_SLAB_OPTIONS[rng.random_range(0..SILL_SLAB_OPTIONS.len())];
     let sill_block = make_top_slab(sill_base);
 
     // We need the building centroid so we can figure out which side of
@@ -1700,7 +1700,7 @@ fn generate_residential_window_decorations(
                 if mod6 == 3 || mod6 == 5 {
                     let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
                     let shutter_roll =
-                        coord_rng(centre_sum, centre_sum, element.id).gen_range(0u32..100);
+                        coord_rng(centre_sum, centre_sum, element.id).random_range(0u32..100);
                     if shutter_roll < 12 {
                         for h in (config.start_y_offset + 1)
                             ..=(config.start_y_offset + config.building_height)
@@ -1746,7 +1746,7 @@ fn generate_residential_window_decorations(
                                 centre_sum.wrapping_add(floor_idx * 5),
                                 element.id,
                             )
-                            .gen_range(0u32..100);
+                            .random_range(0u32..100);
 
                             let abs_y = h + config.abs_terrain_offset;
 
@@ -1767,13 +1767,13 @@ fn generate_residential_window_decorations(
                                 let mut pot_rng =
                                     coord_rng(bx, bz.wrapping_add(floor_idx), element.id);
                                 let pot_here = if mod6 == 1 {
-                                    pot_rng.gen_range(0u32..100) < 70
+                                    pot_rng.random_range(0u32..100) < 70
                                 } else {
-                                    pot_rng.gen_range(0u32..100) < 25
+                                    pot_rng.random_range(0u32..100) < 25
                                 };
                                 if pot_here {
                                     let plant = POTTED_PLANT_OPTIONS
-                                        [pot_rng.gen_range(0..POTTED_PLANT_OPTIONS.len())];
+                                        [pot_rng.random_range(0..POTTED_PLANT_OPTIONS.len())];
                                     editor.set_block_absolute(
                                         plant,
                                         lx,
@@ -1876,12 +1876,12 @@ fn generate_residential_window_decorations(
                                     bz.wrapping_add(floor_idx * 17),
                                     element.id,
                                 );
-                                let furniture_roll = furn_rng.gen_range(0u32..100);
+                                let furniture_roll = furn_rng.random_range(0u32..100);
 
                                 if furniture_roll < 30 {
                                     // Cauldron "planter" with a leaf block
                                     // on top, placed at depth 1 on one side
-                                    let side = if furn_rng.gen_bool(0.5) { -1i32 } else { 1 };
+                                    let side = if furn_rng.random_bool(0.5) { -1i32 } else { 1 };
                                     let cx = bx + tan_x * side + out_nx;
                                     let cz = bz + tan_z * side + out_nz;
                                     editor.set_block_absolute(
@@ -1902,7 +1902,7 @@ fn generate_residential_window_decorations(
                                     );
                                 } else if furniture_roll < 55 {
                                     // Stair "chair" facing outward
-                                    let side = if furn_rng.gen_bool(0.5) { -1i32 } else { 1 };
+                                    let side = if furn_rng.random_bool(0.5) { -1i32 } else { 1 };
                                     let sx = bx + tan_x * side + out_nx;
                                     let sz = bz + tan_z * side + out_nz;
                                     let stair_facing = match facing_for_normal(-out_nx, -out_nz) {
@@ -2457,7 +2457,7 @@ fn generate_chimney(
     let center_z = (min_z + max_z) / 2;
 
     // Choose which quadrant to place the chimney (deterministically)
-    let quadrant = rng.gen_range(0..4);
+    let quadrant = rng.random_range(0..4);
 
     // Filter floor area points to the chosen quadrant and find one that's
     // offset from the edge (so it's actually on the roof, not at the wall)
@@ -2493,7 +2493,7 @@ fn generate_chimney(
     }
 
     // Pick a point from candidates
-    let (chimney_x, chimney_z) = final_candidates[rng.gen_range(0..final_candidates.len())];
+    let (chimney_x, chimney_z) = final_candidates[rng.random_range(0..final_candidates.len())];
 
     // Chimney starts 2 blocks below roof peak to replace roof blocks properly
     // Height is exactly 4 brick blocks with a slab cap on top
@@ -2596,7 +2596,7 @@ fn generate_roof_terrace(
     for &(x, z) in &interior {
         // Deterministic per-position decision using coord_rng
         let mut rng = coord_rng(x, z, element.id);
-        let roll: u32 = rng.gen_range(0..100);
+        let roll: u32 = rng.random_range(0..100);
 
         // ~85% of interior tiles are empty (open terrace space)
         if roll >= 15 {
@@ -2621,7 +2621,7 @@ fn generate_roof_terrace(
                 // Planter: leaf block on top of cauldron
                 editor.set_block_absolute(CAULDRON, x, terrace_y, z, None, Some(replace_any));
                 // Vary the leaf type
-                let leaf = match rng.gen_range(0..3) {
+                let leaf = match rng.random_range(0..3) {
                     0 => OAK_LEAVES,
                     1 => BIRCH_LEAVES,
                     _ => SPRUCE_LEAVES,
@@ -2775,7 +2775,7 @@ fn generate_rooftop_equipment(
         }
 
         let mut rng = coord_rng(x, z, element.id);
-        let roll: u32 = rng.gen_range(0..1200);
+        let roll: u32 = rng.random_range(0..1200);
 
         // ~99.4% of tiles are empty, very sparse
         if roll >= 7 {
@@ -2937,8 +2937,8 @@ impl RoofConfig {
         // 90% wall block, 10% accent block for variety (deterministic based on element ID)
         let mut rng = element_rng(element_id);
         // Advance RNG state to get different value than other style choices
-        let _ = rng.gen::<u32>();
-        let roof_block = if rng.gen_bool(0.1) {
+        let _ = rng.random::<u32>();
+        let roof_block = if rng.random_bool(0.1) {
             accent_block
         } else {
             wall_block

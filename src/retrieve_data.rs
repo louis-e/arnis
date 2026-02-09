@@ -4,7 +4,7 @@ use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
-use rand::seq::SliceRandom;
+use rand::prelude::IndexedRandom;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
 use serde::Deserialize;
@@ -117,7 +117,7 @@ pub fn fetch_data_from_overpass(
     ];
     let fallback_api_servers: Vec<&str> =
         vec!["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
-    let mut url: &&str = api_servers.choose(&mut rand::thread_rng()).unwrap();
+    let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
 
     // Generate Overpass API query for bounding box
     let query: String = format!(
@@ -187,7 +187,7 @@ pub fn fetch_data_from_overpass(
 
                     println!("Request failed. Switching to fallback url...");
                     url = fallback_api_servers
-                        .choose(&mut rand::thread_rng())
+                        .choose(&mut rand::rng())
                         .unwrap();
                     attempt += 1;
                 }

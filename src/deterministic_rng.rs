@@ -8,7 +8,7 @@
 //! # Example
 //! ```ignore
 //! let mut rng = element_rng(element_id);
-//! let color = rng.gen_bool(0.5); // Always same result for same element_id
+//! let color = rng.random_bool(0.5); // Always same result for same element_id
 //! ```
 
 use rand::SeedableRng;
@@ -87,8 +87,8 @@ mod tests {
         let mut rng2 = element_rng(12346);
 
         // Different seeds should (almost certainly) produce different values
-        let v1: u64 = rng1.gen();
-        let v2: u64 = rng2.gen();
+        let v1: u64 = rng1.random();
+        let v2: u64 = rng2.random();
         assert_ne!(v1, v2);
     }
 
@@ -97,8 +97,8 @@ mod tests {
         let mut rng1 = element_rng(12345);
         let mut rng2 = element_rng_salted(12345, 1);
 
-        let v1: u64 = rng1.gen();
-        let v2: u64 = rng2.gen();
+        let v1: u64 = rng1.random();
+        let v2: u64 = rng2.random();
         assert_ne!(v1, v2);
     }
 
