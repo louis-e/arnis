@@ -98,8 +98,7 @@ pub fn generate_world_with_options(
         let mut outlines = HashSet::new();
         for element in &elements {
             if let ProcessedElement::Relation(rel) = element {
-                let is_building_type =
-                    rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                let is_building_type = rel.tags.get("type").map(|t| t.as_str()) == Some("building");
                 if is_building_type {
                     let has_parts = rel
                         .members

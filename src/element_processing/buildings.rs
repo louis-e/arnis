@@ -3797,11 +3797,7 @@ pub fn generate_building_from_relation(
     // Check if this is a type=building relation with part members.
     // Only type=building relations use Part roles; type=multipolygon relations
     // should always render their Outer members normally.
-    let is_building_type = relation
-        .tags
-        .get("type")
-        .map(|t| t.as_str())
-        == Some("building");
+    let is_building_type = relation.tags.get("type").map(|t| t.as_str()) == Some("building");
     let has_parts = is_building_type
         && relation
             .members
