@@ -302,15 +302,10 @@ pub fn parse_osm_data(
                 let role = match mem.role.trim().to_ascii_lowercase().as_str() {
                     "outer" | "outline" => ProcessedMemberRole::Outer,
                     "inner" => ProcessedMemberRole::Inner,
-                    "part" => ProcessedMemberRole::Part,
-                    _ => {
-                        // For building relations, skip unknown roles like "edge", "ridge"
-                        // For other relations, also skip unknown roles
-                        if is_building_relation {
-                            return None;
-                        }
-                        return None;
-                    }
+                    // "part" role only applies to type=building relations.
+                    // For multipolygon/boundary relations, treat it as unknown.
+                    "part" if is_building_relation => ProcessedMemberRole::Part,
+                    _ => return None,
                 };
 
                 // Check if the way exists in ways_map

@@ -91,13 +91,16 @@ pub fn generate_world_with_options(
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
     // Pre-scan: detect building relation outlines that should be suppressed.
+    // Only applies to type=building relations (NOT type=multipolygon).
     // When a type=building relation has "part" members, the outline way should not
     // render as a standalone building — the individual parts render instead.
     let suppressed_building_outlines: HashSet<u64> = {
         let mut outlines = HashSet::new();
         for element in &elements {
             if let ProcessedElement::Relation(rel) = element {
-                if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                let is_building_type =
+                    rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                if is_building_type {
                     let has_parts = rel
                         .members
                         .iter()
@@ -136,14 +139,18 @@ pub fn generate_world_with_options(
 
         match &element {
             ProcessedElement::Way(way) => {
-                // Skip building outlines that are suppressed by building relations with parts.
-                // The individual building:part ways will render instead.
-                if suppressed_building_outlines.contains(&way.id) {
-                    // Outline suppressed — skip all processing
-                } else if way.tags.contains_key("building")
-                    || way.tags.contains_key("building:part")
-                {
-                    buildings::generate_buildings(&mut editor, way, args, None, &flood_fill_cache);
+                if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+                    // Skip building outlines that are suppressed by building relations with parts.
+                    // The individual building:part ways will render instead.
+                    if !suppressed_building_outlines.contains(&way.id) {
+                        buildings::generate_buildings(
+                            &mut editor,
+                            way,
+                            args,
+                            None,
+                            &flood_fill_cache,
+                        );
+                    }
                 } else if way.tags.contains_key("highway") {
                     highways::generate_highways(
                         &mut editor,

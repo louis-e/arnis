@@ -3794,14 +3794,22 @@ pub fn generate_building_from_relation(
         .and_then(|l: &String| l.parse::<i32>().ok())
         .unwrap_or(2); // Default to 2 levels
 
-    // Check if this relation has building parts
-    let has_parts = relation
-        .members
-        .iter()
-        .any(|m| m.role == ProcessedMemberRole::Part);
+    // Check if this is a type=building relation with part members.
+    // Only type=building relations use Part roles; type=multipolygon relations
+    // should always render their Outer members normally.
+    let is_building_type = relation
+        .tags
+        .get("type")
+        .map(|t| t.as_str())
+        == Some("building");
+    let has_parts = is_building_type
+        && relation
+            .members
+            .iter()
+            .any(|m| m.role == ProcessedMemberRole::Part);
 
     if !has_parts {
-        // No parts: render outline as the building (traditional multipolygon behavior)
+        // No parts (or not type=building): render outline as the building
         for member in &relation.members {
             if member.role == ProcessedMemberRole::Outer {
                 generate_buildings(
