@@ -1,6 +1,6 @@
 {
-  "choose_world": "Pasirinkti pasaulį",
-  "no_world_selected": "Pasaulis nepasirinktas",
+  "create_world": "Sukurti pasaulį",
+  "no_world_selected": "Pasaulis nesukurtas",
   "start_generation": "Pradėti generaciją",
   "custom_selection_confirmed": "Rėmo pasirinkimas patvirtintas!",
   "error_coordinates_out_of_range": "Klaida: Koordinatės yra už ribų arba neteisingai išdėstytos (plat turi būti prieš ilg).",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Pasirinktinis ribos rėmas",
   "floodfill_timeout": "Užpildymo laiko limitas (sek.)",
   "ground_level": "Žemės lygis",
-  "choose_world_modal_title": "Pasaulio pasirinkimas",
-  "select_existing_world": "Pasirinkti esamą pasaulį",
-  "generate_new_world": "Sugeneruoti naują pasaulį",
   "customization_settings": "Generacijos nustatymai",
   "footer_text": "© {year} „Arnis“ v{version} sukurta louis-e",
   "new_version_available": "Surasta nauja versija! Spauskite čia kad ją atsisiųstumėte.",
@@ -21,7 +18,7 @@
   "world_in_use": "Pasirinktas pasaulis dabar užimtas",
   "failed_to_create_world": "Klaida sukuriant naują pasaulį",
   "no_world_selected_error": "Nėra pasirinktas pasaulis",
-  "select_minecraft_world_first": "Pirma pasirinkite „Minecraft“ pasaulį!",
+  "create_world_first": "Pirmiausia sukurkite pasaulį!",
   "select_location_first": "Pirma pasirinkite vietą!",
   "area_too_large": "Šis plotas yra labai didelis ir gali viršyti tipinius resursų limitus.",
   "area_extensive": "Šis plotas yra pakankamai didelis kuriam reikėtų daug laiko ir resursų.",
@@ -43,5 +40,6 @@
   "roof": "Stogo generavimas",
   "fillground": "Užpildyti pagrindą",
   "city_boundaries": "Miesto žemė",
-  "bedrock_use_java": "Naudok Java pasauliams"
+  "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
+  "save_path": "Išsaugojimo kelias"
 }

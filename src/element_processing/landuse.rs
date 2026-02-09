@@ -376,44 +376,26 @@ pub fn generate_landuse_from_relation(
     building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.contains_key("landuse") {
-        // Generate individual ways with their original tags
+        // Process each outer member way individually using cached flood fill.
+        // We intentionally do not combine all outer nodes into one mega-way,
+        // because that creates a nonsensical polygon spanning the whole relation
+        // extent, misses the flood fill cache, and can cause multi-GB allocations.
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
+                // Use relation tags so the member inherits the relation's landuse=* type
+                let way_with_rel_tags = ProcessedWay {
+                    id: member.way.id,
+                    nodes: member.way.nodes.clone(),
+                    tags: rel.tags.clone(),
+                };
                 generate_landuse(
                     editor,
-                    &member.way.clone(),
+                    &way_with_rel_tags,
                     args,
                     flood_fill_cache,
                     building_footprints,
                 );
             }
-        }
-
-        // Combine all outer ways into one with relation tags
-        let mut combined_nodes = Vec::new();
-        for member in &rel.members {
-            if member.role == ProcessedMemberRole::Outer {
-                combined_nodes.extend(member.way.nodes.clone());
-            }
-        }
-
-        // Only process if we have nodes
-        if !combined_nodes.is_empty() {
-            // Create combined way with relation tags
-            let combined_way = ProcessedWay {
-                id: rel.id,
-                nodes: combined_nodes,
-                tags: rel.tags.clone(),
-            };
-
-            // Generate landuse area from combined way
-            generate_landuse(
-                editor,
-                &combined_way,
-                args,
-                flood_fill_cache,
-                building_footprints,
-            );
         }
     }
 }

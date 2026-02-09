@@ -1,6 +1,6 @@
 {
-  "choose_world": "세계 선택",
-  "no_world_selected": "선택된 세계 없음",
+  "create_world": "월드 만들기",
+  "no_world_selected": "생성된 월드 없음",
   "start_generation": "생성 시작",
   "custom_selection_confirmed": "사용자 지정 선택이 확인되었습니다!",
   "error_coordinates_out_of_range": "오류: 좌표가 범위를 벗어나거나 잘못된 순서입니다 (Lat이 Lng보다 먼저 필요합니다).",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "사용자 지정 경계 상자",
   "floodfill_timeout": "채우기 시간 초과 (초)",
   "ground_level": "지면 레벨",
-  "choose_world_modal_title": "세계 선택",
-  "select_existing_world": "이미 존재하는 세계 선택",
-  "generate_new_world": "새 세계 생성",
   "customization_settings": "사용자 지정 설정",
   "footer_text": "© {year} Arnis v{version} by louis-e",
   "new_version_available": "새로운 버전이 있습니다! 여기를 클릭하여 다운로드하세요.",
@@ -21,7 +18,7 @@
   "world_in_use": "선택한 세계가 현재 사용 중입니다",
   "failed_to_create_world": "새 세계 생성에 실패했습니다",
   "no_world_selected_error": "선택된 세계 없음 오류",
-  "select_minecraft_world_first": "먼저 마인크래프트 세계를 선택하세요!",
+  "create_world_first": "먼저 월드를 만드세요!",
   "select_location_first": "먼저 위치를 선택하세요!",
   "area_too_large": "이 지역은 매우 크고, 일반적인 계산 한계를 초과할 수 있습니다.",
   "area_extensive": "이 지역은 꽤 광범위하여 상당한 시간과 자원이 필요할 수 있습니다.",
@@ -43,5 +40,6 @@
   "roof": "지붕 생성",
   "fillground": "지면 채우기",
   "city_boundaries": "도시 지면",
-  "bedrock_use_java": "Java로 세계 선택"
+  "bedrock_auto_generated": "Bedrock 월드는 자동 생성됩니다",
+  "save_path": "저장 경로"
 }

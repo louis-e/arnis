@@ -28,23 +28,6 @@ pub struct GenerationOptions {
     pub spawn_point: Option<(i32, i32)>,
 }
 
-pub fn generate_world(
-    elements: Vec<ProcessedElement>,
-    xzbbox: XZBBox,
-    llbbox: LLBBox,
-    ground: Ground,
-    args: &Args,
-) -> Result<(), String> {
-    // Default to Java format when called from CLI
-    let options = GenerationOptions {
-        path: args.path.clone(),
-        format: WorldFormat::JavaAnvil,
-        level_name: None,
-        spawn_point: None,
-    };
-    generate_world_with_options(elements, xzbbox, llbbox, ground, args, options).map(|_| ())
-}
-
 /// Generate world with explicit format options (used by GUI for Bedrock support)
 pub fn generate_world_with_options(
     elements: Vec<ProcessedElement>,
@@ -436,16 +419,18 @@ pub fn generate_world_with_options(
         );
 
         // Always update spawn Y since we now always set a spawn point (user-selected or default)
-        if let Err(e) = update_player_spawn_y_after_generation(
-            &args.path,
-            bbox_string,
-            args.scale,
-            ground.as_ref(),
-        ) {
-            let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
-            eprintln!("Warning: {}", warning_msg);
-            #[cfg(feature = "gui")]
-            send_log(LogLevel::Warning, &warning_msg);
+        if let Some(ref world_path) = args.path {
+            if let Err(e) = update_player_spawn_y_after_generation(
+                world_path,
+                bbox_string,
+                args.scale,
+                ground.as_ref(),
+            ) {
+                let warning_msg = format!("Failed to update spawn point Y coordinate: {}", e);
+                eprintln!("Warning: {}", warning_msg);
+                #[cfg(feature = "gui")]
+                send_log(LogLevel::Warning, &warning_msg);
+            }
         }
     }
 

@@ -578,6 +578,44 @@ button:hover {
   border: 1px solid #fecc44;
 }
 
+/* Save Path Setting */
+.save-path-control {
+  gap: 0;
+}
+
+.save-path-input {
+  max-width: 200px !important;
+  font-size: 0.85em;
+  border-top-right-radius: 0 !important;
+  border-bottom-right-radius: 0 !important;
+  border-right: none !important;
+}
+
+.save-path-browse {
+  background: none;
+  border: 1px solid #fecc44;
+  border-radius: 0 4px 4px 0;
+  padding: 0 6px;
+  margin-top: 0;
+  box-shadow: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  justify-content: center;
+  transition: background 0.2s ease;
+}
+
+.save-path-browse:hover {
+  background: rgba(254, 204, 68, 0.15);
+}
+
+.save-path-browse svg {
+  width: 14px;
+  height: 14px;
+  fill: #fecc44;
+}
+
 .license-button-row {
   justify-content: center;
   margin-top: 5px;

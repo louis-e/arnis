@@ -1,6 +1,6 @@
 {
-  "choose_world": "Choose World",
-  "no_world_selected": "No world selected",
+  "create_world": "Create World",
+  "no_world_selected": "No world created",
   "start_generation": "Start Generation",
   "custom_selection_confirmed": "Custom selection confirmed!",
   "error_coordinates_out_of_range": "Error: Coordinates are out of range or incorrectly ordered (Lat before Lng required).",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Custom Bounding Box",
   "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Ground Level",
-  "choose_world_modal_title": "Choose World",
-  "select_existing_world": "Select existing world",
-  "generate_new_world": "Generate new world",
   "customization_settings": "Customization Settings",
   "footer_text": "© {year} Arnis v{version} by louis-e",
   "new_version_available": "There's a new version available! Click here to download it.",
@@ -21,7 +18,7 @@
   "world_in_use": "The selected world is currently in use",
   "failed_to_create_world": "Failed to create new world",
   "no_world_selected_error": "No world selected",
-  "select_minecraft_world_first": "Select a Minecraft world first!",
+  "create_world_first": "Create a world first!",
   "select_location_first": "Select a location first!",
   "area_too_large": "This area is very large and could exceed typical computing limits.",
   "area_extensive": "The area is quite extensive and may take significant time and resources.",
@@ -43,5 +40,6 @@
   "roof": "Roof Generation",
   "fillground": "Fill Ground",
   "city_boundaries": "City Ground",
-  "bedrock_use_java": "Use Java to select worlds"
+  "bedrock_auto_generated": "Bedrock world is auto-generated",
+  "save_path": "Save Path"
 }

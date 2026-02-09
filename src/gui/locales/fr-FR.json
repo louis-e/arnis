@@ -1,6 +1,6 @@
 {
-  "choose_world": "Choisir un monde",
-  "no_world_selected": "Aucun monde sélectionné",
+  "create_world": "Créer un monde",
+  "no_world_selected": "Aucun monde créé",
   "start_generation": "Commencer la génération",
   "custom_selection_confirmed": "Sélection personnalisée confirmée !",
   "error_coordinates_out_of_range": "Erreur: Coordonnées hors de portée ou dans un ordre incorrect (besoin de la latitude avant la longitude).",
@@ -11,9 +11,6 @@
   "custom_bounding_box": "Cadre de délimitation personnalisé",
   "floodfill_timeout": "Expiration du délai de remplissage (en secondes)",
   "ground_level": "Niveau du sol",
-  "choose_world_modal_title": "Choisir un monde",
-  "select_existing_world": "Sélectionner un monde existant",
-  "generate_new_world": "Générer un nouveau monde",
   "customization_settings": "Paramètres de personnalisation",
   "footer_text": "© {year} Arnis v{version} par louis-e",
   "new_version_available": "Une nouvelle version est disponible ! Cliquez ici pour la télécharger.",
@@ -21,7 +18,7 @@
   "world_in_use": "Le monde sélectionné est en cours d'utilisation",
   "failed_to_create_world": "Échec de la création du nouveau monde",
   "no_world_selected_error": "Aucun monde sélectionné",
-  "select_minecraft_world_first": "Sélectionnez d'abord un monde Minecraft !",
+  "create_world_first": "Créez d'abord un monde !",
   "select_location_first": "Sélectionnez d'abord une localisation !",
   "area_too_large": "Cette zone est très grande et pourrait dépasser les limites de calcul courantes.",
   "area_extensive": "Cette zone est très étendue et pourrait nécessiter beaucoup de ressources et de temps.",
@@ -43,5 +40,6 @@
   "roof": "Génération de toit",
   "fillground": "Remplir le sol",
   "city_boundaries": "Sol urbain",
-  "bedrock_use_java": "Utilisez Java pour les mondes"
+  "bedrock_auto_generated": "Le monde Bedrock est généré automatiquement",
+  "save_path": "Chemin de sauvegarde"
 }

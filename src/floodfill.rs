@@ -3,6 +3,11 @@ use itertools::Itertools;
 use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
+/// Maximum bounding box area (in blocks) for flood fill.
+/// Polygons exceeding this are skipped to prevent multi-GB memory allocations.
+/// 25 million blocks ≈ 5000×5000; HashSet would use ~700 MB at this size.
+const MAX_FLOOD_FILL_AREA: i64 = 25_000_000;
+
 /// Main flood fill function with automatic algorithm selection
 /// Chooses the best algorithm based on polygon size and complexity
 pub fn flood_fill_area(
@@ -28,6 +33,13 @@ pub fn flood_fill_area(
         .unwrap();
 
     let area = (max_x - min_x + 1) as i64 * (max_z - min_z + 1) as i64;
+
+    // Safety cap: reject polygons whose bounding box is too large.
+    // This prevents multi-GB memory allocations when ocean-adjacent elements
+    // (e.g. natural=water, large landuse) produce huge clipped polygons.
+    if area > MAX_FLOOD_FILL_AREA {
+        return vec![];
+    }
 
     // For small and medium areas, use optimized flood fill with span filling
     if area < 50000 {
