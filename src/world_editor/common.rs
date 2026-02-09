@@ -182,7 +182,9 @@ impl SectionToModify {
 
     #[inline]
     pub fn set_block(&mut self, x: u8, y: u8, z: u8, block: Block) {
-        self.storage.set(Self::index(x, y, z), block);
+        let index = Self::index(x, y, z);
+        self.storage.set(index, block);
+        self.properties.remove(&index);
     }
 
     #[inline]
