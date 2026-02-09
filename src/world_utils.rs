@@ -143,19 +143,30 @@ pub fn create_new_world(base_path: &Path) -> Result<String, String> {
             // Update player position and rotation
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    if let Value::Double(ref mut x) = pos.get_mut(0).unwrap() {
+                    if pos.len() < 3 {
+                        return Err(
+                            "Invalid level.dat template: Player Pos list has fewer than 3 elements"
+                                .to_string(),
+                        );
+                    }
+                    if let Value::Double(ref mut x) = pos[0] {
                         *x = -5.0;
                     }
-                    if let Value::Double(ref mut y) = pos.get_mut(1).unwrap() {
+                    if let Value::Double(ref mut y) = pos[1] {
                         *y = -61.0;
                     }
-                    if let Value::Double(ref mut z) = pos.get_mut(2).unwrap() {
+                    if let Value::Double(ref mut z) = pos[2] {
                         *z = -5.0;
                     }
                 }
 
                 if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
-                    if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
+                    if rot.is_empty() {
+                        return Err(
+                            "Invalid level.dat template: Player Rotation list is empty".to_string()
+                        );
+                    }
+                    if let Value::Float(ref mut x) = rot[0] {
                         *x = -45.0;
                     }
                 }
