@@ -614,45 +614,6 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
-    /// Fills a cuboid area with the specified block between two coordinates using absolute Y values.
-    #[allow(clippy::too_many_arguments)]
-    #[inline]
-    pub fn fill_blocks_absolute(
-        &mut self,
-        block: Block,
-        x1: i32,
-        y1_absolute: i32,
-        z1: i32,
-        x2: i32,
-        y2_absolute: i32,
-        z2: i32,
-        override_whitelist: Option<&[Block]>,
-        override_blacklist: Option<&[Block]>,
-    ) {
-        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
-        let (min_y, max_y) = if y1_absolute < y2_absolute {
-            (y1_absolute, y2_absolute)
-        } else {
-            (y2_absolute, y1_absolute)
-        };
-        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
-
-        for x in min_x..=max_x {
-            for absolute_y in min_y..=max_y {
-                for z in min_z..=max_z {
-                    self.set_block_absolute(
-                        block,
-                        x,
-                        absolute_y,
-                        z,
-                        override_whitelist,
-                        override_blacklist,
-                    );
-                }
-            }
-        }
-    }
-
     /// Checks for a block at the given coordinates.
     #[inline]
     pub fn check_for_block(&self, x: i32, y: i32, z: i32, whitelist: Option<&[Block]>) -> bool {
@@ -716,6 +677,40 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, absolute_y, z).is_some()
     }
 
+    /// Sets a block only if no modification has been recorded yet at this
+    /// position (i.e. the in-memory overlay still holds AIR).
+    ///
+    /// This is faster than `set_block_absolute` with `None` whitelists/blacklists
+    /// because it avoids the double HashMap traversal.
+    #[inline]
+    pub fn set_block_if_absent_absolute(&mut self, block: Block, x: i32, absolute_y: i32, z: i32) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        self.world.set_block_if_absent(x, absolute_y, z, block);
+    }
+
+    /// Fills an entire column from y_min to y_max with one block type.
+    ///
+    /// Resolves region/chunk once instead of per-Y-level, making underground
+    /// fill (`--fillground`) dramatically faster.
+    #[inline]
+    pub fn fill_column_absolute(
+        &mut self,
+        block: Block,
+        x: i32,
+        z: i32,
+        y_min: i32,
+        y_max: i32,
+        skip_existing: bool,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        self.world
+            .fill_column(x, z, y_min, y_max, block, skip_existing);
+    }
+
     /// Saves all changes made to the world by writing to the appropriate format.
     pub fn save(&mut self) {
         println!(
@@ -725,6 +720,10 @@ impl<'a> WorldEditor<'a> {
                 WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
             }
         );
+
+        // Compact sections before saving: collapses uniform Full(Vec) sections
+        // (e.g. all-STONE from --fillground) back to Uniform, freeing ~4 KiB each.
+        self.world.compact_sections();
 
         match self.format {
             WorldFormat::JavaAnvil => self.save_java(),

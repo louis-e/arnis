@@ -663,7 +663,7 @@ impl BedrockWriter {
             for z in 0..16usize {
                 for y in 0..16usize {
                     let internal_idx = y * 256 + z * 16 + x;
-                    let block = section.blocks[internal_idx];
+                    let block = section.get_block_at_index(internal_idx);
 
                     // Get stored properties for this block position (if any)
                     let properties = section.properties.get(&internal_idx);

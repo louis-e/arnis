@@ -341,28 +341,24 @@ pub fn generate_world_with_options(
                     if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
                         if is_urban {
                             // Urban area: smooth stone ground
-                            editor.set_block_absolute(SMOOTH_STONE, x, ground_y, z, None, None);
+                            editor.set_block_if_absent_absolute(SMOOTH_STONE, x, ground_y, z);
                         } else {
                             // Rural/natural area: grass and dirt
-                            editor.set_block_absolute(GRASS_BLOCK, x, ground_y, z, None, None);
+                            editor.set_block_if_absent_absolute(GRASS_BLOCK, x, ground_y, z);
                         }
-                        editor.set_block_absolute(DIRT, x, ground_y - 1, z, None, None);
-                        editor.set_block_absolute(DIRT, x, ground_y - 2, z, None, None);
+                        editor.set_block_if_absent_absolute(DIRT, x, ground_y - 1, z);
+                        editor.set_block_if_absent_absolute(DIRT, x, ground_y - 2, z);
                     }
 
                     // Fill underground with stone
                     if args.fillground {
-                        // Fill from bedrock+1 to 3 blocks below ground with stone
-                        editor.fill_blocks_absolute(
+                        editor.fill_column_absolute(
                             STONE,
                             x,
+                            z,
                             MIN_Y + 1,
-                            z,
-                            x,
                             ground_y - 3,
-                            z,
-                            None,
-                            None,
+                            true, // skip_existing: don't overwrite blocks placed by element processing
                         );
                     }
                     // Generate a bedrock level at MIN_Y
