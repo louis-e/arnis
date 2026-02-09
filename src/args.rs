@@ -1,6 +1,6 @@
 use crate::coordinate_system::geographic::LLBBox;
 use clap::Parser;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// Command-line arguments parser
@@ -19,7 +19,7 @@ pub struct Args {
     #[arg(long, group = "location")]
     pub save_json_file: Option<String>,
 
-    /// Path to the Minecraft world (required for Java, optional for Bedrock)
+    /// Output directory for the generated world (required for Java, optional for Bedrock)
     #[arg(long)]
     pub path: Option<PathBuf>,
 
@@ -70,42 +70,37 @@ pub struct Args {
     pub timeout: Option<Duration>,
 }
 
-fn validate_minecraft_world_path(path: &Path) -> Result<(), String> {
-    if !path.exists() {
-        return Err(format!("Path does not exist: {}", path.display()));
-    }
-    if !path.is_dir() {
-        return Err(format!("Path is not a directory: {}", path.display()));
-    }
-    let region = path.join("region");
-    if !region.is_dir() {
-        return Err(format!("No Minecraft world found at {}", region.display()));
-    }
-    Ok(())
-}
-
 /// Validates CLI arguments after parsing.
-/// For Java Edition: `--path` is required and must point to an existing Minecraft world with a `region` subdirectory.
+/// For Java Edition: `--path` is required and must point to an existing directory
+/// where a new world will be created automatically.
 /// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
 pub fn validate_args(args: &Args) -> Result<(), String> {
     if args.bedrock {
         // Bedrock: path is optional; if provided, it must be an existing directory
         if let Some(ref path) = args.path {
+            if !path.exists() {
+                return Err(format!("Path does not exist: {}", path.display()));
+            }
             if !path.is_dir() {
                 return Err(format!("Path is not a directory: {}", path.display()));
             }
         }
     } else {
-        // Java: path is required and must be a valid Minecraft world
+        // Java: path is required and must be an existing directory
         match &args.path {
             None => {
                 return Err(
-                    "The --path argument is required for Java Edition. Use --bedrock for Bedrock Edition output."
+                    "The --path argument is required for Java Edition. Provide the directory where the world should be created. Use --bedrock for Bedrock Edition output."
                         .to_string(),
                 );
             }
             Some(ref path) => {
-                validate_minecraft_world_path(path)?;
+                if !path.exists() {
+                    return Err(format!("Path does not exist: {}", path.display()));
+                }
+                if !path.is_dir() {
+                    return Err(format!("Path is not a directory: {}", path.display()));
+                }
             }
         }
     }
@@ -121,16 +116,9 @@ fn parse_duration(arg: &str) -> Result<std::time::Duration, std::num::ParseIntEr
 mod tests {
     use super::*;
 
-    fn minecraft_tmpdir() -> tempfile::TempDir {
-        let tmpdir = tempfile::tempdir().unwrap();
-        // create a `region` directory in the tempdir
-        let region_path = tmpdir.path().join("region");
-        std::fs::create_dir(&region_path).unwrap();
-        tmpdir
-    }
     #[test]
     fn test_flags() {
-        let tmpdir = minecraft_tmpdir();
+        let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
         // Test that terrain/debug are SetTrue
@@ -174,8 +162,33 @@ mod tests {
     }
 
     #[test]
+    fn test_java_path_must_exist() {
+        let cmd = ["arnis", "--path", "/nonexistent/path", "--bbox", "1,2,3,4"];
+        let args = Args::parse_from(cmd.iter());
+        let result = validate_args(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
+    fn test_bedrock_path_must_exist() {
+        let cmd = [
+            "arnis",
+            "--bedrock",
+            "--path",
+            "/nonexistent/path",
+            "--bbox",
+            "1,2,3,4",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        let result = validate_args(&args);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[test]
     fn test_required_options() {
-        let tmpdir = minecraft_tmpdir();
+        let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
         let cmd = ["arnis"];

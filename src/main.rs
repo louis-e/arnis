@@ -3,7 +3,6 @@
 mod args;
 #[cfg(feature = "bedrock")]
 mod bedrock_block_map;
-mod bedrock_utils;
 mod block_definitions;
 mod bresenham;
 mod clipping;
@@ -29,10 +28,12 @@ mod test_utilities;
 mod urban_ground;
 mod version_check;
 mod world_editor;
+mod world_utils;
 
 use args::Args;
 use clap::Parser;
 use colored::*;
+use std::path::PathBuf;
 use std::{env, fs, io::Write};
 
 #[cfg(feature = "gui")]
@@ -98,6 +99,15 @@ fn run_cli() {
         std::process::exit(1);
     }
 
+    // Early guard: --bedrock requires the bedrock cargo feature
+    if args.bedrock && !cfg!(feature = "bedrock") {
+        eprintln!(
+            "{}: The --bedrock flag requires the 'bedrock' feature. Rebuild with: cargo build --features bedrock",
+            "Error".red().bold()
+        );
+        std::process::exit(1);
+    }
+
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld
@@ -111,12 +121,24 @@ fn run_cli() {
         let output_dir = args
             .path
             .clone()
-            .unwrap_or_else(bedrock_utils::get_bedrock_output_directory);
-        let (output_path, lvl_name) = bedrock_utils::build_bedrock_output(&args.bbox, output_dir);
+            .unwrap_or_else(world_utils::get_bedrock_output_directory);
+        let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
         (output_path, Some(lvl_name))
     } else {
-        // Java: use the provided world path directly
-        (args.path.clone().unwrap(), None)
+        // Java: create a new world in the provided output directory
+        let base_dir = args.path.clone().unwrap();
+        let world_path = match world_utils::create_new_world(&base_dir) {
+            Ok(path) => PathBuf::from(path),
+            Err(e) => {
+                eprintln!("{} {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            }
+        };
+        println!(
+            "Created new world at: {}",
+            world_path.display().to_string().bright_white().bold()
+        );
+        (world_path, None)
     };
 
     // Fetch data

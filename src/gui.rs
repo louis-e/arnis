@@ -221,118 +221,7 @@ fn gui_create_world(save_path: String) -> Result<String, i32> {
 }
 
 fn create_new_world(base_path: &Path) -> Result<String, String> {
-    // Generate a unique world name with proper counter
-    // Check for both "Arnis World X" and "Arnis World X: Location" patterns
-    let mut counter: i32 = 1;
-    let unique_name: String = loop {
-        let candidate_name: String = format!("Arnis World {counter}");
-        let candidate_path: PathBuf = base_path.join(&candidate_name);
-
-        // Check for exact match (no location suffix)
-        let exact_match_exists = candidate_path.exists();
-
-        // Check for worlds with location suffix (Arnis World X: Location)
-        let location_pattern = format!("Arnis World {counter}: ");
-        let location_match_exists = fs::read_dir(base_path)
-            .map(|entries| {
-                entries
-                    .filter_map(Result::ok)
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .any(|name| name.starts_with(&location_pattern))
-            })
-            .unwrap_or(false);
-
-        if !exact_match_exists && !location_match_exists {
-            break candidate_name;
-        }
-        counter += 1;
-    };
-
-    let new_world_path: PathBuf = base_path.join(&unique_name);
-
-    // Create the new world directory structure
-    fs::create_dir_all(new_world_path.join("region"))
-        .map_err(|e| format!("Failed to create world directory: {e}"))?;
-
-    // Copy the region template file
-    const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
-    let region_path = new_world_path.join("region").join("r.0.0.mca");
-    fs::write(&region_path, REGION_TEMPLATE)
-        .map_err(|e| format!("Failed to create region file: {e}"))?;
-
-    // Add the level.dat file
-    const LEVEL_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/level.dat");
-
-    // Decompress the gzipped level.template
-    let mut decoder = GzDecoder::new(LEVEL_TEMPLATE);
-    let mut decompressed_data = Vec::new();
-    decoder
-        .read_to_end(&mut decompressed_data)
-        .map_err(|e| format!("Failed to decompress level.template: {e}"))?;
-
-    // Parse the decompressed NBT data
-    let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
-        .map_err(|e| format!("Failed to parse level.dat template: {e}"))?;
-
-    // Modify the LevelName, LastPlayed and player position fields
-    if let Value::Compound(ref mut root) = level_data {
-        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-            // Update LevelName
-            data.insert("LevelName".to_string(), Value::String(unique_name.clone()));
-
-            // Update LastPlayed to the current Unix time in milliseconds
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| format!("Failed to get current time: {e}"))?;
-            let current_time_millis = current_time.as_millis() as i64;
-            data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
-
-            // Update player position and rotation
-            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    if let Value::Double(ref mut x) = pos.get_mut(0).unwrap() {
-                        *x = -5.0;
-                    }
-                    if let Value::Double(ref mut y) = pos.get_mut(1).unwrap() {
-                        *y = -61.0;
-                    }
-                    if let Value::Double(ref mut z) = pos.get_mut(2).unwrap() {
-                        *z = -5.0;
-                    }
-                }
-
-                if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
-                    if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
-                        *x = -45.0;
-                    }
-                }
-            }
-        }
-    }
-
-    // Serialize the updated NBT data back to bytes
-    let serialized_level_data: Vec<u8> = fastnbt::to_bytes(&level_data)
-        .map_err(|e| format!("Failed to serialize updated level.dat: {e}"))?;
-
-    // Compress the serialized data back to gzip
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder
-        .write_all(&serialized_level_data)
-        .map_err(|e| format!("Failed to compress updated level.dat: {e}"))?;
-    let compressed_level_data = encoder
-        .finish()
-        .map_err(|e| format!("Failed to finalize compression for level.dat: {e}"))?;
-
-    // Write the level.dat file
-    fs::write(new_world_path.join("level.dat"), compressed_level_data)
-        .map_err(|e| format!("Failed to create level.dat file: {e}"))?;
-
-    // Add the icon.png file
-    const ICON_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/icon.png");
-    fs::write(new_world_path.join("icon.png"), ICON_TEMPLATE)
-        .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
-
-    Ok(new_world_path.display().to_string())
+    crate::world_utils::create_new_world(base_path)
 }
 
 /// Adds localized area name to the world name in level.dat
@@ -948,9 +837,9 @@ fn gui_start_generation(
                 }
                 WorldFormat::BedrockMcWorld => {
                     // Bedrock: generate .mcworld on Desktop with location-based name
-                    let output_dir = crate::bedrock_utils::get_bedrock_output_directory();
+                    let output_dir = crate::world_utils::get_bedrock_output_directory();
                     let (output_path, lvl_name) =
-                        crate::bedrock_utils::build_bedrock_output(&bbox, output_dir);
+                        crate::world_utils::build_bedrock_output(&bbox, output_dir);
                     (output_path, Some(lvl_name))
                 }
             };
