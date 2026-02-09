@@ -1047,7 +1047,8 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
                 SMOOTH_STONE,
                 QUARTZ_BLOCK,
             ];
-            MODERN_SKYSCRAPER_WALL_OPTIONS[rng.random_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
+            MODERN_SKYSCRAPER_WALL_OPTIONS
+                [rng.random_range(0..MODERN_SKYSCRAPER_WALL_OPTIONS.len())]
         }
         BuildingCategory::GlassySkyscraper => {
             // Glass-facade skyscrapers use stained glass as wall material
@@ -1619,7 +1620,8 @@ fn generate_residential_window_decorations(
 
     // --- Per-building random material choices ---
     let mut rng = element_rng(element.id);
-    let trapdoor_base = SHUTTER_TRAPDOOR_OPTIONS[rng.random_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())];
+    let trapdoor_base =
+        SHUTTER_TRAPDOOR_OPTIONS[rng.random_range(0..SHUTTER_TRAPDOOR_OPTIONS.len())];
     let sill_base = SILL_SLAB_OPTIONS[rng.random_range(0..SILL_SLAB_OPTIONS.len())];
     let sill_block = make_top_slab(sill_base);
 

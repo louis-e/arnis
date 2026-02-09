@@ -14,7 +14,7 @@ overflow-checks = true
 
 [features]
 default = ["gui"]
-gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "tauri-build", "bedrock"]
+gui = ["tauri", "tauri-plugin-log", "tauri-plugin-shell", "tokio", "rfd", "tauri-build"]
 bedrock = ["bedrockrs_level", "bedrockrs_shared", "nbtx", "zip", "byteorder", "vek", "rusty-leveldb"]
 
 [build-dependencies]

@@ -395,7 +395,8 @@ pub fn generate_natural(
 
                                                 // Add vegetation on grass blocks
                                                 if cluster_block == GRASS_BLOCK {
-                                                    let vegetation_chance = rng.random_range(0..100);
+                                                    let vegetation_chance =
+                                                        rng.random_range(0..100);
                                                     if vegetation_chance == 0 {
                                                         // 1% chance for rare trees
                                                         Tree::create(

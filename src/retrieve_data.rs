@@ -186,9 +186,7 @@ pub fn fetch_data_from_overpass(
                     }
 
                     println!("Request failed. Switching to fallback url...");
-                    url = fallback_api_servers
-                        .choose(&mut rand::rng())
-                        .unwrap();
+                    url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
                     attempt += 1;
                 }
             }

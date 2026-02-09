@@ -8,7 +8,10 @@ use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
-use rand::{prelude::{IndexedRandom, SliceRandom}, Rng};
+use rand::{
+    prelude::{IndexedRandom, SliceRandom},
+    Rng,
+};
 use std::collections::{HashMap, HashSet};
 
 pub fn generate_amenities(
@@ -429,7 +432,10 @@ fn build_display_item_for_category(
 ) -> Option<HashMap<String, Value>> {
     match category {
         LootCategory::GlassBottle => Some(make_display_item("minecraft:glass_bottle", 1)),
-        LootCategory::Paper => Some(make_display_item("minecraft:paper", rng.random_range(1..=4))),
+        LootCategory::Paper => Some(make_display_item(
+            "minecraft:paper",
+            rng.random_range(1..=4),
+        )),
         LootCategory::Glass => Some(make_display_item("minecraft:glass", 1)),
         LootCategory::Leather => Some(build_leather_display_item(rng)),
         LootCategory::EmptyBucket => Some(make_display_item("minecraft:bucket", 1)),
