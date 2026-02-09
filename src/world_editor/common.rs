@@ -57,7 +57,7 @@ pub(crate) struct PaletteItem {
 /// Block storage strategy for a 16×16×16 section.
 ///
 /// **Memory optimisation**: instead of always allocating a 4 096-byte array,
-/// we distinguish three cases:
+/// we distinguish two cases:
 ///
 /// * `Uniform(block)` – every position holds the same block (1 byte).
 ///   This covers freshly-created (all-AIR) sections, and sections that were
@@ -489,6 +489,8 @@ impl WorldToModify {
         // Only write if the current block is AIR
         if section.storage.get(idx) == AIR {
             section.storage.set(idx, block);
+            // Clear any stale properties from a previous block at this position
+            section.properties.remove(&idx);
         }
     }
 
@@ -530,9 +532,11 @@ impl WorldToModify {
             if skip_existing {
                 if section.storage.get(idx) == AIR {
                     section.storage.set(idx, block);
+                    section.properties.remove(&idx);
                 }
             } else {
                 section.storage.set(idx, block);
+                section.properties.remove(&idx);
             }
         }
     }
