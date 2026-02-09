@@ -45,7 +45,14 @@ pub fn sanitize_for_filename(name: &str) -> String {
     // Limit length to avoid excessively long filenames
     const MAX_LEN: usize = 64;
     if sanitized.len() > MAX_LEN {
-        sanitized.truncate(MAX_LEN);
+        // Find a valid UTF-8 char boundary at or before MAX_LEN bytes
+        let cutoff = sanitized
+            .char_indices()
+            .take_while(|(idx, _)| *idx < MAX_LEN)
+            .last()
+            .map(|(idx, ch)| idx + ch.len_utf8())
+            .unwrap_or(0);
+        sanitized.truncate(cutoff);
         sanitized = sanitized.trim_end().to_string();
     }
 

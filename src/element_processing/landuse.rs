@@ -377,7 +377,7 @@ pub fn generate_landuse_from_relation(
 ) {
     if rel.tags.contains_key("landuse") {
         // Process each outer member way individually using cached flood fill.
-        // We intentionally do NOT combine all outer nodes into one mega-way,
+        // We intentionally do not combine all outer nodes into one mega-way,
         // because that creates a nonsensical polygon spanning the whole relation
         // extent, misses the flood fill cache, and can cause multi-GB allocations.
         for member in &rel.members {

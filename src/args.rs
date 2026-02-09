@@ -19,8 +19,9 @@ pub struct Args {
     #[arg(long, group = "location")]
     pub save_json_file: Option<String>,
 
-    /// Output directory for the generated world (required for Java, optional for Bedrock)
-    #[arg(long)]
+    /// Output directory for the generated world (required for Java, optional for Bedrock).
+    /// Use --output-dir (or the deprecated --path alias) to specify where the world is created.
+    #[arg(long = "output-dir", alias = "path")]
     pub path: Option<PathBuf>,
 
     /// Generate a Bedrock Edition world (.mcworld) instead of Java Edition
@@ -90,7 +91,7 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         match &args.path {
             None => {
                 return Err(
-                    "The --path argument is required for Java Edition. Provide the directory where the world should be created. Use --bedrock for Bedrock Edition output."
+                    "The --output-dir argument is required for Java Edition. Provide the directory where the world should be created. Use --bedrock for Bedrock Edition output."
                         .to_string(),
                 );
             }
@@ -124,7 +125,7 @@ mod tests {
         // Test that terrain/debug are SetTrue
         let cmd = [
             "arnis",
-            "--path",
+            "--output-dir",
             tmp_path,
             "--bbox",
             "1,2,3,4",
@@ -135,7 +136,7 @@ mod tests {
         assert!(args.debug);
         assert!(args.terrain);
 
-        let cmd = ["arnis", "--path", tmp_path, "--bbox", "1,2,3,4"];
+        let cmd = ["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
         let args = Args::parse_from(cmd.iter());
         assert!(!args.debug);
         assert!(!args.terrain);
@@ -144,7 +145,7 @@ mod tests {
 
     #[test]
     fn test_bedrock_flag() {
-        // Bedrock mode doesn't require --path
+        // Bedrock mode doesn't require --output-dir
         let cmd = ["arnis", "--bedrock", "--bbox", "1,2,3,4"];
         let args = Args::parse_from(cmd.iter());
         assert!(args.bedrock);
@@ -163,7 +164,13 @@ mod tests {
 
     #[test]
     fn test_java_path_must_exist() {
-        let cmd = ["arnis", "--path", "/nonexistent/path", "--bbox", "1,2,3,4"];
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            "/nonexistent/path",
+            "--bbox",
+            "1,2,3,4",
+        ];
         let args = Args::parse_from(cmd.iter());
         let result = validate_args(&args);
         assert!(result.is_err());
@@ -175,7 +182,7 @@ mod tests {
         let cmd = [
             "arnis",
             "--bedrock",
-            "--path",
+            "--output-dir",
             "/nonexistent/path",
             "--bbox",
             "1,2,3,4",
@@ -194,11 +201,16 @@ mod tests {
         let cmd = ["arnis"];
         assert!(Args::try_parse_from(cmd.iter()).is_err());
 
+        let cmd = ["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+        let args = Args::try_parse_from(cmd.iter()).unwrap();
+        assert!(validate_args(&args).is_ok());
+
+        // Verify --path still works as a deprecated alias
         let cmd = ["arnis", "--path", tmp_path, "--bbox", "1,2,3,4"];
         let args = Args::try_parse_from(cmd.iter()).unwrap();
         assert!(validate_args(&args).is_ok());
 
-        let cmd = ["arnis", "--path", tmp_path, "--file", ""];
+        let cmd = ["arnis", "--output-dir", tmp_path, "--file", ""];
         assert!(Args::try_parse_from(cmd.iter()).is_err());
 
         // The --gui flag isn't used here, ugh. TODO clean up main.rs and its argparse usage.

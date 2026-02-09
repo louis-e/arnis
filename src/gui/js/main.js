@@ -37,8 +37,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.createWorld = createWorld;
   window.startGeneration = startGeneration;
   setupProgressListener();
-  initSettings();
   await initSavePath();
+  initSettings();
   initTelemetryConsent();
   handleBboxInput();
   const localization = await getLocalization();
