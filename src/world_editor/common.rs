@@ -477,7 +477,7 @@ impl WorldToModify {
             .or_default();
 
         // Clamp Y
-        let y = y.clamp(-64, 319);
+        let y = y.clamp(MIN_Y, MAX_Y);
         let section_idx: i8 = (y >> 4) as i8;
         let section = chunk.sections.entry(section_idx).or_default();
 
@@ -518,8 +518,8 @@ impl WorldToModify {
         let local_x = (x & 15) as u8;
         let local_z = (z & 15) as u8;
 
-        let y_min = y_min.clamp(-64, 319);
-        let y_max = y_max.clamp(-64, 319);
+        let y_min = y_min.clamp(MIN_Y, MAX_Y);
+        let y_max = y_max.clamp(MIN_Y, MAX_Y);
 
         for y in y_min..=y_max {
             let section_idx: i8 = (y >> 4) as i8;
