@@ -614,45 +614,6 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
-    /// Fills a cuboid area with the specified block between two coordinates using absolute Y values.
-    #[allow(clippy::too_many_arguments, dead_code)]
-    #[inline]
-    pub fn fill_blocks_absolute(
-        &mut self,
-        block: Block,
-        x1: i32,
-        y1_absolute: i32,
-        z1: i32,
-        x2: i32,
-        y2_absolute: i32,
-        z2: i32,
-        override_whitelist: Option<&[Block]>,
-        override_blacklist: Option<&[Block]>,
-    ) {
-        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
-        let (min_y, max_y) = if y1_absolute < y2_absolute {
-            (y1_absolute, y2_absolute)
-        } else {
-            (y2_absolute, y1_absolute)
-        };
-        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
-
-        for x in min_x..=max_x {
-            for absolute_y in min_y..=max_y {
-                for z in min_z..=max_z {
-                    self.set_block_absolute(
-                        block,
-                        x,
-                        absolute_y,
-                        z,
-                        override_whitelist,
-                        override_blacklist,
-                    );
-                }
-            }
-        }
-    }
-
     /// Checks for a block at the given coordinates.
     #[inline]
     pub fn check_for_block(&self, x: i32, y: i32, z: i32, whitelist: Option<&[Block]>) -> bool {

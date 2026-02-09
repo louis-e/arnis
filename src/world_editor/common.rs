@@ -548,19 +548,14 @@ impl WorldToModify {
     /// Scan every section and collapse any that are entirely one block type
     /// from `Full(Vec)` back to `Uniform(Block)`, freeing the 4 KiB allocation.
     pub fn compact_sections(&mut self) {
-        let mut compacted = 0usize;
         for region in self.regions.values_mut() {
             for chunk in region.chunks.values_mut() {
                 for section in chunk.sections.values_mut() {
                     if matches!(&section.storage, BlockStorage::Full(_)) {
                         section.compact();
-                        if matches!(&section.storage, BlockStorage::Uniform(_)) {
-                            compacted += 1;
-                        }
                     }
                 }
             }
         }
-        let _ = compacted;
     }
 }
