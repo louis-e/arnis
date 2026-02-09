@@ -8,7 +8,7 @@
 //! # Example
 //! ```ignore
 //! let mut rng = element_rng(element_id);
-//! let color = rng.gen_bool(0.5); // Always same result for same element_id
+//! let color = rng.random_bool(0.5); // Always same result for same element_id
 //! ```
 
 use rand::SeedableRng;
@@ -77,7 +77,7 @@ mod tests {
 
         // Same seed should produce same sequence
         for _ in 0..100 {
-            assert_eq!(rng1.gen::<u64>(), rng2.gen::<u64>());
+            assert_eq!(rng1.random::<u64>(), rng2.random::<u64>());
         }
     }
 
@@ -87,8 +87,8 @@ mod tests {
         let mut rng2 = element_rng(12346);
 
         // Different seeds should (almost certainly) produce different values
-        let v1: u64 = rng1.gen();
-        let v2: u64 = rng2.gen();
+        let v1: u64 = rng1.random();
+        let v2: u64 = rng2.random();
         assert_ne!(v1, v2);
     }
 
@@ -97,8 +97,8 @@ mod tests {
         let mut rng1 = element_rng(12345);
         let mut rng2 = element_rng_salted(12345, 1);
 
-        let v1: u64 = rng1.gen();
-        let v2: u64 = rng2.gen();
+        let v1: u64 = rng1.random();
+        let v2: u64 = rng2.random();
         assert_ne!(v1, v2);
     }
 
@@ -107,7 +107,7 @@ mod tests {
         let mut rng1 = coord_rng(100, 200, 12345);
         let mut rng2 = coord_rng(100, 200, 12345);
 
-        assert_eq!(rng1.gen::<u64>(), rng2.gen::<u64>());
+        assert_eq!(rng1.random::<u64>(), rng2.random::<u64>());
     }
 
     #[test]
@@ -116,12 +116,12 @@ mod tests {
         let mut rng1 = coord_rng(-100, -200, 12345);
         let mut rng2 = coord_rng(-100, -200, 12345);
 
-        assert_eq!(rng1.gen::<u64>(), rng2.gen::<u64>());
+        assert_eq!(rng1.random::<u64>(), rng2.random::<u64>());
 
         // Ensure different negative coords produce different seeds
         let mut rng3 = coord_rng(-100, -200, 12345);
         let mut rng4 = coord_rng(-101, -200, 12345);
 
-        assert_ne!(rng3.gen::<u64>(), rng4.gen::<u64>());
+        assert_ne!(rng3.random::<u64>(), rng4.random::<u64>());
     }
 }

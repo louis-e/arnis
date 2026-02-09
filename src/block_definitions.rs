@@ -1039,7 +1039,7 @@ pub static INDUSTRIAL_WINDOW_OPTIONS: [Block; 4] = [
 // Window types for different building styles (non-deterministic, for backwards compatibility)
 pub fn get_window_block_for_building_type(building_type: &str) -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     get_window_block_for_building_type_with_rng(building_type, &mut rng)
 }
 
@@ -1050,18 +1050,18 @@ pub fn get_window_block_for_building_type_with_rng(
 ) -> Block {
     match building_type {
         "residential" | "house" | "apartment" | "apartments" => {
-            RESIDENTIAL_WINDOW_OPTIONS[rng.gen_range(0..RESIDENTIAL_WINDOW_OPTIONS.len())]
+            RESIDENTIAL_WINDOW_OPTIONS[rng.random_range(0..RESIDENTIAL_WINDOW_OPTIONS.len())]
         }
         "hospital" | "school" | "university" => {
-            INSTITUTIONAL_WINDOW_OPTIONS[rng.gen_range(0..INSTITUTIONAL_WINDOW_OPTIONS.len())]
+            INSTITUTIONAL_WINDOW_OPTIONS[rng.random_range(0..INSTITUTIONAL_WINDOW_OPTIONS.len())]
         }
         "hotel" | "restaurant" => {
-            HOSPITALITY_WINDOW_OPTIONS[rng.gen_range(0..HOSPITALITY_WINDOW_OPTIONS.len())]
+            HOSPITALITY_WINDOW_OPTIONS[rng.random_range(0..HOSPITALITY_WINDOW_OPTIONS.len())]
         }
         "industrial" | "warehouse" => {
-            INDUSTRIAL_WINDOW_OPTIONS[rng.gen_range(0..INDUSTRIAL_WINDOW_OPTIONS.len())]
+            INDUSTRIAL_WINDOW_OPTIONS[rng.random_range(0..INDUSTRIAL_WINDOW_OPTIONS.len())]
         }
-        _ => WINDOW_VARIATIONS[rng.gen_range(0..WINDOW_VARIATIONS.len())],
+        _ => WINDOW_VARIATIONS[rng.random_range(0..WINDOW_VARIATIONS.len())],
     }
 }
 
@@ -1080,13 +1080,13 @@ pub static FLOOR_BLOCK_OPTIONS: [Block; 8] = [
 // Random floor block selection (non-deterministic, for backwards compatibility)
 pub fn get_random_floor_block() -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
-    FLOOR_BLOCK_OPTIONS[rng.gen_range(0..FLOOR_BLOCK_OPTIONS.len())]
+    let mut rng = rand::rng();
+    FLOOR_BLOCK_OPTIONS[rng.random_range(0..FLOOR_BLOCK_OPTIONS.len())]
 }
 
 /// Deterministic floor block selection using provided RNG
 pub fn get_floor_block_with_rng(rng: &mut impl rand::Rng) -> Block {
-    FLOOR_BLOCK_OPTIONS[rng.gen_range(0..FLOOR_BLOCK_OPTIONS.len())]
+    FLOOR_BLOCK_OPTIONS[rng.random_range(0..FLOOR_BLOCK_OPTIONS.len())]
 }
 
 // Define all predefined colors with their blocks
@@ -1221,7 +1221,7 @@ static DEFINED_COLORS: &[ColorBlockMapping] = &[
 // Function to randomly select building wall block with alternatives
 pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Find the closest color match
     let closest_color = DEFINED_COLORS
@@ -1229,7 +1229,7 @@ pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
         .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
 
     if let Some((_, options)) = closest_color {
-        options[rng.gen_range(0..options.len())]
+        options[rng.random_range(0..options.len())]
     } else {
         // This should never happen, but fallback just in case
         get_fallback_building_block()
@@ -1239,7 +1239,7 @@ pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
 // Function to get a random fallback building block when no color attribute is specified
 pub fn get_fallback_building_block() -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let fallback_options = [
         BLACKSTONE,
@@ -1269,13 +1269,13 @@ pub fn get_fallback_building_block() -> Block {
         WHITE_CONCRETE,
         WHITE_TERRACOTTA,
     ];
-    fallback_options[rng.gen_range(0..fallback_options.len())]
+    fallback_options[rng.random_range(0..fallback_options.len())]
 }
 
 // Function to get a random castle wall block
 pub fn get_castle_wall_block() -> Block {
     use rand::Rng;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let castle_wall_options = [
         STONE_BRICKS,
@@ -1289,5 +1289,5 @@ pub fn get_castle_wall_block() -> Block {
         SMOOTH_STONE,
         BRICK,
     ];
-    castle_wall_options[rng.gen_range(0..castle_wall_options.len())]
+    castle_wall_options[rng.random_range(0..castle_wall_options.len())]
 }

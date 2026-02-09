@@ -75,8 +75,10 @@ pub struct WorldEditor<'a> {
     ground: Option<Arc<Ground>>,
     format: WorldFormat,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
+    #[cfg(feature = "bedrock")]
     bedrock_level_name: Option<String>,
     /// Optional spawn point for Bedrock worlds (x, z coordinates)
+    #[cfg(feature = "bedrock")]
     bedrock_spawn_point: Option<(i32, i32)>,
 }
 
@@ -93,7 +95,9 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format: WorldFormat::JavaAnvil,
+            #[cfg(feature = "bedrock")]
             bedrock_level_name: None,
+            #[cfg(feature = "bedrock")]
             bedrock_spawn_point: None,
         }
     }
@@ -107,8 +111,12 @@ impl<'a> WorldEditor<'a> {
         xzbbox: &'a XZBBox,
         llbbox: LLBBox,
         format: WorldFormat,
-        bedrock_level_name: Option<String>,
-        bedrock_spawn_point: Option<(i32, i32)>,
+        #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_level_name: Option<
+            String,
+        >,
+        #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_spawn_point: Option<
+            (i32, i32),
+        >,
     ) -> Self {
         Self {
             world_dir,
@@ -117,7 +125,9 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format,
+            #[cfg(feature = "bedrock")]
             bedrock_level_name,
+            #[cfg(feature = "bedrock")]
             bedrock_spawn_point,
         }
     }

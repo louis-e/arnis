@@ -84,7 +84,7 @@ fn generate_advertising_flag(editor: &mut WorldEditor, node: &ProcessedNode) {
         ORANGE_WOOL,
         WHITE_WOOL,
     ];
-    let flag_block = flag_colors[rng.gen_range(0..flag_colors.len())];
+    let flag_block = flag_colors[rng.random_range(0..flag_colors.len())];
 
     // Flag extends to one side (2-3 blocks)
     let flag_length = 3;

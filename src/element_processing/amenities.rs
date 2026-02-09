@@ -8,7 +8,10 @@ use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
-use rand::{seq::SliceRandom, Rng};
+use rand::{
+    prelude::{IndexedRandom, SliceRandom},
+    Rng,
+};
 use std::collections::{HashMap, HashSet};
 
 pub fn generate_amenities(
@@ -47,7 +50,7 @@ pub fn generate_amenities(
                 }
 
                 if let Some(pt) = first_node {
-                    let mut rng = rand::thread_rng();
+                    let mut rng = rand::rng();
                     let loot_pool = build_recycling_loot_pool(element.tags());
                     let items = build_recycling_items(&loot_pool, &mut rng);
 
@@ -132,7 +135,7 @@ pub fn generate_amenities(
                     // Use deterministic RNG for consistent bench orientation across region boundaries
                     let mut rng = element_rng(element.id());
                     // 50% chance to 90 degrees rotate the bench
-                    if rng.gen_bool(0.5) {
+                    if rng.random_bool(0.5) {
                         editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
                         editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
                         editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
@@ -389,8 +392,8 @@ fn build_recycling_items(
 
     let mut items = Vec::new();
     for slot in 0..27 {
-        if rng.gen_bool(0.2) {
-            let kind = loot_pool[rng.gen_range(0..loot_pool.len())];
+        if rng.random_bool(0.2) {
+            let kind = loot_pool[rng.random_range(0..loot_pool.len())];
             if let Some(item) = build_item_for_kind(kind, slot as i8, rng) {
                 items.push(item);
             }
@@ -429,7 +432,10 @@ fn build_display_item_for_category(
 ) -> Option<HashMap<String, Value>> {
     match category {
         LootCategory::GlassBottle => Some(make_display_item("minecraft:glass_bottle", 1)),
-        LootCategory::Paper => Some(make_display_item("minecraft:paper", rng.gen_range(1..=4))),
+        LootCategory::Paper => Some(make_display_item(
+            "minecraft:paper",
+            rng.random_range(1..=4),
+        )),
         LootCategory::Glass => Some(make_display_item("minecraft:glass", 1)),
         LootCategory::Leather => Some(build_leather_display_item(rng)),
         LootCategory::EmptyBucket => Some(make_display_item("minecraft:bucket", 1)),
@@ -440,7 +446,7 @@ fn build_display_item_for_category(
                 "minecraft:gold_ingot",
             ];
             let metal = metals.choose(rng)?;
-            Some(make_display_item(metal, rng.gen_range(1..=2)))
+            Some(make_display_item(metal, rng.random_range(1..=2)))
         }
         LootCategory::GreenWaste => {
             let options = [
@@ -451,7 +457,7 @@ fn build_display_item_for_category(
                 "minecraft:wheat_seeds",
             ];
             let choice = options.choose(rng)?;
-            Some(make_display_item(choice, rng.gen_range(1..=3)))
+            Some(make_display_item(choice, rng.random_range(1..=3)))
         }
     }
 }
@@ -463,7 +469,7 @@ fn place_item_frame_on_random_side(
     z: i32,
     item: HashMap<String, Value>,
 ) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut directions = [
         ((0, 0, -1), 2), // North
         ((0, 0, 1), 3),  // South
@@ -556,12 +562,12 @@ fn build_item_for_kind(
         RecyclingLootKind::GlassBottle => Some(make_basic_item(
             "minecraft:glass_bottle",
             slot,
-            rng.gen_range(1..=4),
+            rng.random_range(1..=4),
         )),
         RecyclingLootKind::Paper => Some(make_basic_item(
             "minecraft:paper",
             slot,
-            rng.gen_range(1..=10),
+            rng.random_range(1..=10),
         )),
         RecyclingLootKind::GlassBlock => Some(build_glass_item(false, slot, rng)),
         RecyclingLootKind::GlassPane => Some(build_glass_item(true, slot, rng)),
@@ -578,26 +584,26 @@ fn build_item_for_kind(
 fn build_scrap_metal_item(slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
     let metals = ["copper_ingot", "iron_ingot", "gold_ingot"];
     let metal = metals.choose(rng).expect("scrap metal list is non-empty");
-    let count = rng.gen_range(1..=3);
+    let count = rng.random_range(1..=3);
     make_basic_item(&format!("minecraft:{metal}"), slot, count)
 }
 
 fn build_green_waste_item(slot: i8, rng: &mut impl Rng) -> HashMap<String, Value> {
     #[allow(clippy::match_same_arms)]
-    let (id, count) = match rng.gen_range(0..8) {
-        0 => ("minecraft:tall_grass", rng.gen_range(1..=4)),
-        1 => ("minecraft:sweet_berries", rng.gen_range(2..=6)),
-        2 => ("minecraft:oak_sapling", rng.gen_range(1..=2)),
-        3 => ("minecraft:birch_sapling", rng.gen_range(1..=2)),
-        4 => ("minecraft:spruce_sapling", rng.gen_range(1..=2)),
-        5 => ("minecraft:jungle_sapling", rng.gen_range(1..=2)),
-        6 => ("minecraft:acacia_sapling", rng.gen_range(1..=2)),
-        _ => ("minecraft:dark_oak_sapling", rng.gen_range(1..=2)),
+    let (id, count) = match rng.random_range(0..8) {
+        0 => ("minecraft:tall_grass", rng.random_range(1..=4)),
+        1 => ("minecraft:sweet_berries", rng.random_range(2..=6)),
+        2 => ("minecraft:oak_sapling", rng.random_range(1..=2)),
+        3 => ("minecraft:birch_sapling", rng.random_range(1..=2)),
+        4 => ("minecraft:spruce_sapling", rng.random_range(1..=2)),
+        5 => ("minecraft:jungle_sapling", rng.random_range(1..=2)),
+        6 => ("minecraft:acacia_sapling", rng.random_range(1..=2)),
+        _ => ("minecraft:dark_oak_sapling", rng.random_range(1..=2)),
     };
 
     // 25% chance to replace with seeds instead
-    let id = if rng.gen_bool(0.25) {
-        match rng.gen_range(0..4) {
+    let id = if rng.random_bool(0.25) {
+        match rng.random_range(0..4) {
             0 => "minecraft:wheat_seeds",
             1 => "minecraft:pumpkin_seeds",
             2 => "minecraft:melon_seeds",
@@ -630,7 +636,7 @@ fn build_glass_item(is_pane: bool, slot: i8, rng: &mut impl Rng) -> HashMap<Stri
         "black",
     ];
 
-    let use_colorless = rng.gen_bool(0.7);
+    let use_colorless = rng.random_bool(0.7);
 
     let id = if use_colorless {
         if is_pane {
@@ -650,9 +656,9 @@ fn build_glass_item(is_pane: bool, slot: i8, rng: &mut impl Rng) -> HashMap<Stri
     };
 
     let count = if is_pane {
-        rng.gen_range(4..=16)
+        rng.random_range(4..=16)
     } else {
-        rng.gen_range(1..=6)
+        rng.random_range(1..=6)
     };
 
     make_basic_item(&id, slot, count)
@@ -692,21 +698,21 @@ fn biased_damage(max_damage: i32, rng: &mut impl Rng) -> i32 {
     let upper = safe_max.saturating_sub(1);
     let lower = (safe_max / 2).min(upper);
 
-    let heavy_wear = rng.gen_range(lower..=upper);
-    let random_wear = rng.gen_range(0..=upper);
+    let heavy_wear = rng.random_range(lower..=upper);
+    let random_wear = rng.random_range(0..=upper);
     heavy_wear.max(random_wear)
 }
 
 fn maybe_leather_color(rng: &mut impl Rng) -> Option<i32> {
-    if rng.gen_bool(0.3) {
-        Some(rng.gen_range(0..=0x00FF_FFFF))
+    if rng.random_bool(0.3) {
+        Some(rng.random_range(0..=0x00FF_FFFF))
     } else {
         None
     }
 }
 
 fn random_leather_piece(rng: &mut impl Rng) -> LeatherPiece {
-    match rng.gen_range(0..4) {
+    match rng.random_range(0..4) {
         0 => LeatherPiece::Helmet,
         1 => LeatherPiece::Chestplate,
         2 => LeatherPiece::Leggings,
