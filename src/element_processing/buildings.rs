@@ -3794,33 +3794,28 @@ pub fn generate_building_from_relation(
         .and_then(|l: &String| l.parse::<i32>().ok())
         .unwrap_or(2); // Default to 2 levels
 
-    // Process the outer way to create the building walls
-    for member in &relation.members {
-        if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(
-                editor,
-                &member.way,
-                args,
-                Some(relation_levels),
-                flood_fill_cache,
-            );
-        }
-    }
+    // Check if this relation has building parts
+    let has_parts = relation
+        .members
+        .iter()
+        .any(|m| m.role == ProcessedMemberRole::Part);
 
-    // Handle inner ways (holes, courtyards, etc.)
-    /*for member in &relation.members {
-        if member.role == ProcessedMemberRole::Inner {
-            let polygon_coords: Vec<(i32, i32)> =
-                member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
-            let hole_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-            for (x, z) in hole_area {
-                // Remove blocks in the inner area to create a hole
-                editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
+    if !has_parts {
+        // No parts: render outline as the building (traditional multipolygon behavior)
+        for member in &relation.members {
+            if member.role == ProcessedMemberRole::Outer {
+                generate_buildings(
+                    editor,
+                    &member.way,
+                    args,
+                    Some(relation_levels),
+                    flood_fill_cache,
+                );
             }
         }
-    }*/
+    }
+    // When has_parts: parts are rendered as standalone ways from the elements list.
+    // The outline way is suppressed in data_processing to avoid overlaying the parts.
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.

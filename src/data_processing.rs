@@ -6,7 +6,7 @@ use crate::element_processing::*;
 use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
 use crate::map_renderer;
-use crate::osm_parser::ProcessedElement;
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -14,6 +14,7 @@ use crate::urban_ground;
 use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -89,6 +90,31 @@ pub fn generate_world_with_options(
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
 
+    // Pre-scan: detect building relation outlines that should be suppressed.
+    // When a type=building relation has "part" members, the outline way should not
+    // render as a standalone building — the individual parts render instead.
+    let suppressed_building_outlines: HashSet<u64> = {
+        let mut outlines = HashSet::new();
+        for element in &elements {
+            if let ProcessedElement::Relation(rel) = element {
+                if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                    let has_parts = rel
+                        .members
+                        .iter()
+                        .any(|m| m.role == ProcessedMemberRole::Part);
+                    if has_parts {
+                        for member in &rel.members {
+                            if member.role == ProcessedMemberRole::Outer {
+                                outlines.insert(member.way.id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        outlines
+    };
+
     // Process all elements
     for element in elements.into_iter() {
         process_pb.inc(1);
@@ -110,7 +136,13 @@ pub fn generate_world_with_options(
 
         match &element {
             ProcessedElement::Way(way) => {
-                if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
+                // Skip building outlines that are suppressed by building relations with parts.
+                // The individual building:part ways will render instead.
+                if suppressed_building_outlines.contains(&way.id) {
+                    // Outline suppressed — skip all processing
+                } else if way.tags.contains_key("building")
+                    || way.tags.contains_key("building:part")
+                {
                     buildings::generate_buildings(&mut editor, way, args, None, &flood_fill_cache);
                 } else if way.tags.contains_key("highway") {
                     highways::generate_highways(
