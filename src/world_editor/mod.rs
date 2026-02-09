@@ -615,7 +615,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Fills a cuboid area with the specified block between two coordinates using absolute Y values.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, dead_code)]
     #[inline]
     pub fn fill_blocks_absolute(
         &mut self,
@@ -716,6 +716,39 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, absolute_y, z).is_some()
     }
 
+    /// Sets a block only if the position is currently empty (AIR).
+    ///
+    /// This is faster than `set_block_absolute` with `None` whitelists/blacklists
+    /// because it avoids the double HashMap traversal.
+    #[inline]
+    pub fn set_block_if_absent_absolute(&mut self, block: Block, x: i32, absolute_y: i32, z: i32) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        self.world.set_block_if_absent(x, absolute_y, z, block);
+    }
+
+    /// Fills an entire column from y_min to y_max with one block type.
+    ///
+    /// Resolves region/chunk once instead of per-Y-level, making underground
+    /// fill (`--fillground`) dramatically faster.
+    #[inline]
+    pub fn fill_column_absolute(
+        &mut self,
+        block: Block,
+        x: i32,
+        z: i32,
+        y_min: i32,
+        y_max: i32,
+        skip_existing: bool,
+    ) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        self.world
+            .fill_column(x, z, y_min, y_max, block, skip_existing);
+    }
+
     /// Saves all changes made to the world by writing to the appropriate format.
     pub fn save(&mut self) {
         println!(
@@ -725,6 +758,10 @@ impl<'a> WorldEditor<'a> {
                 WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
             }
         );
+
+        // Compact sections before saving: collapses uniform Full(Vec) sections
+        // (e.g. all-STONE from --fillground) back to Uniform, freeing ~4 KiB each.
+        self.world.compact_sections();
 
         match self.format {
             WorldFormat::JavaAnvil => self.save_java(),
