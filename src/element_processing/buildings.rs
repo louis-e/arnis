@@ -1,6 +1,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::clipping::clip_way_to_bbox;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::{coord_rng, element_rng};
@@ -1389,14 +1390,14 @@ fn generate_roof_only_structure(
                     }
                 }
 
-                // Determine the pillar base: use terrain height when available,
-                // otherwise fall back to ground_level.  This ensures pillars
-                // reach the ground rather than floating when the roof is raised
-                // by min_height, building:min_level, or layer tags.
+                // Determine the pillar base in the same coordinate system as
+                // slab_y.  When terrain is enabled, both values are absolute
+                // world coordinates.  When terrain is disabled, both are
+                // relative to ground (abs_terrain_offset is added separately).
                 let pillar_base = if args.terrain {
                     editor.get_ground_level(x, z)
                 } else {
-                    args.ground_level
+                    0
                 };
                 for y in (pillar_base + 1)..slab_y {
                     editor.set_block_absolute(
@@ -3923,6 +3924,7 @@ pub fn generate_building_from_relation(
     relation: &ProcessedRelation,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
 ) {
     // Skip underground buildings/building parts
     // Check layer tag
@@ -3982,6 +3984,16 @@ pub fn generate_building_from_relation(
 
         super::merge_way_segments(&mut outer_rings);
 
+        // Clip assembled rings to the world bounding box.  Because member ways
+        // were kept unclipped during parsing (to allow ring assembly), the
+        // merged rings may extend beyond the requested area.  Clipping prevents
+        // oversized flood fills and unnecessary block placement.
+        outer_rings = outer_rings
+            .into_iter()
+            .map(|ring| clip_way_to_bbox(&ring, xzbbox))
+            .filter(|ring| ring.len() >= 4)
+            .collect();
+
         // Close rings that are nearly closed (endpoints within 1 block)
         for ring in &mut outer_rings {
             if ring.len() >= 3 {
@@ -4016,8 +4028,7 @@ pub fn generate_building_from_relation(
         // ring index.  This prevents collisions with real way IDs in the flood
         // fill cache and the deterministic RNG seeded by element ID.
         for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
-            let synthetic_id =
-                (1u64 << 63) | (relation.id << 8) | (ring_idx as u64 & 0xFF);
+            let synthetic_id = (1u64 << 63) | (relation.id << 8) | (ring_idx as u64 & 0xFF);
             let merged_way = ProcessedWay {
                 id: synthetic_id,
                 tags: relation.tags.clone(),

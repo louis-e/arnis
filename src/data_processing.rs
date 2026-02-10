@@ -265,6 +265,7 @@ pub fn generate_world_with_options(
                         rel,
                         args,
                         &flood_fill_cache,
+                        &xzbbox,
                     );
                 } else if rel.tags.contains_key("water")
                     || rel
