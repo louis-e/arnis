@@ -299,13 +299,19 @@ pub fn parse_osm_data(
                     return None;
                 }
 
-                let role = match mem.role.trim().to_ascii_lowercase().as_str() {
-                    "outer" | "outline" => ProcessedMemberRole::Outer,
-                    "inner" => ProcessedMemberRole::Inner,
+                let trimmed_role = mem.role.trim();
+                let role = if trimmed_role.eq_ignore_ascii_case("outer")
+                    || trimmed_role.eq_ignore_ascii_case("outline")
+                {
+                    ProcessedMemberRole::Outer
+                } else if trimmed_role.eq_ignore_ascii_case("inner") {
+                    ProcessedMemberRole::Inner
+                } else if trimmed_role.eq_ignore_ascii_case("part") && is_building_relation {
                     // "part" role only applies to type=building relations.
                     // For multipolygon/boundary relations, treat it as unknown.
-                    "part" if is_building_relation => ProcessedMemberRole::Part,
-                    _ => return None,
+                    ProcessedMemberRole::Part
+                } else {
+                    return None;
                 };
 
                 // Check if the way exists in ways_map

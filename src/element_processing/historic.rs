@@ -285,7 +285,26 @@ pub fn generate_pyramid(
 
             // Use Chebyshev distance (max of dx, dz) for a square-footprint pyramid
             if dx <= radius && dz <= radius {
-                editor.set_block_absolute(SANDSTONE, x, y, z, None, None);
+                // Allow overwriting common terrain blocks so the pyramid is
+                // solid even when it intersects higher ground.
+                editor.set_block_absolute(
+                    SANDSTONE,
+                    x,
+                    y,
+                    z,
+                    Some(&[
+                        GRASS_BLOCK,
+                        DIRT,
+                        STONE,
+                        SAND,
+                        GRAVEL,
+                        COARSE_DIRT,
+                        PODZOL,
+                        DIRT_PATH,
+                        SANDSTONE,
+                    ]),
+                    None,
+                );
                 placed = true;
             }
         }
@@ -304,7 +323,17 @@ pub fn generate_pyramid(
             center_x.round() as i32,
             top_y + 1,
             center_z.round() as i32,
-            None,
+            Some(&[
+                GRASS_BLOCK,
+                DIRT,
+                STONE,
+                SAND,
+                GRAVEL,
+                COARSE_DIRT,
+                PODZOL,
+                DIRT_PATH,
+                SANDSTONE,
+            ]),
             None,
         );
     }

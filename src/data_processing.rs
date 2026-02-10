@@ -256,7 +256,10 @@ pub fn generate_world_with_options(
                 }
             }
             ProcessedElement::Relation(rel) => {
-                if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                let is_building_relation = rel.tags.contains_key("building")
+                    || rel.tags.contains_key("building:part")
+                    || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                if is_building_relation {
                     buildings::generate_building_from_relation(
                         &mut editor,
                         rel,
