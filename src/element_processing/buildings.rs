@@ -1389,8 +1389,16 @@ fn generate_roof_only_structure(
                     }
                 }
 
-                // Pillars from start_y up to slab_y - 1.
-                for y in (start_y_offset + 1)..slab_y {
+                // Determine the pillar base: use terrain height when available,
+                // otherwise fall back to ground_level.  This ensures pillars
+                // reach the ground rather than floating when the roof is raised
+                // by min_height, building:min_level, or layer tags.
+                let pillar_base = if args.terrain {
+                    editor.get_ground_level(x, z)
+                } else {
+                    args.ground_level
+                };
+                for y in (pillar_base + 1)..slab_y {
                     editor.set_block_absolute(
                         COBBLESTONE_WALL,
                         x,
@@ -4003,9 +4011,15 @@ pub fn generate_building_from_relation(
         // Build a synthetic ProcessedWay for each assembled ring and render it.
         // The relation tags are applied so that building type, levels, and roof
         // shape from the relation are honoured.
-        for ring in outer_rings {
+        //
+        // Synthetic IDs use bit 63 as a flag combined with the relation ID and a
+        // ring index.  This prevents collisions with real way IDs in the flood
+        // fill cache and the deterministic RNG seeded by element ID.
+        for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
+            let synthetic_id =
+                (1u64 << 63) | (relation.id << 8) | (ring_idx as u64 & 0xFF);
             let merged_way = ProcessedWay {
-                id: relation.id,
+                id: synthetic_id,
                 tags: relation.tags.clone(),
                 nodes: ring,
             };
