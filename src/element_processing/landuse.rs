@@ -1,11 +1,13 @@
 use crate::args::Args;
 use crate::block_definitions::*;
+use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
-use rand::{prelude::IndexedRandom, Rng};
+use rand::prelude::IndexedRandom;
+use rand::Rng;
 
 pub fn generate_landuse(
     editor: &mut WorldEditor,
@@ -364,6 +366,26 @@ pub fn generate_landuse(
                 }
             }
             _ => {}
+        }
+    }
+
+    // Generate a stone brick wall fence around cemeteries
+    if landuse_tag == "cemetery" {
+        generate_cemetery_fence(editor, element);
+    }
+}
+
+/// Draws a stone-brick wall fence (with slab cap) along the outline of a
+/// cemetery way.
+fn generate_cemetery_fence(editor: &mut WorldEditor, element: &ProcessedWay) {
+    for i in 1..element.nodes.len() {
+        let prev = &element.nodes[i - 1];
+        let cur = &element.nodes[i];
+
+        let points = bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z);
+        for (bx, _, bz) in points {
+            editor.set_block(STONE_BRICK_WALL, bx, 1, bz, None, None);
+            editor.set_block(STONE_BRICK_SLAB, bx, 2, bz, None, None);
         }
     }
 }
