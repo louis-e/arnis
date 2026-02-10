@@ -2143,14 +2143,14 @@ pub fn generate_buildings(
     relation_levels: Option<i32>,
     flood_fill_cache: &FloodFillCache,
 ) {
-    // Intercept tomb=pyramid: generate a sandstone pyramid instead of a building
-    if element.tags.get("tomb").map(|v| v.as_str()) == Some("pyramid") {
-        historic::generate_pyramid(editor, element, args, flood_fill_cache);
+    // Early return for underground buildings
+    if should_skip_underground_building(element) {
         return;
     }
 
-    // Early return for underground buildings
-    if should_skip_underground_building(element) {
+    // Intercept tomb=pyramid: generate a sandstone pyramid instead of a building
+    if element.tags.get("tomb").map(|v| v.as_str()) == Some("pyramid") {
+        historic::generate_pyramid(editor, element, args, flood_fill_cache);
         return;
     }
 

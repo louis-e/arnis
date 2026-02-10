@@ -260,12 +260,15 @@ pub fn generate_pyramid(
     let width = (max_x - min_x + 1) as f64;
     let length = (max_z - min_z + 1) as f64;
     let half_base = width.min(length) / 2.0;
-    let pyramid_height = (half_base * args.scale).max(3.0) as i32;
+    // Height = half the shorter side (classic pyramid proportions).
+    // Footprint is already in scaled Minecraft coordinates, so no extra scale factor needed.
+    let pyramid_height = half_base.max(3.0) as i32;
 
     // Build the pyramid layer by layer.
     // For each layer, only place blocks whose Chebyshev distance from the
     // footprint centre is within the shrinking radius AND that were in the
     // original footprint.
+    let mut last_placed_layer: Option<i32> = None;
     for layer in 0..pyramid_height {
         // The allowed radius shrinks linearly from half_base at layer 0 to 0
         let radius = half_base * (1.0 - layer as f64 / pyramid_height as f64);
@@ -287,19 +290,22 @@ pub fn generate_pyramid(
             }
         }
 
-        if !placed {
+        if placed {
+            last_placed_layer = Some(y);
+        } else {
             break; // Nothing placed, we've reached the apex
         }
     }
 
-    // Cap with smooth sandstone at the very top
-    let apex_y = base_y + 1 + pyramid_height;
-    editor.set_block_absolute(
-        SMOOTH_SANDSTONE,
-        center_x.round() as i32,
-        apex_y,
-        center_z.round() as i32,
-        None,
-        None,
-    );
+    // Cap with smooth sandstone one block above the last placed layer
+    if let Some(top_y) = last_placed_layer {
+        editor.set_block_absolute(
+            SMOOTH_SANDSTONE,
+            center_x.round() as i32,
+            top_y + 1,
+            center_z.round() as i32,
+            None,
+            None,
+        );
+    }
 }
