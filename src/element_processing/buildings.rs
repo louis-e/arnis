@@ -4031,8 +4031,7 @@ pub fn generate_building_from_relation(
         // ring index.  This prevents collisions with real way IDs in the flood
         // fill cache and the deterministic RNG seeded by element ID.
         for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
-            let synthetic_id =
-                (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
+            let synthetic_id = (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
             let merged_way = ProcessedWay {
                 id: synthetic_id,
                 tags: relation.tags.clone(),
