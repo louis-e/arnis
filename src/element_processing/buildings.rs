@@ -7,7 +7,7 @@ use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::historic;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::FloodFillCache;
-use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
+use crate::osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use rand::Rng;
@@ -1253,30 +1253,169 @@ fn generate_roof_only_structure(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     cached_floor_area: &[(i32, i32)],
+    args: &Args,
 ) {
-    let roof_height: i32 = 5;
-    let mut previous_node: Option<(i32, i32)> = None;
+    let scale_factor = args.scale;
+    let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
 
-    for node in &element.nodes {
-        let x = node.x;
-        let z = node.z;
+    // Determine where the roof structure starts vertically.
+    // Priority: min_height → building:min_level → layer hint → default.
+    let min_level_offset = if let Some(mh) = element.tags.get("min_height") {
+        // min_height is in meters; convert via scale factor.
+        mh.trim_end_matches('m')
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|h| (h * scale_factor) as i32)
+            .unwrap_or(0)
+    } else if let Some(ml) = element.tags.get("building:min_level") {
+        ml.parse::<i32>()
+            .ok()
+            .map(|l| multiply_scale(l * 4, scale_factor))
+            .unwrap_or(0)
+    } else if let Some(layer) = element.tags.get("layer") {
+        // For building:part=roof elements without explicit height tags, interpret
+        // the layer tag as a coarse vertical-placement hint.  Each layer maps to
+        // 4 blocks, producing reasonable stacking for multi-shell roof structures.
+        layer
+            .parse::<i32>()
+            .ok()
+            .filter(|&l| l > 0)
+            .map(|l| multiply_scale(l * 4, scale_factor))
+            .unwrap_or(0)
+    } else {
+        0
+    };
 
-        if let Some(prev) = previous_node {
-            let bresenham_points = bresenham_line(prev.0, roof_height, prev.1, x, roof_height, z);
-            for (bx, _, bz) in bresenham_points {
-                editor.set_block(STONE_BRICK_SLAB, bx, roof_height, bz, None, None);
+    let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
+
+    // Determine roof thickness / height.
+    let roof_thickness: i32 = if let Some(h) = element.tags.get("height") {
+        let total = h
+            .trim_end_matches('m')
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|v| (v * scale_factor) as i32)
+            .unwrap_or(5);
+        // If we already applied a min_height offset, the thickness is just
+        // the difference.  Otherwise keep the parsed value.
+        if element.tags.contains_key("min_height") {
+            (total - min_level_offset).max(3)
+        } else {
+            total.max(3)
+        }
+    } else if let Some(levels) = element.tags.get("building:levels") {
+        levels
+            .parse::<i32>()
+            .ok()
+            .map(|l| multiply_scale(l * 4 + 2, scale_factor).max(3))
+            .unwrap_or(5)
+    } else {
+        5 // Default thickness for thin roof / canopy structures
+    };
+
+    // Pick a block for the roof surface.
+    let roof_block = if element
+        .tags
+        .get("material")
+        .or_else(|| element.tags.get("roof:material"))
+        .map(|s| s.as_str())
+        == Some("glass")
+    {
+        GLASS
+    } else if element.tags.get("colour").map(|s| s.as_str()) == Some("white")
+        || element.tags.get("building:colour").map(|s| s.as_str()) == Some("white")
+    {
+        SMOOTH_QUARTZ
+    } else {
+        STONE_BRICK_SLAB
+    };
+
+    // Determine the roof shape from tags.
+    let roof_type = element
+        .tags
+        .get("roof:shape")
+        .map(|s| parse_roof_type(s))
+        .unwrap_or(RoofType::Flat);
+
+    match roof_type {
+        RoofType::Dome | RoofType::Hipped | RoofType::Pyramidal => {
+            // Standalone roof parts with curved or sloped shapes are rendered
+            // as domes.  Without supporting walls, the dome approximation
+            // produces the best visual result for shell-like roof structures.
+            if !cached_floor_area.is_empty() {
+                let (min_x, max_x, min_z, max_z) = cached_floor_area.iter().fold(
+                    (i32::MAX, i32::MIN, i32::MAX, i32::MIN),
+                    |(min_x, max_x, min_z, max_z), &(x, z)| {
+                        (min_x.min(x), max_x.max(x), min_z.min(z), max_z.max(z))
+                    },
+                );
+                let config = RoofConfig {
+                    min_x,
+                    max_x,
+                    min_z,
+                    max_z,
+                    center_x: (min_x + max_x) >> 1,
+                    center_z: (min_z + max_z) >> 1,
+                    base_height: start_y_offset,
+                    abs_terrain_offset,
+                    roof_block,
+                };
+                generate_dome_roof(editor, cached_floor_area, &config);
             }
         }
+        _ => {
+            // Flat / unsupported shape: pillars at outline nodes + slab fill.
+            let slab_y = start_y_offset + roof_thickness;
 
-        for y in 1..=(roof_height - 1) {
-            editor.set_block(COBBLESTONE_WALL, x, y, z, None, None);
+            // Outline pillars and edge slabs.
+            let mut previous_node: Option<(i32, i32)> = None;
+            for node in &element.nodes {
+                let x = node.x;
+                let z = node.z;
+
+                if let Some(prev) = previous_node {
+                    let pts = bresenham_line(prev.0, slab_y, prev.1, x, slab_y, z);
+                    for (bx, _, bz) in pts {
+                        editor.set_block_absolute(
+                            roof_block,
+                            bx,
+                            slab_y + abs_terrain_offset,
+                            bz,
+                            None,
+                            None,
+                        );
+                    }
+                }
+
+                // Pillars from start_y up to slab_y - 1.
+                for y in (start_y_offset + 1)..slab_y {
+                    editor.set_block_absolute(
+                        COBBLESTONE_WALL,
+                        x,
+                        y + abs_terrain_offset,
+                        z,
+                        None,
+                        None,
+                    );
+                }
+
+                previous_node = Some((x, z));
+            }
+
+            // Slab fill across the floor area.
+            for &(x, z) in cached_floor_area {
+                editor.set_block_absolute(
+                    roof_block,
+                    x,
+                    slab_y + abs_terrain_offset,
+                    z,
+                    None,
+                    None,
+                );
+            }
         }
-
-        previous_node = Some((x, z));
-    }
-
-    for &(x, z) in cached_floor_area {
-        editor.set_block(STONE_BRICK_SLAB, x, roof_height, z, None, None);
     }
 }
 
@@ -2118,7 +2257,7 @@ fn parse_roof_type(roof_shape: &str) -> RoofType {
         "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" => RoofType::Hipped,
         "skillion" => RoofType::Skillion,
         "pyramidal" => RoofType::Pyramidal,
-        "dome" | "onion" | "cone" => RoofType::Dome,
+        "dome" | "onion" | "cone" | "circular" | "spherical" => RoofType::Dome,
         _ => RoofType::Flat,
     }
 }
@@ -2190,6 +2329,15 @@ pub fn generate_buildings(
         return;
     }
 
+    // Route building:part="roof" to the roof-only structure generator.
+    // This must be checked before the "building" tag match below, since elements
+    // with building:part="roof" (but no "building" tag) would otherwise fall
+    // through to the full building pipeline and render as small boxy buildings.
+    if element.tags.get("building:part").map(|v| v.as_str()) == Some("roof") {
+        generate_roof_only_structure(editor, element, &cached_floor_area, args);
+        return;
+    }
+
     // Handle special building types with early returns
     if let Some(btype) = element.tags.get("building") {
         match btype.as_str() {
@@ -2204,7 +2352,7 @@ pub fn generate_buildings(
                 return;
             }
             "roof" => {
-                generate_roof_only_structure(editor, element, &cached_floor_area);
+                generate_roof_only_structure(editor, element, &cached_floor_area, args);
                 return;
             }
             "bridge" => {
@@ -3812,17 +3960,62 @@ pub fn generate_building_from_relation(
             .any(|m| m.role == ProcessedMemberRole::Part);
 
     if !has_parts {
-        // No parts (or not type=building): render outline as the building
-        for member in &relation.members {
-            if member.role == ProcessedMemberRole::Outer {
-                generate_buildings(
-                    editor,
-                    &member.way,
-                    args,
-                    Some(relation_levels),
-                    flood_fill_cache,
-                );
+        // Collect outer member node lists and merge open segments into closed rings.
+        // Multipolygon relations commonly split the outline across many short way
+        // segments that share endpoints. Without merging, each segment is processed
+        // individually, producing degenerate polygons and empty flood fills (only
+        // wall outlines, no filled floors/ceilings/roofs).
+        let mut outer_rings: Vec<Vec<ProcessedNode>> = relation
+            .members
+            .iter()
+            .filter(|m| m.role == ProcessedMemberRole::Outer)
+            .map(|m| m.way.nodes.clone())
+            .collect();
+
+        super::merge_way_segments(&mut outer_rings);
+
+        // Close rings that are nearly closed (endpoints within 1 block)
+        for ring in &mut outer_rings {
+            if ring.len() >= 3 {
+                let first = &ring[0];
+                let last = ring.last().unwrap();
+                if first.id != last.id {
+                    let dx = (first.x - last.x).abs();
+                    let dz = (first.z - last.z).abs();
+                    if dx <= 1 && dz <= 1 {
+                        let close_node = ring[0].clone();
+                        ring.push(close_node);
+                    }
+                }
             }
+        }
+
+        // Discard rings that are still open or too small
+        outer_rings.retain(|ring| {
+            if ring.len() < 4 {
+                return false;
+            }
+            let first = &ring[0];
+            let last = ring.last().unwrap();
+            first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
+        });
+
+        // Build a synthetic ProcessedWay for each assembled ring and render it.
+        // The relation tags are applied so that building type, levels, and roof
+        // shape from the relation are honoured.
+        for ring in outer_rings {
+            let merged_way = ProcessedWay {
+                id: relation.id,
+                tags: relation.tags.clone(),
+                nodes: ring,
+            };
+            generate_buildings(
+                editor,
+                &merged_way,
+                args,
+                Some(relation_levels),
+                flood_fill_cache,
+            );
         }
     }
     // When has_parts: parts are rendered as standalone ways from the elements list.

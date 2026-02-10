@@ -286,9 +286,14 @@ pub fn parse_osm_data(
 
         // Water relations require unclipped ways for ring merging in water_areas.rs
         // Boundary relations also require unclipped ways for proper ring assembly
+        // Building multipolygon relations also need unclipped ways so that
+        // open outer-way segments can be merged into closed rings before clipping
         let is_water_relation = is_water_element(tags);
         let is_boundary_relation = tags.contains_key("boundary");
-        let keep_unclipped = is_water_relation || is_boundary_relation;
+        let is_building_multipolygon = (tags.contains_key("building")
+            || tags.contains_key("building:part"))
+            && relation_type == Some("multipolygon");
+        let keep_unclipped = is_water_relation || is_boundary_relation || is_building_multipolygon;
 
         let members: Vec<ProcessedMember> = element
             .members
