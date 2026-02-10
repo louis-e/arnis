@@ -1352,6 +1352,9 @@ fn generate_roof_only_structure(
                         (min_x.min(x), max_x.max(x), min_z.min(z), max_z.max(z))
                     },
                 );
+                // For roof-only structures, base_height is the elevation where
+                // the dome starts (not on top of walls as in from_roof_area),
+                // since there is no building body underneath.
                 let config = RoofConfig {
                     min_x,
                     max_x,
@@ -4028,7 +4031,8 @@ pub fn generate_building_from_relation(
         // ring index.  This prevents collisions with real way IDs in the flood
         // fill cache and the deterministic RNG seeded by element ID.
         for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
-            let synthetic_id = (1u64 << 63) | (relation.id << 8) | (ring_idx as u64 & 0xFF);
+            let synthetic_id =
+                (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
             let merged_way = ProcessedWay {
                 id: synthetic_id,
                 tags: relation.tags.clone(),
