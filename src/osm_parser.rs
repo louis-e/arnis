@@ -111,6 +111,7 @@ pub struct ProcessedWay {
 pub enum ProcessedMemberRole {
     Outer,
     Inner,
+    Part,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -272,11 +273,16 @@ pub fn parse_osm_data(
             continue;
         };
 
-        // Process multipolygons and boundary relations
+        // Process multipolygons, boundary relations, and building relations
         let relation_type = tags.get("type").map(|x: &String| x.as_str());
-        if relation_type != Some("multipolygon") && relation_type != Some("boundary") {
+        if relation_type != Some("multipolygon")
+            && relation_type != Some("boundary")
+            && relation_type != Some("building")
+        {
             continue;
         };
+
+        let is_building_relation = relation_type == Some("building");
 
         // Water relations require unclipped ways for ring merging in water_areas.rs
         // Boundary relations also require unclipped ways for proper ring assembly
@@ -293,10 +299,19 @@ pub fn parse_osm_data(
                     return None;
                 }
 
-                let role = match mem.role.as_str() {
-                    "outer" => ProcessedMemberRole::Outer,
-                    "inner" => ProcessedMemberRole::Inner,
-                    _ => return None,
+                let trimmed_role = mem.role.trim();
+                let role = if trimmed_role.eq_ignore_ascii_case("outer")
+                    || trimmed_role.eq_ignore_ascii_case("outline")
+                {
+                    ProcessedMemberRole::Outer
+                } else if trimmed_role.eq_ignore_ascii_case("inner") {
+                    ProcessedMemberRole::Inner
+                } else if trimmed_role.eq_ignore_ascii_case("part") && is_building_relation {
+                    // "part" role only applies to type=building relations.
+                    // For multipolygon/boundary relations, treat it as unknown.
+                    ProcessedMemberRole::Part
+                } else {
+                    return None;
                 };
 
                 // Check if the way exists in ways_map

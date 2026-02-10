@@ -342,6 +342,8 @@ impl FloodFillCache {
             // Highway areas (like pedestrian plazas) use flood fill when area=yes
             || (way.tags.contains_key("highway")
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
+            // Historic tomb polygons (e.g. tomb=pyramid)
+            || way.tags.get("tomb").map(|v| v == "pyramid").unwrap_or(false)
     }
 
     /// Collects all building footprint coordinates from the pre-computed cache.
@@ -370,7 +372,10 @@ impl FloodFillCache {
                     }
                 }
                 ProcessedElement::Relation(rel) => {
-                    if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                    let is_building = rel.tags.contains_key("building")
+                        || rel.tags.contains_key("building:part")
+                        || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                    if is_building {
                         for member in &rel.members {
                             // Only treat outer members as building footprints.
                             // Inner members represent courtyards/holes where trees can spawn.
@@ -413,7 +418,10 @@ impl FloodFillCache {
                     }
                 }
                 ProcessedElement::Relation(rel) => {
-                    if rel.tags.contains_key("building") || rel.tags.contains_key("building:part") {
+                    let is_building = rel.tags.contains_key("building")
+                        || rel.tags.contains_key("building:part")
+                        || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                    if is_building {
                         // For building relations, compute centroid from outer ways
                         let mut all_coords = Vec::new();
                         for member in &rel.members {

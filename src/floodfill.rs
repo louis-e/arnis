@@ -1,3 +1,4 @@
+use geo::orient::{Direction, Orient};
 use geo::{Contains, LineString, Point, Polygon};
 use itertools::Itertools;
 use std::collections::VecDeque;
@@ -114,13 +115,14 @@ fn optimized_flood_fill_area(
     let mut filled_area = Vec::new();
     let mut visited = FloodBitmap::new(min_x, max_x, min_z, max_z);
 
-    // Create polygon for containment testing
+    // Create polygon for containment testing, with normalized winding order
+    // to avoid "polygon had no winding order" warnings from geo::Contains
     let exterior_coords: Vec<(f64, f64)> = polygon_coords
         .iter()
         .map(|&(x, z)| (x as f64, z as f64))
         .collect();
     let exterior = LineString::from(exterior_coords);
-    let polygon = Polygon::new(exterior, vec![]);
+    let polygon = Polygon::new(exterior, vec![]).orient(Direction::Default);
 
     // Optimized step sizes: larger steps for efficiency, but still catch U-shapes
     let width = max_x - min_x + 1;
@@ -197,13 +199,14 @@ fn original_flood_fill_area(
     let mut filled_area: Vec<(i32, i32)> = Vec::new();
     let mut visited = FloodBitmap::new(min_x, max_x, min_z, max_z);
 
-    // Convert input to a geo::Polygon for efficient point-in-polygon testing
+    // Convert input to a geo::Polygon for efficient point-in-polygon testing,
+    // with normalized winding order to avoid undefined Contains results
     let exterior_coords: Vec<(f64, f64)> = polygon_coords
         .iter()
         .map(|&(x, z)| (x as f64, z as f64))
         .collect::<Vec<_>>();
     let exterior: LineString = LineString::from(exterior_coords);
-    let polygon: Polygon<f64> = Polygon::new(exterior, vec![]);
+    let polygon: Polygon<f64> = Polygon::new(exterior, vec![]).orient(Direction::Default);
 
     // Optimized step sizes for large polygons - coarser sampling for speed
     let width = max_x - min_x + 1;

@@ -54,6 +54,7 @@ pub fn generate_water_areas_from_relation(
         match mem.role {
             ProcessedMemberRole::Outer => outers.push(mem.way.nodes.clone()),
             ProcessedMemberRole::Inner => inners.push(mem.way.nodes.clone()),
+            ProcessedMemberRole::Part => {} // Not applicable to water areas
         }
     }
 

@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::colors::color_text_to_rgb_tuple;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::{coord_rng, element_rng};
+use crate::element_processing::historic;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -2147,6 +2148,12 @@ pub fn generate_buildings(
         return;
     }
 
+    // Intercept tomb=pyramid: generate a sandstone pyramid instead of a building
+    if element.tags.get("tomb").map(|v| v.as_str()) == Some("pyramid") {
+        historic::generate_pyramid(editor, element, args, flood_fill_cache);
+        return;
+    }
+
     // Parse min_level from tags
     let min_level = element
         .tags
@@ -3794,33 +3801,32 @@ pub fn generate_building_from_relation(
         .and_then(|l: &String| l.parse::<i32>().ok())
         .unwrap_or(2); // Default to 2 levels
 
-    // Process the outer way to create the building walls
-    for member in &relation.members {
-        if member.role == ProcessedMemberRole::Outer {
-            generate_buildings(
-                editor,
-                &member.way,
-                args,
-                Some(relation_levels),
-                flood_fill_cache,
-            );
-        }
-    }
+    // Check if this is a type=building relation with part members.
+    // Only type=building relations use Part roles; type=multipolygon relations
+    // should always render their Outer members normally.
+    let is_building_type = relation.tags.get("type").map(|t| t.as_str()) == Some("building");
+    let has_parts = is_building_type
+        && relation
+            .members
+            .iter()
+            .any(|m| m.role == ProcessedMemberRole::Part);
 
-    // Handle inner ways (holes, courtyards, etc.)
-    /*for member in &relation.members {
-        if member.role == ProcessedMemberRole::Inner {
-            let polygon_coords: Vec<(i32, i32)> =
-                member.way.nodes.iter().map(|n| (n.x, n.z)).collect();
-            let hole_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
-
-            for (x, z) in hole_area {
-                // Remove blocks in the inner area to create a hole
-                editor.set_block(AIR, x, ground_level, z, None, Some(&[SPONGE]));
+    if !has_parts {
+        // No parts (or not type=building): render outline as the building
+        for member in &relation.members {
+            if member.role == ProcessedMemberRole::Outer {
+                generate_buildings(
+                    editor,
+                    &member.way,
+                    args,
+                    Some(relation_levels),
+                    flood_fill_cache,
+                );
             }
         }
-    }*/
+    }
+    // When has_parts: parts are rendered as standalone ways from the elements list.
+    // The outline way is suppressed in data_processing to avoid overlaying the parts.
 }
 
 /// Generates a bridge structure, paying attention to the "level" tag.
