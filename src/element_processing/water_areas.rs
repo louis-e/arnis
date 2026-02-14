@@ -1,6 +1,3 @@
-use geo::orient::{Direction, Orient};
-use geo::{Contains, Intersects, LineString, Point, Polygon, Rect};
-
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::{
     block_definitions::WATER,
@@ -164,7 +161,7 @@ fn generate_water_areas(
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    inverse_floodfill(min_x, min_z, max_x, max_z, outers_xz, inners_xz, editor);
+    scanline_fill_water(min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor);
 }
 
 /// Verifies all rings are properly closed (first node matches last).
@@ -190,156 +187,248 @@ fn verify_closed_rings(rings: &[Vec<ProcessedNode>]) -> bool {
     valid
 }
 
-// Water areas are absolutely huge. We can't easily flood fill the entire thing.
-// Instead, we'll iterate over all the blocks in our MC world, and check if each
-// one is in the river or not
+// ============================================================================
+// Scanline rasterization for water area filling
+// ============================================================================
+//
+// For each row (z coordinate) in the fill area, computes polygon edge
+// crossings to determine which x-ranges are inside the outer polygons but
+// outside the inner polygons, then fills those ranges with water blocks.
+//
+// Complexity: O(E * H + A) where E = total edges, H = height of fill area,
+// A = total filled area. This is dramatically faster than the previous
+// quadtree + per-block point-in-polygon approach O(A * V * P) for large or
+// complex water bodies (e.g. the Venetian Lagoon with dozens of inner island
+// rings).
+
+/// A polygon edge segment for scanline intersection testing.
+struct ScanlineEdge {
+    x1: f64,
+    z1: f64,
+    x2: f64,
+    z2: f64,
+}
+
+/// Collects all non-horizontal edges from a single polygon ring.
+///
+/// If the ring is not perfectly closed (last point != first point),
+/// the closing edge is added explicitly.
+fn collect_ring_edges(ring: &[XZPoint]) -> Vec<ScanlineEdge> {
+    let mut edges = Vec::new();
+    if ring.len() < 2 {
+        return edges;
+    }
+    for i in 0..ring.len() - 1 {
+        let a = &ring[i];
+        let b = &ring[i + 1];
+        // Skip horizontal edges, they produce no scanline crossings
+        if a.z != b.z {
+            edges.push(ScanlineEdge {
+                x1: a.x as f64,
+                z1: a.z as f64,
+                x2: b.x as f64,
+                z2: b.z as f64,
+            });
+        }
+    }
+    // Add closing edge if the ring isn't perfectly closed by coordinates
+    let first = ring.first().unwrap();
+    let last = ring.last().unwrap();
+    if first.z != last.z {
+        edges.push(ScanlineEdge {
+            x1: last.x as f64,
+            z1: last.z as f64,
+            x2: first.x as f64,
+            z2: first.z as f64,
+        });
+    }
+    edges
+}
+
+/// Collects edges from multiple rings into a single list.
+/// Used for inner rings where even-odd on combined edges is correct
+/// (inner rings of a valid multipolygon do not overlap).
+fn collect_all_ring_edges(rings: &[Vec<XZPoint>]) -> Vec<ScanlineEdge> {
+    let mut edges = Vec::new();
+    for ring in rings {
+        edges.extend(collect_ring_edges(ring));
+    }
+    edges
+}
+
+/// Computes the integer x-spans that are "inside" the polygon rings at
+/// scanline `z`, using the even-odd (parity) rule.
+///
+/// The crossing test uses the same convention as `geo::Contains`:
+/// an edge crosses the scanline when one endpoint is strictly above `z`
+/// and the other is at or below.
+fn compute_scanline_spans(
+    edges: &[ScanlineEdge],
+    z: f64,
+    min_x: i32,
+    max_x: i32,
+) -> Vec<(i32, i32)> {
+    let mut xs: Vec<f64> = Vec::new();
+    for edge in edges {
+        // Crossing test: (z1 > z) != (z2 > z)
+        // Matches geo's convention (bottom-inclusive, top-exclusive).
+        if (edge.z1 > z) != (edge.z2 > z) {
+            let t = (z - edge.z1) / (edge.z2 - edge.z1);
+            xs.push(edge.x1 + t * (edge.x2 - edge.x1));
+        }
+    }
+
+    if xs.is_empty() {
+        return Vec::new();
+    }
+
+    xs.sort_unstable_by(|a, b| {
+        a.partial_cmp(b)
+            .expect("NaN encountered while sorting scanline intersections")
+    });
+
+    debug_assert!(
+        xs.len().is_multiple_of(2),
+        "Odd number of scanline crossings ({}) at z={}, possible malformed polygon",
+        xs.len(),
+        z
+    );
+
+    // Pair consecutive crossings into fill spans (even-odd rule)
+    let mut spans = Vec::with_capacity(xs.len() / 2);
+    let mut i = 0;
+    while i + 1 < xs.len() {
+        let start = (xs[i].ceil() as i32).max(min_x);
+        let end = (xs[i + 1].floor() as i32).min(max_x);
+        if start <= end {
+            spans.push((start, end));
+        }
+        i += 2;
+    }
+
+    spans
+}
+
+/// Merges two sorted, non-overlapping span lists into their union.
+fn union_spans(a: &[(i32, i32)], b: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    if a.is_empty() {
+        return b.to_vec();
+    }
+    if b.is_empty() {
+        return a.to_vec();
+    }
+
+    // Merge both sorted lists and combine overlapping/adjacent spans
+    let mut all: Vec<(i32, i32)> = Vec::with_capacity(a.len() + b.len());
+    all.extend_from_slice(a);
+    all.extend_from_slice(b);
+    all.sort_unstable_by_key(|&(start, _)| start);
+
+    let mut result: Vec<(i32, i32)> = Vec::new();
+    let mut current = all[0];
+    for &(start, end) in &all[1..] {
+        if start <= current.1 + 1 {
+            // Overlapping or adjacent, extend
+            current.1 = current.1.max(end);
+        } else {
+            result.push(current);
+            current = (start, end);
+        }
+    }
+    result.push(current);
+    result
+}
+
+/// Subtracts spans in `b` from spans in `a`.
+///
+/// Both inputs must be sorted and non-overlapping.
+/// Returns sorted, non-overlapping spans representing `a \ b`.
+fn subtract_spans(a: &[(i32, i32)], b: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    if b.is_empty() {
+        return a.to_vec();
+    }
+
+    let mut result = Vec::new();
+    let mut bi = 0;
+
+    for &(a_start, a_end) in a {
+        let mut pos = a_start;
+
+        // Skip B spans that end before this A span starts
+        while bi < b.len() && b[bi].1 < a_start {
+            bi += 1;
+        }
+
+        // Walk through B spans that overlap with [pos .. a_end]
+        let mut j = bi;
+        while j < b.len() && b[j].0 <= a_end {
+            if b[j].0 > pos {
+                result.push((pos, (b[j].0 - 1).min(a_end)));
+            }
+            pos = pos.max(b[j].1 + 1);
+            j += 1;
+        }
+
+        if pos <= a_end {
+            result.push((pos, a_end));
+        }
+    }
+
+    result
+}
+
+/// Fills water blocks using scanline rasterization.
+///
+/// For each row z in [min_z, max_z], computes which x positions are inside
+/// any outer polygon ring but outside all inner polygon rings, and places
+/// water blocks at those positions.
 #[allow(clippy::too_many_arguments)]
-fn inverse_floodfill(
+fn scanline_fill_water(
     min_x: i32,
     min_z: i32,
     max_x: i32,
     max_z: i32,
-    outers: Vec<Vec<XZPoint>>,
-    inners: Vec<Vec<XZPoint>>,
+    outers: &[Vec<XZPoint>],
+    inners: &[Vec<XZPoint>],
     editor: &mut WorldEditor,
 ) {
-    // Convert to geo Polygons with normalized winding order
-    let inners: Vec<_> = inners
-        .into_iter()
-        .map(|x| {
-            Polygon::new(
-                LineString::from(
-                    x.iter()
-                        .map(|pt| (pt.x as f64, pt.z as f64))
-                        .collect::<Vec<_>>(),
-                ),
-                vec![],
-            )
-            .orient(Direction::Default)
-        })
-        .collect();
+    // Collect edges per outer ring so we can union their spans correctly,
+    // even if multiple outer rings happen to overlap (invalid OSM, but
+    // we handle it gracefully).
+    let outer_edge_groups: Vec<Vec<ScanlineEdge>> =
+        outers.iter().map(|ring| collect_ring_edges(ring)).collect();
+    let inner_edges = collect_all_ring_edges(inners);
 
-    let outers: Vec<_> = outers
-        .into_iter()
-        .map(|x| {
-            Polygon::new(
-                LineString::from(
-                    x.iter()
-                        .map(|pt| (pt.x as f64, pt.z as f64))
-                        .collect::<Vec<_>>(),
-                ),
-                vec![],
-            )
-            .orient(Direction::Default)
-        })
-        .collect();
+    for z in min_z..=max_z {
+        let z_f = z as f64;
 
-    inverse_floodfill_recursive((min_x, min_z), (max_x, max_z), &outers, &inners, editor);
-}
-
-fn inverse_floodfill_recursive(
-    min: (i32, i32),
-    max: (i32, i32),
-    outers: &[Polygon],
-    inners: &[Polygon],
-    editor: &mut WorldEditor,
-) {
-    // Check if we've exceeded 40 seconds
-    // if start_time.elapsed().as_secs() > 40 {
-    //     println!("Water area generation exceeded 40 seconds, continuing anyway");
-    // }
-
-    const ITERATIVE_THRES: i64 = 10_000;
-
-    if min.0 > max.0 || min.1 > max.1 {
-        return;
-    }
-
-    // Multiply as i64 to avoid overflow; in release builds where unchecked math is
-    // enabled, this could cause the rest of this code to end up in an infinite loop.
-    if ((max.0 - min.0) as i64) * ((max.1 - min.1) as i64) < ITERATIVE_THRES {
-        inverse_floodfill_iterative(min, max, 0, outers, inners, editor);
-        return;
-    }
-
-    let center_x: i32 = (min.0 + max.0) / 2;
-    let center_z: i32 = (min.1 + max.1) / 2;
-    let quadrants: [(i32, i32, i32, i32); 4] = [
-        (min.0, center_x, min.1, center_z),
-        (center_x, max.0, min.1, center_z),
-        (min.0, center_x, center_z, max.1),
-        (center_x, max.0, center_z, max.1),
-    ];
-
-    for (min_x, max_x, min_z, max_z) in quadrants {
-        let rect: Rect = Rect::new(
-            Point::new(min_x as f64, min_z as f64),
-            Point::new(max_x as f64, max_z as f64),
-        );
-
-        if outers.iter().any(|outer: &Polygon| outer.contains(&rect))
-            && !inners.iter().any(|inner: &Polygon| inner.intersects(&rect))
-        {
-            rect_fill(min_x, max_x, min_z, max_z, 0, editor);
+        // Compute spans for each outer ring and union them together
+        let mut outer_spans: Vec<(i32, i32)> = Vec::new();
+        for ring_edges in &outer_edge_groups {
+            let ring_spans = compute_scanline_spans(ring_edges, z_f, min_x, max_x);
+            if !ring_spans.is_empty() {
+                outer_spans = union_spans(&outer_spans, &ring_spans);
+            }
+        }
+        if outer_spans.is_empty() {
             continue;
         }
 
-        let outers_intersects: Vec<_> = outers
-            .iter()
-            .filter(|poly| poly.intersects(&rect))
-            .cloned()
-            .collect();
-        let inners_intersects: Vec<_> = inners
-            .iter()
-            .filter(|poly| poly.intersects(&rect))
-            .cloned()
-            .collect();
-
-        if !outers_intersects.is_empty() {
-            inverse_floodfill_recursive(
-                (min_x, min_z),
-                (max_x, max_z),
-                &outers_intersects,
-                &inners_intersects,
-                editor,
-            );
-        }
-    }
-}
-
-// once we "zoom in" enough, it's more efficient to switch to iteration
-fn inverse_floodfill_iterative(
-    min: (i32, i32),
-    max: (i32, i32),
-    ground_level: i32,
-    outers: &[Polygon],
-    inners: &[Polygon],
-    editor: &mut WorldEditor,
-) {
-    for x in min.0..max.0 {
-        for z in min.1..max.1 {
-            let p: Point = Point::new(x as f64, z as f64);
-
-            if outers.iter().any(|poly: &Polygon| poly.contains(&p))
-                && inners.iter().all(|poly: &Polygon| !poly.contains(&p))
-            {
-                editor.set_block(WATER, x, ground_level, z, None, None);
+        let fill_spans = if inner_edges.is_empty() {
+            outer_spans
+        } else {
+            let inner_spans = compute_scanline_spans(&inner_edges, z_f, min_x, max_x);
+            if inner_spans.is_empty() {
+                outer_spans
+            } else {
+                subtract_spans(&outer_spans, &inner_spans)
             }
-        }
-    }
-}
+        };
 
-fn rect_fill(
-    min_x: i32,
-    max_x: i32,
-    min_z: i32,
-    max_z: i32,
-    ground_level: i32,
-    editor: &mut WorldEditor,
-) {
-    for x in min_x..max_x {
-        for z in min_z..max_z {
-            editor.set_block(WATER, x, ground_level, z, None, None);
+        for (start, end) in fill_spans {
+            for x in start..=end {
+                editor.set_block(WATER, x, 0, z, None, None);
+            }
         }
     }
 }
