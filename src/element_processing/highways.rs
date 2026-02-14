@@ -169,14 +169,27 @@ fn generate_highways_internal(
             let is_bridge = element.tags().get("bridge").is_some_and(|v| v != "no");
 
             // Parse the layer value for elevation calculation
-            let layer_value = element
+            let mut layer_value = element
                 .tags()
                 .get("layer")
                 .and_then(|layer| layer.parse::<i32>().ok())
                 .unwrap_or(0);
 
             // Treat negative layers as ground level (0)
-            let layer_value = if layer_value < 0 { 0 } else { layer_value };
+            if layer_value < 0 {
+                layer_value = 0;
+            }
+
+            // If the way is indoor, treat it as ground level to avoid creating
+            // bridges/supports inside buildings (indoor=yes should not produce bridges)
+            let is_indoor = element
+                .tags()
+                .get("indoor")
+                .map(|v| v == "yes")
+                .unwrap_or(false);
+            if is_indoor {
+                layer_value = 0;
+            }
 
             // Skip if 'level' is negative in the tags (indoor mapping)
             if let Some(level) = element.tags().get("level") {
