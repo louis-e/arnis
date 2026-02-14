@@ -26,6 +26,12 @@ pub(crate) enum RoofType {
     Flat,   // Default flat roof
 }
 
+#[derive(Clone)]
+pub(crate) struct HolePolygon {
+    way: ProcessedWay,
+    add_walls: bool,
+}
+
 // ============================================================================
 // Building Style System
 // ============================================================================
@@ -1435,11 +1441,11 @@ fn generate_roof_only_structure(
 // Building Component Generators
 // ============================================================================
 
-/// Generates the walls of a building including foundations, windows, and accent blocks
+/// Builds a wall ring (outer shell or inner courtyard) for a set of nodes.
 #[allow(clippy::too_many_arguments)]
-fn generate_building_walls(
+fn build_wall_ring(
     editor: &mut WorldEditor,
-    element: &ProcessedWay,
+    nodes: &[ProcessedNode],
     config: &BuildingConfig,
     args: &Args,
     has_sloped_roof: bool,
@@ -1448,7 +1454,7 @@ fn generate_building_walls(
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
     let mut current_building: Vec<(i32, i32)> = Vec::new();
 
-    for node in &element.nodes {
+    for node in nodes {
         let x = node.x;
         let z = node.z;
 
@@ -2292,6 +2298,7 @@ pub fn generate_buildings(
     element: &ProcessedWay,
     args: &Args,
     relation_levels: Option<i32>,
+    hole_polygons: Option<&[HolePolygon]>,
     flood_fill_cache: &FloodFillCache,
 ) {
     // Early return for underground buildings
@@ -2317,9 +2324,43 @@ pub fn generate_buildings(
     let min_level_offset = multiply_scale(min_level * 4, scale_factor);
 
     // Get cached floor area
-    let cached_floor_area: Vec<(i32, i32)> =
+    let mut cached_floor_area: Vec<(i32, i32)> =
         flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+
+    if let Some(holes) = hole_polygons {
+        if !holes.is_empty() {
+            let outer_area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+            let mut hole_points: HashSet<(i32, i32)> = HashSet::new();
+
+            for hole in holes {
+                if hole.way.nodes.len() < 3 {
+                    continue;
+                }
+
+                let hole_area = flood_fill_cache.get_or_compute(&hole.way, args.timeout.as_ref());
+                if hole_area.is_empty() {
+                    continue;
+                }
+
+                if !hole_area.iter().any(|pt| outer_area.contains(pt)) {
+                    continue;
+                }
+
+                for point in hole_area {
+                    hole_points.insert(point);
+                }
+            }
+
+            if !hole_points.is_empty() {
+                cached_floor_area.retain(|point| !hole_points.contains(point));
+            }
+        }
+    }
+
     let cached_footprint_size = cached_floor_area.len();
+    if cached_footprint_size == 0 {
+        return;
+    }
 
     // Calculate start Y offset
     let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
@@ -2443,7 +2484,15 @@ pub fn generate_buildings(
     // Generate walls, pass whether this building will have a sloped roof
     let has_sloped_roof = args.roof && style.generate_roof && style.roof_type != RoofType::Flat;
     let (wall_outline, corner_addup) =
-        generate_building_walls(editor, element, &config, args, has_sloped_roof);
+        build_wall_ring(editor, &element.nodes, &config, args, has_sloped_roof);
+
+    if let Some(holes) = hole_polygons {
+        for hole in holes {
+            if hole.add_walls {
+                let _ = build_wall_ring(editor, &hole.way.nodes, &config, args, has_sloped_roof);
+            }
+        }
+    }
 
     // Generate special doors (garage doors, shed doors)
     if config.has_garage_door || config.has_single_door {
@@ -4023,6 +4072,72 @@ pub fn generate_building_from_relation(
             first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
         });
 
+        // Collect and assemble inner rings for courtyards/holes.
+        let mut inner_rings: Vec<Vec<ProcessedNode>> = relation
+            .members
+            .iter()
+            .filter(|m| m.role == ProcessedMemberRole::Inner)
+            .map(|m| m.way.nodes.clone())
+            .collect();
+
+        super::merge_way_segments(&mut inner_rings);
+
+        inner_rings = inner_rings
+            .into_iter()
+            .map(|ring| clip_way_to_bbox(&ring, xzbbox))
+            .filter(|ring| ring.len() >= 4)
+            .collect();
+
+        // Close rings that are nearly closed (endpoints within 1 block)
+        for ring in &mut inner_rings {
+            if ring.len() >= 3 {
+                let first = &ring[0];
+                let last = ring.last().unwrap();
+                if first.id != last.id {
+                    let dx = (first.x - last.x).abs();
+                    let dz = (first.z - last.z).abs();
+                    if dx <= 1 && dz <= 1 {
+                        let close_node = ring[0].clone();
+                        ring.push(close_node);
+                    }
+                }
+            }
+        }
+
+        // Discard rings that are still open or too small
+        inner_rings.retain(|ring| {
+            if ring.len() < 4 {
+                return false;
+            }
+            let first = &ring[0];
+            let last = ring.last().unwrap();
+            first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
+        });
+
+        let hole_polygons: Option<Vec<HolePolygon>> = if inner_rings.is_empty() {
+            None
+        } else {
+            Some(
+                inner_rings
+                    .into_iter()
+                    .enumerate()
+                    .map(|(ring_idx, ring)| {
+                        // Use a different index range from outer rings to avoid cache collisions.
+                        let ring_slot = 0x8000u64 | (ring_idx as u64 & 0x7FFF);
+                        let synthetic_id = (1u64 << 63) | (relation.id << 16) | ring_slot;
+                        HolePolygon {
+                            way: ProcessedWay {
+                                id: synthetic_id,
+                                tags: HashMap::new(),
+                                nodes: ring,
+                            },
+                            add_walls: true,
+                        }
+                    })
+                    .collect(),
+            )
+        };
+
         // Build a synthetic ProcessedWay for each assembled ring and render it.
         // The relation tags are applied so that building type, levels, and roof
         // shape from the relation are honoured.
@@ -4042,6 +4157,7 @@ pub fn generate_building_from_relation(
                 &merged_way,
                 args,
                 Some(relation_levels),
+                hole_polygons.as_deref(),
                 flood_fill_cache,
             );
         }
