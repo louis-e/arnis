@@ -308,12 +308,14 @@ pub fn parse_osm_data(
                     ProcessedMemberRole::Outer
                 } else if trimmed_role.eq_ignore_ascii_case("inner") {
                     ProcessedMemberRole::Inner
-                } else if trimmed_role.eq_ignore_ascii_case("part")
-                    && relation_type == Some("building")
-                {
-                    // "part" role only applies to type=building relations.
-                    // For multipolygon relations, treat it as unknown.
-                    ProcessedMemberRole::Part
+                } else if trimmed_role.eq_ignore_ascii_case("part") {
+                    if relation_type == Some("building") {
+                        // "part" role only applies to type=building relations.
+                        ProcessedMemberRole::Part
+                    } else {
+                        // For multipolygon relations, "part" is not a valid role, skip.
+                        return None;
+                    }
                 } else if is_building_relation {
                     ProcessedMemberRole::Outer
                 } else {

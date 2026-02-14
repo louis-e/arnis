@@ -166,7 +166,10 @@ fn generate_highways_internal(
             // Check if this is a bridge - bridges need special elevation handling
             // to span across valleys instead of following terrain
             // Accept any bridge tag value except "no" (e.g., "yes", "viaduct", "aqueduct", etc.)
-            let is_bridge = element.tags().get("bridge").is_some_and(|v| v != "no");
+            // Indoor highways are never treated as bridges (indoor corridors should not
+            // generate elevated decks or support pillars).
+            let is_indoor = element.tags().get("indoor").is_some_and(|v| v == "yes");
+            let is_bridge = !is_indoor && element.tags().get("bridge").is_some_and(|v| v != "no");
 
             // Parse the layer value for elevation calculation
             let mut layer_value = element
@@ -182,11 +185,6 @@ fn generate_highways_internal(
 
             // If the way is indoor, treat it as ground level to avoid creating
             // bridges/supports inside buildings (indoor=yes should not produce bridges)
-            let is_indoor = element
-                .tags()
-                .get("indoor")
-                .map(|v| v == "yes")
-                .unwrap_or(false);
             if is_indoor {
                 layer_value = 0;
             }
