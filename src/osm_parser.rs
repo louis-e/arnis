@@ -273,27 +273,22 @@ pub fn parse_osm_data(
             continue;
         };
 
-        // Process multipolygons, boundary relations, and building relations
+        // Process multipolygons and building relations
         let relation_type = tags.get("type").map(|x: &String| x.as_str());
-        if relation_type != Some("multipolygon")
-            && relation_type != Some("boundary")
-            && relation_type != Some("building")
-        {
+        if relation_type != Some("multipolygon") && relation_type != Some("building") {
             continue;
         };
 
         let is_building_relation = relation_type == Some("building");
 
         // Water relations require unclipped ways for ring merging in water_areas.rs
-        // Boundary relations also require unclipped ways for proper ring assembly
         // Building multipolygon relations also need unclipped ways so that
         // open outer-way segments can be merged into closed rings before clipping
         let is_water_relation = is_water_element(tags);
-        let is_boundary_relation = tags.contains_key("boundary");
         let is_building_multipolygon = (tags.contains_key("building")
             || tags.contains_key("building:part"))
             && relation_type == Some("multipolygon");
-        let keep_unclipped = is_water_relation || is_boundary_relation || is_building_multipolygon;
+        let keep_unclipped = is_water_relation || is_building_multipolygon;
 
         let members: Vec<ProcessedMember> = element
             .members
@@ -313,7 +308,7 @@ pub fn parse_osm_data(
                     ProcessedMemberRole::Inner
                 } else if trimmed_role.eq_ignore_ascii_case("part") && is_building_relation {
                     // "part" role only applies to type=building relations.
-                    // For multipolygon/boundary relations, treat it as unknown.
+                    // For multipolygon relations, treat it as unknown.
                     ProcessedMemberRole::Part
                 } else {
                     return None;
@@ -328,7 +323,7 @@ pub fn parse_osm_data(
                     }
                 };
 
-                // Water and boundary relations: keep unclipped for ring merging
+                // Water relations: keep unclipped for ring merging
                 // Other relations: clip member ways now
                 let final_way = if keep_unclipped {
                     way

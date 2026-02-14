@@ -56,7 +56,7 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub fillground: bool,
 
-    /// Enable city boundary ground generation (optional)
+    /// Enable city ground generation (optional)
     /// When enabled, detects building clusters and places stone ground in urban areas.
     /// Isolated buildings in rural areas will keep grass around them.
     #[arg(long, default_value_t = true)]
