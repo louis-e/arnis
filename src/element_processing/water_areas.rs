@@ -209,26 +209,49 @@ struct ScanlineEdge {
     z2: f64,
 }
 
-/// Collects all non-horizontal edges from a set of polygon rings.
-fn collect_scanline_edges(rings: &[Vec<XZPoint>]) -> Vec<ScanlineEdge> {
+/// Collects all non-horizontal edges from a single polygon ring.
+///
+/// If the ring is not perfectly closed (last point != first point),
+/// the closing edge is added explicitly.
+fn collect_ring_edges(ring: &[XZPoint]) -> Vec<ScanlineEdge> {
+    let mut edges = Vec::new();
+    if ring.len() < 2 {
+        return edges;
+    }
+    for i in 0..ring.len() - 1 {
+        let a = &ring[i];
+        let b = &ring[i + 1];
+        // Skip horizontal edges, they produce no scanline crossings
+        if a.z != b.z {
+            edges.push(ScanlineEdge {
+                x1: a.x as f64,
+                z1: a.z as f64,
+                x2: b.x as f64,
+                z2: b.z as f64,
+            });
+        }
+    }
+    // Add closing edge if the ring isn't perfectly closed by coordinates
+    let first = ring.first().unwrap();
+    let last = ring.last().unwrap();
+    if first.z != last.z {
+        edges.push(ScanlineEdge {
+            x1: last.x as f64,
+            z1: last.z as f64,
+            x2: first.x as f64,
+            z2: first.z as f64,
+        });
+    }
+    edges
+}
+
+/// Collects edges from multiple rings into a single list.
+/// Used for inner rings where even-odd on combined edges is correct
+/// (inner rings of a valid multipolygon do not overlap).
+fn collect_all_ring_edges(rings: &[Vec<XZPoint>]) -> Vec<ScanlineEdge> {
     let mut edges = Vec::new();
     for ring in rings {
-        if ring.len() < 2 {
-            continue;
-        }
-        for i in 0..ring.len() - 1 {
-            let a = &ring[i];
-            let b = &ring[i + 1];
-            // Skip horizontal edges, they produce no scanline crossings
-            if a.z != b.z {
-                edges.push(ScanlineEdge {
-                    x1: a.x as f64,
-                    z1: a.z as f64,
-                    x2: b.x as f64,
-                    z2: b.z as f64,
-                });
-            }
-        }
+        edges.extend(collect_ring_edges(ring));
     }
     edges
 }
@@ -259,7 +282,17 @@ fn compute_scanline_spans(
         return Vec::new();
     }
 
-    xs.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    xs.sort_unstable_by(|a, b| {
+        a.partial_cmp(b)
+            .expect("NaN encountered while sorting scanline intersections")
+    });
+
+    debug_assert!(
+        xs.len().is_multiple_of(2),
+        "Odd number of scanline crossings ({}) at z={}, possible malformed polygon",
+        xs.len(),
+        z
+    );
 
     // Pair consecutive crossings into fill spans (even-odd rule)
     let mut spans = Vec::with_capacity(xs.len() / 2);
@@ -274,6 +307,36 @@ fn compute_scanline_spans(
     }
 
     spans
+}
+
+/// Merges two sorted, non-overlapping span lists into their union.
+fn union_spans(a: &[(i32, i32)], b: &[(i32, i32)]) -> Vec<(i32, i32)> {
+    if a.is_empty() {
+        return b.to_vec();
+    }
+    if b.is_empty() {
+        return a.to_vec();
+    }
+
+    // Merge both sorted lists and combine overlapping/adjacent spans
+    let mut all: Vec<(i32, i32)> = Vec::with_capacity(a.len() + b.len());
+    all.extend_from_slice(a);
+    all.extend_from_slice(b);
+    all.sort_unstable_by_key(|&(start, _)| start);
+
+    let mut result: Vec<(i32, i32)> = Vec::new();
+    let mut current = all[0];
+    for &(start, end) in &all[1..] {
+        if start <= current.1 + 1 {
+            // Overlapping or adjacent, extend
+            current.1 = current.1.max(end);
+        } else {
+            result.push(current);
+            current = (start, end);
+        }
+    }
+    result.push(current);
+    result
 }
 
 /// Subtracts spans in `b` from spans in `a`.
@@ -329,13 +392,24 @@ fn scanline_fill_water(
     inners: &[Vec<XZPoint>],
     editor: &mut WorldEditor,
 ) {
-    let outer_edges = collect_scanline_edges(outers);
-    let inner_edges = collect_scanline_edges(inners);
+    // Collect edges per outer ring so we can union their spans correctly,
+    // even if multiple outer rings happen to overlap (invalid OSM, but
+    // we handle it gracefully).
+    let outer_edge_groups: Vec<Vec<ScanlineEdge>> =
+        outers.iter().map(|ring| collect_ring_edges(ring)).collect();
+    let inner_edges = collect_all_ring_edges(inners);
 
     for z in min_z..=max_z {
         let z_f = z as f64;
 
-        let outer_spans = compute_scanline_spans(&outer_edges, z_f, min_x, max_x);
+        // Compute spans for each outer ring and union them together
+        let mut outer_spans: Vec<(i32, i32)> = Vec::new();
+        for ring_edges in &outer_edge_groups {
+            let ring_spans = compute_scanline_spans(ring_edges, z_f, min_x, max_x);
+            if !ring_spans.is_empty() {
+                outer_spans = union_spans(&outer_spans, &ring_spans);
+            }
+        }
         if outer_spans.is_empty() {
             continue;
         }
