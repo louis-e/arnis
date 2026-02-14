@@ -326,11 +326,6 @@ pub fn fetch_elevation_data(
             Ok(tile_data) => successful_tiles.push(tile_data),
             Err(e) => {
                 eprintln!("Warning: Failed to download tile: {e}");
-                #[cfg(feature = "gui")]
-                send_log(
-                    LogLevel::Warning,
-                    &format!("Failed to download elevation tile: {e}"),
-                );
             }
         }
     }
