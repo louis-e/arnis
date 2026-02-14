@@ -1855,7 +1855,7 @@ fn generate_residential_window_decorations(
                     let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
                     let shutter_roll =
                         coord_rng(centre_sum, centre_sum, element.id).random_range(0u32..100);
-                    if shutter_roll < 12 {
+                    if shutter_roll < 25 {
                         for h in (config.start_y_offset + 1)
                             ..=(config.start_y_offset + config.building_height)
                         {
@@ -1904,7 +1904,7 @@ fn generate_residential_window_decorations(
 
                             let abs_y = h + config.abs_terrain_offset;
 
-                            if decoration_roll < 6 {
+                            if decoration_roll < 15 {
                                 // ── Window sill ──
                                 let lx = bx + out_nx;
                                 let lz = bz + out_nz;
@@ -1937,7 +1937,7 @@ fn generate_residential_window_decorations(
                                         None,
                                     );
                                 }
-                            } else if decoration_roll < 10 && mod6 == 1 {
+                            } else if decoration_roll < 23 && mod6 == 1 {
                                 // ── Balcony (placed once from centre col) ──
                                 // A small 3-wide × 2-deep platform with
                                 // open-trapdoor railing around the outer
