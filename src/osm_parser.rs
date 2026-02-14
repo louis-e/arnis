@@ -323,8 +323,8 @@ pub fn parse_osm_data(
                     }
                 };
 
-                // Water relations: keep unclipped for ring merging
-                // Other relations: clip member ways now
+                // If keep_unclipped is true (e.g., certain water or building multipolygon
+                // relations), keep member ways unclipped for ring merging; otherwise clip now.
                 let final_way = if keep_unclipped {
                     way
                 } else {
