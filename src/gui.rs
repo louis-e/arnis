@@ -1,15 +1,17 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
-use crate::data_processing;
+use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
-use crate::progress;
+use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
 use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
+use crate::world_editor::WorldFormat;
+use colored::Colorize;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use fs2::FileExt;
@@ -61,6 +63,12 @@ impl Drop for SessionLock {
 }
 
 pub fn run_gui() {
+    // Configure thread pool with 90% CPU cap to keep system responsive
+    crate::floodfill_cache::configure_rayon_thread_pool(0.9);
+
+    // Clean up old cached elevation tiles on startup
+    crate::elevation_data::cleanup_old_cached_tiles();
+
     // Launch the UI
     println!("Launching UI...");
 
@@ -86,7 +94,7 @@ pub fn run_gui() {
     tauri::Builder::default()
         .plugin(
             LogBuilder::default()
-                .level(LevelFilter::Warn)
+                .level(LevelFilter::Info)
                 .targets([
                     Target::new(TargetKind::LogDir {
                         file_name: Some("arnis".into()),
@@ -97,11 +105,15 @@ pub fn run_gui() {
         )
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
-            gui_select_world,
+            gui_create_world,
+            gui_get_default_save_path,
+            gui_set_save_path,
+            gui_pick_save_directory,
             gui_start_generation,
             gui_get_version,
             gui_check_for_updates,
-            gui_get_world_map_data
+            gui_get_world_map_data,
+            gui_show_in_folder
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -114,15 +126,17 @@ pub fn run_gui() {
         .expect("Error while starting the application UI (Tauri)");
 }
 
-#[tauri::command]
-fn gui_select_world(generate_new: bool) -> Result<String, i32> {
-    // Determine the default Minecraft 'saves' directory based on the OS
-    let default_dir: Option<PathBuf> = if cfg!(target_os = "windows") {
+/// Detects the default Minecraft Java Edition saves directory for the current OS.
+/// Checks standard install paths including Flatpak on Linux.
+/// Falls back to Desktop, then current directory.
+fn detect_minecraft_saves_directory() -> PathBuf {
+    // Try standard Minecraft saves directories per OS
+    let mc_saves: Option<PathBuf> = if cfg!(target_os = "windows") {
         env::var("APPDATA")
             .ok()
-            .map(|appdata: String| PathBuf::from(appdata).join(".minecraft").join("saves"))
+            .map(|appdata| PathBuf::from(appdata).join(".minecraft").join("saves"))
     } else if cfg!(target_os = "macos") {
-        dirs::home_dir().map(|home: PathBuf| {
+        dirs::home_dir().map(|home| {
             home.join("Library/Application Support/minecraft")
                 .join("saves")
         })
@@ -139,170 +153,75 @@ fn gui_select_world(generate_new: bool) -> Result<String, i32> {
         None
     };
 
-    if generate_new {
-        // Handle new world generation
-        if let Some(default_path) = &default_dir {
-            if default_path.exists() {
-                // Call create_new_world and return the result
-                create_new_world(default_path).map_err(|_| 1) // Error code 1: Minecraft directory not found
-            } else {
-                Err(1) // Error code 1: Minecraft directory not found
-            }
-        } else {
-            Err(1) // Error code 1: Minecraft directory not found
+    if let Some(saves_dir) = mc_saves {
+        if saves_dir.exists() {
+            return saves_dir;
         }
-    } else {
-        // Handle existing world selection
-        // Open the directory picker dialog
-        let dialog: FileDialog = FileDialog::new();
-        let dialog: FileDialog = if let Some(start_dir) = default_dir.filter(|dir| dir.exists()) {
-            dialog.set_directory(start_dir)
-        } else {
-            dialog
-        };
+    }
 
-        if let Some(path) = dialog.pick_folder() {
-            // Check if the "region" folder exists within the selected directory
-            if path.join("region").exists() {
-                // Check the 'session.lock' file
-                let session_lock_path = path.join("session.lock");
-                if session_lock_path.exists() {
-                    // Try to acquire a lock on the session.lock file
-                    if let Ok(file) = fs::File::open(&session_lock_path) {
-                        if fs2::FileExt::try_lock_shared(&file).is_err() {
-                            return Err(2); // Error code 2: The selected world is currently in use
-                        } else {
-                            // Release the lock immediately
-                            let _ = fs2::FileExt::unlock(&file);
-                        }
-                    }
-                }
-
-                return Ok(path.display().to_string());
-            } else {
-                // No Minecraft directory found, generating new world in custom user selected directory
-                return create_new_world(&path).map_err(|_| 3); // Error code 3: Failed to create new world
-            }
+    // Fallback to Desktop
+    if let Some(desktop) = dirs::desktop_dir() {
+        if desktop.exists() {
+            return desktop;
         }
+    }
 
-        // If no folder was selected, return an error message
-        Err(4) // Error code 4: No world selected
+    // Last resort: current directory
+    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Returns the default save path (auto-detected on first run).
+/// The frontend stores/retrieves this via localStorage and passes it here for validation.
+#[tauri::command]
+fn gui_get_default_save_path() -> String {
+    detect_minecraft_saves_directory().display().to_string()
+}
+
+/// Validates and returns a user-provided save path.
+/// Returns the path string if valid, or an error message.
+#[tauri::command]
+fn gui_set_save_path(path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    if !p.exists() {
+        return Err("Path does not exist.".to_string());
+    }
+    if !p.is_dir() {
+        return Err("Path is not a directory.".to_string());
+    }
+    Ok(path)
+}
+
+/// Opens a native folder-picker dialog and returns the chosen path.
+#[tauri::command]
+fn gui_pick_save_directory(start_path: String) -> Result<String, String> {
+    let start = PathBuf::from(&start_path);
+    let mut dialog = FileDialog::new();
+    if start.is_dir() {
+        dialog = dialog.set_directory(&start);
+    }
+    match dialog.pick_folder() {
+        Some(folder) => Ok(folder.display().to_string()),
+        None => Ok(start_path),
     }
 }
 
-fn create_new_world(base_path: &Path) -> Result<String, String> {
-    // Generate a unique world name with proper counter
-    // Check for both "Arnis World X" and "Arnis World X: Location" patterns
-    let mut counter: i32 = 1;
-    let unique_name: String = loop {
-        let candidate_name: String = format!("Arnis World {counter}");
-        let candidate_path: PathBuf = base_path.join(&candidate_name);
-
-        // Check for exact match (no location suffix)
-        let exact_match_exists = candidate_path.exists();
-
-        // Check for worlds with location suffix (Arnis World X: Location)
-        let location_pattern = format!("Arnis World {counter}: ");
-        let location_match_exists = fs::read_dir(base_path)
-            .map(|entries| {
-                entries
-                    .filter_map(Result::ok)
-                    .filter_map(|entry| entry.file_name().into_string().ok())
-                    .any(|name| name.starts_with(&location_pattern))
-            })
-            .unwrap_or(false);
-
-        if !exact_match_exists && !location_match_exists {
-            break candidate_name;
-        }
-        counter += 1;
-    };
-
-    let new_world_path: PathBuf = base_path.join(&unique_name);
-
-    // Create the new world directory structure
-    fs::create_dir_all(new_world_path.join("region"))
-        .map_err(|e| format!("Failed to create world directory: {e}"))?;
-
-    // Copy the region template file
-    const REGION_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/region.template");
-    let region_path = new_world_path.join("region").join("r.0.0.mca");
-    fs::write(&region_path, REGION_TEMPLATE)
-        .map_err(|e| format!("Failed to create region file: {e}"))?;
-
-    // Add the level.dat file
-    const LEVEL_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/level.dat");
-
-    // Decompress the gzipped level.template
-    let mut decoder = GzDecoder::new(LEVEL_TEMPLATE);
-    let mut decompressed_data = Vec::new();
-    decoder
-        .read_to_end(&mut decompressed_data)
-        .map_err(|e| format!("Failed to decompress level.template: {e}"))?;
-
-    // Parse the decompressed NBT data
-    let mut level_data: Value = fastnbt::from_bytes(&decompressed_data)
-        .map_err(|e| format!("Failed to parse level.dat template: {e}"))?;
-
-    // Modify the LevelName, LastPlayed and player position fields
-    if let Value::Compound(ref mut root) = level_data {
-        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-            // Update LevelName
-            data.insert("LevelName".to_string(), Value::String(unique_name.clone()));
-
-            // Update LastPlayed to the current Unix time in milliseconds
-            let current_time = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_err(|e| format!("Failed to get current time: {e}"))?;
-            let current_time_millis = current_time.as_millis() as i64;
-            data.insert("LastPlayed".to_string(), Value::Long(current_time_millis));
-
-            // Update player position and rotation
-            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    if let Value::Double(ref mut x) = pos.get_mut(0).unwrap() {
-                        *x = -5.0;
-                    }
-                    if let Value::Double(ref mut y) = pos.get_mut(1).unwrap() {
-                        *y = -61.0;
-                    }
-                    if let Value::Double(ref mut z) = pos.get_mut(2).unwrap() {
-                        *z = -5.0;
-                    }
-                }
-
-                if let Some(Value::List(ref mut rot)) = player.get_mut("Rotation") {
-                    if let Value::Float(ref mut x) = rot.get_mut(0).unwrap() {
-                        *x = -45.0;
-                    }
-                }
-            }
-        }
+/// Creates a new Java Edition world in the given base save directory.
+/// Called when the user clicks "Create World".
+#[tauri::command]
+fn gui_create_world(save_path: String) -> Result<String, i32> {
+    let trimmed = save_path.trim();
+    if trimmed.is_empty() {
+        return Err(3);
     }
+    let base = PathBuf::from(trimmed);
+    if !base.is_dir() {
+        return Err(3); // Error code 3: Failed to create new world
+    }
+    create_new_world(&base).map_err(|_| 3)
+}
 
-    // Serialize the updated NBT data back to bytes
-    let serialized_level_data: Vec<u8> = fastnbt::to_bytes(&level_data)
-        .map_err(|e| format!("Failed to serialize updated level.dat: {e}"))?;
-
-    // Compress the serialized data back to gzip
-    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder
-        .write_all(&serialized_level_data)
-        .map_err(|e| format!("Failed to compress updated level.dat: {e}"))?;
-    let compressed_level_data = encoder
-        .finish()
-        .map_err(|e| format!("Failed to finalize compression for level.dat: {e}"))?;
-
-    // Write the level.dat file
-    fs::write(new_world_path.join("level.dat"), compressed_level_data)
-        .map_err(|e| format!("Failed to create level.dat file: {e}"))?;
-
-    // Add the icon.png file
-    const ICON_TEMPLATE: &[u8] = include_bytes!("../assets/minecraft/icon.png");
-    fs::write(new_world_path.join("icon.png"), ICON_TEMPLATE)
-        .map_err(|e| format!("Failed to create icon.png file: {e}"))?;
-
-    Ok(new_world_path.display().to_string())
+fn create_new_world(base_path: &Path) -> Result<String, String> {
+    crate::world_utils::create_new_world(base_path)
 }
 
 /// Adds localized area name to the world name in level.dat
@@ -398,6 +317,7 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                                 if let Ok(compressed_data) = encoder.finish() {
                                     if let Err(e) = std::fs::write(&level_path, compressed_data) {
                                         eprintln!("Failed to update level.dat with area name: {e}");
+                                        #[cfg(feature = "gui")]
                                         send_log(
                                             LogLevel::Warning,
                                             "Failed to update level.dat with area name",
@@ -416,36 +336,20 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     world_path
 }
 
-// Function to update player position in level.dat based on spawn point coordinates
-fn update_player_position(
+/// Calculates the default spawn point at X=1, Z=1 relative to the world origin.
+/// This is used when no spawn point is explicitly selected by the user.
+fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
+    (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
+}
+
+/// Sets the player spawn point in level.dat using Minecraft XZ coordinates.
+/// The Y coordinate is set to a temporary value (150) and will be updated
+/// after terrain generation by `update_player_spawn_y_after_generation`.
+fn set_player_spawn_in_level_dat(
     world_path: &str,
-    spawn_point: Option<(f64, f64)>,
-    bbox_text: String,
-    scale: f64,
+    spawn_x: i32,
+    spawn_z: i32,
 ) -> Result<(), String> {
-    use crate::coordinate_system::transformation::CoordTransformer;
-
-    let Some((lat, lng)) = spawn_point else {
-        return Ok(()); // No spawn point selected, exit early
-    };
-
-    // Parse geometrical point and bounding box
-    let llpoint =
-        LLPoint::new(lat, lng).map_err(|e| format!("Failed to parse spawn point:\n{e}"))?;
-    let llbbox = LLBBox::from_str(&bbox_text)
-        .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{e}"))?;
-
-    // Check if spawn point is within the bbox
-    if !llbbox.contains(&llpoint) {
-        return Err("Spawn point is outside the selected area".to_string());
-    }
-
-    // Convert lat/lng to Minecraft coordinates
-    let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale)
-        .map_err(|e| format!("Failed to build transformation on coordinate systems:\n{e}"))?;
-
-    let xzpoint = transformer.transform_point(llpoint);
-
     // Default y spawn position since terrain elevation cannot be determined yet
     let y = 150.0;
 
@@ -477,21 +381,24 @@ fn update_player_position(
     if let Value::Compound(ref mut root) = nbt_data {
         if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
             // Set world spawn point
-            data.insert("SpawnX".to_string(), Value::Int(xzpoint.x));
+            data.insert("SpawnX".to_string(), Value::Int(spawn_x));
             data.insert("SpawnY".to_string(), Value::Int(y as i32));
-            data.insert("SpawnZ".to_string(), Value::Int(xzpoint.z));
+            data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
 
-            // Update player position
+            // Update player position if Player compound exists
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    if let Value::Double(ref mut pos_x) = pos.get_mut(0).unwrap() {
-                        *pos_x = xzpoint.x as f64;
-                    }
-                    if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
-                        *pos_y = y;
-                    }
-                    if let Value::Double(ref mut pos_z) = pos.get_mut(2).unwrap() {
-                        *pos_z = xzpoint.z as f64;
+                    // Safely update position values with bounds checking
+                    if pos.len() >= 3 {
+                        if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
+                            *pos_x = spawn_x as f64;
+                        }
+                        if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
+                            *pos_y = y;
+                        }
+                        if let Some(Value::Double(ref mut pos_z)) = pos.get_mut(2) {
+                            *pos_z = spawn_z as f64;
+                        }
                     }
                 }
             }
@@ -523,18 +430,14 @@ fn update_player_position(
 }
 
 // Function to update player spawn Y coordinate based on terrain height after generation
+// This updates the spawn Y coordinate to be at terrain height + 3 blocks
 pub fn update_player_spawn_y_after_generation(
     world_path: &Path,
-    spawn_point: Option<(f64, f64)>,
     bbox_text: String,
     scale: f64,
     ground: &Ground,
 ) -> Result<(), String> {
     use crate::coordinate_system::transformation::CoordTransformer;
-
-    let Some((_lat, _lng)) = spawn_point else {
-        return Ok(()); // No spawn point selected, exit early
-    };
 
     // Read the current level.dat file to get existing spawn coordinates
     let level_path = PathBuf::from(world_path).join("level.dat");
@@ -604,7 +507,7 @@ pub fn update_player_spawn_y_after_generation(
         let relative_z = existing_spawn_z - xzbbox.min_z();
         let terrain_point = XZPoint::new(relative_x, relative_z);
 
-        ground.level(terrain_point) + 2
+        ground.level(terrain_point) + 3 // Add 3 blocks above terrain for safety
     } else {
         -61 // Default Y if no terrain
     };
@@ -618,8 +521,8 @@ pub fn update_player_spawn_y_after_generation(
             // Update player position - only Y coordinate
             if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
                 if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    // Keep existing X and Z, only update Y
-                    if let Value::Double(ref mut pos_y) = pos.get_mut(1).unwrap() {
+                    // Safely update Y position with bounds checking
+                    if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
                         *pos_y = spawn_y as f64;
                     }
                 }
@@ -702,12 +605,22 @@ fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, St
         .as_f64()
         .ok_or("Missing maxGeoLon in metadata")?;
 
+    // Extract Minecraft coordinate bounds
+    let min_mc_x = metadata["minMcX"].as_i64().unwrap_or(0) as i32;
+    let max_mc_x = metadata["maxMcX"].as_i64().unwrap_or(0) as i32;
+    let min_mc_z = metadata["minMcZ"].as_i64().unwrap_or(0) as i32;
+    let max_mc_z = metadata["maxMcZ"].as_i64().unwrap_or(0) as i32;
+
     Ok(Some(WorldMapData {
         image_base64: format!("data:image/png;base64,{}", base64_image),
         min_lat,
         max_lat,
         min_lon,
         max_lon,
+        min_mc_x,
+        max_mc_x,
+        min_mc_z,
+        max_mc_z,
     }))
 }
 
@@ -719,6 +632,62 @@ struct WorldMapData {
     max_lat: f64,
     min_lon: f64,
     max_lon: f64,
+    // Minecraft coordinate bounds for coordinate copying
+    min_mc_x: i32,
+    max_mc_x: i32,
+    min_mc_z: i32,
+    max_mc_z: i32,
+}
+
+/// Opens the file with default application (Windows) or shows in file explorer (macOS/Linux)
+#[tauri::command]
+fn gui_show_in_folder(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, try to open with default application (Minecraft Bedrock)
+        // If that fails, show in Explorer
+        if std::process::Command::new("cmd")
+            .args(["/C", "start", "", &path])
+            .spawn()
+            .is_err()
+        {
+            std::process::Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, just reveal in Finder
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to open Finder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, just show in file manager
+        let path_parent = std::path::Path::new(&path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.clone());
+
+        // Try nautilus with select first, then fall back to xdg-open on parent
+        if std::process::Command::new("nautilus")
+            .args(["--select", &path])
+            .spawn()
+            .is_err()
+        {
+            let _ = std::process::Command::new("xdg-open")
+                .arg(&path_parent)
+                .spawn();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -729,15 +698,16 @@ fn gui_start_generation(
     selected_world: String,
     world_scale: f64,
     ground_level: i32,
-    floodfill_timeout: u64,
     terrain_enabled: bool,
     skip_osm_objects: bool,
     interior_enabled: bool,
     roof_enabled: bool,
     fillground_enabled: bool,
+    city_boundaries_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
+    world_format: String,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -748,48 +718,99 @@ fn gui_start_generation(
     // Send generation click telemetry
     telemetry::send_generation_click();
 
-    // If spawn point was chosen and the world is new, check and set the spawn point
-    if is_new_world && spawn_point.is_some() {
-        // Verify the spawn point is within bounds
-        if let Some(coords) = spawn_point {
-            let llbbox = match LLBBox::from_str(&bbox_text) {
-                Ok(bbox) => bbox,
-                Err(e) => {
-                    let error_msg = format!("Failed to parse bounding box: {e}");
-                    eprintln!("{error_msg}");
-                    emit_gui_error(&error_msg);
-                    return Err(error_msg);
-                }
-            };
+    // For new Java worlds, set the spawn point in level.dat
+    // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
+    // level.dat to modify (the spawn point will be set when the .mcworld is created)
+    if is_new_world && world_format != "bedrock" {
+        let llbbox = match LLBBox::from_str(&bbox_text) {
+            Ok(bbox) => bbox,
+            Err(e) => {
+                let error_msg = format!("Failed to parse bounding box: {e}");
+                eprintln!("{error_msg}");
+                emit_gui_error(&error_msg);
+                return Err(error_msg);
+            }
+        };
 
+        let (transformer, xzbbox) = match CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale) {
+            Ok(result) => result,
+            Err(e) => {
+                let error_msg = format!("Failed to create coordinate transformer: {e}");
+                eprintln!("{error_msg}");
+                emit_gui_error(&error_msg);
+                return Err(error_msg);
+            }
+        };
+
+        let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
+            // User selected a spawn point - verify it's within bounds and convert to XZ
             let llpoint = LLPoint::new(coords.0, coords.1)
                 .map_err(|e| format!("Failed to parse spawn point: {e}"))?;
 
             if llbbox.contains(&llpoint) {
-                // Spawn point is valid, update the player position
-                update_player_position(
-                    &selected_world,
-                    spawn_point,
-                    bbox_text.clone(),
-                    world_scale,
-                )
-                .map_err(|e| format!("Failed to set spawn point: {e}"))?;
+                let xzpoint = transformer.transform_point(llpoint);
+                (xzpoint.x, xzpoint.z)
+            } else {
+                // Spawn point outside bounds, use default
+                calculate_default_spawn(&xzbbox)
             }
-        }
+        } else {
+            // No user-selected spawn point - use default at X=1, Z=1 relative to world origin
+            calculate_default_spawn(&xzbbox)
+        };
+
+        set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
+            .map_err(|e| format!("Failed to set spawn point: {e}"))?;
     }
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
-            // Acquire session lock for the world directory before starting generation
             let world_path = PathBuf::from(&selected_world);
-            let _session_lock = match SessionLock::acquire(&world_path) {
-                Ok(lock) => lock,
-                Err(e) => {
-                    let error_msg = format!("Failed to acquire session lock: {e}");
+
+            // Determine world format from UI selection first (needed for session lock decision)
+            let world_format = if world_format == "bedrock" {
+                WorldFormat::BedrockMcWorld
+            } else {
+                WorldFormat::JavaAnvil
+            };
+
+            // Check available disk space before starting generation (minimum 3GB required)
+            const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
+            let check_path = if world_format == WorldFormat::JavaAnvil {
+                world_path.clone()
+            } else {
+                // For Bedrock, check current directory where .mcworld will be created
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+            };
+            match fs2::available_space(&check_path) {
+                Ok(available) if available < MIN_DISK_SPACE_BYTES => {
+                    let error_msg = "Not enough disk space available.".to_string();
                     eprintln!("{error_msg}");
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
                 }
+                Err(e) => {
+                    // Log warning but don't block generation if we can't check space
+                    eprintln!("Warning: Could not check disk space: {e}");
+                }
+                _ => {} // Sufficient space available
+            }
+
+            // Acquire session lock for Java worlds only
+            // Session lock prevents Minecraft from having the world open during generation
+            // Bedrock worlds are generated as .mcworld files and don't need this lock
+            let _session_lock: Option<SessionLock> = if world_format == WorldFormat::JavaAnvil {
+                match SessionLock::acquire(&world_path) {
+                    Ok(lock) => Some(lock),
+                    Err(e) => {
+                        let error_msg = format!("Failed to acquire session lock: {e}");
+                        eprintln!("{error_msg}");
+                        emit_gui_error(&error_msg);
+                        return Err(error_msg);
+                    }
+                }
+            } else {
+                None
             };
 
             // Parse the bounding box from the text with proper error handling
@@ -803,19 +824,70 @@ fn gui_start_generation(
                 }
             };
 
-            // Add localized name to the world if user generated a new world
-            let updated_world_path = if is_new_world {
-                add_localized_world_name(world_path, &bbox)
-            } else {
-                world_path
+            // Determine output path and level name based on format
+            let (generation_path, level_name) = match world_format {
+                WorldFormat::JavaAnvil => {
+                    // Java: use the selected world path, add localized name if new
+                    let updated_path = if is_new_world {
+                        add_localized_world_name(world_path.clone(), &bbox)
+                    } else {
+                        world_path.clone()
+                    };
+                    (updated_path, None)
+                }
+                WorldFormat::BedrockMcWorld => {
+                    // Bedrock: generate .mcworld on Desktop with location-based name
+                    let output_dir = crate::world_utils::get_bedrock_output_directory();
+                    let (output_path, lvl_name) =
+                        crate::world_utils::build_bedrock_output(&bbox, output_dir);
+                    (output_path, Some(lvl_name))
+                }
             };
 
-            // Create an Args instance with the chosen bounding box and world directory path
+            // Calculate MC spawn coordinates from lat/lng if spawn point was provided
+            // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
+            let mc_spawn_point: Option<(i32, i32)> = if let Some((lat, lng)) = spawn_point {
+                if let Ok(llpoint) = LLPoint::new(lat, lng) {
+                    if let Ok((transformer, _)) =
+                        CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+                    {
+                        let xzpoint = transformer.transform_point(llpoint);
+                        Some((xzpoint.x, xzpoint.z))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                // Default spawn point: X=1, Z=1 relative to world origin
+                if let Ok((_, xzbbox)) = CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
+                    Some(calculate_default_spawn(&xzbbox))
+                } else {
+                    None
+                }
+            };
+
+            // Create generation options
+            let generation_options = GenerationOptions {
+                path: generation_path.clone(),
+                format: world_format,
+                level_name,
+                spawn_point: mc_spawn_point,
+            };
+
+            // Create an Args instance with the chosen bounding box
+            // Note: path is used for Java-specific features like spawn point update
             let args: Args = Args {
                 bbox,
                 file: None,
                 save_json_file: None,
-                path: updated_world_path,
+                path: Some(if world_format == WorldFormat::JavaAnvil {
+                    generation_path
+                } else {
+                    world_path
+                }),
+                bedrock: world_format == WorldFormat::BedrockMcWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
@@ -823,9 +895,9 @@ fn gui_start_generation(
                 interior: interior_enabled,
                 roof: roof_enabled,
                 fillground: fillground_enabled,
+                city_boundaries: city_boundaries_enabled,
                 debug: false,
-                timeout: Some(std::time::Duration::from_secs(floodfill_timeout)),
-                spawn_point,
+                timeout: Some(std::time::Duration::from_secs(40)),
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -839,14 +911,29 @@ fn gui_start_generation(
                     CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
 
-                let _ = data_processing::generate_world(
+                let _ = data_processing::generate_world_with_options(
                     parsed_elements,
-                    xzbbox,
+                    xzbbox.clone(),
                     args.bbox,
                     ground,
                     &args,
+                    generation_options.clone(),
                 );
-                // Session lock will be automatically released when _session_lock goes out of scope
+                // Explicitly release session lock before showing Done message
+                // so Minecraft can open the world immediately
+                drop(_session_lock);
+                emit_gui_progress_update(100.0, "Done! World generation completed.");
+                println!("{}", "Done! World generation completed.".green().bold());
+
+                // Start map preview generation silently in background (Java only)
+                if world_format == WorldFormat::JavaAnvil {
+                    let preview_info = data_processing::MapPreviewInfo::new(
+                        generation_options.path.clone(),
+                        &xzbbox,
+                    );
+                    data_processing::start_map_preview_generation(preview_info);
+                }
+
                 return Ok(());
             }
 
@@ -877,21 +964,35 @@ fn gui_start_generation(
                         &mut ground,
                     );
 
-                    let _ = data_processing::generate_world(
+                    let _ = data_processing::generate_world_with_options(
                         parsed_elements,
-                        xzbbox,
+                        xzbbox.clone(),
                         args.bbox,
                         ground,
                         &args,
+                        generation_options.clone(),
                     );
-                    // Session lock will be automatically released when _session_lock goes out of scope
+                    // Explicitly release session lock before showing Done message
+                    // so Minecraft can open the world immediately
+                    drop(_session_lock);
+                    emit_gui_progress_update(100.0, "Done! World generation completed.");
+                    println!("{}", "Done! World generation completed.".green().bold());
+
+                    // Start map preview generation silently in background (Java only)
+                    if world_format == WorldFormat::JavaAnvil {
+                        let preview_info = data_processing::MapPreviewInfo::new(
+                            generation_options.path.clone(),
+                            &xzbbox,
+                        );
+                        data_processing::start_map_preview_generation(preview_info);
+                    }
+
                     Ok(())
                 }
                 Err(e) => {
-                    let error_msg = format!("Failed to fetch data: {e}");
-                    emit_gui_error(&error_msg);
+                    emit_gui_error(&e.to_string());
                     // Session lock will be automatically released when _session_lock goes out of scope
-                    Err(error_msg)
+                    Err(e.to_string())
                 }
             }
         })

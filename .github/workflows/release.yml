@@ -17,7 +17,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             binary_name: arnis
             asset_name: arnis-linux
-          - os: macos-13  # Intel runner for x86_64 builds
+          - os: macos-15-intel  # Intel runner for x86_64 builds
             target: x86_64-apple-darwin
             binary_name: arnis
             asset_name: arnis-mac-intel
@@ -87,7 +87,7 @@ jobs:
       shell: powershell
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: ${{ matrix.os }}-${{ matrix.target }}-build
         path: target/release/${{ matrix.asset_name }}
@@ -97,13 +97,13 @@ jobs:
     runs-on: macos-latest
     steps:
     - name: Download macOS Intel build
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
-        name: macos-13-x86_64-apple-darwin-build
+        name: macos-15-intel-x86_64-apple-darwin-build
         path: ./intel
 
     - name: Download macOS ARM64 build
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: macos-latest-aarch64-apple-darwin-build
         path: ./arm64
@@ -114,7 +114,7 @@ jobs:
         chmod +x arnis-mac-universal
 
     - name: Upload universal binary
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v6
       with:
         name: macos-universal-build
         path: arnis-mac-universal
@@ -127,19 +127,19 @@ jobs:
       uses: actions/checkout@v6
 
     - name: Download Windows build artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: windows-latest-x86_64-pc-windows-msvc-build
         path: ./builds/windows
 
     - name: Download Linux build artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: ubuntu-latest-x86_64-unknown-linux-gnu-build
         path: ./builds/linux
 
     - name: Download macOS universal build artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@v7
       with:
         name: macos-universal-build
         path: ./builds/macos

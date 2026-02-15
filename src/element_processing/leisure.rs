@@ -1,13 +1,20 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::Tree;
-use crate::floodfill::flood_fill_area;
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
 
-pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: &Args) {
+pub fn generate_leisure(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
+) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
         let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
@@ -74,15 +81,13 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
             previous_node = Some((node.x, node.z));
         }
 
-        // Flood-fill the interior of the leisure area
+        // Flood-fill the interior of the leisure area using cache
         if corner_addup != (0, 0, 0) {
-            let polygon_coords: Vec<(i32, i32)> = element
-                .nodes
-                .iter()
-                .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                .collect();
             let filled_area: Vec<(i32, i32)> =
-                flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+
+            // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+            let mut rng = element_rng(element.id);
 
             for (x, z) in filled_area {
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
@@ -91,19 +96,20 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK]))
                 {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                    let random_choice: i32 = rng.gen_range(0..1000);
+                    let random_choice: i32 = rng.random_range(0..1000);
 
                     match random_choice {
                         0..30 => {
-                            // Flowers
-                            let flower_choice = match random_choice {
-                                0..10 => RED_FLOWER,
-                                10..20 => YELLOW_FLOWER,
-                                20..30 => BLUE_FLOWER,
-                                _ => WHITE_FLOWER,
+                            // Plants
+                            let plant_choice = match random_choice {
+                                0..5 => RED_FLOWER,
+                                5..10 => YELLOW_FLOWER,
+                                10..16 => BLUE_FLOWER,
+                                16..22 => WHITE_FLOWER,
+                                22..30 => FERN,
+                                _ => unreachable!(),
                             };
-                            editor.set_block(flower_choice, x, 1, z, None, None);
+                            editor.set_block(plant_choice, x, 1, z, None, None);
                         }
                         30..90 => {
                             // Grass
@@ -115,7 +121,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
                         }
                         105..120 => {
                             // Tree
-                            Tree::create(editor, (x, 1, z));
+                            Tree::create(editor, (x, 1, z), Some(building_footprints));
                         }
                         _ => {}
                     }
@@ -123,8 +129,7 @@ pub fn generate_leisure(editor: &mut WorldEditor, element: &ProcessedWay, args: 
 
                 // Add playground or recreation ground features
                 if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
-                    let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
-                    let random_choice: i32 = rng.gen_range(0..5000);
+                    let random_choice: i32 = rng.random_range(0..5000);
 
                     match random_choice {
                         0..10 => {
@@ -176,31 +181,30 @@ pub fn generate_leisure_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.get("leisure") == Some(&"park".to_string()) {
-        // First generate individual ways with their original tags
+        // Process each outer member way individually using cached flood fill.
+        // We intentionally do not combine all outer nodes into one mega-way,
+        // because that creates a nonsensical polygon spanning the whole relation
+        // extent, misses the flood fill cache, and can cause multi-GB allocations.
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_leisure(editor, &member.way, args);
+                // Use relation tags so the member inherits the relation's leisure=* type
+                let way_with_rel_tags = ProcessedWay {
+                    id: member.way.id,
+                    nodes: member.way.nodes.clone(),
+                    tags: rel.tags.clone(),
+                };
+                generate_leisure(
+                    editor,
+                    &way_with_rel_tags,
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             }
         }
-
-        // Then combine all outer ways into one
-        let mut combined_nodes = Vec::new();
-        for member in &rel.members {
-            if member.role == ProcessedMemberRole::Outer {
-                combined_nodes.extend(member.way.nodes.clone());
-            }
-        }
-
-        // Create combined way with relation tags
-        let combined_way = ProcessedWay {
-            id: rel.id,
-            nodes: combined_nodes,
-            tags: rel.tags.clone(),
-        };
-
-        // Generate leisure area from combined way
-        generate_leisure(editor, &combined_way, args);
     }
 }

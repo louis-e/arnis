@@ -1,15 +1,19 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
+#[cfg(feature = "bedrock")]
+mod bedrock_block_map;
 mod block_definitions;
 mod bresenham;
 mod clipping;
 mod colors;
 mod coordinate_system;
 mod data_processing;
+mod deterministic_rng;
 mod element_processing;
 mod elevation_data;
 mod floodfill;
+mod floodfill_cache;
 mod ground;
 mod map_renderer;
 mod map_transformation;
@@ -21,12 +25,15 @@ mod retrieve_data;
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
+mod urban_ground;
 mod version_check;
 mod world_editor;
+mod world_utils;
 
 use args::Args;
 use clap::Parser;
 use colored::*;
+use std::path::PathBuf;
 use std::{env, fs, io::Write};
 
 #[cfg(feature = "gui")]
@@ -38,6 +45,7 @@ mod progress {
     pub fn emit_gui_error(_message: &str) {}
     pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
     pub fn emit_map_preview_ready() {}
+    pub fn emit_open_mcworld_file(_path: &str) {}
     pub fn is_running_with_gui() -> bool {
         false
     }
@@ -46,6 +54,12 @@ mod progress {
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
 fn run_cli() {
+    // Configure thread pool with 90% CPU cap to keep system responsive
+    floodfill_cache::configure_rayon_thread_pool(0.9);
+
+    // Clean up old cached elevation tiles on startup
+    elevation_data::cleanup_old_cached_tiles();
+
     let version: &str = env!("CARGO_PKG_VERSION");
     let repository: &str = env!("CARGO_PKG_REPOSITORY");
     println!(
@@ -78,6 +92,54 @@ fn run_cli() {
 
     // Parse input arguments
     let args: Args = Args::parse();
+
+    // Validate arguments (path requirements differ between Java and Bedrock)
+    if let Err(e) = args::validate_args(&args) {
+        eprintln!("{}: {}", "Error".red().bold(), e);
+        std::process::exit(1);
+    }
+
+    // Early guard: --bedrock requires the bedrock cargo feature
+    if args.bedrock && !cfg!(feature = "bedrock") {
+        eprintln!(
+            "{}: The --bedrock flag requires the 'bedrock' feature. Rebuild with: cargo build --features bedrock",
+            "Error".red().bold()
+        );
+        std::process::exit(1);
+    }
+
+    // Determine world format and output path
+    let world_format = if args.bedrock {
+        world_editor::WorldFormat::BedrockMcWorld
+    } else {
+        world_editor::WorldFormat::JavaAnvil
+    };
+
+    // Build the generation output path and level name
+    let (generation_path, level_name) = if args.bedrock {
+        // Bedrock: generate .mcworld file in user-specified path or Desktop
+        let output_dir = args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_bedrock_output_directory);
+        let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
+        (output_path, Some(lvl_name))
+    } else {
+        // Java: create a new world in the provided output directory
+        let base_dir = args.path.clone().unwrap();
+        let world_path = match world_utils::create_new_world(&base_dir) {
+            Ok(path) => PathBuf::from(path),
+            Err(e) => {
+                eprintln!("{} {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            }
+        };
+        println!(
+            "Created new world at: {}",
+            world_path.display().to_string().bright_white().bold()
+        );
+        (world_path, None)
+    };
 
     // Fetch data
     let raw_data = match &args.file {
@@ -119,8 +181,37 @@ fn run_cli() {
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
+    // Build generation options
+    let generation_options = data_processing::GenerationOptions {
+        path: generation_path.clone(),
+        format: world_format,
+        level_name,
+        spawn_point: None,
+    };
+
     // Generate world
-    let _ = data_processing::generate_world(parsed_elements, xzbbox, args.bbox, ground, &args);
+    match data_processing::generate_world_with_options(
+        parsed_elements,
+        xzbbox,
+        args.bbox,
+        ground,
+        &args,
+        generation_options,
+    ) {
+        Ok(_) => {
+            if args.bedrock {
+                println!(
+                    "{} Bedrock world saved to: {}",
+                    "Done!".green().bold(),
+                    generation_path.display()
+                );
+            }
+        }
+        Err(e) => {
+            eprintln!("{} {}", "Error:".red().bold(), e);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn main() {

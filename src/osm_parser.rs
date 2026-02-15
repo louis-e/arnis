@@ -5,8 +5,8 @@ use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
-use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 // Raw data from OSM
 
@@ -29,9 +29,18 @@ struct OsmElement {
     pub members: Vec<OsmMember>,
 }
 
-#[derive(Deserialize)]
-struct OsmData {
-    pub elements: Vec<OsmElement>,
+#[derive(Debug, Deserialize)]
+pub struct OsmData {
+    elements: Vec<OsmElement>,
+    #[serde(default)]
+    pub remark: Option<String>,
+}
+
+impl OsmData {
+    /// Returns true if there are no elements in the OSM data
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
+    }
 }
 
 struct SplitOsmData {
@@ -68,11 +77,6 @@ impl SplitOsmData {
     }
 }
 
-fn parse_raw_osm_data(json_data: Value) -> Result<SplitOsmData, serde_json::Error> {
-    let osm_data: OsmData = serde_json::from_value(json_data)?;
-    Ok(SplitOsmData::from_raw_osm_data(osm_data))
-}
-
 // End raw data
 
 // Normalized data that we can use
@@ -107,12 +111,13 @@ pub struct ProcessedWay {
 pub enum ProcessedMemberRole {
     Outer,
     Inner,
+    Part,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProcessedMember {
     pub role: ProcessedMemberRole,
-    pub way: ProcessedWay,
+    pub way: Arc<ProcessedWay>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,7 +169,7 @@ impl ProcessedElement {
 }
 
 pub fn parse_osm_data(
-    json_data: Value,
+    osm_data: OsmData,
     bbox: LLBBox,
     scale: f64,
     debug: bool,
@@ -174,7 +179,7 @@ pub fn parse_osm_data(
     emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
-    let data = parse_raw_osm_data(json_data).expect("Failed to parse OSM data");
+    let data = SplitOsmData::from_raw_osm_data(osm_data);
 
     let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
         .unwrap_or_else(|e| {
@@ -189,7 +194,7 @@ pub fn parse_osm_data(
     }
 
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
-    let mut ways_map: HashMap<u64, ProcessedWay> = HashMap::new();
+    let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
 
     let mut processed_elements: Vec<ProcessedElement> = Vec::new();
 
@@ -238,17 +243,15 @@ pub fn parse_osm_data(
         let tags = element.tags.clone().unwrap_or_default();
 
         // Store unclipped way for relation assembly (clipping happens after ring merging)
-        ways_map.insert(
-            element.id,
-            ProcessedWay {
-                id: element.id,
-                tags: tags.clone(),
-                nodes: nodes.clone(),
-            },
-        );
+        let way = Arc::new(ProcessedWay {
+            id: element.id,
+            tags,
+            nodes,
+        });
+        ways_map.insert(element.id, Arc::clone(&way));
 
         // Clip way nodes for standalone way processing (not relations)
-        let clipped_nodes = clip_way_to_bbox(&nodes, &xzbbox);
+        let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
 
         // Skip ways that are completely outside the bbox (empty after clipping)
         if clipped_nodes.is_empty() {
@@ -257,8 +260,8 @@ pub fn parse_osm_data(
 
         let processed: ProcessedWay = ProcessedWay {
             id: element.id,
-            tags: tags.clone(),
-            nodes: clipped_nodes.clone(),
+            tags: way.tags.clone(),
+            nodes: clipped_nodes,
         };
 
         processed_elements.push(ProcessedElement::Way(processed));
@@ -270,13 +273,24 @@ pub fn parse_osm_data(
             continue;
         };
 
-        // Only process multipolygons for now
-        if tags.get("type").map(|x: &String| x.as_str()) != Some("multipolygon") {
+        // Process multipolygons and building relations
+        let relation_type = tags.get("type").map(|x: &String| x.as_str());
+        if relation_type != Some("multipolygon") && relation_type != Some("building") {
             continue;
         };
 
+        let is_building_relation = relation_type == Some("building")
+            || tags.contains_key("building")
+            || tags.contains_key("building:part");
+
         // Water relations require unclipped ways for ring merging in water_areas.rs
+        // Building multipolygon relations also need unclipped ways so that
+        // open outer-way segments can be merged into closed rings before clipping
         let is_water_relation = is_water_element(tags);
+        let is_building_multipolygon = (tags.contains_key("building")
+            || tags.contains_key("building:part"))
+            && relation_type == Some("multipolygon");
+        let keep_unclipped = is_water_relation || is_building_multipolygon;
 
         let members: Vec<ProcessedMember> = element
             .members
@@ -287,35 +301,50 @@ pub fn parse_osm_data(
                     return None;
                 }
 
-                let role = match mem.role.as_str() {
-                    "outer" => ProcessedMemberRole::Outer,
-                    "inner" => ProcessedMemberRole::Inner,
-                    _ => return None,
+                let trimmed_role = mem.role.trim();
+                let role = if trimmed_role.eq_ignore_ascii_case("outer")
+                    || trimmed_role.eq_ignore_ascii_case("outline")
+                {
+                    ProcessedMemberRole::Outer
+                } else if trimmed_role.eq_ignore_ascii_case("inner") {
+                    ProcessedMemberRole::Inner
+                } else if trimmed_role.eq_ignore_ascii_case("part") {
+                    if relation_type == Some("building") {
+                        // "part" role only applies to type=building relations.
+                        ProcessedMemberRole::Part
+                    } else {
+                        // For multipolygon relations, "part" is not a valid role, skip.
+                        return None;
+                    }
+                } else if is_building_relation {
+                    ProcessedMemberRole::Outer
+                } else {
+                    return None;
                 };
 
                 // Check if the way exists in ways_map
-                let way: ProcessedWay = match ways_map.get(&mem.r#ref) {
-                    Some(w) => w.clone(),
+                let way = match ways_map.get(&mem.r#ref) {
+                    Some(w) => Arc::clone(w),
                     None => {
                         // Way was likely filtered out because it was completely outside the bbox
                         return None;
                     }
                 };
 
-                // Water relations: keep unclipped for ring merging
-                // Non-water relations: clip member ways now
-                let final_way = if is_water_relation {
+                // If keep_unclipped is true (e.g., certain water or building multipolygon
+                // relations), keep member ways unclipped for ring merging; otherwise clip now.
+                let final_way = if keep_unclipped {
                     way
                 } else {
                     let clipped_nodes = clip_way_to_bbox(&way.nodes, &xzbbox);
                     if clipped_nodes.is_empty() {
                         return None;
                     }
-                    ProcessedWay {
+                    Arc::new(ProcessedWay {
                         id: way.id,
-                        tags: way.tags,
+                        tags: way.tags.clone(),
                         nodes: clipped_nodes,
-                    }
+                    })
                 };
 
                 Some(ProcessedMember {
@@ -334,7 +363,10 @@ pub fn parse_osm_data(
         }
     }
 
-    emit_gui_progress_update(15.0, "");
+    emit_gui_progress_update(14.0, "");
+
+    drop(nodes_map);
+    drop(ways_map);
 
     (processed_elements, xzbbox)
 }

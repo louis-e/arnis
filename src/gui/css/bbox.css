@@ -8,13 +8,9 @@ body,
   font-family: "Courier New", Courier, monospace;
 }
 
+/* Hide the BBOX coordinates display at bottom of map */
 #info-box {
-  position: absolute;
-  width: 100%;
-  height: auto;
-  bottom: 0;
-  border: 0 0 7px 0;
-  z-index: 10000;
+  display: none;
 }
 
 #coord-format {
@@ -351,7 +347,8 @@ body,
   background-position: -31px -2px;
 }
 
-.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled {
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled,
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.editing-mode {
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
@@ -378,4 +375,42 @@ body,
   accent-color: #3887BE;
   display: block;
   margin: 0;
+}
+
+/* Context menu for coordinate copying */
+.coordinate-context-menu {
+  position: fixed;
+  background: white;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+  z-index: 10000;
+  min-width: 160px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 13px;
+}
+
+.coordinate-context-menu-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #333;
+}
+
+.coordinate-context-menu-item:hover {
+  background: #f0f0f0;
+}
+
+.coordinate-context-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.coordinate-context-menu-separator {
+  height: 1px;
+  background: #e0e0e0;
+  margin: 4px 0;
 }

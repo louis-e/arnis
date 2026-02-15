@@ -529,7 +529,7 @@ $(document).ready(function () {
                 failureCount++;
 
                 // After a few failures, try HTTP fallback
-                if (failureCount >= 3 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
+                if (failureCount >= 6 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
                     console.log('HTTPS tile loading failed, attempting HTTP fallback for', themeKey);
                     this._httpFallbackAttempted = true;
 
@@ -564,6 +564,7 @@ $(document).ready(function () {
     var worldOverlayEnabled = false;
     var worldPreviewAvailable = false;
     var sliderControl = null;
+    var worldOverlayHiddenForEdit = false; // Track if we hid the overlay for edit/delete mode
 
     // Create the opacity slider as a proper Leaflet control
     var SliderControl = L.Control.extend({
@@ -721,6 +722,214 @@ $(document).ready(function () {
             sliderContainer.style.display = 'none';
         }
     }
+
+    // Temporarily hide the overlay (for edit/delete mode)
+    function hideWorldOverlayTemporarily() {
+        if (worldOverlay && worldOverlayEnabled) {
+            worldOverlayHiddenForEdit = true;
+            map.removeLayer(worldOverlay);
+        }
+        // Also visually disable the preview button during edit/delete mode
+        var btn = document.getElementById('world-preview-btn');
+        if (btn) {
+            btn.classList.add('editing-mode');
+        }
+    }
+
+    // Restore the overlay after edit/delete mode ends
+    function restoreWorldOverlay() {
+        if (worldOverlayHiddenForEdit && worldOverlay && worldOverlayEnabled) {
+            worldOverlay.addTo(map);
+            worldOverlayHiddenForEdit = false;
+        }
+        // Re-enable the preview button
+        var btn = document.getElementById('world-preview-btn');
+        if (btn) {
+            btn.classList.remove('editing-mode');
+        }
+    }
+
+    // ========== Context Menu for Coordinate Copying ==========
+    var contextMenuElement = null;
+
+    // Create the context menu element
+    function createContextMenu() {
+        if (contextMenuElement) return contextMenuElement;
+
+        contextMenuElement = document.createElement('div');
+        contextMenuElement.className = 'coordinate-context-menu';
+        contextMenuElement.style.display = 'none';
+        contextMenuElement.innerHTML = `
+            <div class="coordinate-context-menu-item" id="copy-coords-item">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                </svg>
+                <span id="copy-coords-text">Copy coordinates</span>
+            </div>
+        `;
+        document.body.appendChild(contextMenuElement);
+
+        // Handle click on the copy coordinates item
+        var copyItem = contextMenuElement.querySelector('#copy-coords-item');
+        copyItem.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            copyMinecraftCoordinates();
+            hideContextMenu();
+        });
+
+        return contextMenuElement;
+    }
+
+    // Show context menu at position
+    function showContextMenu(x, y, latLng) {
+        if (!worldPreviewAvailable || !worldOverlayData) return;
+
+        var menu = createContextMenu();
+
+        // Position the menu, ensuring it stays within viewport
+        var menuWidth = 180;
+        var menuHeight = 40;
+        var viewportWidth = window.innerWidth;
+        var viewportHeight = window.innerHeight;
+
+        var posX = x;
+        var posY = y;
+
+        // Adjust if menu would go off-screen
+        if (x + menuWidth > viewportWidth) {
+            posX = viewportWidth - menuWidth - 10;
+        }
+        if (y + menuHeight > viewportHeight) {
+            posY = viewportHeight - menuHeight - 10;
+        }
+
+        menu.style.left = posX + 'px';
+        menu.style.top = posY + 'px';
+        menu.style.display = 'block';
+
+        // Store the latLng for copying
+        menu.dataset.lat = latLng.lat;
+        menu.dataset.lng = latLng.lng;
+    }
+
+    // Hide context menu
+    function hideContextMenu() {
+        if (contextMenuElement) {
+            contextMenuElement.style.display = 'none';
+        }
+    }
+
+    // Calculate Minecraft coordinates from lat/lng
+    function calculateMinecraftCoords(lat, lng) {
+        if (!worldOverlayData) return null;
+
+        var data = worldOverlayData;
+
+        // Check if Minecraft coordinate bounds are available (not all zeros)
+        if (data.min_mc_x === 0 && data.max_mc_x === 0 && 
+            data.min_mc_z === 0 && data.max_mc_z === 0) {
+            return null;
+        }
+
+        // Calculate the relative position within the geo bounds (0 to 1)
+        // Note: Latitude increases northward, but Minecraft Z increases southward
+        var relX = (lng - data.min_lon) / (data.max_lon - data.min_lon);
+        var relZ = (data.max_lat - lat) / (data.max_lat - data.min_lat);
+
+        // Clamp to 0-1 range
+        relX = Math.max(0, Math.min(1, relX));
+        relZ = Math.max(0, Math.min(1, relZ));
+
+        // Calculate Minecraft X and Z coordinates
+        var mcX = Math.round(data.min_mc_x + relX * (data.max_mc_x - data.min_mc_x));
+        var mcZ = Math.round(data.min_mc_z + relZ * (data.max_mc_z - data.min_mc_z));
+
+        // Default Y coordinate (ground level, typically around 64-70)
+        var mcY = 100;
+
+        return { x: mcX, y: mcY, z: mcZ };
+    }
+
+    // Copy Minecraft coordinates to clipboard
+    function copyMinecraftCoordinates() {
+        if (!contextMenuElement) return;
+
+        var lat = parseFloat(contextMenuElement.dataset.lat);
+        var lng = parseFloat(contextMenuElement.dataset.lng);
+
+        var coords = calculateMinecraftCoords(lat, lng);
+        if (!coords) return;
+
+        var tpCommand = '/tp ' + coords.x + ' ' + coords.y + ' ' + coords.z;
+
+        // Copy to clipboard using modern API with fallback
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(tpCommand).catch(function(err) {
+                // Fallback for clipboard API failure
+                fallbackCopyToClipboard(tpCommand);
+            });
+        } else {
+            // Fallback for older browsers
+            fallbackCopyToClipboard(tpCommand);
+        }
+    }
+
+    // Fallback clipboard copy method for older browsers
+    function fallbackCopyToClipboard(text) {
+        var textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        textArea.style.top = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+
+        try {
+            document.execCommand('copy');
+        } catch (err) {
+            console.error('Failed to copy coordinates:', err);
+        }
+
+        document.body.removeChild(textArea);
+    }
+
+    // Check if Minecraft coordinate bounds are available
+    function hasMinecraftCoords() {
+        if (!worldOverlayData) return false;
+        var data = worldOverlayData;
+        return !(data.min_mc_x === 0 && data.max_mc_x === 0 && 
+                 data.min_mc_z === 0 && data.max_mc_z === 0);
+    }
+
+    // Handle right-click on the map
+    map.on('contextmenu', function(e) {
+        // Only show context menu if world preview is available and has Minecraft coords
+        if (worldPreviewAvailable && worldOverlayData && hasMinecraftCoords()) {
+            // Check if the click is within the world bounds
+            var data = worldOverlayData;
+            var lat = e.latlng.lat;
+            var lng = e.latlng.lng;
+
+            if (lat >= data.min_lat && lat <= data.max_lat &&
+                lng >= data.min_lon && lng <= data.max_lon) {
+                showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, e.latlng);
+            }
+        }
+    });
+
+    // Hide context menu on any click or map interaction
+    document.addEventListener('click', function(e) {
+        if (contextMenuElement && !contextMenuElement.contains(e.target)) {
+            hideContextMenu();
+        }
+    });
+
+    map.on('movestart', hideContextMenu);
+    map.on('zoomstart', hideContextMenu);
+    // ========== End Context Menu ==========
 
     // Listen for messages from parent window
     window.addEventListener('message', function(event) {
@@ -899,6 +1108,15 @@ $(document).ready(function () {
             });
         }
 
+        // If it's a rectangle, remove any existing rectangles first
+        if (e.layerType === 'rectangle') {
+            drawnItems.eachLayer(function(layer) {
+                if (layer instanceof L.Rectangle) {
+                    drawnItems.removeLayer(layer);
+                }
+            });
+        }
+
         // Check if it's a rectangle and set proper styles before adding it to the layer
         if (e.layerType === 'rectangle') {
             e.layer.setStyle({
@@ -990,6 +1208,23 @@ $(document).ready(function () {
         map.fitBounds(bounds.getBounds());
     });
 
+    // Hide world preview overlay when entering edit or delete mode
+    map.on('draw:editstart', function() {
+        hideWorldOverlayTemporarily();
+    });
+
+    map.on('draw:deletestart', function() {
+        hideWorldOverlayTemporarily();
+    });
+
+    // Restore world preview overlay when exiting edit or delete mode
+    map.on('draw:editstop', function() {
+        restoreWorldOverlay();
+    });
+
+    map.on('draw:deletestop', function() {
+        restoreWorldOverlay();
+    });
     function display() {
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
         $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));

@@ -1,20 +1,86 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::element_processing::tree::Tree;
-use crate::floodfill::flood_fill_area;
+use crate::deterministic_rng::element_rng;
+use crate::element_processing::tree::{Tree, TreeType};
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
-use rand::Rng;
+use rand::{prelude::IndexedRandom, Rng};
 
-pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {
+pub fn generate_natural(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
+) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
             if let ProcessedElement::Node(node) = element {
                 let x: i32 = node.x;
                 let z: i32 = node.z;
 
-                Tree::create(editor, (x, 1, z));
+                let mut trees_ok_to_generate: Vec<TreeType> = vec![];
+                if let Some(species) = element.tags().get("species") {
+                    if species.contains("Betula") {
+                        trees_ok_to_generate.push(TreeType::Birch);
+                    }
+                    if species.contains("Quercus") {
+                        trees_ok_to_generate.push(TreeType::Oak);
+                    }
+                    if species.contains("Picea") {
+                        trees_ok_to_generate.push(TreeType::Spruce);
+                    }
+                } else if let Some(genus_wikidata) = element.tags().get("genus:wikidata") {
+                    match genus_wikidata.as_str() {
+                        "Q12004" => trees_ok_to_generate.push(TreeType::Birch),
+                        "Q26782" => trees_ok_to_generate.push(TreeType::Oak),
+                        "Q25243" => trees_ok_to_generate.push(TreeType::Spruce),
+                        _ => {
+                            trees_ok_to_generate.push(TreeType::Oak);
+                            trees_ok_to_generate.push(TreeType::Spruce);
+                            trees_ok_to_generate.push(TreeType::Birch);
+                        }
+                    }
+                } else if let Some(genus) = element.tags().get("genus") {
+                    match genus.as_str() {
+                        "Betula" => trees_ok_to_generate.push(TreeType::Birch),
+                        "Quercus" => trees_ok_to_generate.push(TreeType::Oak),
+                        "Picea" => trees_ok_to_generate.push(TreeType::Spruce),
+                        _ => trees_ok_to_generate.push(TreeType::Oak),
+                    }
+                } else if let Some(leaf_type) = element.tags().get("leaf_type") {
+                    match leaf_type.as_str() {
+                        "broadleaved" => {
+                            trees_ok_to_generate.push(TreeType::Oak);
+                            trees_ok_to_generate.push(TreeType::Birch);
+                        }
+                        "needleleaved" => trees_ok_to_generate.push(TreeType::Spruce),
+                        _ => {
+                            trees_ok_to_generate.push(TreeType::Oak);
+                            trees_ok_to_generate.push(TreeType::Spruce);
+                            trees_ok_to_generate.push(TreeType::Birch);
+                        }
+                    }
+                } else {
+                    trees_ok_to_generate.push(TreeType::Oak);
+                    trees_ok_to_generate.push(TreeType::Spruce);
+                    trees_ok_to_generate.push(TreeType::Birch);
+                }
+
+                if trees_ok_to_generate.is_empty() {
+                    trees_ok_to_generate.push(TreeType::Oak);
+                    trees_ok_to_generate.push(TreeType::Spruce);
+                    trees_ok_to_generate.push(TreeType::Birch);
+                }
+
+                let mut rng = element_rng(element.id());
+                let tree_type = *trees_ok_to_generate
+                    .choose(&mut rng)
+                    .unwrap_or(&TreeType::Oak);
+
+                Tree::create_of_type(editor, (x, 1, z), tree_type, Some(building_footprints));
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
@@ -69,17 +135,36 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                 previous_node = Some((x, z));
             }
 
-            // If there are natural nodes, flood-fill the area
+            // If there are natural nodes, flood-fill the area using cache
             if corner_addup != (0, 0, 0) {
-                let polygon_coords: Vec<(i32, i32)> = way
-                    .nodes
-                    .iter()
-                    .map(|n: &crate::osm_parser::ProcessedNode| (n.x, n.z))
-                    .collect();
                 let filled_area: Vec<(i32, i32)> =
-                    flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                    flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
-                let mut rng: rand::prelude::ThreadRng = rand::thread_rng();
+                let trees_ok_to_generate: Vec<TreeType> = {
+                    let mut trees: Vec<TreeType> = vec![];
+                    if let Some(leaf_type) = element.tags().get("leaf_type") {
+                        match leaf_type.as_str() {
+                            "broadleaved" => {
+                                trees.push(TreeType::Oak);
+                                trees.push(TreeType::Birch);
+                            }
+                            "needleleaved" => trees.push(TreeType::Spruce),
+                            _ => {
+                                trees.push(TreeType::Oak);
+                                trees.push(TreeType::Spruce);
+                                trees.push(TreeType::Birch);
+                            }
+                        }
+                    } else {
+                        trees.push(TreeType::Oak);
+                        trees.push(TreeType::Spruce);
+                        trees.push(TreeType::Birch);
+                    }
+                    trees
+                };
+
+                // Use deterministic RNG seeded by element ID for consistent results across region boundaries
+                let mut rng = element_rng(way.id);
 
                 for (x, z) in filled_area {
                     editor.set_block(block_type, x, 0, z, None, None);
@@ -107,7 +192,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            if rng.gen_bool(0.6) {
+                            if rng.random_bool(0.6) {
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }
@@ -115,7 +200,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let random_choice = rng.gen_range(0..500);
+                            let random_choice = rng.random_range(0..500);
                             if random_choice < 33 {
                                 if random_choice <= 2 {
                                     editor.set_block(COBBLESTONE, x, 0, z, None, None);
@@ -130,11 +215,11 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let random_choice = rng.gen_range(0..500);
+                            let random_choice = rng.random_range(0..500);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if random_choice == 1 {
-                                let flower_block = match rng.gen_range(1..=4) {
+                                let flower_block = match rng.random_range(1..=4) {
                                     1 => RED_FLOWER,
                                     2 => BLUE_FLOWER,
                                     3 => YELLOW_FLOWER,
@@ -159,11 +244,19 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let random_choice: i32 = rng.gen_range(0..30);
+                            let random_choice: i32 = rng.random_range(0..30);
                             if random_choice == 0 {
-                                Tree::create(editor, (x, 1, z));
+                                let tree_type = *trees_ok_to_generate
+                                    .choose(&mut rng)
+                                    .unwrap_or(&TreeType::Oak);
+                                Tree::create_of_type(
+                                    editor,
+                                    (x, 1, z),
+                                    tree_type,
+                                    Some(building_footprints),
+                                );
                             } else if random_choice == 1 {
-                                let flower_block = match rng.gen_range(1..=4) {
+                                let flower_block = match rng.random_range(1..=4) {
                                     1 => RED_FLOWER,
                                     2 => BLUE_FLOWER,
                                     3 => YELLOW_FLOWER,
@@ -176,13 +269,13 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         }
                         "sand" => {
                             if editor.check_for_block(x, 0, z, Some(&[SAND]))
-                                && rng.gen_range(0..100) == 1
+                                && rng.random_range(0..100) == 1
                             {
                                 editor.set_block(DEAD_BUSH, x, 1, z, None, None);
                             }
                         }
                         "shoal" => {
-                            if rng.gen_bool(0.05) {
+                            if rng.random_bool(0.05) {
                                 editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
                             }
                         }
@@ -190,14 +283,14 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             if let Some(wetland_type) = element.tags().get("wetland") {
                                 // Wetland without water blocks
                                 if matches!(wetland_type.as_str(), "wet_meadow" | "fen") {
-                                    if rng.gen_bool(0.3) {
+                                    if rng.random_bool(0.3) {
                                         editor.set_block(GRASS_BLOCK, x, 0, z, Some(&[MUD]), None);
                                     }
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                     continue;
                                 }
                                 // All the other types of wetland
-                                if rng.gen_bool(0.3) {
+                                if rng.random_bool(0.3) {
                                     editor.set_block(
                                         WATER,
                                         x,
@@ -218,15 +311,19 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                     }
                                     "swamp" | "mangrove" => {
                                         // TODO implement mangrove
-                                        let random_choice: i32 = rng.gen_range(0..40);
+                                        let random_choice: i32 = rng.random_range(0..40);
                                         if random_choice == 0 {
-                                            Tree::create(editor, (x, 1, z));
+                                            Tree::create(
+                                                editor,
+                                                (x, 1, z),
+                                                Some(building_footprints),
+                                            );
                                         } else if random_choice < 35 {
                                             editor.set_block(GRASS, x, 1, z, None, None);
                                         }
                                     }
                                     "bog" => {
-                                        if rng.gen_bool(0.2) {
+                                        if rng.random_bool(0.2) {
                                             editor.set_block(
                                                 MOSS_BLOCK,
                                                 x,
@@ -236,7 +333,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                                 None,
                                             );
                                         }
-                                        if rng.gen_bool(0.15) {
+                                        if rng.random_bool(0.15) {
                                             editor.set_block(GRASS, x, 1, z, None, None);
                                         }
                                     }
@@ -249,7 +346,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                 }
                             } else {
                                 // Generic natural=wetland without wetland=... tag
-                                if rng.gen_bool(0.3) {
+                                if rng.random_bool(0.3) {
                                     editor.set_block(WATER, x, 0, z, Some(&[MUD]), None);
                                     continue;
                                 }
@@ -258,11 +355,11 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         }
                         "mountain_range" => {
                             // Create block clusters instead of random placement
-                            let cluster_chance = rng.gen_range(0..1000);
+                            let cluster_chance = rng.random_range(0..1000);
 
                             if cluster_chance < 50 {
                                 // 5% chance to start a new cluster
-                                let cluster_block = match rng.gen_range(0..7) {
+                                let cluster_block = match rng.random_range(0..7) {
                                     0 => DIRT,
                                     1 => STONE,
                                     2 => GRAVEL,
@@ -273,7 +370,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                 };
 
                                 // Generate cluster size (5-10 blocks radius)
-                                let cluster_size = rng.gen_range(5..=10);
+                                let cluster_size = rng.random_range(5..=10);
 
                                 // Create cluster around current position
                                 for dx in -(cluster_size as i32)..=(cluster_size as i32) {
@@ -286,7 +383,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                                         if distance <= cluster_size as f32 {
                                             // Probability decreases with distance from center
                                             let place_prob = 1.0 - (distance / cluster_size as f32);
-                                            if rng.gen::<f32>() < place_prob {
+                                            if rng.random::<f32>() < place_prob {
                                                 editor.set_block(
                                                     cluster_block,
                                                     cluster_x,
@@ -298,12 +395,14 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
 
                                                 // Add vegetation on grass blocks
                                                 if cluster_block == GRASS_BLOCK {
-                                                    let vegetation_chance = rng.gen_range(0..100);
+                                                    let vegetation_chance =
+                                                        rng.random_range(0..100);
                                                     if vegetation_chance == 0 {
                                                         // 1% chance for rare trees
                                                         Tree::create(
                                                             editor,
                                                             (cluster_x, 1, cluster_z),
+                                                            Some(building_footprints),
                                                         );
                                                     } else if vegetation_chance < 15 {
                                                         // 15% chance for grass
@@ -327,7 +426,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         }
                         "saddle" => {
                             // Saddle areas - lowest point between peaks, mix of stone and grass
-                            let terrain_chance = rng.gen_range(0..100);
+                            let terrain_chance = rng.random_range(0..100);
                             if terrain_chance < 30 {
                                 // 30% chance for exposed stone
                                 editor.set_block(STONE, x, 0, z, None, None);
@@ -337,7 +436,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             } else {
                                 // 50% chance for grass
                                 editor.set_block(GRASS_BLOCK, x, 0, z, None, None);
-                                if rng.gen_bool(0.4) {
+                                if rng.random_bool(0.4) {
                                     // 40% chance for grass on top
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                 }
@@ -345,10 +444,10 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         }
                         "ridge" => {
                             // Ridge areas - elevated crest, mostly rocky with some vegetation
-                            let ridge_chance = rng.gen_range(0..100);
+                            let ridge_chance = rng.random_range(0..100);
                             if ridge_chance < 60 {
                                 // 60% chance for stone/rocky terrain
-                                let rock_type = match rng.gen_range(0..4) {
+                                let rock_type = match rng.random_range(0..4) {
                                     0 => STONE,
                                     1 => COBBLESTONE,
                                     2 => GRANITE,
@@ -358,7 +457,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             } else {
                                 // 40% chance for grass with sparse vegetation
                                 editor.set_block(GRASS_BLOCK, x, 0, z, None, None);
-                                let vegetation_chance = rng.gen_range(0..100);
+                                let vegetation_chance = rng.random_range(0..100);
                                 if vegetation_chance < 20 {
                                     // 20% chance for grass
                                     editor.set_block(GRASS, x, 1, z, None, None);
@@ -378,7 +477,7 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let tundra_chance = rng.gen_range(0..100);
+                            let tundra_chance = rng.random_range(0..100);
                             if tundra_chance < 40 {
                                 // 40% chance for grass (sedges, grasses)
                                 editor.set_block(GRASS, x, 1, z, None, None);
@@ -393,10 +492,10 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                         }
                         "cliff" => {
                             // Cliff areas - predominantly stone with minimal vegetation
-                            let cliff_chance = rng.gen_range(0..100);
+                            let cliff_chance = rng.random_range(0..100);
                             if cliff_chance < 90 {
                                 // 90% chance for stone variants
-                                let stone_type = match rng.gen_range(0..4) {
+                                let stone_type = match rng.random_range(0..4) {
                                     0 => STONE,
                                     1 => COBBLESTONE,
                                     2 => ANDESITE,
@@ -413,13 +512,13 @@ pub fn generate_natural(editor: &mut WorldEditor, element: &ProcessedElement, ar
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            let hill_chance = rng.gen_range(0..1000);
+                            let hill_chance = rng.random_range(0..1000);
                             if hill_chance == 0 {
                                 // 0.1% chance for rare trees
-                                Tree::create(editor, (x, 1, z));
+                                Tree::create(editor, (x, 1, z), Some(building_footprints));
                             } else if hill_chance < 50 {
                                 // 5% chance for flowers
-                                let flower_block = match rng.gen_range(1..=4) {
+                                let flower_block = match rng.random_range(1..=4) {
                                     1 => RED_FLOWER,
                                     2 => BLUE_FLOWER,
                                     3 => YELLOW_FLOWER,
@@ -448,34 +547,30 @@ pub fn generate_natural_from_relation(
     editor: &mut WorldEditor,
     rel: &ProcessedRelation,
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
+    building_footprints: &BuildingFootprintBitmap,
 ) {
     if rel.tags.contains_key("natural") {
-        // Generate individual ways with their original tags
+        // Process each outer member way individually using cached flood fill.
+        // We intentionally do not combine all outer nodes into one mega-way,
+        // because that creates a nonsensical polygon spanning the whole relation
+        // extent, misses the flood fill cache, and can cause multi-GB allocations.
         for member in &rel.members {
             if member.role == ProcessedMemberRole::Outer {
-                generate_natural(editor, &ProcessedElement::Way(member.way.clone()), args);
+                // Use relation tags so the member inherits the relation's natural=* type
+                let way_with_rel_tags = ProcessedWay {
+                    id: member.way.id,
+                    nodes: member.way.nodes.clone(),
+                    tags: rel.tags.clone(),
+                };
+                generate_natural(
+                    editor,
+                    &ProcessedElement::Way(way_with_rel_tags),
+                    args,
+                    flood_fill_cache,
+                    building_footprints,
+                );
             }
-        }
-
-        // Combine all outer ways into one with relation tags
-        let mut combined_nodes = Vec::new();
-        for member in &rel.members {
-            if member.role == ProcessedMemberRole::Outer {
-                combined_nodes.extend(member.way.nodes.clone());
-            }
-        }
-
-        // Only process if we have nodes
-        if !combined_nodes.is_empty() {
-            // Create combined way with relation tags
-            let combined_way = ProcessedWay {
-                id: rel.id,
-                nodes: combined_nodes,
-                tags: rel.tags.clone(),
-            };
-
-            // Generate natural area from combined way
-            generate_natural(editor, &ProcessedElement::Way(combined_way), args);
         }
     }
 }

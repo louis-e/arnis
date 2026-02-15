@@ -1,7 +1,63 @@
+use geo::orient::{Direction, Orient};
 use geo::{Contains, LineString, Point, Polygon};
 use itertools::Itertools;
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
+
+/// Maximum bounding box area (in blocks) for flood fill.
+/// Polygons exceeding this are skipped to prevent excessive memory allocations.
+/// 25 million blocks ≈ 5000×5000; bitmap uses only ~3 MB at this size.
+const MAX_FLOOD_FILL_AREA: i64 = 25_000_000;
+
+/// A compact bitmap for visited-coordinate tracking during flood fill.
+///
+/// Uses 1 bit per coordinate instead of ~48 bytes per entry in a `HashSet`.
+/// For a 5000×5000 bounding box this is ~3 MB instead of ~1.2 GB.
+struct FloodBitmap {
+    bits: Vec<u8>,
+    min_x: i32,
+    min_z: i32,
+    width: usize,
+}
+
+impl FloodBitmap {
+    #[inline]
+    fn new(min_x: i32, max_x: i32, min_z: i32, max_z: i32) -> Self {
+        let width = (max_x - min_x + 1) as usize;
+        let height = (max_z - min_z + 1) as usize;
+        let num_bytes = (width * height).div_ceil(8);
+        Self {
+            bits: vec![0u8; num_bytes],
+            min_x,
+            min_z,
+            width,
+        }
+    }
+
+    /// Mark (x, z) as visited. Returns `true` if it was NOT already visited
+    /// (i.e. this is the first visit).
+    #[inline]
+    fn insert(&mut self, x: i32, z: i32) -> bool {
+        let idx = (z - self.min_z) as usize * self.width + (x - self.min_x) as usize;
+        let byte = idx / 8;
+        let bit = idx % 8;
+        let mask = 1u8 << bit;
+        if self.bits[byte] & mask != 0 {
+            false // already visited
+        } else {
+            self.bits[byte] |= mask;
+            true
+        }
+    }
+
+    #[inline]
+    fn contains(&self, x: i32, z: i32) -> bool {
+        let idx = (z - self.min_z) as usize * self.width + (x - self.min_x) as usize;
+        let byte = idx / 8;
+        let bit = idx % 8;
+        (self.bits[byte] >> bit) & 1 == 1
+    }
+}
 
 /// Main flood fill function with automatic algorithm selection
 /// Chooses the best algorithm based on polygon size and complexity
@@ -29,6 +85,13 @@ pub fn flood_fill_area(
 
     let area = (max_x - min_x + 1) as i64 * (max_z - min_z + 1) as i64;
 
+    // Safety cap: reject polygons whose bounding box is too large.
+    // This prevents multi-GB memory allocations when ocean-adjacent elements
+    // (e.g. natural=water, large landuse) produce huge clipped polygons.
+    if area > MAX_FLOOD_FILL_AREA {
+        return vec![];
+    }
+
     // For small and medium areas, use optimized flood fill with span filling
     if area < 50000 {
         optimized_flood_fill_area(polygon_coords, timeout, min_x, max_x, min_z, max_z)
@@ -50,15 +113,16 @@ fn optimized_flood_fill_area(
     let start_time = Instant::now();
 
     let mut filled_area = Vec::new();
-    let mut global_visited = HashSet::new();
+    let mut visited = FloodBitmap::new(min_x, max_x, min_z, max_z);
 
-    // Create polygon for containment testing
+    // Create polygon for containment testing, with normalized winding order
+    // to avoid "polygon had no winding order" warnings from geo::Contains
     let exterior_coords: Vec<(f64, f64)> = polygon_coords
         .iter()
         .map(|&(x, z)| (x as f64, z as f64))
         .collect();
     let exterior = LineString::from(exterior_coords);
-    let polygon = Polygon::new(exterior, vec![]);
+    let polygon = Polygon::new(exterior, vec![]).orient(Direction::Default);
 
     // Optimized step sizes: larger steps for efficiency, but still catch U-shapes
     let width = max_x - min_x + 1;
@@ -81,16 +145,14 @@ fn optimized_flood_fill_area(
             }
 
             // Skip if already visited or not inside polygon
-            if global_visited.contains(&(x, z))
-                || !polygon.contains(&Point::new(x as f64, z as f64))
-            {
+            if visited.contains(x, z) || !polygon.contains(&Point::new(x as f64, z as f64)) {
                 continue;
             }
 
             // Start flood fill from this seed point
             queue.clear(); // Reuse queue instead of creating new one
             queue.push_back((x, z));
-            global_visited.insert((x, z));
+            visited.insert(x, z);
 
             while let Some((curr_x, curr_z)) = queue.pop_front() {
                 // Add current point to filled area
@@ -104,17 +166,16 @@ fn optimized_flood_fill_area(
                     (curr_x, curr_z + 1),
                 ];
 
-                for (nx, nz) in neighbors.iter() {
-                    if *nx >= min_x
-                        && *nx <= max_x
-                        && *nz >= min_z
-                        && *nz <= max_z
-                        && !global_visited.contains(&(*nx, *nz))
+                for &(nx, nz) in &neighbors {
+                    if nx >= min_x
+                        && nx <= max_x
+                        && nz >= min_z
+                        && nz <= max_z
+                        && visited.insert(nx, nz)
                     {
                         // Only check polygon containment for unvisited points
-                        if polygon.contains(&Point::new(*nx as f64, *nz as f64)) {
-                            global_visited.insert((*nx, *nz));
-                            queue.push_back((*nx, *nz));
+                        if polygon.contains(&Point::new(nx as f64, nz as f64)) {
+                            queue.push_back((nx, nz));
                         }
                     }
                 }
@@ -136,15 +197,16 @@ fn original_flood_fill_area(
 ) -> Vec<(i32, i32)> {
     let start_time = Instant::now();
     let mut filled_area: Vec<(i32, i32)> = Vec::new();
-    let mut global_visited: HashSet<(i32, i32)> = HashSet::new();
+    let mut visited = FloodBitmap::new(min_x, max_x, min_z, max_z);
 
-    // Convert input to a geo::Polygon for efficient point-in-polygon testing
+    // Convert input to a geo::Polygon for efficient point-in-polygon testing,
+    // with normalized winding order to avoid undefined Contains results
     let exterior_coords: Vec<(f64, f64)> = polygon_coords
         .iter()
         .map(|&(x, z)| (x as f64, z as f64))
         .collect::<Vec<_>>();
     let exterior: LineString = LineString::from(exterior_coords);
-    let polygon: Polygon<f64> = Polygon::new(exterior, vec![]);
+    let polygon: Polygon<f64> = Polygon::new(exterior, vec![]).orient(Direction::Default);
 
     // Optimized step sizes for large polygons - coarser sampling for speed
     let width = max_x - min_x + 1;
@@ -168,16 +230,14 @@ fn original_flood_fill_area(
             }
 
             // Skip if already processed or not inside polygon
-            if global_visited.contains(&(x, z))
-                || !polygon.contains(&Point::new(x as f64, z as f64))
-            {
+            if visited.contains(x, z) || !polygon.contains(&Point::new(x as f64, z as f64)) {
                 continue;
             }
 
             // Start flood-fill from this seed point
             queue.clear(); // Reuse queue
             queue.push_back((x, z));
-            global_visited.insert((x, z));
+            visited.insert(x, z);
 
             while let Some((curr_x, curr_z)) = queue.pop_front() {
                 // Only check polygon containment once per point when adding to filled_area
@@ -192,15 +252,14 @@ fn original_flood_fill_area(
                         (curr_x, curr_z + 1),
                     ];
 
-                    for (nx, nz) in neighbors.iter() {
-                        if *nx >= min_x
-                            && *nx <= max_x
-                            && *nz >= min_z
-                            && *nz <= max_z
-                            && !global_visited.contains(&(*nx, *nz))
+                    for &(nx, nz) in &neighbors {
+                        if nx >= min_x
+                            && nx <= max_x
+                            && nz >= min_z
+                            && nz <= max_z
+                            && visited.insert(nx, nz)
                         {
-                            global_visited.insert((*nx, *nz));
-                            queue.push_back((*nx, *nz));
+                            queue.push_back((nx, nz));
                         }
                     }
                 }
