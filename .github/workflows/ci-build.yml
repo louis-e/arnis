@@ -72,3 +72,10 @@ jobs:
 
     - name: Run unit tests
       run: cargo test --all-targets --all-features
+  
+    - name: Upload artifact
+      if: github.ref == 'refs/heads/main'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.os }}-latest-build
+        path: target/release/arnis.exe
