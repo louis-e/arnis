@@ -87,7 +87,7 @@ jobs:
       shell: powershell
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.os }}-${{ matrix.target }}-build
         path: target/release/${{ matrix.asset_name }}
@@ -114,7 +114,7 @@ jobs:
         chmod +x arnis-mac-universal
 
     - name: Upload universal binary
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: macos-universal-build
         path: arnis-mac-universal
