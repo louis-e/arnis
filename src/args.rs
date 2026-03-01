@@ -122,14 +122,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         (Some(lat), Some(lng)) => {
             // Validate coordinates are valid lat/lng (rejects NaN, inf, out-of-range)
             use crate::coordinate_system::geographic::LLPoint;
-            LLPoint::new(lat, lng).map_err(|e| format!("Invalid spawn coordinates: {e}"))?;
+            let llpoint =
+                LLPoint::new(lat, lng).map_err(|e| format!("Invalid spawn coordinates: {e}"))?;
 
             // Validate that spawn point is within the bounding box
-            if lat < args.bbox.min().lat()
-                || lat > args.bbox.max().lat()
-                || lng < args.bbox.min().lng()
-                || lng > args.bbox.max().lng()
-            {
+            if !args.bbox.contains(&llpoint) {
                 return Err(
                     "Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box."
                         .to_string(),

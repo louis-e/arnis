@@ -232,26 +232,39 @@ pub fn set_spawn_in_level_dat(world_path: &Path, spawn_x: i32, spawn_z: i32) -> 
         .map_err(|e| format!("Failed to parse level.dat NBT data: {e}"))?;
 
     // Update spawn point
-    if let Value::Compound(ref mut root) = nbt_data {
-        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-            data.insert("SpawnX".to_string(), Value::Int(spawn_x));
-            data.insert("SpawnY".to_string(), Value::Int(spawn_y));
-            data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+    let data = match nbt_data {
+        Value::Compound(ref mut root) => match root.get_mut("Data") {
+            Some(Value::Compound(ref mut data)) => data,
+            _ => {
+                return Err(
+                    "Invalid level.dat structure: missing or non-compound \"Data\" section"
+                        .to_string(),
+                );
+            }
+        },
+        _ => {
+            return Err(
+                "Invalid level.dat structure: root NBT value is not a compound".to_string(),
+            );
+        }
+    };
 
-            // Update player position if Player compound exists
-            if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
-                if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
-                    if pos.len() >= 3 {
-                        if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
-                            *pos_x = spawn_x as f64;
-                        }
-                        if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
-                            *pos_y = spawn_y as f64;
-                        }
-                        if let Some(Value::Double(ref mut pos_z)) = pos.get_mut(2) {
-                            *pos_z = spawn_z as f64;
-                        }
-                    }
+    data.insert("SpawnX".to_string(), Value::Int(spawn_x));
+    data.insert("SpawnY".to_string(), Value::Int(spawn_y));
+    data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+
+    // Update player position if Player compound exists
+    if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+        if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+            if pos.len() >= 3 {
+                if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
+                    *pos_x = spawn_x as f64;
+                }
+                if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
+                    *pos_y = spawn_y as f64;
+                }
+                if let Some(Value::Double(ref mut pos_z)) = pos.get_mut(2) {
+                    *pos_z = spawn_z as f64;
                 }
             }
         }
