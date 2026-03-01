@@ -204,7 +204,7 @@ dependencies = [
  "rayon",
  "reqwest",
  "rfd",
- "rusty-leveldb",
+ "rusty-leveldb 4.0.1",
  "semver",
  "serde",
  "serde_json",
@@ -539,7 +539,7 @@ dependencies = [
  "len-trait",
  "miniz_oxide 0.9.0",
  "nbtx",
- "rusty-leveldb",
+ "rusty-leveldb 3.0.3",
  "serde",
  "thiserror 1.0.69",
  "uuid",
@@ -1124,6 +1124,15 @@ name = "crc-catalog"
 version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "19d374276b40fb8bbdee95aef7c7fa6b5316ec764510eb64b8dd0e2ed0d7e7f5"
+
+[[package]]
+name = "crc32c"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a47af21622d091a8f0fb295b88bc886ac74efcc613efc19f5d0b21de5c89e47"
+dependencies = [
+ "rustc_version",
+]
 
 [[package]]
 name = "crc32fast"
@@ -4829,6 +4838,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c48d2f060dd1286adc9c3d179cb5af1292a9d2fcf291abcfe056023fc1977b44"
 dependencies = [
  "crc",
+ "errno 0.2.8",
+ "fs2",
+ "integer-encoding",
+ "rand 0.8.5",
+ "snap",
+]
+
+[[package]]
+name = "rusty-leveldb"
+version = "4.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "43ddda8f34100fca4bf1b0bbf743d12d27b5d84c35c74a52f392aac26f54e82d"
+dependencies = [
+ "bytes",
+ "crc32c",
  "errno 0.2.8",
  "fs2",
  "integer-encoding",
