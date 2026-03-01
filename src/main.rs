@@ -181,12 +181,48 @@ fn run_cli() {
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
+    // Convert spawn lat/lng to Minecraft XZ coordinates if provided
+    let spawn_point: Option<(i32, i32)> = match (args.spawn_lat, args.spawn_lng) {
+        (Some(lat), Some(lng)) => {
+            use coordinate_system::geographic::LLPoint;
+            use coordinate_system::transformation::CoordTransformer;
+
+            match LLPoint::new(lat, lng) {
+                Ok(llpoint) => {
+                    match CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale) {
+                        Ok((transformer, _)) => {
+                            let xzpoint = transformer.transform_point(llpoint);
+                            Some((xzpoint.x, xzpoint.z))
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "{} Failed to convert spawn point: {}",
+                                "Warning:".yellow().bold(),
+                                e
+                            );
+                            None
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{} Invalid spawn coordinates: {}",
+                        "Warning:".yellow().bold(),
+                        e
+                    );
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+
     // Build generation options
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
-        spawn_point: None,
+        spawn_point,
     };
 
     // Generate world

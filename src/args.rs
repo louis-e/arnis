@@ -1,5 +1,5 @@
 use crate::coordinate_system::geographic::LLBBox;
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -45,11 +45,11 @@ pub struct Args {
     pub terrain: bool,
 
     /// Enable interior generation (optional)
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub interior: bool,
 
     /// Enable roof generation (optional)
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub roof: bool,
 
     /// Enable filling ground (optional)
@@ -59,7 +59,7 @@ pub struct Args {
     /// Enable city ground generation (optional)
     /// When enabled, detects building clusters and places stone ground in urban areas.
     /// Isolated buildings in rural areas will keep grass around them.
-    #[arg(long, default_value_t = true)]
+    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub city_boundaries: bool,
 
     /// Enable debug mode (optional)
@@ -69,6 +69,14 @@ pub struct Args {
     /// Set floodfill timeout (seconds) (optional)
     #[arg(long, value_parser = parse_duration)]
     pub timeout: Option<Duration>,
+
+    /// Spawn point latitude (optional, must be within bbox)
+    #[arg(long, allow_hyphen_values = true)]
+    pub spawn_lat: Option<f64>,
+
+    /// Spawn point longitude (optional, must be within bbox)
+    #[arg(long, allow_hyphen_values = true)]
+    pub spawn_lng: Option<f64>,
 }
 
 /// Validates CLI arguments after parsing.
@@ -105,6 +113,30 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             }
         }
     }
+
+    // Validate spawn point: both or neither must be provided
+    match (args.spawn_lat, args.spawn_lng) {
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(
+                "Both --spawn-lat and --spawn-lng must be provided together.".to_string(),
+            );
+        }
+        (Some(lat), Some(lng)) => {
+            // Validate that spawn point is within the bounding box
+            if lat < args.bbox.min().lat()
+                || lat > args.bbox.max().lat()
+                || lng < args.bbox.min().lng()
+                || lng > args.bbox.max().lng()
+            {
+                return Err(
+                    "Spawn point (--spawn-lat, --spawn-lng) must be within the bounding box."
+                        .to_string(),
+                );
+            }
+        }
+        _ => {}
+    }
+
     Ok(())
 }
 
@@ -141,6 +173,48 @@ mod tests {
         assert!(!args.debug);
         assert!(!args.terrain);
         assert!(!args.bedrock);
+        // interior, roof, city_boundaries default to true
+        assert!(args.interior);
+        assert!(args.roof);
+        assert!(args.city_boundaries);
+    }
+
+    #[test]
+    fn test_bool_flags_can_be_disabled() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
+        // Test disabling interior/roof/city-boundaries with =false
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--interior=false",
+            "--roof=false",
+            "--city-boundaries=false",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(!args.interior);
+        assert!(!args.roof);
+        assert!(!args.city_boundaries);
+
+        // Test enabling with bare flag (no value)
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--interior",
+            "--roof",
+            "--city-boundaries",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(args.interior);
+        assert!(args.roof);
+        assert!(args.city_boundaries);
     }
 
     #[test]
@@ -216,5 +290,67 @@ mod tests {
         // The --gui flag isn't used here, ugh. TODO clean up main.rs and its argparse usage.
         // let cmd = ["arnis", "--gui"];
         // assert!(Args::try_parse_from(cmd.iter()).is_ok());
+    }
+
+    #[test]
+    fn test_spawn_point_both_required() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
+        // Only spawn-lat without spawn-lng should fail validation
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--spawn-lat",
+            "2.0",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(validate_args(&args).is_err());
+
+        // Only spawn-lng without spawn-lat should fail validation
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--spawn-lng",
+            "3.0",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(validate_args(&args).is_err());
+
+        // Both provided and within bbox should pass
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--spawn-lat",
+            "2.0",
+            "--spawn-lng",
+            "3.0",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(validate_args(&args).is_ok());
+
+        // Spawn point outside bbox should fail
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--spawn-lat",
+            "5.0",
+            "--spawn-lng",
+            "3.0",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(validate_args(&args).is_err());
     }
 }
