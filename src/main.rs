@@ -181,12 +181,39 @@ fn run_cli() {
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
+    // Convert spawn lat/lng to Minecraft XZ coordinates if provided
+    let spawn_point: Option<(i32, i32)> = match (args.spawn_lat, args.spawn_lng) {
+        (Some(lat), Some(lng)) => {
+            use coordinate_system::geographic::LLPoint;
+            use coordinate_system::transformation::CoordTransformer;
+
+            let llpoint = LLPoint::new(lat, lng).unwrap_or_else(|e| {
+                eprintln!("{} Invalid spawn coordinates: {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            });
+
+            let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                .unwrap_or_else(|e| {
+                    eprintln!(
+                        "{} Failed to convert spawn point: {}",
+                        "Error:".red().bold(),
+                        e
+                    );
+                    std::process::exit(1);
+                });
+
+            let xzpoint = transformer.transform_point(llpoint);
+            Some((xzpoint.x, xzpoint.z))
+        }
+        _ => None,
+    };
+
     // Build generation options
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
-        spawn_point: None,
+        spawn_point,
     };
 
     // Generate world
@@ -205,6 +232,21 @@ fn run_cli() {
                     "Done!".green().bold(),
                     generation_path.display()
                 );
+            }
+
+            // For Java Edition, update spawn point in level.dat if provided
+            if !args.bedrock {
+                if let Some((spawn_x, spawn_z)) = spawn_point {
+                    if let Err(e) =
+                        world_utils::set_spawn_in_level_dat(&generation_path, spawn_x, spawn_z)
+                    {
+                        eprintln!(
+                            "{} Failed to set spawn point in level.dat: {}",
+                            "Warning:".yellow().bold(),
+                            e
+                        );
+                    }
+                }
             }
         }
         Err(e) => {

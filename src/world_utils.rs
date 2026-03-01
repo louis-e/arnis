@@ -205,3 +205,85 @@ pub fn create_new_world(base_path: &Path) -> Result<String, String> {
 
     Ok(new_world_path.display().to_string())
 }
+
+/// Sets the player spawn point in an existing Java Edition level.dat file.
+///
+/// Updates both the world spawn point (SpawnX/SpawnY/SpawnZ) and the player
+/// position if a Player compound exists. The Y coordinate is set to 150 as a
+/// safe default above terrain; Minecraft will adjust it on first load.
+pub fn set_spawn_in_level_dat(world_path: &Path, spawn_x: i32, spawn_z: i32) -> Result<(), String> {
+    let spawn_y = 150;
+
+    let level_path = world_path.join("level.dat");
+    if !level_path.exists() {
+        return Err(format!("level.dat not found at {level_path:?}"));
+    }
+
+    // Read and decompress
+    let level_data = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
+
+    let mut decoder = GzDecoder::new(level_data.as_slice());
+    let mut decompressed_data = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed_data)
+        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
+
+    let mut nbt_data: Value = fastnbt::from_bytes(&decompressed_data)
+        .map_err(|e| format!("Failed to parse level.dat NBT data: {e}"))?;
+
+    // Update spawn point
+    let data = match nbt_data {
+        Value::Compound(ref mut root) => match root.get_mut("Data") {
+            Some(Value::Compound(ref mut data)) => data,
+            _ => {
+                return Err(
+                    "Invalid level.dat structure: missing or non-compound \"Data\" section"
+                        .to_string(),
+                );
+            }
+        },
+        _ => {
+            return Err(
+                "Invalid level.dat structure: root NBT value is not a compound".to_string(),
+            );
+        }
+    };
+
+    data.insert("SpawnX".to_string(), Value::Int(spawn_x));
+    data.insert("SpawnY".to_string(), Value::Int(spawn_y));
+    data.insert("SpawnZ".to_string(), Value::Int(spawn_z));
+
+    // Update player position if Player compound exists
+    if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+        if let Some(Value::List(ref mut pos)) = player.get_mut("Pos") {
+            if pos.len() >= 3 {
+                if let Some(Value::Double(ref mut pos_x)) = pos.get_mut(0) {
+                    *pos_x = spawn_x as f64;
+                }
+                if let Some(Value::Double(ref mut pos_y)) = pos.get_mut(1) {
+                    *pos_y = spawn_y as f64;
+                }
+                if let Some(Value::Double(ref mut pos_z)) = pos.get_mut(2) {
+                    *pos_z = spawn_z as f64;
+                }
+            }
+        }
+    }
+
+    // Serialize, compress, and write back
+    let serialized_data = fastnbt::to_bytes(&nbt_data)
+        .map_err(|e| format!("Failed to serialize updated level.dat: {e}"))?;
+
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized_data)
+        .map_err(|e| format!("Failed to compress updated level.dat: {e}"))?;
+    let compressed_data = encoder
+        .finish()
+        .map_err(|e| format!("Failed to finalize compression for level.dat: {e}"))?;
+
+    fs::write(&level_path, compressed_data)
+        .map_err(|e| format!("Failed to write updated level.dat: {e}"))?;
+
+    Ok(())
+}
