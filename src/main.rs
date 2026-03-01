@@ -187,32 +187,23 @@ fn run_cli() {
             use coordinate_system::geographic::LLPoint;
             use coordinate_system::transformation::CoordTransformer;
 
-            match LLPoint::new(lat, lng) {
-                Ok(llpoint) => {
-                    match CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale) {
-                        Ok((transformer, _)) => {
-                            let xzpoint = transformer.transform_point(llpoint);
-                            Some((xzpoint.x, xzpoint.z))
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "{} Failed to convert spawn point: {}",
-                                "Warning:".yellow().bold(),
-                                e
-                            );
-                            None
-                        }
-                    }
-                }
-                Err(e) => {
+            let llpoint = LLPoint::new(lat, lng).unwrap_or_else(|e| {
+                eprintln!("{} Invalid spawn coordinates: {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            });
+
+            let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                .unwrap_or_else(|e| {
                     eprintln!(
-                        "{} Invalid spawn coordinates: {}",
-                        "Warning:".yellow().bold(),
+                        "{} Failed to convert spawn point: {}",
+                        "Error:".red().bold(),
                         e
                     );
-                    None
-                }
-            }
+                    std::process::exit(1);
+                });
+
+            let xzpoint = transformer.transform_point(llpoint);
+            Some((xzpoint.x, xzpoint.z))
         }
         _ => None,
     };
@@ -241,6 +232,21 @@ fn run_cli() {
                     "Done!".green().bold(),
                     generation_path.display()
                 );
+            }
+
+            // For Java Edition, update spawn point in level.dat if provided
+            if !args.bedrock {
+                if let Some((spawn_x, spawn_z)) = spawn_point {
+                    if let Err(e) =
+                        world_utils::set_spawn_in_level_dat(&generation_path, spawn_x, spawn_z)
+                    {
+                        eprintln!(
+                            "{} Failed to set spawn point in level.dat: {}",
+                            "Warning:".yellow().bold(),
+                            e
+                        );
+                    }
+                }
             }
         }
         Err(e) => {
