@@ -736,8 +736,7 @@ impl<'a> WorldEditor<'a> {
                         || err_str.contains("code: 112")
                         || err_str.contains("os error 28");
                     let user_msg = if is_disk_full {
-                        "Not enough disk space. Please free up space and try again."
-                            .to_string()
+                        "Not enough disk space available.".to_string()
                     } else {
                         format!("Failed to save world: {}", e)
                     };

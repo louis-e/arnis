@@ -94,9 +94,7 @@ impl<'a> WorldEditor<'a> {
     ///
     /// Uses parallel processing with rayon for fast region saving.
     /// Returns an error if any region fails to save (e.g. disk full).
-    pub(super) fn save_java(
-        &mut self,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub(super) fn save_java(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
@@ -120,8 +118,7 @@ impl<'a> WorldEditor<'a> {
         );
 
         let regions_processed = AtomicU64::new(0);
-        let first_error: Mutex<Option<Box<dyn std::error::Error + Send + Sync>>> =
-            Mutex::new(None);
+        let first_error: Mutex<Option<Box<dyn std::error::Error + Send + Sync>>> = Mutex::new(None);
 
         self.world
             .regions
@@ -132,9 +129,7 @@ impl<'a> WorldEditor<'a> {
                     return;
                 }
 
-                if let Err(e) =
-                    self.save_single_region(*region_x, *region_z, region_to_modify)
-                {
+                if let Err(e) = self.save_single_region(*region_x, *region_z, region_to_modify) {
                     let mut guard = first_error.lock().unwrap();
                     if guard.is_none() {
                         *guard = Some(e);
@@ -194,8 +189,7 @@ impl<'a> WorldEditor<'a> {
                 let level_data = create_level_wrapper(&chunk);
                 ser_buffer.clear();
                 fastnbt::to_writer(&mut ser_buffer, &level_data)?;
-                region
-                    .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
             }
         }
 
@@ -211,8 +205,7 @@ impl<'a> WorldEditor<'a> {
                 // If chunk doesn't exist, create it with base layer
                 if !chunk_exists {
                     let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
-                    region
-                        .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+                    region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
                 }
             }
         }
