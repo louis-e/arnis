@@ -62,6 +62,10 @@ pub struct Args {
     #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub city_boundaries: bool,
 
+    /// Generate a void world outside the generated area
+    #[arg(long)]
+    pub void_world: bool,
+
     /// Enable debug mode (optional)
     #[arg(long)]
     pub debug: bool,

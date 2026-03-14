@@ -2,6 +2,7 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::retrieve_data;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{fs, io::Write};
@@ -80,7 +81,7 @@ pub fn build_bedrock_output(bbox: &LLBBox, output_dir: PathBuf) -> (PathBuf, Str
 /// (with updated name, timestamp, and spawn position), and icon.png.
 ///
 /// Returns the full path to the newly created world directory.
-pub fn create_new_world(base_path: &Path) -> Result<String, String> {
+pub fn create_new_world(base_path: &Path, void_world: bool) -> Result<String, String> {
     // Generate a unique world name with proper counter
     // Check for both "Arnis World X" and "Arnis World X: Location" patterns
     let mut counter: i32 = 1;
@@ -177,6 +178,11 @@ pub fn create_new_world(base_path: &Path) -> Result<String, String> {
                         *x = -45.0;
                     }
                 }
+            }
+
+            // For void worlds, use empty layers and the_void biome
+            if void_world {
+                apply_void_generator(data);
             }
         }
     }
@@ -286,4 +292,67 @@ pub fn set_spawn_in_level_dat(world_path: &Path, spawn_x: i32, spawn_z: i32) -> 
         .map_err(|e| format!("Failed to write updated level.dat: {e}"))?;
 
     Ok(())
+}
+
+/// Update an existing Java Edition level.dat to use a void generator.
+///
+/// Used by the GUI since the world is created before the generation options are picked.
+pub fn set_void_generator_in_level_dat(world_path: &Path) -> Result<(), String> {
+    let level_path = world_path.join("level.dat");
+    if !level_path.exists() {
+        return Err(format!("level.dat not found at {level_path:?}"));
+    }
+
+    let level_data = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
+
+    let mut decoder = GzDecoder::new(level_data.as_slice());
+    let mut decompressed_data = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed_data)
+        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
+
+    let mut nbt_data: Value = fastnbt::from_bytes(&decompressed_data)
+        .map_err(|e| format!("Failed to parse level.dat NBT data: {e}"))?;
+
+    if let Value::Compound(ref mut root) = nbt_data {
+        if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
+            apply_void_generator(data);
+        }
+    }
+
+    let serialized_data = fastnbt::to_bytes(&nbt_data)
+        .map_err(|e| format!("Failed to serialize update level.dat: {e}"))?;
+
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized_data)
+        .map_err(|e| format!("Failed to compress update level.dat: {e}"))?;
+    let compressed_data = encoder
+        .finish()
+        .map_err(|e| format!("Failed to finalize compression for level.dat: {e}"))?;
+
+    fs::write(&level_path, compressed_data)
+        .map_err(|e| format!("Failed to write update level.dat: {e}"))?;
+
+    Ok(())
+}
+
+/// Set the overworld generator to the_void with empty layers and no structures.
+fn apply_void_generator(data: &mut HashMap<String, Value>) {
+    if let Some(Value::Compound(ref mut wgs)) = data.get_mut("WorldGenSettings") {
+        if let Some(Value::Compound(ref mut dims)) = wgs.get_mut("dimensions") {
+            if let Some(Value::Compound(ref mut overworld)) = dims.get_mut("minecraft:overworld") {
+                if let Some(Value::Compound(ref mut generator)) = overworld.get_mut("generator") {
+                    if let Some(Value::Compound(ref mut settings)) = generator.get_mut("settings") {
+                        settings.insert(
+                            "biome".to_string(),
+                            Value::String("minecraft:the_void".to_string()),
+                        );
+                        settings.insert("layers".to_string(), Value::List(vec![]));
+                        settings.insert("structure_overrides".to_string(), Value::List(vec![]));
+                    }
+                }
+            }
+        }
+    }
 }

@@ -175,21 +175,32 @@ impl<'a> WorldEditor<'a> {
             }
         }
 
-        // Second pass: ensure all chunks exist (fill with base layer if not)
-        for chunk_x in 0..32 {
-            for chunk_z in 0..32 {
-                let abs_chunk_x = chunk_x + (region_x * 32);
-                let abs_chunk_z = chunk_z + (region_z * 32);
+        if self.void_world {
+            // Void mode: remove template chunks that weren't actually generated.
+            // The region template contains 1024 pre-filled chunks with fixed coordinates.
+            // If we leave them minecraft may load chunks with incorrect positions
+            for chunk_x in 0..32 {
+                for chunk_z in 0..32 {
+                    if !region_to_modify.chunks.contains_key(&(chunk_x, chunk_z)) {
+                        let _ = region.remove_chunk(chunk_x as usize, chunk_z as usize);
+                    }
+                }
+            }
+        } else {
+            // Normal mode
+            for chunk_x in 0..32 {
+                for chunk_z in 0..32 {
+                    let abs_chunk_x = chunk_x + (region_x * 32);
+                    let abs_chunk_z = chunk_z + (region_z * 32);
 
-                // Check if chunk exists in our modifications
-                let chunk_exists = region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
+                    let chunk_exists = region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
 
-                // If chunk doesn't exist, create it with base layer
-                if !chunk_exists {
-                    let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
-                    region
-                        .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
-                        .unwrap();
+                    if !chunk_exists {
+                        let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
+                        region
+                            .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                            .unwrap();
+                    }
                 }
             }
         }

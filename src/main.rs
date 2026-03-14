@@ -127,7 +127,7 @@ fn run_cli() {
     } else {
         // Java: create a new world in the provided output directory
         let base_dir = args.path.clone().unwrap();
-        let world_path = match world_utils::create_new_world(&base_dir) {
+        let world_path = match world_utils::create_new_world(&base_dir, args.void_world) {
             Ok(path) => PathBuf::from(path),
             Err(e) => {
                 eprintln!("{} {}", "Error:".red().bold(), e);
@@ -214,6 +214,7 @@ fn run_cli() {
         format: world_format,
         level_name,
         spawn_point,
+        void_world: args.void_world,
     };
 
     // Generate world

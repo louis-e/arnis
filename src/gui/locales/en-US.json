@@ -40,6 +40,7 @@
   "roof": "Roof Generation",
   "fillground": "Fill Ground",
   "city_boundaries": "City Ground",
+  "void_world": "Void World",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "save_path": "Save Path"
 }
