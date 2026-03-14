@@ -659,12 +659,7 @@ function handleBboxInput() {
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
-        const customSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
-        if (customSize > threshold3) {
-          setBboxSelectionInfo(bboxSelectionInfo, "area_hard_limit", "#ff4444");
-        } else {
-          setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
-        }
+        setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -731,7 +726,6 @@ function normalizeLongitude(lon) {
 const threshold1 = 44000000.00;  // Yellow warning threshold (~6.2km x 7km)
 const threshold2 = 85000000.00;  // Red error threshold (~8.7km x 9.8km)
 const threshold3 = 300000000.00; // Extreme warning threshold (300 km²)
-let bboxExceedsHardLimit = false; // unused sentinel kept for future use
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
