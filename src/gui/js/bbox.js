@@ -1236,21 +1236,6 @@ $(document).ready(function () {
         crosshair.setLatLng(map.getCenter());
     });
 
-    // handle geolocation click events
-    $('#locate-btn').on('click', function () {
-        $('#locate-btn').addClass('locating');
-        map.locate({ setView: true, maxZoom: 13 });
-    });
-
-    map.on('locationfound', function () {
-        $('#locate-btn').removeClass('locating');
-    });
-
-    map.on('locationerror', function (e) {
-        $('#locate-btn').removeClass('locating');
-        alert('Could not get your location: ' + e.message);
-    });
-
 
 
     $('button#add').on('click', function (evt) {

@@ -377,41 +377,6 @@ body,
   margin: 0;
 }
 
-/* Use My Location button */
-#locate-btn {
-    position: absolute;
-    top: 5px;
-    left: 5px;
-    z-index: 1000;
-    background: #007cbb;
-    color: white;
-    border: none;
-    border-radius: 3px;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
-    transition: background-color 0.2s;
-}
-
-#locate-btn:hover {
-    background: #005f8e;
-}
-
-#locate-btn svg {
-    width: 16px;
-    height: 16px;
-    pointer-events: none;
-}
-
-#locate-btn.locating {
-    background: #f59e0b;
-}
-
 /* Context menu for coordinate copying */
 .coordinate-context-menu {
   position: fixed;
