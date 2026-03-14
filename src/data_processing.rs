@@ -27,6 +27,7 @@ pub struct GenerationOptions {
     pub format: WorldFormat,
     pub level_name: Option<String>,
     pub spawn_point: Option<(i32, i32)>,
+    pub void_world: bool,
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
@@ -49,6 +50,7 @@ pub fn generate_world_with_options(
         options.format,
         options.level_name.clone(),
         options.spawn_point,
+        options.void_world,
     );
     let ground = Arc::new(ground);
 

@@ -176,20 +176,23 @@ impl<'a> WorldEditor<'a> {
         }
 
         // Second pass: ensure all chunks exist (fill with base layer if not)
-        for chunk_x in 0..32 {
-            for chunk_z in 0..32 {
-                let abs_chunk_x = chunk_x + (region_x * 32);
-                let abs_chunk_z = chunk_z + (region_z * 32);
+        // In void mode, skip this pass to leave empty chunks truly empty
+        if !self.void_world {
+            for chunk_x in 0..32 {
+                for chunk_z in 0..32 {
+                    let abs_chunk_x = chunk_x + (region_x * 32);
+                    let abs_chunk_z = chunk_z + (region_z * 32);
 
-                // Check if chunk exists in our modifications
-                let chunk_exists = region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
+                    // Check if chunk exists in our modifications
+                    let chunk_exists = region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
 
-                // If chunk doesn't exist, create it with base layer
-                if !chunk_exists {
-                    let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
-                    region
-                        .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
-                        .unwrap();
+                    // If chunk doesn't exist, create it with base layer
+                    if !chunk_exists {
+                        let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
+                        region
+                            .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
+                            .unwrap();
+                    }
                 }
             }
         }

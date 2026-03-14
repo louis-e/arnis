@@ -221,7 +221,7 @@ fn gui_create_world(save_path: String) -> Result<String, i32> {
 }
 
 fn create_new_world(base_path: &Path) -> Result<String, String> {
-    crate::world_utils::create_new_world(base_path)
+    crate::world_utils::create_new_world(base_path, false)
 }
 
 /// Adds localized area name to the world name in level.dat
@@ -704,6 +704,7 @@ fn gui_start_generation(
     roof_enabled: bool,
     fillground_enabled: bool,
     city_boundaries_enabled: bool,
+    void_world_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
@@ -874,6 +875,7 @@ fn gui_start_generation(
                 format: world_format,
                 level_name,
                 spawn_point: mc_spawn_point,
+                void_world: void_world_enabled,
             };
 
             // Create an Args instance with the chosen bounding box
@@ -896,11 +898,24 @@ fn gui_start_generation(
                 roof: roof_enabled,
                 fillground: fillground_enabled,
                 city_boundaries: city_boundaries_enabled,
+                void_world: void_world_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
                 spawn_lng: None,
             };
+
+            // If this is a Java void world, update the generator in level.dat
+            // (the world was already created by gui_create_world)
+            if void_world_enabled && world_format == WorldFormat::JavaAnvil {
+                if let Some(ref world_path) = args.path {
+                    if let Err(e) =
+                        crate::world_utils::set_void_generator_in_level_dat(world_path)
+                    {
+                        eprintln!("Warning: Failed to set void generator in level.dat: {e}");
+                    }
+                }
+            }
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
             if skip_osm_objects {

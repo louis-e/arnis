@@ -74,6 +74,8 @@ pub struct WorldEditor<'a> {
     llbbox: LLBBox,
     ground: Option<Arc<Ground>>,
     format: WorldFormat,
+    /// Enable void world generation (chunks outside the generated area stay empty)
+    pub(crate) void_world: bool,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
     #[cfg(feature = "bedrock")]
     bedrock_level_name: Option<String>,
@@ -95,6 +97,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format: WorldFormat::JavaAnvil,
+            void_world: false,
             #[cfg(feature = "bedrock")]
             bedrock_level_name: None,
             #[cfg(feature = "bedrock")]
@@ -117,6 +120,7 @@ impl<'a> WorldEditor<'a> {
         #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_spawn_point: Option<
             (i32, i32),
         >,
+        void_world: bool,
     ) -> Self {
         Self {
             world_dir,
@@ -125,6 +129,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format,
+            void_world,
             #[cfg(feature = "bedrock")]
             bedrock_level_name,
             #[cfg(feature = "bedrock")]
