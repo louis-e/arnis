@@ -645,6 +645,9 @@ fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
 
 fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
     let height: usize = height_grid.len();
+    if height == 0 {
+        return;
+    }
     let width: usize = height_grid[0].len();
 
     let mut changes_made: bool = true;
@@ -685,6 +688,9 @@ fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
 
 fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     let height = height_grid.len();
+    if height == 0 {
+        return;
+    }
     let width = height_grid[0].len();
 
     // Collect all valid height values to calculate statistics
