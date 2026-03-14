@@ -725,7 +725,7 @@ function normalizeLongitude(lon) {
 
 const threshold1 = 44000000.00;  // Yellow warning threshold (~6.2km x 7km)
 const threshold2 = 85000000.00;  // Red error threshold (~8.7km x 9.8km)
-const threshold3 = 300000000.00; // Extreme warning threshold (300 km²)
+const threshold3 = 500000000.00; // Extreme warning threshold (400 km²)
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
