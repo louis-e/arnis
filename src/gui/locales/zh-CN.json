@@ -21,6 +21,7 @@
   "create_world_first": "请先创建一个世界！",
   "select_location_first": "请先选择一个位置！",
   "area_too_large": "该区域非常大，可能会超出典型的计算限制。",
+  "area_extreme": "此区域极大，可能过大而无法成功生成。",
   "area_extensive": "该区域相当广泛，可能需要大量时间和资源。",
   "selection_confirmed": "选择已确认！",
   "select_area_prompt": "使用工具在地图上选择一个区域。",

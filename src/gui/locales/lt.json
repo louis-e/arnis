@@ -21,6 +21,7 @@
   "create_world_first": "Pirmiausia sukurkite pasaulį!",
   "select_location_first": "Pirma pasirinkite vietą!",
   "area_too_large": "Šis plotas yra labai didelis ir gali viršyti tipinius resursų limitus.",
+  "area_extreme": "Šis plotas yra itin didelis ir gali būti per didelis, kad būtų sėkmingai sugeneruotas.",
   "area_extensive": "Šis plotas yra pakankamai didelis kuriam reikėtų daug laiko ir resursų.",
   "selection_confirmed": "Pasirinkimas patvirtintas!",
   "select_area_prompt": "Pasirinkite plotą žemėlapyje naudodami įrankius.",

@@ -725,6 +725,7 @@ function normalizeLongitude(lon) {
 
 const threshold1 = 44000000.00;  // Yellow warning threshold (~6.2km x 7km)
 const threshold2 = 85000000.00;  // Red error threshold (~8.7km x 9.8km)
+const threshold3 = 500000000.00; // Extreme warning threshold (500 km²)
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
@@ -735,7 +736,9 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  * @param {number} selectedSize - The calculated bbox area in square meters
  */
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
-  if (selectedSize > threshold2) {
+  if (selectedSize > threshold3) {
+    setBboxSelectionInfo(bboxSelectionElement, "area_extreme", "#ff4444");
+  } else if (selectedSize > threshold2) {
     setBboxSelectionInfo(bboxSelectionElement, "area_too_large", "#fa7878");
   } else if (selectedSize > threshold1) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
