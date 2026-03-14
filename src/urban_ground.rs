@@ -19,7 +19,7 @@
 
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::floodfill::flood_fill_area;
-use geo::{ConcaveHull, ConvexHull, MultiPoint, Point, Polygon, Simplify};
+use geo::{concave_hull::ConcaveHullOptions, ConcaveHull, ConvexHull, MultiPoint, Point, Polygon, Simplify};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
@@ -546,7 +546,10 @@ impl UrbanGroundComputer {
             multi_point.convex_hull()
         } else {
             // Use concave hull for better fit
-            multi_point.concave_hull(self.config.concavity)
+            multi_point.concave_hull_with_options(ConcaveHullOptions {
+                concavity: self.config.concavity,
+                ..Default::default()
+            })
         };
 
         // Simplify the hull to reduce vertex count (improves flood fill performance)
