@@ -40,6 +40,40 @@ use crate::progress::emit_gui_error;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 
+/// Walks the error chain to determine whether a save failure was caused by
+/// insufficient disk space.
+///
+/// Checks `std::io::Error` at every level of the chain: first via
+/// `ErrorKind::StorageFull` (stable since Rust 1.83), then via raw OS codes
+/// (112 = Windows `ERROR_DISK_FULL`, 28 = Unix `ENOSPC`), and finally falls
+/// back to substring matching error Display strings for error types (e.g.
+/// fastanvil wrappers) that forward the OS message but aren't directly
+/// downcastable.
+fn is_disk_full_error(err: &dyn std::error::Error) -> bool {
+    let check = |s: &str| -> bool {
+        // io::Error Display on Windows: "There is not enough space on the disk. (os error 112)"
+        // io::Error Display on Unix:    "No space left on device (os error 28)"
+        // fastanvil::RegionError wraps io::Error and forwards its Display
+        s.contains("os error 112")
+            || s.contains("os error 28")
+            || s.contains("StorageFull")
+    };
+
+    if check(&err.to_string()) {
+        return true;
+    }
+
+    let mut source = err.source();
+    while let Some(e) = source {
+        if check(&e.to_string()) {
+            return true;
+        }
+        source = e.source();
+    }
+
+    false
+}
+
 /// World format to generate
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
@@ -730,12 +764,7 @@ impl<'a> WorldEditor<'a> {
         match self.format {
             WorldFormat::JavaAnvil => {
                 if let Err(e) = self.save_java() {
-                    let err_str = e.to_string();
-                    // Detect disk-full errors (OS error 112 on Windows, ENOSPC on Unix)
-                    let is_disk_full = err_str.contains("StorageFull")
-                        || err_str.contains("code: 112")
-                        || err_str.contains("os error 28");
-                    let user_msg = if is_disk_full {
+                    let user_msg = if is_disk_full_error(e.as_ref()) {
                         "Not enough disk space available.".to_string()
                     } else {
                         format!("Failed to save world: {}", e)

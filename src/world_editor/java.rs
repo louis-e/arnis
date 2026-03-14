@@ -67,7 +67,10 @@ impl<'a> WorldEditor<'a> {
 
     /// Helper function to create a base chunk with grass blocks at Y -62
     /// Uses cached sections for efficiency - only serialization happens per chunk
-    pub(super) fn create_base_chunk(abs_chunk_x: i32, abs_chunk_z: i32) -> (Vec<u8>, bool) {
+    pub(super) fn create_base_chunk(
+        abs_chunk_x: i32,
+        abs_chunk_z: i32,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         // Use cached sections (computed once on first call)
         let sections = get_base_chunk_sections();
 
@@ -85,9 +88,9 @@ impl<'a> WorldEditor<'a> {
 
         // Serialize the chunk with Level wrapper
         let mut ser_buffer = Vec::with_capacity(8192);
-        fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
+        fastnbt::to_writer(&mut ser_buffer, &level_data)?;
 
-        (ser_buffer, true)
+        Ok(ser_buffer)
     }
 
     /// Saves the world in Java Edition Anvil format.
@@ -118,22 +121,26 @@ impl<'a> WorldEditor<'a> {
         );
 
         let regions_processed = AtomicU64::new(0);
+        // AtomicBool for a lock-free fast-path stop check; the Mutex only stores the error value.
+        let should_stop = std::sync::atomic::AtomicBool::new(false);
         let first_error: Mutex<Option<Box<dyn std::error::Error + Send + Sync>>> = Mutex::new(None);
 
         self.world
             .regions
             .par_iter()
             .for_each(|((region_x, region_z), region_to_modify)| {
-                // Skip further work once a fatal error has been recorded
-                if first_error.lock().unwrap().is_some() {
+                // Fast-path: bail out without locking once an error has been recorded.
+                if should_stop.load(Ordering::Acquire) {
                     return;
                 }
 
                 if let Err(e) = self.save_single_region(*region_x, *region_z, region_to_modify) {
-                    let mut guard = first_error.lock().unwrap();
+                    let mut guard = first_error.lock().unwrap_or_else(|p| p.into_inner());
                     if guard.is_none() {
                         *guard = Some(e);
                     }
+                    // Signal other workers to stop without re-acquiring the mutex.
+                    should_stop.store(true, Ordering::Release);
                     return;
                 }
 
@@ -152,7 +159,7 @@ impl<'a> WorldEditor<'a> {
 
         save_pb.finish();
 
-        if let Some(e) = first_error.lock().unwrap().take() {
+        if let Some(e) = first_error.lock().unwrap_or_else(|p| p.into_inner()).take() {
             return Err(e);
         }
 
@@ -204,7 +211,7 @@ impl<'a> WorldEditor<'a> {
 
                 // If chunk doesn't exist, create it with base layer
                 if !chunk_exists {
-                    let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
+                    let ser_buffer = Self::create_base_chunk(abs_chunk_x, abs_chunk_z)?;
                     region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
                 }
             }
