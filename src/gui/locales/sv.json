@@ -21,6 +21,7 @@
   "create_world_first": "Skapa en värld först!",
   "select_location_first": "Välj plats först!",
   "area_too_large": "Detta område är mycket stort och kan överskrida vanliga beräkningsgränser.",
+  "area_hard_limit": "Det här området överstiger den maximala storleksgränsen och kan inte genereras.",
   "area_extensive": "Området är ganska extensivt och kan ta betydande tid och resurser.",
   "selection_confirmed": "Val bekräftat!",
   "select_area_prompt": "Välj ett område på kartan med verktygen.",

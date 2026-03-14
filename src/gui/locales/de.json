@@ -21,6 +21,7 @@
   "create_world_first": "Erstelle zuerst eine Welt!",
   "select_location_first": "Wähle zuerst einen Standort aus!",
   "area_too_large": "Dieses Gebiet ist sehr groß und könnte das Berechnungslimit überschreiten.",
+  "area_hard_limit": "Dieses Gebiet überschreitet das maximale Größenlimit und kann nicht generiert werden.",
   "area_extensive": "Diese Gebietsgröße könnte längere Zeit für die Generierung benötigen.",
   "selection_confirmed": "Auswahl bestätigt!",
   "select_area_prompt": "Wähle einen Bereich auf der Karte aus.",

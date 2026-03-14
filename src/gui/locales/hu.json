@@ -21,6 +21,7 @@
   "create_world_first": "Először hozz létre egy világot!",
   "select_location_first": "Válassz egy helyet először!",
   "area_too_large": "Ez a terület nagyon nagy, és meghaladhatja a szokásos számítási korlátokat.",
+  "area_hard_limit": "Ez a terület meghaladja a maximális méretkorlátot, és nem generálható.",
   "area_extensive": "A terület meglehetősen kiterjedt, és jelentős időt és erőforrásokat igényelhet.",
   "selection_confirmed": "Kiválasztás megerősítve",
   "select_area_prompt": "Jelölj ki egy területet a térképen az eszközökkel.",

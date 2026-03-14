@@ -659,7 +659,14 @@ function handleBboxInput() {
         // Update the info text and mark custom input as valid
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
-        setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
+        const customSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
+        if (customSize > threshold3) {
+          setBboxSelectionInfo(bboxSelectionInfo, "area_hard_limit", "#ff4444");
+          bboxExceedsHardLimit = true;
+        } else {
+          bboxExceedsHardLimit = false;
+          setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
+        }
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -725,6 +732,8 @@ function normalizeLongitude(lon) {
 
 const threshold1 = 44000000.00;  // Yellow warning threshold (~6.2km x 7km)
 const threshold2 = 85000000.00;  // Red error threshold (~8.7km x 9.8km)
+const threshold3 = 150000000.00; // Hard limit: generation blocked (~12km x 12.5km)
+let bboxExceedsHardLimit = false; // True when selected area is above threshold3
 let selectedBBox = "";
 let mapSelectedBBox = "";  // Tracks bbox from map selection
 let customBBoxValid = false;  // Tracks if custom input is valid
@@ -735,12 +744,18 @@ let customBBoxValid = false;  // Tracks if custom input is valid
  * @param {number} selectedSize - The calculated bbox area in square meters
  */
 function displayBboxSizeStatus(bboxSelectionElement, selectedSize) {
-  if (selectedSize > threshold2) {
+  if (selectedSize > threshold3) {
+    setBboxSelectionInfo(bboxSelectionElement, "area_hard_limit", "#ff4444");
+    bboxExceedsHardLimit = true;
+  } else if (selectedSize > threshold2) {
     setBboxSelectionInfo(bboxSelectionElement, "area_too_large", "#fa7878");
+    bboxExceedsHardLimit = false;
   } else if (selectedSize > threshold1) {
     setBboxSelectionInfo(bboxSelectionElement, "area_extensive", "#fecc44");
+    bboxExceedsHardLimit = false;
   } else {
     setBboxSelectionInfo(bboxSelectionElement, "selection_confirmed", "#7bd864");
+    bboxExceedsHardLimit = false;
   }
 }
 
@@ -765,6 +780,7 @@ function displayBboxInfoText(bboxText) {
     setBboxSelectionInfo(bboxSelectionInfo, "select_area_prompt", "#ffffff");
     bboxCoordsInput.value = "";
     mapSelectedBBox = "";
+    bboxExceedsHardLimit = false;
     if (!customBBoxValid) {
       selectedBBox = "";
     }
@@ -843,6 +859,12 @@ async function startGeneration() {
     if (!selectedBBox || selectedBBox == "0.000000 0.000000 0.000000 0.000000") {
       const bboxSelectionInfo = document.getElementById('bbox-selection-info');
       setBboxSelectionInfo(bboxSelectionInfo, "select_location_first", "#fa7878");
+      return;
+    }
+
+    if (bboxExceedsHardLimit) {
+      const bboxSelectionInfo = document.getElementById('bbox-selection-info');
+      setBboxSelectionInfo(bboxSelectionInfo, "area_hard_limit", "#ff4444");
       return;
     }
 
