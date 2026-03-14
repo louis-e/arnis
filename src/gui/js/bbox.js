@@ -1237,10 +1237,18 @@ $(document).ready(function () {
     });
 
     // handle geolocation click events
-    $('#geolocation').click(function () {
-        map.locate({ setView: true, maxZoom: 8 });
-        $('#geolocation a').toggleClass('active');
-        $('#geolocation a').toggleClass('active', 350);
+    $('#locate-btn').on('click', function () {
+        $('#locate-btn').addClass('locating');
+        map.locate({ setView: true, maxZoom: 13 });
+    });
+
+    map.on('locationfound', function () {
+        $('#locate-btn').removeClass('locating');
+    });
+
+    map.on('locationerror', function (e) {
+        $('#locate-btn').removeClass('locating');
+        alert('Could not get your location: ' + e.message);
     });
 
 
