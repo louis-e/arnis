@@ -19,7 +19,9 @@
 
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::floodfill::flood_fill_area;
-use geo::{concave_hull::ConcaveHullOptions, ConcaveHull, ConvexHull, MultiPoint, Point, Polygon, Simplify};
+use geo::{
+    concave_hull::ConcaveHullOptions, ConcaveHull, ConvexHull, MultiPoint, Point, Polygon, Simplify,
+};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 

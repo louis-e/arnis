@@ -441,7 +441,9 @@ pub fn generate_world_with_options(
     ground_pb.finish();
 
     // Save world
-    editor.save();
+    if let Err(e) = editor.save() {
+        return Err(e.to_string());
+    }
 
     emit_gui_progress_update(99.0, "Finalizing world...");
 

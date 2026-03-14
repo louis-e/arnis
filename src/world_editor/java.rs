@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 /// Cached base chunk sections (grass at Y=-62)
 /// Computed once on first use and reused for all empty chunks
@@ -40,12 +40,16 @@ use crate::telemetry::{send_log, LogLevel};
 
 impl<'a> WorldEditor<'a> {
     /// Creates a region file for the given region coordinates.
-    pub(super) fn create_region(&self, region_x: i32, region_z: i32) -> Region<File> {
+    pub(super) fn create_region(
+        &self,
+        region_x: i32,
+        region_z: i32,
+    ) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
         let region_dir = self.world_dir.join("region");
         let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
 
         // Ensure region directory exists before creating region files
-        std::fs::create_dir_all(&region_dir).expect("Failed to create region directory");
+        std::fs::create_dir_all(&region_dir)?;
 
         const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
 
@@ -54,19 +58,19 @@ impl<'a> WorldEditor<'a> {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&out_path)
-            .expect("Failed to open region file");
+            .open(&out_path)?;
 
-        region_file
-            .write_all(REGION_TEMPLATE)
-            .expect("Could not write region template");
+        region_file.write_all(REGION_TEMPLATE)?;
 
-        Region::from_stream(region_file).expect("Failed to load region")
+        Ok(Region::from_stream(region_file)?)
     }
 
     /// Helper function to create a base chunk with grass blocks at Y -62
     /// Uses cached sections for efficiency - only serialization happens per chunk
-    pub(super) fn create_base_chunk(abs_chunk_x: i32, abs_chunk_z: i32) -> (Vec<u8>, bool) {
+    pub(super) fn create_base_chunk(
+        abs_chunk_x: i32,
+        abs_chunk_z: i32,
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         // Use cached sections (computed once on first call)
         let sections = get_base_chunk_sections();
 
@@ -84,15 +88,16 @@ impl<'a> WorldEditor<'a> {
 
         // Serialize the chunk with Level wrapper
         let mut ser_buffer = Vec::with_capacity(8192);
-        fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
+        fastnbt::to_writer(&mut ser_buffer, &level_data)?;
 
-        (ser_buffer, true)
+        Ok(ser_buffer)
     }
 
     /// Saves the world in Java Edition Anvil format.
     ///
     /// Uses parallel processing with rayon for fast region saving.
-    pub(super) fn save_java(&mut self) {
+    /// Returns an error if any region fails to save (e.g. disk full).
+    pub(super) fn save_java(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
@@ -116,12 +121,28 @@ impl<'a> WorldEditor<'a> {
         );
 
         let regions_processed = AtomicU64::new(0);
+        // AtomicBool for a lock-free fast-path stop check; the Mutex only stores the error value.
+        let should_stop = std::sync::atomic::AtomicBool::new(false);
+        let first_error: Mutex<Option<Box<dyn std::error::Error + Send + Sync>>> = Mutex::new(None);
 
         self.world
             .regions
             .par_iter()
             .for_each(|((region_x, region_z), region_to_modify)| {
-                self.save_single_region(*region_x, *region_z, region_to_modify);
+                // Fast-path: bail out without locking once an error has been recorded.
+                if should_stop.load(Ordering::Acquire) {
+                    return;
+                }
+
+                if let Err(e) = self.save_single_region(*region_x, *region_z, region_to_modify) {
+                    let mut guard = first_error.lock().unwrap_or_else(|p| p.into_inner());
+                    if guard.is_none() {
+                        *guard = Some(e);
+                    }
+                    // Signal other workers to stop without re-acquiring the mutex.
+                    should_stop.store(true, Ordering::Release);
+                    return;
+                }
 
                 // Update progress
                 let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst) + 1;
@@ -137,6 +158,12 @@ impl<'a> WorldEditor<'a> {
             });
 
         save_pb.finish();
+
+        if let Some(e) = first_error.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            return Err(e);
+        }
+
+        Ok(())
     }
 
     /// Saves a single region to disk.
@@ -148,8 +175,8 @@ impl<'a> WorldEditor<'a> {
         region_x: i32,
         region_z: i32,
         region_to_modify: &super::common::RegionToModify,
-    ) {
-        let mut region = self.create_region(region_x, region_z);
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let mut region = self.create_region(region_x, region_z)?;
         let mut ser_buffer = Vec::with_capacity(8192);
 
         // First pass: write all chunks that have content
@@ -168,10 +195,8 @@ impl<'a> WorldEditor<'a> {
                 // Create Level wrapper and save
                 let level_data = create_level_wrapper(&chunk);
                 ser_buffer.clear();
-                fastnbt::to_writer(&mut ser_buffer, &level_data).unwrap();
-                region
-                    .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
-                    .unwrap();
+                fastnbt::to_writer(&mut ser_buffer, &level_data)?;
+                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
             }
         }
 
@@ -186,13 +211,13 @@ impl<'a> WorldEditor<'a> {
 
                 // If chunk doesn't exist, create it with base layer
                 if !chunk_exists {
-                    let (ser_buffer, _) = Self::create_base_chunk(abs_chunk_x, abs_chunk_z);
-                    region
-                        .write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)
-                        .unwrap();
+                    let ser_buffer = Self::create_base_chunk(abs_chunk_x, abs_chunk_z)?;
+                    region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
                 }
             }
         }
+
+        Ok(())
     }
 }
 
