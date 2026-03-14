@@ -36,6 +36,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 #[cfg(feature = "gui")]
+use crate::progress::emit_gui_error;
+#[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 
 /// World format to generate
@@ -726,7 +728,27 @@ impl<'a> WorldEditor<'a> {
         self.world.compact_sections();
 
         match self.format {
-            WorldFormat::JavaAnvil => self.save_java(),
+            WorldFormat::JavaAnvil => {
+                if let Err(e) = self.save_java() {
+                    let err_str = e.to_string();
+                    // Detect disk-full errors (OS error 112 on Windows, ENOSPC on Unix)
+                    let is_disk_full = err_str.contains("StorageFull")
+                        || err_str.contains("code: 112")
+                        || err_str.contains("os error 28");
+                    let user_msg = if is_disk_full {
+                        "Not enough disk space. Please free up space and try again."
+                            .to_string()
+                    } else {
+                        format!("Failed to save world: {}", e)
+                    };
+                    eprintln!("{}", user_msg);
+                    #[cfg(feature = "gui")]
+                    {
+                        send_log(LogLevel::Error, &user_msg);
+                        emit_gui_error(&user_msg);
+                    }
+                }
+            }
             WorldFormat::BedrockMcWorld => self.save_bedrock(),
         }
     }
