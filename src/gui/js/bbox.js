@@ -462,7 +462,7 @@ $(document).ready(function () {
     $("#projection").val(currentproj);
 
     // Initialize map
-    map = L.map('map').setView([50.114768, 8.687322], 4);
+    map = L.map('map', { zoomControl: false }).setView([50.114768, 8.687322], 4);
 
     // Define available tile themes
     var tileThemes = {
