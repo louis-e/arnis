@@ -909,8 +909,7 @@ fn gui_start_generation(
             // (the world was already created by gui_create_world)
             if void_world_enabled && world_format == WorldFormat::JavaAnvil {
                 if let Some(ref world_path) = args.path {
-                    if let Err(e) =
-                        crate::world_utils::set_void_generator_in_level_dat(world_path)
+                    if let Err(e) = crate::world_utils::set_void_generator_in_level_dat(world_path)
                     {
                         eprintln!("Warning: Failed to set void generator in level.dat: {e}");
                     }

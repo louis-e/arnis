@@ -341,15 +341,9 @@ pub fn set_void_generator_in_level_dat(world_path: &Path) -> Result<(), String> 
 fn apply_void_generator(data: &mut HashMap<String, Value>) {
     if let Some(Value::Compound(ref mut wgs)) = data.get_mut("WorldGenSettings") {
         if let Some(Value::Compound(ref mut dims)) = wgs.get_mut("dimensions") {
-            if let Some(Value::Compound(ref mut overworld)) =
-                dims.get_mut("minecraft:overworld")
-            {
-                if let Some(Value::Compound(ref mut generator)) =
-                    overworld.get_mut("generator")
-                {
-                    if let Some(Value::Compound(ref mut settings)) =
-                        generator.get_mut("settings")
-                    {
+            if let Some(Value::Compound(ref mut overworld)) = dims.get_mut("minecraft:overworld") {
+                if let Some(Value::Compound(ref mut generator)) = overworld.get_mut("generator") {
+                    if let Some(Value::Compound(ref mut settings)) = generator.get_mut("settings") {
                         settings.insert(
                             "biome".to_string(),
                             Value::String("minecraft:the_void".to_string()),
