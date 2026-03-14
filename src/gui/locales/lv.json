@@ -21,7 +21,7 @@
   "create_world_first": "Vispirms izveidojiet pasauli!",
   "select_location_first": "Vispirms izvēlieties atrašanās vietu!",
   "area_too_large": "Šis apgabals ir pārāk liels un var pārsniegt tipiskos aprēķina ierobežojumus",
-  "area_hard_limit": "Šī teritorija pārsniedz maksimālo izmēra ierobežojumu un nevar tikt ģenerēta.",
+  "area_extreme": "Šis apgabals ir ārkārtīgi liels un var būt pārāk liels, lai to veiksmīgi ģenerētu.",
   "area_extensive": "Apgabals ir diezgan plašs un var prasīt ievērojamu laiku un resursus",
   "selection_confirmed": "Izvēle apstiprināta!",
   "select_area_prompt": "Izvēlieties apgabalu kartē, izmantojot rīkus.",

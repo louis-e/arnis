@@ -21,7 +21,7 @@
   "create_world_first": "Luo ensin maailma!",
   "select_location_first": "Valitse paikka ensin!",
   "area_too_large": "Tämä alue on todella iso ja voi ylittää tyypilliset laskentarajat.",
-  "area_hard_limit": "Tämä alue ylittää maksimikoon rajan eikä sitä voida luoda.",
+  "area_extreme": "Tämä alue on äärimmäisen suuri ja saattaa olla liian iso onnistunutta luomista varten.",
   "area_extensive": "Alue on aika laaja ja voi viedä pitkän ajan ja resursseja.",
   "selection_confirmed": "Valinta vahvistettu!",
   "select_area_prompt": "Valitse alue kartalta työkaluilla.",

@@ -21,7 +21,7 @@
   "create_world_first": "Créez d'abord un monde !",
   "select_location_first": "Sélectionnez d'abord une localisation !",
   "area_too_large": "Cette zone est très grande et pourrait dépasser les limites de calcul courantes.",
-  "area_hard_limit": "Cette zone dépasse la limite de taille maximale et ne peut pas être générée.",
+  "area_extreme": "Cette zone est extrêmement grande et risque d'être trop étendue pour être générée avec succès.",
   "area_extensive": "Cette zone est très étendue et pourrait nécessiter beaucoup de ressources et de temps.",
   "selection_confirmed": "Sélection confirmée !",
   "select_area_prompt": "Sélectionnez une zone sur la carte avec les outils.",

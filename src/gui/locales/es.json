@@ -21,7 +21,7 @@
   "create_world_first": "¡Crea un mundo primero!",
   "select_location_first": "¡Seleccione una ubicación primero!",
   "area_too_large": "Esta área es muy grande y podría exceder los límites típicos de computación.",
-  "area_hard_limit": "Esta área supera el límite máximo de tamaño y no puede ser generada.",
+  "area_extreme": "Esta área es extremadamente grande y es posible que sea demasiado extensa para generarse correctamente.",
   "area_extensive": "El área es bastante extensa y puede requerir mucho tiempo y recursos.",
   "selection_confirmed": "¡Selección confirmada!",
   "select_area_prompt": "Selecciona un área en el mapa usando las herramientas.",
