@@ -43,29 +43,37 @@ use crate::telemetry::{send_log, LogLevel};
 /// Walks the error chain to determine whether a save failure was caused by
 /// insufficient disk space.
 ///
-/// Checks `std::io::Error` at every level of the chain: first via
-/// `ErrorKind::StorageFull` (stable since Rust 1.83), then via raw OS codes
-/// (112 = Windows `ERROR_DISK_FULL`, 28 = Unix `ENOSPC`), and finally falls
-/// back to substring matching error Display strings for error types (e.g.
-/// fastanvil wrappers) that forward the OS message but aren't directly
-/// downcastable.
+/// Source chain entries (`err.source()` returns `&(dyn Error + 'static)`) are
+/// inspected via `io::Error` downcast, checking `ErrorKind::StorageFull` (stable
+/// since Rust 1.83) and raw OS error codes (112 = Windows `ERROR_DISK_FULL`,
+/// 28 = Unix `ENOSPC`). The top-level error and any entries that cannot be
+/// downcast to `io::Error` use Display substring matching as fallback (handles
+/// wrappers like `fastanvil::RegionError` that forward the OS message in their
+/// Display string but do not expose `io::Error` in the source chain).
 fn is_disk_full_error(err: &dyn std::error::Error) -> bool {
-    let check = |s: &str| -> bool {
-        // io::Error Display on Windows: "There is not enough space on the disk. (os error 112)"
-        // io::Error Display on Unix:    "No space left on device (os error 28)"
-        // fastanvil::RegionError wraps io::Error and forwards its Display
-        s.contains("os error 112")
-            || s.contains("os error 28")
-            || s.contains("StorageFull")
-    };
-
-    if check(&err.to_string()) {
+    // Fallback string check on the top-level error, which may not be downcastable
+    // without a 'static bound on the parameter.
+    let s = err.to_string();
+    if s.contains("os error 112") || s.contains("os error 28") || s.contains("StorageFull") {
         return true;
     }
 
+    // Walk the source chain. source() yields &(dyn Error + 'static), which
+    // allows downcasting to concrete types via the inherent downcast_ref method.
     let mut source = err.source();
     while let Some(e) = source {
-        if check(&e.to_string()) {
+        // Primary: downcast to io::Error for structured ErrorKind / OS code checks.
+        if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+            if io_err.kind() == std::io::ErrorKind::StorageFull {
+                return true;
+            }
+            if matches!(io_err.raw_os_error(), Some(112) | Some(28)) {
+                return true;
+            }
+        }
+        // Fallback: string check for wrappers that don't expose io::Error directly.
+        let s = e.to_string();
+        if s.contains("os error 112") || s.contains("os error 28") || s.contains("StorageFull") {
             return true;
         }
         source = e.source();
@@ -748,7 +756,12 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Saves all changes made to the world by writing to the appropriate format.
-    pub fn save(&mut self) {
+    ///
+    /// Returns `Err` on I/O failure so callers can abort the generation pipeline
+    /// cleanly. A user-facing error message is also emitted via `emit_gui_error`
+    /// before returning so the GUI is notified regardless of how the caller handles
+    /// the `Result`.
+    pub fn save(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!(
             "Generating world for: {}",
             match self.format {
@@ -775,10 +788,13 @@ impl<'a> WorldEditor<'a> {
                         send_log(LogLevel::Error, &user_msg);
                         emit_gui_error(&user_msg);
                     }
+                    return Err(e);
                 }
             }
             WorldFormat::BedrockMcWorld => self.save_bedrock(),
         }
+
+        Ok(())
     }
 
     #[allow(unreachable_code)]
