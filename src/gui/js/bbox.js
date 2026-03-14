@@ -462,7 +462,7 @@ $(document).ready(function () {
     $("#projection").val(currentproj);
 
     // Initialize map
-    map = L.map('map').setView([50.114768, 8.687322], 4);
+    map = L.map('map', { zoomControl: false }).setView([50.114768, 8.687322], 4);
 
     // Define available tile themes
     var tileThemes = {
@@ -1234,13 +1234,6 @@ $(document).ready(function () {
 
     map.on('move', function (e) {
         crosshair.setLatLng(map.getCenter());
-    });
-
-    // handle geolocation click events
-    $('#geolocation').click(function () {
-        map.locate({ setView: true, maxZoom: 8 });
-        $('#geolocation a').toggleClass('active');
-        $('#geolocation a').toggleClass('active', 350);
     });
 
 
