@@ -1,6 +1,7 @@
 // City Search Functionality
 var citySearch = {
     searchTimeout: null,
+    activeRequest: null,
     
     init: function() {
         this.bindEvents();
@@ -11,12 +12,14 @@ var citySearch = {
         
         // Search on button click
         $('#search-btn').on('click', function() {
+            clearTimeout(self.searchTimeout);
             self.performSearch();
         });
         
         // Search on Enter key
         $('#city-search').on('keypress', function(e) {
             if (e.which === 13) { // Enter key
+                clearTimeout(self.searchTimeout);
                 self.performSearch();
             }
         });
@@ -51,6 +54,12 @@ var citySearch = {
             return;
         }
         
+        // Abort any in-flight request so stale responses never overwrite fresh ones
+        if (self.activeRequest) {
+            self.activeRequest.abort();
+            self.activeRequest = null;
+        }
+        
         this.showLoading();
         
         // Use Nominatim geocoding service
@@ -64,16 +73,20 @@ var citySearch = {
             'accept-language': 'en'
         };
         
-        $.ajax({
+        self.activeRequest = $.ajax({
             url: url,
             data: params,
             method: 'GET',
             timeout: 10000,
             success: function(data) {
+                self.activeRequest = null;
                 self.displayResults(data);
             },
-            error: function() {
-                self.showError('Search failed. Please try again.');
+            error: function(xhr) {
+                self.activeRequest = null;
+                if (xhr.statusText !== 'abort') {
+                    self.showError('Search failed. Please try again.');
+                }
             }
         });
     },
