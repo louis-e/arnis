@@ -98,6 +98,13 @@ impl<'a> WorldEditor<'a> {
     /// Uses parallel processing with rayon for fast region saving.
     /// Returns an error if any region fails to save (e.g. disk full).
     pub(super) fn save_java(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Defensive: if all regions were flushed during ground generation, skip saving.
+        // This happens when incremental flushing completed successfully and all regions
+        // are already written to disk.
+        if self.world.regions.is_empty() {
+            return Ok(());
+        }
+
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
@@ -170,7 +177,8 @@ impl<'a> WorldEditor<'a> {
     ///
     /// Optimized for new world creation, writes chunks directly without reading existing data.
     /// This assumes we're creating a fresh world, not modifying an existing one.
-    fn save_single_region(
+    #[allow(dead_code)]
+    pub(super) fn save_single_region(
         &self,
         region_x: i32,
         region_z: i32,

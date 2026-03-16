@@ -734,6 +734,42 @@ impl<'a> WorldEditor<'a> {
         self.world.set_block_if_absent(x, absolute_y, z, block);
     }
 
+    /// Serialize a single region to disk and immediately drop it from memory.
+    ///
+    /// Called during ground generation once the chunk-ordered loop has moved past
+    /// all chunks belonging to a region, guaranteeing no further writes will target
+    /// it. This keeps peak RAM proportional to the current region column rather than
+    /// the entire world.
+    ///
+    /// If the region is not present in memory (already flushed or never written to)
+    /// this is a no-op. The region is removed from `self.world.regions` before
+    /// returning so that the later `save()` call skips it cleanly.
+    pub fn flush_region(
+        &mut self,
+        region_x: i32,
+        region_z: i32,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if let Some(mut region) = self.world.regions.remove(&(region_x, region_z)) {
+            // Compact before serializing. In the original code path, save() calls
+            // self.world.compact_sections() globally before save_java(). With
+            // incremental flushing, regions are serialized before save() is ever
+            // called, so compaction must happen here instead.
+            //
+            // Without this step, sections that should be Uniform (e.g. a column
+            // filled entirely with STONE by --fillground) are serialized as Full
+            // 4096-entry data arrays. This produces different NBT bytes than the
+            // original code (breaking MD5 equivalence) and results in Minecraft
+            // reading the chunks as empty air (empty world).
+            for chunk in region.chunks.values_mut() {
+                for section in chunk.sections.values_mut() {
+                    section.compact();
+                }
+            }
+            self.save_single_region(region_x, region_z, &region)?;
+        }
+        Ok(())
+    }
+
     /// Fills an entire column from y_min to y_max with one block type.
     ///
     /// Resolves region/chunk once instead of per-Y-level, making underground
