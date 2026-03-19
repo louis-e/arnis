@@ -105,7 +105,10 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             }
             Some(ref path) => {
                 if path.exists() && !path.is_dir() {
-                    return Err(format!("Path exists but is not a directory: {}", path.display()));
+                    return Err(format!(
+                        "Path exists but is not a directory: {}",
+                        path.display()
+                    ));
                 }
                 // If path doesn't exist, that's OK - create_new_world will create it
             }
@@ -254,13 +257,7 @@ mod tests {
         let tmpfile = tempfile::NamedTempFile::new().unwrap();
         let tmp_path = tmpfile.path().to_str().unwrap();
 
-        let cmd = [
-            "arnis",
-            "--output-dir",
-            tmp_path,
-            "--bbox",
-            "1,2,3,4",
-        ];
+        let cmd = ["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
         let args = Args::parse_from(cmd.iter());
         let result = validate_args(&args);
         assert!(result.is_err());
