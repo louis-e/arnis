@@ -27,6 +27,8 @@ pub struct GenerationOptions {
     pub format: WorldFormat,
     pub level_name: Option<String>,
     pub spawn_point: Option<(i32, i32)>,
+    pub luanti_game: Option<crate::luanti_block_map::LuantiGame>,
+    pub ground_level: i32,
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
@@ -42,14 +44,26 @@ pub fn generate_world_with_options(
     let world_format = options.format;
 
     // Create editor with appropriate format
-    let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
-        options.path,
-        &xzbbox,
-        llbbox,
-        options.format,
-        options.level_name.clone(),
-        options.spawn_point,
-    );
+    let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
+        WorldEditor::new_luanti(
+            options.path,
+            &xzbbox,
+            llbbox,
+            options.luanti_game.unwrap_or(crate::luanti_block_map::LuantiGame::MineTestGame),
+            options.level_name.clone(),
+            options.spawn_point,
+            options.ground_level,
+        )
+    } else {
+        WorldEditor::new_with_format_and_name(
+            options.path,
+            &xzbbox,
+            llbbox,
+            options.format,
+            options.level_name.clone(),
+            options.spawn_point,
+        )
+    };
     let ground = Arc::new(ground);
 
     println!("{} Processing data...", "[4/7]".bold());
