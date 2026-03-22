@@ -31,6 +31,18 @@ const STAIR_BLOCK_IDS: &[u8] = &[
     187, // NETHER_BRICK_STAIRS
 ];
 
+/// IDs of trapdoor blocks whose facing converts to wallmounted param2.
+const TRAPDOOR_BLOCK_IDS: &[u8] = &[
+    173, // OAK_TRAPDOOR
+    236, // OAK_TRAPDOOR_OPEN_NORTH (reused as generic oak trapdoor base)
+    237, // OAK_TRAPDOOR_OPEN_SOUTH
+    238, // OAK_TRAPDOOR_OPEN_EAST
+    239, // OAK_TRAPDOOR_OPEN_WEST
+    241, // DARK_OAK_TRAPDOOR
+    242, // SPRUCE_TRAPDOOR
+    243, // BIRCH_TRAPDOOR
+];
+
 /// Convert Minecraft block properties to Luanti param2 value.
 ///
 /// For blocks with a "facing" property, converts to Luanti's facedir,
@@ -43,6 +55,12 @@ const STAIR_BLOCK_IDS: &[u8] = &[
 /// - MC "west"  (-X)                → param2 = 3 (ascend toward -X)
 ///
 /// Upside-down stairs (half=top) add 20 to the base facedir.
+///
+/// Open trapdoors use wallmounted param2:
+/// - MC "north" → wallmounted 4 (+Z in Luanti)
+/// - MC "south" → wallmounted 5 (-Z in Luanti)
+/// - MC "east"  → wallmounted 2 (+X)
+/// - MC "west"  → wallmounted 3 (-X)
 fn properties_to_param2(block: Block, props: &Value) -> u8 {
     let compound = match props {
         Value::Compound(map) => map,
@@ -53,6 +71,23 @@ fn properties_to_param2(block: Block, props: &Value) -> u8 {
         Some(Value::String(s)) => s.as_str(),
         _ => return 0,
     };
+
+    // Open trapdoors use wallmounted param2 (different numbering from facedir)
+    if TRAPDOOR_BLOCK_IDS.contains(&block.id()) {
+        let is_open = matches!(
+            compound.get("open"),
+            Some(Value::String(s)) if s == "true"
+        );
+        if is_open {
+            return match facing {
+                "north" => 4, // +Z in Luanti
+                "south" => 5, // -Z in Luanti
+                "east" => 2,  // +X
+                "west" => 3,  // -X
+                _ => 4,
+            };
+        }
+    }
 
     let base = match facing {
         "north" => 0,
@@ -69,7 +104,11 @@ fn properties_to_param2(block: Block, props: &Value) -> u8 {
             Some(Value::String(s)) if s == "top"
         );
 
-    if upside_down { base + 20 } else { base }
+    if upside_down {
+        base + 20
+    } else {
+        base
+    }
 }
 
 /// 16×16×16 nodes per mapblock
@@ -110,7 +149,7 @@ fn serialize_mapblock(
 
     // Arrays for the 4096 nodes
     let mut param0 = vec![0u16; NODES_PER_BLOCK];
-    let param1 = vec![0u8; NODES_PER_BLOCK]; // Start dark; engine fix_light will set correct values
+    let mut param1 = vec![0u8; NODES_PER_BLOCK];
     let mut param2 = vec![0u8; NODES_PER_BLOCK];
 
     // SectionToModify uses (u8,u8,u8) get_block returning Option<Block>
@@ -137,15 +176,20 @@ fn serialize_mapblock(
 
                 param0[serial_idx] = local_id;
 
+                // Set lighting: air blocks get full sunlight
+                if block == AIR {
+                    param1[serial_idx] = 15; // Full sunlight (lower nibble)
+                }
+
                 // Convert Minecraft block properties to Luanti param2
                 // Properties index uses internal coordinates (YZX order)
-                let props_idx = crate::world_editor::common::SectionToModify::index(x, y, internal_z);
+                let props_idx =
+                    crate::world_editor::common::SectionToModify::index(x, y, internal_z);
                 param2[serial_idx] = if let Some(props) = section.properties.get(&props_idx) {
                     properties_to_param2(block, props)
                 } else {
                     node.param2
                 };
-
             }
         }
     }
@@ -153,13 +197,16 @@ fn serialize_mapblock(
     // Build the uncompressed mapblock buffer (everything after the version byte)
     let mut buf: Vec<u8> = Vec::with_capacity(16384);
 
-    // flags: day_night_differs=1, generated=1
-    let flags: u8 = 0x02 | 0x08;
+    // flags: is_underground (blocks below y=-1), day_night_differs, generated
+    let mut flags: u8 = 0x02 | 0x08; // day_night_differs + generated
+    if block_y < -1 {
+        flags |= 0x01; // is_underground
+    }
     buf.push(flags);
 
-    // lighting_complete: set to 0 so the engine recomputes lighting at all
-    // block boundaries, giving proper sunlight propagation and shadows.
-    buf.extend_from_slice(&0x0000u16.to_be_bytes());
+    // lighting_complete: upper 4 "nothing" bits must always be set per spec;
+    // lower 12 boundary flags cleared = engine recalculates boundary lighting.
+    buf.extend_from_slice(&0xF000u16.to_be_bytes());
 
     // timestamp
     buf.extend_from_slice(&0xFFFFFFFFu32.to_be_bytes());
@@ -221,9 +268,18 @@ fn find_safe_spawn(
     use crate::block_definitions::*;
     // Blocks to avoid spawning on (trees, leaves, vegetation)
     let non_ground = [
-        OAK_LOG, OAK_LEAVES, BIRCH_LOG, BIRCH_LEAVES,
-        DARK_OAK_LOG, DARK_OAK_LEAVES, JUNGLE_LOG, JUNGLE_LEAVES,
-        ACACIA_LOG, ACACIA_LEAVES, SPRUCE_LOG, SPRUCE_LEAVES,
+        OAK_LOG,
+        OAK_LEAVES,
+        BIRCH_LOG,
+        BIRCH_LEAVES,
+        DARK_OAK_LOG,
+        DARK_OAK_LEAVES,
+        JUNGLE_LOG,
+        JUNGLE_LEAVES,
+        ACACIA_LOG,
+        ACACIA_LEAVES,
+        SPRUCE_LOG,
+        SPRUCE_LEAVES,
     ];
 
     // Scan range: from ground_level up to ground_level + 400 to cover elevation
@@ -250,8 +306,12 @@ fn find_safe_spawn(
                         // Found solid ground — check air above
                         let above1 = world.get_block(x, y + 1, z);
                         let above2 = world.get_block(x, y + 2, z);
-                        if (above1.is_none() || above1 == Some(AIR) || non_ground.contains(&above1.unwrap()))
-                            && (above2.is_none() || above2 == Some(AIR) || non_ground.contains(&above2.unwrap()))
+                        if (above1.is_none()
+                            || above1 == Some(AIR)
+                            || non_ground.contains(&above1.unwrap()))
+                            && (above2.is_none()
+                                || above2 == Some(AIR)
+                                || non_ground.contains(&above2.unwrap()))
                         {
                             return (x, y + 1, z);
                         }
@@ -290,8 +350,7 @@ pub fn save_luanti_world(
         let cz = (xzbbox.min_z() + xzbbox.max_z()) / 2;
         (cx, cz)
     };
-    let (spawn_x, spawn_y, spawn_z) =
-        find_safe_spawn(world, base_x, base_z, ground_level);
+    let (spawn_x, spawn_y, spawn_z) = find_safe_spawn(world, base_x, base_z, ground_level);
 
     // Convert spawn Z from internal (Z+ = South) to Luanti (Z+ = North)
     let spawn_z = -spawn_z - 1;
@@ -329,7 +388,23 @@ pub fn save_luanti_world(
             }
         }
     }
-    write_worldmod(world_dir, spawn_x, spawn_y, spawn_z, game, min_x, min_y, min_z, max_x, max_y, max_z)?;
+    // Extend fix_light area 32 nodes (2 mapblocks) above the highest content
+    // so the engine can propagate sunlight down from the sky
+    let fix_max_y = max_y + 32;
+
+    write_worldmod(
+        world_dir, spawn_x, spawn_y, spawn_z, game, min_x, min_y, min_z, max_x, fix_max_y, max_z,
+    )?;
+
+    // Remove stale mod storage so fix_light runs again on regenerated worlds
+    let mod_storage_sqlite = world_dir.join("mod_storage.sqlite");
+    if mod_storage_sqlite.exists() {
+        let _ = fs::remove_file(&mod_storage_sqlite);
+    }
+    // Also remove any WAL/journal files for mod_storage
+    let _ = fs::remove_file(world_dir.join("mod_storage.sqlite-wal"));
+    let _ = fs::remove_file(world_dir.join("mod_storage.sqlite-journal"));
+    let _ = fs::remove_file(world_dir.join("mod_storage.sqlite-shm"));
 
     // Write map.sqlite
     write_map_database(world, world_dir, game)?;
@@ -364,7 +439,11 @@ fn write_world_mt(
     writeln!(f, "creative_mode = true")?;
     writeln!(f, "enable_damage = false")?;
     writeln!(f, "server_announce = false")?;
-    writeln!(f, "static_spawnpoint = {}, {}, {}", spawn_x, spawn_y, spawn_z)?;
+    writeln!(
+        f,
+        "static_spawnpoint = {}, {}, {}",
+        spawn_x, spawn_y, spawn_z
+    )?;
     Ok(())
 }
 
@@ -384,9 +463,7 @@ fn write_map_meta(
     Ok(())
 }
 
-fn write_env_meta(
-    world_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn write_env_meta(world_dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut f = fs::File::create(world_dir.join("env_meta.txt"))?;
     writeln!(f, "game_time = 0")?;
     writeln!(f, "time_of_day = 6000")?;
@@ -413,7 +490,10 @@ fn write_worldmod(
     // Write mod.conf (optional_depends on mcl_spawn so we load after Mineclonia's spawn)
     let mut mc = fs::File::create(mod_dir.join("mod.conf"))?;
     writeln!(mc, "name = arnis_mapgen")?;
-    writeln!(mc, "description = Arnis world configuration (singlenode mapgen + spawn)")?;
+    writeln!(
+        mc,
+        "description = Arnis world configuration (singlenode mapgen + spawn)"
+    )?;
     writeln!(mc, "optional_depends = mcl_spawn")?;
 
     if game == LuantiGame::Mineclonia {
@@ -429,10 +509,17 @@ fn write_worldmod(
         "minetest.set_mapgen_setting(\"mg_name\", \"singlenode\", true)"
     )?;
     writeln!(f)?;
-    writeln!(f, "local SPAWN = {{x={}, y={}, z={}}}", spawn_x, spawn_y, spawn_z)?;
+    writeln!(
+        f,
+        "local SPAWN = {{x={}, y={}, z={}}}",
+        spawn_x, spawn_y, spawn_z
+    )?;
     writeln!(f)?;
     writeln!(f, "-- Teleport player to our spawn after a short delay")?;
-    writeln!(f, "-- (overrides game-specific spawn handlers like Mineclonia's)")?;
+    writeln!(
+        f,
+        "-- (overrides game-specific spawn handlers like Mineclonia's)"
+    )?;
     writeln!(f, "minetest.register_on_joinplayer(function(player)")?;
     writeln!(f, "    minetest.after(0.5, function()")?;
     writeln!(f, "        if player:is_player() then")?;
@@ -451,23 +538,93 @@ fn write_worldmod(
     writeln!(f, "end)")?;
     writeln!(f)?;
     writeln!(f, "-- Fix lighting on first load")?;
-    writeln!(f, "local AREA_MIN = {{x={}, y={}, z={}}}", area_min_x, area_min_y, area_min_z)?;
-    writeln!(f, "local AREA_MAX = {{x={}, y={}, z={}}}", area_max_x, area_max_y, area_max_z)?;
+    writeln!(
+        f,
+        "local AREA_MIN = {{x={}, y={}, z={}}}",
+        area_min_x, area_min_y, area_min_z
+    )?;
+    writeln!(
+        f,
+        "local AREA_MAX = {{x={}, y={}, z={}}}",
+        area_max_x, area_max_y, area_max_z
+    )?;
     writeln!(f, "local storage = minetest.get_mod_storage()")?;
     writeln!(f, "minetest.register_on_joinplayer(function(player)")?;
-    writeln!(f, "    if storage:get_string(\"lighting_fixed\") ~= \"true\" then")?;
-    writeln!(f, "        minetest.chat_send_all(\"Loading map and fixing lighting...\")")?;
+    writeln!(
+        f,
+        "    if storage:get_string(\"lighting_fixed\") ~= \"true\" then"
+    )?;
+    writeln!(
+        f,
+        "        minetest.chat_send_all(\"Loading map and fixing lighting...\")"
+    )?;
     writeln!(f, "        minetest.emerge_area(AREA_MIN, AREA_MAX, function(blockpos, action, calls_remaining)")?;
     writeln!(f, "            if calls_remaining == 0 then")?;
     writeln!(f, "                minetest.fix_light(AREA_MIN, AREA_MAX)")?;
-    writeln!(f, "                storage:set_string(\"lighting_fixed\", \"true\")")?;
-    writeln!(f, "                minetest.chat_send_all(\"Lighting recalculated.\")")?;
+    writeln!(
+        f,
+        "                storage:set_string(\"lighting_fixed\", \"true\")"
+    )?;
+    writeln!(
+        f,
+        "                minetest.chat_send_all(\"Lighting recalculated.\")"
+    )?;
     writeln!(f, "            end")?;
     writeln!(f, "        end)")?;
     writeln!(f, "    end")?;
     writeln!(f, "end)")?;
 
     Ok(())
+}
+
+/// Serialize an air-only mapblock with full sunlight.
+/// Used to place sky blocks above the world so the engine can propagate sun downward.
+fn serialize_air_mapblock(game: LuantiGame) -> Vec<u8> {
+    let air_name = to_luanti_node(AIR, game).name;
+
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+
+    // flags: day_night_differs + generated (not underground)
+    buf.push(0x02 | 0x08);
+    // lighting_complete: upper 4 "nothing" bits set, boundary flags cleared
+    buf.extend_from_slice(&0xF000u16.to_be_bytes());
+    // timestamp
+    buf.extend_from_slice(&0xFFFFFFFFu32.to_be_bytes());
+
+    // name-id mapping: only air (ID 0)
+    buf.push(0); // version
+    buf.extend_from_slice(&1u16.to_be_bytes()); // 1 type
+    buf.extend_from_slice(&0u16.to_be_bytes()); // id = 0
+    buf.extend_from_slice(&(air_name.len() as u16).to_be_bytes());
+    buf.extend_from_slice(air_name.as_bytes());
+
+    // content_width, params_width
+    buf.push(2);
+    buf.push(2);
+
+    // param0: all zeros (air = ID 0)
+    buf.extend_from_slice(&[0u8; NODES_PER_BLOCK * 2]);
+    // param1: all 15 (full sunlight)
+    buf.extend_from_slice(&[15u8; NODES_PER_BLOCK]);
+    // param2: all zeros
+    buf.extend_from_slice(&[0u8; NODES_PER_BLOCK]);
+
+    // Node metadata: empty
+    buf.push(2);
+    buf.extend_from_slice(&0u16.to_be_bytes());
+    // Static objects: empty
+    buf.push(0);
+    buf.extend_from_slice(&0u16.to_be_bytes());
+    // Node timers: empty
+    buf.push(10);
+    buf.extend_from_slice(&0u16.to_be_bytes());
+
+    // Compress with zstd, prepend version byte
+    let compressed = zstd::bulk::compress(&buf, 3).expect("zstd compression failed");
+    let mut blob = Vec::with_capacity(1 + compressed.len());
+    blob.push(MAP_FORMAT_VERSION);
+    blob.extend_from_slice(&compressed);
+    blob
 }
 
 fn write_map_database(
@@ -500,6 +657,13 @@ fn write_map_database(
     let mut block_entries: Vec<(i32, i32, i32, &crate::world_editor::common::SectionToModify)> =
         Vec::new();
 
+    // Track XZ extents and max Y to generate air mapblocks above
+    let mut mb_min_x = i32::MAX;
+    let mut mb_max_x = i32::MIN;
+    let mut mb_min_z = i32::MAX;
+    let mut mb_max_z = i32::MIN;
+    let mut mb_max_y = i32::MIN;
+
     for (&(region_x, region_z), region) in &world.regions {
         for (&(chunk_x, chunk_z), chunk) in &region.chunks {
             for (&section_y, section) in &chunk.sections {
@@ -511,6 +675,11 @@ fn write_map_database(
                 let mb_z = -orig_z - 1;
                 let mb_y = section_y as i32;
                 block_entries.push((mb_x, mb_y, mb_z, section));
+                mb_min_x = mb_min_x.min(mb_x);
+                mb_max_x = mb_max_x.max(mb_x);
+                mb_min_z = mb_min_z.min(mb_z);
+                mb_max_z = mb_max_z.max(mb_z);
+                mb_max_y = mb_max_y.max(mb_y);
             }
         }
     }
@@ -526,6 +695,19 @@ fn write_map_database(
         .map(|&(bx, by, bz, section)| serialize_mapblock(bx, by, bz, section, game))
         .collect();
 
+    // Generate air-only mapblocks above the world (2 extra layers) so the engine
+    // can propagate sunlight down into the content blocks.
+    let air_blob = serialize_air_mapblock(game);
+    let mut air_blocks: Vec<(i64, Vec<u8>)> = Vec::new();
+    for extra_y in 1..=2 {
+        let ay = mb_max_y + extra_y;
+        for ax in mb_min_x..=mb_max_x {
+            for az in mb_min_z..=mb_max_z {
+                air_blocks.push((encode_block_pos(ax, ay, az), air_blob.clone()));
+            }
+        }
+    }
+
     // Insert all serialized blocks into SQLite (must be sequential)
     conn.execute_batch("BEGIN TRANSACTION")?;
     {
@@ -533,12 +715,17 @@ fn write_map_database(
         for (pos, data) in &serialized {
             stmt.execute(rusqlite::params![pos, data])?;
         }
+        for (pos, data) in &air_blocks {
+            stmt.execute(rusqlite::params![pos, data])?;
+        }
     }
     conn.execute_batch("COMMIT")?;
 
     println!(
-        "  Wrote {} mapblocks to map.sqlite",
-        serialized.len().to_string().bold()
+        "  Wrote {} mapblocks to map.sqlite ({} content + {} air)",
+        serialized.len() + air_blocks.len(),
+        serialized.len(),
+        air_blocks.len(),
     );
 
     Ok(())
