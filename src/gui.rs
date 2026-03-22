@@ -768,7 +768,7 @@ fn gui_start_generation(
             let world_path = PathBuf::from(&selected_world);
 
             // Determine world format from UI selection first (needed for session lock decision)
-            
+
             let luanti_game = if world_format.contains("mineclonia") {
                 Some(crate::luanti_block_map::LuantiGame::Mineclonia)
             } else if world_format.starts_with("luanti") {
@@ -855,9 +855,9 @@ fn gui_start_generation(
                 }
                 WorldFormat::LuantiWorld => {
                     // Luanti: create world directory in Minetest worlds folder
-                    let worlds_dir = dirs::data_dir()
+                    let worlds_dir = dirs::home_dir()
                         .unwrap_or_else(|| PathBuf::from("."))
-                        .join("minetest")
+                        .join(".minetest")
                         .join("worlds");
                     let _ = std::fs::create_dir_all(&worlds_dir);
                     let mut counter = 1;
@@ -921,7 +921,9 @@ fn gui_start_generation(
                 bedrock: world_format == WorldFormat::BedrockMcWorld,
                 luanti: world_format == WorldFormat::LuantiWorld,
                 luanti_game: match luanti_game {
-                    Some(crate::luanti_block_map::LuantiGame::Mineclonia) => "mineclonia".to_string(),
+                    Some(crate::luanti_block_map::LuantiGame::Mineclonia) => {
+                        "mineclonia".to_string()
+                    }
                     _ => "minetest_game".to_string(),
                 },
                 downloader: "requests".to_string(),
