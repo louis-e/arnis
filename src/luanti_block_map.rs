@@ -19,6 +19,7 @@ pub enum LuantiGame {
 }
 
 impl LuantiGame {
+    #[allow(dead_code)]
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s {
             "minetest_game" | "minetest" => Ok(Self::MineTestGame),
@@ -33,7 +34,7 @@ impl LuantiGame {
     /// Returns the gameid string for world.mt
     pub fn game_id(&self) -> &'static str {
         match self {
-            Self::MineTestGame => "minetest_game",
+            Self::MineTestGame => "minetest",
             Self::Mineclonia => "mineclonia",
         }
     }
@@ -289,7 +290,7 @@ fn to_minetest_game_node(block: Block) -> LuantiNode {
         // 114: andesite_wall
         114 => "walls:cobble",
         // 115: stone_brick_wall
-        115 => "walls:stonebrick",
+        115 => "walls:cobble",
         // 116..=125: rail variants
         116..=125 => "carts:rail",
         // 126: coarse_dirt
@@ -417,7 +418,7 @@ fn to_minetest_game_node(block: Block) -> LuantiNode {
         // 207: green_concrete
         207 => "wool:dark_green",
         // 208: brick_wall
-        208 => "walls:stonebrick",
+        208 => "walls:cobble",
         // 209: redstone_block
         209 => "default:steelblock",
         // 210..=211: chain variants
@@ -470,16 +471,40 @@ fn to_minetest_game_node(block: Block) -> LuantiNode {
         234 => "default:glass",
         // 235: potted_poppy
         235 => "flowers:rose",
-        // 236..=239: oak_trapdoor variants
-        236..=239 => "doors:trapdoor",
+        // 236..=239: oak_trapdoor open variants (used as shutters)
+        // wallmounted: north=4(+Z), south=5(-Z), east=2(+X), west=3(-X)
+        236 => {
+            return LuantiNode {
+                name: "doors:trapdoor_open",
+                param2: 4,
+            }
+        }
+        237 => {
+            return LuantiNode {
+                name: "doors:trapdoor_open",
+                param2: 5,
+            }
+        }
+        238 => {
+            return LuantiNode {
+                name: "doors:trapdoor_open",
+                param2: 2,
+            }
+        }
+        239 => {
+            return LuantiNode {
+                name: "doors:trapdoor_open",
+                param2: 3,
+            }
+        }
         // 240: quartz_slab
         240 => "stairs:slab_sandstone",
         // 241: dark_oak_trapdoor
-        241 => "doors:trapdoor",
+        241 => "doors:trapdoor_open",
         // 242: spruce_trapdoor
-        242 => "doors:trapdoor",
+        242 => "doors:trapdoor_open",
         // 243: birch_trapdoor
-        243 => "doors:trapdoor",
+        243 => "doors:trapdoor_open",
         // 244: mud_brick_slab
         244 => "stairs:slab_stonebrick",
         // 245: brick_slab
@@ -703,11 +728,34 @@ fn to_mineclonia_node(block: Block) -> LuantiNode {
         233 => "mcl_core:glass_orange",
         234 => "mcl_core:glass_magenta",
         235 => "mcl_flowers:poppy",
-        236..=239 => "mcl_doors:trapdoor",
+        236 => {
+            return LuantiNode {
+                name: "mcl_doors:trapdoor_open",
+                param2: 4,
+            }
+        }
+        237 => {
+            return LuantiNode {
+                name: "mcl_doors:trapdoor_open",
+                param2: 5,
+            }
+        }
+        238 => {
+            return LuantiNode {
+                name: "mcl_doors:trapdoor_open",
+                param2: 2,
+            }
+        }
+        239 => {
+            return LuantiNode {
+                name: "mcl_doors:trapdoor_open",
+                param2: 3,
+            }
+        }
         240 => "mcl_stairs:slab_quartz_block",
-        241 => "mcl_doors:dark_oak_trapdoor",
-        242 => "mcl_doors:spruce_trapdoor",
-        243 => "mcl_doors:birch_trapdoor",
+        241 => "mcl_doors:dark_oak_trapdoor_open",
+        242 => "mcl_doors:spruce_trapdoor_open",
+        243 => "mcl_doors:birch_trapdoor_open",
         244 => "mcl_stairs:slab_mud_brick",
         245 => "mcl_stairs:slab_brick_block",
         246 => "mcl_flowers:tulip_red",
