@@ -128,7 +128,7 @@ fn run_cli() {
         let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
         (output_path, Some(lvl_name))
     } else if args.luanti {
-        // Luanti: create world directory in the output path  
+        // Luanti: create world directory in the output path
         let base_dir = args.path.clone().unwrap();
         // Find a unique world name
         let mut counter = 1;
