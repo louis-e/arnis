@@ -121,11 +121,11 @@ pub fn fetch_data_from_overpass(
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
-        //"https://overpass.kumi.systems/api/interpreter", // This server is not reliable anymore
-        //"https://overpass.private.coffee/api/interpreter", // This server is not reliable anymore
     ];
-    let fallback_api_servers: Vec<&str> =
-        vec!["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+    let fallback_api_servers: Vec<&str> = vec![
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ];
     let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
 
     // Generate Overpass API query for bounding box
