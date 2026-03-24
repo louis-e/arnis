@@ -18,6 +18,7 @@ use std::time::Duration;
 fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(360))
+        .user_agent(format!("arnis/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -253,11 +254,14 @@ pub fn fetch_data_from_overpass(
 
 /// Fetches a short area name using Nominatim for the given lat/lon
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(format!("arnis/{}", env!("CARGO_PKG_VERSION")))
+        .build()?;
 
     let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
 
-    let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
+    let resp = client.get(&url).send()?;
 
     if !resp.status().is_success() {
         return Ok(None);
