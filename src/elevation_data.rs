@@ -322,9 +322,8 @@ pub fn fetch_elevation_data(
 
     // Create a shared HTTP client for connection pooling
     let client = reqwest::blocking::Client::builder()
-        .user_agent(format!("arnis/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| e.to_string())?;
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .build()?;
 
     // Download tiles in parallel with limited concurrency to be respectful to AWS
     let num_tiles = tiles.len();

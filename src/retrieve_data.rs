@@ -18,7 +18,7 @@ use std::time::Duration;
 fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(360))
-        .user_agent(format!("arnis/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -121,11 +121,11 @@ pub fn fetch_data_from_overpass(
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
-        //"https://overpass.kumi.systems/api/interpreter", // This server is not reliable anymore
-        //"https://overpass.private.coffee/api/interpreter", // This server is not reliable anymore
     ];
-    let fallback_api_servers: Vec<&str> =
-        vec!["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+    let fallback_api_servers: Vec<&str> = vec![
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ];
     let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
 
     // Generate Overpass API query for bounding box
@@ -256,7 +256,7 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
-        .user_agent(format!("arnis/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
