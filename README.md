@@ -10,7 +10,7 @@ Generate your hometown, big cities, and natural landscapes with ease!
 _**Want to generate on mobile or want larger maps?** [MapSmith](https://arnismc.com/mapsmith/) generates worlds in your browser, no install required._
 
 ![Minecraft Preview](assets/git/preview.jpg)
-<i>This Github page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
+<i>This GitHub page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
 
 ## :keyboard: Usage
 <img width="60%" src="assets/git/gui.png"><br>
