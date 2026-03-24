@@ -7,7 +7,7 @@ Arnis creates complex and accurate Minecraft Java Edition (1.17+) and Bedrock Ed
 This free and open source project is designed to handle large-scale geographic data from the real world and generate detailed Minecraft worlds. The algorithm processes geospatial data from OpenStreetMap as well as elevation data to create an accurate Minecraft representation of terrain and architecture.
 Generate your hometown, big cities, and natural landscapes with ease!
 
-_**Want to generate on mobile or want larger maps?** [MapSmith](https://arnismc.com/mapsmith/) generates worlds in your browser, no install required._
+_**Want mobile generation or larger map sizes?** [MapSmith](https://arnismc.com/mapsmith/) generates worlds in your browser, no install required._
 
 ![Minecraft Preview](assets/git/preview.jpg)
 <i>This GitHub page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
