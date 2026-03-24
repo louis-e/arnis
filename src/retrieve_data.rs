@@ -194,7 +194,9 @@ pub fn fetch_data_from_overpass(
                         return Err(error);
                     }
 
-                    eprintln!("Request failed: {error}");
+                    if download_method != "requests" {
+                        eprintln!("Request failed: {error}");
+                    }
                     println!("Switching to fallback server...");
                     url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
                     attempt += 1;
