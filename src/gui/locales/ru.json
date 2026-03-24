@@ -40,7 +40,7 @@
   "interior": "Генерация Интерьера",
   "roof": "Генерация Крыши",
   "fillground": "Заполнить Землю",
-  "city_boundaries": "Городской грунт",
+  "land_cover": "Земельный покров",
   "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",
   "save_path": "Путь сохранения"
 }

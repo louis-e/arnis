@@ -1,18 +1,20 @@
 use crate::args::Args;
 use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
+use crate::land_cover::{self, LandCoverData};
 use crate::progress::emit_gui_progress_update;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use image::{Rgb, RgbImage};
 
-/// Represents terrain data and elevation settings
+/// Represents terrain data, land cover classification, and elevation settings
 #[derive(Clone)]
 pub struct Ground {
     pub elevation_enabled: bool,
     ground_level: i32,
     elevation_data: Option<ElevationData>,
+    land_cover: Option<LandCoverData>,
 }
 
 impl Ground {
@@ -21,16 +23,44 @@ impl Ground {
             elevation_enabled: false,
             ground_level,
             elevation_data: None,
+            land_cover: None,
         }
     }
 
-    pub fn new_enabled(bbox: &LLBBox, scale: f64, ground_level: i32) -> Self {
+    pub fn new_enabled(
+        bbox: &LLBBox,
+        scale: f64,
+        ground_level: i32,
+        fetch_land_cover: bool,
+    ) -> Self {
         match fetch_elevation_data(bbox, scale, ground_level) {
-            Ok(elevation_data) => Self {
-                elevation_enabled: true,
-                ground_level,
-                elevation_data: Some(elevation_data),
-            },
+            Ok(elevation_data) => {
+                // Fetch land cover data with the same grid dimensions as elevation
+                let land_cover = if fetch_land_cover {
+                    let lc = land_cover::fetch_land_cover_data(
+                        bbox,
+                        elevation_data.width,
+                        elevation_data.height,
+                    );
+                    if lc.is_some() {
+                        println!("Land cover data loaded successfully");
+                    } else {
+                        eprintln!(
+                            "Warning: Land cover data unavailable, using default ground blocks"
+                        );
+                    }
+                    lc
+                } else {
+                    None
+                };
+
+                Self {
+                    elevation_enabled: true,
+                    ground_level,
+                    elevation_data: Some(elevation_data),
+                    land_cover,
+                }
+            }
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
                 #[cfg(feature = "gui")]
@@ -43,9 +73,55 @@ impl Ground {
                     elevation_enabled: false,
                     ground_level,
                     elevation_data: None,
+                    land_cover: None,
                 }
             }
         }
+    }
+
+    /// Returns whether land cover data is available
+    #[inline(always)]
+    pub fn has_land_cover(&self) -> bool {
+        self.land_cover.is_some()
+    }
+
+    /// Returns the ESA WorldCover land cover class at the given coordinates.
+    /// Returns 0 if land cover data is not available.
+    #[inline(always)]
+    pub fn cover_class(&self, coord: XZPoint) -> u8 {
+        if let Some(ref lc) = self.land_cover {
+            let x_ratio = (coord.x as f64 / lc.width as f64).clamp(0.0, 1.0);
+            let z_ratio = (coord.z as f64 / lc.height as f64).clamp(0.0, 1.0);
+            let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
+            let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
+            lc.grid[z][x]
+        } else {
+            0
+        }
+    }
+
+    /// Computes terrain slope at the given coordinates.
+    ///
+    /// Slope is the difference between the maximum and minimum elevation of
+    /// 4 cardinal neighbors sampled at a step distance. Higher values indicate
+    /// steeper terrain.
+    ///
+    /// Returns 0 if elevation data is not available.
+    #[inline(always)]
+    pub fn slope(&self, coord: XZPoint) -> i32 {
+        if !self.elevation_enabled {
+            return 0;
+        }
+
+        const STEP: i32 = 4;
+        let east = self.level(XZPoint::new(coord.x + STEP, coord.z));
+        let west = self.level(XZPoint::new(coord.x - STEP, coord.z));
+        let north = self.level(XZPoint::new(coord.x, coord.z - STEP));
+        let south = self.level(XZPoint::new(coord.x, coord.z + STEP));
+
+        let max_val = east.max(west).max(north).max(south);
+        let min_val = east.min(west).min(north).min(south);
+        max_val - min_val
     }
 
     /// Returns the ground level at the given coordinates
@@ -148,7 +224,8 @@ pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
         println!("{} Fetching elevation...", "[3/7]".bold());
         emit_gui_progress_update(14.0, "Fetching elevation...");
-        let ground = Ground::new_enabled(&args.bbox, args.scale, args.ground_level);
+        let ground =
+            Ground::new_enabled(&args.bbox, args.scale, args.ground_level, args.land_cover);
         if args.debug {
             ground.save_debug_image("elevation_debug");
         }

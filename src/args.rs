@@ -56,11 +56,12 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub fillground: bool,
 
-    /// Enable city ground generation (optional)
-    /// When enabled, detects building clusters and places stone ground in urban areas.
-    /// Isolated buildings in rural areas will keep grass around them.
-    #[arg(long, default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
-    pub city_boundaries: bool,
+    /// Enable land cover classification (optional)
+    /// When enabled, fetches ESA WorldCover satellite data to classify terrain
+    /// (forests, deserts, wetlands, built-up areas, etc.) and select appropriate
+    /// surface blocks. Requires --terrain to be enabled.
+    #[arg(long = "land-cover", alias = "city-boundaries", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub land_cover: bool,
 
     /// Enable debug mode (optional)
     #[arg(long)]
@@ -172,10 +173,10 @@ mod tests {
         assert!(!args.debug);
         assert!(!args.terrain);
         assert!(!args.bedrock);
-        // interior, roof, city_boundaries default to true
+        // interior, roof, land_cover default to true
         assert!(args.interior);
         assert!(args.roof);
-        assert!(args.city_boundaries);
+        assert!(args.land_cover);
     }
 
     #[test]
@@ -183,7 +184,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
-        // Test disabling interior/roof/city-boundaries with =false
+        // Test disabling interior/roof/land-cover with =false
         let cmd = [
             "arnis",
             "--output-dir",
@@ -192,12 +193,12 @@ mod tests {
             "1,2,3,4",
             "--interior=false",
             "--roof=false",
-            "--city-boundaries=false",
+            "--land-cover=false",
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(!args.interior);
         assert!(!args.roof);
-        assert!(!args.city_boundaries);
+        assert!(!args.land_cover);
 
         // Test enabling with bare flag (no value)
         let cmd = [
@@ -208,12 +209,24 @@ mod tests {
             "1,2,3,4",
             "--interior",
             "--roof",
-            "--city-boundaries",
+            "--land-cover",
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(args.interior);
         assert!(args.roof);
-        assert!(args.city_boundaries);
+        assert!(args.land_cover);
+
+        // Test backwards compatibility with old --city-boundaries alias
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--city-boundaries=false",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(!args.land_cover);
     }
 
     #[test]

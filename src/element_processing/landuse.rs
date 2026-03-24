@@ -41,7 +41,16 @@ pub fn generate_landuse(
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
         "industrial" => STONE, // Placeholder, will be randomized per-block
-        "military" => GRAY_CONCRETE,
+        "military" => {
+            let mil_choice = rng.random_range(0..100);
+            if mil_choice < 89 {
+                GRAY_CONCRETE
+            } else if mil_choice < 99 {
+                STONE_BRICKS // 10% stone bricks
+            } else {
+                COBBLESTONE // 1% cobblestone
+            }
+        }
         "railway" => GRAVEL,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else

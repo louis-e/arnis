@@ -734,6 +734,12 @@ impl<'a> WorldEditor<'a> {
         self.world.set_block_if_absent(x, absolute_y, z, block);
     }
 
+    /// Returns true if a non-AIR block exists at the given absolute coordinates.
+    #[inline]
+    pub fn block_exists_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
+        self.world.get_block(x, absolute_y, z).is_some()
+    }
+
     /// Fills an entire column from y_min to y_max with one block type.
     ///
     /// Resolves region/chunk once instead of per-Y-level, making underground

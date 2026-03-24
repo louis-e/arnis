@@ -40,7 +40,7 @@
   "interior": "内部生成",
   "roof": "屋顶生成",
   "fillground": "填充地面",
-  "city_boundaries": "城市地面",
+  "land_cover": "土地覆盖",
   "bedrock_auto_generated": "Bedrock 世界自动生成",
   "save_path": "存档路径"
 }

@@ -40,7 +40,7 @@
   "interior": "Sisätilan luonti",
   "roof": "Katon luonti",
   "fillground": "Täytä maa",
-  "city_boundaries": "Kaupungin maa",
+  "land_cover": "Maanpeite",
   "bedrock_auto_generated": "Bedrock-maailma luodaan automaattisesti",
   "save_path": "Tallennuspolku"
 }

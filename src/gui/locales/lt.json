@@ -40,7 +40,7 @@
   "interior": "Interjero generavimas",
   "roof": "Stogo generavimas",
   "fillground": "Užpildyti pagrindą",
-  "city_boundaries": "Miesto žemė",
+  "land_cover": "Žemės danga",
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
   "save_path": "Išsaugojimo kelias"
 }

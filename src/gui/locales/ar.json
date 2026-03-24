@@ -40,7 +40,7 @@
   "interior": "توليد الداخلية",
   "roof": "توليد السقف",
   "fillground": "ملء الأرض",
-  "city_boundaries": "أرضية المدينة",
+  "land_cover": "تصنيف الأرض",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "save_path": "مسار الحفظ"
 }

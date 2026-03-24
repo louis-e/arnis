@@ -40,7 +40,7 @@
   "interior": "Генерація інтер'єру",
   "roof": "Генерація даху",
   "fillground": "Заповнити землю",
-  "city_boundaries": "Міська земля",
+  "land_cover": "Земельне покриття",
   "bedrock_auto_generated": "Bedrock світ генерується автоматично",
   "save_path": "Шлях збереження"
 }
