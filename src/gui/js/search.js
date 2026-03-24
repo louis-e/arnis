@@ -102,6 +102,11 @@ var citySearch = {
     },
     
     hideResults: function() {
+        // Abort any in-flight request so a stale response doesn't re-show results
+        if (this.activeRequest) {
+            this.activeRequest.abort();
+            this.activeRequest = null;
+        }
         $('#search-results').hide();
     },
     

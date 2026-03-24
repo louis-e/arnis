@@ -450,11 +450,13 @@ pub fn fetch_elevation_data(
     let metres_per_tile_pixel: f64 = 2.0 * std::f64::consts::PI * 6_378_137.0
         / (2.0_f64.powi(zoom as i32) * 256.0)
         * lat_mid_rad.cos();
-    let native_resolution: f64 = metres_per_tile_pixel * scale;
-    let sigma_terrain: f64 = (native_resolution * 12.0).max(1.0e-6);
+    let blocks_per_tile_pixel: f64 = metres_per_tile_pixel * scale;
+    let sigma_terrain: f64 = (blocks_per_tile_pixel * 12.0).max(1.0e-6);
     // Takes whichever is larger: the grid-proportional value or the terrain floor.
     // For small areas sigma_terrain wins; for large areas sigma_from_grid wins.
-    let output_sigma: f64 = sigma_from_grid.max(sigma_terrain);
+    // Clamped to half the grid size: beyond that the kernel exceeds the grid and
+    // additional sigma has no visual effect, only wasted computation.
+    let output_sigma: f64 = sigma_from_grid.max(sigma_terrain).min(grid_size / 2.0);
 
     let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, output_sigma);
 
