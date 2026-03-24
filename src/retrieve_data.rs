@@ -35,12 +35,12 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
             } else {
                 let status = resp.status();
                 let user_msg = match status.as_u16() {
-                    429 => "Server rate limited. Please try again in a few minutes.".to_string(),
-                    403 => "Server overloaded, please try again.".to_string(),
+                    429 => "Rate limited. Try again later.".to_string(),
+                    403 => "Server overloaded. Try again.".to_string(),
                     500 | 502 | 503 | 504 => {
-                        "Server temporarily unavailable. Please try again later.".to_string()
+                        "Server unavailable. Try again.".to_string()
                     }
-                    _ => format!("Received response code: {status}"),
+                    _ => format!("Response code: {}", status.as_u16()),
                 };
                 eprintln!("{}", format!("Error! {user_msg}").red().bold());
                 Err(format!("Error! {user_msg}").into())

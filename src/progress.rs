@@ -49,8 +49,8 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
 }
 
 pub fn emit_gui_error(message: &str) {
-    let truncated_message = if message.len() > 60 {
-        &message[..60]
+    let truncated_message = if message.len() > 35 {
+        &message[..35]
     } else {
         message
     };
