@@ -41,7 +41,7 @@ This project is open source and welcomes contributions from everyone! Whether yo
 Command line Build: ```cargo run --no-default-features -- --terrain --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lat,min_lng,max_lat,max_lng"```<br>
 GUI Build: ```cargo run```<br>
 
-After your pull request was merged, I will take care of regularly creating update releases which will include your changes.
+After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --terrain --path=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`
 
