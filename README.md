@@ -30,7 +30,7 @@ Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/
 ## :trophy: Open Source
 #### Key objectives of this project
 - **Modularity**: Ensure that all components (e.g., data fetching, processing, and world generation) are cleanly separated into distinct modules for better maintainability and scalability.
-- **Performance Optimization**: We aim to maintain strong performance and fast world-generation process.
+- **Performance Optimization**: We aim to maintain strong performance and fast world generation.
 - **Comprehensive Documentation**: Detailed in-code documentation for a clear structure and logic.
 - **User-Friendly Experience**: Focus on making the project easy to use for end users.
 - **Cross-Platform Support**: We want this project to run smoothly on Windows, macOS, and Linux.
