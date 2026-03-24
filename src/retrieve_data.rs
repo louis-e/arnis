@@ -33,7 +33,17 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 }
                 Ok(text)
             } else {
-                Err(format!("Error! Received response code: {}", resp.status()).into())
+                let status = resp.status();
+                let user_msg = match status.as_u16() {
+                    429 => "Rate limited. Try again later.".to_string(),
+                    403 => "Server overloaded. Try again.".to_string(),
+                    500 | 502 | 503 | 504 => {
+                        "Server unavailable. Try again.".to_string()
+                    }
+                    _ => format!("Response code: {}", status.as_u16()),
+                };
+                eprintln!("{}", format!("Error! {user_msg}").red().bold());
+                Err(format!("Error! {user_msg}").into())
             }
         }
         Err(e) => {
@@ -184,7 +194,10 @@ pub fn fetch_data_from_overpass(
                         return Err(error);
                     }
 
-                    println!("Request failed. Switching to fallback url...");
+                    if download_method != "requests" {
+                        eprintln!("Request failed: {error}");
+                    }
+                    println!("Switching to fallback server...");
                     url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
                     attempt += 1;
                 }
