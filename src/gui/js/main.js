@@ -293,8 +293,16 @@ function initSettings() {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
 
-  // World format toggle (Java/Bedrock)
+  // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
+
+  // Save Luanti game selection changes
+  const luantiGameSelect = document.getElementById('luanti-game-select');
+  if (luantiGameSelect) {
+    luantiGameSelect.addEventListener('change', () => {
+      localStorage.setItem('arnis-luanti-game', luantiGameSelect.value);
+    });
+  }
 
   // Save path setting
   initSavePathSetting();
@@ -409,14 +417,23 @@ function initSettings() {
   window.closeLicense = closeLicense;
 }
 
-// World format selection (Java/Bedrock)
+// World format selection (Java/Bedrock/Luanti)
 let selectedWorldFormat = 'java'; // Default to Java
+
+const VALID_FORMATS = ['java', 'bedrock', 'luanti'];
 
 function initWorldFormatToggle() {
   // Load saved format preference
   const savedFormat = localStorage.getItem('arnis-world-format');
-  if (savedFormat && (savedFormat === 'java' || savedFormat === 'bedrock')) {
+  if (savedFormat && VALID_FORMATS.includes(savedFormat)) {
     selectedWorldFormat = savedFormat;
+  }
+  
+  // Load saved Luanti game preference
+  const savedGame = localStorage.getItem('arnis-luanti-game');
+  const gameSelect = document.getElementById('luanti-game-select');
+  if (savedGame && gameSelect) {
+    gameSelect.value = savedGame;
   }
   
   // Apply the saved selection to UI
@@ -424,22 +441,40 @@ function initWorldFormatToggle() {
 }
 
 function setWorldFormat(format) {
-  if (format !== 'java' && format !== 'bedrock') return;
+  if (!VALID_FORMATS.includes(format)) return;
   
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
   updateFormatToggleUI(format);
 }
 
+function getEffectiveWorldFormat() {
+  if (selectedWorldFormat === 'luanti') {
+    const gameSelect = document.getElementById('luanti-game-select');
+    const game = gameSelect ? gameSelect.value : 'minetest_game';
+    return game === 'mineclonia' ? 'luanti_mineclonia' : 'luanti';
+  }
+  return selectedWorldFormat;
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
+  const luantiBtn = document.getElementById('format-luanti');
   const chooseWorldBtn = document.getElementById('choose-world-btn');
   const selectedWorldText = document.getElementById('selected-world');
+  const luantiDropdown = document.getElementById('luanti-game-dropdown');
+  
+  // Reset all buttons
+  javaBtn.classList.remove('format-active');
+  bedrockBtn.classList.remove('format-active');
+  if (luantiBtn) luantiBtn.classList.remove('format-active');
+  
+  // Hide Luanti dropdown by default
+  if (luantiDropdown) luantiDropdown.style.display = 'none';
   
   if (format === 'java') {
     javaBtn.classList.add('format-active');
-    bedrockBtn.classList.remove('format-active');
     // Enable Create World button for Java
     if (chooseWorldBtn) {
       chooseWorldBtn.disabled = false;
@@ -452,8 +487,7 @@ function updateFormatToggleUI(format) {
       selectedWorldText.textContent = noWorldText;
       selectedWorldText.style.color = '#fecc44';
     }
-  } else {
-    javaBtn.classList.remove('format-active');
+  } else if (format === 'bedrock') {
     bedrockBtn.classList.add('format-active');
     // Disable Create World button for Bedrock
     if (chooseWorldBtn) {
@@ -466,6 +500,22 @@ function updateFormatToggleUI(format) {
     if (selectedWorldText) {
       const bedrockText = window.localization?.bedrock_auto_generated || 'Bedrock world is auto-generated';
       selectedWorldText.textContent = bedrockText;
+      selectedWorldText.style.color = '#fecc44';
+    }
+  } else if (format === 'luanti') {
+    if (luantiBtn) luantiBtn.classList.add('format-active');
+    // Show Luanti game dropdown
+    if (luantiDropdown) luantiDropdown.style.display = 'block';
+    // Disable Create World button for Luanti (auto-generated)
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = true;
+      chooseWorldBtn.style.opacity = '0.5';
+      chooseWorldBtn.style.cursor = 'not-allowed';
+    }
+    // Clear world selection and show Luanti info message
+    worldPath = "";
+    if (selectedWorldText) {
+      selectedWorldText.textContent = 'Luanti world is auto-generated';
       selectedWorldText.style.color = '#fecc44';
     }
   }
@@ -786,8 +836,8 @@ function displayBboxInfoText(bboxText) {
 let worldPath = "";
 
 async function createWorld() {
-  // Don't create if format is Bedrock (button should be disabled)
-  if (selectedWorldFormat === 'bedrock') return;
+  // Don't create if format is Bedrock or Luanti (button should be disabled)
+  if (selectedWorldFormat === 'bedrock' || selectedWorldFormat === 'luanti') return;
 
   // Don't create if save path hasn't been initialized
   if (!savePath) {
@@ -907,7 +957,7 @@ async function startGeneration() {
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: selectedWorldFormat
+        worldFormat: getEffectiveWorldFormat()
     });
 
     console.log("Generation process started.");

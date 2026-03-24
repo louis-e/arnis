@@ -322,6 +322,31 @@ button:hover {
   background-color: var(--primary-accent-dark);
 }
 
+/* Luanti Game Dropdown */
+.luanti-game-dropdown {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.luanti-game-dropdown select {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 0.95em;
+  border: 1px solid #555;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.luanti-game-dropdown select:hover {
+  border-color: var(--primary-accent);
+}
+
+.luanti-game-dropdown select:focus {
+  border-color: var(--primary-accent);
+}
+
 /* Customization Settings */
 .modal {
   position: fixed;
