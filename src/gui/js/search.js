@@ -73,18 +73,20 @@ var citySearch = {
             'accept-language': 'en'
         };
         
-        self.activeRequest = $.ajax({
+        var request = self.activeRequest = $.ajax({
             url: url,
             data: params,
             method: 'GET',
             timeout: 10000,
             success: function(data) {
+                if (self.activeRequest !== request) return;
                 self.activeRequest = null;
                 self.displayResults(data);
             },
-            error: function(xhr) {
+            error: function(jqXHR, textStatus) {
+                if (self.activeRequest !== request) return;
                 self.activeRequest = null;
-                if (xhr.statusText !== 'abort') {
+                if (textStatus !== 'abort') {
                     self.showError('Search failed. Please try again.');
                 }
             }

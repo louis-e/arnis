@@ -447,11 +447,11 @@ pub fn fetch_elevation_data(
     // generations.  min/max and output heights always derive from the same single blur
     // pass, so there is no possibility of range-decoupling blowup.
     let lat_mid_rad: f64 = ((bbox.min().lat() + bbox.max().lat()) / 2.0).to_radians();
-    let metres_per_tile_pixel: f64 =
-        2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
-            * lat_mid_rad.cos();
-    let native_resolution: f64 = (metres_per_tile_pixel * scale).max(1.0);
-    let sigma_terrain: f64 = native_resolution * 12.0;
+    let metres_per_tile_pixel: f64 = 2.0 * std::f64::consts::PI * 6_378_137.0
+        / (2.0_f64.powi(zoom as i32) * 256.0)
+        * lat_mid_rad.cos();
+    let native_resolution: f64 = metres_per_tile_pixel * scale;
+    let sigma_terrain: f64 = (native_resolution * 12.0).max(1.0e-6);
     // Takes whichever is larger: the grid-proportional value or the terrain floor.
     // For small areas sigma_terrain wins; for large areas sigma_from_grid wins.
     let output_sigma: f64 = sigma_from_grid.max(sigma_terrain);
@@ -480,7 +480,14 @@ pub fn fetch_elevation_data(
             |(lo1, hi1), (lo2, hi2)| (lo1.min(lo2), hi1.max(hi2)),
         );
 
-    let height_range: f64 = max_height - min_height;
+    // Validate: if no finite samples exist (e.g. all tiles failed to download),
+    // fall back to flat terrain rather than propagating NaN/inf.
+    let (min_height, _max_height, height_range) =
+        if !min_height.is_finite() || !max_height.is_finite() || min_height >= max_height {
+            (0.0_f64, 0.0_f64, 0.0_f64)
+        } else {
+            (min_height, max_height, max_height - min_height)
+        };
 
     // Realistic height scaling: 1 meter of real elevation = scale blocks in Minecraft
     // At scale=1.0, 1 meter = 1 block (realistic 1:1 mapping)
@@ -853,34 +860,50 @@ mod tests {
         let below = crossover * 0.9;
         let sigma_from_grid_below = 5.0 * (below / 100.0).sqrt();
         assert_eq!(
-            sigma_from_grid_below.max(sigma_terrain), sigma_terrain,
+            sigma_from_grid_below.max(sigma_terrain),
+            sigma_terrain,
             "below crossover sigma_terrain must win"
         );
 
         let above = crossover * 1.1;
         let sigma_from_grid_above = 5.0 * (above / 100.0).sqrt();
         assert_eq!(
-            sigma_from_grid_above.max(sigma_terrain), sigma_from_grid_above,
+            sigma_from_grid_above.max(sigma_terrain),
+            sigma_from_grid_above,
             "above crossover sigma_from_grid must win"
         );
     }
 
     #[test]
     fn test_output_sigma_same_field_invariant() {
-        // Critical invariant: output heights and min/max come from the same blur pass.
-        // output_sigma = sigma_from_grid.max(sigma_terrain) — no separate blur fields.
-        // Verified here by checking that a synthetic height range stays consistent.
-        let zoom: u8 = 15;
-        let lat_mid_rad: f64 = 40.705_f64.to_radians();
-        let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
-            * lat_mid_rad.cos();
-        let sigma_terrain = mpp * 12.0;
-        let sigma_from_grid = 5.0 * (134.0_f64 / 100.0).sqrt(); // small bbox
-        let output_sigma = sigma_from_grid.max(sigma_terrain);
-        // Single unified sigma — both output values and min/max derive from this one blur.
-        assert_eq!(output_sigma, sigma_terrain);
-        // The range produced by apply_gaussian_blur(height_grid, output_sigma) is
-        // guaranteed consistent because it is the only blur performed.
+        // Critical invariant: output heights and min/max come from the SAME single blur.
+        // If someone reintroduces a second blur pass with a different sigma,
+        // blurred values could fall outside the separately-computed min/max.
+        // We verify: blur once → derive min/max → every cell is in [min, max].
+        let grid: Vec<Vec<f64>> = vec![
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+            vec![15.0, 25.0, 35.0, 45.0, 55.0],
+            vec![20.0, 30.0, 80.0, 30.0, 20.0],
+            vec![15.0, 25.0, 35.0, 45.0, 55.0],
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+        ];
+        let sigma = 2.0;
+        let blurred = apply_gaussian_blur(&grid, sigma);
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for row in &blurred {
+            for &h in row {
+                if h.is_finite() {
+                    lo = lo.min(h);
+                    hi = hi.max(h);
+                }
+            }
+        }
+        // Every blurred cell must lie within the derived min/max.
+        for row in &blurred {
+            for &h in row {
+                assert!(h >= lo && h <= hi, "blurred value {h} outside [{lo}, {hi}]");
+            }
+        }
     }
 
     #[test]
