@@ -60,26 +60,6 @@ fn get_tile_cache_dir() -> PathBuf {
 pub fn cleanup_old_cached_tiles() {
     let tile_cache_dir = get_tile_cache_dir();
 
-    // Migration: remove the old CWD-relative cache directory from previous versions.
-    // Previous versions stored tiles in ./arnis-tile-cache (relative to CWD), which
-    // caused failures when the working directory lacked write permissions.
-    // This runs before the early return so it executes even on first startup
-    // when the new OS cache directory doesn't exist yet.
-    let legacy_cache_dir = PathBuf::from(format!("./{TILE_CACHE_DIR_NAME}"));
-    if legacy_cache_dir.is_dir() && legacy_cache_dir != tile_cache_dir {
-        if let Err(e) = std::fs::remove_dir_all(&legacy_cache_dir) {
-            eprintln!(
-                "Warning: Failed to remove legacy tile cache at {}: {e}",
-                legacy_cache_dir.display()
-            );
-        } else {
-            println!(
-                "Migrated tile cache: removed legacy {}",
-                legacy_cache_dir.display()
-            );
-        }
-    }
-
     if !tile_cache_dir.exists() || !tile_cache_dir.is_dir() {
         return; // Nothing to clean up
     }
