@@ -206,8 +206,9 @@ fn download_tile_once(
     let response = client.get(url).send().map_err(|e| e.to_string())?;
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;
-    std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
+    // Validate the image BEFORE writing to cache to prevent caching invalid data
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+    std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
     Ok(img.to_rgb8())
 }
 
@@ -223,6 +224,19 @@ fn fetch_or_load_tile(
     tile_path: &Path,
 ) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
     if tile_path.exists() {
+        // Check file size first — valid Terrarium tiles are ~50-100KB.
+        // Files under 1000 bytes are almost certainly truncated (e.g. from a
+        // process interruption during a previous download).
+        let file_size = std::fs::metadata(tile_path).map(|m| m.len()).unwrap_or(0);
+        if file_size < 1000 {
+            eprintln!(
+                "Warning: Cached tile at {} is too small ({file_size} bytes). Re-downloading...",
+                tile_path.display(),
+            );
+            let _ = std::fs::remove_file(tile_path);
+            return download_tile(client, tile_x, tile_y, zoom, tile_path);
+        }
+
         // Try to load cached tile, but handle corruption gracefully
         match image::open(tile_path) {
             Ok(img) => {
