@@ -29,28 +29,14 @@ pub fn generate_landuse(
         "cemetery" => PODZOL,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
-        "residential" => {
-            let residential_tag = element.tags.get("residential").unwrap_or(&binding);
-            if residential_tag == "rural" {
-                GRASS_BLOCK
-            } else {
-                STONE_BRICKS // Placeholder, will be randomized per-block
-            }
-        }
-        "commercial" => SMOOTH_STONE, // Placeholder, will be randomized per-block
+        // residential and commercial are too broad, they cover entire zones including
+        // gardens, parks, and green spaces. ESA WorldCover handles built-up classification
+        // at 10m satellite resolution, which is far more precise.
+        "residential" | "commercial" => return,
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
         "industrial" => STONE, // Placeholder, will be randomized per-block
-        "military" => {
-            let mil_choice = rng.random_range(0..100);
-            if mil_choice < 89 {
-                GRAY_CONCRETE
-            } else if mil_choice < 99 {
-                STONE_BRICKS // 10% stone bricks
-            } else {
-                COBBLESTONE // 1% cobblestone
-            }
-        }
+        "military" => GRAY_CONCRETE, // Placeholder, will be randomized per-block
         "railway" => GRAVEL,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
@@ -94,31 +80,7 @@ pub fn generate_landuse(
 
     for (x, z) in floor_area {
         // Apply per-block randomness for certain landuse types
-        let actual_block = if landuse_tag == "residential" && block_type == STONE_BRICKS {
-            // Urban residential: mix of stone bricks, cracked stone bricks, stone, cobblestone
-            let random_value = rng.random_range(0..100);
-            if random_value < 72 {
-                STONE_BRICKS
-            } else if random_value < 87 {
-                CRACKED_STONE_BRICKS
-            } else if random_value < 92 {
-                STONE
-            } else {
-                COBBLESTONE
-            }
-        } else if landuse_tag == "commercial" {
-            // Commercial: mix of smooth stone, stone, cobblestone, stone bricks
-            let random_value = rng.random_range(0..100);
-            if random_value < 40 {
-                SMOOTH_STONE
-            } else if random_value < 70 {
-                STONE_BRICKS
-            } else if random_value < 90 {
-                STONE
-            } else {
-                COBBLESTONE
-            }
-        } else if landuse_tag == "industrial" {
+        let actual_block = if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone
             let random_value = rng.random_range(0..100);
             if random_value < 70 {
@@ -127,6 +89,16 @@ pub fn generate_landuse(
                 STONE_BRICKS
             } else {
                 SMOOTH_STONE
+            }
+        } else if landuse_tag == "military" {
+            // Military: primarily gray concrete, with some stone bricks and cobblestone
+            let random_value = rng.random_range(0..100);
+            if random_value < 89 {
+                GRAY_CONCRETE
+            } else if random_value < 99 {
+                STONE_BRICKS
+            } else {
+                COBBLESTONE
             }
         } else {
             block_type
@@ -444,7 +416,9 @@ pub fn generate_place(
     // Determine block type based on place tag
     let block_type = match place_tag.as_str() {
         "square" => STONE_BRICKS,
-        "neighbourhood" | "city_block" | "quarter" | "suburb" => SMOOTH_STONE,
+        // neighbourhood/city_block/quarter/suburb are too broad, ESA WorldCover
+        // land cover data handles built-up classification at 10m resolution instead
+        "neighbourhood" | "city_block" | "quarter" | "suburb" => return,
         _ => return,
     };
 

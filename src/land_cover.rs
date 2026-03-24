@@ -11,17 +11,13 @@
 
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
-use crate::{
-    coordinate_system::geographic::LLBBox,
-    progress::emit_gui_progress_update,
-};
+use crate::{coordinate_system::geographic::LLBBox, progress::emit_gui_progress_update};
 use flate2::read::DeflateDecoder;
 use std::io::Read;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// ESA WorldCover 2021 S3 base URL
-const ESA_BASE_URL: &str =
-    "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map";
+const ESA_BASE_URL: &str = "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map";
 
 /// Cache directory for land cover data
 const LAND_COVER_CACHE_DIR: &str = "arnis-landcover-cache";
@@ -51,7 +47,8 @@ pub const LC_WATER: u8 = 80;
 pub const LC_WETLAND: u8 = 90;
 /// Mangroves
 pub const LC_MANGROVES: u8 = 95;
-/// Moss and lichen
+/// Moss and lichen (falls through to default grass in surface selection)
+#[allow(dead_code)]
 pub const LC_MOSS: u8 = 100;
 
 // ─── Data structures ──────────────────────────────────────────────────────
@@ -220,9 +217,7 @@ fn esa_tile_url(lat: f64, lng: f64) -> String {
     let ew = if lng >= 0.0 { 'E' } else { 'W' };
     let lat_abs = lat.abs() as u32;
     let lng_abs = lng.abs() as u32;
-    format!(
-        "{ESA_BASE_URL}/ESA_WorldCover_10m_2021_v200_{ns}{lat_abs:02}{ew}{lng_abs:03}_Map.tif"
-    )
+    format!("{ESA_BASE_URL}/ESA_WorldCover_10m_2021_v200_{ns}{lat_abs:02}{ew}{lng_abs:03}_Map.tif")
 }
 
 // ─── COG reading ──────────────────────────────────────────────────────────
@@ -236,7 +231,7 @@ fn esa_tile_url(lat: f64, lng: f64) -> String {
 fn read_esa_tile_pixels(
     client: &reqwest::blocking::Client,
     url: &str,
-    cache_dir: &PathBuf,
+    cache_dir: &Path,
     tile_lat: f64,
     tile_lng: f64,
     bbox: &LLBBox,
@@ -327,7 +322,7 @@ fn read_esa_tile_pixels(
     let px_max_y = px_max_y.min(cog.image_height);
 
     // Step 5: Determine which internal tiles we need
-    let tiles_across = (cog.image_width + cog.tile_width - 1) / cog.tile_width;
+    let tiles_across = cog.image_width.div_ceil(cog.tile_width);
     let itile_min_x = px_min_x / cog.tile_width;
     let itile_max_x = (px_max_x.saturating_sub(1)) / cog.tile_width;
     let itile_min_y = px_min_y / cog.tile_height;
@@ -562,11 +557,13 @@ fn parse_ifd(
         match tag {
             256 => {
                 // ImageWidth
-                info.image_width = read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
+                info.image_width =
+                    read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
             }
             257 => {
                 // ImageLength (height)
-                info.image_height = read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
+                info.image_height =
+                    read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
             }
             259 => {
                 // Compression
@@ -575,24 +572,44 @@ fn parse_ifd(
             }
             322 => {
                 // TileWidth
-                info.tile_width = read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
+                info.tile_width =
+                    read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
             }
             323 => {
                 // TileLength (tile height)
-                info.tile_height = read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
+                info.tile_height =
+                    read_ifd_value(bytes, value_offset_pos, typ, is_bigtiff, is_big_endian);
             }
             324 => {
                 // TileOffsets
                 info.tile_offsets = read_ifd_array(
-                    client, url, bytes, header_bytes, value_offset_pos, typ, count,
-                    is_bigtiff, is_big_endian, need_more, ifd_offset,
+                    client,
+                    url,
+                    bytes,
+                    header_bytes,
+                    value_offset_pos,
+                    typ,
+                    count,
+                    is_bigtiff,
+                    is_big_endian,
+                    need_more,
+                    ifd_offset,
                 )?;
             }
             325 => {
                 // TileByteCounts
                 info.tile_byte_counts = read_ifd_array(
-                    client, url, bytes, header_bytes, value_offset_pos, typ, count,
-                    is_bigtiff, is_big_endian, need_more, ifd_offset,
+                    client,
+                    url,
+                    bytes,
+                    header_bytes,
+                    value_offset_pos,
+                    typ,
+                    count,
+                    is_bigtiff,
+                    is_big_endian,
+                    need_more,
+                    ifd_offset,
                 )?;
             }
             _ => {} // Skip other tags
@@ -603,17 +620,23 @@ fn parse_ifd(
 }
 
 /// Read a single scalar value from an IFD entry.
-fn read_ifd_value(bytes: &[u8], offset: usize, typ: u16, is_bigtiff: bool, is_big_endian: bool) -> u64 {
+fn read_ifd_value(
+    bytes: &[u8],
+    offset: usize,
+    typ: u16,
+    is_bigtiff: bool,
+    is_big_endian: bool,
+) -> u64 {
     if offset >= bytes.len() {
         return 0;
     }
     match typ {
-        1 => bytes[offset] as u64,                                          // BYTE
-        3 => read_u16(bytes, offset, is_big_endian) as u64,                // SHORT
-        4 => read_u32(bytes, offset, is_big_endian) as u64,                // LONG
+        1 => bytes[offset] as u64,                          // BYTE
+        3 => read_u16(bytes, offset, is_big_endian) as u64, // SHORT
+        4 => read_u32(bytes, offset, is_big_endian) as u64, // LONG
         16 => {
             if is_bigtiff {
-                read_u64(bytes, offset, is_big_endian)                      // LONG8 (BigTIFF)
+                read_u64(bytes, offset, is_big_endian) // LONG8 (BigTIFF)
             } else {
                 read_u32(bytes, offset, is_big_endian) as u64
             }
@@ -638,13 +661,13 @@ fn read_ifd_array(
     count: u64,
     is_bigtiff: bool,
     is_big_endian: bool,
-    ifd_was_fetched_separately: bool,
+    _ifd_was_fetched_separately: bool,
     _ifd_fetch_offset: u64,
 ) -> Result<Vec<u64>, Box<dyn std::error::Error>> {
     let elem_size = match typ {
-        1 => 1, // BYTE
-        3 => 2, // SHORT
-        4 => 4, // LONG
+        1 => 1,  // BYTE
+        3 => 2,  // SHORT
+        4 => 4,  // LONG
         16 => 8, // LONG8
         _ => 4,
     };
@@ -670,12 +693,8 @@ fn read_ifd_array(
             read_u32(ifd_bytes, value_offset_pos, is_big_endian) as u64
         };
 
-        // Check if the array data is within our header_bytes
-        let abs_offset = if ifd_was_fetched_separately {
-            array_offset // absolute file offset
-        } else {
-            array_offset
-        };
+        // The array offset is always an absolute file offset
+        let abs_offset = array_offset;
 
         if (abs_offset as usize) + total_size <= header_bytes.len() {
             // Data is in the initial header read
@@ -951,10 +970,8 @@ fn read_bits_msb(data: &[u8], bit_offset: usize, n: usize) -> u32 {
     for i in 0..n {
         let byte_idx = (bit_offset + i) / 8;
         let bit_idx = 7 - ((bit_offset + i) % 8); // MSB first
-        if byte_idx < data.len() {
-            if (data[byte_idx] >> bit_idx) & 1 != 0 {
-                result |= 1 << (n - 1 - i);
-            }
+        if byte_idx < data.len() && (data[byte_idx] >> bit_idx) & 1 != 0 {
+            result |= 1 << (n - 1 - i);
         }
     }
     result

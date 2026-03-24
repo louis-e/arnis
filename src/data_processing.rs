@@ -1,9 +1,9 @@
 use crate::args::Args;
 use crate::block_definitions::{
-    ANDESITE, BEDROCK, BLUE_FLOWER, CACTUS, CARROTS, COARSE_DIRT, DEAD_BUSH, DIRT, FARMLAND, GRASS,
-    GRASS_BLOCK, GRAVEL, HAY_BALE, MUD, OAK_LEAVES, POTATOES, RED_FLOWER, RED_SAND, RED_SANDSTONE,
-    SMOOTH_STONE, SNOW_BLOCK, STONE, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT,
-    WHITE_FLOWER, YELLOW_FLOWER,
+    ANDESITE, BEDROCK, BLUE_FLOWER, CARROTS, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
+    DEAD_BUSH, DIRT, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, HAY_BALE, MUD, OAK_LEAVES, POTATOES,
+    RED_FLOWER, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
@@ -398,7 +398,7 @@ pub fn generate_world_with_options(
                                     land_cover::LC_SHRUBLAND => {
                                         // Primarily grass with some coarse dirt patches
                                         let h = land_cover::coord_hash(x, z);
-                                        if h % 5 == 0 {
+                                        if h.is_multiple_of(5) {
                                             (COARSE_DIRT, DIRT) // 20% coarse dirt
                                         } else {
                                             (GRASS_BLOCK, DIRT) // 80% grass
@@ -406,7 +406,18 @@ pub fn generate_world_with_options(
                                     }
                                     land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
                                     land_cover::LC_CROPLAND => (FARMLAND, DIRT),
-                                    land_cover::LC_BUILT_UP => (SMOOTH_STONE, STONE),
+                                    land_cover::LC_BUILT_UP => {
+                                        let h = land_cover::coord_hash(x, z) % 100;
+                                        if h < 72 {
+                                            (STONE_BRICKS, STONE)
+                                        } else if h < 87 {
+                                            (CRACKED_STONE_BRICKS, STONE)
+                                        } else if h < 92 {
+                                            (STONE, STONE)
+                                        } else {
+                                            (COBBLESTONE, STONE)
+                                        }
+                                    }
                                     land_cover::LC_BARE => {
                                         // Skip isolated bare pixels (surrounded by non-bare)
                                         // to avoid random single-block patches
@@ -414,10 +425,8 @@ pub fn generate_world_with_options(
                                             [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
                                                 .iter()
                                                 .filter(|(dx, dz)| {
-                                                    ground.cover_class(XZPoint::new(
-                                                        x + dx,
-                                                        z + dz,
-                                                    )) == land_cover::LC_BARE
+                                                    ground.cover_class(XZPoint::new(x + dx, z + dz))
+                                                        == land_cover::LC_BARE
                                                 })
                                                 .count();
                                         if neighbors_bare == 0 {
@@ -426,13 +435,11 @@ pub fn generate_world_with_options(
                                         } else {
                                             // Bare/sparse: coarse dirt, gravel, stone mix
                                             let h = land_cover::coord_hash(x, z);
-                                            match h % 20 {
-                                                0..=7 => (COARSE_DIRT, DIRT),       // 40% coarse dirt
-                                                8..=11 => (GRAVEL, STONE),          // 20% gravel
-                                                12..=15 => (STONE, STONE),          // 20% stone
-                                                16..=17 => (ANDESITE, STONE),       // 10% andesite
-                                                18 => (RED_SAND, RED_SANDSTONE),    // 5% red sand
-                                                _ => (RED_SANDSTONE, RED_SANDSTONE), // 5% red sandstone
+                                            match h % 10 {
+                                                0..=3 => (COARSE_DIRT, DIRT), // 40% coarse dirt
+                                                4..=5 => (GRAVEL, STONE),     // 20% gravel
+                                                6..=7 => (STONE, STONE),      // 20% stone
+                                                _ => (ANDESITE, STONE),       // 20% andesite
                                             }
                                         }
                                     }
@@ -465,15 +472,34 @@ pub fn generate_world_with_options(
 
                         // Place vegetation from ESA land cover classification
                         // Only if nothing was already placed above ground by OSM processing
-                        if has_land_cover
-                            && !editor.block_exists_absolute(x, ground_y + 1, z)
-                        {
+                        // and the ground block is a natural surface (not a road, building slab, etc.)
+                        let ground_is_natural = editor.check_for_block_absolute(
+                            x,
+                            ground_y,
+                            z,
+                            Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
+                            None,
+                        );
+                        // Trees can also grow through stone surfaces (urban tree cover)
+                        let ground_allows_trees = ground_is_natural
+                            || editor.check_for_block_absolute(
+                                x,
+                                ground_y,
+                                z,
+                                Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
+                                None,
+                            );
+                        if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
                             let cover = ground.cover_class(coord);
-                            let slope = if terrain_enabled { ground.slope(coord) } else { 0 };
+                            let slope = if terrain_enabled {
+                                ground.slope(coord)
+                            } else {
+                                0
+                            };
                             let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
                             match cover {
-                                land_cover::LC_TREE_COVER if slope <= 4 => {
+                                land_cover::LC_TREE_COVER if slope <= 4 && ground_allows_trees => {
                                     let choice = rng.random_range(0..30);
                                     if choice == 0 {
                                         tree::Tree::create(
@@ -481,42 +507,68 @@ pub fn generate_world_with_options(
                                             (x, 1, z),
                                             Some(&building_footprints),
                                         );
-                                    } else if choice == 1 {
-                                        // Flowers between trees
-                                        let flower = [
-                                            RED_FLOWER,
-                                            BLUE_FLOWER,
-                                            YELLOW_FLOWER,
-                                            WHITE_FLOWER,
-                                        ][rng.random_range(0..4)];
-                                        editor.set_block_absolute(
-                                            flower, x, ground_y + 1, z, None, None,
-                                        );
-                                    } else if choice <= 13 {
-                                        // Grass undergrowth (~40%)
-                                        editor.set_block_absolute(
-                                            GRASS, x, ground_y + 1, z, None, None,
-                                        );
+                                    } else if ground_is_natural {
+                                        // Undergrowth only on natural surfaces
+                                        if choice == 1 {
+                                            let flower = [
+                                                RED_FLOWER,
+                                                BLUE_FLOWER,
+                                                YELLOW_FLOWER,
+                                                WHITE_FLOWER,
+                                            ][rng.random_range(0..4)];
+                                            editor.set_block_absolute(
+                                                flower,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        } else if choice <= 13 {
+                                            editor.set_block_absolute(
+                                                GRASS,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
                                     }
                                 }
-                                land_cover::LC_SHRUBLAND => {
+                                land_cover::LC_SHRUBLAND if ground_is_natural => {
                                     let choice = rng.random_range(0..100);
                                     if choice < 2 {
                                         editor.set_block_absolute(
-                                            OAK_LEAVES, x, ground_y + 1, z, None, None,
+                                            OAK_LEAVES,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
                                         );
                                     } else if choice < 30 {
                                         editor.set_block_absolute(
-                                            GRASS, x, ground_y + 1, z, None, None,
+                                            GRASS,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
                                         );
                                     }
                                 }
-                                land_cover::LC_GRASSLAND => {
+                                land_cover::LC_GRASSLAND if ground_is_natural => {
                                     // Short grass on grassland (~55%)
                                     let choice = rng.random_range(0..100);
                                     if choice < 50 {
                                         editor.set_block_absolute(
-                                            GRASS, x, ground_y + 1, z, None, None,
+                                            GRASS,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
                                         );
                                     } else if choice < 55 {
                                         // Occasional tall grass
@@ -537,14 +589,16 @@ pub fn generate_world_with_options(
                                             None,
                                         );
                                     } else if choice == 55 {
-                                        let flower = [
-                                            RED_FLOWER,
-                                            BLUE_FLOWER,
-                                            YELLOW_FLOWER,
-                                            WHITE_FLOWER,
-                                        ][rng.random_range(0..4)];
+                                        let flower =
+                                            [RED_FLOWER, BLUE_FLOWER, YELLOW_FLOWER, WHITE_FLOWER]
+                                                [rng.random_range(0..4)];
                                         editor.set_block_absolute(
-                                            flower, x, ground_y + 1, z, None, None,
+                                            flower,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
                                         );
                                     }
                                 }
@@ -564,28 +618,44 @@ pub fn generate_world_with_options(
                                         } else if rng.random_range(0..76) == 0 {
                                             if rng.random_range(1..=10) <= 4 {
                                                 editor.set_block_absolute(
-                                                    HAY_BALE, x, ground_y + 1, z, None, None,
+                                                    HAY_BALE,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
                                                 );
                                             }
                                         } else {
-                                            let crop = [WHEAT, CARROTS, POTATOES]
-                                                [rng.random_range(0..3)];
+                                            let crop =
+                                                [WHEAT, CARROTS, POTATOES][rng.random_range(0..3)];
                                             editor.set_block_absolute(
-                                                crop, x, ground_y + 1, z, None, None,
+                                                crop,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
                                             );
                                         }
                                     }
                                 }
-                                land_cover::LC_WETLAND | land_cover::LC_MANGROVES => {
+                                land_cover::LC_WETLAND | land_cover::LC_MANGROVES
+                                    if ground_is_natural =>
+                                {
                                     let choice = rng.random_range(0..100);
                                     if choice < 30 {
                                         // Water patches in wetlands
-                                        editor.set_block_absolute(
-                                            WATER, x, ground_y, z, None, None,
-                                        );
+                                        editor
+                                            .set_block_absolute(WATER, x, ground_y, z, None, None);
                                     } else if choice < 65 {
                                         editor.set_block_absolute(
-                                            GRASS, x, ground_y + 1, z, None, None,
+                                            GRASS,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
                                         );
                                     } else if choice < 75 {
                                         editor.set_block_absolute(
@@ -606,16 +676,16 @@ pub fn generate_world_with_options(
                                         );
                                     }
                                 }
-                                land_cover::LC_BARE => {
-                                    // Sparse dead bushes and cacti
-                                    let choice = rng.random_range(0..200);
-                                    if choice == 0 {
+                                land_cover::LC_BARE if ground_is_natural => {
+                                    // Sparse dead bushes
+                                    if rng.random_range(0..100) == 0 {
                                         editor.set_block_absolute(
-                                            CACTUS, x, ground_y + 1, z, None, None,
-                                        );
-                                    } else if choice <= 2 {
-                                        editor.set_block_absolute(
-                                            DEAD_BUSH, x, ground_y + 1, z, None, None,
+                                            DEAD_BUSH,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
                                         );
                                     }
                                 }
