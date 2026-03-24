@@ -23,6 +23,8 @@ const MAX_ZOOM: u8 = 15;
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 /// Maximum age for cached tiles in days before they are cleaned up
 const TILE_CACHE_MAX_AGE_DAYS: u64 = 7;
+/// Subdirectory name for tile cache within the OS cache directory
+const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
 
 /// Holds processed elevation data and metadata
 #[derive(Clone)]
@@ -40,11 +42,23 @@ type TileImage = image::ImageBuffer<Rgb<u8>, Vec<u8>>;
 /// Result type for tile download operations: ((tile_x, tile_y), image) or error
 type TileDownloadResult = Result<((u32, u32), TileImage), String>;
 
+/// Returns the tile cache directory path.
+/// Uses the OS-standard cache directory (e.g. AppData/Local on Windows, ~/.cache on Linux)
+/// to avoid CWD-dependent paths that can fail due to permissions or unexpected working directories.
+/// Falls back to ./arnis-tile-cache if the OS cache directory is unavailable.
+fn get_tile_cache_dir() -> PathBuf {
+    if let Some(cache_dir) = dirs::cache_dir() {
+        cache_dir.join(TILE_CACHE_DIR_NAME)
+    } else {
+        PathBuf::from(format!("./{TILE_CACHE_DIR_NAME}"))
+    }
+}
+
 /// Cleans up old cached tiles from the tile cache directory.
 /// Only deletes .png files within the arnis-tile-cache directory that are older than TILE_CACHE_MAX_AGE_DAYS.
 /// This function is safe and will not delete files outside the cache directory or fail on errors.
 pub fn cleanup_old_cached_tiles() {
-    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
+    let tile_cache_dir = get_tile_cache_dir();
 
     if !tile_cache_dir.exists() || !tile_cache_dir.is_dir() {
         return; // Nothing to clean up
@@ -119,6 +133,24 @@ pub fn cleanup_old_cached_tiles() {
     }
     if error_count > 1 {
         eprintln!("Warning: Failed to delete {error_count} old cached tiles");
+    }
+
+    // Migration: remove the old CWD-relative cache directory from previous versions.
+    // Previous versions stored tiles in ./arnis-tile-cache (relative to CWD), which
+    // caused failures when the working directory lacked write permissions.
+    let legacy_cache_dir = PathBuf::from(format!("./{TILE_CACHE_DIR_NAME}"));
+    if legacy_cache_dir.is_dir() && legacy_cache_dir != tile_cache_dir {
+        if let Err(e) = std::fs::remove_dir_all(&legacy_cache_dir) {
+            eprintln!(
+                "Warning: Failed to remove legacy tile cache at {}: {e}",
+                legacy_cache_dir.display()
+            );
+        } else {
+            println!(
+                "Migrated tile cache: removed legacy {}",
+                legacy_cache_dir.display()
+            );
+        }
     }
 }
 
@@ -301,7 +333,7 @@ pub fn fetch_elevation_data(
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
     let mut extreme_values_found = Vec::new(); // Track extreme values for debugging
 
-    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
+    let tile_cache_dir = get_tile_cache_dir();
     if !tile_cache_dir.exists() {
         std::fs::create_dir_all(&tile_cache_dir)?;
     }
