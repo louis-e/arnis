@@ -719,6 +719,9 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "potted_dandelion" => BedrockBlock::simple("flower_pot"),
         "potted_blue_orchid" => BedrockBlock::simple("flower_pot"),
 
+        // Banner
+        "white_banner" => BedrockBlock::simple("standing_banner"),
+
         // Bed (Bedrock uses single "bed" block with color state)
         "red_bed" => BedrockBlock::with_states(
             "bed",

@@ -2,9 +2,11 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::deterministic_rng::coord_rng;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use rand::Rng;
 use std::collections::HashMap;
 
 /// Type alias for highway connectivity map
@@ -161,6 +163,8 @@ fn generate_highways_internal(
             let mut block_range: i32 = 2;
             let mut add_stripe = false;
             let mut add_outline = false;
+            let mut add_sidewalks = false;
+            let mut randomize_surface = false;
             let scale_factor = args.scale;
 
             // Check if this is a bridge - bridges need special elevation handling
@@ -201,6 +205,7 @@ fn generate_highways_internal(
                 "footway" | "pedestrian" => {
                     block_type = GRAY_CONCRETE;
                     block_range = 1;
+                    randomize_surface = true;
                 }
                 "path" => {
                     block_type = DIRT_PATH;
@@ -209,16 +214,21 @@ fn generate_highways_internal(
                 "motorway" | "primary" | "trunk" => {
                     block_range = 5;
                     add_stripe = true;
+                    add_sidewalks = true;
                 }
                 "secondary" => {
                     block_range = 4;
                     add_stripe = true;
+                    add_sidewalks = true;
                 }
                 "tertiary" => {
                     add_stripe = true;
+                    add_sidewalks = true;
                 }
                 "track" => {
+                    block_type = COARSE_DIRT;
                     block_range = 1;
+                    randomize_surface = true;
                 }
                 "service" => {
                     block_type = GRAY_CONCRETE;
@@ -240,6 +250,21 @@ fn generate_highways_internal(
                     block_range = 1;
                 }
 
+                "residential" | "unclassified" => {
+                    add_sidewalks = true;
+                    randomize_surface = true;
+                    if let Some(lanes) = element.tags().get("lanes") {
+                        if lanes == "2" {
+                            block_range = 3;
+                            add_stripe = true;
+                            add_outline = true;
+                        } else if lanes != "1" {
+                            block_range = 4;
+                            add_stripe = true;
+                            add_outline = true;
+                        }
+                    }
+                }
                 _ => {
                     if let Some(lanes) = element.tags().get("lanes") {
                         if lanes == "2" {
@@ -488,24 +513,57 @@ fn generate_highways_internal(
                                             None,
                                         );
                                     }
-                                } else if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        block_type,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        None,
-                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
-                                    );
                                 } else {
-                                    editor.set_block(
-                                        block_type,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        None,
-                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
-                                    );
+                                    // Apply surface randomization for certain road types
+                                    let actual_block = if randomize_surface {
+                                        let mut srng = coord_rng(set_x, set_z, 77);
+                                        match highway_type.as_str() {
+                                            "track" => {
+                                                if srng.random_range(0..100) < 40 {
+                                                    DIRT_PATH
+                                                } else {
+                                                    COARSE_DIRT
+                                                }
+                                            }
+                                            "footway" | "pedestrian" => {
+                                                if srng.random_range(0..100) < 10 {
+                                                    STONE
+                                                } else {
+                                                    block_type
+                                                }
+                                            }
+                                            _ => {
+                                                // Residential/unclassified: subtle wear
+                                                if srng.random_range(0..100) < 8 {
+                                                    GRAY_CONCRETE
+                                                } else {
+                                                    block_type
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        block_type
+                                    };
+
+                                    if use_absolute_y {
+                                        editor.set_block_absolute(
+                                            actual_block,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            None,
+                                            Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                                        );
+                                    } else {
+                                        editor.set_block(
+                                            actual_block,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            None,
+                                            Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                                        );
+                                    }
                                 }
 
                                 // Add stone brick foundation underneath elevated highways/bridges for thickness
@@ -643,11 +701,74 @@ fn generate_highways_internal(
                                 stripe_length = 0;
                             }
                         }
+
+                        // Add sidewalks along the edges of the road (ground level only)
+                        if add_sidewalks && current_y == 0 && !use_absolute_y {
+                            let sidewalk_offset = block_range + 1;
+                            for &(sdx, sdz) in &[
+                                (-sidewalk_offset, 0),
+                                (sidewalk_offset, 0),
+                                (0, -sidewalk_offset),
+                                (0, sidewalk_offset),
+                            ] {
+                                let sw_x = x + sdx;
+                                let sw_z = z + sdz;
+                                editor.set_block(
+                                    STONE_BLOCK_SLAB,
+                                    sw_x,
+                                    1,
+                                    sw_z,
+                                    Some(&[GRASS_BLOCK, DIRT, COARSE_DIRT, PODZOL]),
+                                    None,
+                                );
+                            }
+                        }
                     }
 
                     segment_index += 1;
                 }
                 previous_node = Some((node.x, node.z));
+            }
+
+            // Place named banners along roads for map labeling
+            if let Some(road_name) = element.tags().get("name") {
+                if !road_name.is_empty() && way.nodes.len() >= 2 {
+                    let banner_interval = 100; // Place a banner every ~100 blocks
+                    let mut accumulated_distance: usize = 0;
+                    let mut last_banner_distance: usize = 0;
+
+                    // Place first banner near the start
+                    let first = &way.nodes[0];
+                    let second = &way.nodes[1];
+                    let dx = (second.x - first.x) as f64;
+                    let dz = (second.z - first.z) as f64;
+                    let angle = dz.atan2(dx);
+                    // Convert angle to Minecraft rotation (0-15, 0=south, clockwise)
+                    let rotation =
+                        (((-angle.to_degrees() + 180.0) / 22.5).round() as i32).rem_euclid(16);
+
+                    // Place banner offset to the side of the road
+                    let offset = block_range + 2;
+                    let banner_x = first.x + offset;
+                    let banner_z = first.z;
+                    editor.set_banner(road_name, banner_x, 1, banner_z, rotation);
+
+                    // Place additional banners along long roads
+                    for pair in way.nodes.windows(2) {
+                        let seg_dx = (pair[1].x - pair[0].x).abs();
+                        let seg_dz = (pair[1].z - pair[0].z).abs();
+                        let seg_len =
+                            ((seg_dx * seg_dx + seg_dz * seg_dz) as f64).sqrt() as usize;
+                        accumulated_distance += seg_len;
+
+                        if accumulated_distance - last_banner_distance >= banner_interval {
+                            let mid_x = (pair[0].x + pair[1].x) / 2 + offset;
+                            let mid_z = (pair[0].z + pair[1].z) / 2;
+                            editor.set_banner(road_name, mid_x, 1, mid_z, rotation);
+                            last_banner_distance = accumulated_distance;
+                        }
+                    }
+                }
             }
         }
     }

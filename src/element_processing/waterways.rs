@@ -1,7 +1,9 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::deterministic_rng::coord_rng;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
+use rand::Rng;
 
 pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(waterway_type) = element.tags.get("waterway") {
@@ -109,6 +111,28 @@ fn create_water_channel(
 
                 // Clear vegetation above sloped areas
                 editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
+            }
+        }
+    }
+
+    // Add vegetation along the banks
+    for x in (center_x - half_width - 3)..=(center_x + half_width + 3) {
+        for z in (center_z - half_width - 3)..=(center_z + half_width + 3) {
+            let dx = (x - center_x).abs();
+            let dz = (z - center_z).abs();
+            let distance_from_center = dx.max(dz);
+
+            // Only place vegetation in the strip just outside the bank
+            if distance_from_center == half_width + 2 || distance_from_center == half_width + 3 {
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+                    let mut rng = coord_rng(x, z, 42);
+                    match rng.random_range(0..100) {
+                        0..50 => editor.set_block(GRASS, x, 1, z, None, None),
+                        50..65 => editor.set_block(FERN, x, 1, z, None, None),
+                        65..70 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
+                        _ => {} // Natural gaps
+                    }
+                }
             }
         }
     }

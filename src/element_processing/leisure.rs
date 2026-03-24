@@ -111,17 +111,32 @@ pub fn generate_leisure(
                             };
                             editor.set_block(plant_choice, x, 1, z, None, None);
                         }
-                        30..90 => {
+                        30..70 => {
                             // Grass
                             editor.set_block(GRASS, x, 1, z, None, None);
                         }
-                        90..105 => {
+                        70..85 => {
+                            // Tall grass
+                            editor.set_block(TALL_GRASS_BOTTOM, x, 1, z, None, None);
+                            editor.set_block(TALL_GRASS_TOP, x, 2, z, None, None);
+                        }
+                        85..95 => {
+                            // Large fern
+                            editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
+                            editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
+                        }
+                        95..110 => {
                             // Oak leaves
                             editor.set_block(OAK_LEAVES, x, 1, z, None, None);
                         }
-                        105..120 => {
+                        110..125 => {
                             // Tree
                             Tree::create(editor, (x, 1, z), Some(building_footprints));
+                        }
+                        125..130 => {
+                            // Park bench
+                            editor.set_block(OAK_STAIRS, x, 1, z, None, None);
+                            editor.set_block(OAK_STAIRS, x + 1, 1, z, None, None);
                         }
                         _ => {}
                     }

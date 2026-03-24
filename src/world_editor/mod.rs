@@ -297,6 +297,60 @@ impl<'a> WorldEditor<'a> {
         self.set_block(SIGN, x, y, z, None, None);
     }
 
+    /// Places a named banner at the given coordinates with a custom name that appears on maps.
+    /// In Java Edition, named banners show their name on maps when a player right-clicks them.
+    pub fn set_banner(
+        &mut self,
+        name: &str,
+        x: i32,
+        y: i32,
+        z: i32,
+        rotation: i32,
+    ) {
+        let absolute_y = self.get_absolute_y(x, y, z);
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let mut block_entity = HashMap::new();
+        block_entity.insert(
+            "id".to_string(),
+            Value::String("minecraft:banner".to_string()),
+        );
+        block_entity.insert("x".to_string(), Value::Int(x));
+        block_entity.insert("y".to_string(), Value::Int(absolute_y));
+        block_entity.insert("z".to_string(), Value::Int(z));
+        block_entity.insert(
+            "CustomName".to_string(),
+            Value::String(format!("{{\"text\":\"{name}\"}}")),
+        );
+        block_entity.insert("keepPacked".to_string(), Value::Byte(0));
+
+        let region = self.world.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        if let Some(chunk_data) = chunk.other.get_mut("block_entities") {
+            if let Value::List(entities) = chunk_data {
+                entities.push(Value::Compound(block_entity));
+            }
+        } else {
+            chunk.other.insert(
+                "block_entities".to_string(),
+                Value::List(vec![Value::Compound(block_entity)]),
+            );
+        }
+
+        // Place the banner block with the specified rotation
+        let mut props = HashMap::new();
+        props.insert(
+            "rotation".to_string(),
+            Value::String(rotation.to_string()),
+        );
+        let banner_with_props = BlockWithProperties::new(WHITE_BANNER, Some(Value::Compound(props)));
+        self.set_block_with_properties_absolute(banner_with_props, x, absolute_y, z, None, None);
+    }
+
     /// Adds an entity at the given coordinates (Y is ground-relative).
     #[allow(dead_code)]
     pub fn add_entity(

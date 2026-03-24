@@ -327,6 +327,7 @@ impl Block {
             246 => "potted_red_tulip",
             247 => "potted_dandelion",
             248 => "potted_blue_orchid",
+            249 => "white_banner",
             _ => panic!("Invalid id"),
         }
     }
@@ -665,6 +666,12 @@ impl Block {
                 map.insert("half".to_string(), Value::String("top".to_string()));
                 map
             })),
+            // White banner (default rotation 0 = south)
+            249 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("rotation".to_string(), Value::String("0".to_string()));
+                map
+            })),
             _ => None,
         }
     }
@@ -962,6 +969,7 @@ pub const BRICK_SLAB: Block = Block::new(245);
 pub const POTTED_RED_TULIP: Block = Block::new(246);
 pub const POTTED_DANDELION: Block = Block::new(247);
 pub const POTTED_BLUE_ORCHID: Block = Block::new(248);
+pub const WHITE_BANNER: Block = Block::new(249);
 
 /// Maps a block to its corresponding stair variant
 #[inline]

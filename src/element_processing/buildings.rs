@@ -2502,6 +2502,23 @@ pub fn generate_buildings(
     // Add shutters and window boxes to small residential buildings
     generate_residential_window_decorations(editor, element, &config);
 
+    // Add exterior lighting along building perimeter for buildings taller than 3 blocks
+    if config.building_height > 3 && !config.is_abandoned_building {
+        let lantern_spacing = rng.random_range(8..=12) as usize;
+        for (i, &(wx, wz)) in wall_outline.iter().enumerate() {
+            if i % lantern_spacing == 0 {
+                editor.set_block(
+                    SEA_LANTERN,
+                    wx,
+                    config.start_y_offset + 3,
+                    wz,
+                    None,
+                    None,
+                );
+            }
+        }
+    }
+
     // Create roof area = floor area + wall outline (so roof covers the walls too)
     let roof_area: Vec<(i32, i32)> = {
         let mut area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
