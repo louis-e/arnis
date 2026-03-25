@@ -184,7 +184,9 @@ fn get_esa_tile_specs(bbox: &LLBBox) -> Vec<(f64, f64, String)> {
     }
 
     let min_lat = min_lat.max(-60.0);
-    let max_lat = max_lat.min(84.0);
+    // Clamp just below the boundary so snap_to_grid doesn't produce an
+    // invalid SW corner at the dataset edge (last valid SW is 81°N / 177°E)
+    let max_lat = max_lat.min(84.0 - 0.001);
 
     // Snap to 3-degree grid (floor to nearest multiple of 3)
     let lat_start = snap_to_grid(min_lat);
@@ -401,8 +403,10 @@ fn read_esa_tile_pixels(
                     let rel_z = 1.0
                         - (pixel_lat - bbox.min().lat()) / (bbox.max().lat() - bbox.min().lat());
 
-                    let gx = (rel_x * grid_width as f64).round() as i64;
-                    let gz = (rel_z * grid_height as f64).round() as i64;
+                    // Scale to grid indices using (size - 1) so rel==1.0 maps to
+                    // the last valid index (same approach as elevation_data.rs)
+                    let gx = (rel_x * (grid_width - 1) as f64).round() as i64;
+                    let gz = (rel_z * (grid_height - 1) as f64).round() as i64;
 
                     if gx >= 0 && gx < grid_width as i64 && gz >= 0 && gz < grid_height as i64 {
                         grid[gz as usize][gx as usize] = class_value;
@@ -429,8 +433,10 @@ fn fetch_range(
         .send()?;
 
     let status = response.status();
-    if !status.is_success() && status.as_u16() != 206 {
-        return Err(format!("HTTP {status} fetching {url}").into());
+    // Must be 206 Partial Content. If the server ignores the Range header and
+    // sends 200 OK, it would return the entire ~500MB GeoTIFF file.
+    if status.as_u16() != 206 {
+        return Err(format!("HTTP {status} fetching range from {url} (expected 206)").into());
     }
 
     Ok(response.bytes()?.to_vec())
