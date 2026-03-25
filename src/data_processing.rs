@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{
-    ANDESITE, BEDROCK, BLUE_FLOWER, CARROTS, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
+    ANDESITE, BEDROCK, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
     DEAD_BUSH, DIRT, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, HAY_BALE, MUD, OAK_LEAVES, POTATOES,
     RED_FLOWER, SAND, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
     TALL_GRASS_TOP, WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
@@ -374,6 +374,46 @@ pub fn generate_world_with_options(
 
                     // Add default dirt and grass layer if there isn't a stone layer already
                     if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
+                        // Handle ESA water with variable depth as a special case
+                        let is_esa_water = has_land_cover
+                            && ground.cover_class(coord) == land_cover::LC_WATER;
+
+                        if is_esa_water {
+                            // Variable water depth based on distance to shore
+                            let dist = ground.water_distance(coord);
+                            let depth = land_cover::water_depth_from_distance(dist);
+
+                            // Fill water column from surface downward
+                            for dy in 0..=depth {
+                                editor.set_block_if_absent_absolute(
+                                    WATER,
+                                    x,
+                                    ground_y - dy,
+                                    z,
+                                );
+                            }
+
+                            // Ocean floor blocks vary by depth
+                            let floor_y = ground_y - depth - 1;
+                            let h = land_cover::coord_hash(x, z);
+                            let floor_block = match depth {
+                                0..=2 => SAND,
+                                3..=4 => {
+                                    if h.is_multiple_of(3) {
+                                        GRAVEL
+                                    } else {
+                                        SAND
+                                    }
+                                }
+                                _ => match h % 4 {
+                                    0 => CLAY,
+                                    1 => GRAVEL,
+                                    _ => SAND,
+                                },
+                            };
+                            editor.set_block_if_absent_absolute(floor_block, x, floor_y, z);
+                            editor.set_block_if_absent_absolute(floor_block, x, floor_y - 1, z);
+                        } else {
                         // Determine surface and sub-surface blocks based on available data
                         let (surface_block, under_block) = if has_land_cover {
                             // ESA WorldCover + slope-based material selection
@@ -444,7 +484,7 @@ pub fn generate_world_with_options(
                                         }
                                     }
                                     land_cover::LC_SNOW_ICE => (SNOW_BLOCK, DIRT),
-                                    land_cover::LC_WATER => (WATER, SAND), // Ocean fallback via ESA
+                                    // LC_WATER handled above with variable depth
                                     land_cover::LC_WETLAND => (MUD, DIRT),
                                     land_cover::LC_MANGROVES => (MUD, DIRT),
                                     _ => (GRASS_BLOCK, DIRT),
@@ -464,6 +504,28 @@ pub fn generate_world_with_options(
                             }
                         } else {
                             (GRASS_BLOCK, DIRT)
+                        };
+
+                        // Shoreline blending: land blocks adjacent to ESA water get
+                        // sand surface for a natural beach/shore transition
+                        let (surface_block, under_block) = if has_land_cover
+                            && surface_block != WATER
+                            && ground.water_distance(coord) == 0
+                        {
+                            // Check if any cardinal neighbor is water
+                            let near_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                                .iter()
+                                .any(|(dx, dz)| {
+                                    ground.cover_class(XZPoint::new(x + dx, z + dz))
+                                        == land_cover::LC_WATER
+                                });
+                            if near_water {
+                                (SAND, SAND)
+                            } else {
+                                (surface_block, under_block)
+                            }
+                        } else {
+                            (surface_block, under_block)
                         };
 
                         editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
@@ -692,6 +754,7 @@ pub fn generate_world_with_options(
                                 _ => {}
                             }
                         }
+                        } // end else (non-water)
                     }
 
                     // Fill underground with stone

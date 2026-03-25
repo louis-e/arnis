@@ -13,6 +13,7 @@
 use crate::telemetry::{send_log, LogLevel};
 use crate::{coordinate_system::geographic::LLBBox, progress::emit_gui_progress_update};
 use flate2::read::DeflateDecoder;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
@@ -58,6 +59,9 @@ pub const LC_MOSS: u8 = 100;
 pub struct LandCoverData {
     /// Classification values (ESA codes) for each grid cell, indexed as [z][x]
     pub grid: Vec<Vec<u8>>,
+    /// Distance from each water cell to nearest shore, indexed as [z][x].
+    /// 0 = non-water, 1 = shore water, 2+ = progressively deeper water.
+    pub water_distance: Vec<Vec<u8>>,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
@@ -145,12 +149,15 @@ pub fn fetch_land_cover_data(
     fill_gaps(&mut grid, grid_width, grid_height);
 
     // Dither class boundaries to reduce the blocky appearance of 10m resolution data.
-    // At the border between two land cover classes, randomly assign the neighbor's class
-    // based on a coordinate hash, producing a natural-looking gradient instead of a hard edge.
     dither_boundaries(&mut grid, grid_width, grid_height);
+
+    // Compute distance from each water cell to nearest shore via multi-source BFS.
+    // Used for variable water depth and ocean floor variation.
+    let water_distance = compute_water_distance(&grid, grid_width, grid_height);
 
     Some(LandCoverData {
         grid,
+        water_distance,
         width: grid_width,
         height: grid_height,
     })
@@ -820,6 +827,80 @@ fn fill_gaps(grid: &mut [Vec<u8>], width: usize, height: usize) {
         if !changed {
             break;
         }
+    }
+}
+
+// ─── Water distance field ─────────────────────────────────────────────────
+
+/// Computes a distance-to-shore grid for all water cells via multi-source BFS.
+///
+/// Returns a grid where:
+/// - 0 = non-water cell (or unreachable water)
+/// - 1 = water cell on the shore (adjacent to non-water)
+/// - 2+ = water cell N blocks from nearest shore
+///
+/// Capped at 15 to limit BFS depth for very large oceans.
+fn compute_water_distance(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<u8>> {
+    let mut distance = vec![vec![0u8; width]; height];
+    let mut queue = VecDeque::new();
+
+    // Seed BFS with shore water cells (water cells adjacent to non-water or grid edge)
+    for z in 0..height {
+        for x in 0..width {
+            if grid[z][x] != LC_WATER {
+                continue;
+            }
+            let is_shore = [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)]
+                .iter()
+                .any(|(dx, dz)| {
+                    let nx = x as i32 + dx;
+                    let nz = z as i32 + dz;
+                    if nx < 0 || nx >= width as i32 || nz < 0 || nz >= height as i32 {
+                        return true; // Grid edge = shore
+                    }
+                    grid[nz as usize][nx as usize] != LC_WATER
+                });
+            if is_shore {
+                distance[z][x] = 1;
+                queue.push_back((x, z));
+            }
+        }
+    }
+
+    // BFS inward from shore cells
+    while let Some((x, z)) = queue.pop_front() {
+        let d = distance[z][x];
+        if d >= 15 {
+            continue;
+        }
+        for (dx, dz) in [(0i32, 1i32), (0, -1), (1, 0), (-1, 0)] {
+            let nx = x as i32 + dx;
+            let nz = z as i32 + dz;
+            if nx >= 0 && nx < width as i32 && nz >= 0 && nz < height as i32 {
+                let nx = nx as usize;
+                let nz = nz as usize;
+                if grid[nz][nx] == LC_WATER && distance[nz][nx] == 0 {
+                    distance[nz][nx] = d + 1;
+                    queue.push_back((nx, nz));
+                }
+            }
+        }
+    }
+
+    distance
+}
+
+/// Returns water depth (in blocks below surface) based on distance from shore.
+/// Creates a natural bowl shape: shallow at edges, deeper toward center.
+pub fn water_depth_from_distance(distance: u8) -> i32 {
+    match distance {
+        0 => 0,
+        1 => 1,
+        2..=3 => 2,
+        4..=5 => 3,
+        6..=8 => 4,
+        9..=12 => 5,
+        _ => 6,
     }
 }
 
