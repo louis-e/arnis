@@ -71,9 +71,8 @@ fn create_water_channel(
     center_x: i32,
     center_z: i32,
     width: i32,
-    depth: i32,
+    _depth: i32,
 ) {
-    const MIN_Y: i32 = -64;
     let half_width = width / 2;
 
     for x in (center_x - half_width - 1)..=(center_x + half_width + 1) {
@@ -82,31 +81,17 @@ fn create_water_channel(
             let dz = (z - center_z).abs();
             let distance_from_center = dx.max(dz);
 
-            // Clamp depth so water stays above bedrock at MIN_Y
-            let ground_y = editor.get_ground_level(x, z);
-            let max_depth = (ground_y - MIN_Y - 1).max(0);
-            let effective_depth = depth.min(max_depth);
-
             if distance_from_center <= half_width {
-                // Main water channel
-                for y in (1 - effective_depth)..=0 {
-                    editor.set_block(WATER, x, y, z, None, None);
-                }
+                // Single water block at surface
+                editor.set_block(WATER, x, 0, z, None, None);
 
                 // Clear vegetation above the water
                 editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
-            } else if distance_from_center == half_width + 1 && effective_depth > 1 {
-                // Create sloped banks (one block interval slopes)
-                let slope_depth = (effective_depth - 1).max(1);
-                for y in (1 - slope_depth)..=0 {
-                    if y == 0 {
-                        editor.set_block(WATER, x, y, z, None, None);
-                    } else {
-                        editor.set_block(AIR, x, y, z, None, None);
-                    }
-                }
+            } else if distance_from_center == half_width + 1 {
+                // Bank: single water block
+                editor.set_block(WATER, x, 0, z, None, None);
 
-                // Clear vegetation above sloped areas
+                // Clear vegetation above
                 editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
             }
         }

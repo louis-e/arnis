@@ -1,12 +1,11 @@
 use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
-use crate::land_cover;
 use crate::{
     coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
     world_editor::WorldEditor,
 };
-use std::collections::{HashMap, HashSet, VecDeque};
+
 
 pub fn generate_water_area_from_way(
     editor: &mut WorldEditor,
@@ -445,56 +444,9 @@ fn scanline_fill_water(
 ///
 /// For each water coordinate, computes the distance to the nearest non-water
 /// edge, then fills a water column proportional to that distance. Shallow at
-/// edges, deeper toward the center. Floor blocks vary by depth.
+/// Place a single water block at surface level for each coordinate.
 fn place_water_with_depth(editor: &mut WorldEditor, water_coords: &[(i32, i32)]) {
-    if water_coords.is_empty() {
-        return;
-    }
-
-    // Build set for O(1) shore detection
-    let water_set: HashSet<(i32, i32)> = water_coords.iter().copied().collect();
-
-    // BFS: find distance to nearest non-water cell for each water cell
-    let mut distance: HashMap<(i32, i32), u8> = HashMap::with_capacity(water_coords.len());
-    let mut queue: VecDeque<(i32, i32)> = VecDeque::new();
-
-    // Seed with shore cells (water cells adjacent to non-water)
     for &(x, z) in water_coords {
-        let is_shore = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
-            .iter()
-            .any(|(dx, dz)| !water_set.contains(&(x + dx, z + dz)));
-        if is_shore {
-            distance.insert((x, z), 1);
-            queue.push_back((x, z));
-        }
-    }
-
-    // BFS inward
-    while let Some((x, z)) = queue.pop_front() {
-        let d = distance[&(x, z)];
-        if d >= 12 {
-            continue;
-        }
-        for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-            let n = (x + dx, z + dz);
-            if water_set.contains(&n) && !distance.contains_key(&n) {
-                distance.insert(n, d + 1);
-                queue.push_back(n);
-            }
-        }
-    }
-
-    // Place water columns with depth, clamped so floors stay above bedrock
-    const MIN_Y: i32 = -64;
-    for &(x, z) in water_coords {
-        let dist = distance.get(&(x, z)).copied().unwrap_or(1);
-        let raw_depth = land_cover::water_depth_from_distance(dist);
-        let ground_y = editor.get_ground_level(x, z);
-        let depth = raw_depth.min((ground_y - MIN_Y - 1).max(0));
-
-        // Fill water column from surface downward
-        for dy in 0..=depth {
-            editor.set_block(WATER, x, -dy, z, None, None);
-        }
+        editor.set_block(WATER, x, 0, z, None, None);
     }
 }

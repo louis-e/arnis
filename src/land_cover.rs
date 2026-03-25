@@ -890,20 +890,6 @@ fn compute_water_distance(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<
     distance
 }
 
-/// Returns water depth (in blocks below surface) based on distance from shore.
-/// Creates a natural bowl shape: shallow at edges, deeper toward center.
-pub fn water_depth_from_distance(distance: u8) -> i32 {
-    match distance {
-        0 => 0,
-        1 => 1,
-        2..=3 => 2,
-        4..=5 => 3,
-        6..=8 => 4,
-        9..=12 => 5,
-        _ => 6,
-    }
-}
-
 // ─── Boundary dithering ───────────────────────────────────────────────────
 
 /// Dithers the boundaries between land cover classes to reduce blockiness.
