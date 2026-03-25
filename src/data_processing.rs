@@ -1,6 +1,6 @@
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
+    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, CARROTS, COARSE_DIRT, COBBLESTONE,
     CRACKED_STONE_BRICKS, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAY_CONCRETE,
     GRAVEL, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, POTATOES, RED_FLOWER, SAND, SANDSTONE,
     SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER,
@@ -396,28 +396,8 @@ pub fn generate_world_with_options(
                                 );
                             }
 
-                            // Ocean floor: sand on top, sandstone foundation below
-                            // so the floor doesn't float when fillground is off
-                            let floor_y = ground_y - depth - 1;
-                            let h = land_cover::coord_hash(x, z);
-                            let floor_block = match depth {
-                                0..=2 => SAND,
-                                3..=4 => {
-                                    if h.is_multiple_of(3) {
-                                        GRAVEL
-                                    } else {
-                                        SAND
-                                    }
-                                }
-                                _ => match h % 4 {
-                                    0 => CLAY,
-                                    1 => GRAVEL,
-                                    _ => SAND,
-                                },
-                            };
-                            editor.set_block_if_absent_absolute(floor_block, x, floor_y, z);
-                            editor.set_block_if_absent_absolute(SANDSTONE, x, floor_y - 1, z);
-                            editor.set_block_if_absent_absolute(SANDSTONE, x, floor_y - 2, z);
+                            // One sandstone layer just above bedrock as ocean floor
+                            editor.set_block_if_absent_absolute(SANDSTONE, x, MIN_Y + 1, z);
                         } else {
                         // Determine surface and sub-surface blocks based on available data
                         let (surface_block, under_block) = if has_land_cover {
@@ -550,9 +530,8 @@ pub fn generate_world_with_options(
                             editor.set_block_if_absent_absolute(under_block, x, ground_y - 1, z);
                             editor.set_block_if_absent_absolute(under_block, x, ground_y - 2, z);
                         } else {
-                            // Under water: sand floor + sandstone foundation
-                            editor.set_block_if_absent_absolute(SAND, x, ground_y - 1, z);
-                            editor.set_block_if_absent_absolute(SANDSTONE, x, ground_y - 2, z);
+                            // Under water: one sandstone layer at bedrock+1
+                            editor.set_block_if_absent_absolute(SANDSTONE, x, MIN_Y + 1, z);
                         }
 
                         // Place vegetation from ESA land cover classification

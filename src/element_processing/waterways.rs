@@ -82,21 +82,15 @@ fn create_water_channel(
             let dz = (z - center_z).abs();
             let distance_from_center = dx.max(dz);
 
-            // Clamp depth so sand+sandstone stay above bedrock at MIN_Y
+            // Clamp depth so water stays above bedrock at MIN_Y
             let ground_y = editor.get_ground_level(x, z);
-            let max_depth = (ground_y - MIN_Y - 2).max(0); // -2 for sand+sandstone
+            let max_depth = (ground_y - MIN_Y - 1).max(0);
             let effective_depth = depth.min(max_depth);
 
             if distance_from_center <= half_width {
                 // Main water channel
                 for y in (1 - effective_depth)..=0 {
                     editor.set_block(WATER, x, y, z, None, None);
-                }
-
-                // Sand floor + sandstone foundation below the water channel
-                if effective_depth > 0 {
-                    editor.set_block(SAND, x, -effective_depth, z, None, None);
-                    editor.set_block(SANDSTONE, x, -effective_depth - 1, z, None, None);
                 }
 
                 // Clear vegetation above the water
@@ -111,10 +105,6 @@ fn create_water_channel(
                         editor.set_block(AIR, x, y, z, None, None);
                     }
                 }
-
-                // Sand floor + sandstone foundation below the sloped areas
-                editor.set_block(SAND, x, -slope_depth, z, None, None);
-                editor.set_block(SANDSTONE, x, -slope_depth - 1, z, None, None);
 
                 // Clear vegetation above sloped areas
                 editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);

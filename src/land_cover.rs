@@ -946,6 +946,12 @@ fn dither_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
                 continue;
             }
 
+            // Never dither water boundaries - water/land edges must stay crisp
+            // to prevent the shoreline from shifting inland
+            if center == LC_WATER || neighbor_class == LC_WATER {
+                continue;
+            }
+
             // Deterministic hash from coordinates for reproducible dithering
             let hash = coord_hash(x as i32, z as i32);
 
