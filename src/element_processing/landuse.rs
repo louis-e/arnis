@@ -104,11 +104,26 @@ pub fn generate_landuse(
             block_type
         };
 
+        // Don't overwrite roads or water with landuse ground blocks
+        let is_protected = editor.check_for_block(
+            x,
+            0,
+            z,
+            Some(&[
+                BLACK_CONCRETE,
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                DIRT_PATH,
+                SMOOTH_STONE,
+                WATER,
+            ]),
+        );
+
         if landuse_tag == "traffic_island" {
             editor.set_block(actual_block, x, 1, z, None, None);
         } else if landuse_tag == "construction" || landuse_tag == "railway" {
             editor.set_block(actual_block, x, 0, z, None, Some(&[SPONGE]));
-        } else {
+        } else if !is_protected {
             editor.set_block(actual_block, x, 0, z, None, None);
         }
 
@@ -138,11 +153,11 @@ pub fn generate_landuse(
                         }
                     } else if random_choice < 33 {
                         Tree::create(editor, (x, 1, z), Some(building_footprints));
-                    } else if random_choice < 35 {
+                    } else if !is_protected && random_choice < 35 {
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                    } else if random_choice < 37 {
+                    } else if !is_protected && random_choice < 37 {
                         editor.set_block(FERN, x, 1, z, None, None);
-                    } else if random_choice < 41 {
+                    } else if !is_protected && random_choice < 41 {
                         editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
                         editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
                     }

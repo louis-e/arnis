@@ -788,8 +788,16 @@ pub fn generate_world_with_options(
                             true, // skip_existing: don't overwrite blocks placed by element processing
                         );
                     }
-                    // Generate a bedrock level at MIN_Y
-                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
+                    // Generate a bedrock level at MIN_Y, but don't overwrite water
+                    // (river channels may extend down to MIN_Y)
+                    editor.set_block_absolute(
+                        BEDROCK,
+                        x,
+                        MIN_Y,
+                        z,
+                        None,
+                        Some(&[BEDROCK, WATER, SAND, SANDSTONE]),
+                    );
 
                     block_counter += 1;
                     #[allow(clippy::manual_is_multiple_of)]
