@@ -18,6 +18,7 @@ use std::time::Duration;
 fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(360))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -33,7 +34,15 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                 }
                 Ok(text)
             } else {
-                Err(format!("Error! Received response code: {}", resp.status()).into())
+                let status = resp.status();
+                let user_msg = match status.as_u16() {
+                    429 => "Rate limited. Try again later.".to_string(),
+                    403 => "Server overloaded. Try again.".to_string(),
+                    500 | 502 | 503 | 504 => "Server unavailable. Try again.".to_string(),
+                    _ => format!("Response code: {}", status.as_u16()),
+                };
+                eprintln!("{}", format!("Error! {user_msg}").red().bold());
+                Err(format!("Error! {user_msg}").into())
             }
         }
         Err(e) => {
@@ -112,25 +121,28 @@ pub fn fetch_data_from_overpass(
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
-        //"https://overpass.kumi.systems/api/interpreter", // This server is not reliable anymore
-        //"https://overpass.private.coffee/api/interpreter", // This server is not reliable anymore
     ];
-    let fallback_api_servers: Vec<&str> =
-        vec!["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
+    let fallback_api_servers: Vec<&str> = vec![
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ];
     let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
 
-    // Generate Overpass API query for bounding box
+    // Generate Overpass API query for bounding box.
+    // Ocean/coastal elements are excluded because ESA WorldCover satellite data
+    // handles ocean detection more reliably at 10m resolution (LC_WATER class).
+    // Inland water (lakes, rivers, ponds) is still fetched from OSM.
     let query: String = format!(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
         nwr["building"];
         nwr["building:part"];
         nwr["highway"];
-        nwr["landuse"];
-        nwr["natural"];
+        nwr["landuse"]["landuse"!="salt_pond"];
+        nwr["natural"]["natural"!="coastline"]["natural"!="bay"]["natural"!="strait"];
         nwr["leisure"];
-        nwr["water"];
-        nwr["waterway"];
+        nwr["water"]["water"!="bay"]["water"!="ocean"]["water"!="sea"]["tidal"!="yes"];
+        nwr["waterway"]["waterway"!="tidal_channel"];
         nwr["amenity"];
         nwr["tourism"];
         nwr["bridge"];
@@ -145,7 +157,7 @@ pub fn fetch_data_from_overpass(
         nwr["advertising"];
         nwr["man_made"];
         nwr["aeroway"];
-        way["place"];
+        way["place"]["place"!~"^(ocean|sea|bay|strait|sound|fjord)$"];
         way;
     )->.relsinbbox;
     (
@@ -184,7 +196,10 @@ pub fn fetch_data_from_overpass(
                         return Err(error);
                     }
 
-                    println!("Request failed. Switching to fallback url...");
+                    if download_method != "requests" {
+                        eprintln!("Request failed: {error}");
+                    }
+                    println!("Switching to fallback server...");
                     url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
                     attempt += 1;
                 }
@@ -242,11 +257,14 @@ pub fn fetch_data_from_overpass(
 
 /// Fetches a short area name using Nominatim for the given lat/lon
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .build()?;
 
     let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
 
-    let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
+    let resp = client.get(&url).send()?;
 
     if !resp.status().is_success() {
         return Ok(None);

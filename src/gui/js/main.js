@@ -114,7 +114,7 @@ async function applyLocalization(localization) {
     "span[data-localize='interior']": "interior",
     "span[data-localize='roof']": "roof",
     "span[data-localize='fillground']": "fillground",
-    "span[data-localize='city_boundaries']": "city_boundaries",
+    "span[data-localize='land_cover']": "land_cover",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     ".footer-link": "footer_text",
@@ -880,7 +880,7 @@ async function startGeneration() {
     var interior = document.getElementById("interior-toggle").checked;
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
-    var city_boundaries = document.getElementById("city-boundaries-toggle").checked;
+    var land_cover = document.getElementById("land-cover-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -903,7 +903,7 @@ async function startGeneration() {
         interiorEnabled: interior,
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
-        cityBoundariesEnabled: city_boundaries,
+        landCoverEnabled: land_cover,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,

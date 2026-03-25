@@ -40,7 +40,7 @@
   "interior": "Interjera ģenerēšana",
   "roof": "Jumta ģenerēšana",
   "fillground": "Aizpildīt zemi",
-  "city_boundaries": "Pilsētas zeme",
+  "land_cover": "Zemes segums",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "save_path": "Saglabāšanas ceļš"
 }

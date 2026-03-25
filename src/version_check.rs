@@ -3,6 +3,7 @@ use reqwest::blocking::Client;
 use reqwest::{Error as ReqwestError, StatusCode};
 use semver::Version;
 use std::error::Error;
+use std::time::Duration;
 
 /// URL to the remote Cargo.toml file to check for the latest version
 const REMOTE_CARGO_TOML_URL: &str =
@@ -11,13 +12,15 @@ const REMOTE_CARGO_TOML_URL: &str =
 /// Fetches the latest version from the remote Cargo.toml file and compares it with the local version.
 /// Returns `true` if a newer version is available, `false` otherwise.
 pub fn check_for_updates() -> Result<bool, Box<dyn Error>> {
-    let client: Client = Client::new();
+    let client: Client = Client::builder()
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(10))
+        .build()?;
 
-    // Fetch the remote Cargo.toml file with a User-Agent header
-    let response: Result<reqwest::blocking::Response, ReqwestError> = client
-        .get(REMOTE_CARGO_TOML_URL)
-        .header("User-Agent", "arnis-client")
-        .send();
+    // Fetch the remote Cargo.toml file
+    let response: Result<reqwest::blocking::Response, ReqwestError> =
+        client.get(REMOTE_CARGO_TOML_URL).send();
 
     match response {
         Ok(res) => {

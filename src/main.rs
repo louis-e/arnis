@@ -15,6 +15,7 @@ mod elevation_data;
 mod floodfill;
 mod floodfill_cache;
 mod ground;
+mod land_cover;
 mod map_renderer;
 mod map_transformation;
 mod osm_parser;
@@ -25,7 +26,6 @@ mod retrieve_data;
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
-mod urban_ground;
 mod version_check;
 mod world_editor;
 mod world_utils;

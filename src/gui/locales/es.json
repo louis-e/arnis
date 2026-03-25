@@ -40,7 +40,7 @@
   "interior": "Generación Interior",
   "roof": "Generación de Tejado",
   "fillground": "Rellenar Suelo",
-  "city_boundaries": "Suelo Urbano",
+  "land_cover": "Cobertura del suelo",
   "bedrock_auto_generated": "El mundo Bedrock se genera automáticamente",
   "save_path": "Ruta de guardado"
 }
