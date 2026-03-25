@@ -64,7 +64,8 @@ fn get_waterway_dimensions(waterway_type: &str) -> (i32, i32) {
     }
 }
 
-/// Creates a water channel with proper depth and sloped banks
+/// Creates a water channel with proper depth and sloped banks.
+/// Depth is clamped so the floor stays above bedrock (MIN_Y = -64).
 fn create_water_channel(
     editor: &mut WorldEditor,
     center_x: i32,
@@ -72,6 +73,7 @@ fn create_water_channel(
     width: i32,
     depth: i32,
 ) {
+    const MIN_Y: i32 = -64;
     let half_width = width / 2;
 
     for x in (center_x - half_width - 1)..=(center_x + half_width + 1) {
@@ -80,27 +82,32 @@ fn create_water_channel(
             let dz = (z - center_z).abs();
             let distance_from_center = dx.max(dz);
 
+            // Clamp depth so sand+sandstone stay above bedrock at MIN_Y
+            let ground_y = editor.get_ground_level(x, z);
+            let max_depth = (ground_y - MIN_Y - 2).max(0); // -2 for sand+sandstone
+            let effective_depth = depth.min(max_depth);
+
             if distance_from_center <= half_width {
                 // Main water channel
-                for y in (1 - depth)..=0 {
+                for y in (1 - effective_depth)..=0 {
                     editor.set_block(WATER, x, y, z, None, None);
                 }
 
                 // Sand floor + sandstone foundation below the water channel
-                editor.set_block(SAND, x, -depth, z, None, None);
-                editor.set_block(SANDSTONE, x, -depth - 1, z, None, None);
+                if effective_depth > 0 {
+                    editor.set_block(SAND, x, -effective_depth, z, None, None);
+                    editor.set_block(SANDSTONE, x, -effective_depth - 1, z, None, None);
+                }
 
                 // Clear vegetation above the water
                 editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
-            } else if distance_from_center == half_width + 1 && depth > 1 {
+            } else if distance_from_center == half_width + 1 && effective_depth > 1 {
                 // Create sloped banks (one block interval slopes)
-                let slope_depth = (depth - 1).max(1);
+                let slope_depth = (effective_depth - 1).max(1);
                 for y in (1 - slope_depth)..=0 {
                     if y == 0 {
-                        // Surface level - place water or air
                         editor.set_block(WATER, x, y, z, None, None);
                     } else {
-                        // Below surface - dig out for slope
                         editor.set_block(AIR, x, y, z, None, None);
                     }
                 }

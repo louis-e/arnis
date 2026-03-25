@@ -484,10 +484,13 @@ fn place_water_with_depth(editor: &mut WorldEditor, water_coords: &[(i32, i32)])
         }
     }
 
-    // Place water columns with depth
+    // Place water columns with depth, clamped so floors stay above bedrock
+    const MIN_Y: i32 = -64;
     for &(x, z) in water_coords {
         let dist = distance.get(&(x, z)).copied().unwrap_or(1);
-        let depth = land_cover::water_depth_from_distance(dist);
+        let raw_depth = land_cover::water_depth_from_distance(dist);
+        let ground_y = editor.get_ground_level(x, z);
+        let depth = raw_depth.min((ground_y - MIN_Y - 1).max(0));
 
         // Fill water column from surface downward
         for dy in 0..=depth {

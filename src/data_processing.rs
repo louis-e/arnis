@@ -1,9 +1,10 @@
 use crate::args::Args;
 use crate::block_definitions::{
-    ANDESITE, BEDROCK, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
-    DEAD_BUSH, DIRT, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, HAY_BALE, MUD, OAK_LEAVES, POTATOES,
-    RED_FLOWER, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
-    TALL_GRASS_TOP, WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
+    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
+    CRACKED_STONE_BRICKS, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAY_CONCRETE,
+    GRAVEL, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, POTATOES, RED_FLOWER, SAND, SANDSTONE,
+    SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER,
+    WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
@@ -379,9 +380,11 @@ pub fn generate_world_with_options(
                             && ground.cover_class(coord) == land_cover::LC_WATER;
 
                         if is_esa_water {
-                            // Variable water depth based on distance to shore
+                            // Variable water depth based on distance to shore,
+                            // clamped so floor stays above bedrock
                             let dist = ground.water_distance(coord);
-                            let depth = land_cover::water_depth_from_distance(dist);
+                            let raw_depth = land_cover::water_depth_from_distance(dist);
+                            let depth = raw_depth.min((ground_y - MIN_Y - 2).max(0));
 
                             // Fill water column from surface downward
                             for dy in 0..=depth {
@@ -777,6 +780,39 @@ pub fn generate_world_with_options(
                         } // end else (non-water)
                     }
 
+                    // Post-processing: remove stray vegetation from road surfaces.
+                    // Despite guards in natural/landuse processing, overlapping elements
+                    // with the same priority can still place vegetation on roads depending
+                    // on sort order. This cleanup pass catches any remaining cases.
+                    if editor.check_for_block_absolute(
+                        x,
+                        ground_y,
+                        z,
+                        Some(&[BLACK_CONCRETE, GRAY_CONCRETE, LIGHT_GRAY_CONCRETE, DIRT_PATH]),
+                        None,
+                    ) && editor.check_for_block_absolute(
+                        x,
+                        ground_y + 1,
+                        z,
+                        Some(&[
+                            GRASS, OAK_LEAVES, DEAD_BUSH, TALL_GRASS_BOTTOM, RED_FLOWER,
+                            BLUE_FLOWER, WHITE_FLOWER, YELLOW_FLOWER,
+                        ]),
+                        None,
+                    ) {
+                        editor.set_block_absolute(AIR, x, ground_y + 1, z, None, None);
+                        // Also clear tall grass top if it was a two-block plant
+                        if editor.check_for_block_absolute(
+                            x,
+                            ground_y + 2,
+                            z,
+                            Some(&[TALL_GRASS_TOP]),
+                            None,
+                        ) {
+                            editor.set_block_absolute(AIR, x, ground_y + 2, z, None, None);
+                        }
+                    }
+
                     // Fill underground with stone
                     if args.fillground {
                         editor.fill_column_absolute(
@@ -788,16 +824,8 @@ pub fn generate_world_with_options(
                             true, // skip_existing: don't overwrite blocks placed by element processing
                         );
                     }
-                    // Generate a bedrock level at MIN_Y, but don't overwrite water
-                    // (river channels may extend down to MIN_Y)
-                    editor.set_block_absolute(
-                        BEDROCK,
-                        x,
-                        MIN_Y,
-                        z,
-                        None,
-                        Some(&[BEDROCK, WATER, SAND, SANDSTONE]),
-                    );
+                    // Generate a bedrock level at MIN_Y
+                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
 
                     block_counter += 1;
                     #[allow(clippy::manual_is_multiple_of)]
