@@ -737,7 +737,12 @@ pub fn generate_world_with_options(
                                         ) {
                                             if x % 9 == 0 && z % 9 == 0 {
                                                 editor.set_block_absolute(
-                                                    WATER, x, ground_y, z, None, None,
+                                                    WATER,
+                                                    x,
+                                                    ground_y,
+                                                    z,
+                                                    Some(&[FARMLAND]),
+                                                    None,
                                                 );
                                             } else if rng.random_range(0..76) == 0 {
                                                 if rng.random_range(1..=10) <= 4 {
@@ -771,7 +776,12 @@ pub fn generate_world_with_options(
                                         if choice < 30 {
                                             // Water patches in wetlands
                                             editor.set_block_absolute(
-                                                WATER, x, ground_y, z, None, None,
+                                                WATER,
+                                                x,
+                                                ground_y,
+                                                z,
+                                                Some(&[MUD, GRASS_BLOCK]),
+                                                None,
                                             );
                                         } else if choice < 65 {
                                             editor.set_block_absolute(
@@ -851,7 +861,23 @@ pub fn generate_world_with_options(
                         ]),
                         None,
                     ) {
-                        editor.set_block_absolute(AIR, x, ground_y + 1, z, None, None);
+                        editor.set_block_absolute(
+                            AIR,
+                            x,
+                            ground_y + 1,
+                            z,
+                            Some(&[
+                                GRASS,
+                                OAK_LEAVES,
+                                DEAD_BUSH,
+                                TALL_GRASS_BOTTOM,
+                                RED_FLOWER,
+                                BLUE_FLOWER,
+                                WHITE_FLOWER,
+                                YELLOW_FLOWER,
+                            ]),
+                            None,
+                        );
                         // Also clear tall grass top if it was a two-block plant
                         if editor.check_for_block_absolute(
                             x,
@@ -860,7 +886,14 @@ pub fn generate_world_with_options(
                             Some(&[TALL_GRASS_TOP]),
                             None,
                         ) {
-                            editor.set_block_absolute(AIR, x, ground_y + 2, z, None, None);
+                            editor.set_block_absolute(
+                                AIR,
+                                x,
+                                ground_y + 2,
+                                z,
+                                Some(&[TALL_GRASS_TOP]),
+                                None,
+                            );
                         }
                     }
 
