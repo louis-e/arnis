@@ -152,7 +152,7 @@ pub fn fetch_land_cover_data(
     dither_boundaries(&mut grid, grid_width, grid_height);
 
     // Compute distance from each water cell to nearest shore via multi-source BFS.
-    // Used for variable water depth and ocean floor variation.
+    // Used for shoreline blending (land cells adjacent to water get sand surface).
     let water_distance = compute_water_distance(&grid, grid_width, grid_height);
 
     Some(LandCoverData {

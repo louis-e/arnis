@@ -6,7 +6,6 @@ use crate::{
     world_editor::WorldEditor,
 };
 
-
 pub fn generate_water_area_from_way(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -400,9 +399,6 @@ fn scanline_fill_water(
         outers.iter().map(|ring| collect_ring_edges(ring)).collect();
     let inner_edges = collect_all_ring_edges(inners);
 
-    // Collect all water coordinates first, then place with variable depth
-    let mut water_coords: Vec<(i32, i32)> = Vec::new();
-
     for z in min_z..=max_z {
         let z_f = z as f64;
 
@@ -431,22 +427,8 @@ fn scanline_fill_water(
 
         for (start, end) in fill_spans {
             for x in start..=end {
-                water_coords.push((x, z));
+                editor.set_block(WATER, x, 0, z, None, None);
             }
         }
-    }
-
-    // Place water with variable depth based on distance from shore
-    place_water_with_depth(editor, &water_coords);
-}
-
-/// Places water blocks with variable depth using BFS distance from shore.
-///
-/// For each water coordinate, computes the distance to the nearest non-water
-/// edge, then fills a water column proportional to that distance. Shallow at
-/// Place a single water block at surface level for each coordinate.
-fn place_water_with_depth(editor: &mut WorldEditor, water_coords: &[(i32, i32)]) {
-    for &(x, z) in water_coords {
-        editor.set_block(WATER, x, 0, z, None, None);
     }
 }

@@ -5,7 +5,7 @@ use crate::world_editor::WorldEditor;
 
 pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(waterway_type) = element.tags.get("waterway") {
-        let (mut waterway_width, waterway_depth) = get_waterway_dimensions(waterway_type);
+        let mut waterway_width = get_waterway_width(waterway_type);
 
         // Check for custom width in tags
         if let Some(width_str) = element.tags.get("width") {
@@ -42,37 +42,29 @@ pub fn generate_waterways(editor: &mut WorldEditor, element: &ProcessedWay) {
             );
 
             for (bx, _, bz) in bresenham_points {
-                // Create water channel with proper depth and sloped banks
-                create_water_channel(editor, bx, bz, waterway_width, waterway_depth);
+                create_water_channel(editor, bx, bz, waterway_width);
             }
         }
     }
 }
 
-/// Determines width and depth based on waterway type
-fn get_waterway_dimensions(waterway_type: &str) -> (i32, i32) {
+/// Determines channel width based on waterway type.
+fn get_waterway_width(waterway_type: &str) -> i32 {
     match waterway_type {
-        "river" => (8, 3),    // Large rivers: 8 blocks wide, 3 blocks deep
-        "canal" => (6, 2),    // Canals: 6 blocks wide, 2 blocks deep
-        "stream" => (3, 2),   // Streams: 3 blocks wide, 2 blocks deep
-        "fairway" => (12, 3), // Shipping fairways: 12 blocks wide, 3 blocks deep
-        "flowline" => (2, 1), // Water flow lines: 2 blocks wide, 1 block deep
-        "brook" => (2, 1),    // Small brooks: 2 blocks wide, 1 block deep
-        "ditch" => (2, 1),    // Ditches: 2 blocks wide, 1 block deep
-        "drain" => (1, 1),    // Drainage: 1 block wide, 1 block deep
-        _ => (4, 2),          // Default: 4 blocks wide, 2 blocks deep
+        "river" => 8,
+        "canal" => 6,
+        "stream" => 3,
+        "fairway" => 12,
+        "flowline" => 2,
+        "brook" => 2,
+        "ditch" => 2,
+        "drain" => 1,
+        _ => 4,
     }
 }
 
-/// Creates a water channel with proper depth and sloped banks.
-/// Depth is clamped so the floor stays above bedrock (MIN_Y = -64).
-fn create_water_channel(
-    editor: &mut WorldEditor,
-    center_x: i32,
-    center_z: i32,
-    width: i32,
-    _depth: i32,
-) {
+/// Creates a water channel at surface level with the given width.
+fn create_water_channel(editor: &mut WorldEditor, center_x: i32, center_z: i32, width: i32) {
     let half_width = width / 2;
 
     for x in (center_x - half_width - 1)..=(center_x + half_width + 1) {
