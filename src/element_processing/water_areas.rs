@@ -1,4 +1,4 @@
-use crate::block_definitions::{CLAY, GRAVEL, SAND, WATER};
+use crate::block_definitions::{CLAY, GRAVEL, SAND, SANDSTONE, WATER};
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::land_cover;
 use crate::{
@@ -514,5 +514,8 @@ fn place_water_with_depth(editor: &mut WorldEditor, water_coords: &[(i32, i32)])
             },
         };
         editor.set_block(floor_block, x, -depth, z, None, None);
+        // Sandstone foundation so the floor doesn't float
+        editor.set_block(SANDSTONE, x, -depth - 1, z, None, None);
+        editor.set_block(SANDSTONE, x, -depth - 2, z, None, None);
     }
 }

@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::{
     ANDESITE, BEDROCK, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
     DEAD_BUSH, DIRT, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, HAY_BALE, MUD, OAK_LEAVES, POTATOES,
-    RED_FLOWER, SAND, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
+    RED_FLOWER, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
     TALL_GRASS_TOP, WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
@@ -393,7 +393,8 @@ pub fn generate_world_with_options(
                                 );
                             }
 
-                            // Ocean floor blocks vary by depth
+                            // Ocean floor: sand on top, sandstone foundation below
+                            // so the floor doesn't float when fillground is off
                             let floor_y = ground_y - depth - 1;
                             let h = land_cover::coord_hash(x, z);
                             let floor_block = match depth {
@@ -412,7 +413,8 @@ pub fn generate_world_with_options(
                                 },
                             };
                             editor.set_block_if_absent_absolute(floor_block, x, floor_y, z);
-                            editor.set_block_if_absent_absolute(floor_block, x, floor_y - 1, z);
+                            editor.set_block_if_absent_absolute(SANDSTONE, x, floor_y - 1, z);
+                            editor.set_block_if_absent_absolute(SANDSTONE, x, floor_y - 2, z);
                         } else {
                         // Determine surface and sub-surface blocks based on available data
                         let (surface_block, under_block) = if has_land_cover {
@@ -529,8 +531,25 @@ pub fn generate_world_with_options(
                         };
 
                         editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
-                        editor.set_block_if_absent_absolute(under_block, x, ground_y - 1, z);
-                        editor.set_block_if_absent_absolute(under_block, x, ground_y - 2, z);
+
+                        // Don't place dirt/under blocks below water surfaces.
+                        // OSM water (rivers, lakes) is placed during element processing;
+                        // placing dirt underneath would show through shallow water.
+                        let surface_is_water = editor.check_for_block_absolute(
+                            x,
+                            ground_y,
+                            z,
+                            Some(&[WATER]),
+                            None,
+                        );
+                        if !surface_is_water {
+                            editor.set_block_if_absent_absolute(under_block, x, ground_y - 1, z);
+                            editor.set_block_if_absent_absolute(under_block, x, ground_y - 2, z);
+                        } else {
+                            // Under water: sand floor + sandstone foundation
+                            editor.set_block_if_absent_absolute(SAND, x, ground_y - 1, z);
+                            editor.set_block_if_absent_absolute(SANDSTONE, x, ground_y - 2, z);
+                        }
 
                         // Place vegetation from ESA land cover classification
                         // Only if nothing was already placed above ground by OSM processing
