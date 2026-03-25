@@ -180,18 +180,19 @@ pub fn generate_natural(
                 // Use deterministic RNG seeded by element ID for consistent results across region boundaries
                 let mut rng = element_rng(way.id);
 
-                // Road blocks that natural areas should not overwrite
-                let road_blocks: &[Block] = &[
+                // Blocks that natural areas should not overwrite
+                let protected_blocks: &[Block] = &[
                     BLACK_CONCRETE,
                     GRAY_CONCRETE,
                     LIGHT_GRAY_CONCRETE,
                     DIRT_PATH,
                     SMOOTH_STONE,
+                    WATER,
                 ];
 
                 for (x, z) in filled_area {
                     // Don't overwrite road/path blocks with natural ground
-                    if !editor.check_for_block(x, 0, z, Some(road_blocks)) {
+                    if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
                         editor.set_block(block_type, x, 0, z, None, None);
                     }
                     // Generate custom layer instead of dirt, must be stone on the lowest level

@@ -86,8 +86,9 @@ fn create_water_channel(
                     editor.set_block(WATER, x, y, z, None, None);
                 }
 
-                // Place one layer of dirt below the water channel
-                editor.set_block(DIRT, x, -depth, z, None, None);
+                // Sand floor + sandstone foundation below the water channel
+                editor.set_block(SAND, x, -depth, z, None, None);
+                editor.set_block(SANDSTONE, x, -depth - 1, z, None, None);
 
                 // Clear vegetation above the water
                 editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
@@ -104,8 +105,9 @@ fn create_water_channel(
                     }
                 }
 
-                // Place one layer of dirt below the sloped areas
-                editor.set_block(DIRT, x, -slope_depth, z, None, None);
+                // Sand floor + sandstone foundation below the sloped areas
+                editor.set_block(SAND, x, -slope_depth, z, None, None);
+                editor.set_block(SANDSTONE, x, -slope_depth - 1, z, None, None);
 
                 // Clear vegetation above sloped areas
                 editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
