@@ -113,6 +113,7 @@ pub fn generate_landuse(
                 BLACK_CONCRETE,
                 GRAY_CONCRETE,
                 LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
                 DIRT_PATH,
                 SMOOTH_STONE,
                 WATER,

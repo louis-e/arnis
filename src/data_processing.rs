@@ -4,7 +4,7 @@ use crate::block_definitions::{
     CRACKED_STONE_BRICKS, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL,
     GRAY_CONCRETE, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, POTATOES, RED_FLOWER, SAND,
     SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
-    WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
+    WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
@@ -842,6 +842,7 @@ pub fn generate_world_with_options(
                             BLACK_CONCRETE,
                             GRAY_CONCRETE,
                             LIGHT_GRAY_CONCRETE,
+                            WHITE_CONCRETE,
                             DIRT_PATH,
                         ]),
                         None,
