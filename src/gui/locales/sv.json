@@ -40,7 +40,7 @@
   "interior": "Interiörgenerering",
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
-  "city_boundaries": "Stadsmark",
+  "land_cover": "Marktäcke",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "save_path": "Sökväg"
 }

@@ -128,18 +128,21 @@ pub fn fetch_data_from_overpass(
     ];
     let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
 
-    // Generate Overpass API query for bounding box
+    // Generate Overpass API query for bounding box.
+    // Ocean/coastal elements are excluded because ESA WorldCover satellite data
+    // handles ocean detection more reliably at 10m resolution (LC_WATER class).
+    // Inland water (lakes, rivers, ponds) is still fetched from OSM.
     let query: String = format!(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
         nwr["building"];
         nwr["building:part"];
         nwr["highway"];
-        nwr["landuse"];
-        nwr["natural"];
+        nwr["landuse"]["landuse"!="salt_pond"];
+        nwr["natural"]["natural"!="coastline"]["natural"!="bay"]["natural"!="strait"];
         nwr["leisure"];
-        nwr["water"];
-        nwr["waterway"];
+        nwr["water"]["water"!="bay"]["water"!="ocean"]["water"!="sea"]["tidal"!="yes"];
+        nwr["waterway"]["waterway"!="tidal_channel"];
         nwr["amenity"];
         nwr["tourism"];
         nwr["bridge"];
@@ -154,7 +157,7 @@ pub fn fetch_data_from_overpass(
         nwr["advertising"];
         nwr["man_made"];
         nwr["aeroway"];
-        way["place"];
+        way["place"]["place"!~"^(ocean|sea|bay|strait|sound|fjord)$"];
         way;
     )->.relsinbbox;
     (

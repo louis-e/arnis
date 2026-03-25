@@ -40,7 +40,7 @@
   "interior": "내부 생성",
   "roof": "지붕 생성",
   "fillground": "지면 채우기",
-  "city_boundaries": "도시 지면",
+  "land_cover": "토지 피복",
   "bedrock_auto_generated": "Bedrock 월드는 자동 생성됩니다",
   "save_path": "저장 경로"
 }

@@ -1,6 +1,6 @@
+use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::{
-    block_definitions::WATER,
     coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
     world_editor::WorldEditor,
