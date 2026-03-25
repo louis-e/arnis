@@ -522,7 +522,8 @@ pub fn generate_world_with_options(
                                         == land_cover::LC_WATER
                                 });
                             if near_water {
-                                (SAND, SAND)
+                                // Use sandstone underneath so sand doesn't fall
+                                (SAND, SANDSTONE)
                             } else {
                                 (surface_block, under_block)
                             }
