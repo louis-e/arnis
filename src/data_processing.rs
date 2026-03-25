@@ -2,9 +2,9 @@ use crate::args::Args;
 use crate::block_definitions::{
     AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
     CRACKED_STONE_BRICKS, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL,
-    GRAY_CONCRETE, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, POTATOES, RED_FLOWER, SAND,
-    SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
-    WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+    GRAY_CONCRETE, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, PACKED_ICE, POTATOES,
+    RED_FLOWER, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
+    TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
@@ -473,7 +473,14 @@ pub fn generate_world_with_options(
                                                 }
                                             }
                                         }
-                                        land_cover::LC_SNOW_ICE => (SNOW_BLOCK, DIRT),
+                                        land_cover::LC_SNOW_ICE => {
+                                            let h = land_cover::coord_hash(x, z) % 10;
+                                            if h < 7 {
+                                                (SNOW_BLOCK, DIRT)
+                                            } else {
+                                                (PACKED_ICE, PACKED_ICE)
+                                            }
+                                        }
                                         // LC_WATER handled above with variable depth
                                         land_cover::LC_WETLAND => (MUD, DIRT),
                                         land_cover::LC_MANGROVES => (MUD, DIRT),
