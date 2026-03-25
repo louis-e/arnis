@@ -2,8 +2,8 @@ use crate::args::Args;
 use crate::block_definitions::{
     ANDESITE, BEDROCK, BLUE_FLOWER, CARROTS, COARSE_DIRT, COBBLESTONE, CRACKED_STONE_BRICKS,
     DEAD_BUSH, DIRT, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, HAY_BALE, MUD, OAK_LEAVES, POTATOES,
-    RED_FLOWER, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
-    WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
+    RED_FLOWER, SAND, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
+    TALL_GRASS_TOP, WATER, WHEAT, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
@@ -444,7 +444,7 @@ pub fn generate_world_with_options(
                                         }
                                     }
                                     land_cover::LC_SNOW_ICE => (SNOW_BLOCK, DIRT),
-                                    land_cover::LC_WATER => (GRASS_BLOCK, DIRT), // Handled by OSM
+                                    land_cover::LC_WATER => (WATER, SAND), // Ocean fallback via ESA
                                     land_cover::LC_WETLAND => (MUD, DIRT),
                                     land_cover::LC_MANGROVES => (MUD, DIRT),
                                     _ => (GRASS_BLOCK, DIRT),
