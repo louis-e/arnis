@@ -22,7 +22,7 @@ use crate::block_definitions::{
     TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::data_processing::MIN_Y;
+use crate::world_editor::MIN_Y;
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
@@ -32,7 +32,6 @@ use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
-use std::sync::Arc;
 
 /// Generate the ground layer for the entire bounding box.
 ///
@@ -41,7 +40,7 @@ use std::sync::Arc;
 /// of the progress state and flushes completed regions to disk as it goes.
 pub fn generate_ground_layer(
     editor: &mut WorldEditor,
-    ground: &Arc<Ground>,
+    ground: &Ground,
     args: &Args,
     xzbbox: &XZBBox,
     building_footprints: &BuildingFootprintBitmap,

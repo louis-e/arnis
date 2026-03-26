@@ -17,8 +17,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub const MIN_Y: i32 = -64;
-
 /// Generation options that can be passed separately from CLI Args
 #[derive(Clone)]
 pub struct GenerationOptions {
@@ -311,7 +309,7 @@ pub fn generate_world_with_options(
     // Generate ground layer (surface blocks, vegetation, shorelines, underground fill)
     ground_generation::generate_ground_layer(
         &mut editor,
-        &ground,
+        ground.as_ref(),
         args,
         &xzbbox,
         &building_footprints,
