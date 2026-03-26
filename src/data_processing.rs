@@ -933,6 +933,35 @@ pub fn generate_world_with_options(
                 }
             }
         }
+
+        // Flush any region columns that are now fully written.
+        //
+        // A region spans 32 chunks (512 blocks) along each axis. Once the
+        // chunk_x loop advances past the last chunk_x in a region column, no
+        // further ground writes (or element writes, which finished earlier) will
+        // target that region. It is safe to serialize it to disk and free its
+        // memory.
+        //
+        // Two cases trigger a flush for region_x:
+        //   1. chunk_x is the last chunk in its region (chunk_x & 31 == 31)
+        //   2. chunk_x is the last chunk in the bounding box (may be mid-region)
+        //
+        // In both cases every region_z column that overlaps the bounding box is
+        // flushed, because the chunk_z loop already completed all z-writes.
+        let region_x = chunk_x >> 5;
+        let is_last_chunk_in_region = (chunk_x & 31) == 31;
+        let is_last_chunk_in_bbox = chunk_x == max_chunk_x;
+
+        if is_last_chunk_in_region || is_last_chunk_in_bbox {
+            let min_region_z = min_chunk_z >> 5;
+            let max_region_z = max_chunk_z >> 5;
+
+            for region_z in min_region_z..=max_region_z {
+                if let Err(e) = editor.flush_region(region_x, region_z) {
+                    return Err(e.to_string());
+                }
+            }
+        }
     }
 
     // Set sign for player orientation
