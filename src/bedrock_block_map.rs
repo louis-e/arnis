@@ -1442,4 +1442,56 @@ mod tests {
             Some(BedrockBlockStateValue::Bool(false))
         ));
     }
+
+    #[test]
+    fn test_rail_shape_conversion() {
+        use crate::block_definitions::RAIL;
+
+        let cases = [
+            ("north_south", 0),
+            ("east_west", 1),
+            ("ascending_east", 2),
+            ("ascending_west", 3),
+            ("ascending_north", 4),
+            ("ascending_south", 5),
+            ("south_east", 6),
+            ("south_west", 7),
+            ("north_west", 8),
+            ("north_east", 9),
+        ];
+
+        for (shape, expected_direction) in cases {
+            let mut props = std::collections::HashMap::new();
+            props.insert(
+                "shape".to_string(),
+                fastnbt::Value::String(shape.to_string()),
+            );
+            let java_props = fastnbt::Value::Compound(props);
+
+            let bedrock = to_bedrock_block_with_properties(RAIL, Some(&java_props));
+            assert_eq!(bedrock.name, "minecraft:rail");
+            assert!(
+                matches!(
+                    bedrock.states.get("rail_direction"),
+                    Some(BedrockBlockStateValue::Int(d)) if *d == expected_direction
+                ),
+                "shape={shape}: expected rail_direction={expected_direction}, got {:?}",
+                bedrock.states.get("rail_direction")
+            );
+        }
+    }
+
+    #[test]
+    fn test_rail_default_without_properties() {
+        use crate::block_definitions::RAIL;
+
+        let bedrock = to_bedrock_block_with_properties(RAIL, None);
+        assert_eq!(bedrock.name, "minecraft:rail");
+        // RAIL (id=66) has no built-in properties, so falls back to
+        // to_bedrock_block which hardcodes rail_direction=0
+        assert!(matches!(
+            bedrock.states.get("rail_direction"),
+            Some(BedrockBlockStateValue::Int(0))
+        ));
+    }
 }

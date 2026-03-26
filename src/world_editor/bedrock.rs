@@ -1145,8 +1145,65 @@ struct BedrockLevelDat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bedrockrs_level::level::db_interface::bedrock_key::ChunkKey;
     use serde_json::Value;
     use zip::ZipArchive;
+
+    /// Build a key using the canonical `ChunkKey` path (the source of truth from
+    /// `bedrockrs_level`) so we can compare against `build_chunk_key_bytes`.
+    fn canonical_key(chunk_key: ChunkKey) -> Vec<u8> {
+        // Replicates RustyDBInterface::build_key without needing a DB instance
+        use bedrockrs_level::level::db_interface::db::LevelDBKey;
+        use std::io::Cursor;
+        let mut key_bytes: Vec<u8> = vec![0; chunk_key.estimate_size()];
+        let mut buff: Cursor<&mut [u8]> = Cursor::new(&mut key_bytes);
+        chunk_key.write_key(&mut buff);
+        key_bytes
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_version() {
+        let pos = Vec2::new(5, -3);
+        let ours = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Version, None);
+        let canonical = canonical_key(ChunkKey::chunk_marker(pos, Dimension::Overworld));
+        assert_eq!(ours, canonical, "Version key mismatch");
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_data3d() {
+        let pos = Vec2::new(-12, 7);
+        let ours = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Data3D, None);
+        let canonical = canonical_key(ChunkKey::data3d(pos, Dimension::Overworld));
+        assert_eq!(ours, canonical, "Data3D key mismatch");
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_subchunk() {
+        let pos = Vec2::new(100, -50);
+        // Positive y index
+        let ours = build_chunk_key_bytes(
+            pos,
+            Dimension::Overworld,
+            KeyTypeTag::SubChunkPrefix,
+            Some(4),
+        );
+        let canonical = canonical_key(ChunkKey::new_subchunk(pos, Dimension::Overworld, 4));
+        assert_eq!(ours, canonical, "SubChunk y=4 key mismatch");
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_negative_y() {
+        let pos = Vec2::new(0, 0);
+        // Negative y index (e.g. y = -4 for sections below y=0)
+        let ours = build_chunk_key_bytes(
+            pos,
+            Dimension::Overworld,
+            KeyTypeTag::SubChunkPrefix,
+            Some(-4),
+        );
+        let canonical = canonical_key(ChunkKey::new_subchunk(pos, Dimension::Overworld, -4));
+        assert_eq!(ours, canonical, "SubChunk y=-4 key mismatch");
+    }
 
     #[test]
     fn writes_mcworld_package_with_metadata() {
