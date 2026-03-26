@@ -15,6 +15,7 @@ mod elevation_data;
 mod floodfill;
 mod floodfill_cache;
 mod ground;
+mod ground_generation;
 mod land_cover;
 mod map_renderer;
 mod map_transformation;
