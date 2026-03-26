@@ -33,8 +33,8 @@ pub fn generate_leisure(
                         "sand" => SAND,
                         "tartan" => RED_TERRACOTTA,
                         "grass" => GRASS_BLOCK,
-                        "dirt" | "ground" | "earth" => DIRT,           //Added
-                        "mulch" => PODZOL,                             // Added
+                        "dirt" | "ground" | "earth" => DIRT,
+                        "mulch" => PODZOL,
                         "pebblestone" | "cobblestone" | "unhewn_cobblestone" => COBBLESTONE,
                         _ => GREEN_STAINED_HARDENED_CLAY,
                     }
