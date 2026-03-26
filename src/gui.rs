@@ -639,13 +639,15 @@ struct WorldMapData {
     max_mc_z: i32,
 }
 
-/// Opens the file with default application (Windows) or shows in file explorer (macOS/Linux)
+/// Reveals a file or folder in the system file explorer.
+/// On Windows, tries to open files with the default application first (e.g. .mcworld with
+/// Minecraft Bedrock), falling back to Explorer. Directories always open in Explorer.
 #[tauri::command]
 fn gui_show_in_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // On Windows, try to open with default application (Minecraft Bedrock)
-        // If that fails, show in Explorer
+        // On Windows, try to open with default application (e.g. .mcworld with Minecraft Bedrock)
+        // For directories, `start ""` opens Explorer directly. Falls back to explorer /select.
         if std::process::Command::new("cmd")
             .args(["/C", "start", "", &path])
             .spawn()

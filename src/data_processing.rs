@@ -14,7 +14,7 @@ use crate::ground::Ground;
 use crate::land_cover;
 use crate::map_renderer;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
-use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
+use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::world_editor::{WorldEditor, WorldFormat};
@@ -1019,7 +1019,19 @@ pub fn generate_world_with_options(
     // For Bedrock format, emit event to open the mcworld file
     if world_format == WorldFormat::BedrockMcWorld {
         if let Some(path_str) = output_path.to_str() {
-            emit_open_mcworld_file(path_str);
+            emit_show_in_folder(path_str);
+        }
+    }
+
+    // For Java worlds saved to the Desktop (GUI falls back there when .minecraft/saves
+    // is missing), open the folder in the file explorer so the user can find the world.
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(desktop) = dirs::desktop_dir() {
+            if output_path.starts_with(&desktop) {
+                if let Some(path_str) = output_path.to_str() {
+                    emit_show_in_folder(path_str);
+                }
+            }
         }
     }
 
