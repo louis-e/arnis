@@ -10,7 +10,7 @@ const MIN_Y: i32 = -64;
 /// Maximum Y coordinate in Minecraft (1.18+)
 const MAX_Y: i32 = 319;
 use fastnbt::{LongArray, Value};
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use serde::{Deserialize, Serialize};
 
 /// Chunk structure for Java Edition NBT format
@@ -396,9 +396,34 @@ impl RegionToModify {
 #[derive(Default)]
 pub(crate) struct WorldToModify {
     pub regions: FnvHashMap<(i32, i32), RegionToModify>,
+    /// Regions that have been flushed to disk and removed from memory.
+    /// Used at save time to purge any stale re-created entries so they
+    /// don't overwrite the correct .mca files on disk.
+    flushed_regions: FnvHashSet<(i32, i32)>,
 }
 
 impl WorldToModify {
+    /// Mark a region as flushed. Any stale re-created entries (from cross-region
+    /// writes like tree canopies) will be purged before the final save.
+    #[inline]
+    pub fn mark_flushed(&mut self, region_x: i32, region_z: i32) {
+        self.flushed_regions.insert((region_x, region_z));
+    }
+
+    /// Remove any regions that were re-created after being flushed to disk.
+    ///
+    /// Cross-region writes (e.g. tree canopies extending past a region boundary)
+    /// can re-create an already-flushed region via `entry().or_default()`. These
+    /// stale entries contain only the spilled blocks — not the full region data.
+    /// Purging them before save prevents overwriting the correct `.mca` files.
+    pub fn purge_stale_regions(&mut self) {
+        if self.flushed_regions.is_empty() {
+            return;
+        }
+        self.regions
+            .retain(|key, _| !self.flushed_regions.contains(key));
+    }
+
     #[inline]
     pub fn get_or_create_region(&mut self, x: i32, z: i32) -> &mut RegionToModify {
         self.regions.entry((x, z)).or_default()
