@@ -101,8 +101,7 @@ impl<'a> WorldEditor<'a> {
         println!("{} Saving world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving world...");
 
-        // Save metadata with error handling — must run even when all regions
-        // were already flushed incrementally during ground generation.
+        // Save metadata with error handling
         if let Err(e) = self.save_metadata() {
             eprintln!("Failed to save world metadata: {}", e);
             #[cfg(feature = "gui")]
@@ -110,7 +109,6 @@ impl<'a> WorldEditor<'a> {
             // Continue with world saving even if metadata fails
         }
 
-        // If all regions were flushed during ground generation, nothing left to write.
         if self.world.regions.is_empty() {
             return Ok(());
         }
