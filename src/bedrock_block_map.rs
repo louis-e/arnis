@@ -787,6 +787,11 @@ pub fn to_bedrock_block_with_properties(
         return convert_trapdoor(java_name, props_map);
     }
 
+    // Handle beds with facing/part/occupied properties
+    if java_name.ends_with("_bed") {
+        return convert_bed(java_name, props_map);
+    }
+
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
 }
@@ -1131,6 +1136,78 @@ fn convert_trapdoor(
 
     BedrockBlock {
         name: format!("minecraft:{bedrock_name}"),
+        states,
+    }
+}
+
+/// Convert Java bed block to Bedrock format with direction, head/foot, and occupied states.
+fn convert_bed(
+    _java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let mut states = HashMap::new();
+
+    // Bedrock bed always has color
+    states.insert(
+        "color".to_string(),
+        BedrockBlockStateValue::String("red".to_string()),
+    );
+
+    if let Some(props) = props {
+        // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3)
+        // Bedrock bed: 0=south, 1=west, 2=north, 3=east
+        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
+            let direction = match facing.as_str() {
+                "south" => 0,
+                "west" => 1,
+                "north" => 2,
+                "east" => 3,
+                _ => 0,
+            };
+            states.insert(
+                "direction".to_string(),
+                BedrockBlockStateValue::Int(direction),
+            );
+        }
+
+        // Convert part: Java "head"/"foot" → Bedrock head_piece_bit
+        if let Some(fastnbt::Value::String(part)) = props.get("part") {
+            let is_head = part == "head";
+            states.insert(
+                "head_piece_bit".to_string(),
+                BedrockBlockStateValue::Bool(is_head),
+            );
+        }
+
+        // Convert occupied: Java "true"/"false" → Bedrock occupied_bit
+        if let Some(fastnbt::Value::String(occupied)) = props.get("occupied") {
+            let is_occupied = occupied == "true";
+            states.insert(
+                "occupied_bit".to_string(),
+                BedrockBlockStateValue::Bool(is_occupied),
+            );
+        }
+    }
+
+    // Defaults if no properties were set
+    if !states.contains_key("direction") {
+        states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
+    }
+    if !states.contains_key("head_piece_bit") {
+        states.insert(
+            "head_piece_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
+    }
+    if !states.contains_key("occupied_bit") {
+        states.insert(
+            "occupied_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
+    }
+
+    BedrockBlock {
+        name: "minecraft:bed".to_string(),
         states,
     }
 }

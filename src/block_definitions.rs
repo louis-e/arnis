@@ -485,48 +485,56 @@ impl Block {
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("north".to_string()));
                 map.insert("part".to_string(), Value::String("head".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             162 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("north".to_string()));
                 map.insert("part".to_string(), Value::String("foot".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             163 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("east".to_string()));
                 map.insert("part".to_string(), Value::String("head".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             164 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("east".to_string()));
                 map.insert("part".to_string(), Value::String("foot".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             165 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("south".to_string()));
                 map.insert("part".to_string(), Value::String("head".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             166 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("south".to_string()));
                 map.insert("part".to_string(), Value::String("foot".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             167 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("west".to_string()));
                 map.insert("part".to_string(), Value::String("head".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             168 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
                 map.insert("facing".to_string(), Value::String("west".to_string()));
                 map.insert("part".to_string(), Value::String("foot".to_string()));
+                map.insert("occupied".to_string(), Value::String("false".to_string()));
                 map
             })),
             173 => Some(Value::Compound({

@@ -58,6 +58,14 @@ jobs:
     - name: Rename binary for release
       run: mv target/${{ matrix.target }}/release/${{ matrix.binary_name }} target/release/${{ matrix.asset_name }}
 
+    - name: Set executable permission
+      if: matrix.os != 'windows-latest'
+      run: chmod +x target/release/${{ matrix.asset_name }}
+
+    - name: Package binary as tar.gz (preserves executable permission)
+      if: matrix.os != 'windows-latest'
+      run: tar -czf target/release/${{ matrix.asset_name }}.tar.gz -C target/release ${{ matrix.asset_name }}
+
     - name: Install Windows SDK
       if: matrix.os == 'windows-latest'
       run: |
@@ -90,7 +98,7 @@ jobs:
       uses: actions/upload-artifact@v7
       with:
         name: ${{ matrix.os }}-${{ matrix.target }}-build
-        path: target/release/${{ matrix.asset_name }}
+        path: target/release/${{ matrix.asset_name }}${{ matrix.os != 'windows-latest' && '.tar.gz' || '' }}
 
   create-universal-macos:
     needs: build
@@ -108,16 +116,22 @@ jobs:
         name: macos-latest-aarch64-apple-darwin-build
         path: ./arm64
 
+    - name: Extract Intel and ARM64 binaries
+      run: |
+        tar -xzf ./intel/arnis-mac-intel.tar.gz -C ./intel
+        tar -xzf ./arm64/arnis-mac-arm64.tar.gz -C ./arm64
+
     - name: Create universal binary
       run: |
         lipo -create -output arnis-mac-universal ./intel/arnis-mac-intel ./arm64/arnis-mac-arm64
         chmod +x arnis-mac-universal
+        tar -czf arnis-mac-universal.tar.gz arnis-mac-universal
 
     - name: Upload universal binary
       uses: actions/upload-artifact@v7
       with:
         name: macos-universal-build
-        path: arnis-mac-universal
+        path: arnis-mac-universal.tar.gz
 
   release:
     needs: [build, create-universal-macos]
@@ -144,17 +158,12 @@ jobs:
         name: macos-universal-build
         path: ./builds/macos
 
-    - name: Make Linux and macOS binaries executable
-      run: |
-        chmod +x ./builds/linux/arnis-linux
-        chmod +x ./builds/macos/arnis-mac-universal
-
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         files: |
           builds/windows/arnis-windows.exe
-          builds/linux/arnis-linux
-          builds/macos/arnis-mac-universal
+          builds/linux/arnis-linux.tar.gz
+          builds/macos/arnis-mac-universal.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}

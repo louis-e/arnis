@@ -30,7 +30,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
             if resp.status().is_success() {
                 let text = resp.text()?;
                 if text.is_empty() {
-                    return Err("Error! Received invalid from server".into());
+                    return Err("Received invalid data from server".into());
                 }
                 Ok(text)
             } else {
@@ -42,7 +42,7 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
                     _ => format!("Response code: {}", status.as_u16()),
                 };
                 eprintln!("{}", format!("Error! {user_msg}").red().bold());
-                Err(format!("Error! {user_msg}").into())
+                Err(user_msg.into())
             }
         }
         Err(e) => {
