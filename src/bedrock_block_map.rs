@@ -1142,15 +1142,19 @@ fn convert_trapdoor(
 
 /// Convert Java bed block to Bedrock format with direction, head/foot, and occupied states.
 fn convert_bed(
-    _java_name: &str,
+    java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
     let mut states = HashMap::new();
 
-    // Bedrock bed always has color
+    // Derive bed color from Java name (e.g. "red_bed" → "red", "blue_bed" → "blue")
+    let color = java_name
+        .strip_suffix("_bed")
+        .filter(|prefix| !prefix.is_empty())
+        .unwrap_or("red");
     states.insert(
         "color".to_string(),
-        BedrockBlockStateValue::String("red".to_string()),
+        BedrockBlockStateValue::String(color.to_string()),
     );
 
     if let Some(props) = props {
@@ -1306,6 +1310,74 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("upside_down_bit"),
             Some(BedrockBlockStateValue::Bool(true))
+        ));
+    }
+
+    #[test]
+    fn test_bed_with_properties() {
+        use crate::block_definitions::RED_BED_NORTH_HEAD;
+        use std::collections::HashMap as StdHashMap;
+
+        let mut props = StdHashMap::new();
+        props.insert(
+            "facing".to_string(),
+            fastnbt::Value::String("north".to_string()),
+        );
+        props.insert(
+            "part".to_string(),
+            fastnbt::Value::String("head".to_string()),
+        );
+        props.insert(
+            "occupied".to_string(),
+            fastnbt::Value::String("false".to_string()),
+        );
+        let java_props = fastnbt::Value::Compound(props);
+
+        let bedrock = to_bedrock_block_with_properties(RED_BED_NORTH_HEAD, Some(&java_props));
+        assert_eq!(bedrock.name, "minecraft:bed");
+
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(c)) if c == "red"
+        ));
+        // Bedrock bed: north = 2
+        assert!(matches!(
+            bedrock.states.get("direction"),
+            Some(BedrockBlockStateValue::Int(2))
+        ));
+        assert!(matches!(
+            bedrock.states.get("head_piece_bit"),
+            Some(BedrockBlockStateValue::Bool(true))
+        ));
+        assert!(matches!(
+            bedrock.states.get("occupied_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        ));
+    }
+
+    #[test]
+    fn test_bed_defaults_without_properties() {
+        use crate::block_definitions::RED_BED_SOUTH_FOOT;
+
+        let bedrock = to_bedrock_block_with_properties(RED_BED_SOUTH_FOOT, None);
+        assert_eq!(bedrock.name, "minecraft:bed");
+
+        // Should use defaults from block.properties() (south facing, foot)
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(c)) if c == "red"
+        ));
+        assert!(matches!(
+            bedrock.states.get("direction"),
+            Some(BedrockBlockStateValue::Int(0))
+        ));
+        assert!(matches!(
+            bedrock.states.get("head_piece_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        ));
+        assert!(matches!(
+            bedrock.states.get("occupied_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
         ));
     }
 }
