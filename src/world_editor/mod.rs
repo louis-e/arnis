@@ -749,6 +749,7 @@ impl<'a> WorldEditor<'a> {
             return Ok(());
         }
 
+        self.world.mark_flushed(region_x, region_z);
         if let Some(mut region) = self.world.regions.remove(&(region_x, region_z)) {
             // Compact before serializing. In the original code path, save() calls
             // self.world.compact_sections() globally before save_java(). With

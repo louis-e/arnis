@@ -10,7 +10,7 @@ pub const MIN_Y: i32 = -64;
 /// Maximum Y coordinate in Minecraft (1.18+)
 const MAX_Y: i32 = 319;
 use fastnbt::{LongArray, Value};
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use serde::{Deserialize, Serialize};
 
 /// Chunk structure for Java Edition NBT format
@@ -396,9 +396,25 @@ impl RegionToModify {
 #[derive(Default)]
 pub(crate) struct WorldToModify {
     pub regions: FnvHashMap<(i32, i32), RegionToModify>,
+    /// Regions that have been flushed to disk and removed from memory.
+    /// Writes targeting these regions are silently skipped to prevent
+    /// re-creating an almost-empty region that would overwrite the full one on disk.
+    flushed_regions: FnvHashSet<(i32, i32)>,
 }
 
 impl WorldToModify {
+    /// Mark a region as flushed so future writes to it are silently skipped.
+    #[inline]
+    pub fn mark_flushed(&mut self, region_x: i32, region_z: i32) {
+        self.flushed_regions.insert((region_x, region_z));
+    }
+
+    /// Returns true if the region at `(region_x, region_z)` was already flushed.
+    #[inline]
+    pub fn is_flushed(&self, region_x: i32, region_z: i32) -> bool {
+        self.flushed_regions.contains(&(region_x, region_z))
+    }
+
     #[inline]
     pub fn get_or_create_region(&mut self, x: i32, z: i32) -> &mut RegionToModify {
         self.regions.entry((x, z)).or_default()
@@ -432,6 +448,10 @@ impl WorldToModify {
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
 
+        if self.is_flushed(region_x, region_z) {
+            return;
+        }
+
         let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
         let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
         chunk.set_block(
@@ -455,6 +475,10 @@ impl WorldToModify {
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
 
+        if self.is_flushed(region_x, region_z) {
+            return;
+        }
+
         let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
         let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
         chunk.set_block_with_properties(
@@ -475,6 +499,10 @@ impl WorldToModify {
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
+
+        if self.is_flushed(region_x, region_z) {
+            return;
+        }
 
         let region = self.regions.entry((region_x, region_z)).or_default();
         let chunk = region
@@ -516,6 +544,10 @@ impl WorldToModify {
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
+
+        if self.is_flushed(region_x, region_z) {
+            return;
+        }
 
         let region = self.regions.entry((region_x, region_z)).or_default();
         let chunk = region
