@@ -726,6 +726,62 @@ impl<'a> WorldEditor<'a> {
         self.world.set_block_if_absent(x, absolute_y, z, block);
     }
 
+    /// Serialize a single region to disk and immediately drop it from memory.
+    ///
+    /// Called during ground generation once the chunk-ordered loop has moved past
+    /// all chunks belonging to a region, guaranteeing no further writes will target
+    /// it. This keeps peak RAM proportional to the current region column rather than
+    /// the entire world.
+    ///
+    /// If the region is not present in memory (already flushed or never written to)
+    /// this is a no-op. The region is removed from `self.world.regions` before
+    /// returning so that the later `save()` call skips it cleanly.
+    ///
+    /// Only applies to Java Anvil format; Bedrock worlds use a single-pass LevelDB
+    /// writer so incremental flushing is not supported (this is a no-op).
+    pub fn flush_region(
+        &mut self,
+        region_x: i32,
+        region_z: i32,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if !matches!(self.format, WorldFormat::JavaAnvil) {
+            return Ok(());
+        }
+
+        if let Some(mut region) = self.world.regions.remove(&(region_x, region_z)) {
+            // Compact before serializing. In the original code path, save() calls
+            // self.world.compact_sections() globally before save_java(). With
+            // incremental flushing, regions are serialized before save() is ever
+            // called, so compaction must happen here instead.
+            //
+            // Without this step, sections that should be Uniform (e.g. a column
+            // filled entirely with STONE by --fillground) are serialized as Full
+            // 4096-entry data arrays. This produces different NBT bytes than the
+            // original code (breaking MD5 equivalence) and results in Minecraft
+            // reading the chunks as empty air (empty world).
+            for chunk in region.chunks.values_mut() {
+                for section in chunk.sections.values_mut() {
+                    section.compact();
+                }
+            }
+            if let Err(e) = self.save_single_region(region_x, region_z, &region) {
+                let user_msg = if is_disk_full_error(e.as_ref()) {
+                    "Not enough disk space available.".to_string()
+                } else {
+                    format!("Failed to save region ({}, {}): {}", region_x, region_z, e)
+                };
+                eprintln!("{}", user_msg);
+                #[cfg(feature = "gui")]
+                {
+                    send_log(LogLevel::Error, &user_msg);
+                    emit_gui_error(&user_msg);
+                }
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
     /// Returns true if a non-AIR block exists at the given absolute coordinates.
     #[inline]
     pub fn block_exists_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
