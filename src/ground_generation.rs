@@ -36,8 +36,8 @@ use rand::Rng;
 /// Generate the ground layer for the entire bounding box.
 ///
 /// This must be called after all OSM element processing is complete and the
-/// flood-fill / highway caches have been dropped. The function takes ownership
-/// of the progress state and flushes completed regions to disk as it goes.
+/// flood-fill / highway caches have been dropped. Regions remain in memory
+/// and are saved in parallel by `save_java()` after generation completes.
 pub fn generate_ground_layer(
     editor: &mut WorldEditor,
     ground: &Ground,
