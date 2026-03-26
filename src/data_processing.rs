@@ -994,6 +994,18 @@ pub fn generate_world_with_options(
         }
     }
 
+    // For Java worlds saved outside .minecraft/saves (e.g. Desktop fallback),
+    // open the folder in the file explorer so the user can find the generated world.
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(desktop) = dirs::desktop_dir() {
+            if output_path.starts_with(&desktop) {
+                if let Some(path_str) = output_path.to_str() {
+                    emit_open_mcworld_file(path_str);
+                }
+            }
+        }
+    }
+
     Ok(output_path)
 }
 
