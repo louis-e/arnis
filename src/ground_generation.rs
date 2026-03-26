@@ -659,46 +659,8 @@ pub fn generate_ground_layer(
             }
         }
 
-        // Flush completed region columns to disk to free memory.
-        //
-        // A region spans 32 chunks (512 blocks) along each axis. We delay the
-        // flush by one chunk past the region boundary so that cross-region
-        // writes (tree canopies can extend up to 3 blocks into the previous
-        // region) are captured before serialization.
-        //
-        // Two cases trigger a flush:
-        //   1. chunk_x just crossed into a new region (first chunk of region N
-        //      means region N-1 is complete, including any spill from this chunk).
-        //   2. chunk_x is the last chunk in the bounding box — flush the current
-        //      region since there will be no next iteration.
-        let curr_region_x = chunk_x >> 5;
-        let is_last_chunk_in_bbox = chunk_x == max_chunk_x;
-
-        // Detect region boundary crossing: the previous chunk belonged to a
-        // different region, so that region is now safe to flush.
-        if chunk_x > min_chunk_x {
-            let prev_region_x = (chunk_x - 1) >> 5;
-            if prev_region_x != curr_region_x {
-                let min_region_z = min_chunk_z >> 5;
-                let max_region_z = max_chunk_z >> 5;
-                for region_z in min_region_z..=max_region_z {
-                    if let Err(e) = editor.flush_region(prev_region_x, region_z) {
-                        return Err(e.to_string());
-                    }
-                }
-            }
-        }
-
-        // Last chunk in bbox: flush the current (and possibly only) region.
-        if is_last_chunk_in_bbox {
-            let min_region_z = min_chunk_z >> 5;
-            let max_region_z = max_chunk_z >> 5;
-            for region_z in min_region_z..=max_region_z {
-                if let Err(e) = editor.flush_region(curr_region_x, region_z) {
-                    return Err(e.to_string());
-                }
-            }
-        }
+        // Regions stay in memory and are saved in parallel by save_java()
+        // at the end of generation for maximum throughput.
     }
 
     ground_pb.inc(block_counter % batch_size);
