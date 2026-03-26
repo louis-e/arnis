@@ -410,9 +410,22 @@ impl WorldToModify {
     }
 
     /// Returns true if the region at `(region_x, region_z)` was already flushed.
+    ///
+    /// In debug builds this also emits a warning, since the delayed-flush logic
+    /// in ground generation should prevent any legitimate write from reaching a
+    /// flushed region.  A hit here indicates a spill radius larger than the
+    /// one-chunk delay or an unexpected write path.
     #[inline]
     pub fn is_flushed(&self, region_x: i32, region_z: i32) -> bool {
-        self.flushed_regions.contains(&(region_x, region_z))
+        let flushed = self.flushed_regions.contains(&(region_x, region_z));
+        #[cfg(debug_assertions)]
+        if flushed {
+            eprintln!(
+                "Warning: write to flushed region ({}, {}) was skipped",
+                region_x, region_z
+            );
+        }
+        flushed
     }
 
     #[inline]
