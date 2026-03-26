@@ -826,6 +826,12 @@ impl<'a> WorldEditor<'a> {
             }
         );
 
+        // Drop any regions that were re-created after being flushed to disk
+        // (e.g. tree canopy leaves spilling across a region boundary). These
+        // stale entries contain only the spilled blocks and must not overwrite
+        // the correct .mca files that were already written during ground generation.
+        self.world.purge_stale_regions();
+
         // Compact sections before saving: collapses uniform Full(Vec) sections
         // (e.g. all-STONE from --fillground) back to Uniform, freeing ~4 KiB each.
         self.world.compact_sections();

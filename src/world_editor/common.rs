@@ -403,29 +403,25 @@ pub(crate) struct WorldToModify {
 }
 
 impl WorldToModify {
-    /// Mark a region as flushed so future writes to it are silently skipped.
+    /// Mark a region as flushed. Any stale re-created entries (from cross-region
+    /// writes like tree canopies) will be purged before the final save.
     #[inline]
     pub fn mark_flushed(&mut self, region_x: i32, region_z: i32) {
         self.flushed_regions.insert((region_x, region_z));
     }
 
-    /// Returns true if the region at `(region_x, region_z)` was already flushed.
+    /// Remove any regions that were re-created after being flushed to disk.
     ///
-    /// In debug builds this also emits a warning, since the delayed-flush logic
-    /// in ground generation should prevent any legitimate write from reaching a
-    /// flushed region.  A hit here indicates a spill radius larger than the
-    /// one-chunk delay or an unexpected write path.
-    #[inline]
-    pub fn is_flushed(&self, region_x: i32, region_z: i32) -> bool {
-        let flushed = self.flushed_regions.contains(&(region_x, region_z));
-        #[cfg(debug_assertions)]
-        if flushed {
-            eprintln!(
-                "Warning: write to flushed region ({}, {}) was skipped",
-                region_x, region_z
-            );
+    /// Cross-region writes (e.g. tree canopies extending past a region boundary)
+    /// can re-create an already-flushed region via `entry().or_default()`. These
+    /// stale entries contain only the spilled blocks — not the full region data.
+    /// Purging them before save prevents overwriting the correct `.mca` files.
+    pub fn purge_stale_regions(&mut self) {
+        if self.flushed_regions.is_empty() {
+            return;
         }
-        flushed
+        self.regions
+            .retain(|key, _| !self.flushed_regions.contains(key));
     }
 
     #[inline]
@@ -461,10 +457,6 @@ impl WorldToModify {
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
 
-        if self.is_flushed(region_x, region_z) {
-            return;
-        }
-
         let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
         let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
         chunk.set_block(
@@ -488,10 +480,6 @@ impl WorldToModify {
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
 
-        if self.is_flushed(region_x, region_z) {
-            return;
-        }
-
         let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
         let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
         chunk.set_block_with_properties(
@@ -512,10 +500,6 @@ impl WorldToModify {
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
-
-        if self.is_flushed(region_x, region_z) {
-            return;
-        }
 
         let region = self.regions.entry((region_x, region_z)).or_default();
         let chunk = region
@@ -557,10 +541,6 @@ impl WorldToModify {
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
         let region_z: i32 = chunk_z >> 5;
-
-        if self.is_flushed(region_x, region_z) {
-            return;
-        }
 
         let region = self.regions.entry((region_x, region_z)).or_default();
         let chunk = region
