@@ -5,19 +5,35 @@
 //! state properties that differ slightly from Java Edition.
 
 use crate::block_definitions::Block;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 
 /// Represents a Bedrock block with its identifier and state properties.
-#[derive(Debug, Clone)]
+///
+/// Uses `BTreeMap` for deterministic iteration order, which is required for
+/// correct `Hash`/`Eq` implementations (used as palette dedup key).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BedrockBlock {
     /// The Bedrock block identifier (e.g., "minecraft:stone")
     pub name: String,
     /// Block state properties as key-value pairs
-    pub states: HashMap<String, BedrockBlockStateValue>,
+    pub states: BTreeMap<String, BedrockBlockStateValue>,
+}
+
+/// `BTreeMap` does not implement `Hash`, so we hash entries in sorted-key order
+/// (guaranteed by `BTreeMap::iter`).
+impl Hash for BedrockBlock {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        for (k, v) in &self.states {
+            k.hash(state);
+            v.hash(state);
+        }
+    }
 }
 
 /// Bedrock block state values can be strings, booleans, or integers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BedrockBlockStateValue {
     String(String),
     Bool(bool),
@@ -29,13 +45,13 @@ impl BedrockBlock {
     pub fn simple(name: &str) -> Self {
         Self {
             name: format!("minecraft:{name}"),
-            states: HashMap::new(),
+            states: BTreeMap::new(),
         }
     }
 
     /// Creates a block with state properties.
     pub fn with_states(name: &str, states: Vec<(&str, BedrockBlockStateValue)>) -> Self {
-        let mut state_map = HashMap::new();
+        let mut state_map = BTreeMap::new();
         for (key, value) in states {
             state_map.insert(key.to_string(), value);
         }
@@ -792,6 +808,11 @@ pub fn to_bedrock_block_with_properties(
         return convert_bed(java_name, props_map);
     }
 
+    // Handle rails with shape property
+    if java_name == "rail" {
+        return convert_rail(props_map);
+    }
+
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
 }
@@ -807,7 +828,7 @@ fn convert_stairs(
         _ => java_name, // Most stairs have the same name
     };
 
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     // Convert facing: Java uses "north/south/east/west", Bedrock uses "weirdo_direction" (0-3)
     // Bedrock: 0=east, 1=west, 2=south, 3=north
@@ -859,7 +880,7 @@ fn convert_barrel(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     if let Some(props) = props {
         if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
@@ -899,7 +920,7 @@ fn convert_slab(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     // Convert type: Java uses "top/bottom/double", Bedrock uses "top_slot_bit"
     if let Some(props) = props {
@@ -968,7 +989,7 @@ fn convert_log(
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
     let bedrock_name = java_name;
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     // Convert axis: Java uses "x/y/z", Bedrock uses "pillar_axis"
     if let Some(props) = props {
@@ -1007,7 +1028,7 @@ fn convert_door(
         _ => java_name, // spruce_door, dark_oak_door, etc. keep their name
     };
 
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     if let Some(props) = props {
         // Convert half: Java "upper"/"lower" → Bedrock upper_block_bit true/false
@@ -1082,17 +1103,18 @@ fn convert_trapdoor(
         _ => java_name, // spruce_trapdoor, dark_oak_trapdoor, birch_trapdoor, etc.
     };
 
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     if let Some(props) = props {
         // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3)
-        // Bedrock trapdoor: 0=south, 1=north, 2=east, 3=west
+        // Bedrock trapdoor direction: 0=east, 1=west, 2=south, 3=north
+        // (same encoding as stairs weirdo_direction).
         if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
             let direction = match facing.as_str() {
-                "south" => 0,
-                "north" => 1,
-                "east" => 2,
-                "west" => 3,
+                "east" => 0,
+                "west" => 1,
+                "south" => 2,
+                "north" => 3,
                 _ => 0,
             };
             states.insert(
@@ -1145,7 +1167,7 @@ fn convert_bed(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     // Derive bed color from Java name (e.g. "red_bed" → "red", "blue_bed" → "blue")
     let color = java_name
@@ -1159,13 +1181,14 @@ fn convert_bed(
 
     if let Some(props) = props {
         // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3)
-        // Bedrock bed: 0=south, 1=west, 2=north, 3=east
+        // Bedrock bed direction: 0=east, 1=west, 2=south, 3=north
+        // (same encoding as trapdoors and stairs weirdo_direction).
         if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
             let direction = match facing.as_str() {
-                "south" => 0,
+                "east" => 0,
                 "west" => 1,
-                "north" => 2,
-                "east" => 3,
+                "south" => 2,
+                "north" => 3,
                 _ => 0,
             };
             states.insert(
@@ -1212,6 +1235,44 @@ fn convert_bed(
 
     BedrockBlock {
         name: "minecraft:bed".to_string(),
+        states,
+    }
+}
+
+/// Convert Java rail to Bedrock format with rail_direction from shape property.
+///
+/// Java uses `shape` strings ("north_south", "east_west", "ascending_east", etc.)
+/// while Bedrock uses `rail_direction` integers (0–9).
+fn convert_rail(props: Option<&std::collections::HashMap<String, fastnbt::Value>>) -> BedrockBlock {
+    let direction = props
+        .and_then(|p| p.get("shape"))
+        .and_then(|v| match v {
+            fastnbt::Value::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .map(|shape| match shape {
+            "north_south" => 0,
+            "east_west" => 1,
+            "ascending_east" => 2,
+            "ascending_west" => 3,
+            "ascending_north" => 4,
+            "ascending_south" => 5,
+            "south_east" => 6,
+            "south_west" => 7,
+            "north_west" => 8,
+            "north_east" => 9,
+            _ => 0,
+        })
+        .unwrap_or(0);
+
+    let mut states = BTreeMap::new();
+    states.insert(
+        "rail_direction".to_string(),
+        BedrockBlockStateValue::Int(direction),
+    );
+
+    BedrockBlock {
+        name: "minecraft:rail".to_string(),
         states,
     }
 }
@@ -1340,10 +1401,10 @@ mod tests {
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(c)) if c == "red"
         ));
-        // Bedrock bed: north = 2
+        // Bedrock bed: facing=north → direction=3
         assert!(matches!(
             bedrock.states.get("direction"),
-            Some(BedrockBlockStateValue::Int(2))
+            Some(BedrockBlockStateValue::Int(3))
         ));
         assert!(matches!(
             bedrock.states.get("head_piece_bit"),
@@ -1367,9 +1428,10 @@ mod tests {
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(c)) if c == "red"
         ));
+        // facing=south → direction=2
         assert!(matches!(
             bedrock.states.get("direction"),
-            Some(BedrockBlockStateValue::Int(0))
+            Some(BedrockBlockStateValue::Int(2))
         ));
         assert!(matches!(
             bedrock.states.get("head_piece_bit"),
@@ -1378,6 +1440,58 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("occupied_bit"),
             Some(BedrockBlockStateValue::Bool(false))
+        ));
+    }
+
+    #[test]
+    fn test_rail_shape_conversion() {
+        use crate::block_definitions::RAIL;
+
+        let cases = [
+            ("north_south", 0),
+            ("east_west", 1),
+            ("ascending_east", 2),
+            ("ascending_west", 3),
+            ("ascending_north", 4),
+            ("ascending_south", 5),
+            ("south_east", 6),
+            ("south_west", 7),
+            ("north_west", 8),
+            ("north_east", 9),
+        ];
+
+        for (shape, expected_direction) in cases {
+            let mut props = std::collections::HashMap::new();
+            props.insert(
+                "shape".to_string(),
+                fastnbt::Value::String(shape.to_string()),
+            );
+            let java_props = fastnbt::Value::Compound(props);
+
+            let bedrock = to_bedrock_block_with_properties(RAIL, Some(&java_props));
+            assert_eq!(bedrock.name, "minecraft:rail");
+            assert!(
+                matches!(
+                    bedrock.states.get("rail_direction"),
+                    Some(BedrockBlockStateValue::Int(d)) if *d == expected_direction
+                ),
+                "shape={shape}: expected rail_direction={expected_direction}, got {:?}",
+                bedrock.states.get("rail_direction")
+            );
+        }
+    }
+
+    #[test]
+    fn test_rail_default_without_properties() {
+        use crate::block_definitions::RAIL;
+
+        let bedrock = to_bedrock_block_with_properties(RAIL, None);
+        assert_eq!(bedrock.name, "minecraft:rail");
+        // RAIL (id=66) has no built-in properties, so falls back to
+        // to_bedrock_block which hardcodes rail_direction=0
+        assert!(matches!(
+            bedrock.states.get("rail_direction"),
+            Some(BedrockBlockStateValue::Int(0))
         ));
     }
 }

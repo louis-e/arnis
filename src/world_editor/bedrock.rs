@@ -13,16 +13,15 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 
-use bedrockrs_level::level::db_interface::bedrock_key::ChunkKey;
 use bedrockrs_level::level::db_interface::key_level::KeyTypeTag;
-use bedrockrs_level::level::db_interface::rusty::{mcpe_options, RustyDBInterface};
-use bedrockrs_level::level::file_interface::RawWorldTrait;
+use bedrockrs_level::level::db_interface::rusty::mcpe_options;
 use bedrockrs_shared::world::dimension::Dimension;
 use byteorder::{LittleEndian, WriteBytesExt};
 use fastnbt::Value;
 use indicatif::{ProgressBar, ProgressStyle};
 use rusty_leveldb::DB;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::collections::HashMap as StdHashMap;
 use std::fs::{self, File};
 use std::io::{Cursor, Write as IoWrite};
@@ -100,7 +99,7 @@ struct BedrockMetadata {
 #[derive(Serialize)]
 struct BedrockBlockState {
     name: String,
-    states: StdHashMap<String, BedrockNbtValue>,
+    states: BTreeMap<String, BedrockNbtValue>,
 }
 
 /// NBT-compatible value types for Bedrock block states
@@ -404,11 +403,11 @@ impl BedrockWriter {
     fn write_chunks_to_db(&self, world: &WorldToModify) -> Result<(), BedrockSaveError> {
         let db_path = self.output_dir.join("db");
 
-        // Open LevelDB with Bedrock-compatible options
-        let mut state = ();
-        let mut db: RustyDBInterface<()> =
-            RustyDBInterface::new(db_path.clone().into_boxed_path(), true, &mut state)
-                .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
+        // Open LevelDB once for all writes (blocks, entities, block entities)
+        let mut opts = mcpe_options(DEFAULT_BEDROCK_COMPRESSION_LEVEL);
+        opts.create_if_missing = true;
+        let mut db = DB::open(db_path.into_boxed_path(), opts)
+            .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
 
         // Count total chunks for progress
         let total_chunks: usize = world
@@ -432,7 +431,7 @@ impl BedrockWriter {
 
             let mut chunks_processed: usize = 0;
 
-            // Process each region and chunk
+            // Process each region and chunk (blocks + entities in a single pass)
             for ((region_x, region_z), region) in &world.regions {
                 for ((local_chunk_x, local_chunk_z), chunk) in &region.chunks {
                     // Calculate absolute chunk coordinates
@@ -441,27 +440,53 @@ impl BedrockWriter {
                     let chunk_pos = Vec2::new(abs_chunk_x, abs_chunk_z);
 
                     // Write chunk version marker (42 is current Bedrock version as of 1.21+)
-                    let version_key = ChunkKey::chunk_marker(chunk_pos, Dimension::Overworld);
-                    db.set_subchunk_raw(version_key, &[42], &mut state)
+                    let version_key = build_chunk_key_bytes(
+                        chunk_pos,
+                        Dimension::Overworld,
+                        KeyTypeTag::Version,
+                        None,
+                    );
+                    db.put(&version_key, &[42])
                         .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
 
                     // Write Data3D (heightmap + biomes) - required for chunk to be valid
-                    let data3d_key = ChunkKey::data3d(chunk_pos, Dimension::Overworld);
+                    let data3d_key = build_chunk_key_bytes(
+                        chunk_pos,
+                        Dimension::Overworld,
+                        KeyTypeTag::Data3D,
+                        None,
+                    );
                     let data3d = self.create_data3d(chunk);
-                    db.set_subchunk_raw(data3d_key, &data3d, &mut state)
+                    db.put(&data3d_key, &data3d)
                         .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
 
                     // Process each section (subchunk)
                     for (&section_y, section) in &chunk.sections {
-                        // Encode the subchunk
                         let subchunk_bytes = self.encode_subchunk(section, section_y)?;
 
-                        // Write to database
-                        let subchunk_key =
-                            ChunkKey::new_subchunk(chunk_pos, Dimension::Overworld, section_y);
-                        db.set_subchunk_raw(subchunk_key, &subchunk_bytes, &mut state)
+                        let subchunk_key = build_chunk_key_bytes(
+                            chunk_pos,
+                            Dimension::Overworld,
+                            KeyTypeTag::SubChunkPrefix,
+                            Some(section_y),
+                        );
+                        db.put(&subchunk_key, &subchunk_bytes)
                             .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
                     }
+
+                    // Write entities and block entities in the same pass
+                    self.write_compound_list_record(
+                        &mut db,
+                        chunk_pos,
+                        KeyTypeTag::BlockEntity,
+                        chunk.other.get("block_entities"),
+                    )?;
+                    self.write_compound_list_record(
+                        &mut db,
+                        chunk_pos,
+                        KeyTypeTag::Entity,
+                        chunk.other.get("entities"),
+                    )?;
 
                     chunks_processed += 1;
                     progress_bar.inc(1);
@@ -476,44 +501,6 @@ impl BedrockWriter {
             }
 
             progress_bar.finish_with_message("Chunks written to LevelDB");
-        }
-
-        // Ensure the RustyDBInterface handle is dropped before opening another DB for the same path.
-        drop(db);
-
-        self.write_chunk_entities(world, &db_path)?;
-
-        Ok(())
-    }
-
-    fn write_chunk_entities(
-        &self,
-        world: &WorldToModify,
-        db_path: &std::path::Path,
-    ) -> Result<(), BedrockSaveError> {
-        let mut opts = mcpe_options(DEFAULT_BEDROCK_COMPRESSION_LEVEL);
-        opts.create_if_missing = true;
-        let mut db = DB::open(db_path.to_path_buf().into_boxed_path(), opts)
-            .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
-
-        for ((region_x, region_z), region) in &world.regions {
-            for ((local_chunk_x, local_chunk_z), chunk) in &region.chunks {
-                let chunk_pos =
-                    Vec2::new(region_x * 32 + local_chunk_x, region_z * 32 + local_chunk_z);
-
-                self.write_compound_list_record(
-                    &mut db,
-                    chunk_pos,
-                    KeyTypeTag::BlockEntity,
-                    chunk.other.get("block_entities"),
-                )?;
-                self.write_compound_list_record(
-                    &mut db,
-                    chunk_pos,
-                    KeyTypeTag::Entity,
-                    chunk.other.get("entities"),
-                )?;
-            }
         }
 
         Ok(())
@@ -649,14 +636,13 @@ impl BedrockWriter {
         section: &SectionToModify,
     ) -> Result<(Vec<BedrockBlock>, [u16; 4096]), BedrockSaveError> {
         let mut palette: Vec<BedrockBlock> = Vec::new();
-        let mut palette_map: StdHashMap<String, u16> = StdHashMap::new();
+        let mut palette_map: StdHashMap<BedrockBlock, u16> = StdHashMap::new();
         let mut indices = [0u16; 4096];
 
         // Add air as first palette entry (required by Bedrock format)
         let air_block = BedrockBlock::simple("air");
-        let air_key = format!("{:?}", (&air_block.name, &air_block.states));
+        palette_map.insert(air_block.clone(), 0);
         palette.push(air_block);
-        palette_map.insert(air_key, 0);
 
         // Convert blocks from internal YZX to Bedrock XZY ordering
         for x in 0..16usize {
@@ -670,13 +656,12 @@ impl BedrockWriter {
 
                     // Convert to Bedrock format, preserving properties
                     let bedrock_block = to_bedrock_block_with_properties(block, properties);
-                    let key = format!("{:?}", (&bedrock_block.name, &bedrock_block.states));
 
-                    let palette_index = if let Some(&idx) = palette_map.get(&key) {
+                    let palette_index = if let Some(&idx) = palette_map.get(&bedrock_block) {
                         idx
                     } else {
                         let idx = palette.len() as u16;
-                        palette_map.insert(key, idx);
+                        palette_map.insert(bedrock_block.clone(), idx);
                         palette.push(bedrock_block);
                         idx
                     };
@@ -1160,8 +1145,65 @@ struct BedrockLevelDat {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bedrockrs_level::level::db_interface::bedrock_key::ChunkKey;
     use serde_json::Value;
     use zip::ZipArchive;
+
+    /// Build a key using the canonical `ChunkKey` path (the source of truth from
+    /// `bedrockrs_level`) so we can compare against `build_chunk_key_bytes`.
+    fn canonical_key(chunk_key: ChunkKey) -> Vec<u8> {
+        // Replicates RustyDBInterface::build_key without needing a DB instance
+        use bedrockrs_level::level::db_interface::db::LevelDBKey;
+        use std::io::Cursor;
+        let mut key_bytes: Vec<u8> = vec![0; chunk_key.estimate_size()];
+        let mut buff: Cursor<&mut [u8]> = Cursor::new(&mut key_bytes);
+        chunk_key.write_key(&mut buff);
+        key_bytes
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_version() {
+        let pos = Vec2::new(5, -3);
+        let ours = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Version, None);
+        let canonical = canonical_key(ChunkKey::chunk_marker(pos, Dimension::Overworld));
+        assert_eq!(ours, canonical, "Version key mismatch");
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_data3d() {
+        let pos = Vec2::new(-12, 7);
+        let ours = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Data3D, None);
+        let canonical = canonical_key(ChunkKey::data3d(pos, Dimension::Overworld));
+        assert_eq!(ours, canonical, "Data3D key mismatch");
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_subchunk() {
+        let pos = Vec2::new(100, -50);
+        // Positive y index
+        let ours = build_chunk_key_bytes(
+            pos,
+            Dimension::Overworld,
+            KeyTypeTag::SubChunkPrefix,
+            Some(4),
+        );
+        let canonical = canonical_key(ChunkKey::new_subchunk(pos, Dimension::Overworld, 4));
+        assert_eq!(ours, canonical, "SubChunk y=4 key mismatch");
+    }
+
+    #[test]
+    fn build_chunk_key_bytes_matches_canonical_negative_y() {
+        let pos = Vec2::new(0, 0);
+        // Negative y index (e.g. y = -4 for sections below y=0)
+        let ours = build_chunk_key_bytes(
+            pos,
+            Dimension::Overworld,
+            KeyTypeTag::SubChunkPrefix,
+            Some(-4),
+        );
+        let canonical = canonical_key(ChunkKey::new_subchunk(pos, Dimension::Overworld, -4));
+        assert_eq!(ours, canonical, "SubChunk y=-4 key mismatch");
+    }
 
     #[test]
     fn writes_mcworld_package_with_metadata() {
