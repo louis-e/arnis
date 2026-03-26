@@ -1,19 +1,26 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SMOOTH_STONE, STONE};
-use crate::coordinate_system::cartesian::XZBBox;
+use crate::block_definitions::{
+    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
+    CRACKED_STONE_BRICKS, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL,
+    GRAY_CONCRETE, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, PACKED_ICE, POTATOES,
+    RED_FLOWER, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM,
+    TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+};
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
 use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
+use crate::land_cover;
 use crate::map_renderer;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
-use crate::urban_ground;
 use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
+use rand::Rng;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -69,14 +76,6 @@ pub fn generate_world_with_options(
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
-
-    // Collect building centroids for urban ground generation (only if enabled)
-    // This must be done before the processing loop clears the flood fill cache
-    let building_centroids = if args.city_boundaries {
-        flood_fill_cache.collect_building_centroids(&elements)
-    } else {
-        Vec::new()
-    };
 
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
@@ -313,15 +312,8 @@ pub fn generate_world_with_options(
 
     process_pb.finish();
 
-    // Compute urban ground lookup (if enabled)
-    // Uses a compact cell-based representation instead of storing all coordinates.
-    // Memory usage: ~270 KB vs ~560 MB for coordinate-based approach.
-    let urban_lookup = if args.city_boundaries && !building_centroids.is_empty() {
-        urban_ground::compute_urban_ground_lookup(building_centroids, &xzbbox)
-    } else {
-        urban_ground::UrbanGroundLookup::empty()
-    };
-    let has_urban_ground = !urban_lookup.is_empty();
+    // Check if ESA WorldCover land cover data is available for surface block selection
+    let has_land_cover = ground.has_land_cover();
 
     // Drop remaining caches
     drop(highway_connectivity);
@@ -379,20 +371,538 @@ pub fn generate_world_with_options(
                         args.ground_level
                     };
 
-                    // Check if this coordinate is in an urban area (O(1) lookup)
-                    let is_urban = has_urban_ground && urban_lookup.is_urban(x, z);
+                    let coord = XZPoint::new(x, z);
 
                     // Add default dirt and grass layer if there isn't a stone layer already
                     if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
-                        if is_urban {
-                            // Urban area: smooth stone ground
-                            editor.set_block_if_absent_absolute(SMOOTH_STONE, x, ground_y, z);
+                        // Handle ESA water with variable depth as a special case
+                        let is_esa_water =
+                            has_land_cover && ground.cover_class(coord) == land_cover::LC_WATER;
+
+                        if is_esa_water {
+                            // Single block of water at ground level
+                            editor.set_block_if_absent_absolute(WATER, x, ground_y, z);
+
+                            // Floor: sand/gravel/clay + sandstone below
+                            let h = land_cover::coord_hash(x, z);
+                            let floor_block = match h % 5 {
+                                0 => GRAVEL,
+                                1 => CLAY,
+                                _ => SAND,
+                            };
+                            if ground_y - 1 > MIN_Y {
+                                editor.set_block_if_absent_absolute(
+                                    floor_block,
+                                    x,
+                                    ground_y - 1,
+                                    z,
+                                );
+                            }
+                            if ground_y - 2 > MIN_Y {
+                                editor.set_block_if_absent_absolute(SANDSTONE, x, ground_y - 2, z);
+                            }
                         } else {
-                            // Rural/natural area: grass and dirt
-                            editor.set_block_if_absent_absolute(GRASS_BLOCK, x, ground_y, z);
+                            // Determine surface and sub-surface blocks based on available data
+                            let (surface_block, under_block) = if has_land_cover {
+                                // ESA WorldCover + slope-based material selection
+                                let cover = ground.cover_class(coord);
+                                let slope = if terrain_enabled {
+                                    ground.slope(coord)
+                                } else {
+                                    0
+                                };
+
+                                // Steep terrain overrides land cover classification
+                                if slope > 6 {
+                                    (STONE, STONE)
+                                } else if slope > 4 {
+                                    (ANDESITE, STONE)
+                                } else if slope > 3 {
+                                    (GRAVEL, STONE)
+                                } else {
+                                    // Select surface block based on ESA land cover class
+                                    match cover {
+                                        land_cover::LC_TREE_COVER => (GRASS_BLOCK, DIRT),
+                                        land_cover::LC_SHRUBLAND => {
+                                            // Primarily grass with some coarse dirt patches
+                                            let h = land_cover::coord_hash(x, z);
+                                            if h.is_multiple_of(5) {
+                                                (COARSE_DIRT, DIRT) // 20% coarse dirt
+                                            } else {
+                                                (GRASS_BLOCK, DIRT) // 80% grass
+                                            }
+                                        }
+                                        land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
+                                        land_cover::LC_CROPLAND => (FARMLAND, DIRT),
+                                        land_cover::LC_BUILT_UP => {
+                                            let h = land_cover::coord_hash(x, z) % 100;
+                                            if h < 72 {
+                                                (STONE_BRICKS, STONE)
+                                            } else if h < 87 {
+                                                (CRACKED_STONE_BRICKS, STONE)
+                                            } else if h < 92 {
+                                                (STONE, STONE)
+                                            } else {
+                                                (COBBLESTONE, STONE)
+                                            }
+                                        }
+                                        land_cover::LC_BARE => {
+                                            // Skip isolated bare pixels (surrounded by non-bare)
+                                            // to avoid random single-block patches
+                                            let neighbors_bare =
+                                                [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                                                    .iter()
+                                                    .filter(|(dx, dz)| {
+                                                        ground.cover_class(XZPoint::new(
+                                                            x + dx,
+                                                            z + dz,
+                                                        )) == land_cover::LC_BARE
+                                                    })
+                                                    .count();
+                                            if neighbors_bare == 0 {
+                                                // Isolated pixel - blend with surroundings
+                                                (GRASS_BLOCK, DIRT)
+                                            } else {
+                                                // Bare/sparse: coarse dirt, gravel, stone mix
+                                                let h = land_cover::coord_hash(x, z);
+                                                match h % 10 {
+                                                    0..=3 => (COARSE_DIRT, DIRT), // 40% coarse dirt
+                                                    4..=5 => (GRAVEL, STONE),     // 20% gravel
+                                                    6..=7 => (STONE, STONE),      // 20% stone
+                                                    _ => (ANDESITE, STONE),       // 20% andesite
+                                                }
+                                            }
+                                        }
+                                        land_cover::LC_SNOW_ICE => {
+                                            let h = land_cover::coord_hash(x, z) % 10;
+                                            if h < 7 {
+                                                (SNOW_BLOCK, DIRT)
+                                            } else {
+                                                (PACKED_ICE, PACKED_ICE)
+                                            }
+                                        }
+                                        // LC_WATER handled above with variable depth
+                                        land_cover::LC_WETLAND => (MUD, DIRT),
+                                        land_cover::LC_MANGROVES => (MUD, DIRT),
+                                        _ => (GRASS_BLOCK, DIRT),
+                                    }
+                                }
+                            } else if terrain_enabled {
+                                // No land cover data but terrain is enabled: apply slope-based materials
+                                let slope = ground.slope(coord);
+                                if slope > 6 {
+                                    (STONE, STONE)
+                                } else if slope > 4 {
+                                    (ANDESITE, STONE)
+                                } else if slope > 3 {
+                                    (GRAVEL, STONE)
+                                } else {
+                                    (GRASS_BLOCK, DIRT)
+                                }
+                            } else {
+                                (GRASS_BLOCK, DIRT)
+                            };
+
+                            // Shoreline blending: land blocks adjacent to water get
+                            // sand surface for a natural beach/shore transition.
+                            // Check both ESA water classification AND placed water
+                            // blocks (from OSM) to bridge any gap between the two.
+                            let (surface_block, under_block) = if surface_block != WATER {
+                                let near_esa_water = has_land_cover
+                                    && ground.water_distance(coord) == 0
+                                    && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(
+                                        |(dx, dz)| {
+                                            ground.cover_class(XZPoint::new(x + dx, z + dz))
+                                                == land_cover::LC_WATER
+                                        },
+                                    );
+                                let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                                    .iter()
+                                    .any(|(dx, dz)| {
+                                        editor.check_for_block_absolute(
+                                            x + dx,
+                                            ground_y,
+                                            z + dz,
+                                            Some(&[WATER]),
+                                            None,
+                                        )
+                                    });
+                                if near_esa_water || near_placed_water {
+                                    (SAND, SANDSTONE)
+                                } else {
+                                    (surface_block, under_block)
+                                }
+                            } else {
+                                (surface_block, under_block)
+                            };
+
+                            editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
+
+                            // Don't place dirt/under blocks below water surfaces.
+                            // OSM water (rivers, lakes) is placed during element processing;
+                            // placing dirt underneath would show through shallow water.
+                            let surface_is_water = editor.check_for_block_absolute(
+                                x,
+                                ground_y,
+                                z,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            if !surface_is_water {
+                                editor.set_block_if_absent_absolute(
+                                    under_block,
+                                    x,
+                                    ground_y - 1,
+                                    z,
+                                );
+                                editor.set_block_if_absent_absolute(
+                                    under_block,
+                                    x,
+                                    ground_y - 2,
+                                    z,
+                                );
+                            } else {
+                                // Under OSM water: find bottom of water column,
+                                // place sand/gravel/clay floor + sandstone below.
+                                let mut water_bottom = ground_y;
+                                while water_bottom - 1 > MIN_Y
+                                    && editor.check_for_block_absolute(
+                                        x,
+                                        water_bottom - 1,
+                                        z,
+                                        Some(&[WATER]),
+                                        None,
+                                    )
+                                {
+                                    water_bottom -= 1;
+                                }
+                                let floor_y = water_bottom - 1;
+                                if floor_y > MIN_Y {
+                                    let h = land_cover::coord_hash(x, z);
+                                    let floor_block = match h % 5 {
+                                        0 => GRAVEL,
+                                        1 => CLAY,
+                                        _ => SAND,
+                                    };
+                                    editor.set_block_if_absent_absolute(floor_block, x, floor_y, z);
+                                    if floor_y - 1 > MIN_Y {
+                                        editor.set_block_if_absent_absolute(
+                                            SANDSTONE,
+                                            x,
+                                            floor_y - 1,
+                                            z,
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Place vegetation from ESA land cover classification
+                            // Only if nothing was already placed above ground by OSM processing
+                            // and the ground block is a natural surface (not a road, building slab, etc.)
+                            let ground_is_natural = editor.check_for_block_absolute(
+                                x,
+                                ground_y,
+                                z,
+                                Some(&[GRASS_BLOCK, COARSE_DIRT, DIRT, MUD, FARMLAND]),
+                                None,
+                            );
+                            // Trees can also grow through stone surfaces (urban tree cover)
+                            let ground_allows_trees = ground_is_natural
+                                || editor.check_for_block_absolute(
+                                    x,
+                                    ground_y,
+                                    z,
+                                    Some(&[SMOOTH_STONE, STONE_BRICKS, CRACKED_STONE_BRICKS]),
+                                    None,
+                                );
+                            if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
+                                let cover = ground.cover_class(coord);
+                                let slope = if terrain_enabled {
+                                    ground.slope(coord)
+                                } else {
+                                    0
+                                };
+                                let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
+
+                                match cover {
+                                    land_cover::LC_TREE_COVER
+                                        if slope <= 4 && ground_allows_trees =>
+                                    {
+                                        let choice = rng.random_range(0..30);
+                                        if choice == 0 {
+                                            tree::Tree::create(
+                                                &mut editor,
+                                                (x, 1, z),
+                                                Some(&building_footprints),
+                                            );
+                                        } else if ground_is_natural {
+                                            // Undergrowth only on natural surfaces
+                                            if choice == 1 {
+                                                let flower = [
+                                                    RED_FLOWER,
+                                                    BLUE_FLOWER,
+                                                    YELLOW_FLOWER,
+                                                    WHITE_FLOWER,
+                                                ][rng.random_range(0..4)];
+                                                editor.set_block_absolute(
+                                                    flower,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                );
+                                            } else if choice <= 13 {
+                                                editor.set_block_absolute(
+                                                    GRASS,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    land_cover::LC_SHRUBLAND if ground_is_natural => {
+                                        let choice = rng.random_range(0..100);
+                                        if choice < 2 {
+                                            editor.set_block_absolute(
+                                                OAK_LEAVES,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        } else if choice < 30 {
+                                            editor.set_block_absolute(
+                                                GRASS,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
+                                    land_cover::LC_GRASSLAND if ground_is_natural => {
+                                        // Short grass on grassland (~55%)
+                                        let choice = rng.random_range(0..100);
+                                        if choice < 50 {
+                                            editor.set_block_absolute(
+                                                GRASS,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        } else if choice < 55 {
+                                            // Occasional tall grass
+                                            editor.set_block_absolute(
+                                                TALL_GRASS_BOTTOM,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                            editor.set_block_absolute(
+                                                TALL_GRASS_TOP,
+                                                x,
+                                                ground_y + 2,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        } else if choice == 55 {
+                                            let flower = [
+                                                RED_FLOWER,
+                                                BLUE_FLOWER,
+                                                YELLOW_FLOWER,
+                                                WHITE_FLOWER,
+                                            ][rng.random_range(0..4)];
+                                            editor.set_block_absolute(
+                                                flower,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
+                                    land_cover::LC_CROPLAND => {
+                                        // Only place crops if the ground is actually farmland
+                                        if editor.check_for_block_absolute(
+                                            x,
+                                            ground_y,
+                                            z,
+                                            Some(&[FARMLAND]),
+                                            None,
+                                        ) {
+                                            if x % 9 == 0 && z % 9 == 0 {
+                                                editor.set_block_absolute(
+                                                    WATER,
+                                                    x,
+                                                    ground_y,
+                                                    z,
+                                                    Some(&[FARMLAND]),
+                                                    None,
+                                                );
+                                            } else if rng.random_range(0..76) == 0 {
+                                                if rng.random_range(1..=10) <= 4 {
+                                                    editor.set_block_absolute(
+                                                        HAY_BALE,
+                                                        x,
+                                                        ground_y + 1,
+                                                        z,
+                                                        None,
+                                                        None,
+                                                    );
+                                                }
+                                            } else {
+                                                let crop = [WHEAT, CARROTS, POTATOES]
+                                                    [rng.random_range(0..3)];
+                                                editor.set_block_absolute(
+                                                    crop,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                );
+                                            }
+                                        }
+                                    }
+                                    land_cover::LC_WETLAND | land_cover::LC_MANGROVES
+                                        if ground_is_natural =>
+                                    {
+                                        let choice = rng.random_range(0..100);
+                                        if choice < 30 {
+                                            // Water patches in wetlands
+                                            editor.set_block_absolute(
+                                                WATER,
+                                                x,
+                                                ground_y,
+                                                z,
+                                                Some(&[MUD, GRASS_BLOCK]),
+                                                None,
+                                            );
+                                        } else if choice < 65 {
+                                            editor.set_block_absolute(
+                                                GRASS,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        } else if choice < 75 {
+                                            editor.set_block_absolute(
+                                                TALL_GRASS_BOTTOM,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                            editor.set_block_absolute(
+                                                TALL_GRASS_TOP,
+                                                x,
+                                                ground_y + 2,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
+                                    land_cover::LC_BARE if ground_is_natural => {
+                                        // Sparse dead bushes
+                                        if rng.random_range(0..100) == 0 {
+                                            editor.set_block_absolute(
+                                                DEAD_BUSH,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        } // end else (non-water)
+                    }
+
+                    // Post-processing: remove stray vegetation from road surfaces.
+                    // Despite guards in natural/landuse processing, overlapping elements
+                    // with the same priority can still place vegetation on roads depending
+                    // on sort order. This cleanup pass catches any remaining cases.
+                    if editor.check_for_block_absolute(
+                        x,
+                        ground_y,
+                        z,
+                        Some(&[
+                            BLACK_CONCRETE,
+                            GRAY_CONCRETE,
+                            LIGHT_GRAY_CONCRETE,
+                            WHITE_CONCRETE,
+                            DIRT_PATH,
+                        ]),
+                        None,
+                    ) && editor.check_for_block_absolute(
+                        x,
+                        ground_y + 1,
+                        z,
+                        Some(&[
+                            GRASS,
+                            OAK_LEAVES,
+                            DEAD_BUSH,
+                            TALL_GRASS_BOTTOM,
+                            RED_FLOWER,
+                            BLUE_FLOWER,
+                            WHITE_FLOWER,
+                            YELLOW_FLOWER,
+                        ]),
+                        None,
+                    ) {
+                        editor.set_block_absolute(
+                            AIR,
+                            x,
+                            ground_y + 1,
+                            z,
+                            Some(&[
+                                GRASS,
+                                OAK_LEAVES,
+                                DEAD_BUSH,
+                                TALL_GRASS_BOTTOM,
+                                RED_FLOWER,
+                                BLUE_FLOWER,
+                                WHITE_FLOWER,
+                                YELLOW_FLOWER,
+                            ]),
+                            None,
+                        );
+                        // Also clear tall grass top if it was a two-block plant
+                        if editor.check_for_block_absolute(
+                            x,
+                            ground_y + 2,
+                            z,
+                            Some(&[TALL_GRASS_TOP]),
+                            None,
+                        ) {
+                            editor.set_block_absolute(
+                                AIR,
+                                x,
+                                ground_y + 2,
+                                z,
+                                Some(&[TALL_GRASS_TOP]),
+                                None,
+                            );
                         }
-                        editor.set_block_if_absent_absolute(DIRT, x, ground_y - 1, z);
-                        editor.set_block_if_absent_absolute(DIRT, x, ground_y - 2, z);
                     }
 
                     // Fill underground with stone

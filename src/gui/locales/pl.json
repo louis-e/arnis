@@ -40,7 +40,7 @@
   "interior": "Generowanie wnętrza",
   "roof": "Generowanie dachu",
   "fillground": "Wypełnij podłoże",
-  "city_boundaries": "Podłoże miejskie",
+  "land_cover": "Pokrycie terenu",
   "bedrock_auto_generated": "Świat Bedrock jest generowany automatycznie",
   "save_path": "Ścieżka zapisu"
 }

@@ -125,7 +125,22 @@ pub fn generate_natural(
                     let bresenham_points: Vec<(i32, i32, i32)> =
                         bresenham_line(prev.0, 0, prev.1, x, 0, z);
                     for (bx, _, bz) in bresenham_points {
-                        editor.set_block(block_type, bx, 0, bz, None, None);
+                        // Don't overwrite road blocks with natural ground
+                        if !editor.check_for_block(
+                            bx,
+                            0,
+                            bz,
+                            Some(&[
+                                BLACK_CONCRETE,
+                                GRAY_CONCRETE,
+                                LIGHT_GRAY_CONCRETE,
+                                WHITE_CONCRETE,
+                                DIRT_PATH,
+                                SMOOTH_STONE,
+                            ]),
+                        ) {
+                            editor.set_block(block_type, bx, 0, bz, None, None);
+                        }
                     }
 
                     current_natural.push((x, z));
@@ -166,8 +181,22 @@ pub fn generate_natural(
                 // Use deterministic RNG seeded by element ID for consistent results across region boundaries
                 let mut rng = element_rng(way.id);
 
+                // Blocks that natural areas should not overwrite
+                let protected_blocks: &[Block] = &[
+                    BLACK_CONCRETE,
+                    GRAY_CONCRETE,
+                    LIGHT_GRAY_CONCRETE,
+                    WHITE_CONCRETE,
+                    DIRT_PATH,
+                    SMOOTH_STONE,
+                    WATER,
+                ];
+
                 for (x, z) in filled_area {
-                    editor.set_block(block_type, x, 0, z, None, None);
+                    // Don't overwrite road/path blocks with natural ground
+                    if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
+                        editor.set_block(block_type, x, 0, z, None, None);
+                    }
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
                         "beach" | "sand" | "dune" | "shoal" => {

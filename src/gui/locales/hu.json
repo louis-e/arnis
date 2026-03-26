@@ -40,7 +40,7 @@
   "interior": "Belső generálás",
   "roof": "Tető generálás",
   "fillground": "Talaj feltöltése",
-  "city_boundaries": "Városi talaj",
+  "land_cover": "Felszínborítás",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal"
 }

@@ -183,6 +183,23 @@ impl Tree<'_> {
             }
         }
 
+        // Skip if this coordinate is on a road, path, or other paved surface
+        if editor.check_for_block(
+            x,
+            0,
+            z,
+            Some(&[
+                BLACK_CONCRETE,
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                DIRT_PATH,
+                SMOOTH_STONE,
+                WATER,
+            ]),
+        ) {
+            return;
+        }
+
         let mut blacklist: Vec<Block> = Vec::new();
         blacklist.extend(Self::get_building_wall_blocks());
         blacklist.extend(Self::get_building_floor_blocks());

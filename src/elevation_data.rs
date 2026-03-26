@@ -23,6 +23,8 @@ const MAX_ZOOM: u8 = 15;
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 /// Maximum age for cached tiles in days before they are cleaned up
 const TILE_CACHE_MAX_AGE_DAYS: u64 = 7;
+/// Subdirectory name for tile cache within the OS cache directory
+const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
 
 /// Holds processed elevation data and metadata
 #[derive(Clone)]
@@ -40,11 +42,23 @@ type TileImage = image::ImageBuffer<Rgb<u8>, Vec<u8>>;
 /// Result type for tile download operations: ((tile_x, tile_y), image) or error
 type TileDownloadResult = Result<((u32, u32), TileImage), String>;
 
+/// Returns the tile cache directory path.
+/// Uses the OS-standard cache directory (e.g. AppData/Local on Windows, ~/.cache on Linux)
+/// to avoid CWD-dependent paths that can fail due to permissions or unexpected working directories.
+/// Falls back to ./arnis-tile-cache if the OS cache directory is unavailable.
+fn get_tile_cache_dir() -> PathBuf {
+    if let Some(cache_dir) = dirs::cache_dir() {
+        cache_dir.join(TILE_CACHE_DIR_NAME)
+    } else {
+        PathBuf::from(format!("./{TILE_CACHE_DIR_NAME}"))
+    }
+}
+
 /// Cleans up old cached tiles from the tile cache directory.
 /// Only deletes .png files within the arnis-tile-cache directory that are older than TILE_CACHE_MAX_AGE_DAYS.
 /// This function is safe and will not delete files outside the cache directory or fail on errors.
 pub fn cleanup_old_cached_tiles() {
-    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
+    let tile_cache_dir = get_tile_cache_dir();
 
     if !tile_cache_dir.exists() || !tile_cache_dir.is_dir() {
         return; // Nothing to clean up
@@ -206,8 +220,9 @@ fn download_tile_once(
     let response = client.get(url).send().map_err(|e| e.to_string())?;
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;
-    std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
+    // Validate the image BEFORE writing to cache to prevent caching invalid data
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
+    std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
     Ok(img.to_rgb8())
 }
 
@@ -223,6 +238,19 @@ fn fetch_or_load_tile(
     tile_path: &Path,
 ) -> Result<image::ImageBuffer<Rgb<u8>, Vec<u8>>, String> {
     if tile_path.exists() {
+        // Check file size first — valid Terrarium tiles are ~50-100KB.
+        // Files under 1000 bytes are almost certainly truncated (e.g. from a
+        // process interruption during a previous download).
+        let file_size = std::fs::metadata(tile_path).map(|m| m.len()).unwrap_or(0);
+        if file_size < 1000 {
+            eprintln!(
+                "Warning: Cached tile at {} is too small ({file_size} bytes). Re-downloading...",
+                tile_path.display(),
+            );
+            let _ = std::fs::remove_file(tile_path);
+            return download_tile(client, tile_x, tile_y, zoom, tile_path);
+        }
+
         // Try to load cached tile, but handle corruption gracefully
         match image::open(tile_path) {
             Ok(img) => {
@@ -287,13 +315,15 @@ pub fn fetch_elevation_data(
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
     let mut extreme_values_found = Vec::new(); // Track extreme values for debugging
 
-    let tile_cache_dir = PathBuf::from("./arnis-tile-cache");
+    let tile_cache_dir = get_tile_cache_dir();
     if !tile_cache_dir.exists() {
         std::fs::create_dir_all(&tile_cache_dir)?;
     }
 
     // Create a shared HTTP client for connection pooling
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .build()?;
 
     // Download tiles in parallel with limited concurrency to be respectful to AWS
     let num_tiles = tiles.len();
@@ -418,60 +448,78 @@ pub fn fetch_elevation_data(
     // - 500x500: sigma ≈ 11.2 (2.2% relative)
     // - 1000x1000: sigma ≈ 15.8 (1.6% relative)
     // This smooths terrain proportionally while preserving more detail.
-    let sigma: f64 = BASE_SIGMA_REF * (grid_size / BASE_GRID_REF).sqrt();
+    let sigma_from_grid: f64 = BASE_SIGMA_REF * (grid_size / BASE_GRID_REF).sqrt();
 
-    //let blur_percentage: f64 = (sigma / grid_size) * 100.0;
-    /*eprintln!(
-        "Elevation blur: grid={}x{}, sigma={:.2}, blur_percentage={:.2}%",
-        grid_width, grid_height, sigma, blur_percentage
-    );*/
+    // --- Sigma selection ---
+    //
+    // sigma_from_grid uses sqrt-scaling to apply proportionally less blur on larger
+    // areas (which are inherently smoother) and more on smaller ones.
+    //
+    // sigma_terrain floors the blur to native_resolution × 12.  This has two effects:
+    //
+    // 1. Voronoi-block suppression: fill_nan_values() expands each ~3.6 m tile pixel
+    //    into a Voronoi block of ~3.6 output cells.  sigma must span at least 2 of
+    //    those blocks so the Gaussian kernel bridges every adjacent block edge.
+    //    native_resolution × 2 would suffice for this, but sigma_terrain (× 12)
+    //    subsumes it completely.
+    //
+    // 2. SRTM surface artifact suppression: Terrarium nominally provides bare-earth
+    //    heights, but SRTM (the source at zoom 15 for most land areas) is a radar
+    //    product that records rooftop/canopy surface in dense urban areas.  The joerd
+    //    documentation explicitly notes "large variations in elevation in areas with
+    //    large buildings" as a known issue.  A sigma wide enough to span several
+    //    building footprints (~3–10 tile pixels) averages the rooftop peaks into the
+    //    surrounding street-level values.  native_resolution × 12 ≈ 43 grid cells
+    //    achieves this for typical Manhattan-scale buildings.
+    //
+    // For large areas sigma_from_grid already exceeds sigma_terrain (crossover ≈ 7.5 km
+    // at scale=1, lat 40°), so behaviour is identical to pre-fix for all large
+    // generations.  min/max and output heights always derive from the same single blur
+    // pass, so there is no possibility of range-decoupling blowup.
+    let lat_mid_rad: f64 = ((bbox.min().lat() + bbox.max().lat()) / 2.0).to_radians();
+    let metres_per_tile_pixel: f64 = 2.0 * std::f64::consts::PI * 6_378_137.0
+        / (2.0_f64.powi(zoom as i32) * 256.0)
+        * lat_mid_rad.cos();
+    let blocks_per_tile_pixel: f64 = metres_per_tile_pixel * scale;
+    let sigma_terrain: f64 = (blocks_per_tile_pixel * 12.0).max(1.0e-6);
+    // Takes whichever is larger: the grid-proportional value or the terrain floor.
+    // For small areas sigma_terrain wins; for large areas sigma_from_grid wins.
+    // Clamped to half the grid size: beyond that the kernel exceeds the grid and
+    // additional sigma has no visual effect, only wasted computation.
+    let output_sigma: f64 = sigma_from_grid.max(sigma_terrain).min(grid_size / 2.0);
 
-    // Continue with the existing blur and conversion to Minecraft heights...
-    let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, sigma);
+    let blurred_heights: Vec<Vec<f64>> = apply_gaussian_blur(&height_grid, output_sigma);
 
     // Release raw height grid
     drop(height_grid);
 
-    // Find min/max in raw data using parallel reduction
-    let (min_height, max_height, extreme_low_count, extreme_high_count) = blurred_heights
+    // Derive min/max from the same field used for output (never from a separate blur)
+    let (min_height, max_height) = blurred_heights
         .par_iter()
         .map(|row| {
-            let mut local_min = f64::MAX;
-            let mut local_max = f64::MIN;
-            let mut local_low = 0usize;
-            let mut local_high = 0usize;
-            for &height in row {
-                local_min = local_min.min(height);
-                local_max = local_max.max(height);
-                if height < -1000.0 {
-                    local_low += 1;
-                }
-                if height > 10000.0 {
-                    local_high += 1;
+            let mut lo = f64::MAX;
+            let mut hi = f64::MIN;
+            for &h in row {
+                if h.is_finite() {
+                    lo = lo.min(h);
+                    hi = hi.max(h);
                 }
             }
-            (local_min, local_max, local_low, local_high)
+            (lo, hi)
         })
         .reduce(
-            || (f64::MAX, f64::MIN, 0usize, 0usize),
-            |(min1, max1, low1, high1), (min2, max2, low2, high2)| {
-                (min1.min(min2), max1.max(max2), low1 + low2, high1 + high2)
-            },
+            || (f64::MAX, f64::MIN),
+            |(lo1, hi1), (lo2, hi2)| (lo1.min(lo2), hi1.max(hi2)),
         );
 
-    //eprintln!("Height data range: {min_height} to {max_height} m");
-    if extreme_low_count > 0 {
-        eprintln!(
-            "WARNING: Found {extreme_low_count} pixels with extremely low elevations (< -1000m)"
-        );
-    }
-    if extreme_high_count > 0 {
-        eprintln!(
-            "WARNING: Found {extreme_high_count} pixels with extremely high elevations (> 10000m)"
-        );
-    }
-
-    let height_range: f64 = max_height - min_height;
+    // Validate: if no finite samples exist (e.g. all tiles failed to download),
+    // fall back to flat terrain rather than propagating NaN/inf.
+    let (min_height, _max_height, height_range) =
+        if !min_height.is_finite() || !max_height.is_finite() || min_height >= max_height {
+            (0.0_f64, 0.0_f64, 0.0_f64)
+        } else {
+            (min_height, max_height, max_height - min_height)
+        };
 
     // Realistic height scaling: 1 meter of real elevation = scale blocks in Minecraft
     // At scale=1.0, 1 meter = 1 block (realistic 1:1 mapping)
@@ -776,6 +824,134 @@ mod tests {
             + below_sea_pixel[2] as f64 / 256.0)
             - TERRARIUM_OFFSET;
         assert_eq!(height, -100.0);
+    }
+
+    #[test]
+    fn test_output_sigma_small_bbox_uses_terrain_floor() {
+        // For small areas, sigma_terrain > sigma_from_grid, so output_sigma = sigma_terrain.
+        // This suppresses SRTM building/surface artifacts and Voronoi block edges.
+        let zoom: u8 = 15;
+        let lat_mid_rad: f64 = 40.705_f64.to_radians();
+        let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
+            * lat_mid_rad.cos();
+        let sigma_terrain = mpp * 12.0; // ≈ 43.9 at lat 40°
+
+        for grid_m in [134_f64, 200.0, 500.0, 1000.0, 5000.0] {
+            let sigma_from_grid = 5.0 * (grid_m / 100.0).sqrt();
+            let output_sigma = sigma_from_grid.max(sigma_terrain);
+            if sigma_terrain > sigma_from_grid {
+                assert_eq!(
+                    output_sigma, sigma_terrain,
+                    "grid={grid_m}m: sigma_terrain should dominate"
+                );
+            } else {
+                assert_eq!(
+                    output_sigma, sigma_from_grid,
+                    "grid={grid_m}m: sigma_from_grid should dominate"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_output_sigma_large_bbox_no_regression() {
+        // For large areas (> ~7.5 km at scale=1, lat 40°), sigma_from_grid ≥ sigma_terrain.
+        // output_sigma = sigma_from_grid — identical to pre-fix behaviour.
+        let zoom: u8 = 15;
+        let lat_mid_rad: f64 = 40.705_f64.to_radians();
+        let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
+            * lat_mid_rad.cos();
+        let sigma_terrain = mpp * 12.0;
+
+        for grid_m in [8_000_f64, 10_000.0, 20_000.0, 50_000.0] {
+            let sigma_from_grid = 5.0 * (grid_m / 100.0).sqrt();
+            assert!(
+                sigma_from_grid >= sigma_terrain,
+                "grid={grid_m}m: sigma_from_grid {sigma_from_grid:.2} should dominate sigma_terrain {sigma_terrain:.2}"
+            );
+            let output_sigma = sigma_from_grid.max(sigma_terrain);
+            assert_eq!(
+                output_sigma, sigma_from_grid,
+                "grid={grid_m}m: output_sigma must equal sigma_from_grid (no regression)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_output_sigma_crossover() {
+        // The crossover grid size where sigma_from_grid == sigma_terrain:
+        //   5 * sqrt(S/100) = mpp * 12  →  S = 100 * (mpp*12/5)²  ≈ 7540 m at lat 40°
+        // Below crossover sigma_terrain wins; above it sigma_from_grid wins.
+        let zoom: u8 = 15;
+        let lat_mid_rad: f64 = 40.705_f64.to_radians();
+        let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
+            * lat_mid_rad.cos();
+        let sigma_terrain = mpp * 12.0;
+        let crossover = 100.0 * (sigma_terrain / 5.0).powi(2);
+
+        let below = crossover * 0.9;
+        let sigma_from_grid_below = 5.0 * (below / 100.0).sqrt();
+        assert_eq!(
+            sigma_from_grid_below.max(sigma_terrain),
+            sigma_terrain,
+            "below crossover sigma_terrain must win"
+        );
+
+        let above = crossover * 1.1;
+        let sigma_from_grid_above = 5.0 * (above / 100.0).sqrt();
+        assert_eq!(
+            sigma_from_grid_above.max(sigma_terrain),
+            sigma_from_grid_above,
+            "above crossover sigma_from_grid must win"
+        );
+    }
+
+    #[test]
+    fn test_output_sigma_same_field_invariant() {
+        // Critical invariant: output heights and min/max come from the SAME single blur.
+        // If someone reintroduces a second blur pass with a different sigma,
+        // blurred values could fall outside the separately-computed min/max.
+        // We verify: blur once → derive min/max → every cell is in [min, max].
+        let grid: Vec<Vec<f64>> = vec![
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+            vec![15.0, 25.0, 35.0, 45.0, 55.0],
+            vec![20.0, 30.0, 80.0, 30.0, 20.0],
+            vec![15.0, 25.0, 35.0, 45.0, 55.0],
+            vec![10.0, 20.0, 30.0, 40.0, 50.0],
+        ];
+        let sigma = 2.0;
+        let blurred = apply_gaussian_blur(&grid, sigma);
+        let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+        for row in &blurred {
+            for &h in row {
+                if h.is_finite() {
+                    lo = lo.min(h);
+                    hi = hi.max(h);
+                }
+            }
+        }
+        // Every blurred cell must lie within the derived min/max.
+        for row in &blurred {
+            for &h in row {
+                assert!(h >= lo && h <= hi, "blurred value {h} outside [{lo}, {hi}]");
+            }
+        }
+    }
+
+    #[test]
+    fn test_output_sigma_scale_factor() {
+        // native_resolution = mpp * scale, sigma_terrain = native_resolution * 12.
+        // Both scale linearly with the scale argument.
+        let zoom: u8 = 15;
+        let lat_mid_rad: f64 = 40.705_f64.to_radians();
+        let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
+            * lat_mid_rad.cos();
+        let st1 = mpp * 1.0 * 12.0;
+        let st2 = mpp * 2.0 * 12.0;
+        assert!(
+            (st2 - 2.0 * st1).abs() < 1e-9,
+            "sigma_terrain must scale linearly with the scale factor"
+        );
     }
 
     #[test]

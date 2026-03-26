@@ -713,14 +713,6 @@ impl<'a> WorldEditor<'a> {
         false
     }
 
-    /// Checks if a block exists at the given coordinates with absolute Y value.
-    ///
-    /// Unlike `check_for_block_absolute`, this doesn't filter by block type.
-    #[allow(unused)]
-    pub fn block_at_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
-        self.world.get_block(x, absolute_y, z).is_some()
-    }
-
     /// Sets a block only if no modification has been recorded yet at this
     /// position (i.e. the in-memory overlay still holds AIR).
     ///
@@ -788,6 +780,12 @@ impl<'a> WorldEditor<'a> {
             }
         }
         Ok(())
+    }
+
+    /// Returns true if a non-AIR block exists at the given absolute coordinates.
+    #[inline]
+    pub fn block_exists_absolute(&self, x: i32, absolute_y: i32, z: i32) -> bool {
+        self.world.get_block(x, absolute_y, z).is_some()
     }
 
     /// Fills an entire column from y_min to y_max with one block type.
