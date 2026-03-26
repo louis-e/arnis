@@ -744,11 +744,18 @@ impl<'a> WorldEditor<'a> {
     /// If the region is not present in memory (already flushed or never written to)
     /// this is a no-op. The region is removed from `self.world.regions` before
     /// returning so that the later `save()` call skips it cleanly.
+    ///
+    /// Only applies to Java Anvil format; Bedrock worlds use a single-pass LevelDB
+    /// writer so incremental flushing is not supported (this is a no-op).
     pub fn flush_region(
         &mut self,
         region_x: i32,
         region_z: i32,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if !matches!(self.format, WorldFormat::JavaAnvil) {
+            return Ok(());
+        }
+
         if let Some(mut region) = self.world.regions.remove(&(region_x, region_z)) {
             // Compact before serializing. In the original code path, save() calls
             // self.world.compact_sections() globally before save_java(). With
@@ -765,7 +772,20 @@ impl<'a> WorldEditor<'a> {
                     section.compact();
                 }
             }
-            self.save_single_region(region_x, region_z, &region)?;
+            if let Err(e) = self.save_single_region(region_x, region_z, &region) {
+                let user_msg = if is_disk_full_error(e.as_ref()) {
+                    "Not enough disk space available.".to_string()
+                } else {
+                    format!("Failed to save region ({}, {}): {}", region_x, region_z, e)
+                };
+                eprintln!("{}", user_msg);
+                #[cfg(feature = "gui")]
+                {
+                    send_log(LogLevel::Error, &user_msg);
+                    emit_gui_error(&user_msg);
+                }
+                return Err(e);
+            }
         }
         Ok(())
     }
