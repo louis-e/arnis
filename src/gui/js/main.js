@@ -241,14 +241,13 @@ function setupProgressListener() {
     showWorldPreviewButton();
   });
 
-  // Listen for open-mcworld-file event to show the generated Bedrock world in file explorer
-  window.__TAURI__.event.listen("open-mcworld-file", async (event) => {
+  // Listen for show-in-folder event to reveal the generated world in the file explorer
+  window.__TAURI__.event.listen("show-in-folder", async (event) => {
     const filePath = event.payload;
     try {
-      // Use our custom command to show the file in the system file explorer
       await invoke("gui_show_in_folder", { path: filePath });
     } catch (error) {
-      console.error("Failed to show mcworld file in folder:", error);
+      console.error("Failed to show file in folder:", error);
     }
   });
 }

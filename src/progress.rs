@@ -66,11 +66,11 @@ pub fn emit_map_preview_ready() {
     }
 }
 
-/// Emits an event to open the generated mcworld file
-pub fn emit_open_mcworld_file(path: &str) {
+/// Emits an event to reveal a file or folder in the system file explorer
+pub fn emit_show_in_folder(path: &str) {
     if let Some(window) = get_main_window() {
-        if let Err(e) = window.emit("open-mcworld-file", path) {
-            eprintln!("Failed to emit open-mcworld-file event: {}", e);
+        if let Err(e) = window.emit("show-in-folder", path) {
+            eprintln!("Failed to emit show-in-folder event: {}", e);
         }
     }
 }
