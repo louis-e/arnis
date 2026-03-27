@@ -1,4 +1,4 @@
-use crate::block_definitions::{Block, AIR};
+use crate::block_definitions::AIR;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::luanti_block_map::{to_luanti_node, LuantiGame};
@@ -14,102 +14,6 @@ use std::path::Path;
 
 /// Mapblock format version — 29 uses zstd compression for the entire block
 const MAP_FORMAT_VERSION: u8 = 29;
-
-/// IDs of stair blocks that need directional param2 mapping.
-const STAIR_BLOCK_IDS: &[u8] = &[
-    144, // OAK_STAIRS
-    177, // STONE_BRICK_STAIRS
-    178, // MUD_BRICK_STAIRS
-    179, // POLISHED_BLACKSTONE_BRICK_STAIRS
-    180, // BRICK_STAIRS
-    181, // POLISHED_GRANITE_STAIRS
-    182, // END_STONE_BRICK_STAIRS
-    183, // POLISHED_DIORITE_STAIRS
-    184, // SMOOTH_SANDSTONE_STAIRS
-    185, // QUARTZ_STAIRS
-    186, // POLISHED_ANDESITE_STAIRS
-    187, // NETHER_BRICK_STAIRS
-];
-
-/// IDs of trapdoor blocks whose facing converts to wallmounted param2.
-const TRAPDOOR_BLOCK_IDS: &[u8] = &[
-    173, // OAK_TRAPDOOR
-    236, // OAK_TRAPDOOR_OPEN_NORTH (reused as generic oak trapdoor base)
-    237, // OAK_TRAPDOOR_OPEN_SOUTH
-    238, // OAK_TRAPDOOR_OPEN_EAST
-    239, // OAK_TRAPDOOR_OPEN_WEST
-    241, // DARK_OAK_TRAPDOOR
-    242, // SPRUCE_TRAPDOOR
-    243, // BIRCH_TRAPDOOR
-];
-
-/// Convert Minecraft block properties to Luanti param2 value.
-///
-/// For blocks with a "facing" property, converts to Luanti's facedir,
-/// accounting for the Z-axis flip (MC Z+ = South, Luanti Z+ = North).
-///
-/// Facedir mapping (with Z-flip applied):
-/// - MC "north" (-Z_mc = +Z_luanti) → param2 = 0 (ascend toward +Z)
-/// - MC "east"  (+X)                → param2 = 1 (ascend toward +X)
-/// - MC "south" (+Z_mc = -Z_luanti) → param2 = 2 (ascend toward -Z)
-/// - MC "west"  (-X)                → param2 = 3 (ascend toward -X)
-///
-/// Upside-down stairs (half=top) add 20 to the base facedir.
-///
-/// Open trapdoors use wallmounted param2:
-/// - MC "north" → wallmounted 4 (+Z in Luanti)
-/// - MC "south" → wallmounted 5 (-Z in Luanti)
-/// - MC "east"  → wallmounted 2 (+X)
-/// - MC "west"  → wallmounted 3 (-X)
-fn properties_to_param2(block: Block, props: &Value) -> u8 {
-    let compound = match props {
-        Value::Compound(map) => map,
-        _ => return 0,
-    };
-
-    let facing = match compound.get("facing") {
-        Some(Value::String(s)) => s.as_str(),
-        _ => return 0,
-    };
-
-    // Open trapdoors use wallmounted param2 (different numbering from facedir)
-    if TRAPDOOR_BLOCK_IDS.contains(&block.id()) {
-        let is_open = matches!(
-            compound.get("open"),
-            Some(Value::String(s)) if s == "true"
-        );
-        if is_open {
-            return match facing {
-                "north" => 4, // +Z in Luanti
-                "south" => 5, // -Z in Luanti
-                "east" => 2,  // +X
-                "west" => 3,  // -X
-                _ => 4,
-            };
-        }
-    }
-
-    let base = match facing {
-        "north" => 0,
-        "east" => 1,
-        "south" => 2,
-        "west" => 3,
-        _ => 0,
-    };
-
-    // Check for upside-down stairs (half=top adds 20 to facedir)
-    let upside_down = STAIR_BLOCK_IDS.contains(&block.id())
-        && matches!(
-            compound.get("half"),
-            Some(Value::String(s)) if s == "top"
-        );
-
-    if upside_down {
-        base + 20
-    } else {
-        base
-    }
-}
 
 /// 16×16×16 nodes per mapblock
 const NODES_PER_BLOCK: usize = 16 * 16 * 16;
@@ -143,7 +47,7 @@ fn serialize_mapblock(
     let mut local_id_to_name: Vec<&str> = Vec::new();
 
     // Pre-populate with air (always ID 0 for efficiency)
-    let air_node = to_luanti_node(AIR, game);
+    let air_node = to_luanti_node(AIR, game, None);
     name_to_local_id.insert(air_node.name, 0);
     local_id_to_name.push(air_node.name);
 
@@ -163,7 +67,10 @@ fn serialize_mapblock(
                 let internal_z = 15 - sz;
 
                 let block = section.get_block(x, y, internal_z).unwrap_or(AIR);
-                let node = to_luanti_node(block, game);
+                let props_idx =
+                    crate::world_editor::common::SectionToModify::index(x, y, internal_z);
+                let props = section.properties.get(&props_idx).map(|v| v as &Value);
+                let node = to_luanti_node(block, game, props);
 
                 let local_id = if let Some(&id) = name_to_local_id.get(node.name) {
                     id
@@ -181,15 +88,7 @@ fn serialize_mapblock(
                     param1[serial_idx] = 15; // Full sunlight (lower nibble)
                 }
 
-                // Convert Minecraft block properties to Luanti param2
-                // Properties index uses internal coordinates (YZX order)
-                let props_idx =
-                    crate::world_editor::common::SectionToModify::index(x, y, internal_z);
-                param2[serial_idx] = if let Some(props) = section.properties.get(&props_idx) {
-                    properties_to_param2(block, props)
-                } else {
-                    node.param2
-                };
+                param2[serial_idx] = node.param2;
             }
         }
     }
@@ -580,7 +479,7 @@ fn write_worldmod(
 /// Serialize an air-only mapblock with full sunlight.
 /// Used to place sky blocks above the world so the engine can propagate sun downward.
 fn serialize_air_mapblock(game: LuantiGame) -> Vec<u8> {
-    let air_name = to_luanti_node(AIR, game).name;
+    let air_name = to_luanti_node(AIR, game, None).name;
 
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
 
