@@ -99,7 +99,6 @@ fn lat_distance(lat1: f64, lat2: f64) -> f64 {
 
 // copied legacy code
 // Function to convert latitude and longitude to Minecraft coordinates.
-// Function to convert latitude and longitude to Minecraft coordinates.
 #[cfg(test)]
 pub fn lat_lon_to_minecraft_coords(
     lat: f64,
