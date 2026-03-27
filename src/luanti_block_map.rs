@@ -437,7 +437,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         49 => "mcl_trees:leaves_oak",  // oak_leaves
         50 => "mcl_trees:tree_oak",  // oak_log
         51 => "mcl_trees:wood_oak",  // oak_planks
-        52 => "mcl_stairs:slab_wood_oak",  // oak_slab
+        52 => "mcl_stairs:slab_oak",  // oak_slab
         53 => "mcl_colorblocks:hardened_clay_orange",  // orange_terracotta
         54 => "mcl_core:podzol",  // podzol
         55 => "mcl_core:andesite_smooth",  // polished_andesite
@@ -458,7 +458,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         70 => "mcl_wool:red",  // red_wool
         71 => "mcl_core:sand",  // sand
         72 => "mcl_core:sandstone",  // sandstone
-        73 => "mcl_scaffolding:scaffolding",  // scaffolding
+        73 => "mcl_bamboo:scaffolding",  // scaffolding
         74 => "mcl_core:quartz_smooth",  // smooth_quartz
         75 => "mcl_core:redsandstone_smooth",  // smooth_red_sandstone
         76 => "mcl_core:sandstonesmooth2",  // smooth_sandstone
@@ -576,7 +576,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         214 => "mcl_stairs:slab_stone_double",  // smooth_stone_slab
         215 => "mcl_core:glass_pane_natural",  // glass_pane
         216 => "mcl_colorblocks:hardened_clay_silver",  // light_gray_terracotta
-        217 => "mcl_stairs:slab_wood_oak",  // oak_slab (variant)
+        217 => "mcl_stairs:slab_oak",  // oak_slab (variant)
         218 => "mcl_doors:wooden_door_b_1",  // oak_door (variant)
         219 => "mcl_trees:tree_dark_oak",  // dark_oak_log
         220 => "mcl_trees:leaves_dark_oak",  // dark_oak_leaves
@@ -595,7 +595,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         233 => "mcl_core:glass_orange",  // orange_stained_glass
         234 => "mcl_core:glass_magenta",  // magenta_stained_glass
         235 => "mcl_flowers:poppy",  // potted_poppy
-        240 => "mcl_stairs:slab_quartz_block",  // quartz_slab
+        240 => "mcl_stairs:slab_quartzblock",  // quartz_slab
         // 241–243: Trapdoors (MC2MT CONV_TRAPDOOR)
         241 => return conv_trapdoor(props, "mcl_doors:dark_oak_trapdoor", "mcl_doors:dark_oak_trapdoor_open"),  // dark_oak_trapdoor
         242 => return conv_trapdoor(props, "mcl_doors:spruce_trapdoor", "mcl_doors:spruce_trapdoor_open"),  // spruce_trapdoor
