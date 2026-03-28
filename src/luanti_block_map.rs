@@ -163,7 +163,7 @@ fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
         2 => "default:stone",  // andesite
         3 => "default:aspen_leaves",  // birch_leaves
         4 => "default:aspen_tree",  // birch_log
-        5 => "wool:black",  // black_concrete
+        5 => "default:obsidianbrick",  // black_concrete
         6 => "default:obsidian",  // blackstone
         7 => "flowers:viola",  // blue_orchid
         8 => "default:clay",  // blue_terracotta
@@ -189,7 +189,7 @@ fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
         28 => "default:dirt_with_grass",  // grass_block
         29 => "default:grass_3",  // short_grass
         30 => "default:gravel",  // gravel
-        31 => "wool:grey",  // gray_concrete
+        31 => "default:coalblock",  // gray_concrete
         32 => "default:clay",  // gray_terracotta
         33 => "default:clay",  // green_terracotta
         34 => "wool:green",  // green_wool
@@ -227,7 +227,7 @@ fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
         66 => "carts:rail",  // rail
         67 => "flowers:rose",  // poppy
         68 => "default:obsidianbrick",  // red_nether_bricks
-        69 => "default:clay",  // red_terracotta
+        69 => "default:desert_stone",  // red_terracotta
         70 => "wool:red",  // red_wool
         71 => "default:sand",  // sand
         72 => "default:sandstone",  // sandstone
@@ -263,10 +263,10 @@ fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
         102 => "wool:brown",  // brown_wool
         103 => "default:copperblock",  // oxidized_copper
         104 => "default:clay",  // yellow_terracotta
-        105 => "farming:carrot_8",  // carrots
-        106 => "doors:door_wood_b_1",  // dark_oak_door (lower)
-        107 => "doors:door_wood_t_1",  // dark_oak_door (upper)
-        108 => "farming:potato_4",  // potatoes
+        105 => "farming:wheat_8",  // carrots
+        106 => "doors:door_wood_b",  // dark_oak_door (lower)
+        107 => "doors:door_wood_a",  // dark_oak_door (upper)
+        108 => "farming:wheat_8",  // potatoes
         109 => "farming:wheat_8",  // wheat
         110 => "default:stone",  // bedrock
         111 => "default:snowblock",  // snow_block
@@ -299,7 +299,7 @@ fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
         156 => "wool:red",  // red_carpet
         157 => "default:steelblock",  // anvil
         158 => "default:wood",  // note_block
-        159 => "doors:door_wood_b_1",  // oak_door
+        159 => "doors:door_wood_b",  // oak_door
         160 => "default:steelblock",  // brewing_stand
         // 161..=168: red_bed variants
         161..=168 => "wool:red",  // red_bed_north_head
@@ -312,7 +312,7 @@ fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
             return conv_trapdoor(props, "doors:trapdoor", "doors:trapdoor_open")
         }
         174 => "wool:brown",  // brown_concrete
-        175 => "default:clay",  // black_terracotta
+        175 => "default:obsidianbrick",  // black_terracotta
         176 => "default:clay",  // brown_terracotta
         // 177–187: Stairs (MC2MT CONV_STAIR)
         177 => return conv_stair(props, "stairs:stair_stonebrick"),  // stone_brick_stairs
@@ -344,17 +344,17 @@ fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
         205 => "wool:orange",  // orange_wool
         206 => "wool:blue",  // blue_wool
         207 => "wool:dark_green",  // green_concrete
-        208 => "walls:cobble",  // brick_wall
-        209 => "default:steelblock",  // redstone_block
+        208 => "default:brick",  // brick_wall
+        209 => "default:desert_stone_block",  // redstone_block
         // 210..=211: chain variants
         210..=211 => "default:fence_wood",  // chain_x
-        212 => "doors:door_wood_b_1",  // spruce_door (lower)
-        213 => "doors:door_wood_t_1",  // spruce_door (upper)
+        212 => "doors:door_wood_b",  // spruce_door (lower)
+        213 => "doors:door_wood_a",  // spruce_door (upper)
         214 => "stairs:slab_stone",  // smooth_stone_slab
         215 => "xpanes:pane_flat",  // glass_pane
         216 => "default:clay",  // light_gray_terracotta
         217 => "stairs:slab_wood",  // oak_slab (variant)
-        218 => "doors:door_wood_b_1",  // oak_door (variant)
+        218 => "doors:door_wood_b",  // oak_door (variant)
         219 => "default:tree",  // dark_oak_log
         220 => "default:leaves",  // dark_oak_leaves
         221 => "default:jungletree",  // jungle_log
@@ -397,7 +397,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         9 => "mcl_core:brick_block",  // bricks
         10 => "mcl_cauldrons:cauldron",  // cauldron
         11 => "mcl_core:stonebrickcarved",  // chiseled_stone_bricks
-        12 => "mcl_walls:cobble",  // cobblestone_wall
+        12 => "mcl:walls_cobble_wall_side",  // cobblestone_wall
         13 => "mcl_core:cobble",  // cobblestone
         14 => "mcl_blackstone:blackstone_brick_polished",  // polished_blackstone_bricks
         15 => "mcl_core:stonebrickcracked",  // cracked_stone_bricks
@@ -411,7 +411,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         23 => "mcl_end:end_bricks",  // end_stone_bricks
         24 => "mcl_farming:soil_wet",  // farmland
         25 => "mcl_core:glass",  // glass
-        26 => "mcl_lanterns:lantern_floor",  // glowstone
+        26 => "mcl_nether:glowstone",  // glowstone
         27 => "mcl_core:granite",  // granite
         28 => "mcl_core:dirt_with_grass",  // grass_block
         29 => "mcl_flowers:tallgrass",  // short_grass
@@ -421,18 +421,18 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         33 => "mcl_colorblocks:hardened_clay_green",  // green_terracotta
         34 => "mcl_wool:green",  // green_wool
         35 => "mcl_farming:hay_block",  // hay_block
-        36 => "mcl_iron_bars:iron_bars",  // iron_bars
+        36 => "xpanes:bar_flat",  // iron_bars
         37 => "mcl_core:ironblock",  // iron_block
         38 => "mcl_trees:wood_jungle",  // jungle_planks
         39 => "mcl_core:ladder",  // ladder
         40 => "mcl_colorblocks:concrete_light_blue",  // light_blue_concrete
         41 => "mcl_colorblocks:hardened_clay_light_blue",  // light_blue_terracotta
         42 => "mcl_colorblocks:concrete_silver",  // light_gray_concrete
-        43 => "mcl_mangrove:moss",  // moss_block
+        43 => "mcl_lush_caves:moss",  // moss_block
         44 => "mcl_core:mossycobble",  // mossy_cobblestone
         45 => "mcl_mud:mud_bricks",  // mud_bricks
         46 => "mcl_nether:nether_brick",  // nether_bricks
-        47 => "mcl_nether:netherite_block",  // netherite_block
+        47 => "mcl_nether:netheriteblock",  // netherite_block
         48 => "mcl_fences:fence",  // oak_fence
         49 => "mcl_trees:leaves_oak",  // oak_leaves
         50 => "mcl_trees:tree_oak",  // oak_log
@@ -441,7 +441,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         53 => "mcl_colorblocks:hardened_clay_orange",  // orange_terracotta
         54 => "mcl_core:podzol",  // podzol
         55 => "mcl_core:andesite_smooth",  // polished_andesite
-        56 => "mcl_core:basalt_polished",  // polished_basalt
+        56 => "mcl_blackstone:basalt_polished",  // polished_basalt
         57 => "mcl_nether:quartz_block",  // quartz_block
         58 => "mcl_blackstone:blackstone_polished",  // polished_blackstone
         59 => "mcl_deepslate:deepslate_polished",  // polished_deepslate
@@ -459,8 +459,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         71 => "mcl_core:sand",  // sand
         72 => "mcl_core:sandstone",  // sandstone
         73 => "mcl_bamboo:scaffolding",  // scaffolding
-        74 => "mcl_core:quartz_smooth",  // smooth_quartz
-        75 => "mcl_core:redsandstone_smooth",  // smooth_red_sandstone
+        74 => "mcl_nether:quartz_smooth",  // smooth_quartz
+        75 => "mcl_core:redsandstonesmooth2",  // smooth_red_sandstone
         76 => "mcl_core:sandstonesmooth2",  // smooth_sandstone
         77 => "mcl_stairs:slab_stone_double",  // smooth_stone
         78 => "mcl_sponges:sponge",  // sponge
@@ -559,22 +559,22 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         196 => "mcl_anvils:anvil_damage_2",  // damaged_anvil
         197 => "mcl_flowers:double_fern",  // large_fern (lower)
         198 => "mcl_flowers:double_fern_top",  // large_fern (upper)
-        199 => "mcl_core:chain",  // chain
+        199 => "mcl_lanterns:chain",  // chain
         200 => "mcl_end:end_rod",  // end_rod
-        201 => "mcl_copper:lightning_rod",  // lightning_rod
+        201 => "mcl_lightning_rods:rod",  // lightning_rod
         202 => "mcl_core:goldblock",  // gold_block
         203 => "mcl_ocean:sea_lantern",  // sea_lantern
         204 => "mcl_colorblocks:concrete_orange",  // orange_concrete
         205 => "mcl_wool:orange",  // orange_wool
         206 => "mcl_wool:blue",  // blue_wool
         207 => "mcl_colorblocks:concrete_green",  // green_concrete
-        208 => "mcl_walls:brick_block",  // brick_wall
-        209 => "mcl_core:redstone_block",  // redstone_block
-        210..=211 => "mcl_core:chain",  // chain_x
+        208 => "mcl_walls:brick",  // brick_wall
+        209 => "mcl_redstone_torch:redstoneblock",  // redstone_block
+        210..=211 => "mcl_lanterns:chain",  // chain_x
         212 => "mcl_doors:spruce_door_b_1",  // spruce_door (lower)
         213 => "mcl_doors:spruce_door_t_1",  // spruce_door (upper)
         214 => "mcl_stairs:slab_stone_double",  // smooth_stone_slab
-        215 => "mcl_core:glass_pane_natural",  // glass_pane
+        215 => "mcl_panes:pane_natural_flat",  // glass_pane
         216 => "mcl_colorblocks:hardened_clay_silver",  // light_gray_terracotta
         217 => "mcl_stairs:slab_oak",  // oak_slab (variant)
         218 => "mcl_doors:wooden_door_b_1",  // oak_door (variant)
@@ -588,7 +588,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         226 => "mcl_core:glass_cyan",  // cyan_stained_glass
         227 => "mcl_core:glass_blue",  // blue_stained_glass
         228 => "mcl_core:glass_light_blue",  // light_blue_stained_glass
-        229 => "mcl_trees:wood_oak",  // daylight_detector
+        229 => "mcl_daylight_detector:daylight_detector",  // daylight_detector
         230 => "mcl_core:glass_red",  // red_stained_glass
         231 => "mcl_core:glass_yellow",  // yellow_stained_glass
         232 => "mcl_core:glass_purple",  // purple_stained_glass
