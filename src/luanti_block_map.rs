@@ -574,7 +574,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         212 => "mcl_doors:spruce_door_b_1",  // spruce_door (lower)
         213 => "mcl_doors:spruce_door_t_1",  // spruce_door (upper)
         214 => "mcl_stairs:slab_stone_double",  // smooth_stone_slab
-        215 => "mcl_panes:pane_natural_flat",  // glass_pane
+        215 => "mcl_core:glass",  // glass_pane
         216 => "mcl_colorblocks:hardened_clay_silver",  // light_gray_terracotta
         217 => "mcl_stairs:slab_oak",  // oak_slab (variant)
         218 => "mcl_doors:wooden_door_b_1",  // oak_door (variant)
