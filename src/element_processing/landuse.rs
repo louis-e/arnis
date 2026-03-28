@@ -171,11 +171,13 @@ pub fn generate_landuse(
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.random_range(0..30);
                     if random_choice == 20 {
-                        let tree_type = match ground.level(XZPoint::new(x, z)) > crate::world_editor::CONIFERS_ONLY_ALTITUDE {
+                        let tree_type = match ground.level(XZPoint::new(x, z))
+                            > crate::world_editor::CONIFERS_ONLY_ALTITUDE
+                        {
                             true => TreeType::Spruce,
                             false => *trees_ok_to_generate
-                                     .choose(&mut rng)
-                                     .unwrap_or(&TreeType::Oak),
+                                .choose(&mut rng)
+                                .unwrap_or(&TreeType::Oak),
                         };
                         Tree::create_of_type(
                             editor,
