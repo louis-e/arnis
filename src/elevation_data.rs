@@ -637,7 +637,7 @@ fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
                 *val = match *val > THREEQRT_MAXY {
                     false => sum / weight_sum,
                     // For VERY high highs, *sharpen* peaks with the gaussian kernel instead!
-                    true => *val * 2. - (sum / weight_sum)
+                    true => *val * 2. - (sum / weight_sum),
                 }
             }
             temp
@@ -667,7 +667,7 @@ fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
                 *val = match *val > THREEQRT_MAXY {
                     false => sum / weight_sum,
                     // For VERY high highs, *sharpen* peaks with the gaussian kernel instead!
-                    true => *val * 2. - (sum / weight_sum)
+                    true => *val * 2. - (sum / weight_sum),
                 }
             }
             blurred_column

@@ -5,7 +5,7 @@
 
 use crate::block_definitions::*;
 // We need to use build height limits - the world will clip the geometry above the limit even if MC can index it in theory.
-use crate::elevation_data::{MIN_Y, MAX_Y};
+use crate::elevation_data::{MAX_Y, MIN_Y};
 /// The rough altitude above which deciduous trees stop growing naturally.
 /// Can be overridden by explicit spec, but will be used to infer biome if it's not specified.
 pub(crate) const CONIFERS_ONLY_ALTITUDE: i32 = 3 * (MAX_Y - MIN_Y) / 2;
