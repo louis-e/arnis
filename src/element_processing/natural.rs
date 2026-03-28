@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
+use crate::ground::Ground;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
@@ -14,6 +15,7 @@ pub fn generate_natural(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    ground: &std::sync::Arc<Ground>,
 ) {
     if let Some(natural_type) = element.tags().get("natural") {
         if natural_type == "tree" {
@@ -63,6 +65,9 @@ pub fn generate_natural(
                             trees_ok_to_generate.push(TreeType::Birch);
                         }
                     }
+                } else if ground.level(node.xz()) > crate::world_editor::CONIFERS_ONLY_ALTITUDE {
+                    // If it's high up (roughly >2.5km at 4km max), only generate spruces if not explicitly spec'd.
+                    trees_ok_to_generate.push(TreeType::Spruce);
                 } else {
                     trees_ok_to_generate.push(TreeType::Oak);
                     trees_ok_to_generate.push(TreeType::Spruce);
@@ -578,6 +583,7 @@ pub fn generate_natural_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    ground: &std::sync::Arc<Ground>,
 ) {
     if rel.tags.contains_key("natural") {
         // Process each outer member way individually using cached flood fill.
@@ -598,6 +604,7 @@ pub fn generate_natural_from_relation(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    ground,
                 );
             }
         }

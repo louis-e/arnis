@@ -17,6 +17,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+pub const MIN_Y: i32 = -2030;
+
 /// Generation options that can be passed separately from CLI Args
 #[derive(Clone)]
 pub struct GenerationOptions {
@@ -155,6 +157,7 @@ pub fn generate_world_with_options(
                         args,
                         &flood_fill_cache,
                         &building_footprints,
+                        &ground,
                     );
                 } else if way.tags.contains_key("natural") {
                     natural::generate_natural(
@@ -163,6 +166,7 @@ pub fn generate_world_with_options(
                         args,
                         &flood_fill_cache,
                         &building_footprints,
+                        &ground,
                     );
                 } else if way.tags.contains_key("amenity") {
                     amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
@@ -218,6 +222,7 @@ pub fn generate_world_with_options(
                         args,
                         &flood_fill_cache,
                         &building_footprints,
+                        &ground,
                     );
                 } else if node.tags.contains_key("amenity") {
                     amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
@@ -272,6 +277,7 @@ pub fn generate_world_with_options(
                         args,
                         &flood_fill_cache,
                         &building_footprints,
+                        &ground,
                     );
                 } else if rel.tags.contains_key("landuse") {
                     landuse::generate_landuse_from_relation(
@@ -280,6 +286,7 @@ pub fn generate_world_with_options(
                         args,
                         &flood_fill_cache,
                         &building_footprints,
+                        &ground,
                     );
                 } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
                     leisure::generate_leisure_from_relation(
