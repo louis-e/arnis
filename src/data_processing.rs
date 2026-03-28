@@ -17,8 +17,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub const MIN_Y: i32 = -2030;
-
 /// Generation options that can be passed separately from CLI Args
 #[derive(Clone)]
 pub struct GenerationOptions {
