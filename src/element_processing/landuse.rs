@@ -38,6 +38,12 @@ pub fn generate_landuse(
         "industrial" => STONE, // Placeholder, will be randomized per-block
         "military" => GRAY_CONCRETE, // Placeholder, will be randomized per-block
         "railway" => GRAVEL,
+        "basin" => WATER,
+        "vineyard" => COARSE_DIRT,
+        "salt_pond" => WATER,
+        "winter_sports" => SNOW_BLOCK,
+        "logging" => DIRT,
+        "port" | "depot" => SMOOTH_STONE,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
             let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);
