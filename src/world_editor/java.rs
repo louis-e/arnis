@@ -387,9 +387,16 @@ fn build_section_value(section: &Section) -> HashMap<String, Value> {
 fn compute_heightmaps(sections: &[Section]) -> Value {
     // Precompute per-section metadata to avoid redundant work in the inner loop.
     enum SectionKind<'a> {
-        Uniform { solid: bool },
+        Uniform {
+            solid: bool,
+        },
         NoAir,
-        Mixed { data: &'a LongArray, bits: usize, vals_per_long: usize, mask: u64 },
+        Mixed {
+            data: &'a LongArray,
+            bits: usize,
+            vals_per_long: usize,
+            mask: u64,
+        },
     }
     struct SectionMeta<'a> {
         y: i8,
@@ -402,7 +409,9 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
         .map(|s| {
             let palette = &s.block_states.palette;
             let kind = if palette.len() == 1 {
-                SectionKind::Uniform { solid: palette[0].name != "minecraft:air" }
+                SectionKind::Uniform {
+                    solid: palette[0].name != "minecraft:air",
+                }
             } else if !palette.iter().any(|p| p.name == "minecraft:air") {
                 SectionKind::NoAir
             } else if let Some(data) = &s.block_states.data {
@@ -419,7 +428,11 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
             } else {
                 SectionKind::Uniform { solid: false }
             };
-            SectionMeta { y: s.y, palette, kind }
+            SectionMeta {
+                y: s.y,
+                palette,
+                kind,
+            }
         })
         .collect();
 
@@ -440,7 +453,12 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
                         heights[col_idx] = abs_y - MIN_Y + 1;
                         break 'outer;
                     }
-                    SectionKind::Mixed { data, bits, vals_per_long, mask } => {
+                    SectionKind::Mixed {
+                        data,
+                        bits,
+                        vals_per_long,
+                        mask,
+                    } => {
                         for local_y in (0..16usize).rev() {
                             let block_idx = local_y * 256 + z * 16 + x;
                             let long_idx = block_idx / vals_per_long;
