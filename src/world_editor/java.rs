@@ -86,11 +86,10 @@ impl<'a> WorldEditor<'a> {
             other: FnvHashMap::default(),
         };
 
-        let level_data = create_chunk_nbt(&chunk_data);
+        let chunk_nbt = create_chunk_nbt(&chunk_data);
 
-        // Serialize the chunk
         let mut ser_buffer = Vec::with_capacity(8192);
-        fastnbt::to_writer(&mut ser_buffer, &level_data)?;
+        fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
 
         Ok(ser_buffer)
     }
@@ -198,10 +197,9 @@ impl<'a> WorldEditor<'a> {
                     other: chunk_to_modify.other.clone(),
                 };
 
-                // Create chunk NBT and save
-                let level_data = create_chunk_nbt(&chunk);
+                let chunk_nbt = create_chunk_nbt(&chunk);
                 ser_buffer.clear();
-                fastnbt::to_writer(&mut ser_buffer, &level_data)?;
+                fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
                 region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
             }
         }
@@ -304,8 +302,8 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
     // Compute heightmaps from block data
     let heightmaps = compute_heightmaps(&chunk.sections);
 
-    // PostProcessing: 24 empty lists (one per section)
-    let post_processing: Vec<Value> = (0..24).map(|_| Value::List(vec![])).collect();
+    // PostProcessing: one empty list per section
+    let post_processing: Vec<Value> = (0..sections.len()).map(|_| Value::List(vec![])).collect();
 
     // Build root-level chunk NBT (modern format — no Level wrapper)
     let mut root = HashMap::from([
@@ -317,7 +315,7 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
             "Status".to_string(),
             Value::String("minecraft:full".to_string()),
         ),
-        ("isLightOn".to_string(), Value::Byte(1)),
+        ("isLightOn".to_string(), Value::Byte(0)),
         ("InhabitedTime".to_string(), Value::Long(0)),
         ("LastUpdate".to_string(), Value::Long(0)),
         ("sections".to_string(), Value::List(sections)),
@@ -379,9 +377,10 @@ fn build_section_value(section: &Section) -> HashMap<String, Value> {
     ])
 }
 
-/// Compute MOTION_BLOCKING and WORLD_SURFACE heightmaps from section block data.
+/// Compute heightmaps from section block data.
 ///
-/// Returns a Value::Compound with all four heightmap types as packed LongArrays.
+/// Returns a Value::Compound with four heightmap types (MOTION_BLOCKING,
+/// MOTION_BLOCKING_NO_LEAVES, OCEAN_FLOOR, WORLD_SURFACE) as packed LongArrays.
 /// Each heightmap is a 16x16 grid of 9-bit values packed 7 per i64 (37 longs total).
 /// Value for each column = (highest_non_air_Y - MIN_Y + 1), or 0 if all air.
 fn compute_heightmaps(sections: &[Section]) -> Value {
