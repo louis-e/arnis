@@ -26,6 +26,22 @@ pub(crate) enum RoofType {
     Flat,   // Default flat roof
 }
 
+/// Enum representing different wall depth styles for building facades.
+/// Each style creates visual depth by placing blocks outward from the wall
+/// plane, making windows appear recessed.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum WallDepthStyle {
+    None,               // No depth features (sheds, greenhouses, tiny buildings)
+    SubtlePilasters,    // Thin columns between windows (residential, houses)
+    ModernPillars,      // Clean paired columns + horizontal bands (commercial, office, hotel)
+    InstitutionalBands, // Columns + stair ledges at floor lines (school, hospital)
+    IndustrialBeams,    // Corner pillars only (industrial, warehouse)
+    HistoricOrnate,     // Stone columns + arched window tops + cornice (historic)
+    ReligiousButtress,  // Stepped buttresses + cornice (religious)
+    SkyscraperFins,     // Full-height vertical fins (tall building, modern skyscraper)
+    GlassCurtain,       // Minimal corner definition only (glassy skyscraper)
+}
+
 #[derive(Clone)]
 pub(crate) struct HolePolygon {
     way: ProcessedWay,
@@ -376,6 +392,10 @@ pub struct BuildingStylePreset {
     // Special features
     pub has_garage_door: Option<bool>, // Generate double door on front face
     pub has_single_door: Option<bool>, // Generate a single door somewhere
+
+    // Wall depth
+    pub wall_depth_style: Option<WallDepthStyle>,
+    pub has_parapet: Option<bool>, // Whether flat-roofed buildings get a parapet wall
 }
 
 impl BuildingStylePreset {
@@ -389,6 +409,7 @@ impl BuildingStylePreset {
         Self {
             use_vertical_windows: Some(false),
             use_accent_lines: Some(false), // Residential buildings rarely have accent lines
+            wall_depth_style: Some(WallDepthStyle::SubtlePilasters),
             ..Default::default()
         }
     }
@@ -400,6 +421,8 @@ impl BuildingStylePreset {
             roof_type: Some(RoofType::Flat),  // Always flat roof
             has_chimney: Some(false),         // No chimneys on tall buildings
             use_accent_roof_line: Some(true), // Usually have accent roof line
+            wall_depth_style: Some(WallDepthStyle::SkyscraperFins),
+            has_parapet: Some(true),
             ..Default::default()
         }
     }
@@ -412,6 +435,8 @@ impl BuildingStylePreset {
             has_chimney: Some(false),
             use_accent_roof_line: Some(true),
             use_vertical_accent: Some(false),
+            wall_depth_style: Some(WallDepthStyle::SkyscraperFins),
+            has_parapet: Some(true),
             // has_windows, use_accent_lines, and use_horizontal_windows
             // are resolved in BuildingStyle::resolve() with category-specific logic
             ..Default::default()
@@ -427,6 +452,8 @@ impl BuildingStylePreset {
             roof_type: Some(RoofType::Flat), // Always flat roof
             generate_roof: Some(true),       // Generate the flat cap
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::GlassCurtain),
+            has_parapet: Some(true),
             // accent_lines, accent_block and floor_block are resolved randomly in resolve()
             // with GlassySkyscraper-specific palettes
             ..Default::default()
@@ -440,6 +467,7 @@ impl BuildingStylePreset {
             has_chimney: Some(false),
             use_accent_lines: Some(false),
             use_vertical_accent: Some(false),
+            wall_depth_style: Some(WallDepthStyle::IndustrialBeams),
             ..Default::default()
         }
     }
@@ -452,6 +480,7 @@ impl BuildingStylePreset {
             use_accent_lines: Some(false),
             use_vertical_accent: Some(false),
             use_accent_roof_line: Some(false),
+            wall_depth_style: Some(WallDepthStyle::HistoricOrnate),
             ..Default::default()
         }
     }
@@ -463,6 +492,7 @@ impl BuildingStylePreset {
             use_accent_lines: Some(false),
             use_accent_roof_line: Some(true),
             has_chimney: Some(true), // Houses often have chimneys
+            wall_depth_style: Some(WallDepthStyle::SubtlePilasters),
             ..Default::default()
         }
     }
@@ -474,6 +504,7 @@ impl BuildingStylePreset {
             use_accent_lines: Some(false),
             use_vertical_accent: Some(false),
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::None),
             ..Default::default()
         }
     }
@@ -484,6 +515,8 @@ impl BuildingStylePreset {
             use_vertical_windows: Some(true), // Office buildings typically have vertical windows
             use_accent_roof_line: Some(true),
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::ModernPillars),
+            has_parapet: Some(true),
             ..Default::default()
         }
     }
@@ -495,6 +528,8 @@ impl BuildingStylePreset {
             use_accent_roof_line: Some(true),
             use_accent_lines: Some(true), // Hotels often have floor-separating lines
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::ModernPillars),
+            has_parapet: Some(true),
             ..Default::default()
         }
     }
@@ -508,6 +543,7 @@ impl BuildingStylePreset {
             use_vertical_accent: Some(false),
             use_accent_roof_line: Some(false),
             use_vertical_windows: Some(false),
+            wall_depth_style: Some(WallDepthStyle::IndustrialBeams),
             ..Default::default()
         }
     }
@@ -518,6 +554,8 @@ impl BuildingStylePreset {
             use_vertical_windows: Some(false), // Schools usually have regular windows
             use_accent_roof_line: Some(true),
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::InstitutionalBands),
+            has_parapet: Some(true),
             ..Default::default()
         }
     }
@@ -529,6 +567,8 @@ impl BuildingStylePreset {
             use_accent_roof_line: Some(true),
             roof_type: Some(RoofType::Flat), // Hospitals typically have flat roofs
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::InstitutionalBands),
+            has_parapet: Some(true),
             ..Default::default()
         }
     }
@@ -540,20 +580,24 @@ impl BuildingStylePreset {
             use_accent_roof_line: Some(true),
             use_accent_lines: Some(false),
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::ReligiousButtress),
             ..Default::default()
         }
     }
 
-    /// Preset for towers (man_made=tower) — solid stone walls, no windows
+    /// Preset for towers (man_made=tower) — stone walls with accent banding
+    /// and glass windows for a clean historic look.
     pub fn tower() -> Self {
         Self {
-            has_windows: Some(false),
-            use_accent_lines: Some(false),
+            has_windows: Some(true),
+            window_block: Some(GLASS),
+            use_accent_lines: Some(true),
             use_vertical_accent: Some(false),
-            use_accent_roof_line: Some(false),
+            use_accent_roof_line: Some(true),
             roof_type: Some(RoofType::Flat),
             generate_roof: Some(true),
             has_chimney: Some(false),
+            wall_depth_style: Some(WallDepthStyle::None),
             ..Default::default()
         }
     }
@@ -570,6 +614,7 @@ impl BuildingStylePreset {
             generate_roof: Some(true),
             has_windows: Some(false),    // No windows on garages
             has_garage_door: Some(true), // Generate double door on front
+            wall_depth_style: Some(WallDepthStyle::None),
             ..Default::default()
         }
     }
@@ -585,6 +630,7 @@ impl BuildingStylePreset {
             use_accent_roof_line: Some(false),
             has_windows: Some(false),    // No windows on sheds
             has_single_door: Some(true), // One door somewhere
+            wall_depth_style: Some(WallDepthStyle::None),
             ..Default::default()
         }
     }
@@ -602,6 +648,7 @@ impl BuildingStylePreset {
             generate_roof: Some(true),
             has_windows: Some(false),    // The walls themselves are glass
             has_single_door: Some(true), // One entrance door
+            wall_depth_style: Some(WallDepthStyle::None),
             ..Default::default()
         }
     }
@@ -611,6 +658,8 @@ impl BuildingStylePreset {
         Self {
             use_vertical_windows: Some(false),
             use_accent_roof_line: Some(true),
+            wall_depth_style: Some(WallDepthStyle::ModernPillars),
+            has_parapet: Some(true),
             ..Default::default()
         }
     }
@@ -671,6 +720,10 @@ pub struct BuildingStyle {
     // Special features
     pub has_garage_door: bool,
     pub has_single_door: bool,
+
+    // Wall depth
+    pub wall_depth_style: WallDepthStyle,
+    pub has_parapet: bool,
 }
 
 impl BuildingStyle {
@@ -685,7 +738,7 @@ impl BuildingStyle {
     /// * `has_multiple_floors` - Whether building has more than 6 height units
     /// * `footprint_size` - The building's floor area in blocks
     /// * `rng` - Deterministic RNG seeded by element ID
-    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments, clippy::unnecessary_lazy_evaluations)]
     pub fn resolve(
         preset: &BuildingStylePreset,
         element: &ProcessedWay,
@@ -832,6 +885,52 @@ impl BuildingStyle {
         let has_garage_door = preset.has_garage_door.unwrap_or(false);
         let has_single_door = preset.has_single_door.unwrap_or(false);
 
+        // Wall depth style: default based on category (preset may override)
+        let wall_depth_style = preset.wall_depth_style.unwrap_or_else(|| {
+            if footprint_size < 20 {
+                WallDepthStyle::None
+            } else {
+                match category {
+                    BuildingCategory::House | BuildingCategory::Residential => {
+                        WallDepthStyle::SubtlePilasters
+                    }
+                    BuildingCategory::Commercial
+                    | BuildingCategory::Office
+                    | BuildingCategory::Hotel => WallDepthStyle::ModernPillars,
+                    BuildingCategory::School | BuildingCategory::Hospital => {
+                        WallDepthStyle::InstitutionalBands
+                    }
+                    BuildingCategory::Industrial | BuildingCategory::Warehouse => {
+                        WallDepthStyle::IndustrialBeams
+                    }
+                    BuildingCategory::Historic => WallDepthStyle::HistoricOrnate,
+                    BuildingCategory::Religious => WallDepthStyle::ReligiousButtress,
+                    BuildingCategory::TallBuilding | BuildingCategory::ModernSkyscraper => {
+                        WallDepthStyle::SkyscraperFins
+                    }
+                    BuildingCategory::GlassySkyscraper => WallDepthStyle::GlassCurtain,
+                    _ => WallDepthStyle::None,
+                }
+            }
+        });
+
+        // Parapet: flat-roofed multi-floor non-residential buildings
+        let has_parapet = preset.has_parapet.unwrap_or_else(|| {
+            let is_flat = roof_type == RoofType::Flat;
+            let suitable = matches!(
+                category,
+                BuildingCategory::Commercial
+                    | BuildingCategory::Office
+                    | BuildingCategory::Hotel
+                    | BuildingCategory::School
+                    | BuildingCategory::Hospital
+                    | BuildingCategory::TallBuilding
+                    | BuildingCategory::GlassySkyscraper
+                    | BuildingCategory::ModernSkyscraper
+            );
+            is_flat && has_multiple_floors && suitable
+        });
+
         Self {
             wall_block,
             floor_block,
@@ -849,6 +948,8 @@ impl BuildingStyle {
             generate_roof,
             has_garage_door,
             has_single_door,
+            wall_depth_style,
+            has_parapet,
         }
     }
 }
@@ -875,6 +976,8 @@ struct BuildingConfig {
     has_garage_door: bool,
     has_single_door: bool,
     category: BuildingCategory,
+    wall_depth_style: WallDepthStyle,
+    has_parapet: bool,
 }
 
 /// Building bounds calculated from nodes
@@ -1664,6 +1767,23 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
         } else {
             config.wall_block
         }
+    } else if config.category == BuildingCategory::Tower {
+        // Tower pattern: narrow 1-block-wide arrow slits every 4 blocks
+        // along the wall, only in the middle two rows of each 4-row floor
+        let floor_row = ((h - config.start_y_offset - 1) % 4 + 4) % 4; // 0..3 within each floor
+        let is_slit =
+            above_floor && (floor_row == 1 || floor_row == 2) && ((bx + bz) % 4 + 4) % 4 == 1;
+
+        if is_slit {
+            config.window_block
+        } else {
+            let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
+            if use_accent_line {
+                config.accent_block
+            } else {
+                config.wall_block
+            }
+        }
     } else if config.is_tall_building && config.use_vertical_windows {
         // Tall building pattern, vertical window strips alternating with wall columns
         if above_floor && (bx + bz) % 2 == 0 {
@@ -1737,6 +1857,51 @@ fn make_top_slab(base: Block) -> BlockWithProperties {
     BlockWithProperties::new(base, Some(Value::Compound(map)))
 }
 
+/// Computes the centroid (average position) of the building outline nodes.
+/// Returns `None` if the node list is empty.
+fn compute_building_centroid(nodes: &[ProcessedNode]) -> Option<(i32, i32)> {
+    if nodes.is_empty() {
+        return None;
+    }
+    let n = nodes.len() as i64;
+    let sx: i64 = nodes.iter().map(|nd| nd.x as i64).sum();
+    let sz: i64 = nodes.iter().map(|nd| nd.z as i64).sum();
+    Some(((sx / n) as i32, (sz / n) as i32))
+}
+
+/// Computes the axis-aligned outward normal for a wall segment defined by
+/// `(x1,z1)→(x2,z2)`, given the building centroid `(cx,cz)`.
+///
+/// Returns one of `(±1, 0)` or `(0, ±1)`, or `(0, 0)` for degenerate
+/// (zero-length) segments.
+fn compute_outward_normal(x1: i32, z1: i32, x2: i32, z2: i32, cx: i32, cz: i32) -> (i32, i32) {
+    let seg_dx = x2 - x1;
+    let seg_dz = z2 - z1;
+
+    // Candidate outward normal (perpendicular to segment direction)
+    let (na_x, na_z) = (-seg_dz, seg_dx);
+
+    // Mid-point of the segment
+    let mid_x = (x1 + x2) / 2;
+    let mid_z = (z1 + z2) / 2;
+
+    // Pick the normal that points AWAY from the centroid.
+    let dot = (mid_x - cx) as i64 * na_x as i64 + (mid_z - cz) as i64 * na_z as i64;
+    let (raw_nx, raw_nz) = if dot >= 0 {
+        (na_x, na_z)
+    } else {
+        (-na_x, -na_z)
+    };
+
+    // Snap to the dominant axis so the normal is always one of
+    // (±1, 0) or (0, ±1).
+    if raw_nx.abs() >= raw_nz.abs() {
+        (raw_nx.signum(), 0)
+    } else {
+        (0, raw_nz.signum())
+    }
+}
+
 /// Returns the facing string for the wall's outward normal.
 fn facing_for_normal(nx: i32, nz: i32) -> &'static str {
     match (nx, nz) {
@@ -1785,18 +1950,9 @@ fn generate_residential_window_decorations(
 
     // We need the building centroid so we can figure out which side of
     // each wall segment is "outside".
-    let (cx, cz) = {
-        let mut sx: i64 = 0;
-        let mut sz: i64 = 0;
-        let n = element.nodes.len() as i64;
-        for node in &element.nodes {
-            sx += node.x as i64;
-            sz += node.z as i64;
-        }
-        if n == 0 {
-            return;
-        }
-        ((sx / n) as i32, (sz / n) as i32)
+    let (cx, cz) = match compute_building_centroid(&element.nodes) {
+        Some(c) => c,
+        None => return,
     };
 
     let mut previous_node: Option<(i32, i32)> = None;
@@ -1804,32 +1960,7 @@ fn generate_residential_window_decorations(
     for node in &element.nodes {
         let (x2, z2) = (node.x, node.z);
         if let Some((x1, z1)) = previous_node {
-            // Direction along the wall segment
-            let seg_dx = x2 - x1;
-            let seg_dz = z2 - z1;
-
-            // Candidate outward normal (perpendicular to segment direction)
-            let (na_x, na_z) = (-seg_dz, seg_dx);
-
-            // Mid-point of the segment
-            let mid_x = (x1 + x2) / 2;
-            let mid_z = (z1 + z2) / 2;
-
-            // Pick the normal that points AWAY from the centroid.
-            let dot = (mid_x - cx) as i64 * na_x as i64 + (mid_z - cz) as i64 * na_z as i64;
-            let (raw_nx, raw_nz) = if dot >= 0 {
-                (na_x, na_z)
-            } else {
-                (-na_x, -na_z)
-            };
-
-            // Snap to the dominant axis so the normal is always one of
-            // (±1, 0) or (0, ±1).
-            let (out_nx, out_nz) = if raw_nx.abs() >= raw_nz.abs() {
-                (raw_nx.signum(), 0)
-            } else {
-                (0, raw_nz.signum())
-            };
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
 
             // Skip degenerate normals (zero-length segment)
             if out_nx == 0 && out_nz == 0 {
@@ -2093,6 +2224,550 @@ fn generate_residential_window_decorations(
         }
 
         previous_node = Some((x2, z2));
+    }
+}
+
+// ============================================================================
+// Wall Depth Features (Facade Protrusions)
+// ============================================================================
+
+/// Creates a `BlockWithProperties` for an upside-down stair used for
+/// cornices and arched window headers. The `facing` parameter is the
+/// **outward** wall direction; the stair is flipped to face **inward**
+/// so that its ledge extends outward (matching real-world cornice behaviour).
+fn make_upside_down_stair(material: Block, facing: &str) -> BlockWithProperties {
+    let stair_block = get_stair_block_for_material(material);
+    // Flip: stair faces inward so the "seat" ledge projects outward
+    let stair_facing = match facing {
+        "north" => StairFacing::South,
+        "south" => StairFacing::North,
+        "east" => StairFacing::West,
+        _ => StairFacing::East,
+    };
+    let mut bwp = create_stair_with_properties(stair_block, stair_facing, StairShape::Straight);
+    // Add half=top to make it upside-down
+    if let Some(Value::Compound(ref mut map)) = bwp.properties {
+        map.insert("half".to_string(), Value::String("top".to_string()));
+    }
+    bwp
+}
+
+/// Adds wall depth features (pilasters, columns, ledges, cornices, buttresses)
+/// to building facades. Blocks are placed 1+ block(s) outward from the wall
+/// plane, making windows appear recessed by contrast.
+///
+/// Each `WallDepthStyle` produces a distinct visual effect appropriate for
+/// the building's category. All outward placements use an AIR whitelist to
+/// avoid overwriting neighboring buildings or existing decorations.
+fn generate_wall_depth_features(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+) {
+    if config.wall_depth_style == WallDepthStyle::None {
+        return;
+    }
+
+    // Skip buildings that are too small for depth features
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+    if bounds.width() < 4 || bounds.length() < 4 {
+        return;
+    }
+
+    // Skip buildings with fewer than 2 floors for most styles
+    if config.building_height < 6
+        && !matches!(
+            config.wall_depth_style,
+            WallDepthStyle::HistoricOrnate | WallDepthStyle::ReligiousButtress
+        )
+    {
+        return;
+    }
+
+    let (cx, cz) = match compute_building_centroid(&element.nodes) {
+        Some(c) => c,
+        None => return,
+    };
+
+    // Per-building deterministic roll for probability-gated styles
+    let mut bldg_rng = element_rng(element.id.wrapping_add(7919));
+    let depth_roll: u32 = bldg_rng.random_range(0..100);
+
+    // SubtlePilasters: 60% of eligible buildings
+    if config.wall_depth_style == WallDepthStyle::SubtlePilasters && depth_roll >= 60 {
+        return;
+    }
+    // GlassCurtain: 40% of eligible buildings
+    if config.wall_depth_style == WallDepthStyle::GlassCurtain && depth_roll >= 40 {
+        return;
+    }
+
+    // Resolve material blocks for depth features
+    let slab_block = get_slab_block_for_material(config.wall_block);
+    let sill_block = make_top_slab(slab_block);
+
+    let mut previous_node: Option<(i32, i32)> = None;
+
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+
+            if out_nx == 0 && out_nz == 0 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+
+            let facing = facing_for_normal(out_nx, out_nz);
+
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+
+            let num_points = points.len();
+
+            for (idx, (bx, _, bz)) in points.iter().enumerate() {
+                let bx = *bx;
+                let bz = *bz;
+
+                let mod6 = ((bx + bz) % 6 + 6) % 6;
+
+                match config.wall_depth_style {
+                    WallDepthStyle::SubtlePilasters => {
+                        place_subtle_pilasters(editor, config, bx, bz, mod6, out_nx, out_nz);
+                    }
+                    WallDepthStyle::ModernPillars => {
+                        place_modern_pillars(
+                            editor,
+                            config,
+                            bx,
+                            bz,
+                            mod6,
+                            out_nx,
+                            out_nz,
+                            &sill_block,
+                        );
+                    }
+                    WallDepthStyle::InstitutionalBands => {
+                        place_institutional_bands(
+                            editor, config, bx, bz, mod6, out_nx, out_nz, facing,
+                        );
+                    }
+                    WallDepthStyle::IndustrialBeams => {
+                        // Only at segment endpoints (first 2 and last 2 points)
+                        if idx < 2 || idx >= num_points.saturating_sub(2) {
+                            place_industrial_beams(editor, config, bx, bz, out_nx, out_nz);
+                        }
+                    }
+                    WallDepthStyle::HistoricOrnate => {
+                        place_historic_ornate(editor, config, bx, bz, mod6, out_nx, out_nz, facing);
+                    }
+                    WallDepthStyle::ReligiousButtress => {
+                        place_religious_buttress(
+                            editor, config, bx, bz, mod6, out_nx, out_nz, facing,
+                        );
+                    }
+                    WallDepthStyle::SkyscraperFins => {
+                        place_skyscraper_fins(editor, config, bx, bz, mod6, out_nx, out_nz);
+                    }
+                    WallDepthStyle::GlassCurtain => {
+                        // Only at segment endpoints
+                        if idx == 0 || idx == num_points.saturating_sub(1) {
+                            place_glass_curtain_corners(editor, config, bx, bz, out_nx, out_nz);
+                        }
+                    }
+                    WallDepthStyle::None => {}
+                }
+            }
+        }
+
+        previous_node = Some((x2, z2));
+    }
+}
+
+/// SubtlePilasters: thin wall_block columns at mod6==3 positions (between window groups)
+/// with an accent_block foundation course at ground level.
+#[allow(clippy::too_many_arguments)]
+fn place_subtle_pilasters(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    mod6: i32,
+    out_nx: i32,
+    out_nz: i32,
+) {
+    if mod6 != 3 {
+        return;
+    }
+
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+
+    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+        let block = if h == config.start_y_offset + 1 {
+            config.accent_block // Foundation course
+        } else {
+            config.wall_block
+        };
+        editor.set_block_absolute(
+            block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
+}
+
+/// ModernPillars: paired accent_block columns at mod6==3 and mod6==5,
+/// plus horizontal slab bands at floor-separation rows.
+#[allow(clippy::too_many_arguments)]
+fn place_modern_pillars(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    mod6: i32,
+    out_nx: i32,
+    out_nz: i32,
+    sill_block: &BlockWithProperties,
+) {
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+
+    // Pillar columns at edges of window bays
+    if mod6 == 3 || mod6 == 5 {
+        for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+            editor.set_block_absolute(
+                config.accent_block,
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+        return;
+    }
+
+    // Horizontal slab bands at floor-level rows (h % 4 == 0), for non-window positions
+    if mod6 >= 3 {
+        // Already handled by pillar columns above
+        return;
+    }
+
+    // Foundation course at ground level
+    editor.set_block_absolute(
+        config.accent_block,
+        lx,
+        config.start_y_offset + 1 + config.abs_terrain_offset,
+        lz,
+        Some(&[AIR]),
+        None,
+    );
+
+    // Floor-level slab bands (skip the window center at mod6==1 for cleaner look)
+    for h in (config.start_y_offset + 2)..=(config.start_y_offset + config.building_height) {
+        if h % 4 == 0 {
+            editor.set_block_with_properties_absolute(
+                sill_block.clone(),
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+    }
+}
+
+/// InstitutionalBands: accent_block columns at mod6==3 + upside-down stair
+/// ledges at floor-separation rows for non-window positions.
+#[allow(clippy::too_many_arguments)]
+fn place_institutional_bands(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    mod6: i32,
+    out_nx: i32,
+    out_nz: i32,
+    facing: &str,
+) {
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+
+    // Pillar columns
+    if mod6 == 3 {
+        for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+            editor.set_block_absolute(
+                config.accent_block,
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+        return;
+    }
+
+    // Foundation course
+    editor.set_block_absolute(
+        config.accent_block,
+        lx,
+        config.start_y_offset + 1 + config.abs_terrain_offset,
+        lz,
+        Some(&[AIR]),
+        None,
+    );
+
+    // Stair ledges at floor-separation rows (non-window positions only)
+    if mod6 >= 3 {
+        return;
+    }
+    for h in (config.start_y_offset + 2)..=(config.start_y_offset + config.building_height) {
+        if h % 4 == 0 {
+            let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+            editor.set_block_with_properties_absolute(
+                stair_bwp,
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+    }
+}
+
+/// IndustrialBeams: heavy wall_block columns placed only at wall segment
+/// endpoints (corners), running full building height.
+#[allow(clippy::too_many_arguments)]
+fn place_industrial_beams(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    out_nx: i32,
+    out_nz: i32,
+) {
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+
+    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+        editor.set_block_absolute(
+            config.wall_block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
+}
+
+/// HistoricOrnate: wall_block columns at mod6==3, arched window headers
+/// (upside-down stairs at window-top rows), cornice at roof line, and
+/// foundation course.
+#[allow(clippy::too_many_arguments)]
+fn place_historic_ornate(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    mod6: i32,
+    out_nx: i32,
+    out_nz: i32,
+    facing: &str,
+) {
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+
+    let top_h = config.start_y_offset + config.building_height;
+
+    // Full-height pillar columns between window groups
+    if mod6 == 3 {
+        for h in (config.start_y_offset + 1)..=top_h {
+            editor.set_block_absolute(
+                config.wall_block,
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+        // Cornice at top
+        let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+        editor.set_block_with_properties_absolute(
+            stair_bwp,
+            lx,
+            top_h + config.abs_terrain_offset + 1,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+        return;
+    }
+
+    // Foundation course for all positions
+    editor.set_block_absolute(
+        config.accent_block,
+        lx,
+        config.start_y_offset + 1 + config.abs_terrain_offset,
+        lz,
+        Some(&[AIR]),
+        None,
+    );
+
+    // Arched window headers at window-top rows (h % 4 == 3) for window-edge positions
+    if mod6 == 0 || mod6 == 2 {
+        for h in (config.start_y_offset + 2)..=top_h {
+            if h % 4 == 3 {
+                let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+                editor.set_block_with_properties_absolute(
+                    stair_bwp,
+                    lx,
+                    h + config.abs_terrain_offset,
+                    lz,
+                    Some(&[AIR]),
+                    None,
+                );
+            }
+        }
+    }
+
+    // Cornice along the full roofline
+    let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+    editor.set_block_with_properties_absolute(
+        stair_bwp,
+        lx,
+        top_h + config.abs_terrain_offset + 1,
+        lz,
+        Some(&[AIR]),
+        None,
+    );
+}
+
+/// ReligiousButtress: stepped buttresses at every other window group,
+/// plus cornice at roof line. Buttresses extend 2 blocks outward at the
+/// lower portion and 1 block outward for the full height.
+#[allow(clippy::too_many_arguments)]
+fn place_religious_buttress(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    mod6: i32,
+    out_nx: i32,
+    out_nz: i32,
+    facing: &str,
+) {
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+    let top_h = config.start_y_offset + config.building_height;
+
+    // Buttress at every other window group center (mod6==0)
+    let window_group = ((bx + bz) / 6 + 1000) % 2; // +1000 to ensure positive
+    if mod6 == 0 && window_group == 0 {
+        let buttress_cutoff = config.start_y_offset + (config.building_height * 3 / 5);
+
+        // Inner layer (outward+1): full height
+        for h in (config.start_y_offset + 1)..=top_h {
+            editor.set_block_absolute(
+                config.wall_block,
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+
+        // Outer layer (outward+2): lower 60% of height
+        let lx2 = bx + out_nx * 2;
+        let lz2 = bz + out_nz * 2;
+        for h in (config.start_y_offset + 1)..=buttress_cutoff {
+            editor.set_block_absolute(
+                config.wall_block,
+                lx2,
+                h + config.abs_terrain_offset,
+                lz2,
+                Some(&[AIR]),
+                None,
+            );
+        }
+        return;
+    }
+
+    // Cornice along the full roofline
+    let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+    editor.set_block_with_properties_absolute(
+        stair_bwp,
+        lx,
+        top_h + config.abs_terrain_offset + 1,
+        lz,
+        Some(&[AIR]),
+        None,
+    );
+}
+
+/// SkyscraperFins: continuous accent_block vertical fins at mod6==3
+/// running the full building height.
+#[allow(clippy::too_many_arguments)]
+fn place_skyscraper_fins(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    mod6: i32,
+    out_nx: i32,
+    out_nz: i32,
+) {
+    if mod6 != 3 {
+        return;
+    }
+
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+
+    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+        editor.set_block_absolute(
+            config.accent_block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
+}
+
+/// GlassCurtain: minimal accent_block columns only at wall segment
+/// endpoints (corners) for subtle edge definition.
+#[allow(clippy::too_many_arguments)]
+fn place_glass_curtain_corners(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    bx: i32,
+    bz: i32,
+    out_nx: i32,
+    out_nz: i32,
+) {
+    let lx = bx + out_nx;
+    let lz = bz + out_nz;
+
+    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+        editor.set_block_absolute(
+            config.accent_block,
+            lx,
+            h + config.abs_terrain_offset,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
     }
 }
 
@@ -2479,6 +3154,8 @@ pub fn generate_buildings(
         has_garage_door: style.has_garage_door,
         has_single_door: style.has_single_door,
         category,
+        wall_depth_style: style.wall_depth_style,
+        has_parapet: style.has_parapet,
     };
 
     // Generate walls, pass whether this building will have a sloped roof
@@ -2501,6 +3178,13 @@ pub fn generate_buildings(
 
     // Add shutters and window boxes to small residential buildings
     generate_residential_window_decorations(editor, element, &config);
+
+    // Add wall depth features (pilasters, columns, ledges, cornices, buttresses)
+    // Only for standalone buildings, not building:part sub-sections (parts adjoin
+    // other parts and outward protrusions would collide with neighbours).
+    if !element.tags.contains_key("building:part") {
+        generate_wall_depth_features(editor, element, &config);
+    }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
     let roof_area: Vec<(i32, i32)> = {
@@ -2559,6 +3243,44 @@ pub fn generate_buildings(
     }
 }
 
+/// Generates a parapet (low wall) around the edge of flat-roofed buildings.
+///
+/// For shorter buildings (< 16 blocks), uses a thin wall piece.
+/// For taller buildings, uses a full wall block for a more substantial parapet.
+fn generate_parapet(editor: &mut WorldEditor, element: &ProcessedWay, config: &BuildingConfig) {
+    if !config.has_parapet {
+        return;
+    }
+
+    if element.nodes.is_empty() {
+        return;
+    }
+
+    let wall_piece = get_wall_piece_for_material(config.wall_block);
+    // Parapet sits on top of the flat roof surface (roof_y + 1 + abs_terrain_offset)
+    let parapet_y = config.start_y_offset + config.building_height + config.abs_terrain_offset + 2;
+
+    let mut previous_node: Option<(i32, i32)> = None;
+
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+
+            for (bx, _, bz) in &points {
+                let block = if config.building_height >= 16 {
+                    config.wall_block
+                } else {
+                    wall_piece
+                };
+                editor.set_block_absolute(block, *bx, parapet_y, *bz, Some(&[AIR]), None);
+            }
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
 /// Handles roof generation including chimney placement and rooftop equipment
 fn generate_building_roof(
     editor: &mut WorldEditor,
@@ -2583,6 +3305,11 @@ fn generate_building_roof(
         roof_area,
         config.abs_terrain_offset,
     );
+
+    // Add parapet on flat-roofed buildings
+    if config.has_parapet && style.roof_type == RoofType::Flat {
+        generate_parapet(editor, element, config);
+    }
 
     // Add chimney if style says so
     if style.has_chimney {
