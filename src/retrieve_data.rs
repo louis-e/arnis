@@ -179,7 +179,7 @@ pub fn fetch_data_from_overpass(
     {
         // Fetch data from Overpass API
         let mut attempt = 0;
-        let max_attempts = 1;
+        let max_attempts = 3;
         let response: String = loop {
             println!("Downloading from {url} with method {download_method}...");
             let result = match download_method {
@@ -199,9 +199,20 @@ pub fn fetch_data_from_overpass(
                     if download_method != "requests" {
                         eprintln!("Request failed: {error}");
                     }
-                    println!("Switching to fallback server...");
-                    url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
+
                     attempt += 1;
+                    let delay_secs = if attempt <= 1 { 3 } else { 5 };
+                    println!(
+                        "Retrying in {delay_secs}s (attempt {}/{max_attempts})...",
+                        attempt
+                    );
+                    std::thread::sleep(Duration::from_secs(delay_secs));
+
+                    // Switch to a fallback server after the first failure
+                    if attempt == 1 {
+                        println!("Switching to fallback server...");
+                        url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
+                    }
                 }
             }
         };

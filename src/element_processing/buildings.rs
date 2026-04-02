@@ -165,8 +165,15 @@ const HISTORIC_WALL_OPTIONS: [Block; 10] = [
     BRICK,
 ];
 
-/// Wall blocks for garages (sturdy, simple)
-const GARAGE_WALL_OPTIONS: [Block; 3] = [BRICK, STONE_BRICKS, POLISHED_ANDESITE];
+/// Wall blocks for garages (sturdy, simple, varied)
+const GARAGE_WALL_OPTIONS: [Block; 6] = [
+    BRICK,
+    STONE_BRICKS,
+    POLISHED_ANDESITE,
+    COBBLESTONE,
+    SMOOTH_STONE,
+    LIGHT_GRAY_CONCRETE,
+];
 
 /// Wall blocks for sheds (wooden)
 const SHED_WALL_OPTIONS: [Block; 1] = [OAK_LOG];
@@ -606,11 +613,10 @@ impl BuildingStylePreset {
     pub fn garage() -> Self {
         Self {
             roof_type: Some(RoofType::Flat),
-            roof_block: Some(POLISHED_ANDESITE), // Always polished andesite roof
             has_chimney: Some(false),
             use_accent_lines: Some(false),
             use_vertical_accent: Some(false),
-            use_accent_roof_line: Some(false),
+            use_accent_roof_line: Some(true), // Accent band at roofline for visual interest
             generate_roof: Some(true),
             has_windows: Some(false),    // No windows on garages
             has_garage_door: Some(true), // Generate double door on front
@@ -978,6 +984,16 @@ struct BuildingConfig {
     category: BuildingCategory,
     wall_depth_style: WallDepthStyle,
     has_parapet: bool,
+}
+
+impl BuildingConfig {
+    /// Returns the position within a 4-block floor cycle (0 = floor row, 1-3 = open rows).
+    /// This aligns with `generate_floors_and_ceilings` which places intermediate ceilings
+    /// at `start_y_offset + 6, +10, +14, …` (i.e. every 4 blocks offset by +2).
+    #[inline]
+    fn floor_row(&self, h: i32) -> i32 {
+        ((h - self.start_y_offset - 2) % 4 + 4) % 4
+    }
 }
 
 /// Building bounds calculated from nodes
@@ -1743,10 +1759,12 @@ fn generate_special_doors(
 /// Determines which block to place at a specific wall position (wall, window, or accent)
 #[inline]
 fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingConfig) -> Block {
+    let floor_row = config.floor_row(h);
+
     // If windows are disabled, always use wall block (with possible accent)
     if !config.has_windows {
         let above_floor = h > config.start_y_offset + 1;
-        let use_accent_line = config.use_accent_lines && above_floor && h % 4 == 0;
+        let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
         if use_accent_line {
             return config.accent_block;
         }
@@ -1758,7 +1776,7 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
     if config.use_horizontal_windows {
         // Modern skyscraper pattern: continuous horizontal window bands
         // with stone separation bands at floor levels (every 4th block)
-        if above_floor && h % 4 == 0 {
+        if above_floor && floor_row == 0 {
             // Floor-level separation band (stone/accent material)
             config.accent_block
         } else if above_floor {
@@ -1768,9 +1786,8 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
             config.wall_block
         }
     } else if config.category == BuildingCategory::Tower {
-        // Tower pattern: narrow 1-block-wide arrow slits every 4 blocks
-        // along the wall, only in the middle two rows of each 4-row floor
-        let floor_row = ((h - config.start_y_offset - 1) % 4 + 4) % 4; // 0..3 within each floor
+        // Tower pattern: glass windows every 4 blocks along the wall,
+        // only in the middle two rows of each 4-row floor
         let is_slit =
             above_floor && (floor_row == 1 || floor_row == 2) && ((bx + bz) % 4 + 4) % 4 == 1;
 
@@ -1793,14 +1810,14 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
         }
     } else {
         // Regular building pattern
-        let is_window_position = above_floor && h % 4 != 0 && (bx + bz) % 6 < 3;
+        let is_window_position = above_floor && floor_row != 0 && (bx + bz) % 6 < 3;
 
         if is_window_position {
             config.window_block
         } else {
-            let use_accent_line = config.use_accent_lines && above_floor && h % 4 == 0;
+            let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
             let use_vertical_accent_here =
-                config.use_vertical_accent && above_floor && h % 4 == 0 && (bx + bz) % 6 < 3;
+                config.use_vertical_accent && above_floor && floor_row == 0 && (bx + bz) % 6 < 3;
 
             if use_accent_line || use_vertical_accent_here {
                 config.accent_block
@@ -1997,7 +2014,7 @@ fn generate_residential_window_decorations(
                             ..=(config.start_y_offset + config.building_height)
                         {
                             let above_floor = h > config.start_y_offset + 1;
-                            if above_floor && h % 4 != 0 {
+                            if above_floor && config.floor_row(h) != 0 {
                                 editor.set_block_with_properties_absolute(
                                     trapdoor_bwp.clone(),
                                     bx + out_nx,
@@ -2013,7 +2030,7 @@ fn generate_residential_window_decorations(
 
                 // --- Window Sills / Balconies ---
                 // Window columns are mod6 ∈ {0, 1, 2}.
-                // At each floor's h % 4 == 0 row we decide once per window
+                // At each floor's floor_row==0 row we decide once per window
                 // whether this floor gets a sill OR a balcony (mutually
                 // exclusive).  The decision is shared across all three
                 // columns via a seed derived from the window centre.
@@ -2023,7 +2040,7 @@ fn generate_residential_window_decorations(
                     // sills at the roof line.
                     let sill_max = config.start_y_offset + config.building_height - 3;
                     for h in (config.start_y_offset + 2)..=sill_max {
-                        if h % 4 == 0 {
+                        if config.floor_row(h) == 0 {
                             let floor_idx = h / 4;
 
                             // Shared roll seeded from the window centre.
@@ -2451,7 +2468,7 @@ fn place_modern_pillars(
         return;
     }
 
-    // Horizontal slab bands at floor-level rows (h % 4 == 0), for non-window positions
+    // Horizontal slab bands at floor-level rows, for non-window positions
     if mod6 >= 3 {
         // Already handled by pillar columns above
         return;
@@ -2469,7 +2486,7 @@ fn place_modern_pillars(
 
     // Floor-level slab bands (skip the window center at mod6==1 for cleaner look)
     for h in (config.start_y_offset + 2)..=(config.start_y_offset + config.building_height) {
-        if h % 4 == 0 {
+        if config.floor_row(h) == 0 {
             editor.set_block_with_properties_absolute(
                 sill_block.clone(),
                 lx,
@@ -2528,7 +2545,7 @@ fn place_institutional_bands(
         return;
     }
     for h in (config.start_y_offset + 2)..=(config.start_y_offset + config.building_height) {
-        if h % 4 == 0 {
+        if config.floor_row(h) == 0 {
             let stair_bwp = make_upside_down_stair(config.wall_block, facing);
             editor.set_block_with_properties_absolute(
                 stair_bwp,
@@ -2622,10 +2639,10 @@ fn place_historic_ornate(
         None,
     );
 
-    // Arched window headers at window-top rows (h % 4 == 3) for window-edge positions
+    // Arched window headers at window-top rows (floor_row == 3) for window-edge positions
     if mod6 == 0 || mod6 == 2 {
         for h in (config.start_y_offset + 2)..=top_h {
-            if h % 4 == 3 {
+            if config.floor_row(h) == 3 {
                 let stair_bwp = make_upside_down_stair(config.wall_block, facing);
                 editor.set_block_with_properties_absolute(
                     stair_bwp,
@@ -3281,6 +3298,47 @@ fn generate_parapet(editor: &mut WorldEditor, element: &ProcessedWay, config: &B
     }
 }
 
+/// Adds a decorative top edge to flat-roofed residential/generic buildings.
+/// Randomly picks one of: raised wall row, slab cap, accent block row, or nothing.
+/// Uses deterministic RNG so the result is consistent across region boundaries.
+fn generate_flat_roof_edge_variation(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+) {
+    if element.nodes.is_empty() {
+        return;
+    }
+
+    let mut rng = element_rng(element.id);
+    // 55% chance to add edge variation
+    if !rng.random_bool(0.55) {
+        return;
+    }
+
+    // Pick variation type: 0 = wall cap (1 block higher), 1 = slab cap, 2 = accent block row
+    let variation = rng.random_range(0u32..3);
+    let roof_top_y = config.start_y_offset + config.building_height + config.abs_terrain_offset + 2;
+
+    let mut previous_node: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+            for (bx, _, bz) in &points {
+                let block = match variation {
+                    0 => config.wall_block,
+                    1 => get_slab_block_for_material(config.wall_block),
+                    _ => config.accent_block,
+                };
+                editor.set_block_absolute(block, *bx, roof_top_y, *bz, Some(&[AIR]), None);
+            }
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
 /// Handles roof generation including chimney placement and rooftop equipment
 fn generate_building_roof(
     editor: &mut WorldEditor,
@@ -3309,6 +3367,12 @@ fn generate_building_roof(
     // Add parapet on flat-roofed buildings
     if config.has_parapet && style.roof_type == RoofType::Flat {
         generate_parapet(editor, element, config);
+    }
+
+    // Add decorative roofline variation on flat-roofed residential/generic buildings
+    // (those that don't already have a parapet or non-flat roof)
+    if !config.has_parapet && style.roof_type == RoofType::Flat {
+        generate_flat_roof_edge_variation(editor, element, config);
     }
 
     // Add chimney if style says so
