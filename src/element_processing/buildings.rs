@@ -4419,7 +4419,7 @@ fn generate_gabled_roof(
         editor.set_block_with_properties_absolute(
             stair,
             ox,
-            config.base_height + config.abs_terrain_offset,
+            config.base_height - 1 + config.abs_terrain_offset,
             oz,
             Some(&[AIR]),
             None,
