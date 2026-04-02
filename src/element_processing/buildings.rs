@@ -2271,6 +2271,58 @@ fn make_upside_down_stair(material: Block, facing: &str) -> BlockWithProperties 
     bwp
 }
 
+/// Places accent-block columns at building polygon vertices (corner quoins).
+/// This frames the building visually, a very common architectural detail.
+/// Uses deterministic RNG for consistency across region boundaries.
+fn generate_corner_quoins(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+) {
+    // Skip if wall and accent are the same block (nothing visible)
+    if config.wall_block == config.accent_block {
+        return;
+    }
+
+    // Too-small buildings look odd with quoins
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+    if bounds.width() < 4 || bounds.length() < 4 {
+        return;
+    }
+
+    // Deterministic 60% chance
+    let mut rng = element_rng(element.id.wrapping_add(3571));
+    if !rng.random_bool(0.6) {
+        return;
+    }
+
+    // Collect unique corner positions from polygon vertices
+    // (skip duplicate closing node if first == last)
+    let mut corners: Vec<(i32, i32)> = Vec::new();
+    for node in &element.nodes {
+        let pos = (node.x, node.z);
+        if corners.last() != Some(&pos) {
+            corners.push(pos);
+        }
+    }
+
+    let quoin_block = config.accent_block;
+    let top_h = config.start_y_offset + config.building_height;
+
+    for &(cx, cz) in &corners {
+        for h in (config.start_y_offset + 1)..=top_h {
+            editor.set_block_absolute(
+                quoin_block,
+                cx,
+                h + config.abs_terrain_offset,
+                cz,
+                Some(&[config.wall_block]),
+                None,
+            );
+        }
+    }
+}
+
 /// Adds wall depth features (pilasters, columns, ledges, cornices, buttresses)
 /// to building facades. Blocks are placed 1+ block(s) outward from the wall
 /// plane, making windows appear recessed by contrast.
@@ -3205,6 +3257,11 @@ pub fn generate_buildings(
         generate_wall_depth_features(editor, element, &config);
     }
 
+    // Add corner quoins (accent-block columns at building corners)
+    if !element.tags.contains_key("building:part") {
+        generate_corner_quoins(editor, element, &config);
+    }
+
     // Create roof area = floor area + wall outline (so roof covers the walls too)
     let roof_area: Vec<(i32, i32)> = {
         let mut area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
@@ -3732,11 +3789,14 @@ fn should_generate_rooftop_equipment(
 
 /// Generates sparse rooftop equipment on flat-roofed commercial/institutional buildings.
 ///
-/// Much sparser than the skyscraper roof terrace (~0.6% of interior tiles).
-/// Typical equipment:
+/// Much sparser than the skyscraper roof terrace (~1% of interior tiles).
+/// Equipment types:
 /// - HVAC / ventilation units (iron block + slab)
-/// - Solar panel clusters (daylight detectors in four 5×4 fields arranged 2×2 with 1-block gaps)
-/// - Antenna masts (iron bars + lightning rod, rare)
+/// - Solar panel clusters (daylight detectors in 5×4 fields)
+/// - Antenna masts (iron bars + lightning rod)
+/// - Water tanks (barrel + cauldron)
+/// - Vent stacks (cobblestone wall columns)
+/// - Roof access structures (2×2 stone brick box with slab cap)
 fn generate_rooftop_equipment(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
@@ -3788,8 +3848,8 @@ fn generate_rooftop_equipment(
         let mut rng = coord_rng(x, z, element.id);
         let roll: u32 = rng.random_range(0..1200);
 
-        // ~99.4% of tiles are empty, very sparse
-        if roll >= 7 {
+        // ~99% of tiles are empty, very sparse
+        if roll >= 12 {
             continue;
         }
 
@@ -3884,8 +3944,8 @@ fn generate_rooftop_equipment(
                     }
                 }
             }
-            _ => {
-                // Small antenna mast: 2 iron bars + lightning rod (1/3 of previous chance)
+            6 => {
+                // Small antenna mast: 2 iron bars + lightning rod
                 editor.set_block_absolute(IRON_BARS, x, equip_y, z, None, Some(replace_any));
                 editor.set_block_absolute(IRON_BARS, x, equip_y + 1, z, None, Some(replace_any));
                 editor.set_block_absolute(
@@ -3897,6 +3957,63 @@ fn generate_rooftop_equipment(
                     Some(replace_any),
                 );
                 used.insert((x, z));
+            }
+            7..=8 => {
+                // Water tank: barrel with cauldron on top
+                editor.set_block_absolute(BARREL, x, equip_y, z, None, Some(replace_any));
+                editor.set_block_absolute(CAULDRON, x, equip_y + 1, z, None, Some(replace_any));
+                used.insert((x, z));
+            }
+            9..=10 => {
+                // Vent stack: 2-3 cobblestone wall blocks tall
+                let stack_h = rng.random_range(2i32..=3);
+                for dy in 0..stack_h {
+                    editor.set_block_absolute(
+                        COBBLESTONE_WALL,
+                        x,
+                        equip_y + dy,
+                        z,
+                        None,
+                        Some(replace_any),
+                    );
+                }
+                used.insert((x, z));
+            }
+            _ => {
+                // Roof access box: 2×2 stone brick structure (stairwell exit)
+                let positions = [(x, z), (x + 1, z), (x, z + 1), (x + 1, z + 1)];
+                let all_fit = positions
+                    .iter()
+                    .all(|pos| floor_set.contains(pos) && !used.contains(pos));
+                if all_fit {
+                    for &(bx, bz) in &positions {
+                        editor.set_block_absolute(
+                            STONE_BRICKS,
+                            bx,
+                            equip_y,
+                            bz,
+                            None,
+                            Some(replace_any),
+                        );
+                        editor.set_block_absolute(
+                            STONE_BRICKS,
+                            bx,
+                            equip_y + 1,
+                            bz,
+                            None,
+                            Some(replace_any),
+                        );
+                        editor.set_block_absolute(
+                            STONE_BRICK_SLAB,
+                            bx,
+                            equip_y + 2,
+                            bz,
+                            None,
+                            Some(replace_any),
+                        );
+                        used.insert((bx, bz));
+                    }
+                }
             }
         }
     }
@@ -4243,6 +4360,70 @@ fn generate_gabled_roof(
                 }
             }
         }
+    }
+
+    // ── Overhang: extend eave 1 block outward with stairs ──────────
+    // For each position on the eave (outer edge perpendicular to the ridge),
+    // place a stair block 1 block outward at base_height, facing away from
+    // the building. This only extends sideways (perpendicular to the ridge),
+    // not along the gable ends, matching real roof construction.
+    let mut overhang_positions: Vec<(i32, i32, BlockWithProperties)> = Vec::new();
+
+    for &(x, z) in floor_area {
+        if ridge_runs_along_x {
+            // Eave runs along X; overhang extends in +Z / -Z direction
+            if !footprint.contains(&(x, z - 1)) {
+                // North eave — place overhang 1 block further north
+                let oz = z - 1;
+                let stair = create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::South,
+                    StairShape::Straight,
+                );
+                overhang_positions.push((x, oz, stair));
+            }
+            if !footprint.contains(&(x, z + 1)) {
+                // South eave — place overhang 1 block further south
+                let oz = z + 1;
+                let stair = create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::North,
+                    StairShape::Straight,
+                );
+                overhang_positions.push((x, oz, stair));
+            }
+        } else {
+            // Eave runs along Z; overhang extends in +X / -X direction
+            if !footprint.contains(&(x - 1, z)) {
+                let ox = x - 1;
+                let stair = create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::East,
+                    StairShape::Straight,
+                );
+                overhang_positions.push((ox, z, stair));
+            }
+            if !footprint.contains(&(x + 1, z)) {
+                let ox = x + 1;
+                let stair = create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::West,
+                    StairShape::Straight,
+                );
+                overhang_positions.push((ox, z, stair));
+            }
+        }
+    }
+
+    for (ox, oz, stair) in overhang_positions {
+        editor.set_block_with_properties_absolute(
+            stair,
+            ox,
+            config.base_height + config.abs_terrain_offset,
+            oz,
+            Some(&[AIR]),
+            None,
+        );
     }
 }
 
