@@ -4219,10 +4219,10 @@ fn generate_gabled_roof(
     // Target a ~0.75 slope (≈37° pitch) for a realistic roof appearance.
     // Using a fraction of max_distance ensures each row drops roughly one
     // block, avoiding flat "steps" of full blocks between stair edges.
-    // Clamped to [3, max_distance] so tiny roofs still have a visible peak
-    // and large roofs don't exceed a 45° pitch (1:1).
+    // Capped at max_distance so the slope never exceeds 45°; floor of 1
+    // keeps even the tiniest roofs visible.
     let raw_roof_height_boost = ((max_distance as f64) * 0.75).round() as i32;
-    let roof_height_boost = raw_roof_height_boost.clamp(3, max_distance);
+    let roof_height_boost = raw_roof_height_boost.max(1).min(max_distance);
     let roof_peak_height = config.base_height + roof_height_boost;
 
     // Calculate roof heights only for positions in the actual footprint
