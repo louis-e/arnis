@@ -4216,10 +4216,13 @@ fn generate_gabled_roof(
             .max(1)
     };
 
-    // Calculate roof height boost, but limit it to max_distance so the slope
-    // is at most 1 block per row (creates a proper diagonal line)
-    let raw_roof_height_boost = (3.0 + (config.building_size() as f64 * 0.15).ln().max(1.0)) as i32;
-    let roof_height_boost = raw_roof_height_boost.min(max_distance);
+    // Target a ~0.75 slope (≈37° pitch) for a realistic roof appearance.
+    // Using a fraction of max_distance ensures each row drops roughly one
+    // block, avoiding flat "steps" of full blocks between stair edges.
+    // Clamped to [3, max_distance] so tiny roofs still have a visible peak
+    // and large roofs don't exceed a 45° pitch (1:1).
+    let raw_roof_height_boost = ((max_distance as f64) * 0.75).round() as i32;
+    let roof_height_boost = raw_roof_height_boost.clamp(3, max_distance);
     let roof_peak_height = config.base_height + roof_height_boost;
 
     // Calculate roof heights only for positions in the actual footprint
@@ -4416,12 +4419,14 @@ fn generate_gabled_roof(
     }
 
     for (ox, oz, stair) in overhang_positions {
+        // No whitelist — overhang stairs must overwrite wall depth pillars
+        // that extend to this Y level
         editor.set_block_with_properties_absolute(
             stair,
             ox,
             config.base_height - 1 + config.abs_terrain_offset,
             oz,
-            Some(&[AIR]),
+            None,
             None,
         );
     }
@@ -4642,7 +4647,9 @@ fn generate_pyramidal_roof(
     floor_area: &[(i32, i32)],
     config: &RoofConfig,
 ) {
-    let peak_height = config.base_height + (config.building_size() / 3).clamp(3, 8);
+    let shorter_half = config.width().min(config.length()) / 2;
+    let peak_height =
+        config.base_height + ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
     let max_distance = (config.width() / 2).max(config.length() / 2) as f64;
 
     let mut roof_heights = HashMap::new();
@@ -4915,8 +4922,9 @@ fn generate_roof(
                 Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
                 _ => width_is_longer,
             };
+            let shorter_half = config.width().min(config.length()) / 2;
             let roof_peak_height =
-                config.base_height + if config.building_size() > 20 { 7 } else { 5 };
+                config.base_height + ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
 
             if is_rectangular {
                 generate_hipped_roof_rectangular(
