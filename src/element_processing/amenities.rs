@@ -299,7 +299,7 @@ pub fn generate_amenities(
 ///   - Stone brick wall rim at polygon edge, 2 blocks high
 ///   - Water fills the interior at y=1
 ///   - Central pillar of chiseled stone bricks + sea lantern at base
-///   - Water source on top of the pillar cascading down
+///   - Water basin (Wasserbecken) on top of the pillar
 ///
 /// For node-based fountains (single point) a compact 3×3 basin is built.
 fn generate_fountain(

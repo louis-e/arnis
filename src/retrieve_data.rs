@@ -192,6 +192,7 @@ pub fn fetch_data_from_overpass(
             match result {
                 Ok(response) => break response,
                 Err(error) => {
+                    attempt += 1;
                     if attempt >= max_attempts {
                         return Err(error);
                     }
@@ -200,7 +201,6 @@ pub fn fetch_data_from_overpass(
                         eprintln!("Request failed: {error}");
                     }
 
-                    attempt += 1;
                     let delay_secs = if attempt <= 1 { 3 } else { 5 };
                     println!(
                         "Retrying in {delay_secs}s (attempt {}/{max_attempts})...",

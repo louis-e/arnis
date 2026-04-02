@@ -1816,8 +1816,10 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
             config.window_block
         } else {
             let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
-            let use_vertical_accent_here =
-                config.use_vertical_accent && above_floor && floor_row == 0 && (bx + bz).rem_euclid(6) < 3;
+            let use_vertical_accent_here = config.use_vertical_accent
+                && above_floor
+                && floor_row == 0
+                && (bx + bz).rem_euclid(6) < 3;
 
             if use_accent_line || use_vertical_accent_here {
                 config.accent_block
