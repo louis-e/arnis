@@ -396,7 +396,11 @@ fn generate_fountain(
     let pillar_pos = floor_area
         .iter()
         .filter(|&&(x, z)| !edge_set.contains(&(x, z)))
-        .min_by_key(|&&(x, z)| (x - cx).pow(2) + (z - cz).pow(2))
+        .min_by_key(|&&(x, z)| {
+            let dx = (x - cx) as i64;
+            let dz = (z - cz) as i64;
+            dx * dx + dz * dz
+        })
         .copied()
         .unwrap_or((cx, cz));
 

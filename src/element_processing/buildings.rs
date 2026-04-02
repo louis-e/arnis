@@ -1810,14 +1810,14 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
         }
     } else {
         // Regular building pattern
-        let is_window_position = above_floor && floor_row != 0 && (bx + bz) % 6 < 3;
+        let is_window_position = above_floor && floor_row != 0 && (bx + bz).rem_euclid(6) < 3;
 
         if is_window_position {
             config.window_block
         } else {
             let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
             let use_vertical_accent_here =
-                config.use_vertical_accent && above_floor && floor_row == 0 && (bx + bz) % 6 < 3;
+                config.use_vertical_accent && above_floor && floor_row == 0 && (bx + bz).rem_euclid(6) < 3;
 
             if use_accent_line || use_vertical_accent_here {
                 config.accent_block
@@ -2687,7 +2687,7 @@ fn place_religious_buttress(
     let top_h = config.start_y_offset + config.building_height;
 
     // Buttress at every other window group center (mod6==0)
-    let window_group = ((bx + bz) / 6 + 1000) % 2; // +1000 to ensure positive
+    let window_group = ((bx + bz) / 6).rem_euclid(2);
     if mod6 == 0 && window_group == 0 {
         let buttress_cutoff = config.start_y_offset + (config.building_height * 3 / 5);
 
