@@ -2427,9 +2427,11 @@ fn generate_wall_depth_features(
     let slab_block = get_slab_block_for_material(config.wall_block);
     let sill_block = make_top_slab(slab_block);
 
-    // For sloped roofs with overhangs, stop depth features 1 block short
-    // to avoid pilasters sticking up into the eave overhang zone
-    let height_reduction = if has_sloped_roof { 1 } else { 0 };
+    // For sloped roofs with overhangs, stop depth features 2 blocks short
+    // so protruding pilasters don't visually break the clean eave/overhang line.
+    // 2 blocks: one for the eave-edge stair row at base_height, one for the
+    // overhang stair placed 1 block outward at base_height - 1.
+    let height_reduction = if has_sloped_roof { 2 } else { 0 };
 
     let mut previous_node: Option<(i32, i32)> = None;
 
@@ -2458,7 +2460,16 @@ fn generate_wall_depth_features(
 
                 match config.wall_depth_style {
                     WallDepthStyle::SubtlePilasters => {
-                        place_subtle_pilasters(editor, config, bx, bz, mod6, out_nx, out_nz, height_reduction);
+                        place_subtle_pilasters(
+                            editor,
+                            config,
+                            bx,
+                            bz,
+                            mod6,
+                            out_nx,
+                            out_nz,
+                            height_reduction,
+                        );
                     }
                     WallDepthStyle::ModernPillars => {
                         place_modern_pillars(
@@ -2475,30 +2486,81 @@ fn generate_wall_depth_features(
                     }
                     WallDepthStyle::InstitutionalBands => {
                         place_institutional_bands(
-                            editor, config, bx, bz, mod6, out_nx, out_nz, facing, height_reduction,
+                            editor,
+                            config,
+                            bx,
+                            bz,
+                            mod6,
+                            out_nx,
+                            out_nz,
+                            facing,
+                            height_reduction,
                         );
                     }
                     WallDepthStyle::IndustrialBeams => {
                         // Only at segment endpoints (first 2 and last 2 points)
                         if idx < 2 || idx >= num_points.saturating_sub(2) {
-                            place_industrial_beams(editor, config, bx, bz, out_nx, out_nz, height_reduction);
+                            place_industrial_beams(
+                                editor,
+                                config,
+                                bx,
+                                bz,
+                                out_nx,
+                                out_nz,
+                                height_reduction,
+                            );
                         }
                     }
                     WallDepthStyle::HistoricOrnate => {
-                        place_historic_ornate(editor, config, bx, bz, mod6, out_nx, out_nz, facing, height_reduction);
+                        place_historic_ornate(
+                            editor,
+                            config,
+                            bx,
+                            bz,
+                            mod6,
+                            out_nx,
+                            out_nz,
+                            facing,
+                            height_reduction,
+                        );
                     }
                     WallDepthStyle::ReligiousButtress => {
                         place_religious_buttress(
-                            editor, config, bx, bz, mod6, out_nx, out_nz, facing, height_reduction,
+                            editor,
+                            config,
+                            bx,
+                            bz,
+                            mod6,
+                            out_nx,
+                            out_nz,
+                            facing,
+                            height_reduction,
                         );
                     }
                     WallDepthStyle::SkyscraperFins => {
-                        place_skyscraper_fins(editor, config, bx, bz, mod6, out_nx, out_nz, height_reduction);
+                        place_skyscraper_fins(
+                            editor,
+                            config,
+                            bx,
+                            bz,
+                            mod6,
+                            out_nx,
+                            out_nz,
+                            height_reduction,
+                        );
                     }
                     WallDepthStyle::GlassCurtain => {
                         // Only at segment endpoints
                         if idx == 0 || idx == num_points.saturating_sub(1) {
-                            place_glass_curtain_corners(editor, config, bx, bz, out_nx, out_nz, height_reduction);
+                            place_glass_curtain_corners(
+                                editor,
+                                config,
+                                bx,
+                                bz,
+                                out_nx,
+                                out_nz,
+                                height_reduction,
+                            );
                         }
                     }
                     WallDepthStyle::None => {}
@@ -4280,43 +4342,81 @@ fn generate_gabled_roof(
         _ => width_is_longer,
     };
 
-    // Use the full distance from center to edge, accounting for odd sizes
-    let max_distance = if ridge_runs_along_x {
-        (config.max_z - config.center_z)
-            .max(config.center_z - config.min_z)
-            .max(1)
-    } else {
-        (config.max_x - config.center_x)
-            .max(config.center_x - config.min_x)
-            .max(1)
-    };
+    // For each footprint position, compute the distance to the nearest
+    // polygon edge perpendicular to the ridge by scanning in both
+    // directions.  This replaces the old axis-aligned bounding-box
+    // distance, making roofs on diagonal buildings slope down to their
+    // actual walls instead of creating tall gable walls at the
+    // bounding-box corners.
+    let mut edge_info: HashMap<(i32, i32), (i32, bool)> = HashMap::new();
+    let mut global_max_edge_dist: i32 = 1;
+    let mut max_perp_span: i32 = 1;
 
-    // Target a ~0.75 slope (≈37° pitch) for a realistic roof appearance.
-    // Using a fraction of max_distance ensures each row drops roughly one
-    // block, avoiding flat "steps" of full blocks between stair edges.
-    // Capped at max_distance so the slope never exceeds 45°; floor of 1
-    // keeps even the tiniest roofs visible.
-    let raw_roof_height_boost = ((max_distance as f64) * 0.75).round() as i32;
-    let roof_height_boost = raw_roof_height_boost.max(1).min(max_distance);
-    let roof_peak_height = config.base_height + roof_height_boost;
-
-    // Calculate roof heights only for positions in the actual footprint
-    let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
     for &(x, z) in floor_area {
-        let distance_to_ridge = if ridge_runs_along_x {
-            (z - config.center_z).abs()
+        let (dist_minus, dist_plus) = if ridge_runs_along_x {
+            let mut dm = 0;
+            {
+                let mut c = z;
+                while footprint.contains(&(x, c - 1)) {
+                    c -= 1;
+                    dm += 1;
+                }
+            }
+            let mut dp = 0;
+            {
+                let mut c = z;
+                while footprint.contains(&(x, c + 1)) {
+                    c += 1;
+                    dp += 1;
+                }
+            }
+            (dm, dp)
         } else {
-            (x - config.center_x).abs()
+            let mut dm = 0;
+            {
+                let mut c = x;
+                while footprint.contains(&(c - 1, z)) {
+                    c -= 1;
+                    dm += 1;
+                }
+            }
+            let mut dp = 0;
+            {
+                let mut c = x;
+                while footprint.contains(&(c + 1, z)) {
+                    c += 1;
+                    dp += 1;
+                }
+            }
+            (dm, dp)
         };
 
-        let roof_height = if distance_to_ridge == 0 {
-            roof_peak_height
-        } else {
-            let slope_ratio = (distance_to_ridge as f64 / max_distance as f64).min(1.0);
-            (roof_peak_height as f64 - (slope_ratio * roof_height_boost as f64)) as i32
-        }
-        .max(config.base_height);
+        let dist_to_edge = dist_minus.min(dist_plus);
+        let closer_to_minus = dist_minus <= dist_plus;
+        edge_info.insert((x, z), (dist_to_edge, closer_to_minus));
+        global_max_edge_dist = global_max_edge_dist.max(dist_to_edge);
+        max_perp_span = max_perp_span.max(dist_minus + dist_plus);
+    }
 
+    // Use the full perpendicular span to compute the effective half-width,
+    // matching the old bounding-box behaviour for axis-aligned buildings
+    // while adapting properly to diagonal footprints.
+    let effective_half_width = (max_perp_span + 1) / 2;
+
+    // Target a ~0.75 slope (≈37° pitch) for a realistic roof appearance.
+    // Capped so the slope never exceeds 45°; floor of 1 keeps tiny roofs
+    // visible.
+    let raw_roof_height_boost = ((effective_half_width as f64) * 0.75).round() as i32;
+    let roof_height_boost = raw_roof_height_boost.max(1).min(effective_half_width);
+    let roof_peak_height = config.base_height + roof_height_boost;
+
+    // Roof height per position: 1:1 slope from the edge, capped at the
+    // boost.  This gives clean stair diagonals without flat "steps" of
+    // full blocks between stair rows.
+    let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
+    for &(x, z) in floor_area {
+        let dist_to_edge = edge_info[&(x, z)].0;
+        let roof_height = (config.base_height + dist_to_edge).min(roof_peak_height);
         roof_heights.insert((x, z), roof_height);
     }
 
@@ -4355,9 +4455,13 @@ fn generate_gabled_roof(
     };
 
     // Helper to determine stair facing for slope (faces toward lower side)
+    // Uses the polygon-edge scanning to pick the correct slope direction
+    // even for diagonal buildings where the center coordinate is misleading.
     let get_slope_stair = |x: i32, z: i32| -> BlockWithProperties {
+        let closer_to_minus = edge_info.get(&(x, z)).map_or(false, |&(_, ctm)| ctm);
         if ridge_runs_along_x {
-            if z < config.center_z {
+            if closer_to_minus {
+                // Closer to north (-Z) edge → on north slope → faces south
                 create_stair_with_properties(
                     stair_block_material,
                     StairFacing::South,
@@ -4370,7 +4474,8 @@ fn generate_gabled_roof(
                     StairShape::Straight,
                 )
             }
-        } else if x < config.center_x {
+        } else if closer_to_minus {
+            // Closer to west (-X) edge → on west slope → faces east
             create_stair_with_properties(
                 stair_block_material,
                 StairFacing::East,
@@ -4723,8 +4828,7 @@ fn generate_pyramidal_roof(
     config: &RoofConfig,
 ) {
     let shorter_half = config.width().min(config.length()) / 2;
-    let peak_height =
-        config.base_height + ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
+    let peak_height = config.base_height + ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
     let max_distance = (config.width() / 2).max(config.length() / 2) as f64;
 
     let mut roof_heights = HashMap::new();
