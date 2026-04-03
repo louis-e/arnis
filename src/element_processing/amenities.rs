@@ -296,7 +296,7 @@ pub fn generate_amenities(
 /// Generates a 3D fountain that adapts to the polygon shape of the element.
 ///
 /// Layout (inside→out):
-///   - Stone brick base with stone brick wall rim at polygon edge (2 blocks total)
+///   - Smooth stone interior floor with stone brick wall rim at polygon edge (2 blocks tall)
 ///   - Water fills the interior at y=1
 ///   - Central pillar of chiseled stone bricks + sea lantern at base
 ///   - Water basin (Wasserbecken) on top of the pillar
