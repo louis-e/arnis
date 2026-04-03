@@ -3255,13 +3255,13 @@ dependencies = [
 
 [[package]]
 name = "nbtx"
-version = "0.1.0"
-source = "git+https://github.com/bedrock-crustaceans/nbtx#551c38ac74f2e68a07d3dbdd354faac0c0ac966e"
+version = "3.0.1"
+source = "git+https://github.com/bedrock-crustaceans/nbtx#bd28e773129ba886e47f630736059ae4d4ac5feb"
 dependencies = [
  "byteorder",
  "paste",
  "serde",
- "thiserror 1.0.69",
+ "thiserror 2.0.18",
  "varint-rs",
 ]
 
