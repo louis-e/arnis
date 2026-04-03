@@ -4348,9 +4348,14 @@ fn generate_gabled_roof(
     // distance, making roofs on diagonal buildings slope down to their
     // actual walls instead of creating tall gable walls at the
     // bounding-box corners.
-    let mut edge_info: HashMap<(i32, i32), (i32, bool)> = HashMap::new();
-    let mut global_max_edge_dist: i32 = 1;
-    let mut max_perp_span: i32 = 1;
+    //
+    // We store the raw (dist_minus, dist_plus) per position so we can
+    // derive both the slope distance and a *per-position* height boost
+    // based on the local wing width.  This is critical for complex
+    // buildings (courtyards, L/U shapes): each wing's roof height is
+    // limited by that wing's width, preventing one giant roof peak that
+    // spans the whole building.
+    let mut edge_scans: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
 
     for &(x, z) in floor_area {
         let (dist_minus, dist_plus) = if ridge_runs_along_x {
@@ -4391,32 +4396,24 @@ fn generate_gabled_roof(
             (dm, dp)
         };
 
-        let dist_to_edge = dist_minus.min(dist_plus);
-        let closer_to_minus = dist_minus <= dist_plus;
-        edge_info.insert((x, z), (dist_to_edge, closer_to_minus));
-        global_max_edge_dist = global_max_edge_dist.max(dist_to_edge);
-        max_perp_span = max_perp_span.max(dist_minus + dist_plus);
+        edge_scans.insert((x, z), (dist_minus, dist_plus));
     }
 
-    // Use the full perpendicular span to compute the effective half-width,
-    // matching the old bounding-box behaviour for axis-aligned buildings
-    // while adapting properly to diagonal footprints.
-    let effective_half_width = (max_perp_span + 1) / 2;
-
-    // Target a ~0.75 slope (≈37° pitch) for a realistic roof appearance.
-    // Capped so the slope never exceeds 45°; floor of 1 keeps tiny roofs
-    // visible.
-    let raw_roof_height_boost = ((effective_half_width as f64) * 0.75).round() as i32;
-    let roof_height_boost = raw_roof_height_boost.max(1).min(effective_half_width);
-    let roof_peak_height = config.base_height + roof_height_boost;
-
-    // Roof height per position: 1:1 slope from the edge, capped at the
-    // boost.  This gives clean stair diagonals without flat "steps" of
-    // full blocks between stair rows.
+    // Roof height per position: 1:1 slope from the nearest edge,
+    // capped by a local boost derived from the wing width at that
+    // position (0.75× local half-width ≈ 37° pitch).
+    //
+    // For simple rectangular buildings every position has roughly the
+    // same local width, so this behaves identically to a global boost.
+    // For complex buildings with courtyards or L/U shapes each wing
+    // gets an appropriately-scaled roof, preventing oversized peaks.
     let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
     for &(x, z) in floor_area {
-        let dist_to_edge = edge_info[&(x, z)].0;
-        let roof_height = (config.base_height + dist_to_edge).min(roof_peak_height);
+        let &(dm, dp) = &edge_scans[&(x, z)];
+        let dist_to_edge = dm.min(dp);
+        let local_half = (dm + dp + 1) / 2;
+        let local_boost = ((local_half as f64) * 0.75).round().max(1.0) as i32;
+        let roof_height = (config.base_height + dist_to_edge).min(config.base_height + local_boost);
         roof_heights.insert((x, z), roof_height);
     }
 
@@ -4458,7 +4455,9 @@ fn generate_gabled_roof(
     // Uses the polygon-edge scanning to pick the correct slope direction
     // even for diagonal buildings where the center coordinate is misleading.
     let get_slope_stair = |x: i32, z: i32| -> BlockWithProperties {
-        let closer_to_minus = edge_info.get(&(x, z)).map_or(false, |&(_, ctm)| ctm);
+        let closer_to_minus = edge_scans
+            .get(&(x, z))
+            .map_or(false, |&(dm, dp)| dm <= dp);
         if ridge_runs_along_x {
             if closer_to_minus {
                 // Closer to north (-Z) edge → on north slope → faces south
