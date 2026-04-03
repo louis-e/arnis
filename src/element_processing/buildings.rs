@@ -4342,76 +4342,58 @@ fn generate_gabled_roof(
         _ => width_is_longer,
     };
 
-    // For each footprint position, compute the distance to the nearest
-    // polygon edge perpendicular to the ridge by scanning in both
-    // directions.  This replaces the old axis-aligned bounding-box
-    // distance, making roofs on diagonal buildings slope down to their
-    // actual walls instead of creating tall gable walls at the
-    // bounding-box corners.
+    // For each footprint position, scan all 4 cardinal directions to
+    // find the distance to the nearest polygon edge.  This replaces an
+    // older single-axis scan that only measured perpendicular to the
+    // ridge, which failed on complex buildings (perimeter buildings,
+    // L/U shapes with courtyards) where wings run in both directions.
     //
-    // We store the raw (dist_minus, dist_plus) per position so we can
-    // derive both the slope distance and a *per-position* height boost
-    // based on the local wing width.  This is critical for complex
-    // buildings (courtyards, L/U shapes): each wing's roof height is
-    // limited by that wing's width, preventing one giant roof peak that
-    // spans the whole building.
+    // We store the perpendicular-to-ridge (dm_perp, dp_perp) per position
+    // for stair facing direction, and also compute the cross-axis span
+    // so we can cap roof height by the narrowest local wing width in
+    // ANY direction.
     let mut edge_scans: HashMap<(i32, i32), (i32, i32)> = HashMap::new();
 
-    for &(x, z) in floor_area {
-        let (dist_minus, dist_plus) = if ridge_runs_along_x {
-            let mut dm = 0;
-            {
-                let mut c = z;
-                while footprint.contains(&(x, c - 1)) {
-                    c -= 1;
-                    dm += 1;
-                }
+    // Helper: scan from (x,z) in a direction until leaving the footprint
+    let scan_dir = |mut cx: i32, mut cz: i32, dx: i32, dz: i32| -> i32 {
+        let mut dist = 0;
+        loop {
+            cx += dx;
+            cz += dz;
+            if !footprint.contains(&(cx, cz)) {
+                break;
             }
-            let mut dp = 0;
-            {
-                let mut c = z;
-                while footprint.contains(&(x, c + 1)) {
-                    c += 1;
-                    dp += 1;
-                }
-            }
-            (dm, dp)
-        } else {
-            let mut dm = 0;
-            {
-                let mut c = x;
-                while footprint.contains(&(c - 1, z)) {
-                    c -= 1;
-                    dm += 1;
-                }
-            }
-            let mut dp = 0;
-            {
-                let mut c = x;
-                while footprint.contains(&(c + 1, z)) {
-                    c += 1;
-                    dp += 1;
-                }
-            }
-            (dm, dp)
-        };
+            dist += 1;
+        }
+        dist
+    };
 
-        edge_scans.insert((x, z), (dist_minus, dist_plus));
-    }
-
-    // Roof height per position: 1:1 slope from the nearest edge,
-    // capped by a local boost derived from the wing width at that
-    // position (0.75× local half-width ≈ 37° pitch).
-    //
-    // For simple rectangular buildings every position has roughly the
-    // same local width, so this behaves identically to a global boost.
-    // For complex buildings with courtyards or L/U shapes each wing
-    // gets an appropriately-scaled roof, preventing oversized peaks.
     let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
+
     for &(x, z) in floor_area {
-        let &(dm, dp) = &edge_scans[&(x, z)];
-        let dist_to_edge = dm.min(dp);
-        let local_half = (dm + dp + 1) / 2;
+        // Scan all 4 cardinal directions
+        let dm_z = scan_dir(x, z, 0, -1); // -Z
+        let dp_z = scan_dir(x, z, 0, 1);  // +Z
+        let dm_x = scan_dir(x, z, -1, 0); // -X
+        let dp_x = scan_dir(x, z, 1, 0);  // +X
+
+        // Perpendicular-to-ridge distances (for slope direction / dist_to_edge)
+        let (dm_perp, dp_perp) = if ridge_runs_along_x {
+            (dm_z, dp_z)
+        } else {
+            (dm_x, dp_x)
+        };
+        edge_scans.insert((x, z), (dm_perp, dp_perp));
+
+        let dist_to_edge = dm_perp.min(dp_perp);
+
+        // Local wing width in both axes
+        let half_z = (dm_z + dp_z + 1) / 2;
+        let half_x = (dm_x + dp_x + 1) / 2;
+        // Use the narrowest cross-section to cap roof height — this
+        // prevents oversized peaks on perimeter buildings where one
+        // axis spans the whole building but the actual wing is narrow.
+        let local_half = half_z.min(half_x);
         let local_boost = ((local_half as f64) * 0.75).round().max(1.0) as i32;
         let roof_height = (config.base_height + dist_to_edge).min(config.base_height + local_boost);
         roof_heights.insert((x, z), roof_height);
