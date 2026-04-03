@@ -979,7 +979,9 @@ impl BuildingStyle {
 
 /// Building configuration derived from OSM tags and args
 struct BuildingConfig {
-    min_level: i32,
+    /// True when the building starts at ground level (no min_height / min_level offset).
+    /// When false, foundation pillars should not be generated.
+    is_ground_level: bool,
     building_height: i32,
     is_tall_building: bool,
     start_y_offset: i32,
@@ -1233,10 +1235,22 @@ fn calculate_building_height(
         }
     }
 
-    // From height tag (overrides levels)
+    // From height tag (overrides levels).
+    // When min_height is also present, the wall height is height − min_height
+    // (OSM `height` is absolute from ground, not relative to min_height).
     if let Some(height_str) = element.tags.get("height") {
         if let Ok(height) = height_str.trim_end_matches("m").trim().parse::<f64>() {
-            building_height = (height * scale_factor) as i32;
+            let effective = if let Some(mh_str) = element.tags.get("min_height") {
+                let mh = mh_str
+                    .trim_end_matches('m')
+                    .trim()
+                    .parse::<f64>()
+                    .unwrap_or(0.0);
+                (height - mh).max(1.0)
+            } else {
+                height
+            };
+            building_height = (effective * scale_factor) as i32;
             building_height = building_height.max(3);
             if height > 28.0 {
                 is_tall_building = true;
@@ -1608,7 +1622,7 @@ fn build_wall_ring(
 
             for (bx, _, bz) in bresenham_points {
                 // Create foundation pillars when using terrain
-                if args.terrain && config.min_level == 0 {
+                if args.terrain && config.is_ground_level {
                     let local_ground_level = if let Some(ground) = editor.get_ground() {
                         ground.level(XZPoint::new(
                             bx - editor.get_min_coords().0,
@@ -3194,13 +3208,23 @@ pub fn generate_buildings(
         return;
     }
 
+    // Skip structures that cannot be represented as conventional buildings.
+    // building:part elements at that location add the correct details
+    // Eiffel Tower, London Eye
+    const SKIP_WAY_IDS: &[u64] = &[5013364, 204068874];
+    if SKIP_WAY_IDS.contains(&element.id) {
+        return;
+    }
+
     // Intercept tomb=pyramid: generate a sandstone pyramid instead of a building
     if element.tags.get("tomb").map(|v| v.as_str()) == Some("pyramid") {
         historic::generate_pyramid(editor, element, args, flood_fill_cache);
         return;
     }
 
-    // Parse min_level from tags
+    // Parse vertical offset: min_height (meters) takes priority, then
+    // building:min_level (floor count).  This lifts the structure off the
+    // ground for elevated building:parts such as observation-wheel capsules.
     let min_level = element
         .tags
         .get("building:min_level")
@@ -3209,7 +3233,17 @@ pub fn generate_buildings(
 
     let scale_factor = args.scale;
     let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
-    let min_level_offset = multiply_scale(min_level * 4, scale_factor);
+
+    let min_level_offset = if let Some(mh) = element.tags.get("min_height") {
+        mh.trim_end_matches('m')
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .map(|h| (h * scale_factor) as i32)
+            .unwrap_or(0)
+    } else {
+        multiply_scale(min_level * 4, scale_factor)
+    };
 
     // Get cached floor area
     let mut cached_floor_area: Vec<(i32, i32)> =
@@ -3347,7 +3381,7 @@ pub fn generate_buildings(
 
     // Create config struct for cleaner function calls
     let config = BuildingConfig {
-        min_level,
+        is_ground_level: min_level_offset == 0,
         building_height,
         is_tall_building,
         start_y_offset,
