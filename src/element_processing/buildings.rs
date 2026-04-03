@@ -860,13 +860,16 @@ impl BuildingStyle {
             (RoofType::Flat, false)
         };
 
-        // For diagonal buildings, switch from gabled/hipped to pyramidal.
-        // Gabled roofs use axis-aligned calculations that produce odd results
-        // when the building's walls don't align with Minecraft's X/Z grid.
-        // Pyramidal roofs use euclidean distance from center, which is rotation-invariant.
-        const DIAGONAL_THRESHOLD: f64 = 0.65;
+        // For diagonal buildings without an explicit roof:shape tag,
+        // switch from gabled/hipped to pyramidal.  With polygon-edge
+        // scanning, gabled roofs now work on moderately rotated buildings,
+        // so only very diagonal shapes (ratio < 0.35) are downgraded.
+        // If the mapper explicitly tagged a roof shape, always respect it.
+        let has_explicit_roof_shape = element.tags.contains_key("roof:shape");
+        const DIAGONAL_THRESHOLD: f64 = 0.35;
         let diagonality = compute_building_diagonality(&element.nodes);
-        let roof_type = if matches!(roof_type, RoofType::Gabled | RoofType::Hipped)
+        let roof_type = if !has_explicit_roof_shape
+            && matches!(roof_type, RoofType::Gabled | RoofType::Hipped)
             && diagonality < DIAGONAL_THRESHOLD
         {
             RoofType::Pyramidal
@@ -1212,7 +1215,8 @@ fn calculate_building_height(
     scale_factor: f64,
     relation_levels: Option<i32>,
 ) -> (i32, bool) {
-    let default_height = ((6.0 * scale_factor) as i32).max(3);
+    // Default: 2 floors (ground + 1 upper) = 2*4+2 = 10 blocks
+    let default_height = ((10.0 * scale_factor) as i32).max(3);
     let mut building_height = default_height;
     let mut is_tall_building = false;
 
@@ -1257,7 +1261,7 @@ fn adjust_height_for_building_type(
     building_height: i32,
     scale_factor: f64,
 ) -> i32 {
-    let default_height = ((6.0 * scale_factor) as i32).max(3);
+    let default_height = ((10.0 * scale_factor) as i32).max(3);
     match building_type {
         "garage" | "shed" => ((2.0 * scale_factor) as i32).max(3),
         "apartments" if building_height == default_height => ((15.0 * scale_factor) as i32).max(3),
@@ -3911,18 +3915,19 @@ fn should_generate_rooftop_equipment(
 ) -> bool {
     let is_flat = roof_type == RoofType::Flat;
     let is_multi_floor = config.building_height >= 8;
-    let suitable_category = matches!(
+    // Place rooftop equipment on any flat-roofed multi-floor building
+    // except small residential houses, religious, and special types.
+    let dominated_by_roof_elements = matches!(
         category,
-        BuildingCategory::Commercial
-            | BuildingCategory::Office
-            | BuildingCategory::Hotel
-            | BuildingCategory::Industrial
-            | BuildingCategory::Warehouse
-            | BuildingCategory::Hospital
-            | BuildingCategory::School
+        BuildingCategory::House
+            | BuildingCategory::Farm
+            | BuildingCategory::Garage
+            | BuildingCategory::Shed
+            | BuildingCategory::Greenhouse
+            | BuildingCategory::Religious
     );
 
-    is_flat && is_multi_floor && suitable_category
+    is_flat && is_multi_floor && !dominated_by_roof_elements
 }
 
 /// Generates sparse rooftop equipment on flat-roofed commercial/institutional buildings.
