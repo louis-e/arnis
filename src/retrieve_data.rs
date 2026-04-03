@@ -208,10 +208,7 @@ pub fn fetch_data_from_overpass(
 
                         if i + 1 < total {
                             let delay_secs = if i < api_servers.len() { 3 } else { 5 };
-                            println!(
-                                "Retrying in {delay_secs}s (attempt {}/{total})...",
-                                i + 1
-                            );
+                            println!("Retrying in {delay_secs}s (attempt {}/{total})...", i + 1);
                             std::thread::sleep(Duration::from_secs(delay_secs));
                             if i + 1 == api_servers.len() {
                                 println!("Primary servers exhausted, trying fallback servers...");

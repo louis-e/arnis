@@ -4394,9 +4394,9 @@ fn generate_gabled_roof(
     for &(x, z) in floor_area {
         // Scan all 4 cardinal directions
         let dm_z = scan_dir(x, z, 0, -1); // -Z
-        let dp_z = scan_dir(x, z, 0, 1);  // +Z
+        let dp_z = scan_dir(x, z, 0, 1); // +Z
         let dm_x = scan_dir(x, z, -1, 0); // -X
-        let dp_x = scan_dir(x, z, 1, 0);  // +X
+        let dp_x = scan_dir(x, z, 1, 0); // +X
 
         // Perpendicular-to-ridge distances (for slope direction / dist_to_edge)
         let (dm_perp, dp_perp) = if ridge_runs_along_x {
@@ -4418,7 +4418,13 @@ fn generate_gabled_roof(
             max_perp_half = perp_half;
         }
 
-        pos_data.insert((x, z), PosData { dist_to_edge, local_half });
+        pos_data.insert(
+            (x, z),
+            PosData {
+                dist_to_edge,
+                local_half,
+            },
+        );
     }
 
     // If the widest perpendicular half-span exceeds `wall_cap`, the 1:1
@@ -4480,9 +4486,7 @@ fn generate_gabled_roof(
     // Uses the polygon-edge scanning to pick the correct slope direction
     // even for diagonal buildings where the center coordinate is misleading.
     let get_slope_stair = |x: i32, z: i32| -> BlockWithProperties {
-        let closer_to_minus = edge_scans
-            .get(&(x, z))
-            .map_or(false, |&(dm, dp)| dm <= dp);
+        let closer_to_minus = edge_scans.get(&(x, z)).is_some_and(|&(dm, dp)| dm <= dp);
         if ridge_runs_along_x {
             if closer_to_minus {
                 // Closer to north (-Z) edge → on north slope → faces south
@@ -4636,184 +4640,146 @@ fn generate_gabled_roof(
     }
 }
 
-/// Generates a hipped roof for rectangular buildings
-/// A hipped roof slopes on ALL four sides, unlike a gabled roof which only slopes on two.
-/// For rectangular buildings, it has a ridge along the longer axis, and the shorter
-/// ends also slope upward to meet the ridge.
-fn generate_hipped_roof_rectangular(
-    editor: &mut WorldEditor,
-    floor_area: &[(i32, i32)],
-    config: &RoofConfig,
-    ridge_axis_is_x: bool,
-    roof_peak_height: i32,
-) {
-    let mut roof_heights = HashMap::new();
+/// Generates a hipped roof using polygon-edge scanning.
+///
+/// A hipped roof slopes on ALL four sides.  For complex / multipolygon
+/// buildings the old bounding-box approach produced a single pyramid peak
+/// at the bounding-box center.  This version scans the actual polygon
+/// footprint in all 4 cardinal directions — the same technique used for
+/// gabled roofs — so it adapts to L/U/courtyard shapes automatically.
+///
+/// Height at each position = min(dist to nearest polygon edge in any
+/// cardinal direction), capped by 60 % of the building wall height,
+/// with half-pitch when the flat peak area would be too wide.
+fn generate_hipped_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], config: &RoofConfig) {
+    let footprint: HashSet<(i32, i32)> = floor_area.iter().copied().collect();
 
-    // For a hipped roof, height is determined by the MINIMUM distance to any edge
-    // The ridge runs along one axis, but the ends also slope
-    let half_width = config.width() / 2;
-    let half_length = config.length() / 2;
-
-    for &(x, z) in floor_area {
-        // Distance from each edge
-        let dist_from_min_x = x - config.min_x;
-        let dist_from_max_x = config.max_x - x;
-        let dist_from_min_z = z - config.min_z;
-        let dist_from_max_z = config.max_z - z;
-
-        // Minimum distance to any edge determines height (closer to edge = lower)
-        let min_dist_to_edge = dist_from_min_x
-            .min(dist_from_max_x)
-            .min(dist_from_min_z)
-            .min(dist_from_max_z);
-
-        // Max possible distance to edge (from center to edge along shorter axis)
-        let max_dist_to_edge = if ridge_axis_is_x {
-            half_length
-        } else {
-            half_width
-        };
-
-        // Calculate slope factor (0 at edge, 1 at ridge/center)
-        let slope_factor = if max_dist_to_edge > 0 {
-            (min_dist_to_edge as f64 / max_dist_to_edge as f64).min(1.0)
-        } else {
-            1.0
-        };
-
-        let roof_height = config.base_height
-            + (slope_factor * (roof_peak_height - config.base_height) as f64) as i32;
-        roof_heights.insert((x, z), roof_height.max(config.base_height));
-    }
-
-    let stair_block_material = get_stair_block_for_material(config.roof_block);
-    let min_x = config.min_x;
-    let max_x = config.max_x;
-    let min_z = config.min_z;
-    let max_z = config.max_z;
-
-    // For stair direction, determine which edge the point is closest to
-    place_roof_blocks_with_stairs(editor, floor_area, &roof_heights, config, |x, z, _| {
-        let dist_from_min_x = x - min_x;
-        let dist_from_max_x = max_x - x;
-        let dist_from_min_z = z - min_z;
-        let dist_from_max_z = max_z - z;
-
-        // Find which edge is closest
-        let min_dist = dist_from_min_x
-            .min(dist_from_max_x)
-            .min(dist_from_min_z)
-            .min(dist_from_max_z);
-
-        if dist_from_min_x == min_dist {
-            // Closest to west edge, stair faces east (toward center)
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::East,
-                StairShape::Straight,
-            )
-        } else if dist_from_max_x == min_dist {
-            // Closest to east edge, stair faces west
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::West,
-                StairShape::Straight,
-            )
-        } else if dist_from_min_z == min_dist {
-            // Closest to north edge, stair faces south
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::South,
-                StairShape::Straight,
-            )
-        } else {
-            // Closest to south edge, stair faces north
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::North,
-                StairShape::Straight,
-            )
+    // Scan from (x,z) in one cardinal direction until leaving the footprint.
+    let scan_dir = |mut cx: i32, mut cz: i32, dx: i32, dz: i32| -> i32 {
+        let mut dist = 0;
+        loop {
+            cx += dx;
+            cz += dz;
+            if !footprint.contains(&(cx, cz)) {
+                break;
+            }
+            dist += 1;
         }
-    });
-}
-
-/// Generates a hipped roof for square/complex buildings using distance from center
-fn generate_hipped_roof_square(
-    editor: &mut WorldEditor,
-    floor_area: &[(i32, i32)],
-    config: &RoofConfig,
-    roof_peak_height: i32,
-) {
-    let mut roof_heights = HashMap::new();
-
-    // Calculate max distance from center to any corner
-    let max_distance = {
-        let corner_distances = [
-            ((config.min_x - config.center_x).pow(2) + (config.min_z - config.center_z).pow(2))
-                as f64,
-            ((config.min_x - config.center_x).pow(2) + (config.max_z - config.center_z).pow(2))
-                as f64,
-            ((config.max_x - config.center_x).pow(2) + (config.min_z - config.center_z).pow(2))
-                as f64,
-            ((config.max_x - config.center_x).pow(2) + (config.max_z - config.center_z).pow(2))
-                as f64,
-        ];
-        corner_distances
-            .iter()
-            .fold(0.0f64, |a, &b| a.max(b))
-            .sqrt()
+        dist
     };
 
-    for &(x, z) in floor_area {
-        let dx = (x - config.center_x) as f64;
-        let dz = (z - config.center_z) as f64;
-        let distance_from_center = (dx * dx + dz * dz).sqrt();
+    let wall_cap = ((config.building_height as f64) * 0.6).round().max(1.0) as i32;
 
-        let distance_factor = if max_distance > 0.0 {
-            (distance_from_center / max_distance).min(1.0)
+    // --- First pass: gather per-position edge distances ---
+    struct PosData {
+        /// Minimum distance to polygon edge in any of the 4 cardinal dirs
+        dist_to_edge: i32,
+        /// The narrowest local half-span (min of the two cross-axis halves)
+        local_half: i32,
+        /// Which cardinal direction had the shortest distance (for stair facing).
+        /// 0 = -X, 1 = +X, 2 = -Z, 3 = +Z
+        closest_dir: u8,
+    }
+    let mut pos_data: HashMap<(i32, i32), PosData> = HashMap::new();
+    let mut max_half: i32 = 0; // widest half-span across all positions
+
+    for &(x, z) in floor_area {
+        let dm_x = scan_dir(x, z, -1, 0);
+        let dp_x = scan_dir(x, z, 1, 0);
+        let dm_z = scan_dir(x, z, 0, -1);
+        let dp_z = scan_dir(x, z, 0, 1);
+
+        let dists = [dm_x, dp_x, dm_z, dp_z];
+        let dist_to_edge = *dists.iter().min().unwrap();
+
+        // Determine which edge is closest (for stair facing)
+        let closest_dir = if dist_to_edge == dm_x {
+            0u8
+        } else if dist_to_edge == dp_x {
+            1
+        } else if dist_to_edge == dm_z {
+            2
         } else {
-            0.0
+            3
         };
 
-        let roof_height = roof_peak_height
-            - (distance_factor * (roof_peak_height - config.base_height) as f64) as i32;
-        roof_heights.insert((x, z), roof_height.max(config.base_height));
+        let half_x = (dm_x + dp_x + 1) / 2;
+        let half_z = (dm_z + dp_z + 1) / 2;
+        let local_half = half_x.min(half_z);
+
+        let full_span = half_x.max(half_z);
+        if full_span > max_half {
+            max_half = full_span;
+        }
+
+        pos_data.insert(
+            (x, z),
+            PosData {
+                dist_to_edge,
+                local_half,
+                closest_dir,
+            },
+        );
     }
 
+    // Half-pitch when the flat peak area would be ≥ 4 blocks wide
+    let flat_band = max_half - wall_cap;
+    let use_half_pitch = flat_band >= 4;
+
+    // --- Second pass: compute roof heights ---
+    let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
+
+    for &(x, z) in floor_area {
+        let pd = &pos_data[&(x, z)];
+        let slope_dist = if use_half_pitch {
+            pd.dist_to_edge / 2
+        } else {
+            pd.dist_to_edge
+        };
+        let local_boost = ((pd.local_half as f64) * 0.75).round().max(1.0) as i32;
+        let capped_boost = local_boost.min(wall_cap);
+        let roof_height = (config.base_height + slope_dist).min(config.base_height + capped_boost);
+        roof_heights.insert((x, z), roof_height);
+    }
+
+    // --- Place blocks with stair facing toward nearest polygon edge ---
     let stair_block_material = get_stair_block_for_material(config.roof_block);
-    let center_x = config.center_x;
-    let center_z = config.center_z;
 
     place_roof_blocks_with_stairs(editor, floor_area, &roof_heights, config, |x, z, _| {
-        let center_dx = x - center_x;
-        let center_dz = z - center_z;
-
-        if center_dx.abs() > center_dz.abs() {
-            if center_dx > 0 {
-                create_stair_with_properties(
-                    stair_block_material,
-                    StairFacing::West,
-                    StairShape::Straight,
-                )
-            } else {
+        let dir = pos_data.get(&(x, z)).map(|pd| pd.closest_dir).unwrap_or(0);
+        match dir {
+            0 => {
+                // Closest edge is -X, stair faces east (toward centre)
                 create_stair_with_properties(
                     stair_block_material,
                     StairFacing::East,
                     StairShape::Straight,
                 )
             }
-        } else if center_dz > 0 {
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::North,
-                StairShape::Straight,
-            )
-        } else {
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::South,
-                StairShape::Straight,
-            )
+            1 => {
+                // Closest edge is +X, stair faces west
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::West,
+                    StairShape::Straight,
+                )
+            }
+            2 => {
+                // Closest edge is -Z, stair faces south
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::South,
+                    StairShape::Straight,
+                )
+            }
+            _ => {
+                // Closest edge is +Z, stair faces north
+                create_stair_with_properties(
+                    stair_block_material,
+                    StairFacing::North,
+                    StairShape::Straight,
+                )
+            }
         }
     });
 }
@@ -5119,32 +5085,7 @@ fn generate_roof(
         }
 
         RoofType::Hipped => {
-            let is_rectangular = (config.width() as f64 / config.length() as f64 > 1.3)
-                || (config.length() as f64 / config.width() as f64 > 1.3);
-            let width_is_longer = config.width() >= config.length();
-            let ridge_axis_is_x = match roof_orientation {
-                Some(o) if o.eq_ignore_ascii_case("along") => width_is_longer,
-                Some(o) if o.eq_ignore_ascii_case("across") => !width_is_longer,
-                _ => width_is_longer,
-            };
-            let shorter_half = config.width().min(config.length()) / 2;
-            let uncapped_boost = ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
-            // Cap: roof peak should not exceed ~60% of the building wall height
-            let wall_cap = ((config.building_height as f64) * 0.6).round().max(3.0) as i32;
-            let roof_peak_height =
-                config.base_height + uncapped_boost.min(wall_cap);
-
-            if is_rectangular {
-                generate_hipped_roof_rectangular(
-                    editor,
-                    roof_area,
-                    &config,
-                    ridge_axis_is_x,
-                    roof_peak_height,
-                );
-            } else {
-                generate_hipped_roof_square(editor, roof_area, &config, roof_peak_height);
-            }
+            generate_hipped_roof(editor, roof_area, &config);
         }
 
         RoofType::Skillion => {
