@@ -12,6 +12,7 @@
 # IDE/editor files
 .idea/
 /.vscode/
+.claude/
 /*.swp
 *.iml
 *.suo

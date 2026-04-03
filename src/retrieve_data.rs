@@ -4,7 +4,7 @@ use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
-use rand::prelude::IndexedRandom;
+use rand::prelude::SliceRandom;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
 use serde::Deserialize;
@@ -126,7 +126,6 @@ pub fn fetch_data_from_overpass(
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
     ];
-    let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
 
     // Generate Overpass API query for bounding box.
     // Ocean/coastal elements are excluded because ESA WorldCover satellite data
@@ -177,33 +176,49 @@ pub fn fetch_data_from_overpass(
     );
 
     {
-        // Fetch data from Overpass API
-        let mut attempt = 0;
-        let max_attempts = 1;
-        let response: String = loop {
-            println!("Downloading from {url} with method {download_method}...");
-            let result = match download_method {
-                "requests" => download_with_reqwest(url, &query),
-                "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
-                "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
-                _ => download_with_reqwest(url, &query), // Default to requests
-            };
+        // Fetch data from Overpass API.
+        // Strategy: try each primary server once (shuffled), then each
+        // fallback server once, with a short delay between attempts.
+        let mut servers: Vec<&str> = api_servers.clone();
+        servers.shuffle(&mut rand::rng());
+        let mut fallbacks: Vec<&str> = fallback_api_servers.clone();
+        fallbacks.shuffle(&mut rand::rng());
+        servers.extend(fallbacks);
 
-            match result {
-                Ok(response) => break response,
-                Err(error) => {
-                    if attempt >= max_attempts {
-                        return Err(error);
-                    }
+        let total = servers.len();
+        let mut last_error: Option<Box<dyn std::error::Error>> = None;
+        let response: String = 'server_loop: {
+            for (i, server) in servers.iter().enumerate() {
+                let url = server;
+                println!("Downloading from {url} with method {download_method}...");
+                let result = match download_method {
+                    "requests" => download_with_reqwest(url, &query),
+                    "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
+                    "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
+                    _ => download_with_reqwest(url, &query), // Default to requests
+                };
 
-                    if download_method != "requests" {
-                        eprintln!("Request failed: {error}");
+                match result {
+                    Ok(response) => break 'server_loop response,
+                    Err(error) => {
+                        if download_method != "requests" {
+                            eprintln!("Request failed: {error}");
+                        }
+                        last_error = Some(error);
+
+                        if i + 1 < total {
+                            let delay_secs = if i < api_servers.len() { 3 } else { 5 };
+                            println!("Retrying in {delay_secs}s (attempt {}/{total})...", i + 1);
+                            std::thread::sleep(Duration::from_secs(delay_secs));
+                            if i + 1 == api_servers.len() {
+                                println!("Primary servers exhausted, trying fallback servers...");
+                            }
+                        }
                     }
-                    println!("Switching to fallback server...");
-                    url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
-                    attempt += 1;
                 }
             }
+            // All servers exhausted
+            return Err(last_error.unwrap_or_else(|| "All servers failed".into()));
         };
 
         if let Some(save_file) = save_file {
