@@ -860,6 +860,20 @@ impl BuildingStyle {
             (RoofType::Flat, false)
         };
 
+        // For diagonal buildings, switch from gabled/hipped to pyramidal.
+        // Gabled roofs use axis-aligned calculations that produce odd results
+        // when the building's walls don't align with Minecraft's X/Z grid.
+        // Pyramidal roofs use euclidean distance from center, which is rotation-invariant.
+        const DIAGONAL_THRESHOLD: f64 = 0.65;
+        let diagonality = compute_building_diagonality(&element.nodes);
+        let roof_type = if matches!(roof_type, RoofType::Gabled | RoofType::Hipped)
+            && diagonality < DIAGONAL_THRESHOLD
+        {
+            RoofType::Pyramidal
+        } else {
+            roof_type
+        };
+
         // Chimney: only for residential with gabled/hipped roofs
         let has_chimney = preset.has_chimney.unwrap_or_else(|| {
             let is_residential = matches!(
@@ -1888,6 +1902,41 @@ fn compute_building_centroid(nodes: &[ProcessedNode]) -> Option<(i32, i32)> {
     Some(((sx / n) as i32, (sz / n) as i32))
 }
 
+/// Computes how axis-aligned a building polygon is.
+/// Returns ratio of polygon area to bounding box area.
+/// - 1.0 = perfectly axis-aligned rectangle
+/// - ~0.5 = 45° rotated square (bounding box is 2x larger)
+/// - Lower values = more diagonal/rotated
+///
+/// Used to detect diagonal buildings that need rotation-invariant roofs.
+fn compute_building_diagonality(nodes: &[ProcessedNode]) -> f64 {
+    if nodes.len() < 3 {
+        return 1.0;
+    }
+
+    // Calculate polygon area using shoelace formula
+    let mut area = 0i64;
+    for i in 0..nodes.len() {
+        let j = (i + 1) % nodes.len();
+        area += (nodes[i].x as i64) * (nodes[j].z as i64);
+        area -= (nodes[j].x as i64) * (nodes[i].z as i64);
+    }
+    let polygon_area = (area.abs() as f64) / 2.0;
+
+    // Calculate bounding box area
+    let min_x = nodes.iter().map(|n| n.x).min().unwrap_or(0);
+    let max_x = nodes.iter().map(|n| n.x).max().unwrap_or(0);
+    let min_z = nodes.iter().map(|n| n.z).min().unwrap_or(0);
+    let max_z = nodes.iter().map(|n| n.z).max().unwrap_or(0);
+    let bbox_area = ((max_x - min_x + 1) * (max_z - min_z + 1)) as f64;
+
+    if bbox_area <= 0.0 {
+        return 1.0;
+    }
+
+    (polygon_area / bbox_area).min(1.0)
+}
+
 /// Computes the axis-aligned outward normal for a wall segment defined by
 /// `(x1,z1)→(x2,z2)`, given the building centroid `(cx,cz)`.
 ///
@@ -2334,6 +2383,7 @@ fn generate_wall_depth_features(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     config: &BuildingConfig,
+    has_sloped_roof: bool,
 ) {
     if config.wall_depth_style == WallDepthStyle::None {
         return;
@@ -2377,6 +2427,10 @@ fn generate_wall_depth_features(
     let slab_block = get_slab_block_for_material(config.wall_block);
     let sill_block = make_top_slab(slab_block);
 
+    // For sloped roofs with overhangs, stop depth features 1 block short
+    // to avoid pilasters sticking up into the eave overhang zone
+    let height_reduction = if has_sloped_roof { 1 } else { 0 };
+
     let mut previous_node: Option<(i32, i32)> = None;
 
     for node in &element.nodes {
@@ -2404,7 +2458,7 @@ fn generate_wall_depth_features(
 
                 match config.wall_depth_style {
                     WallDepthStyle::SubtlePilasters => {
-                        place_subtle_pilasters(editor, config, bx, bz, mod6, out_nx, out_nz);
+                        place_subtle_pilasters(editor, config, bx, bz, mod6, out_nx, out_nz, height_reduction);
                     }
                     WallDepthStyle::ModernPillars => {
                         place_modern_pillars(
@@ -2416,34 +2470,35 @@ fn generate_wall_depth_features(
                             out_nx,
                             out_nz,
                             &sill_block,
+                            height_reduction,
                         );
                     }
                     WallDepthStyle::InstitutionalBands => {
                         place_institutional_bands(
-                            editor, config, bx, bz, mod6, out_nx, out_nz, facing,
+                            editor, config, bx, bz, mod6, out_nx, out_nz, facing, height_reduction,
                         );
                     }
                     WallDepthStyle::IndustrialBeams => {
                         // Only at segment endpoints (first 2 and last 2 points)
                         if idx < 2 || idx >= num_points.saturating_sub(2) {
-                            place_industrial_beams(editor, config, bx, bz, out_nx, out_nz);
+                            place_industrial_beams(editor, config, bx, bz, out_nx, out_nz, height_reduction);
                         }
                     }
                     WallDepthStyle::HistoricOrnate => {
-                        place_historic_ornate(editor, config, bx, bz, mod6, out_nx, out_nz, facing);
+                        place_historic_ornate(editor, config, bx, bz, mod6, out_nx, out_nz, facing, height_reduction);
                     }
                     WallDepthStyle::ReligiousButtress => {
                         place_religious_buttress(
-                            editor, config, bx, bz, mod6, out_nx, out_nz, facing,
+                            editor, config, bx, bz, mod6, out_nx, out_nz, facing, height_reduction,
                         );
                     }
                     WallDepthStyle::SkyscraperFins => {
-                        place_skyscraper_fins(editor, config, bx, bz, mod6, out_nx, out_nz);
+                        place_skyscraper_fins(editor, config, bx, bz, mod6, out_nx, out_nz, height_reduction);
                     }
                     WallDepthStyle::GlassCurtain => {
                         // Only at segment endpoints
                         if idx == 0 || idx == num_points.saturating_sub(1) {
-                            place_glass_curtain_corners(editor, config, bx, bz, out_nx, out_nz);
+                            place_glass_curtain_corners(editor, config, bx, bz, out_nx, out_nz, height_reduction);
                         }
                     }
                     WallDepthStyle::None => {}
@@ -2466,6 +2521,7 @@ fn place_subtle_pilasters(
     mod6: i32,
     out_nx: i32,
     out_nz: i32,
+    height_reduction: i32,
 ) {
     if mod6 != 3 {
         return;
@@ -2473,8 +2529,9 @@ fn place_subtle_pilasters(
 
     let lx = bx + out_nx;
     let lz = bz + out_nz;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+    for h in (config.start_y_offset + 1)..=top_h {
         let block = if h == config.start_y_offset + 1 {
             config.accent_block // Foundation course
         } else {
@@ -2503,13 +2560,15 @@ fn place_modern_pillars(
     out_nx: i32,
     out_nz: i32,
     sill_block: &BlockWithProperties,
+    height_reduction: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
     // Pillar columns at edges of window bays
     if mod6 == 3 || mod6 == 5 {
-        for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+        for h in (config.start_y_offset + 1)..=top_h {
             editor.set_block_absolute(
                 config.accent_block,
                 lx,
@@ -2539,7 +2598,7 @@ fn place_modern_pillars(
     );
 
     // Floor-level slab bands (skip the window center at mod6==1 for cleaner look)
-    for h in (config.start_y_offset + 2)..=(config.start_y_offset + config.building_height) {
+    for h in (config.start_y_offset + 2)..=top_h {
         if config.floor_row(h) == 0 {
             editor.set_block_with_properties_absolute(
                 sill_block.clone(),
@@ -2565,13 +2624,15 @@ fn place_institutional_bands(
     out_nx: i32,
     out_nz: i32,
     facing: &str,
+    height_reduction: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
     // Pillar columns
     if mod6 == 3 {
-        for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+        for h in (config.start_y_offset + 1)..=top_h {
             editor.set_block_absolute(
                 config.accent_block,
                 lx,
@@ -2598,7 +2659,7 @@ fn place_institutional_bands(
     if mod6 >= 3 {
         return;
     }
-    for h in (config.start_y_offset + 2)..=(config.start_y_offset + config.building_height) {
+    for h in (config.start_y_offset + 2)..=top_h {
         if config.floor_row(h) == 0 {
             let stair_bwp = make_upside_down_stair(config.wall_block, facing);
             editor.set_block_with_properties_absolute(
@@ -2623,11 +2684,13 @@ fn place_industrial_beams(
     bz: i32,
     out_nx: i32,
     out_nz: i32,
+    height_reduction: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+    for h in (config.start_y_offset + 1)..=top_h {
         editor.set_block_absolute(
             config.wall_block,
             lx,
@@ -2652,11 +2715,12 @@ fn place_historic_ornate(
     out_nx: i32,
     out_nz: i32,
     facing: &str,
+    height_reduction: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
 
-    let top_h = config.start_y_offset + config.building_height;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
     // Full-height pillar columns between window groups
     if mod6 == 3 {
@@ -2670,16 +2734,18 @@ fn place_historic_ornate(
                 None,
             );
         }
-        // Cornice at top
-        let stair_bwp = make_upside_down_stair(config.wall_block, facing);
-        editor.set_block_with_properties_absolute(
-            stair_bwp,
-            lx,
-            top_h + config.abs_terrain_offset + 1,
-            lz,
-            Some(&[AIR]),
-            None,
-        );
+        // Cornice at top (skip for sloped roofs - would conflict with roof)
+        if height_reduction == 0 {
+            let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+            editor.set_block_with_properties_absolute(
+                stair_bwp,
+                lx,
+                top_h + config.abs_terrain_offset + 1,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
         return;
     }
 
@@ -2710,16 +2776,18 @@ fn place_historic_ornate(
         }
     }
 
-    // Cornice along the full roofline
-    let stair_bwp = make_upside_down_stair(config.wall_block, facing);
-    editor.set_block_with_properties_absolute(
-        stair_bwp,
-        lx,
-        top_h + config.abs_terrain_offset + 1,
-        lz,
-        Some(&[AIR]),
-        None,
-    );
+    // Cornice along the full roofline (skip for sloped roofs)
+    if height_reduction == 0 {
+        let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+        editor.set_block_with_properties_absolute(
+            stair_bwp,
+            lx,
+            top_h + config.abs_terrain_offset + 1,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
 }
 
 /// ReligiousButtress: stepped buttresses at every other window group,
@@ -2735,10 +2803,11 @@ fn place_religious_buttress(
     out_nx: i32,
     out_nz: i32,
     facing: &str,
+    height_reduction: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
-    let top_h = config.start_y_offset + config.building_height;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
     // Buttress at every other window group center (mod6==0)
     let window_group = ((bx + bz) / 6).rem_euclid(2);
@@ -2773,16 +2842,18 @@ fn place_religious_buttress(
         return;
     }
 
-    // Cornice along the full roofline
-    let stair_bwp = make_upside_down_stair(config.wall_block, facing);
-    editor.set_block_with_properties_absolute(
-        stair_bwp,
-        lx,
-        top_h + config.abs_terrain_offset + 1,
-        lz,
-        Some(&[AIR]),
-        None,
-    );
+    // Cornice along the full roofline (skip for sloped roofs)
+    if height_reduction == 0 {
+        let stair_bwp = make_upside_down_stair(config.wall_block, facing);
+        editor.set_block_with_properties_absolute(
+            stair_bwp,
+            lx,
+            top_h + config.abs_terrain_offset + 1,
+            lz,
+            Some(&[AIR]),
+            None,
+        );
+    }
 }
 
 /// SkyscraperFins: continuous accent_block vertical fins at mod6==3
@@ -2796,6 +2867,7 @@ fn place_skyscraper_fins(
     mod6: i32,
     out_nx: i32,
     out_nz: i32,
+    height_reduction: i32,
 ) {
     if mod6 != 3 {
         return;
@@ -2803,8 +2875,9 @@ fn place_skyscraper_fins(
 
     let lx = bx + out_nx;
     let lz = bz + out_nz;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+    for h in (config.start_y_offset + 1)..=top_h {
         editor.set_block_absolute(
             config.accent_block,
             lx,
@@ -2826,11 +2899,13 @@ fn place_glass_curtain_corners(
     bz: i32,
     out_nx: i32,
     out_nz: i32,
+    height_reduction: i32,
 ) {
     let lx = bx + out_nx;
     let lz = bz + out_nz;
+    let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+    for h in (config.start_y_offset + 1)..=top_h {
         editor.set_block_absolute(
             config.accent_block,
             lx,
@@ -3254,7 +3329,7 @@ pub fn generate_buildings(
     // Only for standalone buildings, not building:part sub-sections (parts adjoin
     // other parts and outward protrusions would collide with neighbours).
     if !element.tags.contains_key("building:part") {
-        generate_wall_depth_features(editor, element, &config);
+        generate_wall_depth_features(editor, element, &config, has_sloped_roof);
     }
 
     // Add corner quoins (accent-block columns at building corners)
