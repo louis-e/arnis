@@ -38,6 +38,8 @@ pub fn generate_landuse(
         "industrial" => STONE, // Placeholder, will be randomized per-block
         "military" => GRAY_CONCRETE, // Placeholder, will be randomized per-block
         "railway" => GRAVEL,
+        "vineyard" => COARSE_DIRT,
+        "winter_sports" => SNOW_BLOCK,
         "brownfield" => COARSE_DIRT,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
