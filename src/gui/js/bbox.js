@@ -969,6 +969,40 @@ $(document).ready(function () {
         if (event.data && event.data.type === 'worldChanged') {
             disableWorldPreview();
         }
+
+        // Handle rotation preview: rotate the drawn rectangle on the map
+        if (event.data && event.data.type === 'rotatePreview') {
+            var angle = event.data.angle || 0;
+            // Store the current rotation angle for reapplication on zoom/pan
+            window._rotationAngle = angle;
+            applyRotationToRectangles(angle);
+        }
+    });
+
+    // Reapply rotation when the map zooms or moves (layer point coordinates change)
+    map.on('zoomanim zoomend moveend', function() {
+        if (window._rotationAngle) {
+            applyRotationToRectangles(window._rotationAngle);
+        }
+    });
+
+    function applyRotationToRectangles(angle) {
+        drawnItems.eachLayer(function(layer) {
+            if (layer instanceof L.Rectangle) {
+                var el = layer.getElement ? layer.getElement() : (layer._path || null);
+                if (el) {
+                    if (Math.abs(angle) < 0.001) {
+                        el.style.transformOrigin = '';
+                        el.style.transform = '';
+                    } else {
+                        var center = map.latLngToLayerPoint(layer.getBounds().getCenter());
+                        el.style.transformOrigin = center.x + 'px ' + center.y + 'px';
+                        el.style.transform = 'rotate(' + (-angle) + 'deg)';
+                    }
+                }
+            }
+        });
+    }
     });
 
     // Set the dropdown value in parent window if it exists

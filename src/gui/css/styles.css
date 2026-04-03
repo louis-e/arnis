@@ -583,6 +583,29 @@ button:hover {
   gap: 0;
 }
 
+/* Rotation Angle Control */
+.rotation-control {
+  gap: 4px;
+}
+
+.rotation-control input[type="range"] {
+  width: 50%;
+  accent-color: var(--primary-accent);
+}
+
+.rotation-control input[type="number"] {
+  width: 60px !important;
+  max-width: 60px !important;
+  text-align: center;
+  font-weight: bold;
+}
+
+.rotation-unit {
+  font-weight: bold;
+  color: #ececec;
+  font-size: 0.95em;
+}
+
 .save-path-input {
   max-width: 200px !important;
   font-size: 0.85em;

@@ -88,6 +88,15 @@ pub fn generate_ground_layer(
 
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
+                    // Skip blocks outside the rotated original bounding box
+                    if !ground.is_in_rotated_bounds(x, z) {
+                        block_counter += 1;
+                        if block_counter.is_multiple_of(batch_size) {
+                            ground_pb.set_position(block_counter);
+                        }
+                        continue;
+                    }
+
                     // Get ground level, when terrain is enabled, look it up once per block
                     // When disabled, use constant ground_level (no function call overhead)
                     let ground_y = if terrain_enabled {

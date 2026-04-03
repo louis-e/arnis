@@ -710,6 +710,7 @@ fn gui_start_generation(
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
     world_format: String,
+    rotation_angle: f64,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -902,6 +903,7 @@ fn gui_start_generation(
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
                 spawn_lng: None,
+                rotation: rotation_angle.clamp(-90.0, 90.0),
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -967,6 +969,17 @@ fn gui_start_generation(
                         &mut xzbbox,
                         &mut ground,
                     );
+
+                    // Apply rotation if specified
+                    if rotation_angle.abs() > f64::EPSILON {
+                        map_transformation::rotate::rotate_world(
+                            rotation_angle.clamp(-90.0, 90.0),
+                            &mut parsed_elements,
+                            &mut xzbbox,
+                            &mut ground,
+                        )
+                        .map_err(|e| format!("Rotation failed: {e}"))?;
+                    }
 
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,

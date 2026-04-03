@@ -292,6 +292,34 @@ function initSettings() {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
 
+  // Rotation angle slider and input synchronization
+  const rotationSlider = document.getElementById("rotation-angle-slider");
+  const rotationInput = document.getElementById("rotation-angle-input");
+
+  function updateRotation(val) {
+    if (isNaN(val)) val = 0;
+    val = Math.min(Math.max(val, -90), 90);
+    rotationInput.value = val.toFixed(2);
+    rotationSlider.value = val;
+    // Rotate the map rectangle preview in the iframe
+    const mapFrame = document.querySelector('.map-container');
+    if (mapFrame && mapFrame.contentWindow) {
+      mapFrame.contentWindow.postMessage({
+        type: 'rotatePreview',
+        angle: val
+      }, '*');
+    }
+  }
+  rotationSlider.addEventListener("input", () => {
+    updateRotation(parseFloat(rotationSlider.value));
+  });
+  rotationInput.addEventListener("input", () => {
+    updateRotation(parseFloat(rotationInput.value));
+  });
+  rotationInput.addEventListener("change", () => {
+    updateRotation(parseFloat(rotationInput.value));
+  });
+
   // World format toggle (Java/Bedrock)
   initWorldFormatToggle();
 
@@ -891,6 +919,9 @@ async function startGeneration() {
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
 
+    // Get rotation angle
+    var rotationAngle = parseFloat(document.getElementById("rotation-angle-input").value) || 0;
+
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
@@ -906,7 +937,8 @@ async function startGeneration() {
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: selectedWorldFormat
+        worldFormat: selectedWorldFormat,
+        rotationAngle: rotationAngle
     });
 
     console.log("Generation process started.");
