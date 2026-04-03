@@ -1016,6 +1016,40 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
     }
 }
 
+/// Returns a matching slab block for the given wall material.
+/// Used for floor-level ledges and cornices in building depth features.
+pub fn get_slab_block_for_material(material: Block) -> Block {
+    match material {
+        STONE_BRICKS | CHISELED_STONE_BRICKS | CRACKED_STONE_BRICKS => STONE_BRICK_SLAB,
+        BRICK | BROWN_TERRACOTTA => BRICK_SLAB,
+        MUD_BRICKS | WHITE_TERRACOTTA | GRAY_TERRACOTTA | LIGHT_BLUE_TERRACOTTA => MUD_BRICK_SLAB,
+        OAK_PLANKS | OAK_LOG | SPRUCE_PLANKS | DARK_OAK_PLANKS => OAK_SLAB,
+        QUARTZ_BLOCK | QUARTZ_BRICKS | WHITE_CONCRETE => QUARTZ_SLAB_TOP,
+        SMOOTH_STONE | POLISHED_ANDESITE | ANDESITE | GRAY_CONCRETE | LIGHT_GRAY_CONCRETE => {
+            SMOOTH_STONE_SLAB
+        }
+        SANDSTONE | SMOOTH_SANDSTONE => STONE_BLOCK_SLAB,
+        _ => STONE_BRICK_SLAB,
+    }
+}
+
+/// Returns a matching wall piece block (thin wall) for the given wall material.
+/// Used for parapets and decorative wall elements in building depth features.
+pub fn get_wall_piece_for_material(material: Block) -> Block {
+    match material {
+        STONE_BRICKS
+        | CHISELED_STONE_BRICKS
+        | CRACKED_STONE_BRICKS
+        | POLISHED_ANDESITE
+        | SMOOTH_STONE
+        | POLISHED_DEEPSLATE
+        | DEEPSLATE_BRICKS => STONE_BRICK_WALL,
+        BRICK | BROWN_TERRACOTTA | MUD_BRICKS | WHITE_TERRACOTTA => BRICK_WALL,
+        ANDESITE | GRAY_CONCRETE | LIGHT_GRAY_CONCRETE => ANDESITE_WALL,
+        _ => COBBLESTONE_WALL,
+    }
+}
+
 // Window variations for different building types
 pub static WINDOW_VARIATIONS: [Block; 7] = [
     GLASS,
