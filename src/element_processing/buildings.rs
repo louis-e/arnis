@@ -4378,6 +4378,19 @@ fn generate_gabled_roof(
 
     let mut roof_heights: HashMap<(i32, i32), i32> = HashMap::new();
 
+    // Hard cap: the roof peak should never exceed the wall height.
+    // Real gabled roofs typically add at most ~60% of the wall height.
+    let wall_cap = ((config.building_height as f64) * 0.6).round().max(1.0) as i32;
+
+    // First pass: compute roof heights with 1:1 slope, gather stats to
+    // detect whether the flat ridge area is unacceptably wide.
+    struct PosData {
+        dist_to_edge: i32,
+        local_half: i32,
+    }
+    let mut pos_data: HashMap<(i32, i32), PosData> = HashMap::new();
+    let mut max_perp_half: i32 = 0; // widest perpendicular half-span
+
     for &(x, z) in floor_area {
         // Scan all 4 cardinal directions
         let dm_z = scan_dir(x, z, 0, -1); // -Z
@@ -4398,17 +4411,34 @@ fn generate_gabled_roof(
         // Local wing width in both axes
         let half_z = (dm_z + dp_z + 1) / 2;
         let half_x = (dm_x + dp_x + 1) / 2;
-        // Use the narrowest cross-section to cap roof height — this
-        // prevents oversized peaks on perimeter buildings where one
-        // axis spans the whole building but the actual wing is narrow.
         let local_half = half_z.min(half_x);
-        let local_boost = ((local_half as f64) * 0.75).round().max(1.0) as i32;
-        // Hard cap: the roof peak should never exceed the wall height.
-        // Real gabled roofs typically add at most ~60% of the wall height.
-        // This prevents pyramid-shaped roofs on large-footprint buildings.
-        let wall_cap = ((config.building_height as f64) * 0.6).round().max(1.0) as i32;
+
+        let perp_half = (dm_perp + dp_perp + 1) / 2;
+        if perp_half > max_perp_half {
+            max_perp_half = perp_half;
+        }
+
+        pos_data.insert((x, z), PosData { dist_to_edge, local_half });
+    }
+
+    // If the widest perpendicular half-span exceeds `wall_cap`, the 1:1
+    // slope would create a flat ridge larger than `max_perp_half - wall_cap`
+    // blocks wide.  When that flat band is ≥ 4 blocks, switch to half-pitch
+    // (1 block rise per 2 blocks inward) so the slope is gentler and the
+    // flat area at the peak is reduced.
+    let flat_band = max_perp_half - wall_cap;
+    let use_half_pitch = flat_band >= 4;
+
+    for &(x, z) in floor_area {
+        let pd = &pos_data[&(x, z)];
+        let slope_dist = if use_half_pitch {
+            pd.dist_to_edge / 2
+        } else {
+            pd.dist_to_edge
+        };
+        let local_boost = ((pd.local_half as f64) * 0.75).round().max(1.0) as i32;
         let capped_boost = local_boost.min(wall_cap);
-        let roof_height = (config.base_height + dist_to_edge).min(config.base_height + capped_boost);
+        let roof_height = (config.base_height + slope_dist).min(config.base_height + capped_boost);
         roof_heights.insert((x, z), roof_height);
     }
 
