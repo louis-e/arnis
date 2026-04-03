@@ -1003,7 +1003,6 @@ $(document).ready(function () {
             }
         });
     }
-    });
 
     // Set the dropdown value in parent window if it exists
     if (window.parent && window.parent.document) {
