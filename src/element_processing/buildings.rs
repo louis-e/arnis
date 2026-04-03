@@ -1502,6 +1502,7 @@ fn generate_roof_only_structure(
                     center_x: (min_x + max_x) >> 1,
                     center_z: (min_z + max_z) >> 1,
                     base_height: start_y_offset,
+                    building_height: 4, // roof-only structure, no real walls
                     abs_terrain_offset,
                     roof_block,
                 };
@@ -4169,6 +4170,7 @@ struct RoofConfig {
     center_x: i32,
     center_z: i32,
     base_height: i32,
+    building_height: i32,
     abs_terrain_offset: i32,
     roof_block: Block,
 }
@@ -4217,6 +4219,7 @@ impl RoofConfig {
             center_x,
             center_z,
             base_height,
+            building_height,
             abs_terrain_offset,
             roof_block,
         }
@@ -4395,7 +4398,12 @@ fn generate_gabled_roof(
         // axis spans the whole building but the actual wing is narrow.
         let local_half = half_z.min(half_x);
         let local_boost = ((local_half as f64) * 0.75).round().max(1.0) as i32;
-        let roof_height = (config.base_height + dist_to_edge).min(config.base_height + local_boost);
+        // Hard cap: the roof peak should never exceed the wall height.
+        // Real gabled roofs typically add at most ~60% of the wall height.
+        // This prevents pyramid-shaped roofs on large-footprint buildings.
+        let wall_cap = ((config.building_height as f64) * 0.6).round().max(1.0) as i32;
+        let capped_boost = local_boost.min(wall_cap);
+        let roof_height = (config.base_height + dist_to_edge).min(config.base_height + capped_boost);
         roof_heights.insert((x, z), roof_height);
     }
 
@@ -4809,7 +4817,9 @@ fn generate_pyramidal_roof(
     config: &RoofConfig,
 ) {
     let shorter_half = config.width().min(config.length()) / 2;
-    let peak_height = config.base_height + ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
+    let uncapped_boost = ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
+    let wall_cap = ((config.building_height as f64) * 0.6).round().max(3.0) as i32;
+    let peak_height = config.base_height + uncapped_boost.min(wall_cap);
     let max_distance = (config.width() / 2).max(config.length() / 2) as f64;
 
     let mut roof_heights = HashMap::new();
@@ -5083,8 +5093,11 @@ fn generate_roof(
                 _ => width_is_longer,
             };
             let shorter_half = config.width().min(config.length()) / 2;
+            let uncapped_boost = ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
+            // Cap: roof peak should not exceed ~60% of the building wall height
+            let wall_cap = ((config.building_height as f64) * 0.6).round().max(3.0) as i32;
             let roof_peak_height =
-                config.base_height + ((shorter_half as f64) * 0.75).round().max(3.0) as i32;
+                config.base_height + uncapped_boost.min(wall_cap);
 
             if is_rectangular {
                 generate_hipped_roof_rectangular(
