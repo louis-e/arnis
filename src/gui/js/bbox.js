@@ -1357,8 +1357,9 @@ $(document).ready(function () {
         var halfW = (ne.lng - sw.lng) / 2;
         var halfH = (ne.lat - sw.lat) / 2;
 
-        // Convert to radians (positive = CCW, matching the Rust rotation)
-        var rad = angle * Math.PI / 180;
+        // Negate: positive user angle = clockwise on the map, but the
+        // standard 2D rotation matrix is counterclockwise for positive radians.
+        var rad = -angle * Math.PI / 180;
         var cosR = Math.cos(rad);
         var sinR = Math.sin(rad);
 

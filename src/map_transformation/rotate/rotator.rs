@@ -9,7 +9,7 @@ use std::sync::Arc;
 /// around the center of the current bounding box.
 #[derive(Debug, Deserialize, PartialEq)]
 pub struct Rotator {
-    /// Counterclockwise rotation angle in degrees
+    /// Clockwise rotation angle in degrees (as seen on a map)
     pub angle_degrees: f64,
 }
 
@@ -51,7 +51,9 @@ pub fn rotate_world(
         return Ok(()); // No rotation needed
     }
 
-    let rad = angle_degrees.to_radians();
+    // Negate: the user-facing convention is positive = clockwise on the map,
+    // but the internal XZ rotation formula is counterclockwise.
+    let rad = (-angle_degrees).to_radians();
     let sin_r = rad.sin();
     let cos_r = rad.cos();
 
@@ -190,7 +192,7 @@ pub fn rotate_xz_point(x: i32, z: i32, angle_degrees: f64, xzbbox: &XZBBox) -> (
     if angle_degrees.abs() < f64::EPSILON {
         return (x, z);
     }
-    let rad = angle_degrees.to_radians();
+    let rad = (-angle_degrees).to_radians();
     let cx = (xzbbox.min_x() + xzbbox.max_x()) as f64 / 2.0;
     let cz = (xzbbox.min_z() + xzbbox.max_z()) as f64 / 2.0;
     let (rx, rz) = rotate_point(x as f64, z as f64, cx, cz, rad.sin(), rad.cos());
