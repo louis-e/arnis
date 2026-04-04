@@ -665,7 +665,6 @@ $(document).ready(function () {
                 zIndex: 500
             });
             worldOverlay.addTo(map);
-            applyWorldOverlayRotation();
 
             if (btn) {
                 btn.classList.add('active');
@@ -692,6 +691,11 @@ $(document).ready(function () {
 
     // Enable the preview button when data is available
     function enableWorldPreview(data) {
+        // Skip world preview when the world was generated with rotation,
+        // as the rotated image can't be reliably aligned on the map
+        if (Math.abs(window._generatedRotationAngle || 0) >= 0.001) {
+            return;
+        }
         worldOverlayData = data;
         worldPreviewAvailable = true;
         var btn = document.getElementById('world-preview-btn');
@@ -750,19 +754,6 @@ $(document).ready(function () {
         }
     }
 
-    // Rotate the world preview image to match the current rotation angle
-    function applyWorldOverlayRotation() {
-        if (!worldOverlay) return;
-        var el = worldOverlay.getElement ? worldOverlay.getElement() : null;
-        if (!el) return;
-        var angle = window._rotationAngle || 0;
-        if (Math.abs(angle) < 0.001) {
-            el.style.transform = '';
-        } else {
-            el.style.transformOrigin = '50% 50%';
-            el.style.transform = 'rotate(' + (-angle) + 'deg)';
-        }
-    }
 
     // ========== Context Menu for Coordinate Copying ==========
     var contextMenuElement = null;
@@ -954,6 +945,8 @@ $(document).ready(function () {
 
         // Handle world preview data ready (after generation completes)
         if (event.data && event.data.type === 'worldPreviewReady') {
+            // Capture the rotation angle at generation time
+            window._generatedRotationAngle = window._rotationAngle || 0;
             enableWorldPreview(event.data.data);
 
             // Auto-enable the overlay when generation completes
@@ -965,6 +958,8 @@ $(document).ready(function () {
         // Handle existing world map load (zoom to location and auto-enable)
         if (event.data && event.data.type === 'loadExistingWorldMap') {
             var data = event.data.data;
+            // Existing world: rotation angle unknown, assume 0
+            window._generatedRotationAngle = 0;
             enableWorldPreview(data);
 
             // Calculate bounds and zoom to them
@@ -990,7 +985,10 @@ $(document).ready(function () {
             var angle = event.data.angle || 0;
             window._rotationAngle = angle;
             updateRotationMask(angle);
-            applyWorldOverlayRotation();
+            // Clear the world preview since it was generated at a different angle
+            if (worldOverlayEnabled) {
+                disableWorldPreview();
+            }
         }
 
     });
@@ -1313,6 +1311,7 @@ $(document).ready(function () {
     // Minecraft content when a rotation angle is applied.
     window._rotationMaskLayer = null;
     window._rotationAngle = 0;
+    window._generatedRotationAngle = 0;
 
     function updateRotationMask(angle) {
         // Remove previous mask

@@ -117,6 +117,7 @@ async function applyLocalization(localization) {
     "span[data-localize='land_cover']": "land_cover",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
+    "span[data-localize='rotation_angle']": "rotation_angle",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -291,6 +292,11 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+  // Double-click to reset world scale to default (1.00)
+  slider.addEventListener("dblclick", () => {
+    slider.value = 1;
+    sliderValue.textContent = "1.00";
+  });
 
   // Rotation angle slider and input synchronization
   const rotationSlider = document.getElementById("rotation-angle-slider");
@@ -312,6 +318,10 @@ function initSettings() {
   }
   rotationSlider.addEventListener("input", () => {
     updateRotation(parseFloat(rotationSlider.value));
+  });
+  // Double-click to reset rotation to default (0)
+  rotationSlider.addEventListener("dblclick", () => {
+    updateRotation(0);
   });
   rotationInput.addEventListener("input", () => {
     updateRotation(parseFloat(rotationInput.value));
