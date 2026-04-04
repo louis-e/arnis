@@ -977,13 +977,12 @@ $(document).ready(function () {
             disableWorldPreview();
         }
 
-        // Handle rotation preview: update the diamond mask overlay
+        // Handle rotation preview angle update (store it for preview-skip logic)
         if (event.data && event.data.type === 'rotatePreview') {
             var angle = event.data.angle || 0;
             window._rotationAngle = angle;
-            updateRotationMask(angle);
             // Clear the world preview since it won't align at a different angle
-            if (worldOverlayEnabled) {
+            if (worldOverlayEnabled && Math.abs(angle) >= 0.001) {
                 disableWorldPreview();
             }
         }
@@ -1050,6 +1049,30 @@ $(document).ready(function () {
         popupAnchor: [0, -10]
     });
 
+    // Calculate geographic angle between two lat/lng points (in degrees)
+    function calculateAngleGeo(latlng1, latlng2) {
+        var lat1 = latlng1.lat * Math.PI / 180;
+        var lat2 = latlng2.lat * Math.PI / 180;
+        var dx = (latlng2.lng - latlng1.lng) * Math.cos((lat1 + lat2) / 2);
+        var dy = latlng2.lat - latlng1.lat;
+        var radians = Math.atan2(dy, dx);
+        var degrees = radians * (180 / Math.PI);
+        if (degrees < 0) degrees += 360;
+        return degrees;
+    }
+
+    // Calculate the signed rotation needed to align to the nearest cardinal axis (0, 90, 180, 270)
+    // Positive = clockwise on map, negative = counterclockwise
+    function getRotationToNearestAxis(angle) {
+        var axes = [0, 90, 180, 270, 360];
+        var bestDiff = 360;
+        for (var i = 0; i < axes.length; i++) {
+            var diff = angle - axes[i];
+            if (Math.abs(diff) < Math.abs(bestDiff)) bestDiff = diff;
+        }
+        return bestDiff;
+    }
+
     drawControl = new L.Control.Draw({
         edit: {
             featureGroup: drawnItems
@@ -1077,6 +1100,130 @@ $(document).ready(function () {
         }
     });
     map.addControl(drawControl);
+
+    // ========== Custom Angle Line Tool ==========
+    // A simple 2-click tool: click start point, click end point, done.
+    // Uses a transparent overlay to capture clicks even on top of drawn layers.
+    var _angleLine = null;
+    var _angleStartLatLng = null;
+    var _angleToolActive = false;
+    var _angleToolBtn = null;
+    var _angleOverlay = null;        // transparent click-capture div
+
+    function startAngleTool() {
+        stopAngleTool();
+        _angleToolActive = true;
+
+        // Create a transparent overlay over the map to capture all clicks
+        // (otherwise clicks on the bbox rectangle get swallowed by the layer)
+        _angleOverlay = document.createElement('div');
+        _angleOverlay.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;z-index:1000;cursor:crosshair;';
+        map.getContainer().appendChild(_angleOverlay);
+
+        _angleOverlay.addEventListener('click', _onAngleOverlayClick);
+        _angleOverlay.addEventListener('mousemove', _onAngleOverlayMouseMove);
+    }
+
+    function stopAngleTool() {
+        _angleToolActive = false;
+        _angleStartLatLng = null;
+        if (_angleOverlay) {
+            _angleOverlay.removeEventListener('click', _onAngleOverlayClick);
+            _angleOverlay.removeEventListener('mousemove', _onAngleOverlayMouseMove);
+            _angleOverlay.parentNode && _angleOverlay.parentNode.removeChild(_angleOverlay);
+            _angleOverlay = null;
+        }
+        if (_angleLine) {
+            map.removeLayer(_angleLine);
+            _angleLine = null;
+        }
+        if (_angleToolBtn) {
+            L.DomUtil.removeClass(_angleToolBtn, 'leaflet-draw-toolbar-button-enabled');
+        }
+    }
+
+    function _overlayEventToLatLng(e) {
+        var rect = map.getContainer().getBoundingClientRect();
+        var point = L.point(e.clientX - rect.left, e.clientY - rect.top);
+        return map.containerPointToLatLng(point);
+    }
+
+    function _onAngleOverlayClick(e) {
+        var latlng = _overlayEventToLatLng(e);
+
+        if (!_angleStartLatLng) {
+            // First click — place start point
+            _angleStartLatLng = latlng;
+            _angleLine = L.polyline([_angleStartLatLng, _angleStartLatLng], {
+                color: '#00aaff',
+                weight: 3,
+                dashArray: '5, 5'
+            }).addTo(map);
+        } else {
+            // Second click — finish
+            _angleLine.setLatLngs([_angleStartLatLng, latlng]);
+
+            var angle = calculateAngleGeo(_angleStartLatLng, latlng);
+            var rotation = getRotationToNearestAxis(angle);
+            var rotationValue = parseFloat(rotation.toFixed(2));
+
+            window.parent.postMessage({
+                type: 'angleMeasured',
+                angle: rotationValue
+            }, '*');
+
+            showRotationToast('Rotation angle set to ' + rotationValue + '\u00B0 (see settings)');
+
+            // Keep the line visible briefly, then remove
+            var lineRef = _angleLine;
+            _angleLine = null;
+            setTimeout(function() {
+                if (lineRef) map.removeLayer(lineRef);
+            }, 1500);
+
+            stopAngleTool();
+        }
+    }
+
+    function _onAngleOverlayMouseMove(e) {
+        if (_angleLine && _angleStartLatLng) {
+            _angleLine.setLatLngs([_angleStartLatLng, _overlayEventToLatLng(e)]);
+        }
+    }
+
+    // Inject the angle tool button into the top draw toolbar (alongside rectangle & marker)
+    (function addAngleToolButton() {
+        var drawToolbar = document.querySelector('.leaflet-draw-toolbar.leaflet-draw-toolbar-top');
+        if (!drawToolbar) return;
+
+        var btn = L.DomUtil.create('a', 'leaflet-draw-draw-polyline');
+        btn.href = '#';
+        btn.title = 'Set rotation angle';
+
+        L.DomEvent
+            .on(btn, 'click', L.DomEvent.stopPropagation)
+            .on(btn, 'mousedown', L.DomEvent.stopPropagation)
+            .on(btn, 'dblclick', L.DomEvent.stopPropagation)
+            .on(btn, 'click', L.DomEvent.preventDefault)
+            .on(btn, 'click', function() {
+                if (_angleToolActive) {
+                    stopAngleTool();
+                } else {
+                    startAngleTool();
+                    L.DomUtil.addClass(btn, 'leaflet-draw-toolbar-button-enabled');
+                }
+            });
+
+        _angleToolBtn = btn;
+
+        // Insert before the marker (spawn) button so it's: rectangle | angle | marker
+        var markerBtn = drawToolbar.querySelector('.leaflet-draw-draw-marker');
+        if (markerBtn) {
+            drawToolbar.insertBefore(btn, markerBtn);
+        } else {
+            drawToolbar.appendChild(btn);
+        }
+    })();
 
     // Add hint overlay at bottom-center of map when no bbox is selected
     var hintDiv = document.createElement('div');
@@ -1121,6 +1268,23 @@ $(document).ready(function () {
         location.hash = ymin + ',' + xmin + ',' + ymax + ',' + xmax;
     });
     map.addLayer(bounds);
+
+    // Show a brief toast notification on the map
+    function showRotationToast(message) {
+        // Remove any existing toast
+        var existing = map.getContainer().querySelector('.rotation-toast');
+        if (existing) existing.remove();
+
+        var toast = document.createElement('div');
+        toast.className = 'rotation-toast';
+        toast.textContent = message;
+        map.getContainer().appendChild(toast);
+
+        setTimeout(function() {
+            toast.classList.add('fade-out');
+            setTimeout(function() { toast.remove(); }, 600);
+        }, 6000);
+    }
 
     map.on('draw:created', function (e) {
         // Hide the hint overlay when a bbox area is drawn
@@ -1326,110 +1490,8 @@ $(document).ready(function () {
         display();
     });
 
-    // --- Rotation dead-zone mask ---
-    // Draws a semi-transparent overlay on the bbox corners that won't have
-    // Minecraft content when a rotation angle is applied.
-    window._rotationMaskLayer = null;
+    // Store rotation angle for preview-skip logic (no mask drawn)
     window._rotationAngle = 0;
-
-    function updateRotationMask(angle) {
-        // Remove previous mask
-        if (window._rotationMaskLayer) {
-            map.removeLayer(window._rotationMaskLayer);
-            window._rotationMaskLayer = null;
-        }
-
-        if (Math.abs(angle) < 0.001) return;
-
-        // Find the drawn rectangle
-        var rect = null;
-        drawnItems.eachLayer(function(layer) {
-            if (layer instanceof L.Rectangle) rect = layer;
-        });
-        if (!rect) return;
-
-        var bnds = rect.getBounds();
-        var center = bnds.getCenter();
-        var ne = bnds.getNorthEast();
-        var sw = bnds.getSouthWest();
-
-        // Half-dimensions of the bbox in degrees (lng = W, lat = H)
-        var halfW = (ne.lng - sw.lng) / 2;
-        var halfH = (ne.lat - sw.lat) / 2;
-
-        // Negate: positive user angle = clockwise on the map, but the
-        // standard 2D rotation matrix is counterclockwise for positive radians.
-        var rad = -angle * Math.PI / 180;
-        var cosR = Math.cos(rad);
-        var sinR = Math.sin(rad);
-
-        // Expanded bbox half-dims (bounding box of the rotated rectangle)
-        var expW = Math.abs(halfW * cosR) + Math.abs(halfH * sinR);
-        var expH = Math.abs(halfW * sinR) + Math.abs(halfH * cosR);
-
-        // The four corners of the original bbox, rotated by angle θ.
-        // These form the content diamond in the expanded Minecraft bbox.
-        var rotCorners = [
-            {dlng:  halfW*cosR - halfH*sinR, dlat:  halfW*sinR + halfH*cosR},
-            {dlng:  halfW*cosR + halfH*sinR, dlat:  halfW*sinR - halfH*cosR},
-            {dlng: -halfW*cosR + halfH*sinR, dlat: -halfW*sinR - halfH*cosR},
-            {dlng: -halfW*cosR - halfH*sinR, dlat: -halfW*sinR + halfH*cosR}
-        ];
-
-        // Identify which rotated corner has the extreme dlat/dlng
-        // (i.e. which corner projects onto which bbox edge)
-        var topC = rotCorners[0], rightC = rotCorners[0];
-        for (var i = 1; i < 4; i++) {
-            if (rotCorners[i].dlat > topC.dlat) topC = rotCorners[i];
-            if (rotCorners[i].dlng > rightC.dlng) rightC = rotCorners[i];
-        }
-
-        // Project each extreme vertex radially onto the original bbox edge.
-        // Top vertex (max dlat = expH) → scale to dlat = halfH:
-        //   scaling factor = halfH / expH
-        // Right vertex (max dlng = expW) → scale to dlng = halfW:
-        //   scaling factor = halfW / expW
-        var topLng   = topC.dlng * halfH / expH;
-        var rightLat = rightC.dlat * halfW / expW;
-
-        // Clamp for extreme aspect-ratio / angle combinations
-        topLng   = Math.max(-halfW, Math.min(halfW, topLng));
-        rightLat = Math.max(-halfH, Math.min(halfH, rightLat));
-
-        // Diamond with one vertex on each bbox edge (symmetric about center)
-        var inner = [
-            L.latLng(center.lat + halfH,    center.lng + topLng),     // top edge
-            L.latLng(center.lat + rightLat,  center.lng + halfW),      // right edge
-            L.latLng(center.lat - halfH,     center.lng - topLng),     // bottom edge
-            L.latLng(center.lat - rightLat,  center.lng - halfW)       // left edge
-        ];
-
-        // Outer ring: original bbox
-        var nw = L.latLng(ne.lat, sw.lng);
-        var se = L.latLng(sw.lat, ne.lng);
-        var outer = [nw, ne, se, sw];
-
-        window._rotationMaskLayer = L.polygon([outer, inner], {
-            color: 'transparent',
-            fillColor: '#000',
-            fillOpacity: 0.35,
-            interactive: false,
-            pane: 'overlayPane'
-        }).addTo(map);
-    }
-
-    // Re-apply mask when the bbox is redrawn or edited
-    map.on('draw:created draw:edited', function() {
-        if (window._rotationAngle) {
-            updateRotationMask(window._rotationAngle);
-        }
-    });
-    map.on('draw:deleted', function() {
-        if (window._rotationMaskLayer) {
-            map.removeLayer(window._rotationMaskLayer);
-            window._rotationMaskLayer = null;
-        }
-    });
 
 });
 

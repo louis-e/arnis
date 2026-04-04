@@ -204,6 +204,26 @@ function registerMessageEvent() {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
     }
+
+    // Handle angle measurement from the map polyline tool
+    if (event.data && event.data.type === 'angleMeasured') {
+      var angle = event.data.angle;
+      var rotationSlider = document.getElementById("rotation-angle-slider");
+      var rotationInput = document.getElementById("rotation-angle-input");
+      if (rotationSlider && rotationInput) {
+        var clamped = Math.min(Math.max(angle, -90), 90);
+        rotationInput.value = clamped.toFixed(2);
+        rotationSlider.value = clamped;
+        // Also trigger the rotation preview update on the map
+        var mapFrame = document.querySelector('.map-container');
+        if (mapFrame && mapFrame.contentWindow) {
+          mapFrame.contentWindow.postMessage({
+            type: 'rotatePreview',
+            angle: clamped
+          }, '*');
+        }
+      }
+    }
   });
 }
 
