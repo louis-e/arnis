@@ -691,11 +691,6 @@ $(document).ready(function () {
 
     // Enable the preview button when data is available
     function enableWorldPreview(data) {
-        // Skip world preview when the world was generated with rotation,
-        // as the rotated image can't be reliably aligned on the map
-        if (Math.abs(window._generatedRotationAngle || 0) >= 0.001) {
-            return;
-        }
         worldOverlayData = data;
         worldPreviewAvailable = true;
         var btn = document.getElementById('world-preview-btn');
@@ -945,8 +940,6 @@ $(document).ready(function () {
 
         // Handle world preview data ready (after generation completes)
         if (event.data && event.data.type === 'worldPreviewReady') {
-            // Capture the rotation angle at generation time
-            window._generatedRotationAngle = window._rotationAngle || 0;
             enableWorldPreview(event.data.data);
 
             // Auto-enable the overlay when generation completes
@@ -958,8 +951,6 @@ $(document).ready(function () {
         // Handle existing world map load (zoom to location and auto-enable)
         if (event.data && event.data.type === 'loadExistingWorldMap') {
             var data = event.data.data;
-            // Existing world: rotation angle unknown, assume 0
-            window._generatedRotationAngle = 0;
             enableWorldPreview(data);
 
             // Calculate bounds and zoom to them
@@ -985,10 +976,6 @@ $(document).ready(function () {
             var angle = event.data.angle || 0;
             window._rotationAngle = angle;
             updateRotationMask(angle);
-            // Clear the world preview since it was generated at a different angle
-            if (worldOverlayEnabled) {
-                disableWorldPreview();
-            }
         }
 
     });
@@ -1081,6 +1068,15 @@ $(document).ready(function () {
     });
     map.addControl(drawControl);
 
+    // Add hint overlay at bottom of map when no bbox is selected
+    var hintOverlay = L.control({ position: 'bottomleft' });
+    hintOverlay.onAdd = function() {
+        var div = L.DomUtil.create('div', 'bbox-hint-overlay');
+        div.innerHTML = 'Select a preset, or use the <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; opacity: 0.85;"><rect x="3" y="3" width="18" height="18"></rect></svg> tool to draw a custom area';
+        return div;
+    };
+    hintOverlay.addTo(map);
+
     // Add world preview button to the edit toolbar after drawControl is added
     addWorldPreviewToEditToolbar();
     /*
@@ -1120,6 +1116,12 @@ $(document).ready(function () {
     map.addLayer(bounds);
 
     map.on('draw:created', function (e) {
+        // Hide the hint overlay when a bbox area is drawn
+        if (e.layerType === 'rectangle') {
+            var hint = document.querySelector('.bbox-hint-overlay');
+            if (hint) hint.style.display = 'none';
+        }
+
         // If it's a marker, make sure we only have one
         if (e.layerType === 'marker') {
             // Remove any existing markers
@@ -1189,6 +1191,17 @@ $(document).ready(function () {
         e.layers.eachLayer(function (l) {
             drawnItems.removeLayer(l);
         });
+
+        // Show hint overlay again if no rectangles remain
+        var hasRectangle = false;
+        drawnItems.eachLayer(function(layer) {
+            if (layer instanceof L.Rectangle) hasRectangle = true;
+        });
+        if (!hasRectangle) {
+            var hint = document.querySelector('.bbox-hint-overlay');
+            if (hint) hint.style.display = '';
+        }
+
         if (drawnItems.getLayers().length > 0 &&
             !((drawnItems.getLayers().length == 1) && (drawnItems.getLayers()[0] instanceof L.Marker))) {
             bounds.setBounds(drawnItems.getBounds())
@@ -1311,7 +1324,6 @@ $(document).ready(function () {
     // Minecraft content when a rotation angle is applied.
     window._rotationMaskLayer = null;
     window._rotationAngle = 0;
-    window._generatedRotationAngle = 0;
 
     function updateRotationMask(angle) {
         // Remove previous mask

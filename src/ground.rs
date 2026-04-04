@@ -252,10 +252,13 @@ impl Ground {
         let dz = z as f64 - mask.cz;
         let orig_x = dx * mask.cos + dz * mask.neg_sin + mask.cx;
         let orig_z = -dx * mask.neg_sin + dz * mask.cos + mask.cz;
-        orig_x >= mask.orig_min_x as f64
-            && orig_x <= mask.orig_max_x as f64
-            && orig_z >= mask.orig_min_z as f64
-            && orig_z <= mask.orig_max_z as f64
+        // Allow a tiny tolerance so points that land infinitesimally outside the
+        // integer bbox due to floating-point rounding are still considered inside.
+        const EPSILON: f64 = 1.0e-9;
+        orig_x >= mask.orig_min_x as f64 - EPSILON
+            && orig_x <= mask.orig_max_x as f64 + EPSILON
+            && orig_z >= mask.orig_min_z as f64 - EPSILON
+            && orig_z <= mask.orig_max_z as f64 + EPSILON
     }
 
     fn save_debug_image(&self, filename: &str) {
