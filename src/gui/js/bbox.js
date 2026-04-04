@@ -1350,8 +1350,8 @@ $(document).ready(function () {
         var halfW = (ne.lng - sw.lng) / 2;
         var halfH = (ne.lat - sw.lat) / 2;
 
-        // Negate angle so the diamond matches the visual tile rotation direction
-        var rad = -angle * Math.PI / 180;
+        // Convert to radians (positive = CCW, matching the Rust rotation)
+        var rad = angle * Math.PI / 180;
         var cosR = Math.cos(rad);
         var sinR = Math.sin(rad);
 
