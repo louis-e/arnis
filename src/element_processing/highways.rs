@@ -2,26 +2,13 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::element_processing::surfaces::{
+    get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
+};
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
-
-/// Pick a road surface block deterministically based on coordinates.
-/// Returns a random-looking mix of gray_concrete_powder and cyan_terracotta.
-#[inline]
-fn road_block(x: i32, z: i32) -> Block {
-    // Combine coordinates into a single value and apply bit mixing for a scattered look
-    let mut h = (x as u32).wrapping_mul(0x9E3779B9) ^ (z as u32).wrapping_mul(0x517CC1B7);
-    h ^= h >> 16;
-    h = h.wrapping_mul(0x45D9F3B);
-    h ^= h >> 16;
-    if h & 1 == 0 {
-        GRAY_CONCRETE_POWDER
-    } else {
-        CYAN_TERRACOTTA
-    }
-}
 
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
@@ -176,23 +163,7 @@ fn generate_highways_internal(
             };
 
             // Handle areas like pedestrian plazas
-            let mut surface_block: Block = STONE; // Default block
-
-            // Determine the block type based on the 'surface' tag
-            if let Some(surface) = element.tags().get("surface") {
-                surface_block = match surface.as_str() {
-                    "paving_stones" | "sett" => STONE_BRICKS,
-                    "bricks" => BRICK,
-                    "wood" => OAK_PLANKS,
-                    "asphalt" => BLACK_CONCRETE,
-                    "gravel" | "fine_gravel" => GRAVEL,
-                    "grass" => GRASS_BLOCK,
-                    "dirt" | "ground" | "earth" => DIRT,
-                    "sand" => SAND,
-                    "concrete" => LIGHT_GRAY_CONCRETE,
-                    _ => STONE, // Default to stone for unknown surfaces
-                };
-            }
+            let surface_block: Block = get_blocks_for_surface_way(way, vec![STONE])[0]; // Default block
 
             // Fill the area using flood fill cache
             let filled_area: Vec<(i32, i32)> =
@@ -203,10 +174,6 @@ fn generate_highways_internal(
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
-            let mut block_type = GRAY_CONCRETE_POWDER; // placeholder, overridden per-block by road_block() when use_road_mix is true
-            let mut use_road_mix = true;
-            let mut block_range: i32 = 2;
-            let mut add_stripe = false;
             let mut add_outline = false;
             let scale_factor = args.scale;
 
@@ -243,67 +210,46 @@ fn generate_highways_internal(
                 }
             }
 
-            // Determine block type and range based on highway type
-            match highway_type.as_str() {
-                "footway" | "pedestrian" => {
-                    block_type = GRAY_CONCRETE;
-                    use_road_mix = false;
-                    block_range = 1;
-                }
-                "path" => {
-                    block_type = DIRT_PATH;
-                    use_road_mix = false;
-                    block_range = 1;
-                }
-                "motorway" | "primary" | "trunk" => {
-                    block_range = 5;
-                    add_stripe = true;
-                }
-                "secondary" => {
-                    block_range = 4;
-                    add_stripe = true;
-                }
-                "tertiary" => {
-                    add_stripe = true;
-                }
-                "track" => {
-                    block_range = 1;
-                }
-                "service" => {
-                    block_type = GRAY_CONCRETE;
-                    use_road_mix = false;
-                    block_range = 2;
-                }
-                "secondary_link" | "tertiary_link" => {
-                    //Exit ramps, sliproads
-                    block_range = 1;
-                }
-                "escape" => {
-                    // Sand trap for vehicles on mountainous roads
-                    block_type = SAND;
-                    use_road_mix = false;
-                    block_range = 1;
-                }
-                "steps" => {
-                    //TODO: Add correct stairs respecting height, step_count, etc.
-                    block_type = GRAY_CONCRETE;
-                    use_road_mix = false;
-                    block_range = 1;
-                }
+            let mut block_types: &[Block] = match highway_type.as_str() {
+                "footway" | "pedestrian" | "service" | "steps" => &[GRAY_CONCRETE],
+                "path" => &[DIRT_PATH],
+                "escape" => &[SAND],
+                _ => &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA],
+            };
+            let mut lanes: i32 = ["motorway", "trunk", "primary", "secondary", "tertiary"]
+                .contains(&highway_type.as_str()) as i32;
 
-                _ => {
-                    if let Some(lanes) = element.tags().get("lanes") {
-                        if lanes == "2" {
-                            block_range = 3;
-                            add_stripe = true;
-                            add_outline = true;
-                        } else if lanes != "1" {
-                            block_range = 4;
-                            add_stripe = true;
-                            add_outline = true;
-                        }
-                    }
-                }
+            // Determine block type and range based on highway type
+            //TODO: Add correct stairs respecting height, step_count, etc.
+            let mut width: f32 = match highway_type.as_str() {
+                "motorway" | "primary" | "trunk" => 5.,
+                "secondary" => 4.,
+                "path" | "footway" | "pedestrian" | "steps" | "track" | "escape"
+                | "secondary_link" | "tertiary_link" => 1.,
+                _ => 2.,
+            };
+            if let Some(tag_lanes) = element
+                .tags()
+                .get("lanes")
+                .and_then(|l| l.parse::<i32>().ok())
+            {
+                lanes = tag_lanes;
+                width = (lanes * 3 + 1) as f32;
+                add_outline = true;
+            }
+            element
+                .tags()
+                .get("surface")
+                .and_then(|s| get_blocks_for_surface(s).map(|b| block_types = b));
+            if let Some(l) = element.tags().get("lane_markings") {
+                lanes = (l != "no") as i32;
+            }
+            if let Some(w) = element
+                .tags()
+                .get("width")
+                .and_then(|w| w.parse::<f32>().ok())
+            {
+                width = w;
             }
 
             let ProcessedElement::Way(way) = element else {
@@ -311,7 +257,7 @@ fn generate_highways_internal(
             };
 
             if scale_factor < 1.0 {
-                block_range = ((block_range as f64) * scale_factor).floor() as i32;
+                width *= scale_factor as f32;
             }
 
             // Calculate elevation based on layer
@@ -458,6 +404,7 @@ fn generate_highways_internal(
                         };
 
                         // Draw the road surface for the entire width
+                        let block_range: i32 = (width / 2.).round() as i32;
                         for dx in -block_range..=block_range {
                             for dz in -block_range..=block_range {
                                 let set_x: i32 = x + dx;
@@ -466,128 +413,47 @@ fn generate_highways_internal(
                                 // Zebra crossing logic
                                 if is_zebra_crossing {
                                     let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
-                                    if is_horizontal {
-                                        if set_x % 2 < 1 {
-                                            if use_absolute_y {
-                                                editor.set_block_absolute(
-                                                    WHITE_CONCRETE,
-                                                    set_x,
-                                                    current_y,
-                                                    set_z,
-                                                    Some(&[
-                                                        BLACK_CONCRETE,
-                                                        GRAY_CONCRETE_POWDER,
-                                                        CYAN_TERRACOTTA,
-                                                    ]),
-                                                    None,
-                                                );
-                                            } else {
-                                                editor.set_block(
-                                                    WHITE_CONCRETE,
-                                                    set_x,
-                                                    current_y,
-                                                    set_z,
-                                                    Some(&[
-                                                        BLACK_CONCRETE,
-                                                        GRAY_CONCRETE_POWDER,
-                                                        CYAN_TERRACOTTA,
-                                                    ]),
-                                                    None,
-                                                );
-                                            }
-                                        } else if use_absolute_y {
-                                            editor.set_block_absolute(
-                                                road_block(set_x, set_z),
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                None,
-                                                None,
-                                            );
-                                        } else {
-                                            editor.set_block(
-                                                road_block(set_x, set_z),
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                None,
-                                                None,
-                                            );
-                                        }
-                                    } else if set_z % 2 < 1 {
-                                        if use_absolute_y {
-                                            editor.set_block_absolute(
-                                                WHITE_CONCRETE,
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
-                                                None,
-                                            );
-                                        } else {
-                                            editor.set_block(
-                                                WHITE_CONCRETE,
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
-                                                None,
-                                            );
-                                        }
-                                    } else if use_absolute_y {
-                                        editor.set_block_absolute(
-                                            road_block(set_x, set_z),
+                                    if (is_horizontal && set_x % 2 < 1)
+                                        || (!is_horizontal && set_z % 2 < 1)
+                                    {
+                                        editor.set_block_flag_absolute(
+                                            WHITE_CONCRETE,
                                             set_x,
                                             current_y,
                                             set_z,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                GRAY_CONCRETE_POWDER,
+                                                CYAN_TERRACOTTA,
+                                            ]),
                                             None,
-                                            None,
+                                            use_absolute_y,
                                         );
                                     } else {
-                                        editor.set_block(
-                                            road_block(set_x, set_z),
+                                        editor.set_block_flag_absolute(
+                                            BLACK_CONCRETE,
                                             set_x,
                                             current_y,
                                             set_z,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                GRAY_CONCRETE_POWDER,
+                                                CYAN_TERRACOTTA,
+                                            ]),
                                             None,
-                                            None,
+                                            use_absolute_y,
                                         );
                                     }
                                 } else {
-                                    let effective_block = if use_road_mix {
-                                        road_block(set_x, set_z)
-                                    } else {
-                                        block_type
-                                    };
-                                    if use_absolute_y {
-                                        editor.set_block_absolute(
-                                            effective_block,
-                                            set_x,
-                                            current_y,
-                                            set_z,
-                                            None,
-                                            Some(&[
-                                                BLACK_CONCRETE,
-                                                GRAY_CONCRETE_POWDER,
-                                                CYAN_TERRACOTTA,
-                                                WHITE_CONCRETE,
-                                            ]),
-                                        );
-                                    } else {
-                                        editor.set_block(
-                                            effective_block,
-                                            set_x,
-                                            current_y,
-                                            set_z,
-                                            None,
-                                            Some(&[
-                                                BLACK_CONCRETE,
-                                                GRAY_CONCRETE_POWDER,
-                                                CYAN_TERRACOTTA,
-                                                WHITE_CONCRETE,
-                                            ]),
-                                        );
-                                    }
+                                    editor.set_block_flag_absolute(
+                                        semirandom_surface(set_x, set_z, block_types),
+                                        set_x,
+                                        current_y,
+                                        set_z,
+                                        None,
+                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                                        use_absolute_y,
+                                    );
                                 }
 
                                 // Add stone brick foundation underneath elevated highways/bridges for thickness
@@ -644,77 +510,82 @@ fn generate_highways_internal(
                         // Add light gray concrete outline for multi-lane roads
                         if add_outline {
                             // Left outline
-                            for dz in -block_range..=block_range {
-                                let outline_x = x - block_range - 1;
-                                let outline_z = z + dz;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                } else {
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                }
-                            }
-                            // Right outline
-                            for dz in -block_range..=block_range {
-                                let outline_x = x + block_range + 1;
-                                let outline_z = z + dz;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                } else {
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                }
+                            for d in -block_range..=block_range {
+                                let outline_x_left = x - block_range;
+                                let outline_x_right = x + block_range;
+                                let outline_z_left = z - block_range;
+                                let outline_z_right = z + block_range;
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    outline_x_left,
+                                    current_y,
+                                    z + d,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    outline_x_right,
+                                    current_y,
+                                    z + d,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    x + d,
+                                    current_y,
+                                    outline_z_left,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    x + d,
+                                    current_y,
+                                    outline_z_right,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
                             }
                         }
 
                         // Add a dashed white line in the middle for larger roads
-                        if add_stripe {
+                        if lanes > 0 && point_index > 0 {
                             if stripe_length < dash_length {
-                                let stripe_x: i32 = *x;
-                                let stripe_z: i32 = *z;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        WHITE_CONCRETE,
-                                        stripe_x,
-                                        current_y,
-                                        stripe_z,
-                                        Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
-                                        None,
+                                let dx = (x - bresenham_points[point_index - 1].0) as f32;
+                                let dz = (z - bresenham_points[point_index - 1].2) as f32;
+                                let len = (dx * dx + dz * dz).sqrt();
+
+                                let left_x = *x as f32 - dz / len * width / 2.;
+                                let left_z = *z as f32 + dx / len * width / 2.;
+                                let right_x = *x as f32 + dz / len * width / 2.;
+                                let right_z = *z as f32 - dx / len * width / 2.;
+                                let lane_width = width / lanes as f32;
+                                for s in 1..lanes {
+                                    let (stripe_x, stripe_z) = offset_point_towards(
+                                        left_x,
+                                        left_z,
+                                        right_x,
+                                        right_z,
+                                        s as f32 * lane_width,
                                     );
-                                } else {
-                                    editor.set_block(
+                                    editor.set_block_flag_absolute(
                                         WHITE_CONCRETE,
-                                        stripe_x,
+                                        stripe_x as i32,
                                         current_y,
-                                        stripe_z,
-                                        Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                        stripe_z as i32,
+                                        Some(&[
+                                            BLACK_CONCRETE,
+                                            GRAY_CONCRETE_POWDER,
+                                            CYAN_TERRACOTTA,
+                                        ]),
                                         None,
+                                        use_absolute_y,
                                     );
                                 }
                             }
@@ -733,6 +604,16 @@ fn generate_highways_internal(
             }
         }
     }
+}
+
+fn offset_point_towards(x1: f32, y1: f32, x2: f32, y2: f32, l: f32) -> (f32, f32) {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist == 0.0 {
+        return (x1, y1);
+    }
+    (x1 + dx / dist * l, y1 + dy / dist * l)
 }
 
 /// Helper function to determine if a slope should be added at a specific node

@@ -1,5 +1,8 @@
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::surfaces::get_blocks_for_surface_way;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
@@ -43,8 +46,24 @@ pub fn generate_railways(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     subway_points: &mut Vec<(i32, i32)>,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
 ) {
     if let Some(railway_type) = element.tags.get("railway") {
+        if railway_type == "platform" {
+            for (x, z) in flood_fill_cache.get_or_compute(element, args.timeout.as_ref()) {
+                editor.set_block(
+                    get_blocks_for_surface_way(element, vec![POLISHED_ANDESITE])[0],
+                    x,
+                    1,
+                    z,
+                    None,
+                    None,
+                )
+            }
+            return;
+        }
+
         // Subway lines get their own two-phase generation pipeline.
         let is_subway = railway_type == "subway"
             || element

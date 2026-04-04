@@ -734,34 +734,14 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
     ) {
-        // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
-        }
-
-        // Calculate the absolute Y coordinate based on ground level
-        let absolute_y = self.get_absolute_y(x, y, z);
-
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            // Check against whitelist and blacklist
-            if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-            } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-            } else {
-                false
-            }
-        } else {
-            true
-        };
-
-        if should_insert {
-            self.world.set_block(x, absolute_y, z, block);
-        }
+        self.set_block_absolute(
+            block,
+            x,
+            self.get_absolute_y(x, y, z),
+            z,
+            override_whitelist,
+            override_blacklist,
+        );
     }
 
     /// Sets a block of the specified type at the given coordinates with absolute Y value.
@@ -775,30 +755,35 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
     ) {
-        // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
-        }
+        self.set_block_with_properties_absolute(
+            BlockWithProperties {
+                block,
+                properties: None,
+            },
+            x,
+            absolute_y,
+            z,
+            override_whitelist,
+            override_blacklist,
+        )
+    }
 
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            // Check against whitelist and blacklist
-            if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-            } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-            } else {
-                false
-            }
+    /// Sets a block using set_block_absolute or set_block depending on a flag.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_block_flag_absolute(
+        &mut self,
+        block: Block,
+        x: i32,
+        y: i32,
+        z: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+        is_absolute: bool,
+    ) {
+        if is_absolute {
+            self.set_block_absolute(block, x, y, z, override_whitelist, override_blacklist);
         } else {
-            true
-        };
-
-        if should_insert {
-            self.world.set_block(x, absolute_y, z, block);
+            self.set_block(block, x, y, z, override_whitelist, override_blacklist)
         }
     }
 
