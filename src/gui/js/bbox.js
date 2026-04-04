@@ -691,6 +691,12 @@ $(document).ready(function () {
 
     // Enable the preview button when data is available
     function enableWorldPreview(data) {
+        // Skip world preview when rotation is active — the preview image covers
+        // the expanded post-rotation MC bbox but the geo bounds are pre-rotation,
+        // so the image would be squeezed incorrectly onto the map.
+        if (Math.abs(window._rotationAngle || 0) >= 0.001) {
+            return;
+        }
         worldOverlayData = data;
         worldPreviewAvailable = true;
         var btn = document.getElementById('world-preview-btn');
@@ -976,6 +982,10 @@ $(document).ready(function () {
             var angle = event.data.angle || 0;
             window._rotationAngle = angle;
             updateRotationMask(angle);
+            // Clear the world preview since it won't align at a different angle
+            if (worldOverlayEnabled) {
+                disableWorldPreview();
+            }
         }
 
     });
