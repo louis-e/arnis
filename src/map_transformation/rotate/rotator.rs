@@ -184,6 +184,19 @@ fn rotate_point(x: f64, z: f64, cx: f64, cz: f64, sin_r: f64, cos_r: f64) -> (f6
     (rx, rz)
 }
 
+/// Rotate a single integer (x, z) point by `angle_degrees` around the center of `xzbbox`.
+/// Used by CLI and GUI to rotate spawn points to match the rotated world.
+pub fn rotate_xz_point(x: i32, z: i32, angle_degrees: f64, xzbbox: &XZBBox) -> (i32, i32) {
+    if angle_degrees.abs() < f64::EPSILON {
+        return (x, z);
+    }
+    let rad = angle_degrees.to_radians();
+    let cx = (xzbbox.min_x() + xzbbox.max_x()) as f64 / 2.0;
+    let cz = (xzbbox.min_z() + xzbbox.max_z()) as f64 / 2.0;
+    let (rx, rz) = rotate_point(x as f64, z as f64, cx, cz, rad.sin(), rad.cos());
+    (rx.round() as i32, rz.round() as i32)
+}
+
 /// Rotate elevation grid and land-cover data, applying Laplacian smoothing to
 /// reduce jagged edges from coordinate discretization during rotation.
 #[allow(clippy::too_many_arguments)]
