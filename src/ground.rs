@@ -217,6 +217,23 @@ impl Ground {
         }
     }
 
+    /// Replace the land-cover grids with new rotated/transformed data.
+    /// Used by the rotation operator to keep land cover aligned with elevation.
+    pub fn set_land_cover_data(
+        &mut self,
+        grid: Vec<Vec<u8>>,
+        water_distance: Vec<Vec<u8>>,
+        width: usize,
+        height: usize,
+    ) {
+        if let Some(ref mut lc) = self.land_cover {
+            lc.grid = grid;
+            lc.water_distance = water_distance;
+            lc.width = width;
+            lc.height = height;
+        }
+    }
+
     /// Store rotation parameters so we can mask out-of-bounds blocks later.
     pub fn set_rotation_mask(&mut self, mask: RotationMask) {
         self.rotation_mask = Some(mask);

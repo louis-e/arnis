@@ -995,8 +995,13 @@ $(document).ready(function () {
                         el.style.transformOrigin = '';
                         el.style.transform = '';
                     } else {
-                        var center = map.latLngToLayerPoint(layer.getBounds().getCenter());
-                        el.style.transformOrigin = center.x + 'px ' + center.y + 'px';
+                        // Use containerPoint so the rotation center stays stable across zoom/pan
+                        var center = map.latLngToContainerPoint(layer.getBounds().getCenter());
+                        var pane = map.getPane('overlayPane');
+                        var panePos = L.DomUtil.getPosition(pane) || L.point(0, 0);
+                        var ox = center.x - panePos.x;
+                        var oy = center.y - panePos.y;
+                        el.style.transformOrigin = ox + 'px ' + oy + 'px';
                         el.style.transform = 'rotate(' + (-angle) + 'deg)';
                     }
                 }

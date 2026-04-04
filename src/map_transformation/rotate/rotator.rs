@@ -59,11 +59,13 @@ pub fn rotate_world(
     let cx = (xzbbox.min_x() + xzbbox.max_x()) as f64 / 2.0;
     let cz = (xzbbox.min_z() + xzbbox.max_z()) as f64 / 2.0;
 
-    // Store the original bbox extents for the rotation mask
+    // Store the original bbox extents for the rotation mask and elevation sampling
     let orig_min_x = xzbbox.min_x();
     let orig_max_x = xzbbox.max_x();
     let orig_min_z = xzbbox.min_z();
     let orig_max_z = xzbbox.max_z();
+    let orig_width = (orig_max_x - orig_min_x + 1) as usize;
+    let orig_height = (orig_max_z - orig_min_z + 1) as usize;
 
     // --- 1. Compute new axis-aligned bounding box after rotation ---
     let corners = [
@@ -142,8 +144,19 @@ pub fn rotate_world(
         }
     }
 
-    // --- 3. Rotate elevation data ---
-    rotate_elevation(ground, xzbbox, cx, cz, sin_r, cos_r);
+    // --- 3. Rotate elevation and land-cover data ---
+    rotate_ground_data(
+        ground,
+        xzbbox,
+        orig_min_x,
+        orig_min_z,
+        orig_width,
+        orig_height,
+        cx,
+        cz,
+        sin_r,
+        cos_r,
+    );
 
     // --- 4. Set rotation mask so ground generation skips out-of-bounds blocks ---
     ground.set_rotation_mask(RotationMask {
@@ -171,34 +184,47 @@ fn rotate_point(x: f64, z: f64, cx: f64, cz: f64, sin_r: f64, cos_r: f64) -> (f6
     (rx, rz)
 }
 
-/// Rotate elevation grid and apply Laplacian smoothing to fix jagged edges.
-fn rotate_elevation(
+/// Rotate elevation grid and land-cover data, applying Laplacian smoothing to
+/// reduce jagged edges from coordinate discretization during rotation.
+#[allow(clippy::too_many_arguments)]
+fn rotate_ground_data(
     ground: &mut Ground,
     xzbbox: &XZBBox,
+    orig_min_x: i32,
+    orig_min_z: i32,
+    orig_width: usize,
+    orig_height: usize,
     cx: f64,
     cz: f64,
     sin_r: f64,
     cos_r: f64,
 ) {
-    // We need to clone the ground to sample from the original during rotation
-    let original_ground = ground.clone();
-
-    if !original_ground.elevation_enabled {
+    // Check elevation_enabled BEFORE cloning to avoid unnecessary allocation
+    if !ground.elevation_enabled {
         return;
     }
+
+    let original_ground = ground.clone();
 
     let new_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
     let new_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
 
     // For each cell in the new grid, inverse-rotate to find the source cell
-    // and sample from the original ground
     let neg_sin_r = -sin_r; // Inverse rotation
     let mut new_heights: Vec<Vec<i32>> = Vec::with_capacity(new_h);
     let mut has_data: Vec<Vec<bool>> = Vec::with_capacity(new_h);
 
+    // Also rotate land-cover grids if present
+    let has_land_cover = original_ground.has_land_cover();
+    let mut new_cover: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
+    let mut new_water: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
+
     for z_idx in 0..new_h {
-        let mut row = Vec::with_capacity(new_w);
+        let mut height_row = Vec::with_capacity(new_w);
         let mut data_row = Vec::with_capacity(new_w);
+        let mut cover_row: Option<Vec<u8>> = has_land_cover.then(|| Vec::with_capacity(new_w));
+        let mut water_row: Option<Vec<u8>> = has_land_cover.then(|| Vec::with_capacity(new_w));
+
         for x_idx in 0..new_w {
             let world_x = xzbbox.min_x() + x_idx as i32;
             let world_z = xzbbox.min_z() + z_idx as i32;
@@ -207,18 +233,36 @@ fn rotate_elevation(
             let (orig_x, orig_z) =
                 rotate_point(world_x as f64, world_z as f64, cx, cz, neg_sin_r, cos_r);
 
-            // Sample from original ground using relative coordinates
-            let coord = XZPoint::new(orig_x.round() as i32, orig_z.round() as i32);
-            let level = original_ground.level(coord);
+            // Convert to coordinates relative to the original bbox origin,
+            // which is what Ground::level / cover_class / water_distance expect
+            let rel_x = orig_x.round() as i32 - orig_min_x;
+            let rel_z = orig_z.round() as i32 - orig_min_z;
 
-            // Check if this point was within the original data bounds
-            let in_original = original_ground.elevation_enabled && coord.x >= 0 && coord.z >= 0;
+            // Full bounds check: both lower AND upper against original grid dimensions
+            let in_original = rel_x >= 0
+                && rel_z >= 0
+                && (rel_x as usize) < orig_width
+                && (rel_z as usize) < orig_height;
 
-            row.push(level);
+            let coord = XZPoint::new(rel_x, rel_z);
+            height_row.push(original_ground.level(coord));
             data_row.push(in_original);
+
+            if let Some(ref mut cr) = cover_row {
+                cr.push(original_ground.cover_class(coord));
+            }
+            if let Some(ref mut wr) = water_row {
+                wr.push(original_ground.water_distance(coord));
+            }
         }
-        new_heights.push(row);
+        new_heights.push(height_row);
         has_data.push(data_row);
+        if let Some(ref mut cg) = new_cover {
+            cg.push(cover_row.unwrap());
+        }
+        if let Some(ref mut wd) = new_water {
+            wd.push(water_row.unwrap());
+        }
     }
 
     // Apply Laplacian smoothing (3 iterations) to reduce jagged edges
@@ -231,8 +275,6 @@ fn rotate_elevation(
                 if !has_data[z_idx][x_idx] {
                     continue; // Don't smooth padding areas
                 }
-                // Only smooth cells that border a "rotated edge" (where
-                // neighbors might have different data status)
                 let neighbors_sum = prev[z_idx - 1][x_idx] as f64
                     + prev[z_idx + 1][x_idx] as f64
                     + prev[z_idx][x_idx - 1] as f64
@@ -247,6 +289,11 @@ fn rotate_elevation(
 
     // Update ground with rotated elevation
     ground.set_elevation_data(new_heights, new_w, new_h);
+
+    // Update land cover with rotated data
+    if let (Some(cover_grid), Some(water_dist)) = (new_cover, new_water) {
+        ground.set_land_cover_data(cover_grid, water_dist, new_w, new_h);
+    }
 }
 
 #[cfg(test)]

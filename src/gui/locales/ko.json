@@ -42,5 +42,6 @@
   "fillground": "지면 채우기",
   "land_cover": "토지 피복",
   "bedrock_auto_generated": "Bedrock 월드는 자동 생성됩니다",
-  "save_path": "저장 경로"
+  "save_path": "저장 경로",
+  "rotation_angle": "회전 각도"
 }

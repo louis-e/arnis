@@ -52,7 +52,7 @@ tauri-plugin-shell = { version = "2", optional = true }
 tokio = { version = "1.48.0", features = ["full"], optional = true }
 bedrockrs_level = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", rev = "7ef268b", package = "bedrockrs_level", optional = true }
 bedrockrs_shared = { git = "https://github.com/bedrock-crustaceans/bedrock-rs", rev = "7ef268b", package = "bedrockrs_shared", optional = true }
-nbtx = { git = "https://github.com/bedrock-crustaceans/nbtx", rev = "551c38a", optional = true }
+nbtx = { git = "https://github.com/bedrock-crustaceans/nbtx", optional = true }
 vek = { version = "0.17", optional = true }
 zip = { version = "0.6", default-features = false, features = ["deflate"], optional = true }
 rusty-leveldb = { version = "3", optional = true }

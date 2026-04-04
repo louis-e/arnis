@@ -42,5 +42,6 @@
   "fillground": "Talaj feltöltése",
   "land_cover": "Felszínborítás",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
-  "save_path": "Mentési útvonal"
+  "save_path": "Mentési útvonal",
+  "rotation_angle": "Forgatási Szög"
 }

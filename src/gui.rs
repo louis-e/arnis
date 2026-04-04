@@ -762,6 +762,21 @@ fn gui_start_generation(
             calculate_default_spawn(&xzbbox)
         };
 
+        // Rotate spawn point to match the rotated world
+        let (spawn_x, spawn_z) = if rotation_angle.abs() > f64::EPSILON {
+            let rad = rotation_angle.clamp(-90.0, 90.0).to_radians();
+            let cx = (xzbbox.min_x() + xzbbox.max_x()) as f64 / 2.0;
+            let cz = (xzbbox.min_z() + xzbbox.max_z()) as f64 / 2.0;
+            let dx = spawn_x as f64 - cx;
+            let dz = spawn_z as f64 - cz;
+            (
+                (dx * rad.cos() + dz * rad.sin() + cx).round() as i32,
+                (-dx * rad.sin() + dz * rad.cos() + cz).round() as i32,
+            )
+        } else {
+            (spawn_x, spawn_z)
+        };
+
         set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
             .map_err(|e| format!("Failed to set spawn point: {e}"))?;
     }
@@ -849,26 +864,52 @@ fn gui_start_generation(
 
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
             // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
-            let mc_spawn_point: Option<(i32, i32)> = if let Some((lat, lng)) = spawn_point {
-                if let Ok(llpoint) = LLPoint::new(lat, lng) {
-                    if let Ok((transformer, _)) =
-                        CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
-                    {
-                        let xzpoint = transformer.transform_point(llpoint);
-                        Some((xzpoint.x, xzpoint.z))
+            let mc_spawn_point: Option<(i32, i32)> = {
+                let raw = if let Some((lat, lng)) = spawn_point {
+                    if let Ok(llpoint) = LLPoint::new(lat, lng) {
+                        if let Ok((transformer, _)) =
+                            CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+                        {
+                            let xzpoint = transformer.transform_point(llpoint);
+                            Some((xzpoint.x, xzpoint.z))
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
                 } else {
-                    None
-                }
-            } else {
-                // Default spawn point: X=1, Z=1 relative to world origin
-                if let Ok((_, xzbbox)) = CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
-                    Some(calculate_default_spawn(&xzbbox))
-                } else {
-                    None
-                }
+                    // Default spawn point: X=1, Z=1 relative to world origin
+                    if let Ok((_, xzbbox)) = CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+                    {
+                        Some(calculate_default_spawn(&xzbbox))
+                    } else {
+                        None
+                    }
+                };
+
+                // Rotate spawn point to match the rotated world
+                raw.map(|(sx, sz)| {
+                    if rotation_angle.abs() > f64::EPSILON {
+                        if let Ok((_, xzbbox)) =
+                            CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+                        {
+                            let rad = rotation_angle.clamp(-90.0, 90.0).to_radians();
+                            let cx = (xzbbox.min_x() + xzbbox.max_x()) as f64 / 2.0;
+                            let cz = (xzbbox.min_z() + xzbbox.max_z()) as f64 / 2.0;
+                            let dx = sx as f64 - cx;
+                            let dz = sz as f64 - cz;
+                            (
+                                (dx * rad.cos() + dz * rad.sin() + cx).round() as i32,
+                                (-dx * rad.sin() + dz * rad.cos() + cz).round() as i32,
+                            )
+                        } else {
+                            (sx, sz)
+                        }
+                    } else {
+                        (sx, sz)
+                    }
+                })
             };
 
             // Create generation options

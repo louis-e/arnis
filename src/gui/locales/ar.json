@@ -42,5 +42,6 @@
   "fillground": "ملء الأرض",
   "land_cover": "تصنيف الأرض",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
-  "save_path": "مسار الحفظ"
+  "save_path": "مسار الحفظ",
+  "rotation_angle": "زاوية الدوران"
 }

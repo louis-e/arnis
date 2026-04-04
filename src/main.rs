@@ -217,7 +217,20 @@ fn run_cli() {
                 });
 
             let xzpoint = transformer.transform_point(llpoint);
-            Some((xzpoint.x, xzpoint.z))
+            let (mut sx, mut sz) = (xzpoint.x, xzpoint.z);
+
+            // Rotate spawn point to match the rotated world
+            if args.rotation.abs() > f64::EPSILON {
+                let rad = args.rotation.to_radians();
+                let cx = (xzbbox.min_x() + xzbbox.max_x()) as f64 / 2.0;
+                let cz = (xzbbox.min_z() + xzbbox.max_z()) as f64 / 2.0;
+                let dx = sx as f64 - cx;
+                let dz = sz as f64 - cz;
+                sx = (dx * rad.cos() + dz * rad.sin() + cx).round() as i32;
+                sz = (-dx * rad.sin() + dz * rad.cos() + cz).round() as i32;
+            }
+
+            Some((sx, sz))
         }
         _ => None,
     };
