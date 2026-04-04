@@ -995,12 +995,10 @@ $(document).ready(function () {
                         el.style.transformOrigin = '';
                         el.style.transform = '';
                     } else {
-                        // Use containerPoint so the rotation center stays stable across zoom/pan
-                        var center = map.latLngToContainerPoint(layer.getBounds().getCenter());
-                        var pane = map.getPane('overlayPane');
-                        var panePos = L.DomUtil.getPosition(pane) || L.point(0, 0);
-                        var ox = center.x - panePos.x;
-                        var oy = center.y - panePos.y;
+                        // Use the SVG element's own bounding box for a zoom/pan-stable center
+                        var bbox = el.getBBox();
+                        var ox = bbox.x + bbox.width / 2;
+                        var oy = bbox.y + bbox.height / 2;
                         el.style.transformOrigin = ox + 'px ' + oy + 'px';
                         el.style.transform = 'rotate(' + (-angle) + 'deg)';
                     }
