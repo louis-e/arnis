@@ -665,6 +665,7 @@ $(document).ready(function () {
                 zIndex: 500
             });
             worldOverlay.addTo(map);
+            applyWorldOverlayRotation();
 
             if (btn) {
                 btn.classList.add('active');
@@ -746,6 +747,20 @@ $(document).ready(function () {
         var btn = document.getElementById('world-preview-btn');
         if (btn) {
             btn.classList.remove('editing-mode');
+        }
+    }
+
+    // Rotate the world preview image to match the current rotation angle
+    function applyWorldOverlayRotation() {
+        if (!worldOverlay) return;
+        var el = worldOverlay.getElement ? worldOverlay.getElement() : null;
+        if (!el) return;
+        var angle = window._rotationAngle || 0;
+        if (Math.abs(angle) < 0.001) {
+            el.style.transform = '';
+        } else {
+            el.style.transformOrigin = '50% 50%';
+            el.style.transform = 'rotate(' + (-angle) + 'deg)';
         }
     }
 
@@ -970,42 +985,15 @@ $(document).ready(function () {
             disableWorldPreview();
         }
 
-        // Handle rotation preview: rotate the drawn rectangle on the map
+        // Handle rotation preview: update the diamond mask overlay
         if (event.data && event.data.type === 'rotatePreview') {
             var angle = event.data.angle || 0;
-            // Store the current rotation angle for reapplication on zoom/pan
             window._rotationAngle = angle;
-            applyRotationToRectangles(angle);
+            updateRotationMask(angle);
+            applyWorldOverlayRotation();
         }
-    });
 
-    // Reapply rotation when the map zooms or moves (layer point coordinates change)
-    map.on('zoomanim zoomend moveend', function() {
-        if (window._rotationAngle) {
-            applyRotationToRectangles(window._rotationAngle);
-        }
     });
-
-    function applyRotationToRectangles(angle) {
-        drawnItems.eachLayer(function(layer) {
-            if (layer instanceof L.Rectangle) {
-                var el = layer.getElement ? layer.getElement() : (layer._path || null);
-                if (el) {
-                    if (Math.abs(angle) < 0.001) {
-                        el.style.transformOrigin = '';
-                        el.style.transform = '';
-                    } else {
-                        // Use the SVG element's own bounding box for a zoom/pan-stable center
-                        var bbox = el.getBBox();
-                        var ox = bbox.x + bbox.width / 2;
-                        var oy = bbox.y + bbox.height / 2;
-                        el.style.transformOrigin = ox + 'px ' + oy + 'px';
-                        el.style.transform = 'rotate(' + (-angle) + 'deg)';
-                    }
-                }
-            }
-        });
-    }
 
     // Set the dropdown value in parent window if it exists
     if (window.parent && window.parent.document) {
@@ -1318,6 +1306,110 @@ $(document).ready(function () {
 
     $("input").click(function (e) {
         display();
+    });
+
+    // --- Rotation dead-zone mask ---
+    // Draws a semi-transparent overlay on the bbox corners that won't have
+    // Minecraft content when a rotation angle is applied.
+    window._rotationMaskLayer = null;
+    window._rotationAngle = 0;
+
+    function updateRotationMask(angle) {
+        // Remove previous mask
+        if (window._rotationMaskLayer) {
+            map.removeLayer(window._rotationMaskLayer);
+            window._rotationMaskLayer = null;
+        }
+
+        if (Math.abs(angle) < 0.001) return;
+
+        // Find the drawn rectangle
+        var rect = null;
+        drawnItems.eachLayer(function(layer) {
+            if (layer instanceof L.Rectangle) rect = layer;
+        });
+        if (!rect) return;
+
+        var bnds = rect.getBounds();
+        var center = bnds.getCenter();
+        var ne = bnds.getNorthEast();
+        var sw = bnds.getSouthWest();
+
+        // Half-dimensions of the bbox in degrees (lng = W, lat = H)
+        var halfW = (ne.lng - sw.lng) / 2;
+        var halfH = (ne.lat - sw.lat) / 2;
+
+        // Negate angle so the diamond matches the visual tile rotation direction
+        var rad = -angle * Math.PI / 180;
+        var cosR = Math.cos(rad);
+        var sinR = Math.sin(rad);
+
+        // Expanded bbox half-dims (bounding box of the rotated rectangle)
+        var expW = Math.abs(halfW * cosR) + Math.abs(halfH * sinR);
+        var expH = Math.abs(halfW * sinR) + Math.abs(halfH * cosR);
+
+        // The four corners of the original bbox, rotated by angle θ.
+        // These form the content diamond in the expanded Minecraft bbox.
+        var rotCorners = [
+            {dlng:  halfW*cosR - halfH*sinR, dlat:  halfW*sinR + halfH*cosR},
+            {dlng:  halfW*cosR + halfH*sinR, dlat:  halfW*sinR - halfH*cosR},
+            {dlng: -halfW*cosR + halfH*sinR, dlat: -halfW*sinR - halfH*cosR},
+            {dlng: -halfW*cosR - halfH*sinR, dlat: -halfW*sinR + halfH*cosR}
+        ];
+
+        // Identify which rotated corner has the extreme dlat/dlng
+        // (i.e. which corner projects onto which bbox edge)
+        var topC = rotCorners[0], rightC = rotCorners[0];
+        for (var i = 1; i < 4; i++) {
+            if (rotCorners[i].dlat > topC.dlat) topC = rotCorners[i];
+            if (rotCorners[i].dlng > rightC.dlng) rightC = rotCorners[i];
+        }
+
+        // Project each extreme vertex radially onto the original bbox edge.
+        // Top vertex (max dlat = expH) → scale to dlat = halfH:
+        //   scaling factor = halfH / expH
+        // Right vertex (max dlng = expW) → scale to dlng = halfW:
+        //   scaling factor = halfW / expW
+        var topLng   = topC.dlng * halfH / expH;
+        var rightLat = rightC.dlat * halfW / expW;
+
+        // Clamp for extreme aspect-ratio / angle combinations
+        topLng   = Math.max(-halfW, Math.min(halfW, topLng));
+        rightLat = Math.max(-halfH, Math.min(halfH, rightLat));
+
+        // Diamond with one vertex on each bbox edge (symmetric about center)
+        var inner = [
+            L.latLng(center.lat + halfH,    center.lng + topLng),     // top edge
+            L.latLng(center.lat + rightLat,  center.lng + halfW),      // right edge
+            L.latLng(center.lat - halfH,     center.lng - topLng),     // bottom edge
+            L.latLng(center.lat - rightLat,  center.lng - halfW)       // left edge
+        ];
+
+        // Outer ring: original bbox
+        var nw = L.latLng(ne.lat, sw.lng);
+        var se = L.latLng(sw.lat, ne.lng);
+        var outer = [nw, ne, se, sw];
+
+        window._rotationMaskLayer = L.polygon([outer, inner], {
+            color: 'transparent',
+            fillColor: '#000',
+            fillOpacity: 0.35,
+            interactive: false,
+            pane: 'overlayPane'
+        }).addTo(map);
+    }
+
+    // Re-apply mask when the bbox is redrawn or edited
+    map.on('draw:created draw:edited', function() {
+        if (window._rotationAngle) {
+            updateRotationMask(window._rotationAngle);
+        }
+    });
+    map.on('draw:deleted', function() {
+        if (window._rotationMaskLayer) {
+            map.removeLayer(window._rotationMaskLayer);
+            window._rotationMaskLayer = null;
+        }
     });
 
 });

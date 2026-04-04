@@ -301,7 +301,7 @@ function initSettings() {
     val = Math.min(Math.max(val, -90), 90);
     rotationInput.value = val.toFixed(2);
     rotationSlider.value = val;
-    // Rotate the map rectangle preview in the iframe
+    // Tell the map iframe to update the rotation mask overlay
     const mapFrame = document.querySelector('.map-container');
     if (mapFrame && mapFrame.contentWindow) {
       mapFrame.contentWindow.postMessage({
