@@ -1068,14 +1068,11 @@ $(document).ready(function () {
     });
     map.addControl(drawControl);
 
-    // Add hint overlay at bottom of map when no bbox is selected
-    var hintOverlay = L.control({ position: 'bottomleft' });
-    hintOverlay.onAdd = function() {
-        var div = L.DomUtil.create('div', 'bbox-hint-overlay');
-        div.innerHTML = 'Select a preset, or use the <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; opacity: 0.85;"><rect x="3" y="3" width="18" height="18"></rect></svg> tool to draw a custom area';
-        return div;
-    };
-    hintOverlay.addTo(map);
+    // Add hint overlay at bottom-center of map when no bbox is selected
+    var hintDiv = document.createElement('div');
+    hintDiv.className = 'bbox-hint-overlay';
+    hintDiv.innerHTML = 'Use the <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; opacity: 0.85;"><rect x="3" y="3" width="18" height="18"></rect></svg> tool to draw a custom area';
+    map.getContainer().appendChild(hintDiv);
 
     // Add world preview button to the edit toolbar after drawControl is added
     addWorldPreviewToEditToolbar();
