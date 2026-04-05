@@ -20,6 +20,7 @@ mod land_cover;
 mod map_renderer;
 mod map_transformation;
 mod osm_parser;
+mod overture;
 #[cfg(feature = "gui")]
 mod progress;
 mod retrieve_data;
@@ -159,6 +160,27 @@ fn run_cli() {
     // Parse raw data
     let (mut parsed_elements, mut xzbbox) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+
+    // Fetch supplementary building data from Overture Maps (if enabled)
+    if !args.no_overture {
+        println!("{} Fetching Overture Maps data...", "  [+]".bold());
+        let overture_elements =
+            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+        if !overture_elements.is_empty() {
+            let before_count = parsed_elements.len();
+            let unique_overture =
+                overture::deduplicate_against_osm(overture_elements, &parsed_elements);
+            parsed_elements.extend(unique_overture);
+            let added = parsed_elements.len() - before_count;
+            println!(
+                "  Added {} buildings from Overture Maps",
+                added.to_string().bright_white().bold()
+            );
+        } else {
+            println!("  No additional buildings from Overture Maps for this area");
+        }
+    }
+
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
 
