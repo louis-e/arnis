@@ -20,7 +20,6 @@ use parquet::file::serialized_reader::SerializedFileReader;
 use parquet::record::Row;
 use reqwest::blocking::Client;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::time::Duration;
 
 // ─── Constants ────────────────────────────────────────────────────────────
@@ -1231,13 +1230,23 @@ fn overture_class_to_osm_building<'a>(subtype: Option<&'a str>, class: Option<&'
 
 /// Hash a GERS UUID string to a u64 with the high bit set.
 ///
-/// This guarantees no collision with OSM IDs (which are sequential positive u64
-/// currently up to ~12 billion, well under 2^34). Setting bit 63 puts our
-/// IDs in a completely separate range.
+/// Uses FNV-1a (not `DefaultHasher`) so that IDs are deterministic across
+/// Rust compiler versions — `DefaultHasher`'s algorithm is explicitly not
+/// a stable API contract.
+///
+/// Setting bit 63 guarantees no collision with OSM IDs (which are sequential
+/// positive u64 currently up to ~12 billion, well under 2^34).
 fn gers_id_to_u64(gers_id: &str) -> u64 {
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    gers_id.hash(&mut hasher);
-    hasher.finish() | OVERTURE_ID_HIGH_BIT
+    // FNV-1a parameters for u64
+    const FNV_OFFSET: u64 = 0xcbf29ce484222325;
+    const FNV_PRIME: u64 = 0x100000001b3;
+
+    let mut hash = FNV_OFFSET;
+    for byte in gers_id.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash | OVERTURE_ID_HIGH_BIT
 }
 
 // ─── Sparse byte reader for row-group-only downloads ─────────────────────
@@ -1340,6 +1349,9 @@ fn fetch_range(
     start: u64,
     length: u64,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    if length == 0 {
+        return Err("fetch_range called with length 0".into());
+    }
     let end = start + length - 1;
     let response = client
         .get(url)
