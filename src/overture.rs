@@ -191,7 +191,7 @@ fn fetch_overture_buildings_inner(
         .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
-    emit_gui_progress_update(4.0, "Fetching Overture Maps data...");
+    emit_gui_progress_update(14.5, "Fetching Overture Maps data...");
 
     // List partition files whose geographic bounds overlap our bbox
     // (single ~230 KB STAC download instead of 512 HTTP requests)
@@ -1015,7 +1015,12 @@ fn building_to_processed_way(
 
     // Convert coordinates to Minecraft XZ
     let mut nodes: Vec<ProcessedNode> = Vec::with_capacity(building.exterior_ring.len());
-    let mut any_within = false;
+
+    // Track the building polygon's geographic bounding box from its actual vertices
+    let mut poly_min_lat = f64::MAX;
+    let mut poly_max_lat = f64::MIN;
+    let mut poly_min_lng = f64::MAX;
+    let mut poly_max_lng = f64::MIN;
 
     for (i, &(lng, lat)) in building.exterior_ring.iter().enumerate() {
         // Validate coordinate
@@ -1023,15 +1028,11 @@ fn building_to_processed_way(
             continue;
         }
 
-        // Check if point is within the bbox (with some margin)
-        let within_bbox = lat >= bbox.min().lat()
-            && lat <= bbox.max().lat()
-            && lng >= bbox.min().lng()
-            && lng <= bbox.max().lng();
-
-        if within_bbox {
-            any_within = true;
-        }
+        // Update polygon bounding box
+        poly_min_lat = poly_min_lat.min(lat);
+        poly_max_lat = poly_max_lat.max(lat);
+        poly_min_lng = poly_min_lng.min(lng);
+        poly_max_lng = poly_max_lng.max(lng);
 
         let llpoint = match LLPoint::new(lat, lng) {
             Ok(p) => p,
@@ -1049,8 +1050,19 @@ fn building_to_processed_way(
         });
     }
 
-    // Must have at least 3 nodes and at least one within the bbox
-    if nodes.len() < 3 || !any_within {
+    // Must have at least 3 nodes
+    if nodes.len() < 3 {
+        return None;
+    }
+
+    // Check that the building polygon's bounding box overlaps the target bbox.
+    // This correctly handles buildings that straddle the bbox boundary (edges
+    // cross but no vertices fall inside) — unlike a vertex-containment check.
+    let bbox_overlaps = poly_max_lng >= bbox.min().lng()
+        && poly_min_lng <= bbox.max().lng()
+        && poly_max_lat >= bbox.min().lat()
+        && poly_min_lat <= bbox.max().lat();
+    if !bbox_overlaps {
         return None;
     }
 
