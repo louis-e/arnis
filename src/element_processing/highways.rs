@@ -408,6 +408,16 @@ fn generate_highways_internal(
                                     && element.tags().get("footway")
                                         == Some(&"crossing".to_string())
                                 {
+                                    // Check if crossing should have markings
+                                    let crossing = element.tags().get("crossing");
+                                    let crossing_markings = element.tags().get("crossing:markings");
+                                    let is_unmarked = crossing == Some(&"no".to_string())
+                                        || crossing == Some(&"unmarked".to_string())
+                                        || crossing_markings == Some(&"no".to_string());
+
+                                    if is_unmarked {
+                                        continue;
+                                    }
                                     let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
                                     if is_horizontal {
                                         if set_x % 2 < 1 {
