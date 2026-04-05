@@ -338,6 +338,7 @@ function initSettings() {
   rotationInput.addEventListener("change", () => {
     updateRotation(parseFloat(rotationInput.value));
   });
+  window.updateRotation = updateRotation;
 
   // World format toggle (Java/Bedrock)
   initWorldFormatToggle();
@@ -706,6 +707,11 @@ function handleBboxInput() {
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
+
+        // Reset rotation when bbox changes via manual input
+        if (typeof window.updateRotation === 'function') {
+          window.updateRotation(0);
+        }
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -801,10 +807,15 @@ function displayBboxInfoText(bboxText) {
   lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
   lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
   mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
-  
+
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
+
+  // Reset rotation when bbox changes
+  if (typeof window.updateRotation === 'function') {
+    window.updateRotation(0);
+  }
 
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
   const bboxCoordsInput = document.getElementById("bbox-coords");
