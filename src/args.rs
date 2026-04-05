@@ -85,6 +85,10 @@ pub struct Args {
     /// in OpenStreetMap coverage.
     #[arg(long = "no-overture", default_value_t = false)]
     pub no_overture: bool,
+
+    /// Clockwise rotation angle in degrees (optional, range: -90 to 90)
+    #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
+    pub rotation: f64,
 }
 
 /// Validates CLI arguments after parsing.
@@ -142,6 +146,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             }
         }
         _ => {}
+    }
+
+    // Validate rotation angle range (also rejects NaN and infinity)
+    if !args.rotation.is_finite() || args.rotation < -90.0 || args.rotation > 90.0 {
+        return Err("Rotation angle must be between -90 and 90 degrees.".to_string());
     }
 
     Ok(())

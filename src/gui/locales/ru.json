@@ -42,5 +42,6 @@
   "fillground": "Заполнить Землю",
   "land_cover": "Земельный покров",
   "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",
-  "save_path": "Путь сохранения"
+  "save_path": "Путь сохранения",
+  "rotation_angle": "Угол Поворота"
 }

@@ -42,5 +42,6 @@
   "fillground": "地面を埋める",
   "land_cover": "土地被覆",
   "bedrock_auto_generated": "Bedrock ワールドは自動生成されます",
-  "save_path": "保存先"
+  "save_path": "保存先",
+  "rotation_angle": "回転角度"
 }

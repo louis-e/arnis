@@ -204,6 +204,19 @@ fn run_cli() {
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
 
+    // Apply rotation if specified
+    if args.rotation.abs() > f64::EPSILON {
+        if let Err(e) = map_transformation::rotate::rotate_world(
+            args.rotation,
+            &mut parsed_elements,
+            &mut xzbbox,
+            &mut ground,
+        ) {
+            eprintln!("{} Rotation failed: {}", "Error:".red().bold(), e);
+            std::process::exit(1);
+        }
+    }
+
     // Convert spawn lat/lng to Minecraft XZ coordinates if provided
     let spawn_point: Option<(i32, i32)> = match (args.spawn_lat, args.spawn_lng) {
         (Some(lat), Some(lng)) => {
@@ -215,8 +228,8 @@ fn run_cli() {
                 std::process::exit(1);
             });
 
-            let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
-                .unwrap_or_else(|e| {
+            let (transformer, pre_rot_bbox) =
+                CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale).unwrap_or_else(|e| {
                     eprintln!(
                         "{} Failed to convert spawn point: {}",
                         "Error:".red().bold(),
@@ -226,7 +239,14 @@ fn run_cli() {
                 });
 
             let xzpoint = transformer.transform_point(llpoint);
-            Some((xzpoint.x, xzpoint.z))
+            let (sx, sz) = map_transformation::rotate::rotate_xz_point(
+                xzpoint.x,
+                xzpoint.z,
+                args.rotation,
+                &pre_rot_bbox,
+            );
+
+            Some((sx, sz))
         }
         _ => None,
     };
