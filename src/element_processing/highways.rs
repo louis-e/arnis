@@ -397,6 +397,17 @@ fn generate_highways_internal(
                             (y, false)
                         };
 
+                        // Check if this is a marked zebra crossing
+                        let is_zebra_crossing = highway_type == "footway"
+                            && element.tags().get("footway")
+                                == Some(&"crossing".to_string())
+                            && !matches!(
+                                element.tags().get("crossing").map(|s| s.as_str()),
+                                Some("no" | "unmarked")
+                            )
+                            && element.tags().get("crossing:markings").map(|s| s.as_str())
+                                != Some("no");
+
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
                             for dz in -block_range..=block_range {
@@ -404,10 +415,7 @@ fn generate_highways_internal(
                                 let set_z: i32 = z + dz;
 
                                 // Zebra crossing logic
-                                if highway_type == "footway"
-                                    && element.tags().get("footway")
-                                        == Some(&"crossing".to_string())
-                                {
+                                if is_zebra_crossing {
                                     let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
                                     if is_horizontal {
                                         if set_x % 2 < 1 {
@@ -874,3 +882,4 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
         previous_node = Some((node.x, node.z));
     }
 }
+
