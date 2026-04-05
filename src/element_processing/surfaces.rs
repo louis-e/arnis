@@ -1,5 +1,5 @@
 use crate::block_definitions::{
-    Block, BLACK_CONCRETE, BRICK, COBBLESTONE, DIRT, GRASS_BLOCK, GRAVEL, LIGHT_GRAY_CONCRETE,
+    Block, BRICK, COBBLESTONE, DIRT, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, LIGHT_GRAY_CONCRETE,
     OAK_PLANKS, PODZOL, RED_TERRACOTTA, SAND, STONE_BRICKS, TERRACOTTA,
 };
 use crate::osm_parser::ProcessedWay;
@@ -16,7 +16,7 @@ pub fn get_block_for_surface(surface_type: &str) -> Option<Block> {
         "paving_stones" | "sett" => Some(STONE_BRICKS),
         "bricks" => Some(BRICK),
         "wood" => Some(OAK_PLANKS),
-        "asphalt" => Some(BLACK_CONCRETE),
+        "asphalt" => Some(GRAY_CONCRETE),
         "gravel" | "fine_gravel" => Some(GRAVEL),
         "concrete" => Some(LIGHT_GRAY_CONCRETE),
         _ => None,

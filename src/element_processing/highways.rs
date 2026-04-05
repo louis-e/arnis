@@ -4,7 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::element_processing::surfaces::{get_block_for_surface, get_block_for_surface_way};
 use crate::floodfill_cache::FloodFillCache;
-use crate::osm_parser::{ProcessedElement, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
@@ -13,7 +13,8 @@ pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
 /// Minimum terrain dip (in blocks) below max endpoint elevation to classify a bridge as valley-spanning
 const VALLEY_BRIDGE_THRESHOLD: i32 = 7;
-
+const PAINTABLE_ROAD_SURFACES: &[Block] = &[BLACK_CONCRETE, GRAY_CONCRETE, LIGHT_GRAY_CONCRETE];
+const LAYER_HEIGHT_STEP: i32 = 6;
 /// Generates highways with elevation support based on layer tags and connectivity analysis
 pub fn generate_highways(
     editor: &mut WorldEditor,
@@ -79,17 +80,46 @@ fn generate_highways_internal(
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
     flood_fill_cache: &FloodFillCache,
 ) {
+    let is_indoor = element.tags().get("indoor").is_some_and(|v| v == "yes");
+    // Parse the layer value for elevation calculation
+    let mut layer_value = element
+        .tags()
+        .get("layer")
+        .and_then(|layer| layer.parse::<i32>().ok())
+        .unwrap_or(0);
+
+    // Treat negative layers as ground level (0)
+    if layer_value < 0 {
+        layer_value = 0;
+    }
+
+    // If the way is indoor, treat it as ground level to avoid creating
+    // bridges/supports inside buildings (indoor=yes should not produce bridges)
+    if is_indoor {
+        layer_value = 0;
+    }
+
+    // Calculate elevation based on layer
+    let layer_elevation_boost = layer_value * LAYER_HEIGHT_STEP;
+
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
             // Handle street lamps
             if let ProcessedElement::Node(first_node) = element {
                 let x: i32 = first_node.x;
                 let z: i32 = first_node.z;
-                editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                editor.set_block(
+                    COBBLESTONE_WALL,
+                    x,
+                    layer_elevation_boost + 1,
+                    z,
+                    None,
+                    None,
+                );
                 for dy in 2..=4 {
-                    editor.set_block(OAK_FENCE, x, dy, z, None, None);
+                    editor.set_block(OAK_FENCE, x, layer_elevation_boost + dy, z, None, None);
                 }
-                editor.set_block(GLOWSTONE, x, 5, z, None, None);
+                editor.set_block(GLOWSTONE, x, layer_elevation_boost + 5, z, None, None);
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -100,12 +130,19 @@ fn generate_highways_internal(
                         let z: i32 = node.z;
 
                         for dy in 1..=3 {
-                            editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
+                            editor.set_block(
+                                COBBLESTONE_WALL,
+                                x,
+                                layer_elevation_boost + dy,
+                                z,
+                                None,
+                                None,
+                            );
                         }
 
-                        editor.set_block(GREEN_WOOL, x, 4, z, None, None);
-                        editor.set_block(YELLOW_WOOL, x, 5, z, None, None);
-                        editor.set_block(RED_WOOL, x, 6, z, None, None);
+                        editor.set_block(GREEN_WOOL, x, layer_elevation_boost + 4, z, None, None);
+                        editor.set_block(YELLOW_WOOL, x, layer_elevation_boost + 5, z, None, None);
+                        editor.set_block(RED_WOOL, x, layer_elevation_boost + 6, z, None, None);
                     }
                 }
             }
@@ -115,11 +152,18 @@ fn generate_highways_internal(
                 let x = node.x;
                 let z = node.z;
                 for dy in 1..=3 {
-                    editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
+                    editor.set_block(
+                        COBBLESTONE_WALL,
+                        x,
+                        layer_elevation_boost + dy,
+                        z,
+                        None,
+                        None,
+                    );
                 }
 
-                editor.set_block(WHITE_WOOL, x, 4, z, None, None);
-                editor.set_block(WHITE_WOOL, x + 1, 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x, layer_elevation_boost + 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x + 1, layer_elevation_boost + 4, z, None, None);
             }
         } else if element
             .tags()
@@ -150,26 +194,7 @@ fn generate_highways_internal(
             // Accept any bridge tag value except "no" (e.g., "yes", "viaduct", "aqueduct", etc.)
             // Indoor highways are never treated as bridges (indoor corridors should not
             // generate elevated decks or support pillars).
-            let is_indoor = element.tags().get("indoor").is_some_and(|v| v == "yes");
             let is_bridge = !is_indoor && element.tags().get("bridge").is_some_and(|v| v != "no");
-
-            // Parse the layer value for elevation calculation
-            let mut layer_value = element
-                .tags()
-                .get("layer")
-                .and_then(|layer| layer.parse::<i32>().ok())
-                .unwrap_or(0);
-
-            // Treat negative layers as ground level (0)
-            if layer_value < 0 {
-                layer_value = 0;
-            }
-
-            // If the way is indoor, treat it as ground level to avoid creating
-            // bridges/supports inside buildings (indoor=yes should not produce bridges)
-            if is_indoor {
-                layer_value = 0;
-            }
 
             // Skip if 'level' is negative in the tags (indoor mapping)
             if let Some(level) = element.tags().get("level") {
@@ -179,22 +204,22 @@ fn generate_highways_internal(
             }
 
             let mut block_type = match highway_type.as_str() {
-                "footway" | "pedestrian" | "service" | "steps" => GRAY_CONCRETE,
                 "path" => DIRT_PATH,
                 "escape" => SAND,
-                _ => BLACK_CONCRETE,
+                _ => GRAY_CONCRETE,
             };
             let mut lanes: i32 = ["motorway", "trunk", "primary", "secondary", "tertiary"]
-                .contains(&highway_type.as_str()) as i32;
+                .contains(&highway_type.as_str()) as i32
+                + 1;
 
             // Determine block type and range based on highway type
             //TODO: Add correct stairs respecting height, step_count, etc.
             let mut width: f32 = match highway_type.as_str() {
-                "motorway" | "primary" | "trunk" => 5.,
-                "secondary" => 4.,
+                "motorway" | "primary" | "trunk" => 10.,
+                "secondary" => 8.,
                 "path" | "footway" | "pedestrian" | "steps" | "track" | "escape"
-                | "secondary_link" | "tertiary_link" => 1.,
-                _ => 2.,
+                | "secondary_link" | "tertiary_link" => 2.,
+                _ => 4.,
             };
             if let Some(tag_lanes) = element
                 .tags()
@@ -227,10 +252,6 @@ fn generate_highways_internal(
             if scale_factor < 1.0 {
                 width *= scale_factor as f32;
             }
-
-            // Calculate elevation based on layer
-            const LAYER_HEIGHT_STEP: i32 = 6; // Each layer is 6 blocks higher/lower
-            let base_elevation = layer_value * LAYER_HEIGHT_STEP;
 
             // Check if we need slopes at start and end
             // This is used for overpasses that need ramps to ground-level roads
@@ -311,14 +332,14 @@ fn generate_highways_internal(
                 if is_short_isolated_elevated {
                     (0, false, false) // Treat as ground level
                 } else {
-                    (base_elevation, needs_start_slope, needs_end_slope)
+                    (layer_elevation_boost, needs_start_slope, needs_end_slope)
                 };
 
             let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize; // 35% of way length, max 50 blocks, min 15 blocks
 
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
-            let total_segments = way.nodes.len() - 1;
+            let _total_segments = way.nodes.len() - 1;
 
             for node in &way.nodes {
                 if let Some(prev) = previous_node {
@@ -331,7 +352,7 @@ fn generate_highways_internal(
                         bresenham_line(x1, 0, z1, x2, 0, z2);
 
                     // Calculate elevation for this segment
-                    let segment_length = bresenham_points.len();
+                    let _segment_length = bresenham_points.len();
 
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
@@ -351,8 +372,7 @@ fn generate_highways_internal(
                             let y = calculate_point_elevation(
                                 segment_index,
                                 point_index,
-                                segment_length,
-                                total_segments,
+                                &way.nodes,
                                 effective_elevation,
                                 effective_start_slope,
                                 effective_end_slope,
@@ -382,7 +402,7 @@ fn generate_highways_internal(
                                             set_x,
                                             current_y,
                                             set_z,
-                                            Some(&[BLACK_CONCRETE]),
+                                            Some(PAINTABLE_ROAD_SURFACES),
                                             None,
                                             use_absolute_y,
                                         );
@@ -392,7 +412,7 @@ fn generate_highways_internal(
                                             set_x,
                                             current_y,
                                             set_z,
-                                            None,
+                                            Some(PAINTABLE_ROAD_SURFACES),
                                             None,
                                             use_absolute_y,
                                         );
@@ -532,7 +552,7 @@ fn generate_highways_internal(
                                         stripe_x as i32,
                                         current_y,
                                         stripe_z as i32,
-                                        Some(&[BLACK_CONCRETE]),
+                                        Some(PAINTABLE_ROAD_SURFACES),
                                         None,
                                         use_absolute_y,
                                     );
@@ -620,10 +640,9 @@ fn calculate_way_length(way: &ProcessedWay) -> usize {
 /// Calculate the Y elevation for a specific point along the highway
 #[allow(clippy::too_many_arguments)]
 fn calculate_point_elevation(
-    segment_index: usize,
+    way_node_index: usize,
     point_index: usize,
-    segment_length: usize,
-    total_segments: usize,
+    way_nodes: &[ProcessedNode],
     base_elevation: i32,
     needs_start_slope: bool,
     needs_end_slope: bool,
@@ -635,27 +654,37 @@ fn calculate_point_elevation(
     }
 
     // Calculate total distance from start
-    let total_distance_from_start = segment_index * segment_length + point_index;
-    let total_way_length = total_segments * segment_length;
-
+    let mut total_distance_from_start = point_index as f32;
+    for i in 0..way_node_index {
+        let dx = (way_nodes[i + 1].x - way_nodes[i].x) as f32;
+        let dz = (way_nodes[i + 1].z - way_nodes[i].z) as f32;
+        total_distance_from_start += (dx * dx + dz * dz).sqrt();
+    }
+    let mut total_way_length = 0.;
+    for i in 0..way_nodes.len() - 1 {
+        let dx = (way_nodes[i + 1].x - way_nodes[i].x) as f32;
+        let dz = (way_nodes[i + 1].z - way_nodes[i].z) as f32;
+        total_way_length += (dx * dx + dz * dz).sqrt();
+    }
     // Ensure we have reasonable values
-    if total_way_length == 0 || slope_length == 0 {
+    if total_way_length == 0. || slope_length == 0 {
         return base_elevation;
     }
 
     // Start slope calculation - gradual rise from ground level
-    if needs_start_slope && total_distance_from_start <= slope_length {
-        let slope_progress = total_distance_from_start as f32 / slope_length as f32;
+    if needs_start_slope && total_distance_from_start <= slope_length as f32 {
+        let slope_progress = total_distance_from_start / slope_length as f32;
         let elevation_offset = (base_elevation as f32 * slope_progress) as i32;
         return elevation_offset;
     }
 
     // End slope calculation - gradual descent to ground level
     if needs_end_slope
-        && total_distance_from_start >= (total_way_length.saturating_sub(slope_length))
+        && total_distance_from_start
+            >= (total_way_length as usize).saturating_sub(slope_length) as f32
     {
         let distance_from_end = total_way_length - total_distance_from_start;
-        let slope_progress = distance_from_end as f32 / slope_length as f32;
+        let slope_progress = distance_from_end / slope_length as f32;
         let elevation_offset = (base_elevation as f32 * slope_progress) as i32;
         return elevation_offset;
     }
