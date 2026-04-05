@@ -8,6 +8,7 @@
 //! Data is read from GeoParquet files hosted on Azure Blob Storage using
 //! HTTP Range requests (same pattern as land_cover.rs COG reading).
 
+use crate::clipping::clip_way_to_bbox;
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
@@ -233,7 +234,7 @@ fn fetch_overture_buildings_inner(
         match process_partition_file(&client, url, bbox, debug) {
             Ok(buildings) => {
                 non_osm_count += buildings.iter().filter(|b| !b.is_osm_sourced).count();
-                all_buildings.extend(buildings);
+                all_buildings.extend(buildings.into_iter().filter(|b| !b.is_osm_sourced));
             }
             Err(e) => {
                 if debug {
@@ -245,24 +246,23 @@ fn fetch_overture_buildings_inner(
     }
 
     if debug {
-        let non_osm_count = all_buildings.iter().filter(|b| !b.is_osm_sourced).count();
-        println!(
-            "Overture: {} total buildings found, {} non-OSM",
-            all_buildings.len(),
-            non_osm_count
-        );
+        println!("Overture: {} non-OSM buildings found", all_buildings.len());
     }
 
-    // Filter out OSM-sourced buildings and convert to ProcessedElements
-    let (coord_transformer, _) = CoordTransformer::llbbox_to_xzbbox(bbox, scale)?;
+    // Convert to ProcessedElements and clip to xzbbox (matching OSM clipping)
+    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(bbox, scale)?;
 
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
-        .filter(|b| !b.is_osm_sourced)
         .take(MAX_OVERTURE_BUILDINGS)
         .filter_map(|building| {
-            building_to_processed_way(&building, &coord_transformer, bbox)
-                .map(ProcessedElement::Way)
+            let mut way = building_to_processed_way(&building, &coord_transformer, bbox)?;
+            let clipped = clip_way_to_bbox(&way.nodes, &xzbbox);
+            if clipped.len() < 3 {
+                return None;
+            }
+            way.nodes = clipped;
+            Some(ProcessedElement::Way(way))
         })
         .collect();
 
@@ -290,8 +290,8 @@ fn list_partition_files(
         .into());
     }
 
-    let stac_bytes = response.bytes()?.to_vec();
-    let reader = SerializedFileReader::new(bytes::Bytes::from(stac_bytes))?;
+    let stac_bytes = response.bytes()?;
+    let reader = SerializedFileReader::new(stac_bytes)?;
 
     let target_min_lng = bbox.min().lng();
     let target_max_lng = bbox.max().lng();
@@ -439,6 +439,13 @@ fn process_partition_file(
     // Parquet files end with: [footer bytes] [4-byte footer length (LE)] [4-byte magic "PAR1"]
     // First, read the last 8 bytes to get the footer length.
     let tail = fetch_range(client, url, file_size - 8, 8)?;
+    if tail.len() < 8 {
+        return Err(format!(
+            "Truncated Parquet tail: expected 8 bytes, got {}",
+            tail.len()
+        )
+        .into());
+    }
     if &tail[4..8] != b"PAR1" {
         return Err("Not a valid Parquet file (missing PAR1 magic)".into());
     }

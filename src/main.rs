@@ -161,8 +161,8 @@ fn run_cli() {
     let (mut parsed_elements, mut xzbbox) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
 
-    // Fetch supplementary building data from Overture Maps (if enabled)
-    if !args.no_overture {
+    // Fetch supplementary building data from Overture Maps
+    {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
         let overture_elements =
             overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);

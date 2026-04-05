@@ -913,7 +913,6 @@ fn gui_start_generation(
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
                 spawn_lng: None,
-                no_overture: false,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
             };
 
@@ -960,8 +959,8 @@ fn gui_start_generation(
                     let (mut parsed_elements, mut xzbbox) =
                         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
 
-                    // Fetch supplementary building data from Overture Maps (if enabled)
-                    if !args.no_overture {
+                    // Fetch supplementary building data from Overture Maps
+                    {
                         let overture_elements =
                             overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
                         if !overture_elements.is_empty() {

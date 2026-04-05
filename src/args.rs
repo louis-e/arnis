@@ -79,13 +79,6 @@ pub struct Args {
     #[arg(long, allow_hyphen_values = true)]
     pub spawn_lng: Option<f64>,
 
-    /// Disable Overture Maps building data supplementation (optional)
-    /// When Overture is enabled (default), additional building footprints from
-    /// Overture Maps (Google/Microsoft ML sources) are fetched to fill gaps
-    /// in OpenStreetMap coverage.
-    #[arg(long = "no-overture", default_value_t = false)]
-    pub no_overture: bool,
-
     /// Clockwise rotation angle in degrees (optional, range: -90 to 90)
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
