@@ -188,7 +188,14 @@ pub fn generate_amenities(
                         let bresenham_points: Vec<(i32, i32, i32)> =
                             bresenham_line(prev.x, 0, prev.z, pt.x, 0, pt.z);
                         for (bx, _, bz) in bresenham_points {
-                            editor.set_block(block_type, bx, 0, bz, Some(&[BLACK_CONCRETE]), None);
+                            editor.set_block(
+                                block_type,
+                                bx,
+                                0,
+                                bz,
+                                Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                None,
+                            );
 
                             current_amenity.push((node.x, node.z));
                             corner_addup.0 += node.x;
@@ -211,7 +218,12 @@ pub fn generate_amenities(
                             x,
                             0,
                             z,
-                            Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
+                            Some(&[
+                                BLACK_CONCRETE,
+                                GRAY_CONCRETE_POWDER,
+                                CYAN_TERRACOTTA,
+                                GRAY_CONCRETE,
+                            ]),
                             None,
                         );
 
@@ -238,7 +250,12 @@ pub fn generate_amenities(
                                         x,
                                         0,
                                         z,
-                                        Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
+                                        Some(&[
+                                            BLACK_CONCRETE,
+                                            GRAY_CONCRETE_POWDER,
+                                            CYAN_TERRACOTTA,
+                                            GRAY_CONCRETE,
+                                        ]),
                                         None,
                                     );
                                 } else if local_z == 0 {
@@ -248,7 +265,12 @@ pub fn generate_amenities(
                                         x,
                                         0,
                                         z,
-                                        Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
+                                        Some(&[
+                                            BLACK_CONCRETE,
+                                            GRAY_CONCRETE_POWDER,
+                                            CYAN_TERRACOTTA,
+                                            GRAY_CONCRETE,
+                                        ]),
                                         None,
                                     );
                                 }
@@ -259,7 +281,12 @@ pub fn generate_amenities(
                                     x,
                                     0,
                                     z,
-                                    Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
+                                    Some(&[
+                                        BLACK_CONCRETE,
+                                        GRAY_CONCRETE_POWDER,
+                                        CYAN_TERRACOTTA,
+                                        GRAY_CONCRETE,
+                                    ]),
                                     None,
                                 );
                             } else if local_z > space_length && local_z < space_length + lane_width

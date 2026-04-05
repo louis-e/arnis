@@ -330,6 +330,8 @@ impl Block {
             249 => "red_sand",
             250 => "red_sandstone",
             251 => "cactus",
+            252 => "gray_concrete_powder",
+            253 => "cyan_terracotta",
             _ => panic!("Invalid id"),
         }
     }
@@ -976,6 +978,8 @@ pub const POTTED_BLUE_ORCHID: Block = Block::new(248);
 pub const RED_SAND: Block = Block::new(249);
 pub const RED_SANDSTONE: Block = Block::new(250);
 pub const CACTUS: Block = Block::new(251);
+pub const GRAY_CONCRETE_POWDER: Block = Block::new(252);
+pub const CYAN_TERRACOTTA: Block = Block::new(253);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
