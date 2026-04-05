@@ -42,5 +42,6 @@
   "fillground": "Zapolni tla",
   "land_cover": "Pokritost tal",
   "bedrock_auto_generated": "Bedrock svet je samodejno ustvarjen",
-  "save_path": "Pot shranjevanja"
+  "save_path": "Pot shranjevanja",
+  "rotation_angle": "Kot zasuka"
 }
