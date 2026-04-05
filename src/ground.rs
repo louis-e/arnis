@@ -8,6 +8,23 @@ use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use image::{Rgb, RgbImage};
 
+/// Parameters describing the inverse-rotation needed to check whether a world
+/// coordinate falls inside the original (pre-rotation) bounding box.
+#[derive(Clone)]
+pub struct RotationMask {
+    /// Center of rotation (world coordinates)
+    pub cx: f64,
+    pub cz: f64,
+    /// sin/cos of the *negative* angle (inverse rotation)
+    pub neg_sin: f64,
+    pub cos: f64,
+    /// Original axis-aligned bounding box before rotation
+    pub orig_min_x: i32,
+    pub orig_max_x: i32,
+    pub orig_min_z: i32,
+    pub orig_max_z: i32,
+}
+
 /// Represents terrain data, land cover classification, and elevation settings
 #[derive(Clone)]
 pub struct Ground {
@@ -15,6 +32,8 @@ pub struct Ground {
     ground_level: i32,
     elevation_data: Option<ElevationData>,
     land_cover: Option<LandCoverData>,
+    /// When set, coordinates outside the rotated original bbox are skipped.
+    rotation_mask: Option<RotationMask>,
 }
 
 impl Ground {
@@ -24,6 +43,7 @@ impl Ground {
             ground_level,
             elevation_data: None,
             land_cover: None,
+            rotation_mask: None,
         }
     }
 
@@ -59,6 +79,7 @@ impl Ground {
                     ground_level,
                     elevation_data: Some(elevation_data),
                     land_cover,
+                    rotation_mask: None,
                 }
             }
             Err(e) => {
@@ -74,6 +95,7 @@ impl Ground {
                     ground_level,
                     elevation_data: None,
                     land_cover: None,
+                    rotation_mask: None,
                 }
             }
         }
@@ -183,6 +205,60 @@ impl Ground {
         let x: usize = ((x_ratio * (data.width - 1) as f64).round() as usize).min(data.width - 1);
         let z: usize = ((z_ratio * (data.height - 1) as f64).round() as usize).min(data.height - 1);
         data.heights[z][x]
+    }
+
+    /// Replace the elevation grid with new rotated/transformed data.
+    /// Used by the rotation operator to update elevation after rotating.
+    pub fn set_elevation_data(&mut self, heights: Vec<Vec<i32>>, width: usize, height: usize) {
+        if let Some(ref mut data) = self.elevation_data {
+            data.heights = heights;
+            data.width = width;
+            data.height = height;
+        }
+    }
+
+    /// Replace the land-cover grids with new rotated/transformed data.
+    /// Used by the rotation operator to keep land cover aligned with elevation.
+    pub fn set_land_cover_data(
+        &mut self,
+        grid: Vec<Vec<u8>>,
+        water_distance: Vec<Vec<u8>>,
+        width: usize,
+        height: usize,
+    ) {
+        if let Some(ref mut lc) = self.land_cover {
+            lc.grid = grid;
+            lc.water_distance = water_distance;
+            lc.width = width;
+            lc.height = height;
+        }
+    }
+
+    /// Store rotation parameters so we can mask out-of-bounds blocks later.
+    pub fn set_rotation_mask(&mut self, mask: RotationMask) {
+        self.rotation_mask = Some(mask);
+    }
+
+    /// Returns `true` if the coordinate is inside the rotated original bbox.
+    /// When no rotation was applied, always returns `true`.
+    #[inline(always)]
+    pub fn is_in_rotated_bounds(&self, x: i32, z: i32) -> bool {
+        let mask = match self.rotation_mask {
+            Some(ref m) => m,
+            None => return true,
+        };
+        // Inverse-rotate (x, z) back to original space
+        let dx = x as f64 - mask.cx;
+        let dz = z as f64 - mask.cz;
+        let orig_x = dx * mask.cos + dz * mask.neg_sin + mask.cx;
+        let orig_z = -dx * mask.neg_sin + dz * mask.cos + mask.cz;
+        // Allow a tiny tolerance so points that land infinitesimally outside the
+        // integer bbox due to floating-point rounding are still considered inside.
+        const EPSILON: f64 = 1.0e-9;
+        orig_x >= mask.orig_min_x as f64 - EPSILON
+            && orig_x <= mask.orig_max_x as f64 + EPSILON
+            && orig_z >= mask.orig_min_z as f64 - EPSILON
+            && orig_z <= mask.orig_max_z as f64 + EPSILON
     }
 
     fn save_debug_image(&self, filename: &str) {

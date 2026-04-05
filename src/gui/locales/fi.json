@@ -42,5 +42,6 @@
   "fillground": "Täytä maa",
   "land_cover": "Maanpeite",
   "bedrock_auto_generated": "Bedrock-maailma luodaan automaattisesti",
-  "save_path": "Tallennuspolku"
+  "save_path": "Tallennuspolku",
+  "rotation_angle": "Kiertokulma"
 }

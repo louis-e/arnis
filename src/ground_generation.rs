@@ -88,6 +88,15 @@ pub fn generate_ground_layer(
 
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
+                    // Skip blocks outside the rotated original bounding box
+                    if !ground.is_in_rotated_bounds(x, z) {
+                        block_counter += 1;
+                        if block_counter.is_multiple_of(batch_size) {
+                            ground_pb.set_position(block_counter);
+                        }
+                        continue;
+                    }
+
                     // Get ground level, when terrain is enabled, look it up once per block
                     // When disabled, use constant ground_level (no function call overhead)
                     let ground_y = if terrain_enabled {
@@ -96,7 +105,7 @@ pub fn generate_ground_layer(
                         args.ground_level
                     };
 
-                    let coord = XZPoint::new(x, z);
+                    let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
 
                     // Add default dirt and grass layer if there isn't a stone layer already
                     if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
@@ -179,8 +188,8 @@ pub fn generate_ground_layer(
                                                     .iter()
                                                     .filter(|(dx, dz)| {
                                                         ground.cover_class(XZPoint::new(
-                                                            x + dx,
-                                                            z + dz,
+                                                            x + dx - xzbbox.min_x(),
+                                                            z + dz - xzbbox.min_z(),
                                                         )) == land_cover::LC_BARE
                                                     })
                                                     .count();
@@ -237,8 +246,10 @@ pub fn generate_ground_layer(
                                     && ground.water_distance(coord) == 0
                                     && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(
                                         |(dx, dz)| {
-                                            ground.cover_class(XZPoint::new(x + dx, z + dz))
-                                                == land_cover::LC_WATER
+                                            ground.cover_class(XZPoint::new(
+                                                x + dx - xzbbox.min_x(),
+                                                z + dz - xzbbox.min_z(),
+                                            )) == land_cover::LC_WATER
                                         },
                                     );
                                 let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]

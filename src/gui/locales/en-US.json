@@ -42,5 +42,6 @@
   "fillground": "Fill Ground",
   "land_cover": "Land Cover",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
-  "save_path": "Save Path"
+  "save_path": "Save Path",
+  "rotation_angle": "Rotation Angle"
 }

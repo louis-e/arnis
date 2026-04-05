@@ -6,6 +6,7 @@ use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
+use crate::overture;
 use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
 use crate::telemetry::{self, send_log, LogLevel};
@@ -710,6 +711,7 @@ fn gui_start_generation(
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
     world_format: String,
+    rotation_angle: f64,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -760,6 +762,14 @@ fn gui_start_generation(
             // No user-selected spawn point - use default at X=1, Z=1 relative to world origin
             calculate_default_spawn(&xzbbox)
         };
+
+        // Rotate spawn point to match the rotated world
+        let (spawn_x, spawn_z) = map_transformation::rotate::rotate_xz_point(
+            spawn_x,
+            spawn_z,
+            rotation_angle.clamp(-90.0, 90.0),
+            &xzbbox,
+        );
 
         set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
             .map_err(|e| format!("Failed to set spawn point: {e}"))?;
@@ -848,26 +858,27 @@ fn gui_start_generation(
 
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
             // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
-            let mc_spawn_point: Option<(i32, i32)> = if let Some((lat, lng)) = spawn_point {
-                if let Ok(llpoint) = LLPoint::new(lat, lng) {
-                    if let Ok((transformer, _)) =
-                        CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
-                    {
+            let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
+                CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+            {
+                let (sx, sz) = if let Some((lat, lng)) = spawn_point {
+                    if let Ok(llpoint) = LLPoint::new(lat, lng) {
                         let xzpoint = transformer.transform_point(llpoint);
-                        Some((xzpoint.x, xzpoint.z))
+                        (xzpoint.x, xzpoint.z)
                     } else {
-                        None
+                        calculate_default_spawn(&pre_rot_bbox)
                     }
                 } else {
-                    None
-                }
+                    calculate_default_spawn(&pre_rot_bbox)
+                };
+                Some(map_transformation::rotate::rotate_xz_point(
+                    sx,
+                    sz,
+                    rotation_angle.clamp(-90.0, 90.0),
+                    &pre_rot_bbox,
+                ))
             } else {
-                // Default spawn point: X=1, Z=1 relative to world origin
-                if let Ok((_, xzbbox)) = CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
-                    Some(calculate_default_spawn(&xzbbox))
-                } else {
-                    None
-                }
+                None
             };
 
             // Create generation options
@@ -902,6 +913,7 @@ fn gui_start_generation(
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
                 spawn_lng: None,
+                rotation: rotation_angle.clamp(-90.0, 90.0),
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -946,6 +958,20 @@ fn gui_start_generation(
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox) =
                         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+
+                    // Fetch supplementary building data from Overture Maps
+                    {
+                        let overture_elements =
+                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+                        if !overture_elements.is_empty() {
+                            let unique_overture = overture::deduplicate_against_osm(
+                                overture_elements,
+                                &parsed_elements,
+                            );
+                            parsed_elements.extend(unique_overture);
+                        }
+                    }
+
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
@@ -967,6 +993,17 @@ fn gui_start_generation(
                         &mut xzbbox,
                         &mut ground,
                     );
+
+                    // Apply rotation if specified
+                    if rotation_angle.abs() > f64::EPSILON {
+                        map_transformation::rotate::rotate_world(
+                            rotation_angle.clamp(-90.0, 90.0),
+                            &mut parsed_elements,
+                            &mut xzbbox,
+                            &mut ground,
+                        )
+                        .map_err(|e| format!("Rotation failed: {e}"))?;
+                    }
 
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,

@@ -42,5 +42,6 @@
   "fillground": "Fyll mark",
   "land_cover": "Marktäcke",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
-  "save_path": "Sökväg"
+  "save_path": "Sökväg",
+  "rotation_angle": "Rotationsvinkel"
 }

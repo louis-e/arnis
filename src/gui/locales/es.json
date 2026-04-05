@@ -42,5 +42,6 @@
   "fillground": "Rellenar Suelo",
   "land_cover": "Cobertura del suelo",
   "bedrock_auto_generated": "El mundo Bedrock se genera automáticamente",
-  "save_path": "Ruta de guardado"
+  "save_path": "Ruta de guardado",
+  "rotation_angle": "Ángulo de Rotación"
 }

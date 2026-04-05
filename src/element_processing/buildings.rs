@@ -4476,7 +4476,7 @@ fn generate_gabled_roof(
         } else {
             pd.dist_to_edge
         };
-        let local_boost = ((pd.local_half as f64) * 0.75).round().max(1.0) as i32;
+        let local_boost = ((pd.local_half as f64) * 0.85).round().max(1.0) as i32;
         let capped_boost = local_boost.min(wall_cap);
         let roof_height = (config.base_height + slope_dist).min(config.base_height + capped_boost);
         roof_heights.insert((x, z), roof_height);
@@ -4770,7 +4770,7 @@ fn generate_hipped_roof(editor: &mut WorldEditor, floor_area: &[(i32, i32)], con
         } else {
             pd.dist_to_edge
         };
-        let local_boost = ((pd.local_half as f64) * 0.75).round().max(1.0) as i32;
+        let local_boost = ((pd.local_half as f64) * 0.85).round().max(1.0) as i32;
         let capped_boost = local_boost.min(wall_cap);
         let roof_height = (config.base_height + slope_dist).min(config.base_height + capped_boost);
         roof_heights.insert((x, z), roof_height);

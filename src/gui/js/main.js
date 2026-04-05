@@ -117,6 +117,7 @@ async function applyLocalization(localization) {
     "span[data-localize='land_cover']": "land_cover",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
+    "span[data-localize='rotation_angle']": "rotation_angle",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -202,6 +203,24 @@ function registerMessageEvent() {
     if (bboxText) {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
+    }
+
+    // Handle angle measurement from the map polyline tool
+    if (event.data && event.data.type === 'angleMeasured') {
+      var angle = event.data.angle;
+      var rotationInput = document.getElementById("rotation-angle-input");
+      if (rotationInput) {
+        var clamped = Math.min(Math.max(angle, -90), 90);
+        rotationInput.value = clamped.toFixed(2);
+        // Also trigger the rotation preview update on the map
+        var mapFrame = document.querySelector('.map-container');
+        if (mapFrame && mapFrame.contentWindow) {
+          mapFrame.contentWindow.postMessage({
+            type: 'rotatePreview',
+            angle: clamped
+          }, '*');
+        }
+      }
     }
   });
 }
@@ -291,6 +310,35 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+  // Double-click to reset world scale to default (1.00)
+  slider.addEventListener("dblclick", () => {
+    slider.value = 1;
+    sliderValue.textContent = "1.00";
+  });
+
+  // Rotation angle input
+  const rotationInput = document.getElementById("rotation-angle-input");
+
+  function updateRotation(val) {
+    if (isNaN(val)) val = 0;
+    val = Math.min(Math.max(val, -90), 90);
+    rotationInput.value = val.toFixed(2);
+    // Tell the map iframe to update the rotation mask overlay
+    const mapFrame = document.querySelector('.map-container');
+    if (mapFrame && mapFrame.contentWindow) {
+      mapFrame.contentWindow.postMessage({
+        type: 'rotatePreview',
+        angle: val
+      }, '*');
+    }
+  }
+  rotationInput.addEventListener("input", () => {
+    updateRotation(parseFloat(rotationInput.value));
+  });
+  rotationInput.addEventListener("change", () => {
+    updateRotation(parseFloat(rotationInput.value));
+  });
+  window.updateRotation = updateRotation;
 
   // World format toggle (Java/Bedrock)
   initWorldFormatToggle();
@@ -659,6 +707,11 @@ function handleBboxInput() {
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
+
+        // Reset rotation when bbox changes via manual input
+        if (typeof window.updateRotation === 'function') {
+          window.updateRotation(0);
+        }
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -754,10 +807,15 @@ function displayBboxInfoText(bboxText) {
   lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
   lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
   mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
-  
+
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
+
+  // Reset rotation when bbox changes
+  if (typeof window.updateRotation === 'function') {
+    window.updateRotation(0);
+  }
 
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
   const bboxCoordsInput = document.getElementById("bbox-coords");
@@ -891,6 +949,9 @@ async function startGeneration() {
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
 
+    // Get rotation angle
+    var rotationAngle = parseFloat(document.getElementById("rotation-angle-input").value) || 0;
+
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
@@ -906,7 +967,8 @@ async function startGeneration() {
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: selectedWorldFormat
+        worldFormat: selectedWorldFormat,
+        rotationAngle: rotationAngle
     });
 
     console.log("Generation process started.");
