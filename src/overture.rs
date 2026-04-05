@@ -212,9 +212,10 @@ fn fetch_overture_buildings_inner(
 
     // Process each partition file: read footer, check for bbox overlap, fetch matching rows
     let mut all_buildings: Vec<OvertureBuilding> = Vec::new();
+    let mut non_osm_count: usize = 0;
 
     for (i, url) in partition_urls.iter().enumerate() {
-        if all_buildings.len() >= MAX_OVERTURE_BUILDINGS {
+        if non_osm_count >= MAX_OVERTURE_BUILDINGS {
             if debug {
                 println!("Reached building limit ({MAX_OVERTURE_BUILDINGS}), stopping");
             }
@@ -231,6 +232,7 @@ fn fetch_overture_buildings_inner(
 
         match process_partition_file(&client, url, bbox, debug) {
             Ok(buildings) => {
+                non_osm_count += buildings.iter().filter(|b| !b.is_osm_sourced).count();
                 all_buildings.extend(buildings);
             }
             Err(e) => {
@@ -855,7 +857,7 @@ fn parse_overture_row(
         .map(|s| s.contains("OpenStreetMap"))
         .unwrap_or(false);
 
-    let id = id.unwrap_or_else(|| "unknown".to_string());
+    let id = id?;
 
     Some(OvertureBuilding {
         id,
@@ -886,6 +888,10 @@ fn parse_wkb_polygon(wkb: &[u8]) -> Option<Vec<(f64, f64)>> {
     }
 
     let byte_order = wkb[0];
+    // WKB only defines 0 (big-endian) and 1 (little-endian)
+    if byte_order > 1 {
+        return None;
+    }
     let is_le = byte_order == 1;
 
     let geom_type = if is_le {
