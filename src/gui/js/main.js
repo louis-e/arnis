@@ -208,12 +208,10 @@ function registerMessageEvent() {
     // Handle angle measurement from the map polyline tool
     if (event.data && event.data.type === 'angleMeasured') {
       var angle = event.data.angle;
-      var rotationSlider = document.getElementById("rotation-angle-slider");
       var rotationInput = document.getElementById("rotation-angle-input");
-      if (rotationSlider && rotationInput) {
+      if (rotationInput) {
         var clamped = Math.min(Math.max(angle, -90), 90);
         rotationInput.value = clamped.toFixed(2);
-        rotationSlider.value = clamped;
         // Also trigger the rotation preview update on the map
         var mapFrame = document.querySelector('.map-container');
         if (mapFrame && mapFrame.contentWindow) {
@@ -318,15 +316,13 @@ function initSettings() {
     sliderValue.textContent = "1.00";
   });
 
-  // Rotation angle slider and input synchronization
-  const rotationSlider = document.getElementById("rotation-angle-slider");
+  // Rotation angle input
   const rotationInput = document.getElementById("rotation-angle-input");
 
   function updateRotation(val) {
     if (isNaN(val)) val = 0;
     val = Math.min(Math.max(val, -90), 90);
     rotationInput.value = val.toFixed(2);
-    rotationSlider.value = val;
     // Tell the map iframe to update the rotation mask overlay
     const mapFrame = document.querySelector('.map-container');
     if (mapFrame && mapFrame.contentWindow) {
@@ -336,13 +332,6 @@ function initSettings() {
       }, '*');
     }
   }
-  rotationSlider.addEventListener("input", () => {
-    updateRotation(parseFloat(rotationSlider.value));
-  });
-  // Double-click to reset rotation to default (0)
-  rotationSlider.addEventListener("dblclick", () => {
-    updateRotation(0);
-  });
   rotationInput.addEventListener("input", () => {
     updateRotation(parseFloat(rotationInput.value));
   });
