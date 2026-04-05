@@ -78,6 +78,13 @@ pub struct Args {
     /// Spawn point longitude (optional, must be within bbox)
     #[arg(long, allow_hyphen_values = true)]
     pub spawn_lng: Option<f64>,
+
+    /// Disable Overture Maps building data supplementation (optional)
+    /// When Overture is enabled (default), additional building footprints from
+    /// Overture Maps (Google/Microsoft ML sources) are fetched to fill gaps
+    /// in OpenStreetMap coverage.
+    #[arg(long = "no-overture", default_value_t = false)]
+    pub no_overture: bool,
 }
 
 /// Validates CLI arguments after parsing.

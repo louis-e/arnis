@@ -6,6 +6,7 @@ use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
+use crate::overture;
 use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
 use crate::telemetry::{self, send_log, LogLevel};
@@ -902,6 +903,7 @@ fn gui_start_generation(
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
                 spawn_lng: None,
+                no_overture: false,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -946,6 +948,20 @@ fn gui_start_generation(
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox) =
                         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+
+                    // Fetch supplementary building data from Overture Maps (if enabled)
+                    if !args.no_overture {
+                        let overture_elements =
+                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+                        if !overture_elements.is_empty() {
+                            let unique_overture = overture::deduplicate_against_osm(
+                                overture_elements,
+                                &parsed_elements,
+                            );
+                            parsed_elements.extend(unique_overture);
+                        }
+                    }
+
                     parsed_elements.sort_by(|el1, el2| {
                         let (el1_priority, el2_priority) =
                             (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
