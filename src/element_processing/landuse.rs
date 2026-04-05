@@ -1,9 +1,11 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
+use crate::ground::Ground;
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::prelude::IndexedRandom;
@@ -15,6 +17,7 @@ pub fn generate_landuse(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    ground: &std::sync::Arc<Ground>,
 ) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
@@ -171,9 +174,14 @@ pub fn generate_landuse(
                 if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                     let random_choice: i32 = rng.random_range(0..30);
                     if random_choice == 20 {
-                        let tree_type = *trees_ok_to_generate
-                            .choose(&mut rng)
-                            .unwrap_or(&TreeType::Oak);
+                        let tree_type = match ground.level(XZPoint::new(x, z))
+                            > crate::world_editor::CONIFERS_ONLY_ALTITUDE
+                        {
+                            true => TreeType::Spruce,
+                            false => *trees_ok_to_generate
+                                .choose(&mut rng)
+                                .unwrap_or(&TreeType::Oak),
+                        };
                         Tree::create_of_type(
                             editor,
                             (x, 1, z),
@@ -396,6 +404,7 @@ pub fn generate_landuse_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    ground: &std::sync::Arc<Ground>,
 ) {
     if rel.tags.contains_key("landuse") {
         // Process each outer member way individually using cached flood fill.
@@ -416,6 +425,7 @@ pub fn generate_landuse_from_relation(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    ground,
                 );
             }
         }

@@ -8,8 +8,10 @@ use image::Rgb;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
+/// Minimum Y coordinate in Minecraft (build height limit)
+pub const MIN_Y: i32 = -2031;
 /// Maximum Y coordinate in Minecraft (build height limit)
-const MAX_Y: i32 = 319;
+pub const MAX_Y: i32 = 2031;
 /// AWS S3 Terrarium tiles endpoint (no API key required)
 const AWS_TERRARIUM_URL: &str =
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
@@ -528,7 +530,7 @@ pub fn fetch_elevation_data(
 
     // Calculate available Y range in Minecraft (from ground_level to MAX_Y)
     // Leave a buffer at the top for buildings, trees, and other structures
-    const TERRAIN_HEIGHT_BUFFER: i32 = 15;
+    const TERRAIN_HEIGHT_BUFFER: i32 = 32;
     let available_y_range: f64 = (MAX_Y - TERRAIN_HEIGHT_BUFFER - ground_level) as f64;
 
     // Determine final height scale:
@@ -615,6 +617,7 @@ fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
 
     let height_len = heights.len();
     let width = heights[0].len();
+    const THREEQRT_MAXY: f64 = 0.75 * (MAX_Y as f64);
 
     // Horizontal pass - parallelize across rows (each row is independent)
     let after_horizontal: Vec<Vec<f64>> = heights
@@ -631,7 +634,11 @@ fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
                         weight_sum += k;
                     }
                 }
-                *val = sum / weight_sum;
+                *val = match *val > THREEQRT_MAXY {
+                    false => sum / weight_sum,
+                    // For VERY high highs, *sharpen* peaks with the gaussian kernel instead!
+                    true => *val * 2. - (sum / weight_sum),
+                }
             }
             temp
         })
@@ -657,7 +664,11 @@ fn apply_gaussian_blur(heights: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
                         weight_sum += k;
                     }
                 }
-                *val = sum / weight_sum;
+                *val = match *val > THREEQRT_MAXY {
+                    false => sum / weight_sum,
+                    // For VERY high highs, *sharpen* peaks with the gaussian kernel instead!
+                    true => *val * 2. - (sum / weight_sum),
+                }
             }
             blurred_column
         })

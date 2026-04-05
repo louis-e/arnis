@@ -23,12 +23,12 @@ use crate::block_definitions::{
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::tree;
+use crate::elevation_data::MIN_Y;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
 use crate::land_cover;
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
-use crate::world_editor::MIN_Y;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;

@@ -17,7 +17,7 @@ pub mod bedrock;
 
 // Re-export common types used internally
 pub(crate) use common::WorldToModify;
-pub use common::MIN_Y;
+pub(crate) use common::CONIFERS_ONLY_ALTITUDE;
 
 #[cfg(feature = "bedrock")]
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};

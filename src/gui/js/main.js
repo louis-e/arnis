@@ -930,10 +930,10 @@ async function startGeneration() {
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
-    var ground_level = -62;
+    var ground_level = -2030;
 
     // Validate ground_level
-    ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
+    ground_level = isNaN(ground_level) || ground_level < -2030 ? -2030 : ground_level;
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
