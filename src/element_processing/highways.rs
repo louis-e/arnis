@@ -2,8 +2,9 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
+use crate::element_processing::surfaces::{get_block_for_surface, get_block_for_surface_way};
 use crate::floodfill_cache::FloodFillCache;
-use crate::osm_parser::{ProcessedElement, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
@@ -12,7 +13,8 @@ pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
 /// Minimum terrain dip (in blocks) below max endpoint elevation to classify a bridge as valley-spanning
 const VALLEY_BRIDGE_THRESHOLD: i32 = 7;
-
+const PAINTABLE_ROAD_SURFACES: &[Block] = &[BLACK_CONCRETE, GRAY_CONCRETE, LIGHT_GRAY_CONCRETE];
+const LAYER_HEIGHT_STEP: i32 = 6;
 /// Generates highways with elevation support based on layer tags and connectivity analysis
 pub fn generate_highways(
     editor: &mut WorldEditor,
@@ -78,17 +80,46 @@ fn generate_highways_internal(
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
     flood_fill_cache: &FloodFillCache,
 ) {
+    let is_indoor = element.tags().get("indoor").is_some_and(|v| v == "yes");
+    // Parse the layer value for elevation calculation
+    let mut layer_value = element
+        .tags()
+        .get("layer")
+        .and_then(|layer| layer.parse::<i32>().ok())
+        .unwrap_or(0);
+
+    // Treat negative layers as ground level (0)
+    if layer_value < 0 {
+        layer_value = 0;
+    }
+
+    // If the way is indoor, treat it as ground level to avoid creating
+    // bridges/supports inside buildings (indoor=yes should not produce bridges)
+    if is_indoor {
+        layer_value = 0;
+    }
+
+    // Calculate elevation based on layer
+    let layer_elevation_boost = layer_value * LAYER_HEIGHT_STEP;
+
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
             // Handle street lamps
             if let ProcessedElement::Node(first_node) = element {
                 let x: i32 = first_node.x;
                 let z: i32 = first_node.z;
-                editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                editor.set_block(
+                    COBBLESTONE_WALL,
+                    x,
+                    layer_elevation_boost + 1,
+                    z,
+                    None,
+                    None,
+                );
                 for dy in 2..=4 {
-                    editor.set_block(OAK_FENCE, x, dy, z, None, None);
+                    editor.set_block(OAK_FENCE, x, layer_elevation_boost + dy, z, None, None);
                 }
-                editor.set_block(GLOWSTONE, x, 5, z, None, None);
+                editor.set_block(GLOWSTONE, x, layer_elevation_boost + 5, z, None, None);
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -99,12 +130,19 @@ fn generate_highways_internal(
                         let z: i32 = node.z;
 
                         for dy in 1..=3 {
-                            editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
+                            editor.set_block(
+                                COBBLESTONE_WALL,
+                                x,
+                                layer_elevation_boost + dy,
+                                z,
+                                None,
+                                None,
+                            );
                         }
 
-                        editor.set_block(GREEN_WOOL, x, 4, z, None, None);
-                        editor.set_block(YELLOW_WOOL, x, 5, z, None, None);
-                        editor.set_block(RED_WOOL, x, 6, z, None, None);
+                        editor.set_block(GREEN_WOOL, x, layer_elevation_boost + 4, z, None, None);
+                        editor.set_block(YELLOW_WOOL, x, layer_elevation_boost + 5, z, None, None);
+                        editor.set_block(RED_WOOL, x, layer_elevation_boost + 6, z, None, None);
                     }
                 }
             }
@@ -114,11 +152,18 @@ fn generate_highways_internal(
                 let x = node.x;
                 let z = node.z;
                 for dy in 1..=3 {
-                    editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
+                    editor.set_block(
+                        COBBLESTONE_WALL,
+                        x,
+                        layer_elevation_boost + dy,
+                        z,
+                        None,
+                        None,
+                    );
                 }
 
-                editor.set_block(WHITE_WOOL, x, 4, z, None, None);
-                editor.set_block(WHITE_WOOL, x + 1, 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x, layer_elevation_boost + 4, z, None, None);
+                editor.set_block(WHITE_WOOL, x + 1, layer_elevation_boost + 4, z, None, None);
             }
         } else if element
             .tags()
@@ -130,23 +175,7 @@ fn generate_highways_internal(
             };
 
             // Handle areas like pedestrian plazas
-            let mut surface_block: Block = STONE; // Default block
-
-            // Determine the block type based on the 'surface' tag
-            if let Some(surface) = element.tags().get("surface") {
-                surface_block = match surface.as_str() {
-                    "paving_stones" | "sett" => STONE_BRICKS,
-                    "bricks" => BRICK,
-                    "wood" => OAK_PLANKS,
-                    "asphalt" => BLACK_CONCRETE,
-                    "gravel" | "fine_gravel" => GRAVEL,
-                    "grass" => GRASS_BLOCK,
-                    "dirt" | "ground" | "earth" => DIRT,
-                    "sand" => SAND,
-                    "concrete" => LIGHT_GRAY_CONCRETE,
-                    _ => STONE, // Default to stone for unknown surfaces
-                };
-            }
+            let surface_block: Block = get_block_for_surface_way(way, STONE); // Default block
 
             // Fill the area using flood fill cache
             let filled_area: Vec<(i32, i32)> =
@@ -157,9 +186,6 @@ fn generate_highways_internal(
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
-            let mut block_type = BLACK_CONCRETE;
-            let mut block_range: i32 = 2;
-            let mut add_stripe = false;
             let mut add_outline = false;
             let scale_factor = args.scale;
 
@@ -168,26 +194,7 @@ fn generate_highways_internal(
             // Accept any bridge tag value except "no" (e.g., "yes", "viaduct", "aqueduct", etc.)
             // Indoor highways are never treated as bridges (indoor corridors should not
             // generate elevated decks or support pillars).
-            let is_indoor = element.tags().get("indoor").is_some_and(|v| v == "yes");
             let is_bridge = !is_indoor && element.tags().get("bridge").is_some_and(|v| v != "no");
-
-            // Parse the layer value for elevation calculation
-            let mut layer_value = element
-                .tags()
-                .get("layer")
-                .and_then(|layer| layer.parse::<i32>().ok())
-                .unwrap_or(0);
-
-            // Treat negative layers as ground level (0)
-            if layer_value < 0 {
-                layer_value = 0;
-            }
-
-            // If the way is indoor, treat it as ground level to avoid creating
-            // bridges/supports inside buildings (indoor=yes should not produce bridges)
-            if is_indoor {
-                layer_value = 0;
-            }
 
             // Skip if 'level' is negative in the tags (indoor mapping)
             if let Some(level) = element.tags().get("level") {
@@ -196,63 +203,46 @@ fn generate_highways_internal(
                 }
             }
 
-            // Determine block type and range based on highway type
-            match highway_type.as_str() {
-                "footway" | "pedestrian" => {
-                    block_type = GRAY_CONCRETE;
-                    block_range = 1;
-                }
-                "path" => {
-                    block_type = DIRT_PATH;
-                    block_range = 1;
-                }
-                "motorway" | "primary" | "trunk" => {
-                    block_range = 5;
-                    add_stripe = true;
-                }
-                "secondary" => {
-                    block_range = 4;
-                    add_stripe = true;
-                }
-                "tertiary" => {
-                    add_stripe = true;
-                }
-                "track" => {
-                    block_range = 1;
-                }
-                "service" => {
-                    block_type = GRAY_CONCRETE;
-                    block_range = 2;
-                }
-                "secondary_link" | "tertiary_link" => {
-                    //Exit ramps, sliproads
-                    block_type = BLACK_CONCRETE;
-                    block_range = 1;
-                }
-                "escape" => {
-                    // Sand trap for vehicles on mountainous roads
-                    block_type = SAND;
-                    block_range = 1;
-                }
-                "steps" => {
-                    //TODO: Add correct stairs respecting height, step_count, etc.
-                    block_type = GRAY_CONCRETE;
-                    block_range = 1;
-                }
+            let mut block_type = match highway_type.as_str() {
+                "path" => DIRT_PATH,
+                "escape" => SAND,
+                _ => GRAY_CONCRETE,
+            };
+            let mut lanes: i32 = ["motorway", "trunk", "primary", "secondary", "tertiary"]
+                .contains(&highway_type.as_str()) as i32
+                + 1;
 
-                _ => {
-                    if let Some(lanes) = element.tags().get("lanes") {
-                        if lanes == "2" {
-                            block_range = 3;
-                            add_stripe = true;
-                            add_outline = true;
-                        } else if lanes != "1" {
-                            block_range = 4;
-                            add_stripe = true;
-                            add_outline = true;
-                        }
-                    }
-                }
+            // Determine block type and range based on highway type
+            //TODO: Add correct stairs respecting height, step_count, etc.
+            let mut width: f32 = match highway_type.as_str() {
+                "motorway" | "primary" | "trunk" => 10.,
+                "secondary" => 8.,
+                "path" | "footway" | "pedestrian" | "steps" | "track" | "escape"
+                | "secondary_link" | "tertiary_link" => 2.,
+                _ => 4.,
+            };
+            if let Some(tag_lanes) = element
+                .tags()
+                .get("lanes")
+                .and_then(|l| l.parse::<i32>().ok())
+            {
+                lanes = tag_lanes;
+                width = (lanes * 3 + 1) as f32;
+                add_outline = true;
+            }
+            element
+                .tags()
+                .get("surface")
+                .and_then(|s| get_block_for_surface(s).map(|b| block_type = b));
+            if let Some(l) = element.tags().get("lane_markings") {
+                lanes = (l != "no") as i32;
+            }
+            if let Some(w) = element
+                .tags()
+                .get("width")
+                .and_then(|w| w.parse::<f32>().ok())
+            {
+                width = w;
             }
 
             let ProcessedElement::Way(way) = element else {
@@ -260,12 +250,8 @@ fn generate_highways_internal(
             };
 
             if scale_factor < 1.0 {
-                block_range = ((block_range as f64) * scale_factor).floor() as i32;
+                width *= scale_factor as f32;
             }
-
-            // Calculate elevation based on layer
-            const LAYER_HEIGHT_STEP: i32 = 6; // Each layer is 6 blocks higher/lower
-            let base_elevation = layer_value * LAYER_HEIGHT_STEP;
 
             // Check if we need slopes at start and end
             // This is used for overpasses that need ramps to ground-level roads
@@ -346,14 +332,14 @@ fn generate_highways_internal(
                 if is_short_isolated_elevated {
                     (0, false, false) // Treat as ground level
                 } else {
-                    (base_elevation, needs_start_slope, needs_end_slope)
+                    (layer_elevation_boost, needs_start_slope, needs_end_slope)
                 };
 
             let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize; // 35% of way length, max 50 blocks, min 15 blocks
 
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
-            let total_segments = way.nodes.len() - 1;
+            let _total_segments = way.nodes.len() - 1;
 
             for node in &way.nodes {
                 if let Some(prev) = previous_node {
@@ -366,13 +352,12 @@ fn generate_highways_internal(
                         bresenham_line(x1, 0, z1, x2, 0, z2);
 
                     // Calculate elevation for this segment
-                    let segment_length = bresenham_points.len();
+                    let _segment_length = bresenham_points.len();
 
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
                     let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
                     let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
-
                     for (point_index, (x, _, z)) in bresenham_points.iter().enumerate() {
                         // Calculate Y elevation for this point
                         // For valley bridges: use fixed deck height (max of endpoints) to stay level
@@ -387,8 +372,7 @@ fn generate_highways_internal(
                             let y = calculate_point_elevation(
                                 segment_index,
                                 point_index,
-                                segment_length,
-                                total_segments,
+                                &way.nodes,
                                 effective_elevation,
                                 effective_start_slope,
                                 effective_end_slope,
@@ -398,6 +382,7 @@ fn generate_highways_internal(
                         };
 
                         // Draw the road surface for the entire width
+                        let block_range: i32 = (width / 2.).round() as i32;
                         for dx in -block_range..=block_range {
                             for dz in -block_range..=block_range {
                                 let set_x: i32 = x + dx;
@@ -409,102 +394,38 @@ fn generate_highways_internal(
                                         == Some(&"crossing".to_string())
                                 {
                                     let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
-                                    if is_horizontal {
-                                        if set_x % 2 < 1 {
-                                            if use_absolute_y {
-                                                editor.set_block_absolute(
-                                                    WHITE_CONCRETE,
-                                                    set_x,
-                                                    current_y,
-                                                    set_z,
-                                                    Some(&[BLACK_CONCRETE]),
-                                                    None,
-                                                );
-                                            } else {
-                                                editor.set_block(
-                                                    WHITE_CONCRETE,
-                                                    set_x,
-                                                    current_y,
-                                                    set_z,
-                                                    Some(&[BLACK_CONCRETE]),
-                                                    None,
-                                                );
-                                            }
-                                        } else if use_absolute_y {
-                                            editor.set_block_absolute(
-                                                BLACK_CONCRETE,
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                None,
-                                                None,
-                                            );
-                                        } else {
-                                            editor.set_block(
-                                                BLACK_CONCRETE,
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                None,
-                                                None,
-                                            );
-                                        }
-                                    } else if set_z % 2 < 1 {
-                                        if use_absolute_y {
-                                            editor.set_block_absolute(
-                                                WHITE_CONCRETE,
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                Some(&[BLACK_CONCRETE]),
-                                                None,
-                                            );
-                                        } else {
-                                            editor.set_block(
-                                                WHITE_CONCRETE,
-                                                set_x,
-                                                current_y,
-                                                set_z,
-                                                Some(&[BLACK_CONCRETE]),
-                                                None,
-                                            );
-                                        }
-                                    } else if use_absolute_y {
-                                        editor.set_block_absolute(
-                                            BLACK_CONCRETE,
+                                    if (is_horizontal && set_x % 2 < 1)
+                                        || (!is_horizontal && set_z % 2 < 1)
+                                    {
+                                        editor.set_block_flag_absolute(
+                                            WHITE_CONCRETE,
                                             set_x,
                                             current_y,
                                             set_z,
+                                            Some(PAINTABLE_ROAD_SURFACES),
                                             None,
-                                            None,
+                                            use_absolute_y,
                                         );
                                     } else {
-                                        editor.set_block(
+                                        editor.set_block_flag_absolute(
                                             BLACK_CONCRETE,
                                             set_x,
                                             current_y,
                                             set_z,
+                                            Some(PAINTABLE_ROAD_SURFACES),
                                             None,
-                                            None,
+                                            use_absolute_y,
                                         );
                                     }
-                                } else if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        block_type,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        None,
-                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
-                                    );
                                 } else {
-                                    editor.set_block(
+                                    editor.set_block_flag_absolute(
                                         block_type,
                                         set_x,
                                         current_y,
                                         set_z,
                                         None,
                                         Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
+                                        use_absolute_y,
                                     );
                                 }
 
@@ -562,77 +483,78 @@ fn generate_highways_internal(
                         // Add light gray concrete outline for multi-lane roads
                         if add_outline {
                             // Left outline
-                            for dz in -block_range..=block_range {
-                                let outline_x = x - block_range - 1;
-                                let outline_z = z + dz;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                } else {
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                }
-                            }
-                            // Right outline
-                            for dz in -block_range..=block_range {
-                                let outline_x = x + block_range + 1;
-                                let outline_z = z + dz;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                } else {
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                }
+                            for d in -block_range..=block_range {
+                                let outline_x_left = x - block_range;
+                                let outline_x_right = x + block_range;
+                                let outline_z_left = z - block_range;
+                                let outline_z_right = z + block_range;
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    outline_x_left,
+                                    current_y,
+                                    z + d,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    outline_x_right,
+                                    current_y,
+                                    z + d,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    x + d,
+                                    current_y,
+                                    outline_z_left,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
+                                editor.set_block_flag_absolute(
+                                    LIGHT_GRAY_CONCRETE,
+                                    x + d,
+                                    current_y,
+                                    outline_z_right,
+                                    None,
+                                    None,
+                                    use_absolute_y,
+                                );
                             }
                         }
 
                         // Add a dashed white line in the middle for larger roads
-                        if add_stripe {
+                        if lanes > 0 && point_index > 0 {
                             if stripe_length < dash_length {
-                                let stripe_x: i32 = *x;
-                                let stripe_z: i32 = *z;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        WHITE_CONCRETE,
-                                        stripe_x,
-                                        current_y,
-                                        stripe_z,
-                                        Some(&[BLACK_CONCRETE]),
-                                        None,
+                                let dx = (x - bresenham_points[point_index - 1].0) as f32;
+                                let dz = (z - bresenham_points[point_index - 1].2) as f32;
+                                let len = (dx * dx + dz * dz).sqrt();
+
+                                let left_x = *x as f32 - dz / len * width / 2.;
+                                let left_z = *z as f32 + dx / len * width / 2.;
+                                let right_x = *x as f32 + dz / len * width / 2.;
+                                let right_z = *z as f32 - dx / len * width / 2.;
+                                let lane_width = width / lanes as f32;
+                                for s in 1..lanes {
+                                    let (stripe_x, stripe_z) = offset_point_towards(
+                                        left_x,
+                                        left_z,
+                                        right_x,
+                                        right_z,
+                                        s as f32 * lane_width,
                                     );
-                                } else {
-                                    editor.set_block(
+                                    editor.set_block_flag_absolute(
                                         WHITE_CONCRETE,
-                                        stripe_x,
+                                        stripe_x as i32,
                                         current_y,
-                                        stripe_z,
-                                        Some(&[BLACK_CONCRETE]),
+                                        stripe_z as i32,
+                                        Some(PAINTABLE_ROAD_SURFACES),
                                         None,
+                                        use_absolute_y,
                                     );
                                 }
                             }
@@ -651,6 +573,16 @@ fn generate_highways_internal(
             }
         }
     }
+}
+
+fn offset_point_towards(x1: f32, y1: f32, x2: f32, y2: f32, l: f32) -> (f32, f32) {
+    let dx = x2 - x1;
+    let dy = y2 - y1;
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist == 0.0 {
+        return (x1, y1);
+    }
+    (x1 + dx / dist * l, y1 + dy / dist * l)
 }
 
 /// Helper function to determine if a slope should be added at a specific node
@@ -708,10 +640,9 @@ fn calculate_way_length(way: &ProcessedWay) -> usize {
 /// Calculate the Y elevation for a specific point along the highway
 #[allow(clippy::too_many_arguments)]
 fn calculate_point_elevation(
-    segment_index: usize,
+    way_node_index: usize,
     point_index: usize,
-    segment_length: usize,
-    total_segments: usize,
+    way_nodes: &[ProcessedNode],
     base_elevation: i32,
     needs_start_slope: bool,
     needs_end_slope: bool,
@@ -723,27 +654,37 @@ fn calculate_point_elevation(
     }
 
     // Calculate total distance from start
-    let total_distance_from_start = segment_index * segment_length + point_index;
-    let total_way_length = total_segments * segment_length;
-
+    let mut total_distance_from_start = point_index as f32;
+    for i in 0..way_node_index {
+        let dx = (way_nodes[i + 1].x - way_nodes[i].x) as f32;
+        let dz = (way_nodes[i + 1].z - way_nodes[i].z) as f32;
+        total_distance_from_start += (dx * dx + dz * dz).sqrt();
+    }
+    let mut total_way_length = 0.;
+    for i in 0..way_nodes.len() - 1 {
+        let dx = (way_nodes[i + 1].x - way_nodes[i].x) as f32;
+        let dz = (way_nodes[i + 1].z - way_nodes[i].z) as f32;
+        total_way_length += (dx * dx + dz * dz).sqrt();
+    }
     // Ensure we have reasonable values
-    if total_way_length == 0 || slope_length == 0 {
+    if total_way_length == 0. || slope_length == 0 {
         return base_elevation;
     }
 
     // Start slope calculation - gradual rise from ground level
-    if needs_start_slope && total_distance_from_start <= slope_length {
-        let slope_progress = total_distance_from_start as f32 / slope_length as f32;
+    if needs_start_slope && total_distance_from_start <= slope_length as f32 {
+        let slope_progress = total_distance_from_start / slope_length as f32;
         let elevation_offset = (base_elevation as f32 * slope_progress) as i32;
         return elevation_offset;
     }
 
     // End slope calculation - gradual descent to ground level
     if needs_end_slope
-        && total_distance_from_start >= (total_way_length.saturating_sub(slope_length))
+        && total_distance_from_start
+            >= (total_way_length as usize).saturating_sub(slope_length) as f32
     {
         let distance_from_end = total_way_length - total_distance_from_start;
-        let slope_progress = distance_from_end as f32 / slope_length as f32;
+        let slope_progress = distance_from_end / slope_length as f32;
         let elevation_offset = (base_elevation as f32 * slope_progress) as i32;
         return elevation_offset;
     }

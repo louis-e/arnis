@@ -1,10 +1,32 @@
+use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::surfaces::get_block_for_surface_way;
+use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
-pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
+pub fn generate_railways(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
     if let Some(railway_type) = element.tags.get("railway") {
+        if railway_type == "platform" {
+            for (x, z) in flood_fill_cache.get_or_compute(element, args.timeout.as_ref()) {
+                editor.set_block(
+                    get_block_for_surface_way(element, POLISHED_ANDESITE),
+                    x,
+                    1,
+                    z,
+                    None,
+                    None,
+                )
+            }
+            return;
+        }
+
         if [
             "proposed",
             "abandoned",
