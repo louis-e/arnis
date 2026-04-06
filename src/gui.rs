@@ -707,6 +707,7 @@ fn gui_start_generation(
     roof_enabled: bool,
     fillground_enabled: bool,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
+    disable_height_limit: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
@@ -914,6 +915,7 @@ fn gui_start_generation(
                 spawn_lat: None,
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
+                disable_height_limit,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

@@ -41,6 +41,7 @@
   "roof": "Генерація даху",
   "fillground": "Заповнити землю",
   "land_cover": "Земельне покриття",
+  "disable_height_limit": "Вимкнути обмеження висоти",
   "bedrock_auto_generated": "Bedrock світ генерується автоматично",
   "save_path": "Шлях збереження",
   "rotation_angle": "Кут Обертання"

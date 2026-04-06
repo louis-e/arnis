@@ -82,6 +82,13 @@ pub struct Args {
     /// Clockwise rotation angle in degrees (optional, range: -90 to 90)
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
+
+    /// Disable the Minecraft build height limit (Y=319).
+    /// When enabled, terrain will use realistic 1:1 scaling without compression,
+    /// even if it exceeds the vanilla height limit.
+    /// Requires a Minecraft data pack that increases the world height.
+    #[arg(long, default_value_t = false)]
+    pub disable_height_limit: bool,
 }
 
 /// Validates CLI arguments after parsing.

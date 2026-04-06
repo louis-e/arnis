@@ -41,6 +41,7 @@
   "roof": "Generiranje strehe",
   "fillground": "Zapolni tla",
   "land_cover": "Pokritost tal",
+  "disable_height_limit": "Onemogoči omejitev višine",
   "bedrock_auto_generated": "Bedrock svet je samodejno ustvarjen",
   "save_path": "Pot shranjevanja",
   "rotation_angle": "Kot zasuka"

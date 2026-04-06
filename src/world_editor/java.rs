@@ -2,7 +2,7 @@
 //!
 //! This module handles saving worlds in the Java Edition Anvil (.mca) format.
 
-use super::common::{Chunk, ChunkToModify, Section, MIN_Y};
+use super::common::{Chunk, ChunkToModify, Section};
 use super::WorldEditor;
 use crate::block_definitions::GRASS_BLOCK;
 use crate::progress::emit_gui_progress_update;
@@ -257,7 +257,8 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)>
 ///
 /// Writes all required fields for server compatibility:
 /// DataVersion, Status, yPos, Heightmaps, biomes, structures, etc.
-/// All 24 sections (Y=-4 to Y=19) are emitted, even empty ones.
+/// Section range is determined dynamically: at minimum the vanilla range
+/// (Y=-4 to Y=19), extended upward/downward to cover any sections with content.
 fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
     // Index existing sections by Y for quick lookup
     let section_map: HashMap<i8, usize> = chunk
@@ -267,14 +268,26 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
         .map(|(i, s)| (s.y, i))
         .collect();
 
+    // Determine section range: start with vanilla range, expand to cover content
+    let mut min_section_y: i8 = -4; // vanilla min (Y=-64)
+    let mut max_section_y: i8 = 19; // vanilla max (Y=319)
+    for &y in section_map.keys() {
+        if y < min_section_y {
+            min_section_y = y;
+        }
+        if y > max_section_y {
+            max_section_y = y;
+        }
+    }
+
     // Biome palette shared by all sections (single "plains" entry, no data array needed)
     let biome_value = Value::Compound(HashMap::from([(
         "palette".to_string(),
         Value::List(vec![Value::String("minecraft:plains".to_string())]),
     )]));
 
-    // Build all 24 sections (Y=-4 to Y=19)
-    let sections: Vec<Value> = (-4i8..=19)
+    // Build all sections in the determined range
+    let sections: Vec<Value> = (min_section_y..=max_section_y)
         .map(|y| {
             let mut section_nbt = if let Some(&idx) = section_map.get(&y) {
                 build_section_value(&chunk.sections[idx])
@@ -300,7 +313,8 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
         .collect();
 
     // Compute heightmaps from block data
-    let heightmaps = compute_heightmaps(&chunk.sections);
+    let total_height = ((max_section_y as i32 + 1) - min_section_y as i32) * 16;
+    let heightmaps = compute_heightmaps(&chunk.sections, min_section_y, total_height);
 
     // PostProcessing: one empty list per section
     let post_processing: Vec<Value> = (0..sections.len()).map(|_| Value::List(vec![])).collect();
@@ -309,7 +323,7 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
     let mut root = HashMap::from([
         ("DataVersion".to_string(), Value::Int(DATA_VERSION)),
         ("xPos".to_string(), Value::Int(chunk.x_pos)),
-        ("yPos".to_string(), Value::Int(-4)),
+        ("yPos".to_string(), Value::Int(min_section_y as i32)),
         ("zPos".to_string(), Value::Int(chunk.z_pos)),
         (
             "Status".to_string(),
@@ -381,9 +395,9 @@ fn build_section_value(section: &Section) -> HashMap<String, Value> {
 ///
 /// Returns a Value::Compound with four heightmap types (MOTION_BLOCKING,
 /// MOTION_BLOCKING_NO_LEAVES, OCEAN_FLOOR, WORLD_SURFACE) as packed LongArrays.
-/// Each heightmap is a 16x16 grid of 9-bit values packed 7 per i64 (37 longs total).
-/// Value for each column = (highest_non_air_Y - MIN_Y + 1), or 0 if all air.
-fn compute_heightmaps(sections: &[Section]) -> Value {
+/// Bit width is determined dynamically based on total world height.
+/// Value for each column = (highest_non_air_Y - min_block_y + 1), or 0 if all air.
+fn compute_heightmaps(sections: &[Section], min_section_y: i8, total_height: i32) -> Value {
     // Precompute per-section metadata to avoid redundant work in the inner loop.
     enum SectionKind<'a> {
         Uniform {
@@ -439,6 +453,7 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
     metas.sort_by(|a, b| b.y.cmp(&a.y));
 
     let mut heights = [0i32; 256]; // 16x16 grid, Z-major order
+    let min_block_y = min_section_y as i32 * 16;
 
     for z in 0..16usize {
         for x in 0..16usize {
@@ -449,7 +464,7 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
                     SectionKind::Uniform { solid: false } => continue,
                     SectionKind::Uniform { solid: true } | SectionKind::NoAir => {
                         let abs_y = (meta.y as i32) * 16 + 15;
-                        heights[col_idx] = abs_y - MIN_Y + 1;
+                        heights[col_idx] = abs_y - min_block_y + 1;
                         break 'outer;
                     }
                     SectionKind::Mixed {
@@ -470,7 +485,7 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
                                     && meta.palette[palette_idx].name != "minecraft:air"
                                 {
                                     let abs_y = (meta.y as i32) * 16 + local_y as i32;
-                                    heights[col_idx] = abs_y - MIN_Y + 1;
+                                    heights[col_idx] = abs_y - min_block_y + 1;
                                     break 'outer;
                                 }
                             }
@@ -481,7 +496,7 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
         }
     }
 
-    let packed = pack_heightmap_values(&heights);
+    let packed = pack_heightmap_values(&heights, total_height);
     // All four heightmap types use the same data. Vanilla differentiates them (e.g.
     // MOTION_BLOCKING includes fluids, OCEAN_FLOOR excludes them), but servers
     // recompute heightmaps on load — they just need valid structure here.
@@ -499,11 +514,16 @@ fn compute_heightmaps(sections: &[Section]) -> Value {
     ]))
 }
 
-/// Pack 256 heightmap values (9-bit each) into a LongArray.
-/// 7 values per i64, 37 longs total. Values don't span across longs.
-fn pack_heightmap_values(values: &[i32; 256]) -> LongArray {
-    let bits = 9;
-    let mut result = Vec::with_capacity(37);
+/// Pack 256 heightmap values into a LongArray with dynamic bit width.
+/// Bit width = ceil(log2(total_height + 1)). Values don't span across longs.
+fn pack_heightmap_values(values: &[i32; 256], total_height: i32) -> LongArray {
+    // Calculate bits needed: ceil(log2(total_height + 1)), minimum 9
+    let bits = ((total_height + 1) as f64).log2().ceil().max(9.0) as usize;
+    let vals_per_long = 64 / bits;
+    let num_longs = (256 + vals_per_long - 1) / vals_per_long;
+    let mask = (1i64 << bits) - 1;
+
+    let mut result = Vec::with_capacity(num_longs);
     let mut current: i64 = 0;
     let mut bit_pos = 0;
 
@@ -513,7 +533,7 @@ fn pack_heightmap_values(values: &[i32; 256]) -> LongArray {
             current = 0;
             bit_pos = 0;
         }
-        current |= ((val as i64) & 0x1FF) << bit_pos;
+        current |= ((val as i64) & mask) << bit_pos;
         bit_pos += bits;
     }
     if bit_pos > 0 {
