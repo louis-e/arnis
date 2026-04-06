@@ -69,6 +69,16 @@ pub fn flood_fill_area(
         return vec![]; // Not a valid polygon
     }
 
+    // Reject open polylines: geo::Polygon auto-closes by connecting last to
+    // first, which creates a diagonal artifact edge for genuinely open ways
+    // (e.g. ridges, cliffs). Closed polygons from SH clipping always have
+    // first == last preserved by clip_way_to_bbox.
+    let first = polygon_coords[0];
+    let last = polygon_coords[polygon_coords.len() - 1];
+    if first != last {
+        return vec![];
+    }
+
     // Calculate bounding box of the polygon using itertools
     let (min_x, max_x) = polygon_coords
         .iter()
