@@ -3603,7 +3603,7 @@ fn generate_parapet(editor: &mut WorldEditor, element: &ProcessedWay, config: &B
             }
         }
         for &(cx, cz) in &corners {
-            editor.set_block_absolute(config.accent_block, cx, cap_y, cz, None, None);
+            editor.set_block_absolute(config.accent_block, cx, cap_y, cz, None, Some(&[]));
         }
     }
 }
