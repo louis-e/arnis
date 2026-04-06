@@ -1630,6 +1630,9 @@ fn build_wall_ring(
             );
 
             for (bx, _, bz) in bresenham_points {
+                // Passages only apply to ground-level buildings; elevated
+                // building:part elements (min_level > 0) receive an empty bitmap
+                // via effective_passages, so this is always false for them.
                 let is_passage = building_passages.contains(bx, bz);
 
                 // Create foundation pillars when using terrain
@@ -3536,6 +3539,16 @@ pub fn generate_buildings(
         },
     };
 
+    // Passages only apply to ground-level buildings. Elevated building:part
+    // elements (min_level > 0) sit above the passage and must keep their
+    // walls, floors and decorations intact.
+    let empty_passages = CoordinateBitmap::new_empty();
+    let effective_passages: &CoordinateBitmap = if config.is_ground_level {
+        building_passages
+    } else {
+        &empty_passages
+    };
+
     // Generate walls, pass whether this building will have a sloped roof
     let has_sloped_roof = args.roof && style.generate_roof && style.roof_type != RoofType::Flat;
     let (wall_outline, corner_addup) = build_wall_ring(
@@ -3544,7 +3557,7 @@ pub fn generate_buildings(
         &config,
         args,
         has_sloped_roof,
-        building_passages,
+        effective_passages,
     );
 
     if let Some(holes) = hole_polygons {
@@ -3556,7 +3569,7 @@ pub fn generate_buildings(
                     &config,
                     args,
                     has_sloped_roof,
-                    building_passages,
+                    effective_passages,
                 );
             }
         }
@@ -3564,22 +3577,28 @@ pub fn generate_buildings(
 
     // Generate special doors (garage doors, shed doors)
     if config.has_garage_door || config.has_single_door {
-        generate_special_doors(editor, element, &config, &wall_outline, building_passages);
+        generate_special_doors(editor, element, &config, &wall_outline, effective_passages);
     }
 
     // Add shutters and window boxes to small residential buildings
-    generate_residential_window_decorations(editor, element, &config, building_passages);
+    generate_residential_window_decorations(editor, element, &config, effective_passages);
 
     // Add wall depth features (pilasters, columns, ledges, cornices, buttresses)
     // Only for standalone buildings, not building:part sub-sections (parts adjoin
     // other parts and outward protrusions would collide with neighbours).
     if !element.tags.contains_key("building:part") {
-        generate_wall_depth_features(editor, element, &config, has_sloped_roof, building_passages);
+        generate_wall_depth_features(
+            editor,
+            element,
+            &config,
+            has_sloped_roof,
+            effective_passages,
+        );
     }
 
     // Add corner quoins (accent-block columns at building corners)
     if !element.tags.contains_key("building:part") {
-        generate_corner_quoins(editor, element, &config, building_passages);
+        generate_corner_quoins(editor, element, &config, effective_passages);
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
@@ -3600,24 +3619,26 @@ pub fn generate_buildings(
             &config,
             args,
             style.generate_roof,
-            building_passages,
+            effective_passages,
         );
 
         // Build tunnel side walls: for each interior coordinate that borders a
         // passage coordinate, place a wall column from ground to passage ceiling.
         // This creates the left/right corridor walls inside the archway.
-        if !building_passages.is_empty() {
+        // Only applies to ground-level buildings (elevated building:parts are
+        // above the passage and should not get corridor walls).
+        if !effective_passages.is_empty() {
             let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
             let abs = config.abs_terrain_offset;
             for &(x, z) in &cached_floor_area {
-                if building_passages.contains(x, z) {
+                if effective_passages.contains(x, z) {
                     continue; // this is road, not a wall
                 }
                 // Check 4-connected neighbours for passage adjacency
-                let adjacent_to_passage = building_passages.contains(x - 1, z)
-                    || building_passages.contains(x + 1, z)
-                    || building_passages.contains(x, z - 1)
-                    || building_passages.contains(x, z + 1);
+                let adjacent_to_passage = effective_passages.contains(x - 1, z)
+                    || effective_passages.contains(x + 1, z)
+                    || effective_passages.contains(x, z - 1)
+                    || effective_passages.contains(x, z + 1);
                 if adjacent_to_passage {
                     for y in (config.start_y_offset + 1)..=(config.start_y_offset + passage_height)
                     {
@@ -3651,7 +3672,7 @@ pub fn generate_buildings(
                     element,
                     abs_terrain_offset,
                     is_abandoned_building,
-                    building_passages,
+                    effective_passages,
                 );
             }
         }
