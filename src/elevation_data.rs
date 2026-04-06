@@ -441,17 +441,19 @@ pub fn fetch_elevation_data(
     // Calculate blur sigma based on grid resolution
     // Use sqrt scaling to maintain consistent relative smoothing across different area sizes.
     // This prevents larger generation areas from appearing noisier than smaller ones.
-    // Reference: 100x100 grid uses sigma=5 (5% relative blur)
+    // Reference: 100x100 grid uses sigma=2.5 (2.5% relative blur)
     const BASE_GRID_REF: f64 = 100.0;
-    const BASE_SIGMA_REF: f64 = 5.0;
+    const BASE_SIGMA_REF: f64 = 2.5;
 
     let grid_size: f64 = (grid_width.min(grid_height) as f64).max(1.0);
 
     // Sqrt scaling provides a good balance:
-    // - 100x100: sigma = 5 (5% relative)
-    // - 500x500: sigma ≈ 11.2 (2.2% relative)
-    // - 1000x1000: sigma ≈ 15.8 (1.6% relative)
-    // This smooths terrain proportionally while preserving more detail.
+    // - 100x100: sigma = 2.5 (2.5% relative)
+    // - 500x500: sigma ≈ 5.6 (1.1% relative)
+    // - 1000x1000: sigma ≈ 7.9 (0.8% relative)
+    // - 3000x3000: sigma ≈ 13.7 (0.5% relative)
+    // This preserves terrain detail (steep slopes, ridges) while still
+    // smoothing enough to suppress tile-resolution noise.
     let sigma_from_grid: f64 = BASE_SIGMA_REF * (grid_size / BASE_GRID_REF).sqrt();
 
     // --- Sigma selection ---
@@ -459,33 +461,23 @@ pub fn fetch_elevation_data(
     // sigma_from_grid uses sqrt-scaling to apply proportionally less blur on larger
     // areas (which are inherently smoother) and more on smaller ones.
     //
-    // sigma_terrain floors the blur to native_resolution × 12.  This has two effects:
+    // sigma_terrain floors the blur to native_resolution × 3.  This has two effects:
     //
     // 1. Voronoi-block suppression: fill_nan_values() expands each ~3.6 m tile pixel
     //    into a Voronoi block of ~3.6 output cells.  sigma must span at least 2 of
     //    those blocks so the Gaussian kernel bridges every adjacent block edge.
-    //    native_resolution × 2 would suffice for this, but sigma_terrain (× 12)
-    //    subsumes it completely.
     //
-    // 2. SRTM surface artifact suppression: Terrarium nominally provides bare-earth
-    //    heights, but SRTM (the source at zoom 15 for most land areas) is a radar
-    //    product that records rooftop/canopy surface in dense urban areas.  The joerd
-    //    documentation explicitly notes "large variations in elevation in areas with
-    //    large buildings" as a known issue.  A sigma wide enough to span several
-    //    building footprints (~3–10 tile pixels) averages the rooftop peaks into the
-    //    surrounding street-level values.  native_resolution × 12 ≈ 43 grid cells
-    //    achieves this for typical Manhattan-scale buildings.
-    //
-    // For large areas sigma_from_grid already exceeds sigma_terrain (crossover ≈ 7.5 km
-    // at scale=1, lat 40°), so behaviour is identical to pre-fix for all large
-    // generations.  min/max and output heights always derive from the same single blur
-    // pass, so there is no possibility of range-decoupling blowup.
+    // 2. Basic SRTM noise suppression: the ×3 factor provides a small margin
+    //    above the Voronoi-block size to smooth minor SRTM surface noise.
+    //    A higher multiplier (e.g. ×12) would also suppress rooftop/canopy
+    //    artifacts in dense urban areas, but at the cost of flattening
+    //    mountains and removing realistic terrain detail everywhere.
     let lat_mid_rad: f64 = ((bbox.min().lat() + bbox.max().lat()) / 2.0).to_radians();
     let metres_per_tile_pixel: f64 = 2.0 * std::f64::consts::PI * 6_378_137.0
         / (2.0_f64.powi(zoom as i32) * 256.0)
         * lat_mid_rad.cos();
     let blocks_per_tile_pixel: f64 = metres_per_tile_pixel * scale;
-    let sigma_terrain: f64 = (blocks_per_tile_pixel * 12.0).max(1.0e-6);
+    let sigma_terrain: f64 = (blocks_per_tile_pixel * 3.0).max(1.0e-6);
     // Takes whichever is larger: the grid-proportional value or the terrain floor.
     // For small areas sigma_terrain wins; for large areas sigma_from_grid wins.
     // Clamped to half the grid size: beyond that the kernel exceeds the grid and
@@ -862,15 +854,15 @@ mod tests {
     #[test]
     fn test_output_sigma_small_bbox_uses_terrain_floor() {
         // For small areas, sigma_terrain > sigma_from_grid, so output_sigma = sigma_terrain.
-        // This suppresses SRTM building/surface artifacts and Voronoi block edges.
+        // This suppresses Voronoi block edges from the NaN-fill step.
         let zoom: u8 = 15;
         let lat_mid_rad: f64 = 40.705_f64.to_radians();
         let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
             * lat_mid_rad.cos();
-        let sigma_terrain = mpp * 12.0; // ≈ 43.9 at lat 40°
+        let sigma_terrain = mpp * 3.0; // ≈ 11.0 at lat 40°
 
         for grid_m in [134_f64, 200.0, 500.0, 1000.0, 5000.0] {
-            let sigma_from_grid = 5.0 * (grid_m / 100.0).sqrt();
+            let sigma_from_grid = 2.5 * (grid_m / 100.0).sqrt();
             let output_sigma = sigma_from_grid.max(sigma_terrain);
             if sigma_terrain > sigma_from_grid {
                 assert_eq!(
@@ -888,16 +880,16 @@ mod tests {
 
     #[test]
     fn test_output_sigma_large_bbox_no_regression() {
-        // For large areas (> ~7.5 km at scale=1, lat 40°), sigma_from_grid ≥ sigma_terrain.
+        // For large areas, sigma_from_grid ≥ sigma_terrain.
         // output_sigma = sigma_from_grid — identical to pre-fix behaviour.
         let zoom: u8 = 15;
         let lat_mid_rad: f64 = 40.705_f64.to_radians();
         let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
             * lat_mid_rad.cos();
-        let sigma_terrain = mpp * 12.0;
+        let sigma_terrain = mpp * 3.0;
 
         for grid_m in [8_000_f64, 10_000.0, 20_000.0, 50_000.0] {
-            let sigma_from_grid = 5.0 * (grid_m / 100.0).sqrt();
+            let sigma_from_grid = 2.5 * (grid_m / 100.0).sqrt();
             assert!(
                 sigma_from_grid >= sigma_terrain,
                 "grid={grid_m}m: sigma_from_grid {sigma_from_grid:.2} should dominate sigma_terrain {sigma_terrain:.2}"
@@ -913,17 +905,17 @@ mod tests {
     #[test]
     fn test_output_sigma_crossover() {
         // The crossover grid size where sigma_from_grid == sigma_terrain:
-        //   5 * sqrt(S/100) = mpp * 12  →  S = 100 * (mpp*12/5)²  ≈ 7540 m at lat 40°
+        //   2.5 * sqrt(S/100) = mpp * 3  →  S = 100 * (mpp*3/2.5)²  ≈ 1936 m at lat 40°
         // Below crossover sigma_terrain wins; above it sigma_from_grid wins.
         let zoom: u8 = 15;
         let lat_mid_rad: f64 = 40.705_f64.to_radians();
         let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
             * lat_mid_rad.cos();
-        let sigma_terrain = mpp * 12.0;
-        let crossover = 100.0 * (sigma_terrain / 5.0).powi(2);
+        let sigma_terrain = mpp * 3.0;
+        let crossover = 100.0 * (sigma_terrain / 2.5).powi(2);
 
         let below = crossover * 0.9;
-        let sigma_from_grid_below = 5.0 * (below / 100.0).sqrt();
+        let sigma_from_grid_below = 2.5 * (below / 100.0).sqrt();
         assert_eq!(
             sigma_from_grid_below.max(sigma_terrain),
             sigma_terrain,
@@ -931,7 +923,7 @@ mod tests {
         );
 
         let above = crossover * 1.1;
-        let sigma_from_grid_above = 5.0 * (above / 100.0).sqrt();
+        let sigma_from_grid_above = 2.5 * (above / 100.0).sqrt();
         assert_eq!(
             sigma_from_grid_above.max(sigma_terrain),
             sigma_from_grid_above,
@@ -973,14 +965,14 @@ mod tests {
 
     #[test]
     fn test_output_sigma_scale_factor() {
-        // native_resolution = mpp * scale, sigma_terrain = native_resolution * 12.
+        // native_resolution = mpp * scale, sigma_terrain = native_resolution * 3.
         // Both scale linearly with the scale argument.
         let zoom: u8 = 15;
         let lat_mid_rad: f64 = 40.705_f64.to_radians();
         let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
             * lat_mid_rad.cos();
-        let st1 = mpp * 1.0 * 12.0;
-        let st2 = mpp * 2.0 * 12.0;
+        let st1 = mpp * 1.0 * 3.0;
+        let st2 = mpp * 2.0 * 3.0;
         assert!(
             (st2 - 2.0 * st1).abs() < 1e-9,
             "sigma_terrain must scale linearly with the scale factor"
