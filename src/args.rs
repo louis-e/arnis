@@ -239,10 +239,12 @@ mod tests {
     #[test]
     fn test_java_nonexistent_path_is_ok() {
         // Java: nonexistent paths are OK - create_new_world will create them
+        let tmp = tempfile::tempdir().unwrap();
+        let nonexistent = tmp.path().join("does_not_exist");
         let cmd = [
             "arnis",
             "--output-dir",
-            "/nonexistent/path",
+            nonexistent.to_str().unwrap(),
             "--bbox",
             "1,2,3,4",
         ];
