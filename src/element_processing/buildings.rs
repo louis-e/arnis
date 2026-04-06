@@ -3241,8 +3241,8 @@ pub fn generate_buildings(
 
     // Skip structures that cannot be represented as conventional buildings.
     // building:part elements at that location add the correct details
-    // Eiffel Tower, London Eye
-    const SKIP_WAY_IDS: &[u64] = &[5013364, 204068874];
+    // Eiffel Tower, London Eye, Utah State Capitol
+    const SKIP_WAY_IDS: &[u64] = &[5013364, 204068874, 32920861];
     if SKIP_WAY_IDS.contains(&element.id) {
         return;
     }
