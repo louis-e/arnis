@@ -41,6 +41,7 @@
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
   "land_cover": "Marktäcke",
+  "disable_height_limit": "Inaktivera höjdgräns",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "save_path": "Sökväg",
   "rotation_angle": "Rotationsvinkel"

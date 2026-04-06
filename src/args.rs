@@ -82,6 +82,13 @@ pub struct Args {
     /// Clockwise rotation angle in degrees (optional, range: -90 to 90)
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
+
+    /// Disable the Minecraft build height limit (Y=319).
+    /// When enabled, terrain will use realistic 1:1 scaling without compression,
+    /// even if it exceeds the vanilla height limit.
+    /// Requires a Minecraft data pack that increases the world height.
+    #[arg(long, default_value_t = false)]
+    pub disable_height_limit: bool,
 }
 
 /// Validates CLI arguments after parsing.
@@ -182,6 +189,7 @@ mod tests {
         assert!(!args.debug);
         assert!(!args.terrain);
         assert!(!args.bedrock);
+        assert!(!args.disable_height_limit);
         // interior, roof, land_cover default to true
         assert!(args.interior);
         assert!(args.roof);
@@ -246,6 +254,29 @@ mod tests {
         assert!(args.bedrock);
         assert!(args.path.is_none());
         assert!(validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn test_disable_height_limit_flag() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
+        // Default is false
+        let cmd = ["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+        let args = Args::parse_from(cmd.iter());
+        assert!(!args.disable_height_limit);
+
+        // Flag enables it
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--disable-height-limit",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(args.disable_height_limit);
     }
 
     #[test]

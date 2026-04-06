@@ -41,6 +41,7 @@
   "roof": "屋根生成",
   "fillground": "地面を埋める",
   "land_cover": "土地被覆",
+  "disable_height_limit": "高さ制限を無効にする",
   "bedrock_auto_generated": "Bedrock ワールドは自動生成されます",
   "save_path": "保存先",
   "rotation_angle": "回転角度"

@@ -115,6 +115,7 @@ async function applyLocalization(localization) {
     "span[data-localize='roof']": "roof",
     "span[data-localize='fillground']": "fillground",
     "span[data-localize='land_cover']": "land_cover",
+    "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
@@ -484,6 +485,8 @@ function updateFormatToggleUI(format) {
   const chooseWorldBtn = document.getElementById('choose-world-btn');
   const selectedWorldText = document.getElementById('selected-world');
   
+  const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
+
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
@@ -492,6 +495,11 @@ function updateFormatToggleUI(format) {
       chooseWorldBtn.disabled = false;
       chooseWorldBtn.style.opacity = '1';
       chooseWorldBtn.style.cursor = 'pointer';
+    }
+    // Re-enable height limit toggle for Java
+    if (heightLimitToggle) {
+      heightLimitToggle.disabled = false;
+      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
     }
     // Show appropriate text based on whether a world was already created
     if (selectedWorldText && !worldPath) {
@@ -507,6 +515,12 @@ function updateFormatToggleUI(format) {
       chooseWorldBtn.disabled = true;
       chooseWorldBtn.style.opacity = '0.5';
       chooseWorldBtn.style.cursor = 'not-allowed';
+    }
+    // Disable height limit toggle for Bedrock (not supported)
+    if (heightLimitToggle) {
+      heightLimitToggle.checked = false;
+      heightLimitToggle.disabled = true;
+      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
     }
     // Clear world selection and show Bedrock info message
     worldPath = "";
@@ -938,6 +952,7 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var land_cover = document.getElementById("land-cover-toggle").checked;
+    var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -964,6 +979,7 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         landCoverEnabled: land_cover,
+        disableHeightLimit: disable_height_limit,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,

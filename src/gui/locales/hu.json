@@ -41,6 +41,7 @@
   "roof": "Tető generálás",
   "fillground": "Talaj feltöltése",
   "land_cover": "Felszínborítás",
+  "disable_height_limit": "Magasságkorlát kikapcsolása",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal",
   "rotation_angle": "Forgatási Szög"

@@ -41,6 +41,7 @@
   "roof": "Roof Generation",
   "fillground": "Fill Ground",
   "land_cover": "Land Cover",
+  "disable_height_limit": "Disable Height Limit",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "save_path": "Save Path",
   "rotation_angle": "Rotation Angle"

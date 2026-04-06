@@ -41,6 +41,7 @@
   "roof": "Dach Generierung",
   "fillground": "Boden füllen",
   "land_cover": "Landbedeckung",
+  "disable_height_limit": "Höhenlimit deaktivieren",
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",
   "save_path": "Speicherpfad",
   "rotation_angle": "Rotationswinkel"

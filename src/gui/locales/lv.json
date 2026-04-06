@@ -41,6 +41,7 @@
   "roof": "Jumta ģenerēšana",
   "fillground": "Aizpildīt zemi",
   "land_cover": "Zemes segums",
+  "disable_height_limit": "Atspējot augstuma ierobežojumu",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "save_path": "Saglabāšanas ceļš",
   "rotation_angle": "Rotācijas Leņķis"

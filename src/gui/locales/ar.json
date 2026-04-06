@@ -41,6 +41,7 @@
   "roof": "توليد السقف",
   "fillground": "ملء الأرض",
   "land_cover": "تصنيف الأرض",
+  "disable_height_limit": "تعطيل حد الارتفاع",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "save_path": "مسار الحفظ",
   "rotation_angle": "زاوية الدوران"

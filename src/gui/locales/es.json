@@ -41,6 +41,7 @@
   "roof": "Generación de Tejado",
   "fillground": "Rellenar Suelo",
   "land_cover": "Cobertura del suelo",
+  "disable_height_limit": "Desactivar límite de altura",
   "bedrock_auto_generated": "El mundo Bedrock se genera automáticamente",
   "save_path": "Ruta de guardado",
   "rotation_angle": "Ángulo de Rotación"

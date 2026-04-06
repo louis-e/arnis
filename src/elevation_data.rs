@@ -8,7 +8,10 @@ use image::Rgb;
 use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 
-/// Maximum Y coordinate in Minecraft (build height limit)
+/// Maximum Y coordinate in Minecraft (vanilla build height limit).
+/// Used for compression decisions when disable_height_limit is false.
+/// Note: world_editor/common.rs has a separate MAX_Y=2031 (data pack maximum)
+/// that serves as the absolute safety clamp for block placement.
 const MAX_Y: i32 = 319;
 /// AWS S3 Terrarium tiles endpoint (no API key required)
 const AWS_TERRARIUM_URL: &str =
@@ -296,6 +299,7 @@ pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
     ground_level: i32,
+    disable_height_limit: bool,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
 
@@ -533,8 +537,15 @@ pub fn fetch_elevation_data(
 
     // Determine final height scale:
     // - Use realistic 1:1 (times scale) if terrain fits within Minecraft limits
-    // - Only compress if the terrain would exceed the build height
-    let scaled_range: f64 = if ideal_scaled_range <= available_y_range {
+    // - Only compress if the terrain would exceed the build height (and height limit is enabled)
+    let scaled_range: f64 = if disable_height_limit {
+        // No compression: always use realistic 1:1 scaling
+        eprintln!(
+            "Height limit disabled: {:.1}m range => {:.0} blocks (no compression)",
+            height_range, ideal_scaled_range
+        );
+        ideal_scaled_range
+    } else if ideal_scaled_range <= available_y_range {
         // Terrain fits! Use realistic scaling
         eprintln!(
             "Realistic elevation: {:.1}m range fits in {} available blocks",
@@ -570,9 +581,14 @@ pub fn fetch_elevation_data(
                     };
                     // Scale to Minecraft blocks and add to ground level
                     let scaled_height: f64 = relative_height * scaled_range;
-                    // Clamp to valid Minecraft Y range (leave buffer at top for structures)
-                    ((ground_level as f64 + scaled_height).round() as i32)
-                        .clamp(ground_level, MAX_Y - TERRAIN_HEIGHT_BUFFER)
+                    let mc_y = (ground_level as f64 + scaled_height).round() as i32;
+                    if disable_height_limit {
+                        // No clamping: allow terrain to exceed vanilla limits
+                        mc_y
+                    } else {
+                        // Clamp to valid Minecraft Y range (leave buffer at top for structures)
+                        mc_y.clamp(ground_level, MAX_Y - TERRAIN_HEIGHT_BUFFER)
+                    }
                 })
                 .collect()
         })
@@ -586,7 +602,24 @@ pub fn fetch_elevation_data(
             max_block_height = max_block_height.max(height);
         }
     }
-    //eprintln!("Minecraft height data range: {min_block_height} to {max_block_height} blocks");
+
+    // Warn if terrain exceeds the absolute Minecraft data pack maximum (Y=2031)
+    const DATA_PACK_MAX_Y: i32 = 2031;
+    if disable_height_limit && max_block_height > DATA_PACK_MAX_Y {
+        eprintln!(
+            "Warning: Terrain peak reaches Y={}, which exceeds the maximum data pack height (Y={}). \
+             Blocks above Y={} will be truncated.",
+            max_block_height, DATA_PACK_MAX_Y, DATA_PACK_MAX_Y
+        );
+        #[cfg(feature = "gui")]
+        send_log(
+            LogLevel::Warning,
+            &format!(
+                "Terrain peak Y={} exceeds data pack max Y={}. Blocks will be truncated.",
+                max_block_height, DATA_PACK_MAX_Y
+            ),
+        );
+    }
 
     Ok(ElevationData {
         heights: mc_heights,
