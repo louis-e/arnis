@@ -1,8 +1,8 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::XZPoint;
-use crate::floodfill_cache::FloodFillCache;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -935,4 +935,93 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
         }
         previous_node = Some((node.x, node.z));
     }
+}
+
+/// Returns the half-width (block_range) for a highway type.
+///
+/// This extracts the same logic used inside `generate_highways_internal` so
+/// that pre-scan passes (e.g. building-passage collection) can determine road
+/// width without generating any blocks.
+pub(crate) fn highway_block_range(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    scale: f64,
+) -> i32 {
+    let mut block_range: i32 = match highway_type {
+        "footway" | "pedestrian" => 1,
+        "path" => 1,
+        "motorway" | "primary" | "trunk" => 5,
+        "secondary" => 4,
+        "tertiary" => 2,
+        "track" => 1,
+        "service" => 2,
+        "secondary_link" | "tertiary_link" => 1,
+        "escape" => 1,
+        "steps" => 1,
+        _ => {
+            if let Some(lanes) = tags.get("lanes") {
+                if lanes == "2" {
+                    3
+                } else if lanes != "1" {
+                    4
+                } else {
+                    2
+                }
+            } else {
+                2
+            }
+        }
+    };
+
+    if scale < 1.0 {
+        block_range = ((block_range as f64) * scale).floor() as i32;
+    }
+
+    block_range
+}
+
+/// Collect all (x, z) coordinates covered by highways tagged
+/// `tunnel=building_passage`.  The returned bitmap can be passed into building
+/// generation to cut ground-level openings through walls and floors.
+pub fn collect_building_passage_coords(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+) -> CoordinateBitmap {
+    let mut bitmap = CoordinateBitmap::new(xzbbox);
+
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+
+        // Must be tunnel=building_passage
+        if way.tags.get("tunnel").map(|v| v.as_str()) != Some("building_passage") {
+            continue;
+        }
+
+        // Must have a highway tag so we know the road width
+        let Some(highway_type) = way.tags.get("highway") else {
+            continue;
+        };
+
+        let block_range = highway_block_range(highway_type, &way.tags, scale);
+
+        for i in 1..way.nodes.len() {
+            let prev = way.nodes[i - 1].xz();
+            let cur = way.nodes[i].xz();
+
+            let points = bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z);
+
+            for (bx, _, bz) in &points {
+                for dx in -block_range..=block_range {
+                    for dz in -block_range..=block_range {
+                        bitmap.set(bx + dx, bz + dz);
+                    }
+                }
+            }
+        }
+    }
+
+    bitmap
 }

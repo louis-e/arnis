@@ -7,7 +7,7 @@ use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::historic;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
@@ -51,6 +51,11 @@ pub(crate) struct HolePolygon {
 // ============================================================================
 // Building Style System
 // ============================================================================
+
+/// Height (in blocks above ground floor) of a building-passage archway.
+/// Walls and floors below this height are removed at tunnel=building_passage
+/// highway coordinates, creating a ground-level opening through the building.
+const BUILDING_PASSAGE_HEIGHT: i32 = 4;
 
 /// Accent block options for building decoration
 const ACCENT_BLOCK_OPTIONS: [Block; 6] = [
@@ -1602,10 +1607,13 @@ fn build_wall_ring(
     config: &BuildingConfig,
     args: &Args,
     has_sloped_roof: bool,
+    building_passages: &CoordinateBitmap,
 ) -> (Vec<(i32, i32)>, (i32, i32, i32)) {
     let mut previous_node: Option<(i32, i32)> = None;
     let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
     let mut current_building: Vec<(i32, i32)> = Vec::new();
+
+    let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
     for node in nodes {
         let x = node.x;
@@ -1622,8 +1630,11 @@ fn build_wall_ring(
             );
 
             for (bx, _, bz) in bresenham_points {
+                let is_passage = building_passages.contains(bx, bz);
+
                 // Create foundation pillars when using terrain
-                if args.terrain && config.is_ground_level {
+                // Skip in passage zones so the road can pass through.
+                if args.terrain && config.is_ground_level && !is_passage {
                     let local_ground_level = if let Some(ground) = editor.get_ground() {
                         ground.level(XZPoint::new(
                             bx - editor.get_min_coords().0,
@@ -1645,15 +1656,34 @@ fn build_wall_ring(
                     }
                 }
 
-                // Generate wall blocks with windows
-                for h in
-                    (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height)
-                {
+                // Generate wall blocks with windows.
+                // In passage zones, skip below passage ceiling so the road
+                // can pass through; place a floor-block lintel at the top of
+                // the opening and continue the wall above.
+                let wall_start = if is_passage {
+                    config.start_y_offset + passage_height + 1
+                } else {
+                    config.start_y_offset + 1
+                };
+
+                for h in wall_start..=(config.start_y_offset + config.building_height) {
                     let block = determine_wall_block_at_position(bx, h, bz, config);
                     editor.set_block_absolute(
                         block,
                         bx,
                         h + config.abs_terrain_offset,
+                        bz,
+                        None,
+                        None,
+                    );
+                }
+
+                // Place passage ceiling lintel
+                if is_passage && passage_height < config.building_height {
+                    editor.set_block_absolute(
+                        config.floor_block,
+                        bx,
+                        config.start_y_offset + passage_height + config.abs_terrain_offset,
                         bz,
                         None,
                         None,
@@ -1697,6 +1727,7 @@ fn generate_special_doors(
     element: &ProcessedWay,
     config: &BuildingConfig,
     wall_outline: &[(i32, i32)],
+    building_passages: &CoordinateBitmap,
 ) {
     if wall_outline.is_empty() {
         return;
@@ -1737,6 +1768,13 @@ fn generate_special_doors(
                     // Wall runs along Z axis
                     (mid_x, mid_z, mid_x, mid_z + 1)
                 };
+
+                // Skip placing doors inside a building passage
+                if building_passages.contains(door1_x, door1_z)
+                    || building_passages.contains(door2_x, door2_z)
+                {
+                    continue;
+                }
 
                 // Place the double door (lower and upper parts)
                 // Use empty blacklist to overwrite existing wall blocks
@@ -1783,9 +1821,19 @@ fn generate_special_doors(
             let door_idx = rng.random_range(0..wall_outline.len());
             let (door_x, door_z) = wall_outline[door_idx];
 
-            // Place single oak door (empty blacklist to overwrite wall blocks)
-            editor.set_block_absolute(OAK_DOOR, door_x, door_y, door_z, None, Some(&[]));
-            editor.set_block_absolute(OAK_DOOR_UPPER, door_x, door_y + 1, door_z, None, Some(&[]));
+            // Skip placing a door inside a building passage
+            if !building_passages.contains(door_x, door_z) {
+                // Place single oak door (empty blacklist to overwrite wall blocks)
+                editor.set_block_absolute(OAK_DOOR, door_x, door_y, door_z, None, Some(&[]));
+                editor.set_block_absolute(
+                    OAK_DOOR_UPPER,
+                    door_x,
+                    door_y + 1,
+                    door_z,
+                    None,
+                    Some(&[]),
+                );
+            }
         }
     }
 }
@@ -2017,6 +2065,7 @@ fn generate_residential_window_decorations(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     config: &BuildingConfig,
+    building_passages: &CoordinateBitmap,
 ) {
     // Only non-tall residential / house buildings get decorations.
     if config.is_tall_building {
@@ -2073,6 +2122,11 @@ fn generate_residential_window_decorations(
             for (bx, _, bz) in &points {
                 let bx = *bx;
                 let bz = *bz;
+
+                // Skip decorations at passage openings
+                if building_passages.contains(bx, bz) {
+                    continue;
+                }
 
                 let mod6 = ((bx + bz) % 6 + 6) % 6; // always 0..5
 
@@ -2350,6 +2404,7 @@ fn generate_corner_quoins(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     config: &BuildingConfig,
+    building_passages: &CoordinateBitmap,
 ) {
     // Skip if wall and accent are the same block (nothing visible)
     if config.wall_block == config.accent_block {
@@ -2380,9 +2435,16 @@ fn generate_corner_quoins(
 
     let quoin_block = config.accent_block;
     let top_h = config.start_y_offset + config.building_height;
+    let passage_h = config.start_y_offset + BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
     for &(cx, cz) in &corners {
-        for h in (config.start_y_offset + 1)..=top_h {
+        let is_passage = building_passages.contains(cx, cz);
+        let start_h = if is_passage {
+            passage_h + 1
+        } else {
+            config.start_y_offset + 1
+        };
+        for h in start_h..=top_h {
             editor.set_block_absolute(
                 quoin_block,
                 cx,
@@ -2407,6 +2469,7 @@ fn generate_wall_depth_features(
     element: &ProcessedWay,
     config: &BuildingConfig,
     has_sloped_roof: bool,
+    building_passages: &CoordinateBitmap,
 ) {
     if config.wall_depth_style == WallDepthStyle::None {
         return;
@@ -2478,6 +2541,12 @@ fn generate_wall_depth_features(
             for (idx, (bx, _, bz)) in points.iter().enumerate() {
                 let bx = *bx;
                 let bz = *bz;
+
+                // Skip decorative features at passage openings — the road
+                // passes through here so no pilasters/buttresses/etc.
+                if building_passages.contains(bx, bz) {
+                    continue;
+                }
 
                 let mod6 = ((bx + bz) % 6 + 6) % 6;
 
@@ -3108,6 +3177,7 @@ fn generate_floors_and_ceilings(
     config: &BuildingConfig,
     args: &Args,
     generate_non_flat_roof: bool,
+    building_passages: &CoordinateBitmap,
 ) -> HashSet<(i32, i32)> {
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
     let ceiling_light_block = if config.is_abandoned_building {
@@ -3116,26 +3186,38 @@ fn generate_floors_and_ceilings(
         GLOWSTONE
     };
 
+    let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
+
     for &(x, z) in cached_floor_area {
         if !processed_points.insert((x, z)) {
             continue;
         }
 
-        // Set ground floor
-        editor.set_block_absolute(
-            config.floor_block,
-            x,
-            config.start_y_offset + config.abs_terrain_offset,
-            z,
-            None,
-            None,
-        );
+        let is_passage = building_passages.contains(x, z);
+
+        // Set ground floor — skip in passage zones (the road surface is placed
+        // by the highway processor instead).
+        if !is_passage {
+            editor.set_block_absolute(
+                config.floor_block,
+                x,
+                config.start_y_offset + config.abs_terrain_offset,
+                z,
+                None,
+                None,
+            );
+        }
 
         // Set intermediate ceilings with light fixtures
         if config.building_height > 4 {
             for h in (config.start_y_offset + 2 + 4..config.start_y_offset + config.building_height)
                 .step_by(4)
             {
+                // Skip intermediate ceilings below passage opening
+                if is_passage && h <= config.start_y_offset + passage_height {
+                    continue;
+                }
+
                 let block = if x % 5 == 0 && z % 5 == 0 {
                     ceiling_light_block
                 } else {
@@ -3143,12 +3225,24 @@ fn generate_floors_and_ceilings(
                 };
                 editor.set_block_absolute(block, x, h + config.abs_terrain_offset, z, None, None);
             }
-        } else if x % 5 == 0 && z % 5 == 0 {
-            // Single floor building with ceiling light
+        } else if x % 5 == 0 && z % 5 == 0 && !is_passage {
+            // Single floor building with ceiling light (skip in passage)
             editor.set_block_absolute(
                 ceiling_light_block,
                 x,
                 config.start_y_offset + config.building_height + config.abs_terrain_offset,
+                z,
+                None,
+                None,
+            );
+        }
+
+        // Place passage ceiling lintel at the top of the archway
+        if is_passage && passage_height < config.building_height {
+            editor.set_block_absolute(
+                config.floor_block,
+                x,
+                config.start_y_offset + passage_height + config.abs_terrain_offset,
                 z,
                 None,
                 None,
@@ -3233,6 +3327,7 @@ pub fn generate_buildings(
     relation_levels: Option<i32>,
     hole_polygons: Option<&[HolePolygon]>,
     flood_fill_cache: &FloodFillCache,
+    building_passages: &CoordinateBitmap,
 ) {
     // Early return for underground buildings
     if should_skip_underground_building(element) {
@@ -3443,35 +3538,48 @@ pub fn generate_buildings(
 
     // Generate walls, pass whether this building will have a sloped roof
     let has_sloped_roof = args.roof && style.generate_roof && style.roof_type != RoofType::Flat;
-    let (wall_outline, corner_addup) =
-        build_wall_ring(editor, &element.nodes, &config, args, has_sloped_roof);
+    let (wall_outline, corner_addup) = build_wall_ring(
+        editor,
+        &element.nodes,
+        &config,
+        args,
+        has_sloped_roof,
+        building_passages,
+    );
 
     if let Some(holes) = hole_polygons {
         for hole in holes {
             if hole.add_walls {
-                let _ = build_wall_ring(editor, &hole.way.nodes, &config, args, has_sloped_roof);
+                let _ = build_wall_ring(
+                    editor,
+                    &hole.way.nodes,
+                    &config,
+                    args,
+                    has_sloped_roof,
+                    building_passages,
+                );
             }
         }
     }
 
     // Generate special doors (garage doors, shed doors)
     if config.has_garage_door || config.has_single_door {
-        generate_special_doors(editor, element, &config, &wall_outline);
+        generate_special_doors(editor, element, &config, &wall_outline, building_passages);
     }
 
     // Add shutters and window boxes to small residential buildings
-    generate_residential_window_decorations(editor, element, &config);
+    generate_residential_window_decorations(editor, element, &config, building_passages);
 
     // Add wall depth features (pilasters, columns, ledges, cornices, buttresses)
     // Only for standalone buildings, not building:part sub-sections (parts adjoin
     // other parts and outward protrusions would collide with neighbours).
     if !element.tags.contains_key("building:part") {
-        generate_wall_depth_features(editor, element, &config, has_sloped_roof);
+        generate_wall_depth_features(editor, element, &config, has_sloped_roof, building_passages);
     }
 
     // Add corner quoins (accent-block columns at building corners)
     if !element.tags.contains_key("building:part") {
-        generate_corner_quoins(editor, element, &config);
+        generate_corner_quoins(editor, element, &config, building_passages);
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
@@ -3492,7 +3600,41 @@ pub fn generate_buildings(
             &config,
             args,
             style.generate_roof,
+            building_passages,
         );
+
+        // Build tunnel side walls: for each interior coordinate that borders a
+        // passage coordinate, place a wall column from ground to passage ceiling.
+        // This creates the left/right corridor walls inside the archway.
+        if !building_passages.is_empty() {
+            let passage_height =
+                BUILDING_PASSAGE_HEIGHT.min(config.building_height);
+            let abs = config.abs_terrain_offset;
+            for &(x, z) in &cached_floor_area {
+                if building_passages.contains(x, z) {
+                    continue; // this is road, not a wall
+                }
+                // Check 4-connected neighbours for passage adjacency
+                let adjacent_to_passage = building_passages.contains(x - 1, z)
+                    || building_passages.contains(x + 1, z)
+                    || building_passages.contains(x, z - 1)
+                    || building_passages.contains(x, z + 1);
+                if adjacent_to_passage {
+                    for y in (config.start_y_offset + 1)
+                        ..=(config.start_y_offset + passage_height)
+                    {
+                        editor.set_block_absolute(
+                            config.wall_block,
+                            x,
+                            y + abs,
+                            z,
+                            None,
+                            None,
+                        );
+                    }
+                }
+            }
+        }
 
         // Generate interior features
         if args.interior {
@@ -3518,6 +3660,7 @@ pub fn generate_buildings(
                     element,
                     abs_terrain_offset,
                     is_abandoned_building,
+                    building_passages,
                 );
             }
         }
@@ -5217,6 +5360,7 @@ pub fn generate_building_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     xzbbox: &crate::coordinate_system::cartesian::XZBBox,
+    building_passages: &CoordinateBitmap,
 ) {
     // Skip underground buildings/building parts
     // Check layer tag
@@ -5399,6 +5543,7 @@ pub fn generate_building_from_relation(
                 Some(relation_levels),
                 hole_polygons.as_deref(),
                 flood_fill_cache,
+                building_passages,
             );
         }
     }

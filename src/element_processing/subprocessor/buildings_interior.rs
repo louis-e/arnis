@@ -1,4 +1,5 @@
 use crate::block_definitions::*;
+use crate::floodfill_cache::CoordinateBitmap;
 use crate::world_editor::WorldEditor;
 use std::collections::HashSet;
 
@@ -291,6 +292,7 @@ pub fn generate_building_interior(
     element: &crate::osm_parser::ProcessedWay,
     abs_terrain_offset: i32,
     is_abandoned_building: bool,
+    building_passages: &CoordinateBitmap,
 ) {
     // Skip interior generation for very small buildings
     let width = max_x - min_x + 1;
@@ -361,6 +363,14 @@ pub fn generate_building_interior(
             for x in interior_min_x..=interior_max_x {
                 // Skip if outside the building's floor area
                 if !floor_area_set.contains(&(x, z)) {
+                    continue;
+                }
+
+                // Skip interior blocks in building-passage zones on floors
+                // that fall within the archway opening.
+                if building_passages.contains(x, z)
+                    && floor_y < start_y_offset + 4.min(building_height)
+                {
                     continue;
                 }
 

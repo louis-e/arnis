@@ -67,6 +67,11 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
+    // Collect coordinates covered by tunnel=building_passage highways so that
+    // building generation can cut ground-level openings through walls and floors.
+    let building_passages =
+        highways::collect_building_passage_coords(&elements, &xzbbox, args.scale);
+
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
@@ -138,6 +143,7 @@ pub fn generate_world_with_options(
                             None,
                             None,
                             &flood_fill_cache,
+                            &building_passages,
                         );
                     }
                 } else if way.tags.contains_key("highway") {
@@ -256,6 +262,7 @@ pub fn generate_world_with_options(
                         args,
                         &flood_fill_cache,
                         &xzbbox,
+                        &building_passages,
                     );
                 } else if rel.tags.contains_key("water")
                     || rel
