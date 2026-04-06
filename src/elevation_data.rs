@@ -879,9 +879,9 @@ mod tests {
     }
 
     #[test]
-    fn test_output_sigma_large_bbox_no_regression() {
-        // For large areas, sigma_from_grid ≥ sigma_terrain.
-        // output_sigma = sigma_from_grid — identical to pre-fix behaviour.
+    fn test_output_sigma_large_bbox_grid_dominates() {
+        // For large areas, sigma_from_grid ≥ sigma_terrain,
+        // so output_sigma is determined by the grid-proportional component.
         let zoom: u8 = 15;
         let lat_mid_rad: f64 = 40.705_f64.to_radians();
         let mpp = 2.0 * std::f64::consts::PI * 6_378_137.0 / (2.0_f64.powi(zoom as i32) * 256.0)
