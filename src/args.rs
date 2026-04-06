@@ -189,6 +189,7 @@ mod tests {
         assert!(!args.debug);
         assert!(!args.terrain);
         assert!(!args.bedrock);
+        assert!(!args.disable_height_limit);
         // interior, roof, land_cover default to true
         assert!(args.interior);
         assert!(args.roof);
@@ -253,6 +254,29 @@ mod tests {
         assert!(args.bedrock);
         assert!(args.path.is_none());
         assert!(validate_args(&args).is_ok());
+    }
+
+    #[test]
+    fn test_disable_height_limit_flag() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        let tmp_path = tmpdir.path().to_str().unwrap();
+
+        // Default is false
+        let cmd = ["arnis", "--output-dir", tmp_path, "--bbox", "1,2,3,4"];
+        let args = Args::parse_from(cmd.iter());
+        assert!(!args.disable_height_limit);
+
+        // Flag enables it
+        let cmd = [
+            "arnis",
+            "--output-dir",
+            tmp_path,
+            "--bbox",
+            "1,2,3,4",
+            "--disable-height-limit",
+        ];
+        let args = Args::parse_from(cmd.iter());
+        assert!(args.disable_height_limit);
     }
 
     #[test]

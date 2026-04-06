@@ -485,6 +485,8 @@ function updateFormatToggleUI(format) {
   const chooseWorldBtn = document.getElementById('choose-world-btn');
   const selectedWorldText = document.getElementById('selected-world');
   
+  const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
+
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
@@ -493,6 +495,11 @@ function updateFormatToggleUI(format) {
       chooseWorldBtn.disabled = false;
       chooseWorldBtn.style.opacity = '1';
       chooseWorldBtn.style.cursor = 'pointer';
+    }
+    // Re-enable height limit toggle for Java
+    if (heightLimitToggle) {
+      heightLimitToggle.disabled = false;
+      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
     }
     // Show appropriate text based on whether a world was already created
     if (selectedWorldText && !worldPath) {
@@ -508,6 +515,12 @@ function updateFormatToggleUI(format) {
       chooseWorldBtn.disabled = true;
       chooseWorldBtn.style.opacity = '0.5';
       chooseWorldBtn.style.cursor = 'not-allowed';
+    }
+    // Disable height limit toggle for Bedrock (not supported)
+    if (heightLimitToggle) {
+      heightLimitToggle.checked = false;
+      heightLimitToggle.disabled = true;
+      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
     }
     // Clear world selection and show Bedrock info message
     worldPath = "";

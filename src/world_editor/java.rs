@@ -520,7 +520,7 @@ fn pack_heightmap_values(values: &[i32; 256], total_height: i32) -> LongArray {
     // Calculate bits needed: ceil(log2(total_height + 1)), minimum 9
     let bits = ((total_height + 1) as f64).log2().ceil().max(9.0) as usize;
     let vals_per_long = 64 / bits;
-    let num_longs = (256 + vals_per_long - 1) / vals_per_long;
+    let num_longs = 256_usize.div_ceil(vals_per_long);
     let mask = (1i64 << bits) - 1;
 
     let mut result = Vec::with_capacity(num_longs);
