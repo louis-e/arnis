@@ -1318,6 +1318,28 @@ mod tests {
     }
 
     #[test]
+    fn test_gray_concrete_powder_bedrock_mapping() {
+        use crate::block_definitions::GRAY_CONCRETE_POWDER;
+        let bedrock = to_bedrock_block(GRAY_CONCRETE_POWDER);
+        assert_eq!(bedrock.name, "minecraft:concretePowder");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "gray"
+        ));
+    }
+
+    #[test]
+    fn test_cyan_terracotta_bedrock_mapping() {
+        use crate::block_definitions::CYAN_TERRACOTTA;
+        let bedrock = to_bedrock_block(CYAN_TERRACOTTA);
+        assert_eq!(bedrock.name, "minecraft:stained_hardened_clay");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "cyan"
+        ));
+    }
+
+    #[test]
     fn test_stairs_with_properties() {
         use crate::block_definitions::OAK_STAIRS;
         use std::collections::HashMap as StdHashMap;

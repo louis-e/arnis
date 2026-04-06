@@ -16,7 +16,7 @@ fn road_block(x: i32, z: i32) -> Block {
     h ^= h >> 16;
     h = h.wrapping_mul(0x45D9F3B);
     h ^= h >> 16;
-    if h % 2 == 0 {
+    if h & 1 == 0 {
         GRAY_CONCRETE_POWDER
     } else {
         CYAN_TERRACOTTA
@@ -515,44 +515,41 @@ fn generate_highways_internal(
                                             None,
                                         );
                                     }
-                                } else if use_absolute_y {
-                                    let effective_block = if use_road_mix {
-                                        road_block(set_x, set_z)
-                                    } else {
-                                        block_type
-                                    };
-                                    editor.set_block_absolute(
-                                        effective_block,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        None,
-                                        Some(&[
-                                            BLACK_CONCRETE,
-                                            GRAY_CONCRETE_POWDER,
-                                            CYAN_TERRACOTTA,
-                                            WHITE_CONCRETE,
-                                        ]),
-                                    );
                                 } else {
                                     let effective_block = if use_road_mix {
                                         road_block(set_x, set_z)
                                     } else {
                                         block_type
                                     };
-                                    editor.set_block(
-                                        effective_block,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        None,
-                                        Some(&[
-                                            BLACK_CONCRETE,
-                                            GRAY_CONCRETE_POWDER,
-                                            CYAN_TERRACOTTA,
-                                            WHITE_CONCRETE,
-                                        ]),
-                                    );
+                                    if use_absolute_y {
+                                        editor.set_block_absolute(
+                                            effective_block,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            None,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                GRAY_CONCRETE_POWDER,
+                                                CYAN_TERRACOTTA,
+                                                WHITE_CONCRETE,
+                                            ]),
+                                        );
+                                    } else {
+                                        editor.set_block(
+                                            effective_block,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            None,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                GRAY_CONCRETE_POWDER,
+                                                CYAN_TERRACOTTA,
+                                                WHITE_CONCRETE,
+                                            ]),
+                                        );
+                                    }
                                 }
 
                                 // Add stone brick foundation underneath elevated highways/bridges for thickness
@@ -889,7 +886,12 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
                     bx,
                     0,
                     bz,
-                    Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA, WHITE_CONCRETE]),
+                    Some(&[
+                        BLACK_CONCRETE,
+                        GRAY_CONCRETE_POWDER,
+                        CYAN_TERRACOTTA,
+                        WHITE_CONCRETE,
+                    ]),
                 ) {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
