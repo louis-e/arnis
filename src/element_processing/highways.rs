@@ -372,6 +372,15 @@ fn generate_highways_internal(
 
             let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize; // 35% of way length, max 50 blocks, min 15 blocks
 
+            // Check if this is a marked zebra crossing (only depends on tags, compute once)
+            let is_zebra_crossing = highway_type == "footway"
+                && element.tags().get("footway").map(|s| s.as_str()) == Some("crossing")
+                && !matches!(
+                    element.tags().get("crossing").map(|s| s.as_str()),
+                    Some("no" | "unmarked")
+                )
+                && element.tags().get("crossing:markings").map(|s| s.as_str()) != Some("no");
+
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
             let total_segments = way.nodes.len() - 1;
@@ -417,16 +426,6 @@ fn generate_highways_internal(
                             );
                             (y, false)
                         };
-
-                        // Check if this is a marked zebra crossing
-                        let is_zebra_crossing = highway_type == "footway"
-                            && element.tags().get("footway") == Some(&"crossing".to_string())
-                            && !matches!(
-                                element.tags().get("crossing").map(|s| s.as_str()),
-                                Some("no" | "unmarked")
-                            )
-                            && element.tags().get("crossing:markings").map(|s| s.as_str())
-                                != Some("no");
 
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
@@ -529,6 +528,7 @@ fn generate_highways_internal(
                                         set_z,
                                         None,
                                         Some(&[
+                                            BLACK_CONCRETE,
                                             GRAY_CONCRETE_POWDER,
                                             CYAN_TERRACOTTA,
                                             WHITE_CONCRETE,
@@ -547,6 +547,7 @@ fn generate_highways_internal(
                                         set_z,
                                         None,
                                         Some(&[
+                                            BLACK_CONCRETE,
                                             GRAY_CONCRETE_POWDER,
                                             CYAN_TERRACOTTA,
                                             WHITE_CONCRETE,
@@ -888,7 +889,7 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
                     bx,
                     0,
                     bz,
-                    Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA, WHITE_CONCRETE]),
+                    Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA, WHITE_CONCRETE]),
                 ) {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
