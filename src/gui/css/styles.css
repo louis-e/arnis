@@ -421,6 +421,10 @@ button:hover {
   accent-color: #fecc44;
 }
 
+#disable-height-limit-toggle {
+  accent-color: #fecc44;
+}
+
 #telemetry-toggle {
   accent-color: #fecc44;
 }
@@ -481,7 +485,7 @@ button:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .settings-row label {
