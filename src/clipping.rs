@@ -1,7 +1,6 @@
 // Sutherland-Hodgman polygon clipping and related geometry utilities.
 //
-// Provides bbox clipping for polygons, polylines, and water rings with
-// proper corner insertion for closed shapes.
+// Provides bbox clipping for polygons, polylines, and water rings.
 
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::osm_parser::ProcessedNode;
@@ -56,12 +55,14 @@ pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Process
         return Vec::new();
     }
 
-    let polygon = insert_bbox_corners(polygon, min_x, min_z, max_x, max_z);
-
-    let polygon = remove_consecutive_duplicates(polygon);
-
-    if polygon.len() < 3 {
-        return Vec::new();
+    // Re-close the polygon: SH output is implicitly closed, and dedup may
+    // have removed the explicit closing point. Re-adding it preserves the
+    // closure signal so downstream code (flood fill) can distinguish closed
+    // polygons from open polylines -- open polylines must never be flood-filled
+    // because geo::Polygon auto-closure would create a diagonal artifact edge.
+    let mut polygon = polygon;
+    if polygon.len() >= 3 {
+        polygon.push(polygon[0]);
     }
 
     assign_node_ids_preserving_endpoints(nodes, polygon, way_id)
@@ -115,11 +116,6 @@ pub fn clip_water_ring_to_bbox(
 
     if !all_points_inside {
         eprintln!("ERROR: clip_water_ring_to_bbox produced points outside bbox!");
-        return None;
-    }
-
-    let polygon = insert_bbox_corners(polygon, min_x, min_z, max_x, max_z);
-    if polygon.len() < 3 {
         return None;
     }
 
@@ -374,10 +370,16 @@ fn clip_polygon_sutherland_hodgman_simple(
         }
 
         let mut clipped = Vec::new();
+        let is_closed = !polygon.is_empty() && polygon.first() == polygon.last();
+        let edge_count = if is_closed {
+            polygon.len().saturating_sub(1)
+        } else {
+            polygon.len()
+        };
 
-        for i in 0..(polygon.len().saturating_sub(1)) {
+        for i in 0..edge_count {
             let current = polygon[i];
-            let next = polygon[i + 1];
+            let next = polygon.get(i + 1).copied().unwrap_or(polygon[0]);
 
             let current_inside = point_inside_edge(current, edge_x1, edge_z1, edge_x2, edge_z2);
             let next_inside = point_inside_edge(next, edge_x1, edge_z1, edge_x2, edge_z2);
@@ -496,140 +498,6 @@ fn find_bbox_intersections(
     }
 
     intersections
-}
-
-/// Returns which bbox edge a point lies on: 0=bottom, 1=right, 2=top, 3=left, -1=interior.
-fn get_bbox_edge(point: (f64, f64), min_x: f64, min_z: f64, max_x: f64, max_z: f64) -> i32 {
-    // Use a slightly larger epsilon to handle floating-point errors from Sutherland-Hodgman.
-    // Points should be clamped to bbox before this function is called, so any point
-    // at or very near the boundary should be considered ON that edge.
-    let eps = 1.0;
-
-    let on_left = (point.0 - min_x).abs() <= eps;
-    let on_right = (point.0 - max_x).abs() <= eps;
-    let on_bottom = (point.1 - min_z).abs() <= eps;
-    let on_top = (point.1 - max_z).abs() <= eps;
-
-    // Handle corners (assign to edge in counter-clockwise order)
-    if on_bottom && on_left {
-        return 3;
-    }
-    if on_bottom && on_right {
-        return 0;
-    }
-    if on_top && on_right {
-        return 1;
-    }
-    if on_top && on_left {
-        return 2;
-    }
-
-    if on_bottom {
-        return 0;
-    }
-    if on_right {
-        return 1;
-    }
-    if on_top {
-        return 2;
-    }
-    if on_left {
-        return 3;
-    }
-
-    -1
-}
-
-/// Returns corners to insert when traversing from edge1 to edge2 via shorter path.
-fn get_corners_between_edges(
-    edge1: i32,
-    edge2: i32,
-    min_x: f64,
-    min_z: f64,
-    max_x: f64,
-    max_z: f64,
-) -> Vec<(f64, f64)> {
-    if edge1 == edge2 || edge1 < 0 || edge2 < 0 {
-        return Vec::new();
-    }
-
-    let corners = [
-        (max_x, min_z), // 0: bottom-right
-        (max_x, max_z), // 1: top-right
-        (min_x, max_z), // 2: top-left
-        (min_x, min_z), // 3: bottom-left
-    ];
-
-    let ccw_dist = ((edge2 - edge1 + 4) % 4) as usize;
-    let cw_dist = ((edge1 - edge2 + 4) % 4) as usize;
-
-    // For opposite edges (distance = 2), we need to pick a direction.
-    // Use counter-clockwise by default to ensure corners are inserted.
-    // This prevents diagonal lines when polygon spans opposite bbox edges.
-
-    let mut result = Vec::new();
-
-    if ccw_dist <= cw_dist {
-        // Go counter-clockwise
-        let mut current = edge1;
-        for _ in 0..ccw_dist {
-            result.push(corners[current as usize]);
-            current = (current + 1) % 4;
-        }
-    } else {
-        // Go clockwise
-        let mut current = edge1;
-        for _ in 0..cw_dist {
-            current = (current + 4 - 1) % 4;
-            result.push(corners[current as usize]);
-        }
-    }
-
-    result
-}
-
-/// Checks if two points are approximately equal (within epsilon tolerance).
-fn points_approx_equal(p1: (f64, f64), p2: (f64, f64)) -> bool {
-    let eps = 1.0;
-    (p1.0 - p2.0).abs() <= eps && (p1.1 - p2.1).abs() <= eps
-}
-
-/// Inserts bbox corners where polygon transitions between different bbox edges.
-fn insert_bbox_corners(
-    polygon: Vec<(f64, f64)>,
-    min_x: f64,
-    min_z: f64,
-    max_x: f64,
-    max_z: f64,
-) -> Vec<(f64, f64)> {
-    if polygon.len() < 3 {
-        return polygon;
-    }
-
-    let mut result = Vec::with_capacity(polygon.len() + 4);
-
-    for i in 0..polygon.len() {
-        let current = polygon[i];
-        let next = polygon[(i + 1) % polygon.len()];
-
-        result.push(current);
-
-        let edge1 = get_bbox_edge(current, min_x, min_z, max_x, max_z);
-        let edge2 = get_bbox_edge(next, min_x, min_z, max_x, max_z);
-
-        if edge1 >= 0 && edge2 >= 0 && edge1 != edge2 {
-            let corners = get_corners_between_edges(edge1, edge2, min_x, min_z, max_x, max_z);
-
-            // Filter out corners that match the current point or the next point
-            for corner in corners {
-                if !points_approx_equal(corner, current) && !points_approx_equal(corner, next) {
-                    result.push(corner);
-                }
-            }
-        }
-    }
-
-    result
 }
 
 /// Removes consecutive duplicate points (within epsilon tolerance).
