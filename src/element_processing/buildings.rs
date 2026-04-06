@@ -1810,12 +1810,12 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
     if config.use_horizontal_windows {
         // Modern skyscraper pattern: continuous horizontal window bands
         // with stone separation bands at floor levels (every 4th block)
-        if above_floor && floor_row == 0 {
-            // Floor-level separation band (stone/accent material)
-            config.accent_block
-        } else if above_floor && config.has_lobby_base && h <= config.start_y_offset + 5 {
+        if above_floor && config.has_lobby_base && h <= config.start_y_offset + 5 {
             // Solid lobby base: first floor cycle uses wall block
             config.wall_block
+        } else if above_floor && floor_row == 0 {
+            // Floor-level separation band (stone/accent material)
+            config.accent_block
         } else if above_floor {
             // Full-width window band
             config.window_block
@@ -3603,7 +3603,7 @@ fn generate_parapet(editor: &mut WorldEditor, element: &ProcessedWay, config: &B
             }
         }
         for &(cx, cz) in &corners {
-            editor.set_block_absolute(config.accent_block, cx, cap_y, cz, Some(&[AIR]), None);
+            editor.set_block_absolute(config.accent_block, cx, cap_y, cz, None, None);
         }
     }
 }

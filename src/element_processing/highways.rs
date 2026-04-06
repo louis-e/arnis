@@ -444,7 +444,7 @@ fn generate_highways_internal(
                                                     set_x,
                                                     current_y,
                                                     set_z,
-                                                    Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                                    Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                                     None,
                                                 );
                                             } else {
@@ -453,7 +453,7 @@ fn generate_highways_internal(
                                                     set_x,
                                                     current_y,
                                                     set_z,
-                                                    Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                                    Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                                     None,
                                                 );
                                             }
