@@ -213,6 +213,8 @@ impl Tree<'_> {
             z,
             Some(&[
                 BLACK_CONCRETE,
+                GRAY_CONCRETE_POWDER,
+                CYAN_TERRACOTTA,
                 GRAY_CONCRETE,
                 LIGHT_GRAY_CONCRETE,
                 DIRT_PATH,
@@ -415,6 +417,8 @@ impl Tree<'_> {
             BLUE_TERRACOTTA,
             YELLOW_TERRACOTTA,
             BLACK_CONCRETE,
+            GRAY_CONCRETE_POWDER,
+            CYAN_TERRACOTTA,
             WHITE_CONCRETE,
             GRAY_CONCRETE,
             LIGHT_GRAY_CONCRETE,

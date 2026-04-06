@@ -114,6 +114,8 @@ pub fn generate_landuse(
             z,
             Some(&[
                 BLACK_CONCRETE,
+                GRAY_CONCRETE_POWDER,
+                CYAN_TERRACOTTA,
                 GRAY_CONCRETE,
                 LIGHT_GRAY_CONCRETE,
                 WHITE_CONCRETE,

@@ -357,6 +357,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "concrete",
             vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
         ),
+        "gray_concrete_powder" => BedrockBlock::with_states(
+            "concretePowder",
+            vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
+        ),
         "light_gray_concrete" => BedrockBlock::with_states(
             "concrete",
             vec![(
@@ -453,6 +457,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "blue_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
             vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
+        ),
+        "cyan_terracotta" => BedrockBlock::with_states(
+            "stained_hardened_clay",
+            vec![("color", BedrockBlockStateValue::String("cyan".to_string()))],
         ),
         "gray_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
@@ -1306,6 +1314,28 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(s)) if s == "white"
+        ));
+    }
+
+    #[test]
+    fn test_gray_concrete_powder_bedrock_mapping() {
+        use crate::block_definitions::GRAY_CONCRETE_POWDER;
+        let bedrock = to_bedrock_block(GRAY_CONCRETE_POWDER);
+        assert_eq!(bedrock.name, "minecraft:concretePowder");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "gray"
+        ));
+    }
+
+    #[test]
+    fn test_cyan_terracotta_bedrock_mapping() {
+        use crate::block_definitions::CYAN_TERRACOTTA;
+        let bedrock = to_bedrock_block(CYAN_TERRACOTTA);
+        assert_eq!(bedrock.name, "minecraft:stained_hardened_clay");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "cyan"
         ));
     }
 
