@@ -15,9 +15,13 @@ use std::process::Command;
 use std::time::Duration;
 
 /// Function to download data using reqwest
-fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn download_with_reqwest(
+    url: &str,
+    query: &str,
+    timeout_secs: u64,
+) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
-        .timeout(Duration::from_secs(360))
+        .timeout(Duration::from_secs(timeout_secs))
         .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
@@ -190,12 +194,17 @@ pub fn fetch_data_from_overpass(
         let response: String = 'server_loop: {
             for (i, server) in servers.iter().enumerate() {
                 let url = server;
+                let timeout_secs = if url.contains("private.coffee") {
+                    120
+                } else {
+                    360
+                };
                 println!("Downloading from {url} with method {download_method}...");
                 let result = match download_method {
-                    "requests" => download_with_reqwest(url, &query),
+                    "requests" => download_with_reqwest(url, &query, timeout_secs),
                     "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
                     "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
-                    _ => download_with_reqwest(url, &query), // Default to requests
+                    _ => download_with_reqwest(url, &query, timeout_secs), // Default to requests
                 };
 
                 match result {

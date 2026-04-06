@@ -17,6 +17,13 @@
   --primary-accent-light: #fff2cc;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
 p {
   color: #ececec;
 }
@@ -24,10 +31,12 @@ p {
 .container {
   margin: 0;
   padding-top: 1vh;
+  padding-bottom: 0.5vh;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   text-align: center;
+  height: 100vh;
+  box-sizing: border-box;
 }
 
 .logo {
@@ -47,6 +56,7 @@ p {
 .row {
   display: flex;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 a {
@@ -66,7 +76,8 @@ a:hover {
   justify-content: center;
   align-items: stretch;
   margin-top: 5px;
-  min-height: 70vh;
+  min-height: 420px;
+  flex: 1;
 }
 
 .section {
@@ -210,9 +221,11 @@ button:hover {
 }
 
 .footer {
-  margin-top: 20px;
+  margin-top: 8px;
+  padding-bottom: 6px;
   text-align: center;
   font-size: 0.9em;
+  flex-shrink: 0;
 }
 
 .footer-link {
