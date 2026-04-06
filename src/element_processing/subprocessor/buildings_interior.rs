@@ -1,4 +1,5 @@
 use crate::block_definitions::*;
+use crate::element_processing::buildings::BUILDING_PASSAGE_HEIGHT;
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::world_editor::WorldEditor;
 use std::collections::HashSet;
@@ -369,7 +370,7 @@ pub fn generate_building_interior(
                 // Skip interior blocks in building-passage zones on floors
                 // that fall within the archway opening.
                 if building_passages.contains(x, z)
-                    && floor_y < start_y_offset + 4.min(building_height)
+                    && floor_y < start_y_offset + BUILDING_PASSAGE_HEIGHT.min(building_height)
                 {
                     continue;
                 }

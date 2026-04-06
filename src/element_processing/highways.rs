@@ -988,6 +988,19 @@ pub fn collect_building_passage_coords(
     xzbbox: &XZBBox,
     scale: f64,
 ) -> CoordinateBitmap {
+    // Quick scan: skip bitmap allocation entirely when there are no passage ways.
+    let has_any = elements.iter().any(|e| {
+        if let ProcessedElement::Way(w) = e {
+            w.tags.get("tunnel").map(|v| v.as_str()) == Some("building_passage")
+                && w.tags.contains_key("highway")
+        } else {
+            false
+        }
+    });
+    if !has_any {
+        return CoordinateBitmap::new_empty();
+    }
+
     let mut bitmap = CoordinateBitmap::new(xzbbox);
 
     for element in elements {

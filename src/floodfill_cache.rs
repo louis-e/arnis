@@ -58,6 +58,18 @@ impl CoordinateBitmap {
         }
     }
 
+    /// Creates a zero-size bitmap that contains nothing and allocates no memory.
+    pub fn new_empty() -> Self {
+        Self {
+            bits: Vec::new(),
+            min_x: 0,
+            min_z: 0,
+            width: 0,
+            height: 0,
+            count: 0,
+        }
+    }
+
     /// Converts (x, z) coordinate to bit index, returning None if out of bounds.
     #[inline]
     fn coord_to_index(&self, x: i32, z: i32) -> Option<usize> {

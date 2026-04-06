@@ -55,7 +55,7 @@ pub(crate) struct HolePolygon {
 /// Height (in blocks above ground floor) of a building-passage archway.
 /// Walls and floors below this height are removed at tunnel=building_passage
 /// highway coordinates, creating a ground-level opening through the building.
-const BUILDING_PASSAGE_HEIGHT: i32 = 4;
+pub(crate) const BUILDING_PASSAGE_HEIGHT: i32 = 4;
 
 /// Accent block options for building decoration
 const ACCENT_BLOCK_OPTIONS: [Block; 6] = [
@@ -3607,8 +3607,7 @@ pub fn generate_buildings(
         // passage coordinate, place a wall column from ground to passage ceiling.
         // This creates the left/right corridor walls inside the archway.
         if !building_passages.is_empty() {
-            let passage_height =
-                BUILDING_PASSAGE_HEIGHT.min(config.building_height);
+            let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
             let abs = config.abs_terrain_offset;
             for &(x, z) in &cached_floor_area {
                 if building_passages.contains(x, z) {
@@ -3620,17 +3619,9 @@ pub fn generate_buildings(
                     || building_passages.contains(x, z - 1)
                     || building_passages.contains(x, z + 1);
                 if adjacent_to_passage {
-                    for y in (config.start_y_offset + 1)
-                        ..=(config.start_y_offset + passage_height)
+                    for y in (config.start_y_offset + 1)..=(config.start_y_offset + passage_height)
                     {
-                        editor.set_block_absolute(
-                            config.wall_block,
-                            x,
-                            y + abs,
-                            z,
-                            None,
-                            None,
-                        );
+                        editor.set_block_absolute(config.wall_block, x, y + abs, z, None, None);
                     }
                 }
             }
