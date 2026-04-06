@@ -1003,6 +1003,7 @@ struct BuildingConfig {
     category: BuildingCategory,
     wall_depth_style: WallDepthStyle,
     has_parapet: bool,
+    has_lobby_base: bool,
 }
 
 impl BuildingConfig {
@@ -1812,6 +1813,9 @@ fn determine_wall_block_at_position(bx: i32, h: i32, bz: i32, config: &BuildingC
         if above_floor && floor_row == 0 {
             // Floor-level separation band (stone/accent material)
             config.accent_block
+        } else if above_floor && config.has_lobby_base && h <= config.start_y_offset + 5 {
+            // Solid lobby base: first floor cycle uses wall block
+            config.wall_block
         } else if above_floor {
             // Full-width window band
             config.window_block
@@ -2565,6 +2569,7 @@ fn generate_wall_depth_features(
                             mod6,
                             out_nx,
                             out_nz,
+                            &sill_block,
                             height_reduction,
                         );
                     }
@@ -2937,8 +2942,9 @@ fn place_religious_buttress(
     }
 }
 
-/// SkyscraperFins: continuous accent_block vertical fins at mod6==3
-/// running the full building height.
+/// SkyscraperFins: continuous accent_block vertical fins at mod6==3,
+/// horizontal slab ledge bands at floor-separation rows for other positions,
+/// and a foundation course at ground level.
 #[allow(clippy::too_many_arguments)]
 fn place_skyscraper_fins(
     editor: &mut WorldEditor,
@@ -2948,25 +2954,50 @@ fn place_skyscraper_fins(
     mod6: i32,
     out_nx: i32,
     out_nz: i32,
+    sill_block: &BlockWithProperties,
     height_reduction: i32,
 ) {
-    if mod6 != 3 {
-        return;
-    }
-
     let lx = bx + out_nx;
     let lz = bz + out_nz;
     let top_h = config.start_y_offset + config.building_height - height_reduction;
 
-    for h in (config.start_y_offset + 1)..=top_h {
-        editor.set_block_absolute(
-            config.accent_block,
-            lx,
-            h + config.abs_terrain_offset,
-            lz,
-            Some(&[AIR]),
-            None,
-        );
+    // Foundation course at ground level (all positions)
+    editor.set_block_absolute(
+        config.accent_block,
+        lx,
+        config.start_y_offset + 1 + config.abs_terrain_offset,
+        lz,
+        Some(&[AIR]),
+        None,
+    );
+
+    if mod6 == 3 {
+        // Vertical fin column (existing behavior)
+        for h in (config.start_y_offset + 1)..=top_h {
+            editor.set_block_absolute(
+                config.accent_block,
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
+        return;
+    }
+
+    // Floor-level ledge bands at non-fin positions
+    for h in (config.start_y_offset + 2)..=top_h {
+        if config.floor_row(h) == 0 {
+            editor.set_block_with_properties_absolute(
+                sill_block.clone(),
+                lx,
+                h + config.abs_terrain_offset,
+                lz,
+                Some(&[AIR]),
+                None,
+            );
+        }
     }
 }
 
@@ -3403,6 +3434,11 @@ pub fn generate_buildings(
         category,
         wall_depth_style: style.wall_depth_style,
         has_parapet: style.has_parapet,
+        has_lobby_base: if category == BuildingCategory::ModernSkyscraper {
+            element_rng(element.id.wrapping_add(6143)).random_bool(0.70)
+        } else {
+            false
+        },
     };
 
     // Generate walls, pass whether this building will have a sloped roof
@@ -3530,6 +3566,45 @@ fn generate_parapet(editor: &mut WorldEditor, element: &ProcessedWay, config: &B
             }
         }
         previous_node = Some((x2, z2));
+    }
+
+    // Enhanced parapet for modern skyscrapers: accent slab cap + corner posts
+    if config.category == BuildingCategory::ModernSkyscraper {
+        let cap_slab = make_top_slab(get_slab_block_for_material(config.accent_block));
+        let cap_y = parapet_y + 1;
+
+        // Cap slabs along wall perimeter
+        let mut prev: Option<(i32, i32)> = None;
+        for node in &element.nodes {
+            let (x2, z2) = (node.x, node.z);
+            if let Some((x1, z1)) = prev {
+                let points =
+                    bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+                for (bx, _, bz) in &points {
+                    editor.set_block_with_properties_absolute(
+                        cap_slab.clone(),
+                        *bx,
+                        cap_y,
+                        *bz,
+                        Some(&[AIR]),
+                        None,
+                    );
+                }
+            }
+            prev = Some((x2, z2));
+        }
+
+        // Corner posts: full accent block at polygon vertices
+        let mut corners: Vec<(i32, i32)> = Vec::new();
+        for node in &element.nodes {
+            let pos = (node.x, node.z);
+            if corners.last() != Some(&pos) {
+                corners.push(pos);
+            }
+        }
+        for &(cx, cz) in &corners {
+            editor.set_block_absolute(config.accent_block, cx, cap_y, cz, Some(&[AIR]), None);
+        }
     }
 }
 
