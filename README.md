@@ -7,10 +7,10 @@ Arnis creates complex and accurate Minecraft Java Edition (1.17+) and Bedrock Ed
 This free and open source project is designed to handle large-scale geographic data from the real world and generate detailed Minecraft worlds. The algorithm processes geospatial data from OpenStreetMap as well as elevation data to create an accurate Minecraft representation of terrain and architecture.
 Generate your hometown, big cities, and natural landscapes with ease!
 
-_**Want to generate on mobile or want larger maps?** [MapSmith](https://arnismc.com/mapsmith/) generates worlds in your browser, no install required._
+_**Want mobile generation or larger map sizes?** [MapSmith](https://arnismc.com/mapsmith/) generates worlds in your browser, no install required._
 
 ![Minecraft Preview](assets/git/preview.jpg)
-<i>This Github page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
+<i>This GitHub page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
 
 ## :keyboard: Usage
 <img width="60%" src="assets/git/gui.png"><br>
@@ -30,18 +30,18 @@ Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/
 ## :trophy: Open Source
 #### Key objectives of this project
 - **Modularity**: Ensure that all components (e.g., data fetching, processing, and world generation) are cleanly separated into distinct modules for better maintainability and scalability.
-- **Performance Optimization**: We aim to keep a good performance and speed of the world generation process.
+- **Performance Optimization**: We aim to maintain strong performance and fast world generation.
 - **Comprehensive Documentation**: Detailed in-code documentation for a clear structure and logic.
 - **User-Friendly Experience**: Focus on making the project easy to use for end users.
 - **Cross-Platform Support**: We want this project to run smoothly on Windows, macOS, and Linux.
 
 #### How to contribute
-This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. Please respect the above mentioned key objectives. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
+This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. Please respect the above-mentioned key objectives. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
 
 Command line Build: ```cargo run --no-default-features -- --terrain --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lat,min_lng,max_lat,max_lng"```<br>
 GUI Build: ```cargo run```<br>
 
-After your pull request was merged, I will take care of regularly creating update releases which will include your changes.
+After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
 
 If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --terrain --path=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`
 
