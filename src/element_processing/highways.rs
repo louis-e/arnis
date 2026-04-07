@@ -564,35 +564,67 @@ fn generate_highways_internal(
                                 );
                             }
                         }
+                    }
 
-                        // Add a dashed white line in the middle for larger roads
-                        if lanes > 0 && point_index > 0 {
-                            if stripe_length < dash_length {
-                                let dx = (x - bresenham_points[point_index - 1].0) as f32;
-                                let dz = (z - bresenham_points[point_index - 1].2) as f32;
-                                let len = (dx * dx + dz * dz).sqrt();
+                    // Add a dashed white line in the middle for larger roads
+                    if lanes > 0 {
+                        let lane_width = width / lanes as f32;
 
-                                let left_x = *x as f32 - dz / len * width / 2.;
-                                let left_z = *z as f32 + dx / len * width / 2.;
-                                let right_x = *x as f32 + dz / len * width / 2.;
-                                let right_z = *z as f32 - dx / len * width / 2.;
-                                let lane_width = width / lanes as f32;
-                                for s in 1..lanes {
-                                    let (stripe_x, stripe_z) = offset_point_towards(
-                                        left_x,
-                                        left_z,
-                                        right_x,
-                                        right_z,
-                                        s as f32 * lane_width,
-                                    );
+                        let dx = (x2 - x1) as f32;
+                        let dz = (z2 - z1) as f32;
+                        let road_length = (dx * dx + dz * dz).sqrt();
+
+                        //generating points on corners of the road rect
+                        let left_x1 = x1 as f32 - dz / road_length * width / 2.;
+                        let left_z1 = z1 as f32 + dx / road_length * width / 2.;
+                        let right_x1 = x1 as f32 + dz / road_length * width / 2.;
+                        let right_z1 = z1 as f32 - dx / road_length * width / 2.;
+                        let left_x2 = x2 as f32 - dz / road_length * width / 2.;
+                        let left_z2 = z2 as f32 + dx / road_length * width / 2.;
+                        let right_x2 = x2 as f32 + dz / road_length * width / 2.;
+                        let right_z2 = z2 as f32 - dx / road_length * width / 2.;
+
+                        for l in 1..lanes {
+                            let (x1, z1) = offset_point_towards(
+                                left_x1,
+                                left_z1,
+                                right_x1,
+                                right_z1,
+                                l as f32 * lane_width,
+                            );
+                            let (x2, z2) = offset_point_towards(
+                                left_x2,
+                                left_z2,
+                                right_x2,
+                                right_z2,
+                                l as f32 * lane_width,
+                            );
+
+                            let points =
+                                bresenham_line(x1 as i32, 0, z1 as i32, x2 as i32, 0, z2 as i32);
+
+                            for (point_index, (x, _, z)) in points.into_iter().enumerate() {
+                                if stripe_length < dash_length {
                                     editor.set_block_flag_absolute(
                                         WHITE_CONCRETE,
-                                        stripe_x as i32,
-                                        current_y,
-                                        stripe_z as i32,
+                                        x,
+                                        if is_valley_bridge {
+                                            bridge_deck_y
+                                        } else {
+                                            calculate_point_elevation(
+                                                segment_index,
+                                                point_index,
+                                                &way.nodes,
+                                                effective_elevation,
+                                                effective_start_slope,
+                                                effective_end_slope,
+                                                slope_length,
+                                            )
+                                        },
+                                        z,
                                         Some(PAINTABLE_ROAD_SURFACES),
                                         None,
-                                        use_absolute_y,
+                                        is_valley_bridge,
                                     );
                                 }
                             }
@@ -625,7 +657,7 @@ fn offset_point_towards(x1: f32, y1: f32, x2: f32, y2: f32, l: f32) -> (f32, f32
 
 /// Helper function to determine if a slope should be added at a specific node
 fn should_add_slope_at_node(
-    node: &crate::osm_parser::ProcessedNode,
+    node: &ProcessedNode,
     current_layer: i32,
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>,
 ) -> bool {
