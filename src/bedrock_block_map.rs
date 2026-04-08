@@ -491,11 +491,22 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         // Plain terracotta
         "terracotta" => BedrockBlock::simple("hardened_clay"),
-
+        // Wall banner — Bedrock uses "minecraft:wall_banner" with a
+        // "facing_direction" int state: 2=north, 3=south, 4=west, 5=east.
+        // The color is stored in the block entity (Base field), not the block state.
+        // The facing string→int mapping is handled by to_bedrock_block_with_properties.
+        "light_gray_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))], // default north
+        ),
         // Wool colors
         "white_wool" => BedrockBlock::with_states(
             "wool",
             vec![("color", BedrockBlockStateValue::String("white".to_string()))],
+        ),
+        "black_wool" => BedrockBlock::with_states(
+            "wool",
+            vec![("color", BedrockBlockStateValue::String("black".to_string()))],
         ),
         "red_wool" => BedrockBlock::with_states(
             "wool",
@@ -819,6 +830,11 @@ pub fn to_bedrock_block_with_properties(
     // Handle rails with shape property
     if java_name == "rail" {
         return convert_rail(props_map);
+    }
+
+    // Handle wall banners with facing property
+    if java_name == "light_gray_wall_banner" {
+        return convert_wall_banner(props_map);
     }
 
     // Fall back to basic conversion without properties
@@ -1245,6 +1261,37 @@ fn convert_bed(
         name: "minecraft:bed".to_string(),
         states,
     }
+}
+
+/// Convert Java wall banner to Bedrock format.
+///
+/// Java stores facing as a string ("north"/"south"/"east"/"west") on the block state.
+/// Bedrock uses `facing_direction` as an integer on `minecraft:wall_banner`:
+///   2 = north, 3 = south, 4 = west, 5 = east
+///
+/// The banner color (light_gray = 7) and patterns live in the block entity, not here.
+fn convert_wall_banner(
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let facing_direction = props
+        .and_then(|p| p.get("facing"))
+        .and_then(|v| match v {
+            fastnbt::Value::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .map(|f| match f {
+            "north" => 2,
+            "south" => 3,
+            "west"  => 4,
+            "east"  => 5,
+            _       => 2, // default north
+        })
+        .unwrap_or(2);
+
+    BedrockBlock::with_states(
+        "wall_banner",
+        vec![("facing_direction", BedrockBlockStateValue::Int(facing_direction))],
+    )
 }
 
 /// Convert Java rail to Bedrock format with rail_direction from shape property.
