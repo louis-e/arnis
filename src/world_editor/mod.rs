@@ -236,12 +236,12 @@ impl<'a> WorldEditor<'a> {
         let absolute_y = self.get_absolute_y(x, y, z);
         self.world.get_block(x, absolute_y, z).is_some()
     }
-
+    #[allow(clippy::too_many_arguments)]
     pub fn place_wall_banner(
         &mut self,
-        block: Block, // e.g. LIGHT_GRAY_WALL_BANNER
+        block: Block,
         x: i32,
-        y: i32, // ground-relative
+        y: i32,
         z: i32,
         facing: &str,              // "north" / "south" / "east" / "west"
         base_color: &str,          // "light_gray" etc.
@@ -298,7 +298,7 @@ impl<'a> WorldEditor<'a> {
     /// Places a banner block entity at the given coordinates (absolute Y).
     /// This writes the pattern data into the chunk's block_entities list,
     /// which is required for the banner patterns to appear in-game.
-    #[allow(dead_code)]
+
     fn set_banner_block_entity_absolute(
         &mut self,
         x: i32,
@@ -339,7 +339,7 @@ impl<'a> WorldEditor<'a> {
     ///
     /// Java color names and pattern resource-path IDs are converted here to their
     /// Bedrock integer color indices and short pattern codes.
-    #[allow(dead_code)]
+
     fn set_bedrock_banner_block_entity_absolute(
         &mut self,
         x: i32,
