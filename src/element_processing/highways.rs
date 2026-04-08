@@ -131,7 +131,7 @@ fn generate_highways_internal(
                         ];
 
                         // patterns expressed as (java_color, java_pattern_id) pairs
-                        // so both Java and Bedrock writers can consume them.
+                        // so both Java and Bedrock writers can use them.
                         const BANNER_PATTERNS: &[(&str, &str)] = &[
                             ("red",    "minecraft:triangle_top"),
                             ("lime",   "minecraft:triangle_bottom"),

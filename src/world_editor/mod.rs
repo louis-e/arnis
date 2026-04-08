@@ -277,26 +277,43 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    fn insert_block_entity(&mut self, x: i32, z: i32, be: HashMap<String, Value>) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let region = self.world.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        const BLOCK_ENTITIES_KEY: &str = "block_entities";
+
+        match chunk.other.entry(BLOCK_ENTITIES_KEY.to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(be));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(be)]));
+            }
+        }
+    }
+
     /// Places a banner block entity at the given coordinates (absolute Y).
     /// This writes the pattern data into the chunk's block_entities list,
     /// which is required for the banner patterns to appear in-game.
     #[allow(dead_code)]
-    pub fn set_banner_block_entity_absolute(
+    fn set_banner_block_entity_absolute(
         &mut self,
         x: i32,
         absolute_y: i32,
         z: i32,
         patterns_list: &[(&str, &str)],
     ) {
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
-        }
-
-        let chunk_x: i32 = x >> 4;
-        let chunk_z: i32 = z >> 4;
-        let region_x: i32 = chunk_x >> 5;
-        let region_z: i32 = chunk_z >> 5;
-
         let mut be = HashMap::new();
         be.insert("id".to_string(), Value::String("minecraft:banner".to_string()));
         be.insert("x".to_string(), Value::Int(x));
@@ -321,20 +338,7 @@ impl<'a> WorldEditor<'a> {
             .collect();
         be.insert("patterns".to_string(), Value::List(patterns));
         be.insert("components".to_string(), Value::Compound(HashMap::new()));
-
-        let region = self.world.get_or_create_region(region_x, region_z);
-        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
-
-        match chunk.other.entry("block_entities".to_string()) {
-            Entry::Occupied(mut entry) => {
-                if let Value::List(list) = entry.get_mut() {
-                    list.push(Value::Compound(be));
-                }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(Value::List(vec![Value::Compound(be)]));
-            }
-        }
+        self.insert_block_entity(x, z, be);
     }
 
     /// Places a Bedrock-format banner block entity at the given coordinates (absolute Y).
@@ -347,7 +351,7 @@ impl<'a> WorldEditor<'a> {
     /// Java color names and pattern resource-path IDs are converted here to their
     /// Bedrock integer color indices and short pattern codes.
     #[allow(dead_code)]
-    pub fn set_bedrock_banner_block_entity_absolute(
+    fn set_bedrock_banner_block_entity_absolute(
         &mut self,
         x: i32,
         absolute_y: i32,
@@ -355,10 +359,6 @@ impl<'a> WorldEditor<'a> {
         base_color: &str,
         patterns: &[(&str, &str)], // &[(java_color_name, java_pattern_id)]
     ) {
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
-        }
-
         /// Maps a Java color name to the Bedrock integer color index used in banner
         /// block entities.  The ordering is the standard Minecraft dye index.
         fn java_color_to_bedrock_int(color: &str) -> i32 {
@@ -436,11 +436,6 @@ impl<'a> WorldEditor<'a> {
             }
         }
 
-        let chunk_x: i32 = x >> 4;
-        let chunk_z: i32 = z >> 4;
-        let region_x: i32 = chunk_x >> 5;
-        let region_z: i32 = chunk_z >> 5;
-
         let bedrock_patterns: Vec<Value> = patterns
             .iter()
             .map(|(color, pattern)| {
@@ -469,19 +464,7 @@ impl<'a> WorldEditor<'a> {
         be.insert("Patterns".to_string(), Value::List(bedrock_patterns));
         be.insert("Type".to_string(), Value::Int(0));
 
-        let region = self.world.get_or_create_region(region_x, region_z);
-        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
-
-        match chunk.other.entry("block_entities".to_string()) {
-            Entry::Occupied(mut entry) => {
-                if let Value::List(list) = entry.get_mut() {
-                    list.push(Value::Compound(be));
-                }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(Value::List(vec![Value::Compound(be)]));
-            }
-        }
+        self.insert_block_entity(x, z, be);
     }
 
     /// Sets a sign at the given coordinates
