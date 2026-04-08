@@ -133,17 +133,19 @@ fn generate_highways_internal(
                         // patterns expressed as (java_color, java_pattern_id) pairs
                         // so both Java and Bedrock writers can use them.
                         const BANNER_PATTERNS: &[(&str, &str)] = &[
-                            ("red",    "minecraft:triangle_top"),
-                            ("lime",   "minecraft:triangle_bottom"),
+                            ("red", "minecraft:triangle_top"),
+                            ("lime", "minecraft:triangle_bottom"),
                             ("yellow", "minecraft:circle"),
-                            ("black",  "minecraft:curly_border"),
-                            ("black",  "minecraft:border"),
+                            ("black", "minecraft:curly_border"),
+                            ("black", "minecraft:border"),
                         ];
 
                         for (dx, dz, facing) in &banner_offsets {
                             editor.place_wall_banner(
                                 LIGHT_GRAY_WALL_BANNER,
-                                x + dx, abs_y, z + dz,
+                                x + dx,
+                                abs_y,
+                                z + dz,
                                 facing,
                                 "light_gray",
                                 BANNER_PATTERNS,

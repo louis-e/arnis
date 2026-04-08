@@ -239,9 +239,9 @@ impl<'a> WorldEditor<'a> {
 
     pub fn place_wall_banner(
         &mut self,
-        block: Block,              // e.g. LIGHT_GRAY_WALL_BANNER
+        block: Block, // e.g. LIGHT_GRAY_WALL_BANNER
         x: i32,
-        y: i32,                    // ground-relative
+        y: i32, // ground-relative
         z: i32,
         facing: &str,              // "north" / "south" / "east" / "west"
         base_color: &str,          // "light_gray" etc.
@@ -253,26 +253,18 @@ impl<'a> WorldEditor<'a> {
                 block,
                 Some(fastnbt::nbt!({ "facing": facing })),
             ),
-            x, y, z, None, None,
+            x,
+            y,
+            z,
+            None,
+            None,
         );
         match self.format() {
-
             crate::world_editor::WorldFormat::JavaAnvil => {
-                self.set_banner_block_entity_absolute(
-                    x,
-                    y,
-                    z,
-                    patterns,
-                );
+                self.set_banner_block_entity_absolute(x, y, z, patterns);
             }
             crate::world_editor::WorldFormat::BedrockMcWorld => {
-                self.set_bedrock_banner_block_entity_absolute(
-                    x,
-                    y,
-                    z,
-                    base_color,
-                    patterns,
-                );
+                self.set_bedrock_banner_block_entity_absolute(x, y, z, base_color, patterns);
             }
         }
     }
@@ -315,7 +307,10 @@ impl<'a> WorldEditor<'a> {
         patterns_list: &[(&str, &str)],
     ) {
         let mut be = HashMap::new();
-        be.insert("id".to_string(), Value::String("minecraft:banner".to_string()));
+        be.insert(
+            "id".to_string(),
+            Value::String("minecraft:banner".to_string()),
+        );
         be.insert("x".to_string(), Value::Int(x));
         be.insert("y".to_string(), Value::Int(absolute_y));
         be.insert("z".to_string(), Value::Int(z));
@@ -325,14 +320,8 @@ impl<'a> WorldEditor<'a> {
             .map(|(color, pattern)| {
                 let mut entry = HashMap::new();
 
-                entry.insert(
-                    "color".to_string(),
-                    Value::String(color.to_string()),
-                );
-                entry.insert(
-                    "pattern".to_string(),
-                    Value::String(pattern.to_string()),
-                );
+                entry.insert("color".to_string(), Value::String(color.to_string()));
+                entry.insert("pattern".to_string(), Value::String(pattern.to_string()));
                 Value::Compound(entry)
             })
             .collect();
@@ -363,23 +352,23 @@ impl<'a> WorldEditor<'a> {
         /// block entities.  The ordering is the standard Minecraft dye index.
         fn java_color_to_bedrock_int(color: &str) -> i32 {
             match color {
-                "black"       => 0,
-                "red"         => 1,
-                "green"       => 2,
-                "brown"       => 3,
-                "blue"        => 4,
-                "purple"      => 5,
-                "cyan"        => 6,
-                "light_gray"  => 7,
-                "gray"        => 8,
-                "pink"        => 9,
-                "lime"        => 10,
-                "yellow"      => 11,
-                "light_blue"  => 12,
-                "magenta"     => 13,
-                "orange"      => 14,
-                "white"       => 15,
-                _             => 0,
+                "black" => 0,
+                "red" => 1,
+                "green" => 2,
+                "brown" => 3,
+                "blue" => 4,
+                "purple" => 5,
+                "cyan" => 6,
+                "light_gray" => 7,
+                "gray" => 8,
+                "pink" => 9,
+                "lime" => 10,
+                "yellow" => 11,
+                "light_blue" => 12,
+                "magenta" => 13,
+                "orange" => 14,
+                "white" => 15,
+                _ => 0,
             }
         }
 
@@ -389,50 +378,50 @@ impl<'a> WorldEditor<'a> {
             // Strip the optional "minecraft:" namespace prefix
             let key = pattern.strip_prefix("minecraft:").unwrap_or(pattern);
             match key {
-                "base"              => "b",
-                "square_bottom_left"  => "bl",
+                "base" => "b",
+                "square_bottom_left" => "bl",
                 "square_bottom_right" => "br",
-                "square_top_left"     => "tl",
-                "square_top_right"    => "tr",
-                "stripe_bottom"       => "bs",
-                "stripe_top"          => "ts",
-                "stripe_left"         => "ls",
-                "stripe_right"        => "rs",
-                "stripe_center"       => "cs",
-                "stripe_middle"       => "ms",
-                "stripe_downright"    => "drs",
-                "stripe_downleft"     => "dls",
-                "stripe_small"        => "ss",
-                "cross"              => "cr",
-                "straight_cross"      => "sc",
-                "triangle_bottom"     => "bt",
-                "triangle_top"        => "tt",
-                "triangles_bottom"    => "bts",
-                "triangles_top"       => "tts",
-                "diagonal_left"       => "ld",
-                "diagonal_right"      => "rd",
-                "diagonal_up_left"    => "lud",
-                "diagonal_up_right"   => "rud",
-                "circle"             => "mc",
-                "rhombus"            => "mr",
-                "half_vertical"       => "vh",
+                "square_top_left" => "tl",
+                "square_top_right" => "tr",
+                "stripe_bottom" => "bs",
+                "stripe_top" => "ts",
+                "stripe_left" => "ls",
+                "stripe_right" => "rs",
+                "stripe_center" => "cs",
+                "stripe_middle" => "ms",
+                "stripe_downright" => "drs",
+                "stripe_downleft" => "dls",
+                "stripe_small" => "ss",
+                "cross" => "cr",
+                "straight_cross" => "sc",
+                "triangle_bottom" => "bt",
+                "triangle_top" => "tt",
+                "triangles_bottom" => "bts",
+                "triangles_top" => "tts",
+                "diagonal_left" => "ld",
+                "diagonal_right" => "rd",
+                "diagonal_up_left" => "lud",
+                "diagonal_up_right" => "rud",
+                "circle" => "mc",
+                "rhombus" => "mr",
+                "half_vertical" => "vh",
                 "half_vertical_right" => "vhr",
-                "half_horizontal"     => "hh",
+                "half_horizontal" => "hh",
                 "half_horizontal_bottom" => "hhb",
-                "border"             => "bo",
-                "curly_border"        => "cbo",
-                "gradient"           => "gra",
-                "gradient_up"         => "gru",
-                "bricks"             => "bri",
-                "globe"              => "glb",
-                "creeper"            => "cre",
-                "skull"              => "sku",
-                "flower"             => "flo",
-                "mojang"             => "moj",
-                "piglin"             => "pig",
-                "flow"               => "flw",
-                "guster"             => "gus",
-                _                    => "b", // fallback: solid base
+                "border" => "bo",
+                "curly_border" => "cbo",
+                "gradient" => "gra",
+                "gradient_up" => "gru",
+                "bricks" => "bri",
+                "globe" => "glb",
+                "creeper" => "cre",
+                "skull" => "sku",
+                "flower" => "flo",
+                "mojang" => "moj",
+                "piglin" => "pig",
+                "flow" => "flw",
+                "guster" => "gus",
+                _ => "b", // fallback: solid base
             }
         }
 

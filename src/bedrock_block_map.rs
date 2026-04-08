@@ -1282,15 +1282,18 @@ fn convert_wall_banner(
         .map(|f| match f {
             "north" => 2,
             "south" => 3,
-            "west"  => 4,
-            "east"  => 5,
-            _       => 2, // default north
+            "west" => 4,
+            "east" => 5,
+            _ => 2, // default north
         })
         .unwrap_or(2);
 
     BedrockBlock::with_states(
         "wall_banner",
-        vec![("facing_direction", BedrockBlockStateValue::Int(facing_direction))],
+        vec![(
+            "facing_direction",
+            BedrockBlockStateValue::Int(facing_direction),
+        )],
     )
 }
 

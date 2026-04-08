@@ -532,8 +532,8 @@ impl BedrockWriter {
         // a TAG_List header, which Bedrock cannot parse.
         let mut data: Vec<u8> = Vec::new();
         for compound in &deduped {
-            let bytes = nbtx::to_le_bytes(compound)
-                .map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+            let bytes =
+                nbtx::to_le_bytes(compound).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
             data.extend_from_slice(&bytes);
         }
 
