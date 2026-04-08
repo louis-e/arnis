@@ -121,14 +121,6 @@ fn generate_highways_internal(
                         editor.set_block(BLACK_WOOL, x, 4, z, None, None);
                         editor.set_block(BLACK_WOOL, x, 5, z, None, None);
 
-                        let banner_patterns_list = fastnbt::nbt!([
-                            { "color": "red",    "pattern": "minecraft:triangle_top" },
-                            { "color": "lime",   "pattern": "minecraft:triangle_bottom" },
-                            { "color": "yellow", "pattern": "minecraft:circle" },
-                            { "color": "black",  "pattern": "minecraft:curly_border" },
-                            { "color": "black",  "pattern": "minecraft:border" }
-                        ]);
-
                         // Banner placement logic
                         let abs_y = editor.get_absolute_y(x, 5, z);
                         let banner_offsets: [(i32, i32, &str); 4] = [
@@ -138,7 +130,7 @@ fn generate_highways_internal(
                             (1, 0, "east"),
                         ];
 
-                        // The 5 patterns expressed as (java_color, java_pattern_id) pairs
+                        // patterns expressed as (java_color, java_pattern_id) pairs
                         // so both Java and Bedrock writers can consume them.
                         const BANNER_PATTERNS: &[(&str, &str)] = &[
                             ("red",    "minecraft:triangle_top"),
@@ -149,39 +141,13 @@ fn generate_highways_internal(
                         ];
 
                         for (dx, dz, facing) in &banner_offsets {
-                            let bx = x + dx;
-                            let bz = z + dz;
-
-                            // Apply Block rotation
-                            editor.set_block_with_properties_absolute(
-                                crate::block_definitions::BlockWithProperties::new(
-                                    LIGHT_GRAY_WALL_BANNER,
-                                    Some(fastnbt::nbt!({ "facing": facing })),
-                                ),
-                                bx, abs_y, bz, None, None,
+                            editor.place_wall_banner(
+                                LIGHT_GRAY_WALL_BANNER,
+                                x + dx, abs_y, z + dz,
+                                facing,
+                                "light_gray",
+                                BANNER_PATTERNS,
                             );
-
-                            // Write banner block entity in the correct format for
-                            // the current output format (Java vs Bedrock).
-                            match editor.format() {
-                                crate::world_editor::WorldFormat::JavaAnvil => {
-                                    editor.set_banner_block_entity_absolute(
-                                        bx,
-                                        abs_y,
-                                        bz,
-                                        banner_patterns_list.clone(),
-                                    );
-                                }
-                                crate::world_editor::WorldFormat::BedrockMcWorld => {
-                                    editor.set_bedrock_banner_block_entity_absolute(
-                                        bx,
-                                        abs_y,
-                                        bz,
-                                        "light_gray",
-                                        BANNER_PATTERNS,
-                                    );
-                                }
-                            }
                         }
                     }
                 }

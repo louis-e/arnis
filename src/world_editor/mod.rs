@@ -237,6 +237,46 @@ impl<'a> WorldEditor<'a> {
         self.world.get_block(x, absolute_y, z).is_some()
     }
 
+    pub fn place_wall_banner(
+        &mut self,
+        block: Block,              // e.g. LIGHT_GRAY_WALL_BANNER
+        x: i32,
+        y: i32,                    // ground-relative
+        z: i32,
+        facing: &str,              // "north" / "south" / "east" / "west"
+        base_color: &str,          // "light_gray" etc.
+        patterns: &[(&str, &str)], // [("red", "minecraft:triangle_top"), ...]
+    ) {
+        // Apply Block rotation
+        self.set_block_with_properties_absolute(
+            crate::block_definitions::BlockWithProperties::new(
+                block,
+                Some(fastnbt::nbt!({ "facing": facing })),
+            ),
+            x, y, z, None, None,
+        );
+        match self.format() {
+
+            crate::world_editor::WorldFormat::JavaAnvil => {
+                self.set_banner_block_entity_absolute(
+                    x,
+                    y,
+                    z,
+                    patterns,
+                );
+            }
+            crate::world_editor::WorldFormat::BedrockMcWorld => {
+                self.set_bedrock_banner_block_entity_absolute(
+                    x,
+                    y,
+                    z,
+                    base_color,
+                    patterns,
+                );
+            }
+        }
+    }
+
     /// Places a banner block entity at the given coordinates (absolute Y).
     /// This writes the pattern data into the chunk's block_entities list,
     /// which is required for the banner patterns to appear in-game.
@@ -246,7 +286,7 @@ impl<'a> WorldEditor<'a> {
         x: i32,
         absolute_y: i32,
         z: i32,
-        patterns_list: Value,
+        patterns_list: &[(&str, &str)],
     ) {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
@@ -263,7 +303,23 @@ impl<'a> WorldEditor<'a> {
         be.insert("y".to_string(), Value::Int(absolute_y));
         be.insert("z".to_string(), Value::Int(z));
         be.insert("keepPacked".to_string(), Value::Byte(0));
-        be.insert("patterns".to_string(), patterns_list);
+        let patterns: Vec<Value> = patterns_list
+            .iter()
+            .map(|(color, pattern)| {
+                let mut entry = HashMap::new();
+
+                entry.insert(
+                    "color".to_string(),
+                    Value::String(color.to_string()),
+                );
+                entry.insert(
+                    "pattern".to_string(),
+                    Value::String(pattern.to_string()),
+                );
+                Value::Compound(entry)
+            })
+            .collect();
+        be.insert("patterns".to_string(), Value::List(patterns));
         be.insert("components".to_string(), Value::Compound(HashMap::new()));
 
         let region = self.world.get_or_create_region(region_x, region_z);
