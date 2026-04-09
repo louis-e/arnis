@@ -499,6 +499,26 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "wall_banner",
             vec![("facing_direction", BedrockBlockStateValue::Int(2))], // default north
         ),
+        "white_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))], // default north
+        ),
+        "blue_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
+        "black_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
+        "red_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
+        "green_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
         // Wool colors
         "white_wool" => BedrockBlock::with_states(
             "wool",
@@ -833,7 +853,15 @@ pub fn to_bedrock_block_with_properties(
     }
 
     // Handle wall banners with facing property
-    if java_name == "light_gray_wall_banner" {
+    if matches!(
+        java_name,
+        "light_gray_wall_banner"
+            | "white_wall_banner"
+            | "blue_wall_banner"
+            | "black_wall_banner"
+            | "red_wall_banner"
+            | "green_wall_banner"
+    ) {
         return convert_wall_banner(props_map);
     }
 

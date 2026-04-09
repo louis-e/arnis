@@ -1283,7 +1283,7 @@ fn adjust_height_for_building_type(
 ) -> i32 {
     let default_height = ((10.0 * scale_factor) as i32).max(3);
     match building_type {
-        "garage" | "shed" => ((2.0 * scale_factor) as i32).max(3),
+        "garage" | "garages" | "carport" | "shed" => ((2.0 * scale_factor) as i32).max(3),
         "apartments" if building_height == default_height => ((15.0 * scale_factor) as i32).max(3),
         "hospital" if building_height == default_height => ((23.0 * scale_factor) as i32).max(3),
         _ => building_height,
@@ -3105,6 +3105,100 @@ fn place_glass_curtain_corners(
 // Hospital Decorations
 // ============================================================================
 
+/// Places green-cross banners on the exterior walls of a hospital building.
+///
+/// For each wall segment (polygon edge), a wall banner with a green cross pattern
+/// on a white background is placed at the midpoint of the segment, facing
+/// outward.  The banner sits roughly at 2/3 of the building height so it is
+/// clearly visible from the ground.
+///
+/// Only segments that are at least 5 blocks long receive a banner — this avoids
+/// cluttering narrow corners and ensures the cross is readable.
+fn generate_hospital_green_cross(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+) {
+    if element.nodes.len() < 3 {
+        return;
+    }
+
+    // Green cross on white background — universal pharmacy/hospital symbol.
+    // Layer the full cross, then paint over the top/bottom edges with white
+    // so the vertical arm doesn't stretch the full banner height.
+    const GREEN_CROSS_PATTERNS: &[(&str, &str)] = &[
+        ("green", "minecraft:straight_cross"),
+        ("white", "minecraft:stripe_top"),
+        ("white", "minecraft:stripe_bottom"),
+        ("white", "minecraft:border"),
+    ];
+
+    let banner_y =
+        config.start_y_offset + (config.building_height * 2 / 3).max(2) + config.abs_terrain_offset;
+
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+    let center_x = (bounds.min_x + bounds.max_x) / 2;
+    let center_z = (bounds.min_z + bounds.max_z) / 2;
+
+    let mut previous_node: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let seg_len = ((x2 - x1).abs()).max((z2 - z1).abs());
+            if seg_len < 5 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+
+            let mid_x = (x1 + x2) / 2;
+            let mid_z = (z1 + z2) / 2;
+
+            // Determine outward facing direction.
+            // The wall runs from (x1,z1) to (x2,z2).  We pick the cardinal
+            // direction that points away from the building centre.
+            let dx = x2 - x1;
+            let dz = z2 - z1;
+
+            // Normal vector components (perpendicular to the wall segment).
+            // Two candidates: (dz, -dx) and (-dz, dx).  Pick the one that
+            // points away from the building centre.
+            let (nx, nz) = {
+                let (n1x, n1z) = (dz, -dx);
+                let dot = (mid_x + n1x - center_x) * n1x + (mid_z + n1z - center_z) * n1z;
+                if dot >= 0 {
+                    (n1x, n1z)
+                } else {
+                    (-dz, dx)
+                }
+            };
+
+            // Convert normal to cardinal facing and banner offset
+            let (facing, bx, bz) = if nx.abs() >= nz.abs() {
+                if nx > 0 {
+                    ("east", mid_x + 1, mid_z) // banner faces east, placed east of wall
+                } else {
+                    ("west", mid_x - 1, mid_z) // banner faces west, placed west of wall
+                }
+            } else if nz > 0 {
+                ("south", mid_x, mid_z + 1) // banner faces south, placed south of wall
+            } else {
+                ("north", mid_x, mid_z - 1) // banner faces north, placed north of wall
+            };
+
+            editor.place_wall_banner(
+                WHITE_WALL_BANNER,
+                bx,
+                banner_y,
+                bz,
+                facing,
+                "white",
+                GREEN_CROSS_PATTERNS,
+            );
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
 /// Generates a helipad marking on the flat roof of a hospital.
 ///
 /// Layout (7×7 yellow concrete pad with a 5×5 "H" pattern):
@@ -3885,6 +3979,11 @@ fn generate_building_roof(
     // Hospital helipad on the flat roof
     if category == BuildingCategory::Hospital && style.roof_type == RoofType::Flat {
         generate_hospital_helipad(editor, element, roof_area, config);
+    }
+
+    // Hospital green cross banners on exterior walls
+    if category == BuildingCategory::Hospital {
+        generate_hospital_green_cross(editor, element, config);
     }
 }
 

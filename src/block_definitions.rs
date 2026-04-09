@@ -57,7 +57,7 @@ type ColorBlockMapping = (ColorTuple, BlockOptions);
 
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
-    id: u8,
+    id: u16,
 }
 
 // Extended block with dynamic properties
@@ -82,12 +82,12 @@ impl BlockWithProperties {
 
 impl Block {
     #[inline(always)]
-    const fn new(id: u8) -> Self {
+    const fn new(id: u16) -> Self {
         Self { id }
     }
 
     #[inline(always)]
-    pub fn id(&self) -> u8 {
+    pub fn id(&self) -> u16 {
         self.id
     }
 
@@ -334,6 +334,11 @@ impl Block {
             253 => "cyan_terracotta",
             254 => "black_wool",
             255 => "light_gray_wall_banner",
+            256 => "white_wall_banner",
+            257 => "blue_wall_banner",
+            258 => "black_wall_banner",
+            259 => "red_wall_banner",
+            260 => "green_wall_banner",
             _ => panic!("Invalid id"),
         }
     }
@@ -689,7 +694,7 @@ impl Block {
 use std::sync::Mutex;
 
 #[allow(clippy::type_complexity)]
-static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), BlockWithProperties>>> =
+static STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), BlockWithProperties>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 // General function to create any stair block with facing and shape properties
@@ -984,6 +989,11 @@ pub const GRAY_CONCRETE_POWDER: Block = Block::new(252);
 pub const CYAN_TERRACOTTA: Block = Block::new(253);
 pub const BLACK_WOOL: Block = Block::new(254);
 pub const LIGHT_GRAY_WALL_BANNER: Block = Block::new(255);
+pub const WHITE_WALL_BANNER: Block = Block::new(256);
+pub const BLUE_WALL_BANNER: Block = Block::new(257);
+pub const BLACK_WALL_BANNER: Block = Block::new(258);
+pub const RED_WALL_BANNER: Block = Block::new(259);
+pub const GREEN_WALL_BANNER: Block = Block::new(260);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
