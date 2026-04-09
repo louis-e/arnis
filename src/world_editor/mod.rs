@@ -298,7 +298,6 @@ impl<'a> WorldEditor<'a> {
     /// Places a banner block entity at the given coordinates (absolute Y).
     /// This writes the pattern data into the chunk's block_entities list,
     /// which is required for the banner patterns to appear in-game.
-
     fn set_banner_block_entity_absolute(
         &mut self,
         x: i32,
@@ -339,7 +338,6 @@ impl<'a> WorldEditor<'a> {
     ///
     /// Java color names and pattern resource-path IDs are converted here to their
     /// Bedrock integer color indices and short pattern codes.
-
     fn set_bedrock_banner_block_entity_absolute(
         &mut self,
         x: i32,
