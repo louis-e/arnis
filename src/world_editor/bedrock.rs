@@ -526,7 +526,17 @@ impl BedrockWriter {
             return Ok(());
         }
 
-        let data = nbtx::to_le_bytes(&deduped).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+        // Bedrock block entities and entities are stored as CONCATENATED individual
+        // NBT compounds — NOT as a single NBT list. Each compound is serialised
+        // back-to-back with no wrapper. nbtx::to_le_bytes() on a Vec would produce
+        // a TAG_List header, which Bedrock cannot parse.
+        let mut data: Vec<u8> = Vec::new();
+        for compound in &deduped {
+            let bytes =
+                nbtx::to_le_bytes(compound).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+            data.extend_from_slice(&bytes);
+        }
+
         let key = build_chunk_key_bytes(chunk_pos, Dimension::Overworld, key_type, None);
         db.put(&key, &data)
             .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;

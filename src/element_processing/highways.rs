@@ -114,13 +114,43 @@ fn generate_highways_internal(
                         let x: i32 = node.x;
                         let z: i32 = node.z;
 
-                        for dy in 1..=3 {
-                            editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
-                        }
+                        // Traffic light blocks
+                        editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                        editor.set_block(IRON_BARS, x, 2, z, None, None);
+                        editor.set_block(IRON_BARS, x, 3, z, None, None);
+                        editor.set_block(BLACK_WOOL, x, 4, z, None, None);
+                        editor.set_block(BLACK_WOOL, x, 5, z, None, None);
 
-                        editor.set_block(GREEN_WOOL, x, 4, z, None, None);
-                        editor.set_block(YELLOW_WOOL, x, 5, z, None, None);
-                        editor.set_block(RED_WOOL, x, 6, z, None, None);
+                        // Banner placement logic
+                        let abs_y = editor.get_absolute_y(x, 5, z);
+                        let banner_offsets: [(i32, i32, &str); 4] = [
+                            (0, -1, "north"),
+                            (0, 1, "south"),
+                            (-1, 0, "west"),
+                            (1, 0, "east"),
+                        ];
+
+                        // patterns expressed as (java_color, java_pattern_id) pairs
+                        // so both Java and Bedrock writers can use them.
+                        const BANNER_PATTERNS: &[(&str, &str)] = &[
+                            ("red", "minecraft:triangle_top"),
+                            ("lime", "minecraft:triangle_bottom"),
+                            ("yellow", "minecraft:circle"),
+                            ("black", "minecraft:curly_border"),
+                            ("black", "minecraft:border"),
+                        ];
+
+                        for (dx, dz, facing) in &banner_offsets {
+                            editor.place_wall_banner(
+                                LIGHT_GRAY_WALL_BANNER,
+                                x + dx,
+                                abs_y,
+                                z + dz,
+                                facing,
+                                "light_gray",
+                                BANNER_PATTERNS,
+                            );
+                        }
                     }
                 }
             }

@@ -236,6 +236,223 @@ impl<'a> WorldEditor<'a> {
         let absolute_y = self.get_absolute_y(x, y, z);
         self.world.get_block(x, absolute_y, z).is_some()
     }
+    #[allow(clippy::too_many_arguments)]
+    pub fn place_wall_banner(
+        &mut self,
+        block: Block,
+        x: i32,
+        y: i32,
+        z: i32,
+        facing: &str,              // "north" / "south" / "east" / "west"
+        base_color: &str,          // "light_gray" etc.
+        patterns: &[(&str, &str)], // [("red", "minecraft:triangle_top"), ...]
+    ) {
+        // Apply Block rotation
+        self.set_block_with_properties_absolute(
+            crate::block_definitions::BlockWithProperties::new(
+                block,
+                Some(fastnbt::nbt!({ "facing": facing })),
+            ),
+            x,
+            y,
+            z,
+            None,
+            None,
+        );
+        match self.format() {
+            crate::world_editor::WorldFormat::JavaAnvil => {
+                self.set_banner_block_entity_absolute(x, y, z, patterns);
+            }
+            crate::world_editor::WorldFormat::BedrockMcWorld => {
+                self.set_bedrock_banner_block_entity_absolute(x, y, z, base_color, patterns);
+            }
+        }
+    }
+
+    fn insert_block_entity(&mut self, x: i32, z: i32, be: HashMap<String, Value>) {
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        let chunk_x = x >> 4;
+        let chunk_z = z >> 4;
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+
+        let region = self.world.get_or_create_region(region_x, region_z);
+        let chunk = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
+
+        const BLOCK_ENTITIES_KEY: &str = "block_entities";
+
+        match chunk.other.entry(BLOCK_ENTITIES_KEY.to_string()) {
+            Entry::Occupied(mut entry) => {
+                if let Value::List(list) = entry.get_mut() {
+                    list.push(Value::Compound(be));
+                }
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(Value::List(vec![Value::Compound(be)]));
+            }
+        }
+    }
+
+    /// Places a banner block entity at the given coordinates (absolute Y).
+    /// This writes the pattern data into the chunk's block_entities list,
+    /// which is required for the banner patterns to appear in-game.
+    fn set_banner_block_entity_absolute(
+        &mut self,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        patterns_list: &[(&str, &str)],
+    ) {
+        let mut be = HashMap::new();
+        be.insert(
+            "id".to_string(),
+            Value::String("minecraft:banner".to_string()),
+        );
+        be.insert("x".to_string(), Value::Int(x));
+        be.insert("y".to_string(), Value::Int(absolute_y));
+        be.insert("z".to_string(), Value::Int(z));
+        be.insert("keepPacked".to_string(), Value::Byte(0));
+        let patterns: Vec<Value> = patterns_list
+            .iter()
+            .map(|(color, pattern)| {
+                let mut entry = HashMap::new();
+
+                entry.insert("color".to_string(), Value::String(color.to_string()));
+                entry.insert("pattern".to_string(), Value::String(pattern.to_string()));
+                Value::Compound(entry)
+            })
+            .collect();
+        be.insert("patterns".to_string(), Value::List(patterns));
+        be.insert("components".to_string(), Value::Compound(HashMap::new()));
+        self.insert_block_entity(x, z, be);
+    }
+
+    /// Places a Bedrock-format banner block entity at the given coordinates (absolute Y).
+    ///
+    /// Bedrock banners use a completely different block entity schema from Java:
+    ///   - `Base`:     Int  — base color index (0=black … 15=white; light_gray=7)
+    ///   - `Patterns`: List — each entry has `Color` (Int) and `Pattern` (String, short code)
+    ///   - `Type`:     Int  — 0 = normal banner
+    ///
+    /// Java color names and pattern resource-path IDs are converted here to their
+    /// Bedrock integer color indices and short pattern codes.
+    fn set_bedrock_banner_block_entity_absolute(
+        &mut self,
+        x: i32,
+        absolute_y: i32,
+        z: i32,
+        base_color: &str,
+        patterns: &[(&str, &str)], // &[(java_color_name, java_pattern_id)]
+    ) {
+        /// Maps a Java color name to the Bedrock integer color index used in banner
+        /// block entities.  The ordering is the standard Minecraft dye index.
+        fn java_color_to_bedrock_int(color: &str) -> i32 {
+            match color {
+                "black" => 0,
+                "red" => 1,
+                "green" => 2,
+                "brown" => 3,
+                "blue" => 4,
+                "purple" => 5,
+                "cyan" => 6,
+                "light_gray" => 7,
+                "gray" => 8,
+                "pink" => 9,
+                "lime" => 10,
+                "yellow" => 11,
+                "light_blue" => 12,
+                "magenta" => 13,
+                "orange" => 14,
+                "white" => 15,
+                _ => 0,
+            }
+        }
+
+        /// Maps a Java banner pattern resource-path ID (e.g. "minecraft:triangle_top")
+        /// to the Bedrock short pattern code (e.g. "tts").
+        fn java_pattern_to_bedrock_code(pattern: &str) -> &'static str {
+            // Strip the optional "minecraft:" namespace prefix
+            let key = pattern.strip_prefix("minecraft:").unwrap_or(pattern);
+            match key {
+                "base" => "b",
+                "square_bottom_left" => "bl",
+                "square_bottom_right" => "br",
+                "square_top_left" => "tl",
+                "square_top_right" => "tr",
+                "stripe_bottom" => "bs",
+                "stripe_top" => "ts",
+                "stripe_left" => "ls",
+                "stripe_right" => "rs",
+                "stripe_center" => "cs",
+                "stripe_middle" => "ms",
+                "stripe_downright" => "drs",
+                "stripe_downleft" => "dls",
+                "stripe_small" => "ss",
+                "cross" => "cr",
+                "straight_cross" => "sc",
+                "triangle_bottom" => "bt",
+                "triangle_top" => "tt",
+                "triangles_bottom" => "bts",
+                "triangles_top" => "tts",
+                "diagonal_left" => "ld",
+                "diagonal_right" => "rd",
+                "diagonal_up_left" => "lud",
+                "diagonal_up_right" => "rud",
+                "circle" => "mc",
+                "rhombus" => "mr",
+                "half_vertical" => "vh",
+                "half_vertical_right" => "vhr",
+                "half_horizontal" => "hh",
+                "half_horizontal_bottom" => "hhb",
+                "border" => "bo",
+                "curly_border" => "cbo",
+                "gradient" => "gra",
+                "gradient_up" => "gru",
+                "bricks" => "bri",
+                "globe" => "glb",
+                "creeper" => "cre",
+                "skull" => "sku",
+                "flower" => "flo",
+                "mojang" => "moj",
+                "piglin" => "pig",
+                "flow" => "flw",
+                "guster" => "gus",
+                _ => "b", // fallback: solid base
+            }
+        }
+
+        let bedrock_patterns: Vec<Value> = patterns
+            .iter()
+            .map(|(color, pattern)| {
+                let mut entry = HashMap::new();
+                entry.insert(
+                    "Color".to_string(),
+                    Value::Int(java_color_to_bedrock_int(color)),
+                );
+                entry.insert(
+                    "Pattern".to_string(),
+                    Value::String(java_pattern_to_bedrock_code(pattern).to_string()),
+                );
+                Value::Compound(entry)
+            })
+            .collect();
+
+        let mut be = HashMap::new();
+        be.insert("id".to_string(), Value::String("Banner".to_string()));
+        be.insert("x".to_string(), Value::Int(x));
+        be.insert("y".to_string(), Value::Int(absolute_y));
+        be.insert("z".to_string(), Value::Int(z));
+        be.insert(
+            "Base".to_string(),
+            Value::Int(java_color_to_bedrock_int(base_color)),
+        );
+        be.insert("Patterns".to_string(), Value::List(bedrock_patterns));
+        be.insert("Type".to_string(), Value::Int(0));
+
+        self.insert_block_entity(x, z, be);
+    }
 
     /// Sets a sign at the given coordinates
     #[allow(clippy::too_many_arguments, dead_code)]
