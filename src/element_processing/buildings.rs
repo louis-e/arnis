@@ -3164,7 +3164,7 @@ fn generate_hospital_green_cross(
             // points away from the building centre.
             let (nx, nz) = {
                 let (n1x, n1z) = (dz, -dx);
-                let dot = (mid_x + n1x - center_x) * n1x + (mid_z + n1z - center_z) * n1z;
+                let dot = (mid_x - center_x) * n1x + (mid_z - center_z) * n1z;
                 if dot >= 0 {
                     (n1x, n1z)
                 } else {
