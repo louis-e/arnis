@@ -136,41 +136,29 @@ pub fn generate_amenities(
                     let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
                     // 50% chance to 90 degrees rotate the bench
                     if rng.random_bool(0.5) {
-                        let mut stair = create_stair_with_properties(
+                        let stair = top_stair(create_stair_with_properties(
                             OAK_STAIRS,
                             StairFacing::West,
-                            StairShape::Straight);
-                        if let Some(Value::Compound(ref mut map)) = stair.properties {
-                            map.insert("half".to_string(), Value::String("top".to_string()));
-                        }
+                            StairShape::Straight));
                         editor.set_block_with_properties_absolute(stair, pt.x - 1, abs_y, pt.z, None, None);
 
                         editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
-                        let mut stair = create_stair_with_properties(
+                        let stair = top_stair(create_stair_with_properties(
                             OAK_STAIRS,
                             StairFacing::East,
-                            StairShape::Straight);
-                        if let Some(Value::Compound(ref mut map)) = stair.properties {
-                            map.insert("half".to_string(), Value::String("top".to_string()));
-                        }
+                            StairShape::Straight));
                         editor.set_block_with_properties_absolute(stair, pt.x + 1, abs_y, pt.z, None, None);
                     } else {
-                        let mut stair = create_stair_with_properties(
+                        let stair = top_stair(create_stair_with_properties(
                             OAK_STAIRS,
                             StairFacing::North,
-                            StairShape::Straight);
-                        if let Some(Value::Compound(ref mut map)) = stair.properties {
-                            map.insert("half".to_string(), Value::String("top".to_string()));
-                        }
+                            StairShape::Straight));
                         editor.set_block_with_properties_absolute(stair, pt.x, abs_y, pt.z - 1, None, None);
                         editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
-                        let mut stair = create_stair_with_properties(
+                        let stair = top_stair(create_stair_with_properties(
                             OAK_STAIRS,
                             StairFacing::South,
-                            StairShape::Straight);
-                        if let Some(Value::Compound(ref mut map)) = stair.properties {
-                            map.insert("half".to_string(), Value::String("top".to_string()));
-                        }
+                            StairShape::Straight));
                         editor.set_block_with_properties_absolute(stair, pt.x, abs_y, pt.z + 1, None, None);
                     }
                 }
