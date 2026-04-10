@@ -134,6 +134,7 @@ pub fn generate_amenities(
                     // Use deterministic RNG for consistent bench orientation across region boundaries
                     let mut rng = element_rng(element.id());
                     let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    let bench_blacklist = [OAK_LOG, SPRUCE_LOG];
                     let (facing_a, facing_b, dx, dz) = if rng.random_bool(0.5) {
                         // East-West Bench: The stairs move away from center on the X axis
                         (StairFacing::West, StairFacing::East, 1, 0)
@@ -143,12 +144,12 @@ pub fn generate_amenities(
                     };
                 //place bench
                 let stair_a = top_stair(create_stair_with_properties(OAK_STAIRS, facing_a, StairShape::Straight));
-                editor.set_block_with_properties_absolute(stair_a, pt.x - dx, abs_y, pt.z - dz, None, None);
+                editor.set_block_with_properties_absolute(stair_a, pt.x - dx, abs_y, pt.z - dz, None, Some(&bench_blacklist));
 
                 editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
 
                 let stair_b = top_stair(create_stair_with_properties(OAK_STAIRS, facing_b, StairShape::Straight));
-                editor.set_block_with_properties_absolute(stair_b, pt.x + dx, abs_y, pt.z + dz, None, None);
+                editor.set_block_with_properties_absolute(stair_b, pt.x + dx, abs_y, pt.z + dz, None, Some(&bench_blacklist));
                 }
             }
             "shelter" => {
