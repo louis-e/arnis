@@ -134,33 +134,21 @@ pub fn generate_amenities(
                     // Use deterministic RNG for consistent bench orientation across region boundaries
                     let mut rng = element_rng(element.id());
                     let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
-                    // 50% chance to 90 degrees rotate the bench
-                    if rng.random_bool(0.5) {
-                        let stair = top_stair(create_stair_with_properties(
-                            OAK_STAIRS,
-                            StairFacing::West,
-                            StairShape::Straight));
-                        editor.set_block_with_properties_absolute(stair, pt.x - 1, abs_y, pt.z, None, None);
-
-                        editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
-                        let stair = top_stair(create_stair_with_properties(
-                            OAK_STAIRS,
-                            StairFacing::East,
-                            StairShape::Straight));
-                        editor.set_block_with_properties_absolute(stair, pt.x + 1, abs_y, pt.z, None, None);
+                    let (facing_a, facing_b, dx, dz) = if rng.random_bool(0.5) {
+                        // East-West Bench: The stairs move away from center on the X axis
+                        (StairFacing::West, StairFacing::East, 1, 0)
                     } else {
-                        let stair = top_stair(create_stair_with_properties(
-                            OAK_STAIRS,
-                            StairFacing::North,
-                            StairShape::Straight));
-                        editor.set_block_with_properties_absolute(stair, pt.x, abs_y, pt.z - 1, None, None);
-                        editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
-                        let stair = top_stair(create_stair_with_properties(
-                            OAK_STAIRS,
-                            StairFacing::South,
-                            StairShape::Straight));
-                        editor.set_block_with_properties_absolute(stair, pt.x, abs_y, pt.z + 1, None, None);
-                    }
+                        // North-South Bench: The stairs move away from center on the Z axis
+                        (StairFacing::North, StairFacing::South, 0, 1)
+                    };
+                //place bench
+                let stair_a = top_stair(create_stair_with_properties(OAK_STAIRS, facing_a, StairShape::Straight));
+                editor.set_block_with_properties_absolute(stair_a, pt.x - dx, abs_y, pt.z - dz, None, None);
+
+                editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
+
+                let stair_b = top_stair(create_stair_with_properties(OAK_STAIRS, facing_b, StairShape::Straight));
+                editor.set_block_with_properties_absolute(stair_b, pt.x + dx, abs_y, pt.z + dz, None, None);
                 }
             }
             "shelter" => {
