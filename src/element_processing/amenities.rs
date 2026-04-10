@@ -142,14 +142,36 @@ pub fn generate_amenities(
                         // North-South Bench: The stairs move away from center on the Z axis
                         (StairFacing::North, StairFacing::South, 0, 1)
                     };
-                //place bench
-                let stair_a = top_stair(create_stair_with_properties(OAK_STAIRS, facing_a, StairShape::Straight));
-                editor.set_block_with_properties_absolute(stair_a, pt.x - dx, abs_y, pt.z - dz, None, Some(&bench_blacklist));
+                    //place bench
+                    let stair_a = top_stair(create_stair_with_properties(
+                        OAK_STAIRS,
+                        facing_a,
+                        StairShape::Straight,
+                    ));
+                    editor.set_block_with_properties_absolute(
+                        stair_a,
+                        pt.x - dx,
+                        abs_y,
+                        pt.z - dz,
+                        None,
+                        Some(&bench_blacklist),
+                    );
 
-                editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
+                    editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
 
-                let stair_b = top_stair(create_stair_with_properties(OAK_STAIRS, facing_b, StairShape::Straight));
-                editor.set_block_with_properties_absolute(stair_b, pt.x + dx, abs_y, pt.z + dz, None, Some(&bench_blacklist));
+                    let stair_b = top_stair(create_stair_with_properties(
+                        OAK_STAIRS,
+                        facing_b,
+                        StairShape::Straight,
+                    ));
+                    editor.set_block_with_properties_absolute(
+                        stair_b,
+                        pt.x + dx,
+                        abs_y,
+                        pt.z + dz,
+                        None,
+                        Some(&bench_blacklist),
+                    );
                 }
             }
             "shelter" => {

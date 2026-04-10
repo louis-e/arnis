@@ -740,7 +740,7 @@ pub fn create_stair_with_properties(
     block_with_props
 }
 // Add half=top to make it upside-down
-pub fn top_stair(mut stair: BlockWithProperties) ->BlockWithProperties {
+pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
     if let Some(Value::Compound(ref mut map)) = stair.properties {
         map.insert("half".to_string(), Value::String("top".to_string()));
     }
