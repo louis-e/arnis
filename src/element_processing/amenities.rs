@@ -13,6 +13,38 @@ use rand::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// Looks outward from (x, z) in each of the four cardinal directions,
+/// up to max_radius blocks away, and returns the (x, z) position of
+/// the nearest road node found.
+///
+/// Returns None if no road node exists within range.
+/// Callers can use the returned position to derive a facing direction,
+/// compute a distance, or do anything else they need.
+fn nearest_road(x: i32, z: i32, max_radius: i32, editor: &WorldEditor) -> Option<(i32, i32)> {
+    let road_blocks = [
+        GRAY_CONCRETE_POWDER,
+        CYAN_TERRACOTTA,
+        DIRT_PATH,
+        GRAY_CONCRETE,
+        BLACK_CONCRETE,
+        STONE_BRICKS,
+    ];
+    for dist in 1..=max_radius {
+        // Cross pattern: North, South, West, East
+        let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
+
+        for (cx, cz) in candidates {
+            let surface_y = editor.get_ground_level(cx, cz);
+
+            if editor.check_for_block_absolute(cx, surface_y, cz, Some(&road_blocks), None) {
+                return Some((cx, cz));
+            }
+        }
+    }
+
+    None
+}
+
 pub fn generate_amenities(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -131,17 +163,32 @@ pub fn generate_amenities(
             "bench" => {
                 // Place a bench
                 if let Some(pt) = first_node {
-                    // Use deterministic RNG for consistent bench orientation across region boundaries
                     let mut rng = element_rng(element.id());
-                    let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
-                    let bench_blacklist = [OAK_LOG, SPRUCE_LOG];
-                    let (facing_a, facing_b, dx, dz) = if rng.random_bool(0.5) {
-                        // East-West Bench: The stairs move away from center on the X axis
+                    let road_pos = nearest_road(pt.x, pt.z, 5, editor);
+
+                    let use_east_west = if let Some((rx, rz)) = road_pos {
+                        let dx = (rx - pt.x).abs();
+                        let dz = (rz - pt.z).abs();
+                        dz >= dx
+                    } else {
+                        rng.random_bool(0.5)
+                    };
+
+                    // facing_a and facing_b must face AWAY from the center (pt.x, pt.z)
+                    let (facing_a, facing_b, dx, dz) = if use_east_west {
+                        // Bench stretches along X axis.
+                        // Stair A is at -1 (West), so it faces West.
+                        // Stair B is at +1 (East), so it faces East.
                         (StairFacing::West, StairFacing::East, 1, 0)
                     } else {
-                        // North-South Bench: The stairs move away from center on the Z axis
+                        // Bench stretches along Z axis.
+                        // Stair A is at -1 (North), so it faces North.
+                        // Stair B is at +1 (South), so it faces South.
                         (StairFacing::North, StairFacing::South, 0, 1)
                     };
+
+                    let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    let bench_blacklist = [OAK_LOG, SPRUCE_LOG];
                     //place bench
                     let stair_a = top_stair(create_stair_with_properties(
                         OAK_STAIRS,
@@ -157,7 +204,7 @@ pub fn generate_amenities(
                         Some(&bench_blacklist),
                     );
 
-                    editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, None);
+                    editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, Some(&bench_blacklist));
 
                     let stair_b = top_stair(create_stair_with_properties(
                         OAK_STAIRS,
