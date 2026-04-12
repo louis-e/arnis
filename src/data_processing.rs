@@ -77,8 +77,7 @@ pub fn generate_world_with_options(
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
     /// TODO Use this data to create overhanging traffic signals.
-    let road_mask =
-        highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
+    let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
@@ -179,7 +178,13 @@ pub fn generate_world_with_options(
                         &building_footprints,
                     );
                 } else if way.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache, &road_mask);
+                    amenities::generate_amenities(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &road_mask,
+                    );
                 } else if way.tags.contains_key("leisure") {
                     leisure::generate_leisure(
                         &mut editor,
@@ -234,7 +239,13 @@ pub fn generate_world_with_options(
                         &building_footprints,
                     );
                 } else if node.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache, &road_mask);
+                    amenities::generate_amenities(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &road_mask,
+                    );
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
