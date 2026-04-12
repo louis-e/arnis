@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
@@ -13,11 +13,41 @@ use rand::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// Looks outward from (x, z) in each of the four cardinal directions,
+/// up to max_radius blocks away, and returns the (x, z) position of
+/// the nearest road node found.
+///
+
+/// Returns None if no road node exists within range.
+/// Callers can use the returned position to derive a facing direction,
+/// compute a distance, or do anything else they need.
+fn get_nearest_road_block(
+    x: i32,
+    z: i32,
+    max_radius: i32,
+    road_mask: &RoadMaskBitmap,
+) -> Option<(i32, i32)> {
+    // Begins at 2 and skips to 4, 6, 8, etc.
+    for dist in (2..=max_radius).step_by(2) {
+        // Cross pattern: North, South, West, East
+        let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
+
+        for (cx, cz) in candidates {
+            if road_mask.contains(cx, cz) {
+                return Some((cx, cz));
+            }
+        }
+    }
+
+    None
+}
+
 pub fn generate_amenities(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
@@ -131,18 +161,62 @@ pub fn generate_amenities(
             "bench" => {
                 // Place a bench
                 if let Some(pt) = first_node {
-                    // Use deterministic RNG for consistent bench orientation across region boundaries
                     let mut rng = element_rng(element.id());
-                    // 50% chance to 90 degrees rotate the bench
-                    if rng.random_bool(0.5) {
-                        editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
-                        editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
-                        editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
+                    let road_pos = get_nearest_road_block(pt.x, pt.z, 4, road_mask);
+
+                    let use_east_west = if let Some((rx, rz)) = road_pos {
+                        let dx = (rx - pt.x).abs();
+                        let dz = (rz - pt.z).abs();
+                        dz >= dx
                     } else {
-                        editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
-                        editor.set_block(OAK_LOG, pt.x, 1, pt.z + 1, None, None);
-                        editor.set_block(OAK_LOG, pt.x, 1, pt.z - 1, None, None);
-                    }
+                        rng.random_bool(0.5)
+                    };
+
+                    // facing_a and facing_b must face AWAY from the center (pt.x, pt.z)
+                    let (facing_a, facing_b, dx, dz) = if use_east_west {
+                        // Bench stretches along X axis.
+                        // Stair A is at -1 (West), so it faces West.
+                        // Stair B is at +1 (East), so it faces East.
+                        (StairFacing::West, StairFacing::East, 1, 0)
+                    } else {
+                        // Bench stretches along Z axis.
+                        // Stair A is at -1 (North), so it faces North.
+                        // Stair B is at +1 (South), so it faces South.
+                        (StairFacing::North, StairFacing::South, 0, 1)
+                    };
+
+                    let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    let bench_blacklist = [OAK_LOG, SPRUCE_LOG];
+                    //place bench
+                    let stair_a = top_stair(create_stair_with_properties(
+                        OAK_STAIRS,
+                        facing_a,
+                        StairShape::Straight,
+                    ));
+                    editor.set_block_with_properties_absolute(
+                        stair_a,
+                        pt.x - dx,
+                        abs_y,
+                        pt.z - dz,
+                        None,
+                        Some(&bench_blacklist),
+                    );
+
+                    editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, Some(&bench_blacklist));
+
+                    let stair_b = top_stair(create_stair_with_properties(
+                        OAK_STAIRS,
+                        facing_b,
+                        StairShape::Straight,
+                    ));
+                    editor.set_block_with_properties_absolute(
+                        stair_b,
+                        pt.x + dx,
+                        abs_y,
+                        pt.z + dz,
+                        None,
+                        Some(&bench_blacklist),
+                    );
                 }
             }
             "shelter" => {

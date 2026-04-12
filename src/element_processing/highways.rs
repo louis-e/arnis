@@ -1010,6 +1010,83 @@ pub(crate) fn highway_block_range(
     block_range
 }
 
+/// Collect all (x, z) coordinates that are covered by any rendered road or path
+/// surface. The returned bitmap has 1 for every block that the highway renderer
+/// places as a road/path surface and 0 everywhere else.
+///
+/// Geometry is computed identically to `generate_highways_internal`:
+/// - Bresenham line between each consecutive pair of OSM nodes
+/// - Expanded by `block_range` in both axes (same value as the renderer uses)
+/// - `area=yes` ways, indoor ways, negative-level ways, and pure node types
+///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
+///   early-return guards.
+///
+/// This lets `find_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
+/// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
+pub fn collect_road_surface_coords(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+) -> CoordinateBitmap {
+    let mut bitmap = CoordinateBitmap::new(xzbbox);
+
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+
+        let Some(highway_type) = way.tags.get("highway") else {
+            continue;
+        };
+
+        // Exclude non-surface node-only highway types
+        match highway_type.as_str() {
+            "street_lamp" | "crossing" | "bus_stop" => continue,
+            _ => {}
+        }
+
+        // Exclude area highways (pedestrian plazas etc.) — flood-filled separately
+        if way.tags.get("area").is_some_and(|v| v == "yes") {
+            continue;
+        }
+
+        // Exclude indoor ways (same guard as generate_highways_internal)
+        if way.tags.get("indoor").is_some_and(|v| v == "yes") {
+            continue;
+        }
+
+        // Exclude negative-level ways (indoor mapping)
+        if way
+            .tags
+            .get("level")
+            .and_then(|l| l.parse::<i32>().ok())
+            .is_some_and(|l| l < 0)
+        {
+            continue;
+        }
+
+        // Use the same block_range the renderer uses for this highway type
+        let block_range = highway_block_range(highway_type, &way.tags, scale);
+
+        for i in 1..way.nodes.len() {
+            let prev = way.nodes[i - 1].xz();
+            let cur = way.nodes[i].xz();
+
+            let points = bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z);
+
+            for (bx, _, bz) in &points {
+                for dx in -block_range..=block_range {
+                    for dz in -block_range..=block_range {
+                        bitmap.set(bx + dx, bz + dz);
+                    }
+                }
+            }
+        }
+    }
+
+    bitmap
+}
+
 /// Collect all (x, z) coordinates covered by highways tagged
 /// `tunnel=building_passage`.  The returned bitmap can be passed into building
 /// generation to cut ground-level openings through walls and floors.
