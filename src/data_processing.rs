@@ -195,17 +195,11 @@ pub fn generate_world_with_options(
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    let is_subway = way
-                        .tags
-                        .get("railway")
-                        .map(|v| v == "subway")
-                        .unwrap_or(false)
-                        || way.tags.get("subway").map(|v| v == "yes").unwrap_or(false);
-                    if is_subway {
-                        railways::generate_subway_shell(&mut editor, way, &mut subway_points);
-                    } else {
-                        railways::generate_railways(&mut editor, way);
-                    }
+                    railways::generate_railways(
+                        &mut editor,
+                        way,
+                        &mut subway_points,
+                    );
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")

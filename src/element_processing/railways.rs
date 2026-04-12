@@ -39,12 +39,27 @@ fn subway_shell_block(x: i32, y: i32, z: i32) -> Block {
     }
 }
 
-pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
+pub fn generate_railways(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    subway_points: &mut Vec<(i32, i32)>,
+) {
     if let Some(railway_type) = element.tags.get("railway") {
+        // Subway lines get their own two-phase generation pipeline.
+        let is_subway = railway_type == "subway"
+            || element
+                .tags
+                .get("subway")
+                .map(|v| v == "yes")
+                .unwrap_or(false);
+        if is_subway {
+            generate_subway_shell(editor, element, subway_points);
+            return;
+        }
+
         if [
             "proposed",
             "abandoned",
-            "subway",
             "construction",
             "razed",
             "turntable",
@@ -52,12 +67,6 @@ pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
         .contains(&railway_type.as_str())
         {
             return;
-        }
-
-        if let Some(subway) = element.tags.get("subway") {
-            if subway == "yes" {
-                return;
-            }
         }
 
         if let Some(tunnel) = element.tags.get("tunnel") {
@@ -381,7 +390,7 @@ pub fn generate_roller_coaster(editor: &mut WorldEditor, element: &ProcessedWay)
 /// blocks survive the underground stone fill in step 6.
 ///
 /// Centerline points are collected into `subway_points` for phase 2.
-pub fn generate_subway_shell(
+fn generate_subway_shell(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     subway_points: &mut Vec<(i32, i32)>,
@@ -408,8 +417,8 @@ pub fn generate_subway_shell(
                 continue;
             }
 
-            // Ground levels at adjacent points — used for slope-aware rail
-            // placement.  Because the tunnel depth is fixed, surface-level
+            // Ground levels at adjacent points, used for slope-aware rail
+            // placement. Because the tunnel depth is fixed, surface-level
             // differences map 1:1 to rail-level differences.
             let prev_ground = if j > 0 {
                 let (px, _, pz) = smoothed[j - 1];
