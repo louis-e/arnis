@@ -2,7 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -36,6 +36,7 @@ pub fn generate_highways(
     args: &Args,
     highway_connectivity: &HighwayConnectivityMap,
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap
 ) {
     generate_highways_internal(
         editor,
@@ -1021,7 +1022,7 @@ pub(crate) fn highway_block_range(
 ///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
 ///   early-return guards.
 ///
-/// This lets `find_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
+/// This lets `get_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
 /// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
 pub fn collect_road_surface_coords(
     elements: &[ProcessedElement],

@@ -163,6 +163,7 @@ pub fn generate_world_with_options(
                         args,
                         &highway_connectivity,
                         &flood_fill_cache,
+                        &road_mask
                     );
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(
@@ -258,6 +259,7 @@ pub fn generate_world_with_options(
                         args,
                         &highway_connectivity,
                         &flood_fill_cache,
+                        &road_mask,
                     );
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
