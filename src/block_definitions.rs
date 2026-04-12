@@ -339,6 +339,7 @@ impl Block {
             258 => "black_wall_banner",
             259 => "red_wall_banner",
             260 => "green_wall_banner",
+            261 => "mossy_stone_bricks",
             _ => panic!("Invalid id"),
         }
     }
@@ -1001,6 +1002,7 @@ pub const BLUE_WALL_BANNER: Block = Block::new(257);
 pub const BLACK_WALL_BANNER: Block = Block::new(258);
 pub const RED_WALL_BANNER: Block = Block::new(259);
 pub const GREEN_WALL_BANNER: Block = Block::new(260);
+pub const MOSSY_STONE_BRICKS: Block = Block::new(261);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
