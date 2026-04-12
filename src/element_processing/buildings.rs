@@ -2392,12 +2392,11 @@ fn make_upside_down_stair(material: Block, facing: &str) -> BlockWithProperties 
         "east" => StairFacing::West,
         _ => StairFacing::East,
     };
-    let bwp = top_stair(create_stair_with_properties(
+    top_stair(create_stair_with_properties(
         stair_block,
         stair_facing,
         StairShape::Straight,
-    ));
-    bwp
+    ))
 }
 
 /// Places accent-block columns at building polygon vertices (corner quoins).

@@ -17,7 +17,6 @@ use std::collections::{HashMap, HashSet};
 /// up to max_radius blocks away, and returns the (x, z) position of
 /// the nearest road node found.
 ///
-
 /// Returns None if no road node exists within range.
 /// Callers can use the returned position to derive a facing direction,
 /// compute a distance, or do anything else they need.
