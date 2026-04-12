@@ -150,3 +150,25 @@ pub fn get_nearest_road_block(
 
     None
 }
+
+pub fn get_nearest_non_road_block(
+    x: i32,
+    z: i32,
+    max_radius: i32,
+    road_mask: &RoadMaskBitmap,
+) -> Option<(i32, i32)> {
+    for dist in (2..=max_radius).step_by(2) {
+        let candidates = [
+            (x - dist, z - dist), (x + dist, z + dist),
+            (x - dist, z + dist), (x + dist, z - dist), // Fixed typo in your diagonals
+            (x, z - dist), (x, z + dist),
+            (x - dist, z), (x + dist, z)
+        ];
+        for (cx, cz) in candidates {
+            if !road_mask.contains(cx, cz) {
+                return  Some((cx, cz));
+            }
+        }
+    }
+    None // Return None if nothing was found in any distance
+}

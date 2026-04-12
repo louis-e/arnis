@@ -3,6 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
+use crate::element_processing::get_nearest_non_road_block;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -44,6 +45,7 @@ pub fn generate_highways(
         args,
         highway_connectivity,
         flood_fill_cache,
+        road_mask,
     );
 }
 
@@ -94,6 +96,7 @@ fn generate_highways_internal(
     args: &Args,
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap,
 ) {
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
@@ -114,11 +117,37 @@ fn generate_highways_internal(
                     if let ProcessedElement::Node(node) = element {
                         let x: i32 = node.x;
                         let z: i32 = node.z;
+                        let mut _x: i32 = 0;
+                        let mut _z: i32 = 0;
+                        // if the traffic signal is on a street it tries to create a hanging traffic signal
+                        if road_mask.contains(x, z) {
+                            if let Some((found_x, found_z)) = get_nearest_non_road_block(x, z, 4, road_mask) {
+                                _x = found_x;
+                                _z = found_z;
+                                editor.set_block(COBBLESTONE_WALL, _x, 1, _z, None, None);
+                                editor.set_block(IRON_BARS, _x, 2, _z, None, None);
+                                editor.set_block(IRON_BARS, _x, 3, _z, None, None);
+                                editor.set_block(IRON_BARS, _x, 4, _z, None, None);
+                                editor.set_block(IRON_BARS, _x, 5, _z, None, None);
+                                let y = editor.get_absolute_y(x, 5, z);
+                                let line_points = bresenham_line(x, y, z, _x, y, _z);
+                                for (x, _, z) in line_points {
+                                    editor.set_block(IRON_BARS, x, 6, z, None, None);
+                                }
+                            }
+                            else {
+                                editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                                editor.set_block(IRON_BARS, x, 2, z, None, None);
+                                editor.set_block(IRON_BARS, x, 3, z, None, None);
+                            }
 
-                        // Traffic light blocks
-                        editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
-                        editor.set_block(IRON_BARS, x, 2, z, None, None);
-                        editor.set_block(IRON_BARS, x, 3, z, None, None);
+                        }
+                        else {
+                            editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                            editor.set_block(IRON_BARS, x, 2, z, None, None);
+                            editor.set_block(IRON_BARS, x, 3, z, None, None);
+                        }
+                        // Traffic signal blocks
                         editor.set_block(BLACK_WOOL, x, 4, z, None, None);
                         editor.set_block(BLACK_WOOL, x, 5, z, None, None);
 
