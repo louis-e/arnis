@@ -43,11 +43,13 @@ jobs:
       - name: Run benchmark command with memory tracking
         id: benchmark
         run: |
-          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
+          /usr/bin/time -v ./target/release/arnis --path="./world" --terrain --benchmark --bbox="48.125768 11.552296 48.148565 11.593838" 2> benchmark_log.txt
           grep "Maximum resident set size" benchmark_log.txt | awk '{print $6}' > peak_mem_kb.txt
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
           echo "peak_memory=${peak_mb}" >> $GITHUB_OUTPUT
+          gen_time=$(grep -oP '(?<=generation_time=)\d+' benchmark_log.txt || echo "")
+          echo "gen_time=${gen_time}" >> $GITHUB_OUTPUT
 
       - name: End timer and calculate duration
         id: end_time
@@ -64,16 +66,25 @@ jobs:
           minutes=$((duration / 60))
           seconds=$((duration % 60))
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
+          gen_time=${{ steps.benchmark.outputs.gen_time }}
 
-          baseline_time=30
+          baseline_time=20
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
-          if [ "$diff" -lt -5 ]; then
+          # Use generation-only time for verdict when available
+          if [ -n "$gen_time" ]; then
+            eval_diff=$((gen_time - baseline_time))
+          else
+            eval_diff=$diff
+          fi
+          eval_abs_diff=${eval_diff#-}
+
+          if [ "$eval_diff" -lt -5 ]; then
             verdict="✅ This PR **improves generation time**."
-          elif [ "$abs_diff" -le 4 ]; then
+          elif [ "$eval_abs_diff" -le 4 ]; then
             verdict="🟢 Generation time is unchanged."
-          elif [ "$diff" -le 15 ]; then
+          elif [ "$eval_diff" -le 10 ]; then
             verdict="⚠️ This PR **worsens generation time**."
           else
             verdict="🚨 This PR **drastically worsens generation time**."
@@ -92,6 +103,9 @@ jobs:
           {
             echo "summary<<EOF"
             echo "⏱️ Benchmark run finished in **${minutes}m ${seconds}s**"
+            if [ -n "$gen_time" ]; then
+              echo "🏗️ Generation time: **${gen_time}s** (excl. data fetching)"
+            fi
             echo "🧠 Peak memory usage: **${peak_mem} MB**${mem_annotation}"
             echo ""
             echo "📈 Compared against baseline: **${baseline_time}s**"
