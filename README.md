@@ -92,6 +92,8 @@ Download Arnis only from the official source https://arnismc.com or https://gith
 
 The logo was made by @nxfx21.
 
+NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.
+
 
 [^1]: https://en.wikipedia.org/wiki/OpenStreetMap
 
