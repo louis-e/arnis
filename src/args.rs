@@ -89,6 +89,10 @@ pub struct Args {
     /// Requires a Minecraft data pack that increases the world height.
     #[arg(long, default_value_t = false)]
     pub disable_height_limit: bool,
+
+    /// Print generation-only timing to stderr (excludes data fetching)
+    #[arg(long, hide = true)]
+    pub benchmark: bool,
 }
 
 /// Validates CLI arguments after parsing.

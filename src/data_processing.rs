@@ -37,6 +37,7 @@ pub fn generate_world_with_options(
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
+    let generation_start = args.benchmark.then(std::time::Instant::now);
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
@@ -354,6 +355,11 @@ pub fn generate_world_with_options(
     // Save world
     if let Err(e) = editor.save() {
         return Err(e.to_string());
+    }
+
+    if let Some(start) = generation_start {
+        let gen_secs = start.elapsed().as_secs();
+        eprintln!("[BENCHMARK] generation_time={gen_secs}");
     }
 
     emit_gui_progress_update(99.0, "Finalizing world...");
