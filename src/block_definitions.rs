@@ -1,5 +1,5 @@
 #![allow(unused)]
-
+// Benchmark recheck after Block.id u16→u8 revert
 use fastnbt::Value;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
