@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
@@ -17,26 +17,22 @@ use std::collections::{HashMap, HashSet};
 /// up to max_radius blocks away, and returns the (x, z) position of
 /// the nearest road node found.
 ///
+
 /// Returns None if no road node exists within range.
 /// Callers can use the returned position to derive a facing direction,
 /// compute a distance, or do anything else they need.
-fn nearest_road(x: i32, z: i32, max_radius: i32, editor: &WorldEditor) -> Option<(i32, i32)> {
-    let road_blocks = [
-        GRAY_CONCRETE_POWDER,
-        CYAN_TERRACOTTA,
-        DIRT_PATH,
-        GRAY_CONCRETE,
-        BLACK_CONCRETE,
-        STONE_BRICKS,
-    ];
+fn get_nearest_road_block(
+    x: i32,
+    z: i32,
+    max_radius: i32,
+    road_mask: &RoadMaskBitmap,
+) -> Option<(i32, i32)> {
     for dist in 1..=max_radius {
         // Cross pattern: North, South, West, East
         let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
 
         for (cx, cz) in candidates {
-            let surface_y = editor.get_ground_level(cx, cz);
-
-            if editor.check_for_block_absolute(cx, surface_y, cz, Some(&road_blocks), None) {
+            if road_mask.contains(cx, cz) {
                 return Some((cx, cz));
             }
         }
@@ -50,6 +46,7 @@ pub fn generate_amenities(
     element: &ProcessedElement,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
@@ -164,7 +161,7 @@ pub fn generate_amenities(
                 // Place a bench
                 if let Some(pt) = first_node {
                     let mut rng = element_rng(element.id());
-                    let road_pos = nearest_road(pt.x, pt.z, 5, editor);
+                    let road_pos = get_nearest_road_block(pt.x, pt.z, 4, road_mask);
 
                     let use_east_west = if let Some((rx, rz)) = road_pos {
                         let dx = (rx - pt.x).abs();
