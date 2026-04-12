@@ -57,7 +57,7 @@ type ColorBlockMapping = (ColorTuple, BlockOptions);
 
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
-    id: u16,
+    id: u8,
 }
 
 // Extended block with dynamic properties
@@ -82,12 +82,12 @@ impl BlockWithProperties {
 
 impl Block {
     #[inline(always)]
-    const fn new(id: u16) -> Self {
+    const fn new(id: u8) -> Self {
         Self { id }
     }
 
     #[inline(always)]
-    pub fn id(&self) -> u16 {
+    pub fn id(&self) -> u8 {
         self.id
     }
 
@@ -233,6 +233,11 @@ impl Block {
             142 => "bookshelf",
             143 => "oak_pressure_plate",
             144 => "oak_stairs",
+            145 => "white_wall_banner",
+            146 => "blue_wall_banner",
+            147 => "black_wall_banner",
+            148 => "red_wall_banner",
+            149 => "green_wall_banner",
             155 => "chest",
             156 => "red_carpet",
             157 => "anvil",
@@ -334,11 +339,6 @@ impl Block {
             253 => "cyan_terracotta",
             254 => "black_wool",
             255 => "light_gray_wall_banner",
-            256 => "white_wall_banner",
-            257 => "blue_wall_banner",
-            258 => "black_wall_banner",
-            259 => "red_wall_banner",
-            260 => "green_wall_banner",
             _ => panic!("Invalid id"),
         }
     }
@@ -694,7 +694,7 @@ impl Block {
 use std::sync::Mutex;
 
 #[allow(clippy::type_complexity)]
-static STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), BlockWithProperties>>> =
+static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), BlockWithProperties>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 // General function to create any stair block with facing and shape properties
@@ -748,7 +748,7 @@ pub fn top_stair(mut stair: BlockWithProperties) -> BlockWithProperties {
 }
 
 // Lazy static blocks
-pub const ACACIA_PLANKS: Block = Block::new(0);
+
 pub const AIR: Block = Block::new(1);
 pub const ANDESITE: Block = Block::new(2);
 pub const BIRCH_LEAVES: Block = Block::new(3);
@@ -764,8 +764,7 @@ pub const COBBLESTONE_WALL: Block = Block::new(12);
 pub const COBBLESTONE: Block = Block::new(13);
 pub const POLISHED_BLACKSTONE_BRICKS: Block = Block::new(14);
 pub const CRACKED_STONE_BRICKS: Block = Block::new(15);
-pub const CRIMSON_PLANKS: Block = Block::new(16);
-pub const CUT_SANDSTONE: Block = Block::new(17);
+
 pub const CYAN_CONCRETE: Block = Block::new(18);
 pub const DARK_OAK_PLANKS: Block = Block::new(19);
 pub const DEEPSLATE_BRICKS: Block = Block::new(20);
@@ -786,7 +785,7 @@ pub const GREEN_WOOL: Block = Block::new(34);
 pub const HAY_BALE: Block = Block::new(35);
 pub const IRON_BARS: Block = Block::new(36);
 pub const IRON_BLOCK: Block = Block::new(37);
-pub const JUNGLE_PLANKS: Block = Block::new(38);
+
 pub const LADDER: Block = Block::new(39);
 pub const LIGHT_BLUE_CONCRETE: Block = Block::new(40);
 pub const LIGHT_BLUE_TERRACOTTA: Block = Block::new(41);
@@ -804,26 +803,24 @@ pub const OAK_SLAB: Block = Block::new(52);
 pub const ORANGE_TERRACOTTA: Block = Block::new(53);
 pub const PODZOL: Block = Block::new(54);
 pub const POLISHED_ANDESITE: Block = Block::new(55);
-pub const POLISHED_BASALT: Block = Block::new(56);
+
 pub const QUARTZ_BLOCK: Block = Block::new(57);
 pub const POLISHED_BLACKSTONE: Block = Block::new(58);
 pub const POLISHED_DEEPSLATE: Block = Block::new(59);
 pub const POLISHED_DIORITE: Block = Block::new(60);
 pub const POLISHED_GRANITE: Block = Block::new(61);
-pub const PRISMARINE: Block = Block::new(62);
-pub const PURPUR_BLOCK: Block = Block::new(63);
-pub const PURPUR_PILLAR: Block = Block::new(64);
+
 pub const QUARTZ_BRICKS: Block = Block::new(65);
 pub const RAIL: Block = Block::new(66);
 pub const RED_FLOWER: Block = Block::new(67);
-pub const RED_NETHER_BRICK: Block = Block::new(68);
+
 pub const RED_TERRACOTTA: Block = Block::new(69);
 pub const RED_WOOL: Block = Block::new(70);
 pub const SAND: Block = Block::new(71);
 pub const SANDSTONE: Block = Block::new(72);
 pub const SCAFFOLDING: Block = Block::new(73);
 pub const SMOOTH_QUARTZ: Block = Block::new(74);
-pub const SMOOTH_RED_SANDSTONE: Block = Block::new(75);
+
 pub const SMOOTH_SANDSTONE: Block = Block::new(76);
 pub const SMOOTH_STONE: Block = Block::new(77);
 pub const SPONGE: Block = Block::new(78);
@@ -834,7 +831,7 @@ pub const STONE_BRICK_SLAB: Block = Block::new(82);
 pub const STONE_BRICKS: Block = Block::new(83);
 pub const STONE: Block = Block::new(84);
 pub const TERRACOTTA: Block = Block::new(85);
-pub const WARPED_PLANKS: Block = Block::new(86);
+
 pub const WATER: Block = Block::new(87);
 pub const WHITE_CONCRETE: Block = Block::new(88);
 pub const WHITE_FLOWER: Block = Block::new(89);
@@ -845,16 +842,15 @@ pub const YELLOW_CONCRETE: Block = Block::new(93);
 pub const YELLOW_FLOWER: Block = Block::new(94);
 pub const YELLOW_WOOL: Block = Block::new(95);
 pub const LIME_CONCRETE: Block = Block::new(96);
-pub const CYAN_WOOL: Block = Block::new(97);
+
 pub const BLUE_CONCRETE: Block = Block::new(98);
 pub const PURPLE_CONCRETE: Block = Block::new(99);
 pub const RED_CONCRETE: Block = Block::new(100);
 pub const MAGENTA_CONCRETE: Block = Block::new(101);
-pub const BROWN_WOOL: Block = Block::new(102);
-pub const OXIDIZED_COPPER: Block = Block::new(103);
+
 pub const YELLOW_TERRACOTTA: Block = Block::new(104);
 pub const SNOW_BLOCK: Block = Block::new(111);
-pub const SNOW_LAYER: Block = Block::new(112);
+
 pub const SIGN: Block = Block::new(113);
 pub const ANDESITE_WALL: Block = Block::new(114);
 pub const STONE_BRICK_WALL: Block = Block::new(115);
@@ -881,7 +877,7 @@ pub const GOLD_ORE: Block = Block::new(129);
 pub const COPPER_ORE: Block = Block::new(130);
 pub const CLAY: Block = Block::new(131);
 pub const DIRT_PATH: Block = Block::new(132);
-pub const ICE: Block = Block::new(133);
+
 pub const PACKED_ICE: Block = Block::new(134);
 pub const MUD: Block = Block::new(135);
 pub const DEAD_BUSH: Block = Block::new(136);
@@ -935,16 +931,16 @@ pub const CHISELLED_BOOKSHELF_SOUTH: Block = Block::new(193);
 pub const CHISELLED_BOOKSHELF_WEST: Block = Block::new(194);
 // Backwards-compatible alias (defaults to north-facing)
 pub const CHISELLED_BOOKSHELF: Block = CHISELLED_BOOKSHELF_NORTH;
-pub const CHIPPED_ANVIL: Block = Block::new(195);
+
 pub const DAMAGED_ANVIL: Block = Block::new(196);
 pub const LARGE_FERN_LOWER: Block = Block::new(197);
 pub const LARGE_FERN_UPPER: Block = Block::new(198);
-pub const CHAIN: Block = Block::new(199);
+
 pub const END_ROD: Block = Block::new(200);
 pub const LIGHTNING_ROD: Block = Block::new(201);
 pub const GOLD_BLOCK: Block = Block::new(202);
 pub const SEA_LANTERN: Block = Block::new(203);
-pub const ORANGE_CONCRETE: Block = Block::new(204);
+
 pub const ORANGE_WOOL: Block = Block::new(205);
 pub const BLUE_WOOL: Block = Block::new(206);
 pub const GREEN_CONCRETE: Block = Block::new(207);
@@ -955,7 +951,7 @@ pub const CHAIN_Z: Block = Block::new(211);
 pub const SPRUCE_DOOR_LOWER: Block = Block::new(212);
 pub const SPRUCE_DOOR_UPPER: Block = Block::new(213);
 pub const SMOOTH_STONE_SLAB: Block = Block::new(214);
-pub const GLASS_PANE: Block = Block::new(215);
+
 pub const LIGHT_GRAY_TERRACOTTA: Block = Block::new(216);
 pub const OAK_SLAB_TOP: Block = Block::new(217);
 pub const OAK_DOOR_UPPER: Block = Block::new(218);
@@ -970,16 +966,10 @@ pub const CYAN_STAINED_GLASS: Block = Block::new(226);
 pub const BLUE_STAINED_GLASS: Block = Block::new(227);
 pub const LIGHT_BLUE_STAINED_GLASS: Block = Block::new(228);
 pub const DAYLIGHT_DETECTOR: Block = Block::new(229);
-pub const RED_STAINED_GLASS: Block = Block::new(230);
-pub const YELLOW_STAINED_GLASS: Block = Block::new(231);
-pub const PURPLE_STAINED_GLASS: Block = Block::new(232);
-pub const ORANGE_STAINED_GLASS: Block = Block::new(233);
-pub const MAGENTA_STAINED_GLASS: Block = Block::new(234);
+
 pub const FLOWER_POT: Block = Block::new(235);
 pub const OAK_TRAPDOOR_OPEN_NORTH: Block = Block::new(236);
-pub const OAK_TRAPDOOR_OPEN_SOUTH: Block = Block::new(237);
-pub const OAK_TRAPDOOR_OPEN_EAST: Block = Block::new(238);
-pub const OAK_TRAPDOOR_OPEN_WEST: Block = Block::new(239);
+
 pub const QUARTZ_SLAB_TOP: Block = Block::new(240);
 pub const DARK_OAK_TRAPDOOR: Block = Block::new(241);
 pub const SPRUCE_TRAPDOOR: Block = Block::new(242);
@@ -989,18 +979,16 @@ pub const BRICK_SLAB: Block = Block::new(245);
 pub const POTTED_RED_TULIP: Block = Block::new(246);
 pub const POTTED_DANDELION: Block = Block::new(247);
 pub const POTTED_BLUE_ORCHID: Block = Block::new(248);
-pub const RED_SAND: Block = Block::new(249);
-pub const RED_SANDSTONE: Block = Block::new(250);
-pub const CACTUS: Block = Block::new(251);
+
 pub const GRAY_CONCRETE_POWDER: Block = Block::new(252);
 pub const CYAN_TERRACOTTA: Block = Block::new(253);
 pub const BLACK_WOOL: Block = Block::new(254);
 pub const LIGHT_GRAY_WALL_BANNER: Block = Block::new(255);
-pub const WHITE_WALL_BANNER: Block = Block::new(256);
-pub const BLUE_WALL_BANNER: Block = Block::new(257);
-pub const BLACK_WALL_BANNER: Block = Block::new(258);
-pub const RED_WALL_BANNER: Block = Block::new(259);
-pub const GREEN_WALL_BANNER: Block = Block::new(260);
+pub const WHITE_WALL_BANNER: Block = Block::new(145);
+pub const BLUE_WALL_BANNER: Block = Block::new(146);
+pub const BLACK_WALL_BANNER: Block = Block::new(147);
+pub const RED_WALL_BANNER: Block = Block::new(148);
+pub const GREEN_WALL_BANNER: Block = Block::new(149);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
