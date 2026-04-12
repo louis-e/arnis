@@ -27,7 +27,8 @@ fn get_nearest_road_block(
     max_radius: i32,
     road_mask: &RoadMaskBitmap,
 ) -> Option<(i32, i32)> {
-    for dist in 1..=max_radius {
+    // Begins at 2 and skips to 4, 6, 8, etc.
+    for dist in (2..=max_radius).step_by(2) {
         // Cross pattern: North, South, West, East
         let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
 
