@@ -79,7 +79,7 @@ pub fn generate_world_with_options(
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
-    /// TODO Use this data to create overhanging traffic signals.
+    // TODO Use this data to create overhanging traffic signals.
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
     // Process all elements (no longer need to partition boundaries)
