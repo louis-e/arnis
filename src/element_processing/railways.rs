@@ -6,6 +6,39 @@ use crate::world_editor::WorldEditor;
 /// Number of blocks per OSM layer level (matches highway elevation step).
 const LAYER_HEIGHT_STEP: i32 = 6;
 
+/// Number of solid stone blocks between the terrain surface and the tunnel ceiling.
+const SUBWAY_DEPTH: i32 = 3;
+
+/// Half-width of the outer stone shell (total footprint = 2 * WALL_RADIUS + 1 = 5).
+const WALL_RADIUS: i32 = 2;
+
+/// Half-width of the interior air space (total air width = 2 * AIR_RADIUS + 1 = 3).
+const AIR_RADIUS: i32 = 1;
+
+/// Number of interior Y-levels (rail + 3 air = 4 blocks for minecart clearance).
+const INTERIOR_HEIGHT: i32 = 4;
+
+/// Interval in centerline points between ceiling lights.
+const LIGHT_INTERVAL: usize = 8;
+
+/// Deterministic spatial hash for tunnel wall/ceiling block variety.
+/// Returns CRACKED_STONE_BRICKS (~15%), MOSSY_STONE_BRICKS (~3%),
+/// or STONE_BRICKS (~82%).
+fn subway_shell_block(x: i32, y: i32, z: i32) -> Block {
+    let h = (x as u32)
+        .wrapping_mul(73856093)
+        .wrapping_add((y as u32).wrapping_mul(19349663))
+        .wrapping_add((z as u32).wrapping_mul(83492791));
+    let v = h % 100;
+    if v < 15 {
+        CRACKED_STONE_BRICKS
+    } else if v < 18 {
+        MOSSY_STONE_BRICKS
+    } else {
+        STONE_BRICKS
+    }
+}
+
 pub fn generate_railways(editor: &mut WorldEditor, element: &ProcessedWay) {
     if let Some(railway_type) = element.tags.get("railway") {
         if [
@@ -339,6 +372,161 @@ pub fn generate_roller_coaster(editor: &mut WorldEditor, element: &ProcessedWay)
                     }
                 }
             }
+        }
+    }
+}
+
+/// Phase 1 of subway generation: place the structural tunnel shell and rail
+/// track.  Called during element processing (step 4) so that all non-AIR
+/// blocks survive the underground stone fill in step 6.
+///
+/// Centerline points are collected into `subway_points` for phase 2.
+pub fn generate_subway_shell(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    subway_points: &mut Vec<(i32, i32)>,
+) {
+    for i in 1..element.nodes.len() {
+        let prev_node = element.nodes[i - 1].xz();
+        let cur_node = element.nodes[i].xz();
+
+        let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
+        let smoothed = smooth_diagonal_rails(&points);
+
+        for j in 0..smoothed.len() {
+            let (bx, _, bz) = smoothed[j];
+
+            // Record centerline point for phase 2 air-carving.
+            subway_points.push((bx, bz));
+
+            let ground_y = editor.get_ground_level(bx, bz);
+            let ceil_y = ground_y - SUBWAY_DEPTH;
+            let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
+
+            // Safety: skip if the tunnel would go below world minimum.
+            if floor_y <= crate::world_editor::MIN_Y {
+                continue;
+            }
+
+            // Ground levels at adjacent points — used for slope-aware rail
+            // placement.  Because the tunnel depth is fixed, surface-level
+            // differences map 1:1 to rail-level differences.
+            let prev_ground = if j > 0 {
+                let (px, _, pz) = smoothed[j - 1];
+                editor.get_ground_level(px, pz)
+            } else {
+                ground_y
+            };
+            let next_ground = if j + 1 < smoothed.len() {
+                let (nx, _, nz) = smoothed[j + 1];
+                editor.get_ground_level(nx, nz)
+            } else {
+                ground_y
+            };
+
+            // Place tunnel shell (5x5 footprint, full height).
+            // Interior positions deliberately get non-AIR blocks too so that
+            // the ground fill (skip_existing: true) leaves them alone.
+            // Wall/ceiling blocks get random cracked/mossy variants for variety.
+            for dx in -WALL_RADIUS..=WALL_RADIUS {
+                for dz in -WALL_RADIUS..=WALL_RADIUS {
+                    for y in floor_y..=ceil_y {
+                        let is_wall_or_ceiling =
+                            dx.abs() == WALL_RADIUS || dz.abs() == WALL_RADIUS || y == ceil_y;
+
+                        let block = if y == floor_y {
+                            // Entire floor row: polished deepslate
+                            POLISHED_DEEPSLATE
+                        } else if is_wall_or_ceiling {
+                            // Visible wall/ceiling: mix in cracked and mossy
+                            subway_shell_block(bx + dx, y, bz + dz)
+                        } else {
+                            // Interior placeholder (carved in phase 2)
+                            STONE_BRICKS
+                        };
+                        editor.set_block_absolute(block, bx + dx, y, bz + dz, None, None);
+                    }
+                }
+            }
+
+            // Place rail on the structural floor (one above floor_y).
+            let prev_xz = if j > 0 {
+                let (px, _, pz) = smoothed[j - 1];
+                Some((px, pz))
+            } else {
+                None
+            };
+            let next_xz = if j + 1 < smoothed.len() {
+                let (nx, _, nz) = smoothed[j + 1];
+                Some((nx, nz))
+            } else {
+                None
+            };
+
+            let rail_block = determine_rail_with_slope(
+                (bx, bz),
+                prev_xz,
+                next_xz,
+                prev_ground,
+                ground_y,
+                next_ground,
+            );
+            // Whitelist: allow overwriting the STONE_BRICKS placeholder.
+            editor.set_block_absolute(
+                rail_block,
+                bx,
+                floor_y + 1,
+                bz,
+                Some(&[STONE_BRICKS, CRACKED_STONE_BRICKS, MOSSY_STONE_BRICKS]),
+                None,
+            );
+        }
+    }
+}
+
+/// Phase 2 of subway generation: carve the 3x3 air interior and place
+/// ceiling lights.  Called AFTER ground generation so that the carved
+/// air blocks are not overwritten by the underground stone fill.
+pub fn carve_subway_interior(editor: &mut WorldEditor, subway_points: &[(i32, i32)]) {
+    for (idx, &(bx, bz)) in subway_points.iter().enumerate() {
+        let ground_y = editor.get_ground_level(bx, bz);
+        let ceil_y = ground_y - SUBWAY_DEPTH;
+        let floor_y = ceil_y - INTERIOR_HEIGHT - 1;
+
+        if floor_y <= crate::world_editor::MIN_Y {
+            continue;
+        }
+
+        // Whitelist: allow overwriting shell blocks and ground-fill STONE
+        // so the tunnel is actually hollow.
+        let carve_whitelist: &[Block] = &[
+            STONE_BRICKS,
+            CRACKED_STONE_BRICKS,
+            MOSSY_STONE_BRICKS,
+            STONE,
+        ];
+        for dx in -AIR_RADIUS..=AIR_RADIUS {
+            for dz in -AIR_RADIUS..=AIR_RADIUS {
+                for y in (floor_y + 1)..ceil_y {
+                    // Skip the center rail block.
+                    if dx == 0 && dz == 0 && y == floor_y + 1 {
+                        continue;
+                    }
+                    editor.set_block_absolute(
+                        AIR,
+                        bx + dx,
+                        y,
+                        bz + dz,
+                        Some(carve_whitelist),
+                        None,
+                    );
+                }
+            }
+        }
+
+        // Periodic ceiling lighting.
+        if idx % LIGHT_INTERVAL == 0 {
+            editor.set_block_absolute(SEA_LANTERN, bx, ceil_y - 1, bz, None, None);
         }
     }
 }

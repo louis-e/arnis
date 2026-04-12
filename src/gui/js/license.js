@@ -36,6 +36,8 @@ Bedrock Edition world format support uses the <a href="https://github.com/bedroc
 If you consent to telemetry data collection, please review our Privacy Policy at:
 <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank">https://arnismc.com/privacypolicy.html</a>.
 
+<p>NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.</p>
+
 <p><b>License:</b></p>
 <pre style="white-space: pre-wrap; font-family: inherit;">
 Apache License

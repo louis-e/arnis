@@ -54,6 +54,9 @@ pub fn generate_world_with_options(
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
 
+    // Collect subway centerline points for post-ground-fill air carving (phase 2).
+    let mut subway_points: Vec<(i32, i32)> = Vec::new();
+
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(Arc::clone(&ground));
 
@@ -192,7 +195,17 @@ pub fn generate_world_with_options(
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way);
+                    let is_subway = way
+                        .tags
+                        .get("railway")
+                        .map(|v| v == "subway")
+                        .unwrap_or(false)
+                        || way.tags.get("subway").map(|v| v == "yes").unwrap_or(false);
+                    if is_subway {
+                        railways::generate_subway_shell(&mut editor, way, &mut subway_points);
+                    } else {
+                        railways::generate_railways(&mut editor, way);
+                    }
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
@@ -321,6 +334,12 @@ pub fn generate_world_with_options(
         &xzbbox,
         &building_footprints,
     )?;
+
+    // Carve subway tunnel interiors now that underground is filled with stone.
+    // This must happen after ground generation so AIR blocks are not overwritten.
+    if !subway_points.is_empty() {
+        railways::carve_subway_interior(&mut editor, &subway_points);
+    }
 
     // Save world
     if let Err(e) = editor.save() {
