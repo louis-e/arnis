@@ -6,7 +6,7 @@ use crate::world_editor::WorldEditor;
 /// Number of blocks per OSM layer level (matches highway elevation step).
 const LAYER_HEIGHT_STEP: i32 = 6;
 
-/// Number of solid stone blocks between the terrain surface and the tunnel ceiling.
+/// Vertical offset in blocks from the terrain surface to the tunnel ceiling.
 const SUBWAY_DEPTH: i32 = 3;
 
 /// Half-width of the outer stone shell (total footprint = 2 * WALL_RADIUS + 1 = 5).
@@ -405,8 +405,11 @@ fn generate_subway_shell(
         for j in 0..smoothed.len() {
             let (bx, _, bz) = smoothed[j];
 
-            // Record centerline point for phase 2 air-carving.
-            subway_points.push((bx, bz));
+            // Record centerline point for phase 2 air-carving, skipping
+            // duplicate shared endpoints between adjacent segments.
+            if subway_points.last().copied() != Some((bx, bz)) {
+                subway_points.push((bx, bz));
+            }
 
             let ground_y = editor.get_ground_level(bx, bz);
             let ceil_y = ground_y - SUBWAY_DEPTH;
