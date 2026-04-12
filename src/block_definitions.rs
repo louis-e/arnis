@@ -889,6 +889,11 @@ pub const WHITE_CARPET: Block = Block::new(141);
 pub const BOOKSHELF: Block = Block::new(142);
 pub const OAK_PRESSURE_PLATE: Block = Block::new(143);
 pub const OAK_STAIRS: Block = Block::new(144);
+pub const WHITE_WALL_BANNER: Block = Block::new(145);
+pub const BLUE_WALL_BANNER: Block = Block::new(146);
+pub const BLACK_WALL_BANNER: Block = Block::new(147);
+pub const RED_WALL_BANNER: Block = Block::new(148);
+pub const GREEN_WALL_BANNER: Block = Block::new(149);
 pub const CHEST: Block = Block::new(155);
 pub const RED_CARPET: Block = Block::new(156);
 pub const ANVIL: Block = Block::new(157);
@@ -984,11 +989,6 @@ pub const GRAY_CONCRETE_POWDER: Block = Block::new(252);
 pub const CYAN_TERRACOTTA: Block = Block::new(253);
 pub const BLACK_WOOL: Block = Block::new(254);
 pub const LIGHT_GRAY_WALL_BANNER: Block = Block::new(255);
-pub const WHITE_WALL_BANNER: Block = Block::new(145);
-pub const BLUE_WALL_BANNER: Block = Block::new(146);
-pub const BLACK_WALL_BANNER: Block = Block::new(147);
-pub const RED_WALL_BANNER: Block = Block::new(148);
-pub const GREEN_WALL_BANNER: Block = Block::new(149);
 
 /// Maps a block to its corresponding stair variant
 #[inline]
