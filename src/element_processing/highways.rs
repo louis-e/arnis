@@ -115,69 +115,56 @@ fn generate_highways_internal(
             if let Some(crossing_type) = element.tags().get("crossing") {
                 if crossing_type == "traffic_signals" {
                     if let ProcessedElement::Node(node) = element {
-                        let x: i32 = node.x;
-                        let z: i32 = node.z;
-                        let mut _x: i32 = 0;
-                        let mut _z: i32 = 0;
-                        // if the traffic signal is on a street it tries to create a hanging traffic signal
-                        if road_mask.contains(x, z) {
-                            if let Some((found_x, found_z)) = get_nearest_non_road_block(x, z, 4, road_mask) {
-                                _x = found_x;
-                                _z = found_z;
-                                editor.set_block(COBBLESTONE_WALL, _x, 1, _z, None, None);
-                                editor.set_block(IRON_BARS, _x, 2, _z, None, None);
-                                editor.set_block(IRON_BARS, _x, 3, _z, None, None);
-                                editor.set_block(IRON_BARS, _x, 4, _z, None, None);
-                                editor.set_block(IRON_BARS, _x, 5, _z, None, None);
+                        let x = node.x;
+                        let z = node.z;
+
+                        // Try to build a hanging signal if it's on a road
+                        let anchor = road_mask
+                            .contains(x, z)
+                            .then(|| get_nearest_non_road_block(x, z, 4, road_mask))
+                            .flatten();
+
+                        match anchor {
+                            Some((ax, az)) => {
+                                // Hanging signal: pole at roadside anchor, bars strung across
+                                editor.set_block(COBBLESTONE_WALL, ax, 1, az, None, None);
+                                editor.set_block(IRON_BARS, ax, 2, az, None, None);
+                                editor.set_block(IRON_BARS, ax, 3, az, None, None);
+                                editor.set_block(IRON_BARS, ax, 4, az, None, None);
+                                editor.set_block(IRON_BARS, ax, 5, az, None, None);
+
                                 let y = editor.get_absolute_y(x, 5, z);
-                                let line_points = bresenham_line(x, y, z, _x, y, _z);
-                                for (x, _, z) in line_points {
-                                    editor.set_block(IRON_BARS, x, 6, z, None, None);
+                                for (lx, _, lz) in bresenham_line(x, y, z, ax, y, az) {
+                                    editor.set_block(IRON_BARS, lx, 6, lz, None, None);
                                 }
                             }
-                            else {
+                            None => {
+                                // Standalone pole (off-road or no anchor found)
                                 editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
                                 editor.set_block(IRON_BARS, x, 2, z, None, None);
                                 editor.set_block(IRON_BARS, x, 3, z, None, None);
                             }
+                        }
 
-                        }
-                        else {
-                            editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
-                            editor.set_block(IRON_BARS, x, 2, z, None, None);
-                            editor.set_block(IRON_BARS, x, 3, z, None, None);
-                        }
-                        // Traffic signal blocks
+                        // Signal head (shared for both cases)
                         editor.set_block(BLACK_WOOL, x, 4, z, None, None);
                         editor.set_block(BLACK_WOOL, x, 5, z, None, None);
 
-                        // Banner placement logic
-                        let abs_y = editor.get_absolute_y(x, 5, z);
-                        let banner_offsets: [(i32, i32, &str); 4] = [
-                            (0, -1, "north"),
-                            (0, 1, "south"),
-                            (-1, 0, "west"),
-                            (1, 0, "east"),
-                        ];
-
-                        // patterns expressed as (java_color, java_pattern_id) pairs
-                        // so both Java and Bedrock writers can use them.
+                        // Banners
                         const BANNER_PATTERNS: &[(&str, &str)] = &[
-                            ("red", "minecraft:triangle_top"),
-                            ("lime", "minecraft:triangle_bottom"),
+                            ("red",    "minecraft:triangle_top"),
+                            ("lime",   "minecraft:triangle_bottom"),
                             ("yellow", "minecraft:circle"),
-                            ("black", "minecraft:curly_border"),
-                            ("black", "minecraft:border"),
+                            ("black",  "minecraft:curly_border"),
+                            ("black",  "minecraft:border"),
                         ];
 
-                        for (dx, dz, facing) in &banner_offsets {
+                        let abs_y = editor.get_absolute_y(x, 5, z);
+                        for (dx, dz, facing) in [(0, -1, "north"), (0, 1, "south"), (-1, 0, "west"), (1, 0, "east")] {
                             editor.place_wall_banner(
                                 LIGHT_GRAY_WALL_BANNER,
-                                x + dx,
-                                abs_y,
-                                z + dz,
-                                facing,
-                                "light_gray",
+                                x + dx, abs_y, z + dz,
+                                facing, "light_gray",
                                 BANNER_PATTERNS,
                             );
                         }

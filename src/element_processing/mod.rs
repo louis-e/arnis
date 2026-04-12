@@ -122,53 +122,38 @@ pub fn merge_way_segments(rings: &mut Vec<Vec<ProcessedNode>>) {
     }
 }
 
-/// Looks outward from (x, z) in each of the four cardinal directions,
-/// up to max_radius blocks away, and returns the (x, z) position of
-/// the nearest road node found.
+/// Searches outward from (x, z) in the four cardinal directions and four
+/// diagonals stepping by 2 up to max_radius blocks away, and returns the
+/// (x, z) position of the nearest block that satisfies predicate
 ///
-
-/// Returns None if no road node exists within range.
-/// Callers can use the returned position to derive a facing direction,
-/// compute a distance, or do anything else they need.
-pub fn get_nearest_road_block(
+/// Returns None if no matching block is found within range.
+fn get_nearest_block_matching(
     x: i32,
     z: i32,
     max_radius: i32,
     road_mask: &RoadMaskBitmap,
+    predicate: impl Fn(bool) -> bool,
 ) -> Option<(i32, i32)> {
-    // Begins at 2 and skips to 4, 6, 8, etc.
     for dist in (2..=max_radius).step_by(2) {
-        // Cross pattern: North, South, West, East
-        let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
-
+        let candidates = [
+            (x, z - dist), (x, z + dist),
+            (x - dist, z), (x + dist, z),
+            (x - dist, z - dist), (x + dist, z + dist),
+            (x - dist, z + dist), (x + dist, z - dist),
+        ];
         for (cx, cz) in candidates {
-            if road_mask.contains(cx, cz) {
+            if predicate(road_mask.contains(cx, cz)) {
                 return Some((cx, cz));
             }
         }
     }
-
     None
 }
 
-pub fn get_nearest_non_road_block(
-    x: i32,
-    z: i32,
-    max_radius: i32,
-    road_mask: &RoadMaskBitmap,
-) -> Option<(i32, i32)> {
-    for dist in (2..=max_radius).step_by(2) {
-        let candidates = [
-            (x - dist, z - dist), (x + dist, z + dist),
-            (x - dist, z + dist), (x + dist, z - dist), // Fixed typo in your diagonals
-            (x, z - dist), (x, z + dist),
-            (x - dist, z), (x + dist, z)
-        ];
-        for (cx, cz) in candidates {
-            if !road_mask.contains(cx, cz) {
-                return  Some((cx, cz));
-            }
-        }
-    }
-    None // Return None if nothing was found in any distance
+pub fn get_nearest_road_block(x: i32, z: i32, max_radius: i32, road_mask: &RoadMaskBitmap) -> Option<(i32, i32)> {
+    get_nearest_block_matching(x, z, max_radius, road_mask, |on_road| on_road)
+}
+
+pub fn get_nearest_non_road_block(x: i32, z: i32, max_radius: i32, road_mask: &RoadMaskBitmap) -> Option<(i32, i32)> {
+    get_nearest_block_matching(x, z, max_radius, road_mask, |on_road| !on_road)
 }
