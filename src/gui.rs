@@ -726,7 +726,7 @@ fn gui_start_generation(
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
-    if is_new_world && world_format != "bedrock" {
+    if is_new_world && world_format != "bedrock" && world_format != "fnv" {
         let llbbox = match LLBBox::from_str(&bbox_text) {
             Ok(bbox) => bbox,
             Err(e) => {
@@ -779,6 +779,87 @@ fn gui_start_generation(
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
             let world_path = PathBuf::from(&selected_world);
+
+            // FNV ESM: completely separate pipeline — generate .esm and return early
+            if world_format == "fnv" {
+                let bbox = match LLBBox::from_str(&bbox_text) {
+                    Ok(bbox) => bbox,
+                    Err(e) => {
+                        let error_msg = format!("Failed to parse bounding box: {e}");
+                        eprintln!("{error_msg}");
+                        progress::emit_gui_error(&error_msg);
+                        return Err(error_msg);
+                    }
+                };
+
+                let output_dir = if world_path.as_os_str().is_empty() {
+                    crate::world_utils::get_bedrock_output_directory()
+                } else {
+                    world_path.clone()
+                };
+                eprintln!("[FNV] selected_world={:?}  output_dir={:?}", world_path, output_dir);
+
+                let (_transformer, xzbbox) =
+                    match CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            let error_msg =
+                                format!("Failed to create coordinate transformer: {e}");
+                            eprintln!("{error_msg}");
+                            progress::emit_gui_error(&error_msg);
+                            return Err(error_msg);
+                        }
+                    };
+
+                let args = Args {
+                    bbox,
+                    file: None,
+                    save_json_file: None,
+                    path: Some(output_dir.clone()),
+                    bedrock: false,
+                    downloader: "requests".to_string(),
+                    scale: world_scale,
+                    ground_level,
+                    terrain: true,
+                    interior: false,
+                    roof: false,
+                    fillground: false,
+                    land_cover: true,
+                    debug: false,
+                    timeout: Some(std::time::Duration::from_secs(40)),
+                    spawn_lat: None,
+                    spawn_lng: None,
+                    rotation: 0.0,
+                    disable_height_limit: false,
+                    fnv_esm: true,
+                    fnv_water_level: None,
+                };
+
+                let ground = ground::generate_ground_data(&args);
+
+                return match crate::fnv_esm::generate_fnv_esm(
+                    &ground,
+                    &args.bbox,
+                    &xzbbox,
+                    &output_dir,
+                    None,
+                    world_scale,
+                ) {
+                    Ok(_) => {
+                        let msg = format!("Done! Saved to: {}", output_dir.display());
+                        emit_gui_progress_update(100.0, &msg);
+                        println!("{}", msg.green().bold());
+                        // Pass the directory so Explorer opens to the folder, not tries to launch the .esm
+                        progress::emit_show_in_folder(&output_dir.to_string_lossy());
+                        Ok(())
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        progress::emit_gui_error(&e.to_string());
+                        Err(e.to_string())
+                    }
+                };
+            }
 
             // Determine world format from UI selection first (needed for session lock decision)
             let world_format = if world_format == "bedrock" {
@@ -916,6 +997,8 @@ fn gui_start_generation(
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
                 disable_height_limit,
+                fnv_esm: false,
+                fnv_water_level: None,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

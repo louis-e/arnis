@@ -38,6 +38,9 @@ pub struct ElevationData {
     pub(crate) width: usize,
     /// Height of the elevation grid
     pub(crate) height: usize,
+    /// Minecraft Y coordinate that corresponds to real-world sea level (0 m elevation).
+    /// `None` if the area is entirely above or entirely below sea level.
+    pub(crate) sea_level_y: Option<i32>,
 }
 
 /// RGB image buffer type for elevation tiles
@@ -613,10 +616,22 @@ pub fn fetch_elevation_data(
         );
     }
 
+    // Compute the Minecraft Y that corresponds to 0 m real-world elevation (sea level).
+    // Only meaningful when the bbox actually straddles sea level.
+    let sea_level_y: Option<i32> = if height_range > 0.0 && min_height <= 0.0 && max_height >= 0.0
+    {
+        let relative_sea = -min_height / height_range; // (0 - min_height) / height_range
+        let mc_sea = (ground_level as f64 + relative_sea * scaled_range).round() as i32;
+        Some(mc_sea.clamp(ground_level, MAX_Y))
+    } else {
+        None
+    };
+
     Ok(ElevationData {
         heights: mc_heights,
         width: grid_width,
         height: grid_height,
+        sea_level_y,
     })
 }
 

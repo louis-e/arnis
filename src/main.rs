@@ -14,6 +14,7 @@ mod element_processing;
 mod elevation_data;
 mod floodfill;
 mod floodfill_cache;
+mod fnv_esm;
 mod ground;
 mod ground_generation;
 mod land_cover;
@@ -108,6 +109,41 @@ fn run_cli() {
             "Error".red().bold()
         );
         std::process::exit(1);
+    }
+
+    // FNV ESM: generate a Fallout: New Vegas .esm file directly, then exit
+    if args.fnv_esm {
+        use coordinate_system::transformation::CoordTransformer;
+
+        let (_transformer, xzbbox) =
+            CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale).unwrap_or_else(|e| {
+                eprintln!("{} {}", "Error:".red().bold(), e);
+                std::process::exit(1);
+            });
+
+        // Always fetch real elevation for FNV ESM — terrain height is the
+        // whole point, so we never fall back to flat ground here.
+        println!("{} Fetching elevation...", "  [+]".bold());
+        let ground = ground::Ground::new_enabled(
+            &args.bbox,
+            args.scale,
+            args.ground_level,
+            true, // fetch land cover for terrain texture painting
+            args.disable_height_limit,
+        );
+
+        let output_dir = args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_bedrock_output_directory);
+
+        if let Err(e) =
+            fnv_esm::generate_fnv_esm(&ground, &args.bbox, &xzbbox, &output_dir, args.fnv_water_level, args.scale)
+        {
+            eprintln!("{} {}", "Error:".red().bold(), e);
+            std::process::exit(1);
+        }
+        return;
     }
 
     // Determine world format and output path
