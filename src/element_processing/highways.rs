@@ -600,8 +600,14 @@ fn generate_highways_internal(
                                 l as f32 * lane_width,
                             );
 
-                            let points =
-                                bresenham_line(x1 as i32, 0, z1 as i32, x2 as i32, 0, z2 as i32);
+                            let points = bresenham_line(
+                                x1.round() as i32,
+                                0,
+                                z1.round() as i32,
+                                x2.round() as i32,
+                                0,
+                                z2.round() as i32,
+                            );
 
                             for (point_index, (x, _, z)) in points.into_iter().enumerate() {
                                 if stripe_length < dash_length {
