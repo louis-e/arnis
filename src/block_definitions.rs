@@ -239,6 +239,8 @@ impl Block {
             148 => "red_wall_banner",
             149 => "green_wall_banner",
             150 => "mossy_stone_bricks",
+            151 => "water_cauldron",
+            152 => "lever",
             155 => "chest",
             156 => "red_carpet",
             157 => "anvil",
@@ -896,6 +898,8 @@ pub const BLACK_WALL_BANNER: Block = Block::new(147);
 pub const RED_WALL_BANNER: Block = Block::new(148);
 pub const GREEN_WALL_BANNER: Block = Block::new(149);
 pub const MOSSY_STONE_BRICKS: Block = Block::new(150);
+pub const WATER_CAULDRON: Block = Block::new(151);
+pub const LEVER: Block = Block::new(152);
 pub const CHEST: Block = Block::new(155);
 pub const RED_CARPET: Block = Block::new(156);
 pub const ANVIL: Block = Block::new(157);
