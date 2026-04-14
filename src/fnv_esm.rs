@@ -1,8 +1,10 @@
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
+use crate::deterministic_rng::coord_rng;
 use crate::ground::Ground;
 use crate::land_cover;
 use colored::Colorize;
+use rand::Rng;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -70,6 +72,34 @@ const TEXTURE_SNOW: u32 = 0x00143ABF;
 const TEXTURE_SAND: u32 = 0x00103FF4;
 /// Dirt/Default
 const TEXTURE_DIRT: u32 = 0x00000A8A;
+
+// ---------------------------------------------------------------------------
+// Static object FormIDs (all reference FalloutNV.esm, plugin index 0x00)
+// ---------------------------------------------------------------------------
+
+/// Juniper tree placed in tree-cover terrain cells.
+const JUNIPER_FID: u32 = 0x001479E2;
+
+/// Grid spacing (in arnis blocks) between candidate tree placement points.
+/// A value of 8 gives a 4×4 = 16-point grid per cell; with the placement
+/// probability this yields a natural-looking low-to-medium density.
+const TREE_GRID_SPACING: i32 = 8;
+
+// Rock variants — sizes are approximate model extents.
+const ROCK_SMALL_CLUSTER_FID: u32 = 0x00119885; // ~2 m diameter cluster
+const ROCK_TALL_FID: u32 = 0x00119882;           // ~2 m wide × 4 m tall
+const ROCK_MEDIUM_FID: u32 = 0x00119887;         // ~4 m × 8 m
+const ROCK_LARGE_FID: u32 = 0x00119888;          // ~8 m × 16 m
+
+/// Grid spacing for rock placement.  Coarser than trees to avoid wall-of-rocks
+/// effect and to leave room for the larger variants.
+const ROCK_GRID_SPACING: i32 = 10;
+
+/// Desert shrub/bush placed in shrubland and grassland cells.
+const SHRUB_FID: u32 = 0x000EC8D2;
+
+/// Grid spacing for shrub placement.  Denser than rocks; shrubs are small.
+const SHRUB_GRID_SPACING: i32 = 6;
 
 // --- binary helpers ---
 
@@ -291,6 +321,12 @@ struct QuadTexture {
 /// Each texture's share of the neighbourhood becomes its VTXT opacity, so
 /// transition zones blend smoothly instead of snapping to a single texture.
 ///
+/// A single **cell-wide base texture** is selected (whichever texture has the
+/// highest aggregate weight across all four quadrants combined) and used as
+/// BTXT for every quadrant. This prevents the visible seam that would otherwise
+/// appear at the quadrant boundary (row 16, the middle of the cell) when the
+/// per-quadrant majority texture flips between the northern and southern halves.
+///
 /// Quadrant layout in the 33×33 LAND vertex grid (row 0 = south):
 ///   NW (0): rows 16–32, cols  0–16
 ///   NE (1): rows 16–32, cols 16–32
@@ -344,67 +380,73 @@ fn compute_quad_textures(
         }
     }
 
-    // ── Per-quadrant texture assignment ────────────────────────────────────
-    let quads: Vec<QuadTexture> = (0..4)
-        .map(|quad| {
-            let (row_start, col_start) = QUAD_ORIGIN[quad];
+    // ── Pass 1: collect per-vertex blend fractions for all quadrants ────────
+    // Also accumulate a cell-wide weight map so we can pick one base texture
+    // shared by all four quadrants, eliminating mid-cell BTXT discontinuities.
+    let mut all_vertex_fracs: [Vec<BTreeMap<u32, f32>>; 4] =
+        [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut cell_weights: BTreeMap<u32, f32> = BTreeMap::new();
 
-            let mut vertex_fracs: Vec<BTreeMap<u32, f32>> = Vec::with_capacity(17 * 17);
-            let mut quad_weights: BTreeMap<u32, f32> = BTreeMap::new();
+    for quad in 0..4usize {
+        let (row_start, col_start) = QUAD_ORIGIN[quad];
+        let vf = &mut all_vertex_fracs[quad];
+        vf.reserve(17 * 17);
 
-            for qr in 0..17usize {
-                for qc in 0..17usize {
-                    let land_row = row_start + qr;
-                    let land_col = col_start + qc;
-                    // World coordinates for this vertex (row-flip matches sample_heights).
-                    let ax = cell_col as i32 * BLOCKS_PER_CELL + land_col as i32;
-                    let az = cell_row as i32 * BLOCKS_PER_CELL + (VERTS - 1 - land_row) as i32;
+        for qr in 0..17usize {
+            for qc in 0..17usize {
+                let land_row = row_start + qr;
+                let land_col = col_start + qc;
+                let ax = cell_col as i32 * BLOCKS_PER_CELL + land_col as i32;
+                let az = cell_row as i32 * BLOCKS_PER_CELL + (VERTS - 1 - land_row) as i32;
 
-                    // Centre of this vertex in the pre-sampled grid.
-                    let cx = (ax - origin_ax) as usize;
-                    let cz = (az - origin_az) as usize;
+                let cx = (ax - origin_ax) as usize;
+                let cz = (az - origin_az) as usize;
 
-                    // Count each texture in the BLEND_RADIUS window using the grid.
-                    let mut counts: BTreeMap<u32, i32> = BTreeMap::new();
-                    for dz in 0..BLEND_DIAM {
-                        let sz = cz + dz - BLEND_RADIUS as usize; // always in-bounds
-                        for dx in 0..BLEND_DIAM {
-                            let sx = cx + dx - BLEND_RADIUS as usize;
-                            let fid = tex_grid[sz * sample_size + sx];
-                            *counts.entry(fid).or_insert(0) += 1;
-                        }
+                let mut counts: BTreeMap<u32, i32> = BTreeMap::new();
+                for dz in 0..BLEND_DIAM {
+                    let sz = cz + dz - BLEND_RADIUS as usize;
+                    for dx in 0..BLEND_DIAM {
+                        let sx = cx + dx - BLEND_RADIUS as usize;
+                        let fid = tex_grid[sz * sample_size + sx];
+                        *counts.entry(fid).or_insert(0) += 1;
                     }
-
-                    let mut fracs: BTreeMap<u32, f32> = BTreeMap::new();
-                    for (&fid, &cnt) in &counts {
-                        let f = cnt as f32 / BLEND_TOTAL;
-                        fracs.insert(fid, f);
-                        *quad_weights.entry(fid).or_insert(0.0) += f;
-                    }
-                    vertex_fracs.push(fracs);
                 }
+
+                let mut fracs: BTreeMap<u32, f32> = BTreeMap::new();
+                for (&fid, &cnt) in &counts {
+                    let f = cnt as f32 / BLEND_TOTAL;
+                    fracs.insert(fid, f);
+                    *cell_weights.entry(fid).or_insert(0.0) += f;
+                }
+                vf.push(fracs);
             }
+        }
+    }
 
-            // Base = texture with the highest aggregate weight in this quadrant.
-            let base_fid = quad_weights
-                .iter()
-                .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(f, _)| *f)
-                .unwrap_or(TEXTURE_DIRT);
+    // ── Cell-wide base texture ───────────────────────────────────────────────
+    // Using the same base for every quadrant ensures Gamebryo never has to
+    // render a hard BTXT flip at the internal quadrant boundaries (row 16 and
+    // col 16), which would show as a visible seam regardless of VTXT blending.
+    let cell_base_fid = cell_weights
+        .iter()
+        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(f, _)| *f)
+        .unwrap_or(TEXTURE_DIRT);
 
-            // ATXT layers for minority textures.  Every vertex with at least one
-            // minority sample gets a VTXT entry — this is what produces the gradient.
+    // ── Pass 2: build minority overlay layers using the shared base ──────────
+    let quads: Vec<QuadTexture> = all_vertex_fracs
+        .into_iter()
+        .map(|vertex_fracs| {
             let mut extra: BTreeMap<u32, Vec<(u16, f32)>> = BTreeMap::new();
             for (i, fracs) in vertex_fracs.iter().enumerate() {
                 for (&fid, &opacity) in fracs {
-                    if fid != base_fid && opacity >= MIN_OPACITY {
+                    if fid != cell_base_fid && opacity >= MIN_OPACITY {
                         extra.entry(fid).or_default().push((i as u16, opacity));
                     }
                 }
             }
-
             QuadTexture {
-                base_fid,
+                base_fid: cell_base_fid,
                 layers: extra.into_iter().collect(),
             }
         })
@@ -595,6 +637,265 @@ fn build_land_record(
     buf
 }
 
+// --- vegetation helpers ---
+
+/// Build a single REFR record for a static object placed in the world.
+///
+/// `form_id`  — the FormID to assign this reference record.
+/// `base_fid` — the base object FormID (e.g. JUNIPER_FID).
+/// `x/y/z`   — FNV game-unit position (X east, Y north, Z up).
+/// `rot_z`   — rotation around the Z axis in radians (for variety).
+fn build_tree_refr(form_id: u32, base_fid: u32, x: f32, y: f32, z: f32, rot_z: f32) -> Vec<u8> {
+    let mut data = Vec::new();
+
+    // NAME: base object FormID
+    let mut name_data = Vec::new();
+    pu32(&mut name_data, base_fid);
+    data.extend(subrecord(b"NAME", &name_data));
+
+    // DATA: position (XYZ) + rotation (XYZ) as f32s
+    let mut pos_data = Vec::new();
+    pf32(&mut pos_data, x);
+    pf32(&mut pos_data, y);
+    pf32(&mut pos_data, z);
+    pf32(&mut pos_data, 0.0); // rot X
+    pf32(&mut pos_data, 0.0); // rot Y
+    pf32(&mut pos_data, rot_z);
+    data.extend(subrecord(b"DATA", &pos_data));
+
+    let mut buf = Vec::new();
+    push_record(&mut buf, b"REFR", 0, form_id, &data);
+    buf
+}
+
+/// Generate REFR records for vegetation in one cell.
+///
+/// Iterates a regular grid across the cell at `TREE_GRID_SPACING`-block
+/// intervals. At each grid point, samples the land-cover class and places a
+/// Juniper tree if the class is LC_TREE_COVER. A deterministic per-coordinate
+/// RNG decides whether to actually place (density thinning) and adds small
+/// positional/rotational jitter.
+///
+/// Returns the concatenated REFR byte data and the number of records written.
+/// `next_fid` is advanced by the returned count.
+fn place_tree_refs(
+    ground: &Ground,
+    cell_col: i32,
+    cell_row: i32,
+    cell_x: i32,
+    cell_y: i32,
+    global_min: i32,
+    effective_scale: i32,
+    water_height_game: Option<f32>,
+    next_fid: &mut u32,
+) -> (Vec<u8>, u32) {
+    let mut refs = Vec::new();
+    let mut count = 0u32;
+
+    let mut local_row_fnv = 0i32;
+    while local_row_fnv < BLOCKS_PER_CELL {
+        let mut local_col = 0i32;
+        while local_col < BLOCKS_PER_CELL {
+            // arnis coords: Z increases southward; FNV row 0 = south = large arnis Z.
+            let arnis_x = cell_col * BLOCKS_PER_CELL + local_col;
+            let arnis_z = cell_row * BLOCKS_PER_CELL + (BLOCKS_PER_CELL - 1 - local_row_fnv);
+
+            let lc = ground.cover_class(XZPoint::new(arnis_x, arnis_z));
+            if lc == land_cover::LC_TREE_COVER {
+                let mut rng = coord_rng(arnis_x, arnis_z, 0x4A554E49_50455200);
+
+                // ~60% placement probability to avoid uniform grid appearance.
+                if rng.random_bool(0.6) {
+                    // Jitter within ±48 game units (< half a block = 64 units).
+                    let jitter_x: f32 = rng.random_range(-48.0_f32..48.0_f32);
+                    let jitter_y: f32 = rng.random_range(-48.0_f32..48.0_f32);
+                    // Random Z rotation 0..2π.
+                    let rot_z: f32 = rng.random_range(0.0_f32..std::f32::consts::TAU);
+
+                    let game_x = cell_x as f32 * CELL_GAME_UNITS
+                        + local_col as f32 * 128.0
+                        + 64.0
+                        + jitter_x;
+                    let game_y = cell_y as f32 * CELL_GAME_UNITS
+                        + local_row_fnv as f32 * 128.0
+                        + 64.0
+                        + jitter_y;
+
+                    let raw_h = ground.level(XZPoint::new(arnis_x, arnis_z));
+                    let game_z =
+                        ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+
+                    // Skip trees submerged below the water surface.
+                    if water_height_game.map_or(true, |wl| game_z >= wl) {
+                        refs.extend(build_tree_refr(*next_fid, JUNIPER_FID, game_x, game_y, game_z, rot_z));
+                        *next_fid += 1;
+                        count += 1;
+                    }
+                }
+            }
+
+            local_col += TREE_GRID_SPACING;
+        }
+        local_row_fnv += TREE_GRID_SPACING;
+    }
+
+    (refs, count)
+}
+
+/// Generate REFR records for rocks in one cell.
+///
+/// Rocks are placed in `LC_BARE` terrain at a high density and in
+/// `LC_SHRUBLAND` at a reduced density (rocky outcrops among brush).
+/// Rock type is chosen by weighted RNG — smaller variants are more common.
+/// All four variants look fine from any angle, so rotation is fully random.
+fn place_rock_refs(
+    ground: &Ground,
+    cell_col: i32,
+    cell_row: i32,
+    cell_x: i32,
+    cell_y: i32,
+    global_min: i32,
+    effective_scale: i32,
+    water_height_game: Option<f32>,
+    next_fid: &mut u32,
+) -> (Vec<u8>, u32) {
+    let mut refs = Vec::new();
+    let mut count = 0u32;
+
+    let mut local_row_fnv = 0i32;
+    while local_row_fnv < BLOCKS_PER_CELL {
+        let mut local_col = 0i32;
+        while local_col < BLOCKS_PER_CELL {
+            let arnis_x = cell_col * BLOCKS_PER_CELL + local_col;
+            let arnis_z = cell_row * BLOCKS_PER_CELL + (BLOCKS_PER_CELL - 1 - local_row_fnv);
+
+            let lc = ground.cover_class(XZPoint::new(arnis_x, arnis_z));
+
+            // Placement probability: bare land ~65%, shrubland ~20% (rocky outcrops).
+            let place_prob = match lc {
+                land_cover::LC_BARE => 0.65,
+                land_cover::LC_SHRUBLAND => 0.20,
+                _ => 0.0,
+            };
+
+            if place_prob > 0.0 {
+                let mut rng = coord_rng(arnis_x, arnis_z, 0x524F434B_53000000);
+
+                if rng.random_bool(place_prob) {
+                    // Weighted rock type: 40% small cluster, 30% tall, 20% medium, 10% large.
+                    let rock_fid = match rng.random_range(0u32..10) {
+                        0..=3 => ROCK_SMALL_CLUSTER_FID,
+                        4..=6 => ROCK_TALL_FID,
+                        7..=8 => ROCK_MEDIUM_FID,
+                        _     => ROCK_LARGE_FID,
+                    };
+
+                    // Small jitter so rocks don't sit on a perfect grid.
+                    let jitter_x: f32 = rng.random_range(-40.0_f32..40.0_f32);
+                    let jitter_y: f32 = rng.random_range(-40.0_f32..40.0_f32);
+                    let rot_z: f32 = rng.random_range(0.0_f32..std::f32::consts::TAU);
+
+                    let game_x = cell_x as f32 * CELL_GAME_UNITS
+                        + local_col as f32 * 128.0
+                        + 64.0
+                        + jitter_x;
+                    let game_y = cell_y as f32 * CELL_GAME_UNITS
+                        + local_row_fnv as f32 * 128.0
+                        + 64.0
+                        + jitter_y;
+
+                    let raw_h = ground.level(XZPoint::new(arnis_x, arnis_z));
+                    let game_z =
+                        ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+
+                    if water_height_game.map_or(true, |wl| game_z >= wl) {
+                        refs.extend(build_tree_refr(*next_fid, rock_fid, game_x, game_y, game_z, rot_z));
+                        *next_fid += 1;
+                        count += 1;
+                    }
+                }
+            }
+
+            local_col += ROCK_GRID_SPACING;
+        }
+        local_row_fnv += ROCK_GRID_SPACING;
+    }
+
+    (refs, count)
+}
+
+/// Generate REFR records for shrubs/bushes in one cell.
+///
+/// Dense in `LC_SHRUBLAND`, sparser in `LC_GRASSLAND` and `LC_BARE` (scrubby
+/// outskirts of rocky areas).  Rotation is fully random — the asset looks fine
+/// from any angle.
+fn place_shrub_refs(
+    ground: &Ground,
+    cell_col: i32,
+    cell_row: i32,
+    cell_x: i32,
+    cell_y: i32,
+    global_min: i32,
+    effective_scale: i32,
+    water_height_game: Option<f32>,
+    next_fid: &mut u32,
+) -> (Vec<u8>, u32) {
+    let mut refs = Vec::new();
+    let mut count = 0u32;
+
+    let mut local_row_fnv = 0i32;
+    while local_row_fnv < BLOCKS_PER_CELL {
+        let mut local_col = 0i32;
+        while local_col < BLOCKS_PER_CELL {
+            let arnis_x = cell_col * BLOCKS_PER_CELL + local_col;
+            let arnis_z = cell_row * BLOCKS_PER_CELL + (BLOCKS_PER_CELL - 1 - local_row_fnv);
+
+            let lc = ground.cover_class(XZPoint::new(arnis_x, arnis_z));
+
+            let place_prob = match lc {
+                land_cover::LC_SHRUBLAND => 0.70,
+                land_cover::LC_GRASSLAND => 0.35,
+                land_cover::LC_BARE      => 0.15,
+                _ => 0.0,
+            };
+
+            if place_prob > 0.0 {
+                let mut rng = coord_rng(arnis_x, arnis_z, 0x42555348_00000000);
+
+                if rng.random_bool(place_prob) {
+                    let jitter_x: f32 = rng.random_range(-40.0_f32..40.0_f32);
+                    let jitter_y: f32 = rng.random_range(-40.0_f32..40.0_f32);
+                    let rot_z: f32 = rng.random_range(0.0_f32..std::f32::consts::TAU);
+
+                    let game_x = cell_x as f32 * CELL_GAME_UNITS
+                        + local_col as f32 * 128.0
+                        + 64.0
+                        + jitter_x;
+                    let game_y = cell_y as f32 * CELL_GAME_UNITS
+                        + local_row_fnv as f32 * 128.0
+                        + 64.0
+                        + jitter_y;
+
+                    let raw_h = ground.level(XZPoint::new(arnis_x, arnis_z));
+                    let game_z =
+                        ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+
+                    if water_height_game.map_or(true, |wl| game_z >= wl) {
+                        refs.extend(build_tree_refr(*next_fid, SHRUB_FID, game_x, game_y, game_z, rot_z));
+                        *next_fid += 1;
+                        count += 1;
+                    }
+                }
+            }
+
+            local_col += SHRUB_GRID_SPACING;
+        }
+        local_row_fnv += SHRUB_GRID_SPACING;
+    }
+
+    (refs, count)
+}
+
 // --- public entry point ---
 
 pub fn generate_fnv_esm(
@@ -730,6 +1031,12 @@ pub fn generate_fnv_esm(
         vnml: Vec<u8>,
         water_height_game: Option<f32>,
         quads: [QuadTexture; 4],
+        tree_refs: Vec<u8>,
+        tree_count: u32,
+        rock_refs: Vec<u8>,
+        rock_count: u32,
+        shrub_refs: Vec<u8>,
+        shrub_count: u32,
     }
 
     let mut cells: Vec<CellInfo> = Vec::with_capacity(num_cols * num_rows);
@@ -749,6 +1056,42 @@ pub fn generate_fnv_esm(
             let vnml = compute_vnml(&heights);
             let quads = compute_quad_textures(ground, col, row, default_texture);
 
+            let (tree_refs, tree_count) = place_tree_refs(
+                ground,
+                col as i32,
+                row as i32,
+                cell_x,
+                cell_y,
+                global_min,
+                effective_scale,
+                effective_water_level,
+                &mut next_fid,
+            );
+
+            let (rock_refs, rock_count) = place_rock_refs(
+                ground,
+                col as i32,
+                row as i32,
+                cell_x,
+                cell_y,
+                global_min,
+                effective_scale,
+                effective_water_level,
+                &mut next_fid,
+            );
+
+            let (shrub_refs, shrub_count) = place_shrub_refs(
+                ground,
+                col as i32,
+                row as i32,
+                cell_x,
+                cell_y,
+                global_min,
+                effective_scale,
+                effective_water_level,
+                &mut next_fid,
+            );
+
             cells.push(CellInfo {
                 cell_x,
                 cell_y,
@@ -759,6 +1102,12 @@ pub fn generate_fnv_esm(
                 vnml,
                 water_height_game: effective_water_level,
                 quads,
+                tree_refs,
+                tree_count,
+                rock_refs,
+                rock_count,
+                shrub_refs,
+                shrub_count,
             });
         }
     }
@@ -808,8 +1157,15 @@ pub fn generate_fnv_esm(
                 let mut cell_label = [0u8; 4];
                 cell_label.copy_from_slice(&cell.cell_fid.to_le_bytes());
 
+                // Type 9 = cell temp children: LAND record + all object REFRs.
+                let mut temp_children_content = Vec::new();
+                temp_children_content.extend_from_slice(&land_rec);
+                temp_children_content.extend_from_slice(&cell.tree_refs);
+                temp_children_content.extend_from_slice(&cell.rock_refs);
+                temp_children_content.extend_from_slice(&cell.shrub_refs);
+
                 let mut tmp_grup = Vec::new();
-                push_grup(&mut tmp_grup, cell_label, 9, &land_rec); // type 9 = cell temp children
+                push_grup(&mut tmp_grup, cell_label, 9, &temp_children_content);
 
                 let mut cell_children_grup = Vec::new();
                 push_grup(&mut cell_children_grup, cell_label, 6, &tmp_grup); // type 6 = cell children
@@ -818,11 +1174,13 @@ pub fn generate_fnv_esm(
                 subblock_content.extend_from_slice(&cell_children_grup);
             }
 
-            let sub_label = xy_label(*sx as i16, *sy as i16);
+            // FNV exterior subblock GRUP label: Y-coordinate first, then X (LE i16 pairs).
+            let sub_label = xy_label(*sy as i16, *sx as i16);
             push_grup(&mut block_content, sub_label, 5, &subblock_content);
         }
 
-        let blk_label = xy_label(*bx as i16, *by as i16);
+        // FNV exterior block GRUP label: Y-coordinate first, then X (LE i16 pairs).
+        let blk_label = xy_label(*by as i16, *bx as i16);
         push_grup(&mut world_children_content, blk_label, 4, &block_content);
     }
 
@@ -850,7 +1208,8 @@ pub fn generate_fnv_esm(
     // reflect our content size.
     let mut tes4 = TESTESM_BYTES[..TESTESM_TES4_LEN].to_vec();
 
-    let num_records = 1u32 + cells.len() as u32 * 2; // WRLD + CELL + LAND per cell
+    let total_refrs: u32 = cells.iter().map(|c| c.tree_count + c.rock_count + c.shrub_count).sum();
+    let num_records = 1u32 + cells.len() as u32 * 2 + total_refrs; // WRLD + CELL + LAND + REFRs
     tes4[TES4_NUM_RECORDS_OFFSET..TES4_NUM_RECORDS_OFFSET + 4]
         .copy_from_slice(&num_records.to_le_bytes());
 
