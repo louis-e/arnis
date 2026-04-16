@@ -226,7 +226,7 @@ fn rotate_ground_data(
 
     // For each cell in the new grid, inverse-rotate to find the source cell
     let neg_sin_r = -sin_r; // Inverse rotation
-    let mut new_heights: Vec<Vec<i32>> = Vec::with_capacity(new_h);
+    let mut new_heights: Vec<Vec<f64>> = Vec::with_capacity(new_h);
     let mut has_data: Vec<Vec<bool>> = Vec::with_capacity(new_h);
 
     // Also rotate land-cover grids if present
@@ -260,7 +260,7 @@ fn rotate_ground_data(
                 && (rel_z as usize) < orig_height;
 
             let coord = XZPoint::new(rel_x, rel_z);
-            height_row.push(original_ground.level(coord));
+            height_row.push(original_ground.level(coord) as f64);
             data_row.push(in_original);
 
             if let Some(ref mut cr) = cover_row {
@@ -290,14 +290,13 @@ fn rotate_ground_data(
                 if !has_data[z_idx][x_idx] {
                     continue; // Don't smooth padding areas
                 }
-                let neighbors_sum = prev[z_idx - 1][x_idx] as f64
-                    + prev[z_idx + 1][x_idx] as f64
-                    + prev[z_idx][x_idx - 1] as f64
-                    + prev[z_idx][x_idx + 1] as f64;
+                let neighbors_sum = prev[z_idx - 1][x_idx]
+                    + prev[z_idx + 1][x_idx]
+                    + prev[z_idx][x_idx - 1]
+                    + prev[z_idx][x_idx + 1];
                 let avg = neighbors_sum / 4.0;
                 // Blend: 70% original + 30% neighbor average
-                new_heights[z_idx][x_idx] =
-                    (0.7 * prev[z_idx][x_idx] as f64 + 0.3 * avg).round() as i32;
+                new_heights[z_idx][x_idx] = 0.7 * prev[z_idx][x_idx] + 0.3 * avg;
             }
         }
     }

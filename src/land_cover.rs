@@ -91,7 +91,7 @@ pub fn fetch_land_cover_data(
     grid_height: usize,
 ) -> Option<LandCoverData> {
     println!("Fetching land cover data (ESA WorldCover 2021)...");
-    emit_gui_progress_update(17.0, "Fetching land cover...");
+    emit_gui_progress_update(18.0, "Fetching land cover...");
 
     let cache_dir = get_cache_dir();
     if !cache_dir.exists() {

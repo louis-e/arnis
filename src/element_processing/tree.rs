@@ -115,10 +115,14 @@ const ACACIA_LEAVES_FILL: [(Coord, Coord); 5] = [
 /// Maximum horizontal canopy radius used by the predefined tree patterns.
 const MAX_CANOPY_RADIUS: i32 = 3;
 
-/// Helper function to set blocks in various patterns.
-fn round(editor: &mut WorldEditor, material: Block, (x, y, z): Coord, block_pattern: &[Coord]) {
+fn round_absolute(
+    editor: &mut WorldEditor,
+    material: Block,
+    (x, y, z): Coord,
+    block_pattern: &[Coord],
+) {
     for (i, j, k) in block_pattern {
-        editor.set_block(material, x + i, y + j, z + k, None, None);
+        editor.set_block_absolute(material, x + i, y + j, z + k, None, None);
     }
 }
 
@@ -236,14 +240,19 @@ impl Tree<'_> {
         let check_canopy_collision =
             Self::canopy_might_intersect_building(x, z, building_footprints);
 
+        // Resolve trunk base Y once from the trunk's (x,z) position.
+        // All tree blocks use this as reference so the canopy doesn't
+        // warp to follow the hillside terrain.
+        let base_y = editor.get_absolute_y(x, y, z);
+
         // Build the logs
-        editor.fill_blocks(
+        editor.fill_blocks_absolute(
             tree.log_block,
             x,
-            y,
+            base_y,
             z,
             x,
-            y + tree.log_height,
+            base_y + tree.log_height,
             z,
             None,
             Some(&blacklist),
@@ -253,10 +262,10 @@ impl Tree<'_> {
         for ((i1, j1, k1), (i2, j2, k2)) in tree.leaves_fill {
             if check_canopy_collision {
                 for leaf_x in (x + i1)..=(x + i2) {
-                    for leaf_y in (y + j1)..=(y + j2) {
+                    for leaf_y in (base_y + j1)..=(base_y + j2) {
                         for leaf_z in (z + k1)..=(z + k2) {
                             if building_footprints.is_none_or(|fp| !fp.contains(leaf_x, leaf_z)) {
-                                editor.set_block(
+                                editor.set_block_absolute(
                                     tree.leaves_block,
                                     leaf_x,
                                     leaf_y,
@@ -269,13 +278,13 @@ impl Tree<'_> {
                     }
                 }
             } else {
-                editor.fill_blocks(
+                editor.fill_blocks_absolute(
                     tree.leaves_block,
                     x + i1,
-                    y + j1,
+                    base_y + j1,
                     z + k1,
                     x + i2,
-                    y + j2,
+                    base_y + j2,
                     z + k2,
                     None,
                     None,
@@ -291,10 +300,10 @@ impl Tree<'_> {
                         let leaf_x = x + i;
                         let leaf_z = z + k;
                         if building_footprints.is_none_or(|fp| !fp.contains(leaf_x, leaf_z)) {
-                            editor.set_block(
+                            editor.set_block_absolute(
                                 tree.leaves_block,
                                 leaf_x,
-                                y + offset + j,
+                                base_y + offset + j,
                                 leaf_z,
                                 None,
                                 None,
@@ -302,7 +311,12 @@ impl Tree<'_> {
                         }
                     }
                 } else {
-                    round(editor, tree.leaves_block, (x, y + offset, z), round_pattern);
+                    round_absolute(
+                        editor,
+                        tree.leaves_block,
+                        (x, base_y + offset, z),
+                        round_pattern,
+                    );
                 }
             }
         }

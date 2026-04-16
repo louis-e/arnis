@@ -51,7 +51,7 @@ fn download_with_reqwest(
         }
         Err(e) => {
             if e.is_timeout() {
-                let msg = "Request timed out. Try selecting a smaller area.";
+                let msg = "Request timed out. Try again!";
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else if e.is_connect() {

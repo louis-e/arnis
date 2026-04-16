@@ -56,12 +56,12 @@ impl Ground {
     ) -> Self {
         match fetch_elevation_data(bbox, scale, ground_level, disable_height_limit) {
             Ok(elevation_data) => {
-                // Fetch land cover data with the same grid dimensions as elevation
+                // Fetch land cover data at world resolution (not capped grid resolution)
                 let land_cover = if fetch_land_cover {
                     let lc = land_cover::fetch_land_cover_data(
                         bbox,
-                        elevation_data.width,
-                        elevation_data.height,
+                        elevation_data.world_width,
+                        elevation_data.world_height,
                     );
                     if lc.is_some() {
                         println!("Land cover data loaded successfully");
@@ -192,29 +192,45 @@ impl Ground {
         coords.map(|c: XZPoint| self.level(c)).max()
     }
 
-    /// Converts game coordinates to elevation data coordinates
+    /// Converts game coordinates to elevation data coordinates (0.0 to 1.0 ratio)
     #[inline(always)]
     fn get_data_coordinates(&self, coord: XZPoint, data: &ElevationData) -> (f64, f64) {
-        let x_ratio: f64 = coord.x as f64 / data.width as f64;
-        let z_ratio: f64 = coord.z as f64 / data.height as f64;
+        let x_ratio: f64 = coord.x as f64 / (data.world_width - 1).max(1) as f64;
+        let z_ratio: f64 = coord.z as f64 / (data.world_height - 1).max(1) as f64;
         (x_ratio.clamp(0.0, 1.0), z_ratio.clamp(0.0, 1.0))
     }
 
-    /// Interpolates height value from the elevation grid
+    /// Bilinearly interpolates height value from the elevation grid
     #[inline(always)]
     fn interpolate_height(&self, x_ratio: f64, z_ratio: f64, data: &ElevationData) -> i32 {
-        let x: usize = ((x_ratio * (data.width - 1) as f64).round() as usize).min(data.width - 1);
-        let z: usize = ((z_ratio * (data.height - 1) as f64).round() as usize).min(data.height - 1);
-        data.heights[z][x]
+        let fx = x_ratio * (data.width - 1) as f64;
+        let fz = z_ratio * (data.height - 1) as f64;
+        let x0 = fx.floor() as usize;
+        let z0 = fz.floor() as usize;
+        let x1 = (x0 + 1).min(data.width - 1);
+        let z1 = (z0 + 1).min(data.height - 1);
+        let dx = fx - x0 as f64;
+        let dz = fz - z0 as f64;
+        let v00 = data.heights[z0][x0];
+        let v10 = data.heights[z0][x1];
+        let v01 = data.heights[z1][x0];
+        let v11 = data.heights[z1][x1];
+        let lerp_top = v00 + (v10 - v00) * dx;
+        let lerp_bot = v01 + (v11 - v01) * dx;
+        let result = lerp_top + (lerp_bot - lerp_top) * dz;
+        result.round() as i32
     }
 
     /// Replace the elevation grid with new rotated/transformed data.
     /// Used by the rotation operator to update elevation after rotating.
-    pub fn set_elevation_data(&mut self, heights: Vec<Vec<i32>>, width: usize, height: usize) {
+    pub fn set_elevation_data(&mut self, heights: Vec<Vec<f64>>, width: usize, height: usize) {
         if let Some(ref mut data) = self.elevation_data {
             data.heights = heights;
             data.width = width;
             data.height = height;
+            // After rotation, grid and world dimensions are the same
+            data.world_width = width;
+            data.world_height = height;
         }
     }
 
@@ -277,20 +293,26 @@ impl Ground {
         let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> =
             RgbImage::new(width as u32, height as u32);
 
-        let mut min_height: i32 = i32::MAX;
-        let mut max_height: i32 = i32::MIN;
+        let mut min_height: f64 = f64::MAX;
+        let mut max_height: f64 = f64::MIN;
 
         for row in heights {
             for &h in row {
-                min_height = min_height.min(h);
-                max_height = max_height.max(h);
+                if h.is_finite() {
+                    min_height = min_height.min(h);
+                    max_height = max_height.max(h);
+                }
             }
         }
 
+        let range = max_height - min_height;
         for (y, row) in heights.iter().enumerate() {
             for (x, &h) in row.iter().enumerate() {
-                let normalized: u8 =
-                    (((h - min_height) as f64 / (max_height - min_height) as f64) * 255.0) as u8;
+                let normalized: u8 = if range > 0.0 {
+                    (((h - min_height) / range) * 255.0) as u8
+                } else {
+                    128
+                };
                 img.put_pixel(
                     x as u32,
                     y as u32,
@@ -315,7 +337,7 @@ impl Ground {
 pub fn generate_ground_data(args: &Args) -> Ground {
     if args.terrain {
         println!("{} Fetching elevation...", "[3/7]".bold());
-        emit_gui_progress_update(14.0, "Fetching elevation...");
+        emit_gui_progress_update(15.0, "Fetching elevation...");
         let ground = Ground::new_enabled(
             &args.bbox,
             args.scale,

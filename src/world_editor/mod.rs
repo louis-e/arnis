@@ -876,6 +876,40 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    /// Fill a rectangular volume with a block using absolute Y coordinates.
+    #[allow(clippy::too_many_arguments)]
+    pub fn fill_blocks_absolute(
+        &mut self,
+        block: Block,
+        x1: i32,
+        y1: i32,
+        z1: i32,
+        x2: i32,
+        y2: i32,
+        z2: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+    ) {
+        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
+        let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
+        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
+
+        for x in min_x..=max_x {
+            for abs_y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    self.set_block_absolute(
+                        block,
+                        x,
+                        abs_y,
+                        z,
+                        override_whitelist,
+                        override_blacklist,
+                    );
+                }
+            }
+        }
+    }
+
     /// Checks for a block at the given coordinates.
     #[inline]
     pub fn check_for_block(&self, x: i32, y: i32, z: i32, whitelist: Option<&[Block]>) -> bool {

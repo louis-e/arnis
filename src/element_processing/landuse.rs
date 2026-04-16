@@ -35,8 +35,8 @@ pub fn generate_landuse(
         "residential" | "commercial" => return,
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
-        "industrial" => STONE, // Placeholder, will be randomized per-block
-        "military" => GRAY_CONCRETE, // Placeholder, will be randomized per-block
+        "industrial" => STONE,       // Randomized per-block below
+        "military" => GRAY_CONCRETE, // Randomized per-block below
         "railway" => GRAVEL,
         "vineyard" => COARSE_DIRT,
         "winter_sports" => SNOW_BLOCK,
@@ -50,7 +50,7 @@ pub fn generate_landuse(
                 COARSE_DIRT
             }
         }
-        "quarry" => STONE,
+        "quarry" => STONE, // Randomized per-block below
         _ => GRASS_BLOCK,
     };
 
@@ -102,6 +102,18 @@ pub fn generate_landuse(
                 STONE_BRICKS
             } else {
                 COBBLESTONE
+            }
+        } else if landuse_tag == "quarry" {
+            // Quarry: mix of stone, gravel, cobblestone, andesite
+            let random_value = rng.random_range(0..100);
+            if random_value < 40 {
+                STONE
+            } else if random_value < 60 {
+                GRAVEL
+            } else if random_value < 80 {
+                COBBLESTONE
+            } else {
+                ANDESITE
             }
         } else {
             block_type

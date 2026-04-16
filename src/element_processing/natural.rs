@@ -111,6 +111,12 @@ pub fn generate_natural(
                 _ => GRASS_BLOCK,
             };
 
+            // Whether this natural type should have per-block rock variation
+            let rock_variation = matches!(
+                natural_type.as_str(),
+                "bare_rock" | "blockfield" | "cliff" | "saddle" | "ridge" | "mountain_range"
+            );
+
             let ProcessedElement::Way(way) = element else {
                 return;
             };
@@ -141,7 +147,12 @@ pub fn generate_natural(
                                 SMOOTH_STONE,
                             ]),
                         ) {
-                            editor.set_block(block_type, bx, 0, bz, None, None);
+                            let b = if rock_variation {
+                                vary_rock_block(block_type, bx, bz)
+                            } else {
+                                block_type
+                            };
+                            editor.set_block(b, bx, 0, bz, None, None);
                         }
                     }
 
@@ -199,7 +210,12 @@ pub fn generate_natural(
                 for (x, z) in filled_area {
                     // Don't overwrite road/path blocks with natural ground
                     if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
-                        editor.set_block(block_type, x, 0, z, None, None);
+                        let b = if rock_variation {
+                            vary_rock_block(block_type, x, z)
+                        } else {
+                            block_type
+                        };
+                        editor.set_block(b, x, 0, z, None, None);
                     }
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
@@ -605,5 +621,26 @@ pub fn generate_natural_from_relation(
                 );
             }
         }
+    }
+}
+
+/// Vary a rock block type per-coordinate for natural rock areas.
+/// Uses coord_hash for deterministic, spatially-coherent variation.
+fn vary_rock_block(base: Block, x: i32, z: i32) -> Block {
+    let h = crate::land_cover::coord_hash(x, z) % 10;
+    match base {
+        STONE => match h {
+            0..=4 => STONE,
+            5..=6 => ANDESITE,
+            7 => COBBLESTONE,
+            _ => GRAVEL,
+        },
+        COBBLESTONE => match h {
+            0..=4 => COBBLESTONE,
+            5..=6 => ANDESITE,
+            7 => STONE,
+            _ => GRAVEL,
+        },
+        _ => base,
     }
 }
