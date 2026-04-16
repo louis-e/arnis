@@ -56,12 +56,15 @@ impl Ground {
     ) -> Self {
         match fetch_elevation_data(bbox, scale, ground_level, disable_height_limit) {
             Ok(elevation_data) => {
-                // Fetch land cover data at world resolution (not capped grid resolution)
+                // Fetch land cover data, capped to avoid OOM on large areas.
+                // The coordinate lookup in cover_class/water_distance handles
+                // upscaling from the capped grid to full world resolution.
+                const MAX_LAND_COVER_DIM: usize = 4096;
                 let land_cover = if fetch_land_cover {
                     let lc = land_cover::fetch_land_cover_data(
                         bbox,
-                        elevation_data.world_width,
-                        elevation_data.world_height,
+                        elevation_data.world_width.min(MAX_LAND_COVER_DIM),
+                        elevation_data.world_height.min(MAX_LAND_COVER_DIM),
                     );
                     if lc.is_some() {
                         println!("Land cover data loaded successfully");

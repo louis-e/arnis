@@ -358,10 +358,10 @@ fn fetch_or_cache(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     if cache_path.exists() {
         let bytes = std::fs::read(cache_path)?;
-        if bytes.len() > 100 {
+        if bytes.len() > 100 && is_valid_payload(&bytes) {
             return Ok(bytes);
         }
-        // Too small, re-download
+        // Invalid or too small, re-download
         let _ = std::fs::remove_file(cache_path);
     }
 
@@ -385,7 +385,7 @@ fn fetch_or_cache(
 
     let bytes = response.bytes()?.to_vec();
 
-    if bytes.len() > 100 {
+    if bytes.len() > 100 && is_valid_payload(&bytes) {
         if let Some(parent) = cache_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -393,6 +393,19 @@ fn fetch_or_cache(
     }
 
     Ok(bytes)
+}
+
+/// Check if a payload looks like a valid image (TIFF or PNG), not an HTML error page.
+fn is_valid_payload(bytes: &[u8]) -> bool {
+    if bytes.len() < 4 {
+        return false;
+    }
+    // TIFF: little-endian "II\x2A\x00" or big-endian "MM\x00\x2A"
+    let is_tiff = (bytes[0] == b'I' && bytes[1] == b'I' && bytes[2] == 0x2A && bytes[3] == 0x00)
+        || (bytes[0] == b'M' && bytes[1] == b'M' && bytes[2] == 0x00 && bytes[3] == 0x2A);
+    // PNG: "\x89PNG"
+    let is_png = bytes[0] == 0x89 && bytes[1] == b'P' && bytes[2] == b'N' && bytes[3] == b'G';
+    is_tiff || is_png
 }
 
 /// Decode a GeoTIFF containing float32 elevation values.

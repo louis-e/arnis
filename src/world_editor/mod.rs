@@ -877,6 +877,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Fill a rectangular volume with a block using absolute Y coordinates.
+    #[inline]
     #[allow(clippy::too_many_arguments)]
     pub fn fill_blocks_absolute(
         &mut self,

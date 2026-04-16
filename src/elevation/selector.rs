@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_select_provider_fallback() {
-        // With no regional providers, should always return AWS
+        // Bbox outside all regional coverage should fall back to AWS
         let bbox = LLBBox::new(-33.86, 151.20, -33.85, 151.22).unwrap();
         let provider = select_provider(&bbox);
         assert_eq!(provider.name(), "aws");
