@@ -14,7 +14,7 @@ _**Want mobile generation or larger map sizes?** [MapSmith](https://arnismc.com/
 
 ## ⌨️ Usage
 <img width="60%" src="assets/git/gui.png"><br>
-Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
+Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#installation) the project on your own.
 
 Choose your area on the map using the rectangle tool and select your Minecraft world—then simply click on ***Start Generation***!
 Additionally, you can customize various generation settings, such as world scale, spawn point, or building interiors.
