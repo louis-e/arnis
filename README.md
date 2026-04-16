@@ -60,7 +60,7 @@ nix run github:louis-e/arnis -- --terrain --path=YOUR_PATH/.minecraft/saves/worl
 This project welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable.
 
 1. ***Fork*** the repository.
-2. ***Make your changes*** while respecting the [Key Objectives](https://github.com/louis-e/arnis/tree/main?tab=readme-ov-file#key-objectives-of-this-project).
+2. ***Make your changes*** while respecting the [Key Objectives](#key-objectives-of-this-project).
 3. ***Submit a pull request*** with a description.
 
 Once merged, your changes will be included in the next regular update release. Contributions of all levels are appreciated!
