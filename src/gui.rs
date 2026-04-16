@@ -837,6 +837,42 @@ fn gui_start_generation(
 
                 let ground = ground::generate_ground_data(&args);
 
+                // Fetch OSM road network for asphalt texture painting.
+                // Failure is non-fatal; roads are simply omitted.
+                emit_gui_progress_update(10.0, "Fetching road data...");
+                let road_polylines: Vec<Vec<(i32, i32)>> = match retrieve_data::fetch_data_from_overpass(
+                    bbox,
+                    false,
+                    "requests",
+                    None,
+                ) {
+                    Ok(raw_data) => {
+                        let (elements, _) =
+                            crate::osm_parser::parse_osm_data(raw_data, bbox, world_scale, false);
+                        elements
+                            .iter()
+                            .filter_map(|e| {
+                                if let crate::osm_parser::ProcessedElement::Way(way) = e {
+                                    if way.tags.get("highway").map_or(false, |v| {
+                                        crate::fnv_esm::fnv_road_type(v) > 0
+                                    }) {
+                                        let pts: Vec<(i32, i32)> =
+                                            way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                                        if pts.len() >= 2 {
+                                            return Some(pts);
+                                        }
+                                    }
+                                }
+                                None
+                            })
+                            .collect()
+                    }
+                    Err(e) => {
+                        println!("Road data unavailable ({}); roads will not be painted.", e);
+                        Vec::new()
+                    }
+                };
+
                 return match crate::fnv_esm::generate_fnv_esm(
                     &ground,
                     &args.bbox,
@@ -844,7 +880,7 @@ fn gui_start_generation(
                     &output_dir,
                     None,
                     world_scale,
-                    &[], // GUI does not fetch OSM data; roads omitted
+                    &road_polylines,
                 ) {
                     Ok(_) => {
                         let msg = format!("Done! Saved to: {}", output_dir.display());

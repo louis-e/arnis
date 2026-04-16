@@ -10,6 +10,18 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
+/// Returns a non-zero priority for driveable highway types that should have
+/// the asphalt texture painted on FNV terrain, or 0 for non-road types.
+pub(crate) fn fnv_road_type(highway: &str) -> u8 {
+    match highway {
+        "motorway" | "motorway_link" => 4,
+        "trunk" | "trunk_link" | "primary" | "primary_link" => 3,
+        "secondary" | "secondary_link" | "tertiary" | "tertiary_link" => 2,
+        "residential" | "living_street" | "unclassified" | "service" | "road" => 1,
+        _ => 0,
+    }
+}
+
 const BLOCKS_PER_CELL: i32 = 32;
 const VERTS: usize = 33;
 const HEIGHT_MARGIN: i32 = 16;

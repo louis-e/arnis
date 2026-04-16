@@ -56,19 +56,6 @@ mod progress {
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
-/// Returns a non-zero priority for driveable highway types that should have
-/// the asphalt texture painted on FNV terrain, or 0 for non-road types
-/// (footways, paths, point features, etc.) that should be skipped.
-fn fnv_road_type(highway: &str) -> u8 {
-    match highway {
-        "motorway" | "motorway_link" => 4,
-        "trunk" | "trunk_link" | "primary" | "primary_link" => 3,
-        "secondary" | "secondary_link" | "tertiary" | "tertiary_link" => 2,
-        "residential" | "living_street" | "unclassified" | "service" | "road" => 1,
-        _ => 0, // footway, path, cycleway, steps, pedestrian, street_lamp, etc.
-    }
-}
-
 fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     floodfill_cache::configure_rayon_thread_pool(0.9);
@@ -164,7 +151,7 @@ fn run_cli() {
                     .iter()
                     .filter_map(|e| {
                         if let osm_parser::ProcessedElement::Way(way) = e {
-                            if way.tags.get("highway").map_or(false, |v| fnv_road_type(v) > 0) {
+                            if way.tags.get("highway").map_or(false, |v| fnv_esm::fnv_road_type(v) > 0) {
                                 let pts: Vec<(i32, i32)> =
                                     way.nodes.iter().map(|n| (n.x, n.z)).collect();
                                 if pts.len() >= 2 {
