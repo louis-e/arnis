@@ -58,7 +58,7 @@ impl ElevationProvider for Usgs3dep {
         let cache_key = bbox_hash(bbox, grid_width, grid_height);
         let cache_path = cache_dir.join(format!("{cache_key}.tiff"));
 
-        let bytes = fetch_or_cache(&url, &cache_path)?;
+        let bytes = fetch_or_cache(&url, &cache_path, None)?;
         decode_geotiff_f32(&bytes, grid_width, grid_height)
     }
 }
@@ -125,7 +125,7 @@ impl ElevationProvider for IgnFrance {
         let cache_key = bbox_hash(bbox, grid_width, grid_height);
         let cache_path = cache_dir.join(format!("{cache_key}.tiff"));
 
-        let bytes = fetch_or_cache(&url, &cache_path)?;
+        let bytes = fetch_or_cache(&url, &cache_path, None)?;
         decode_geotiff_f32(&bytes, grid_width, grid_height)
     }
 }
@@ -181,7 +181,7 @@ impl ElevationProvider for IgnSpain {
         let cache_key = bbox_hash(bbox, grid_width, grid_height);
         let cache_path = cache_dir.join(format!("{cache_key}.tiff"));
 
-        let bytes = fetch_or_cache(&url, &cache_path)?;
+        let bytes = fetch_or_cache(&url, &cache_path, None)?;
         decode_geotiff_f32(&bytes, grid_width, grid_height)
     }
 }
@@ -228,6 +228,12 @@ impl ElevationProvider for JapanGsi {
 
         println!("Fetching {} elevation tiles from GSI Japan...", tiles.len());
 
+        // Build a shared HTTP client for all tile downloads
+        let client = reqwest::blocking::Client::builder()
+            .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+            .timeout(std::time::Duration::from_secs(120))
+            .build()?;
+
         // Download all tiles into a HashMap
         let mut tile_map: std::collections::HashMap<(u32, u32), image::RgbaImage> =
             std::collections::HashMap::new();
@@ -240,7 +246,7 @@ impl ElevationProvider for JapanGsi {
                 );
                 let cache_path = cache_dir.join(format!("{layer}_z{zoom}_x{tile_x}_y{tile_y}.png"));
 
-                match fetch_or_cache(&url, &cache_path) {
+                match fetch_or_cache(&url, &cache_path, Some(&client)) {
                     Ok(bytes) => {
                         if let Ok(img) = image::load_from_memory(&bytes) {
                             tile_map.insert((*tile_x, *tile_y), img.to_rgba8());
@@ -344,28 +350,32 @@ fn sample_gsi_pixel(
 // --- Shared helpers ---
 
 /// Fetch data from URL or load from cache.
+/// If `client` is provided, reuse it; otherwise build a new one.
 fn fetch_or_cache(
     url: &str,
     cache_path: &std::path::Path,
+    client: Option<&reqwest::blocking::Client>,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     if cache_path.exists() {
         let bytes = std::fs::read(cache_path)?;
         if bytes.len() > 100 {
-            println!(
-                "Loading cached elevation data from {}",
-                cache_path.display()
-            );
             return Ok(bytes);
         }
         // Too small, re-download
         let _ = std::fs::remove_file(cache_path);
     }
 
-    println!("Fetching elevation data from remote service...");
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(120))
-        .build()?;
+    let owned_client;
+    let client = match client {
+        Some(c) => c,
+        None => {
+            owned_client = reqwest::blocking::Client::builder()
+                .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+                .timeout(std::time::Duration::from_secs(120))
+                .build()?;
+            &owned_client
+        }
+    };
 
     let response = client.get(url).send()?;
     let status = response.status();
@@ -417,14 +427,18 @@ fn decode_geotiff_f32(
 
     // Resample to target dimensions using nearest-neighbor
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; target_width]; target_height];
+    let target_y_den = target_height.saturating_sub(1).max(1);
+    let target_x_den = target_width.saturating_sub(1).max(1);
+    let src_y_extent = src_height.saturating_sub(1);
+    let src_x_extent = src_width.saturating_sub(1);
 
     #[allow(clippy::needless_range_loop)]
     for ty in 0..target_height {
-        let sy = (ty as f64 / target_height as f64 * src_height as f64) as usize;
-        let sy = sy.min(src_height - 1);
+        let sy = (ty as f64 / target_y_den as f64 * src_y_extent as f64) as usize;
+        let sy = sy.min(src_y_extent);
         for tx in 0..target_width {
-            let sx = (tx as f64 / target_width as f64 * src_width as f64) as usize;
-            let sx = sx.min(src_width - 1);
+            let sx = (tx as f64 / target_x_den as f64 * src_x_extent as f64) as usize;
+            let sx = sx.min(src_x_extent);
             let idx = sy * src_width + sx;
             if idx < float_data.len() {
                 let val = float_data[idx];

@@ -159,8 +159,7 @@ pub fn generate_ground_layer(
                                 // ESA WorldCover + slope-based material selection
                                 let cover = ground.cover_class(coord);
 
-                                // Steep terrain overrides land cover classification
-                                // Inspired by Tellus: steeper = darker/harder blocks
+                                // Steep terrain overrides land cover classification (steeper = darker/harder blocks)
                                 if slope > 8 {
                                     // Extreme cliff: deepslate mass
                                     (DEEPSLATE, DEEPSLATE)
@@ -299,13 +298,14 @@ pub fn generate_ground_layer(
 
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
+                                // Use blacklist to avoid replacing water/bedrock
                                 editor.set_block_absolute(
                                     surface_block,
                                     x,
                                     ground_y,
                                     z,
                                     None,
-                                    None,
+                                    Some(&[WATER, BEDROCK]),
                                 );
                             } else {
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
@@ -526,40 +526,28 @@ pub fn generate_ground_layer(
                                             );
                                         }
                                     }
-                                    land_cover::LC_CROPLAND => {
-                                        // Only place crops if the ground is actually farmland
+                                    land_cover::LC_CROPLAND
                                         if editor.check_for_block_absolute(
                                             x,
                                             ground_y,
                                             z,
                                             Some(&[FARMLAND]),
                                             None,
-                                        ) {
-                                            if x % 9 == 0 && z % 9 == 0 {
+                                        ) =>
+                                    {
+                                        if x % 9 == 0 && z % 9 == 0 {
+                                            editor.set_block_absolute(
+                                                WATER,
+                                                x,
+                                                ground_y,
+                                                z,
+                                                Some(&[FARMLAND]),
+                                                None,
+                                            );
+                                        } else if rng.random_range(0..76) == 0 {
+                                            if rng.random_range(1..=10) <= 4 {
                                                 editor.set_block_absolute(
-                                                    WATER,
-                                                    x,
-                                                    ground_y,
-                                                    z,
-                                                    Some(&[FARMLAND]),
-                                                    None,
-                                                );
-                                            } else if rng.random_range(0..76) == 0 {
-                                                if rng.random_range(1..=10) <= 4 {
-                                                    editor.set_block_absolute(
-                                                        HAY_BALE,
-                                                        x,
-                                                        ground_y + 1,
-                                                        z,
-                                                        None,
-                                                        None,
-                                                    );
-                                                }
-                                            } else {
-                                                let crop = [WHEAT, CARROTS, POTATOES]
-                                                    [rng.random_range(0..3)];
-                                                editor.set_block_absolute(
-                                                    crop,
+                                                    HAY_BALE,
                                                     x,
                                                     ground_y + 1,
                                                     z,
@@ -567,6 +555,17 @@ pub fn generate_ground_layer(
                                                     None,
                                                 );
                                             }
+                                        } else {
+                                            let crop =
+                                                [WHEAT, CARROTS, POTATOES][rng.random_range(0..3)];
+                                            editor.set_block_absolute(
+                                                crop,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
                                         }
                                     }
                                     land_cover::LC_WETLAND | land_cover::LC_MANGROVES
@@ -611,18 +610,18 @@ pub fn generate_ground_layer(
                                             );
                                         }
                                     }
-                                    land_cover::LC_BARE if ground_is_natural => {
+                                    land_cover::LC_BARE
+                                        if ground_is_natural && rng.random_range(0..100) == 0 =>
+                                    {
                                         // Sparse dead bushes
-                                        if rng.random_range(0..100) == 0 {
-                                            editor.set_block_absolute(
-                                                DEAD_BUSH,
-                                                x,
-                                                ground_y + 1,
-                                                z,
-                                                None,
-                                                None,
-                                            );
-                                        }
+                                        editor.set_block_absolute(
+                                            DEAD_BUSH,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
+                                        );
                                     }
                                     _ => {}
                                 }
