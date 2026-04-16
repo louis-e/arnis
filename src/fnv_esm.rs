@@ -1,3 +1,4 @@
+use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
 use crate::deterministic_rng::coord_rng;
@@ -13,6 +14,42 @@ const BLOCKS_PER_CELL: i32 = 32;
 const VERTS: usize = 33;
 const HEIGHT_MARGIN: i32 = 16;
 const FNV_FORM_VERSION: u16 = 15;
+
+// ---------------------------------------------------------------------------
+// Terrain smoothing
+//
+// Raw DEM data often has sharp stair-step artefacts that look fine as
+// Minecraft blocks but are jarring as a continuous FNV landscape.  We apply
+// an iterative gradient-limited Laplacian smooth to the sampled height grid
+// before encoding VHGT deltas.
+//
+// To guarantee that adjacent cells produce identical heights at their shared
+// border vertices, the smooth is applied to a padded grid that extends
+// SMOOTH_PAD vertices beyond each edge.  Both cells call ground.level() at
+// the same coordinates for this border region, so all inputs are identical
+// and the deterministic algorithm yields the same smoothed border heights.
+// ---------------------------------------------------------------------------
+
+/// Extra vertex rows/columns sampled outside each cell edge.
+/// Must be ≥ SMOOTH_ITERS so that every inner vertex's smoothed value depends
+/// only on raw ground.level() samples, guaranteeing inter-cell consistency.
+const SMOOTH_PAD: usize = 7;
+
+/// Number of smoothing passes.
+const SMOOTH_ITERS: usize = 6;
+
+/// VHGT gradient (units per vertex) below which no smoothing is applied.
+/// ~10 units ≈ atan(80/128) ≈ 32° slope — gentle hills are left unchanged.
+const SMOOTH_THRESHOLD: i32 = 10;
+
+/// VHGT gradient above which the maximum blend is applied.
+/// ~32 units ≈ atan(256/128) ≈ 63° — near-vertical cliffs get full treatment.
+const SMOOTH_FULL: i32 = 32;
+
+/// Maximum fraction of the difference toward the 4-neighbour average applied
+/// per iteration.  0.65 is aggressive enough to tame cliffs in a few passes
+/// without over-flattening moderate slopes.
+const SMOOTH_MAX_BLEND: f32 = 0.65;
 /// Each FNV exterior cell spans 4096 game units in X and Y.
 const CELL_GAME_UNITS: f32 = 4096.0;
 /// Multiplier applied to terrain height variation for more dramatic FNV terrain.
@@ -101,6 +138,128 @@ const SHRUB_FID: u32 = 0x000EC8D2;
 /// Grid spacing for shrub placement.  Denser than rocks; shrubs are small.
 const SHRUB_GRID_SPACING: i32 = 6;
 
+// ---------------------------------------------------------------------------
+// Road rasterisation
+// ---------------------------------------------------------------------------
+
+/// Real-world half-width of a typical road in metres.
+/// At scale 1.0 this is 3 arnis blocks each side of the centreline.
+/// Below the scale at which this rounds to zero the road is omitted.
+const ROAD_HALF_WIDTH_METERS: f64 = 3.0;
+
+/// Returns the road half-width in arnis blocks for the given world scale,
+/// or 0 if the road would be too narrow to paint (< 1 block each side).
+fn road_half_width_blocks(world_scale: f64) -> i32 {
+    (ROAD_HALF_WIDTH_METERS * world_scale).round() as i32
+}
+
+/// Flat boolean grid covering the arnis worldspace in block coordinates.
+/// True = this block lies on or within `half_width` of a road centreline.
+struct RoadGrid {
+    data: Vec<bool>,
+    width: i32,
+    height: i32,
+}
+
+impl RoadGrid {
+    fn new(width: i32, height: i32) -> Self {
+        Self {
+            data: vec![false; (width * height) as usize],
+            width,
+            height,
+        }
+    }
+
+    #[inline]
+    fn is_road(&self, x: i32, z: i32) -> bool {
+        if x < 0 || z < 0 || x >= self.width || z >= self.height {
+            return false;
+        }
+        self.data[(z * self.width + x) as usize]
+    }
+
+    #[inline]
+    fn mark(&mut self, x: i32, z: i32) {
+        if x < 0 || z < 0 || x >= self.width || z >= self.height {
+            return;
+        }
+        self.data[(z * self.width + x) as usize] = true;
+    }
+}
+
+/// Rasterise a set of road centreline polylines into a `RoadGrid`.
+///
+/// Each polyline is a sequence of arnis (x, z) coordinates. For every
+/// segment the centreline is traced with Bresenham's line algorithm, then
+/// expanded by `half_width` blocks in every direction to give the road its
+/// painted width.
+fn build_road_grid(
+    polylines: &[Vec<(i32, i32)>],
+    world_width: i32,
+    world_height: i32,
+    half_width: i32,
+) -> RoadGrid {
+    let mut grid = RoadGrid::new(world_width, world_height);
+
+    // Paint a line segment (already expanded by half_width) into the grid.
+    let paint_segment = |grid: &mut RoadGrid, x0: i32, z0: i32, x1: i32, z1: i32| {
+        for (cx, _, cz) in bresenham_line(x0, 0, z0, x1, 0, z1) {
+            for dz in -half_width..=half_width {
+                for dx in -half_width..=half_width {
+                    grid.mark(cx + dx, cz + dz);
+                }
+            }
+        }
+    };
+
+    for polyline in polylines {
+        for segment in polyline.windows(2) {
+            let (x0, z0) = segment[0];
+            let (x1, z1) = segment[1];
+            paint_segment(&mut grid, x0, z0, x1, z1);
+        }
+    }
+
+    // Bridge small gaps between polyline endpoints that arise from independent
+    // bbox-clip rounding.  Each polyline contributes two endpoints (first and
+    // last node); if two endpoints from different polylines are within
+    // (2*half_width + 2) blocks of each other we draw a connecting segment so
+    // that the road appears continuous rather than broken.
+    let gap_threshold = (2 * half_width + 2).max(4);
+    let gap_threshold_sq = (gap_threshold * gap_threshold) as i64;
+
+    // Collect (endpoint, polyline_index) pairs — first and last node of each polyline.
+    let endpoints: Vec<(i32, i32, usize)> = polylines
+        .iter()
+        .enumerate()
+        .flat_map(|(i, pl)| {
+            let mut ep = Vec::new();
+            if let Some(&(x, z)) = pl.first() { ep.push((x, z, i)); }
+            if pl.len() > 1 {
+                if let Some(&(x, z)) = pl.last() { ep.push((x, z, i)); }
+            }
+            ep
+        })
+        .collect();
+
+    for a in 0..endpoints.len() {
+        for b in (a + 1)..endpoints.len() {
+            let (ax, az, ai) = endpoints[a];
+            let (bx, bz, bi) = endpoints[b];
+            if ai == bi {
+                continue; // same polyline — skip
+            }
+            let dx = (bx - ax) as i64;
+            let dz = (bz - az) as i64;
+            if dx * dx + dz * dz <= gap_threshold_sq {
+                paint_segment(&mut grid, ax, az, bx, bz);
+            }
+        }
+    }
+
+    grid
+}
+
 // --- binary helpers ---
 
 #[inline]
@@ -178,18 +337,19 @@ fn subrecord(tag: &[u8; 4], data: &[u8]) -> Vec<u8> {
 
 // --- VHGT delta encoding ---
 
-/// Sample a 33×33 vertex grid for one cell and encode it as VHGT deltas.
+/// Sample and smooth the 33×33 vertex height grid for one cell.
 ///
 /// FNV VHGT convention:
 ///   row 0 = SOUTH edge of the cell (higher arnis Z, since Z increases south)
 ///   row 32 = NORTH edge of the cell (lower arnis Z)
 ///   col 0 = WEST edge, col 32 = EAST edge
 ///
-/// Flipping the row direction ensures that adjacent cells share the same
-/// terrain sample at their border: SOUTH of cell (cell_y) uses the same
-/// arnis z-coordinate as NORTH of cell (cell_y - 1).
-/// Sample and scale the 33×33 vertex grid for one cell.
-/// Returns the height grid in VHGT units (offset-zeroed, scaled).
+/// The heights are sampled into a padded (VERTS + 2×SMOOTH_PAD)² grid that
+/// extends SMOOTH_PAD vertices beyond each cell edge, then smoothed in-place
+/// with SMOOTH_ITERS passes of a gradient-limited Laplacian filter.  Because
+/// the padded region is sourced from the same ground.level() function as every
+/// other cell, adjacent cells always compute identical heights at their shared
+/// border vertices — no inter-cell seams are introduced by the smoothing.
 fn sample_heights(
     ground: &Ground,
     cell_col: i32,
@@ -197,14 +357,56 @@ fn sample_heights(
     global_min: i32,
     scale: i32,
 ) -> [[i32; VERTS]; VERTS] {
+    const PSIZE: usize = VERTS + 2 * SMOOTH_PAD;
+
+    // ── Sample padded grid ──────────────────────────────────────────────────
+    let mut grid = [[0i32; PSIZE]; PSIZE];
+    for pr in 0..PSIZE {
+        for pc in 0..PSIZE {
+            // Map padded indices back to arnis world coordinates.
+            // pr=SMOOTH_PAD corresponds to grid row 0 (south edge, large arnis z).
+            let x = cell_col * BLOCKS_PER_CELL + pc as i32 - SMOOTH_PAD as i32;
+            let z = cell_row * BLOCKS_PER_CELL
+                + VERTS as i32 - 1
+                - (pr as i32 - SMOOTH_PAD as i32);
+            let raw_h = ground.level(XZPoint::new(x, z));
+            grid[pr][pc] = (raw_h - global_min) * scale + HEIGHT_MARGIN;
+        }
+    }
+
+    // ── Iterative gradient-limited Laplacian smoothing ─────────────────────
+    // Each pass: vertices with a steep neighbour gradient blend toward the
+    // 4-neighbour average.  Blend strength scales linearly from zero at
+    // SMOOTH_THRESHOLD up to SMOOTH_MAX_BLEND at SMOOTH_FULL.
+    for _ in 0..SMOOTH_ITERS {
+        let prev = grid; // [[i32; PSIZE]; PSIZE] is Copy — this is a stack copy
+        for pr in 1..PSIZE - 1 {
+            for pc in 1..PSIZE - 1 {
+                let h = prev[pr][pc];
+                let neighbours = [
+                    prev[pr - 1][pc],
+                    prev[pr + 1][pc],
+                    prev[pr][pc - 1],
+                    prev[pr][pc + 1],
+                ];
+                let max_grad = neighbours.iter().map(|&n| (h - n).abs()).max().unwrap();
+                if max_grad > SMOOTH_THRESHOLD {
+                    let avg: i32 = neighbours.iter().sum::<i32>() / 4;
+                    let strength = ((max_grad - SMOOTH_THRESHOLD) as f32
+                        / (SMOOTH_FULL - SMOOTH_THRESHOLD) as f32)
+                        .clamp(0.0, 1.0)
+                        * SMOOTH_MAX_BLEND;
+                    grid[pr][pc] = h + ((avg - h) as f32 * strength).round() as i32;
+                }
+            }
+        }
+    }
+
+    // ── Extract inner VERTS×VERTS ───────────────────────────────────────────
     let mut heights = [[0i32; VERTS]; VERTS];
     for row in 0..VERTS {
         for col in 0..VERTS {
-            let x = cell_col * BLOCKS_PER_CELL + col as i32;
-            // row 0 = south (large arnis z), row 32 = north (small arnis z)
-            let z = cell_row * BLOCKS_PER_CELL + (VERTS - 1 - row) as i32;
-            let raw_h = ground.level(XZPoint::new(x, z));
-            heights[row][col] = (raw_h - global_min) * scale + HEIGHT_MARGIN;
+            heights[row][col] = grid[row + SMOOTH_PAD][col + SMOOTH_PAD];
         }
     }
     heights
@@ -296,6 +498,7 @@ fn texture_for_cover(lc: u8) -> u32 {
         land_cover::LC_BARE => TEXTURE_SAND,
         land_cover::LC_CROPLAND | land_cover::LC_GRASSLAND | land_cover::LC_SHRUBLAND | land_cover::LC_TREE_COVER => TEXTURE_GRASS,
         _ => TEXTURE_DIRT,
+        // _ => TEXTURE_GRASS,
     }
 }
 
@@ -310,87 +513,79 @@ struct QuadTexture {
     layers: Vec<(u32, Vec<(u16, f32)>)>,
 }
 
-/// Sample the 17×17 vertex grid of each quadrant and build smoothly-blended
-/// per-vertex texture assignments.
+/// Returns the local slope at `(row, col)` in a VERTS×VERTS height grid,
+/// in VHGT units per vertex, using central differences for interior vertices
+/// and one-sided differences at the grid border.
+#[inline]
+fn slope_at(heights: &[[i32; VERTS]; VERTS], row: usize, col: usize) -> i32 {
+    let h = heights[row][col];
+    let dh_row = if row == 0 {
+        (heights[1][col] - h).abs()
+    } else if row == VERTS - 1 {
+        (h - heights[VERTS - 2][col]).abs()
+    } else {
+        (heights[row + 1][col] - heights[row - 1][col]).abs() / 2
+    };
+    let dh_col = if col == 0 {
+        (heights[row][1] - h).abs()
+    } else if col == VERTS - 1 {
+        (h - heights[row][VERTS - 2]).abs()
+    } else {
+        (heights[row][col + 1] - heights[row][col - 1]).abs() / 2
+    };
+    dh_row.max(dh_col)
+}
+
+/// Assign per-vertex textures and build BTXT/ATXT/VTXT data for all four
+/// quadrants of one LAND record.
 ///
-/// For every vertex, a `BLEND_RADIUS`-block neighbourhood is sampled in arnis
-/// space. Because the sampling is in world coordinates rather than
-/// quadrant-relative coordinates, it naturally crosses quadrant and cell
-/// boundaries, eliminating hard seams at those edges.
+/// Each vertex receives exactly one texture, chosen by priority:
+///   1. Road grid hit        → TEXTURE_ASPHALT
+///   2. Steep slope          → TEXTURE_DIRT  (cliff / exposed rock)
+///   3. Land cover class     → texture_for_cover(lc)
+///   4. Fallback             → default_texture
 ///
-/// Each texture's share of the neighbourhood becomes its VTXT opacity, so
-/// transition zones blend smoothly instead of snapping to a single texture.
+/// Texture boundaries therefore follow terrain contours (steep slopes) and
+/// road edges rather than invisible land-cover class lines.  No neighbourhood
+/// blending is performed; opacity is always 1.0 for non-base vertices.
 ///
-/// A single **cell-wide base texture** is selected (whichever texture has the
-/// highest aggregate weight across all four quadrants combined) and used as
-/// BTXT for every quadrant. This prevents the visible seam that would otherwise
-/// appear at the quadrant boundary (row 16, the middle of the cell) when the
-/// per-quadrant majority texture flips between the northern and southern halves.
+/// A single cell-wide BTXT (the most common texture across all four quadrants)
+/// is used for every quadrant, preventing the mid-cell seam that would appear
+/// if adjacent quadrants had different base textures.
 ///
 /// Quadrant layout in the 33×33 LAND vertex grid (row 0 = south):
-///   NW (0): rows 16–32, cols  0–16
-///   NE (1): rows 16–32, cols 16–32
-///   SW (2): rows  0–16, cols  0–16
-///   SE (3): rows  0–16, cols 16–32
-/// `default_texture` is used for any vertex whose land-cover class has no
-/// explicit mapping (class 0 = data unavailable).  Pass `TEXTURE_SNOW` for
-/// polar regions where ESA WorldCover has no coverage.
+///   SW (0): rows  0–16, cols  0–16
+///   SE (1): rows  0–16, cols 16–32
+///   NW (2): rows 16–32, cols  0–16
+///   NE (3): rows 16–32, cols 16–32
+///
+/// FNV quad indices: 0=SW, 1=SE, 2=NW, 3=NE.  Vertex 0 within each quad is
+/// the SW corner of that quad (row_start, col_start), with V increasing
+/// northward and C increasing eastward.
 fn compute_quad_textures(
     ground: &Ground,
     cell_col: usize,
     cell_row: usize,
+    heights: &[[i32; VERTS]; VERTS],
     default_texture: u32,
+    road_grid: Option<&RoadGrid>,
 ) -> [QuadTexture; 4] {
-    // (land_row_start, land_col_start) for quadrants NW=0, NE=1, SW=2, SE=3
-    const QUAD_ORIGIN: [(usize, usize); 4] = [(16, 0), (16, 16), (0, 0), (0, 16)];
+    // (land_row_start, land_col_start) for FNV quadrants SW=0, SE=1, NW=2, NE=3
+    const QUAD_ORIGIN: [(usize, usize); 4] = [(0, 0), (0, 16), (16, 0), (16, 16)];
 
-    // Blend radius in arnis blocks.  Radius 8 → 17×17 = 289-sample window.
-    // This covers 8 vertices (= ¼ of a cell) on each side of any boundary,
-    // giving a 16-vertex gradient across cell and quadrant edges.
-    const BLEND_RADIUS: i32 = 8;
-    const BLEND_DIAM: usize = (BLEND_RADIUS * 2 + 1) as usize;
-    const BLEND_TOTAL: f32 = (BLEND_DIAM * BLEND_DIAM) as f32;
-    // Include any vertex with at least one minority sample (1/289 ≈ 0.003).
-    // Raising this threshold was the primary cause of lingering hard seams in
-    // the previous implementation.
-    const MIN_OPACITY: f32 = 1.0 / BLEND_TOTAL;
+    // VHGT gradient threshold above which a vertex is treated as a steep slope
+    // and receives the rocky/dirt texture.
+    // 12 units ≈ atan(96 / 128) ≈ 37° — visible cliff faces get TEXTURE_DIRT.
+    const SLOPE_ROCKY: i32 = 12;
 
-    // ── Pre-sample texture IDs ──────────────────────────────────────────────
-    // Build a flat grid covering the cell area plus a BLEND_RADIUS-wide border
-    // so the inner blending loop just indexes an array instead of calling
-    // cover_class for every (vertex × neighbour) pair.
-    //
-    // Grid is indexed [sz * sample_size + sx] where:
-    //   sx = arnis_x - origin_ax,  sz = arnis_z - origin_az
-    let sample_size = BLOCKS_PER_CELL as usize + BLEND_RADIUS as usize * 2 + 1; // 49
-    let origin_ax = cell_col as i32 * BLOCKS_PER_CELL - BLEND_RADIUS;
-    let origin_az = cell_row as i32 * BLOCKS_PER_CELL - BLEND_RADIUS;
-
-    let mut tex_grid: Vec<u32> = vec![default_texture; sample_size * sample_size];
-    for sz in 0..sample_size {
-        for sx in 0..sample_size {
-            let ax = origin_ax + sx as i32;
-            let az = origin_az + sz as i32;
-            let lc = ground.cover_class(XZPoint::new(ax, az));
-            tex_grid[sz * sample_size + sx] = if lc == 0 {
-                default_texture
-            } else {
-                texture_for_cover(lc)
-            };
-        }
-    }
-
-    // ── Pass 1: collect per-vertex blend fractions for all quadrants ────────
-    // Also accumulate a cell-wide weight map so we can pick one base texture
-    // shared by all four quadrants, eliminating mid-cell BTXT discontinuities.
-    let mut all_vertex_fracs: [Vec<BTreeMap<u32, f32>>; 4] =
-        [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-    let mut cell_weights: BTreeMap<u32, f32> = BTreeMap::new();
+    // ── Pass 1: assign one texture per vertex, tally cell-wide counts ────────
+    let mut all_vertex_tex: [Vec<u32>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    let mut cell_counts: BTreeMap<u32, u32> = BTreeMap::new();
 
     for quad in 0..4usize {
         let (row_start, col_start) = QUAD_ORIGIN[quad];
-        let vf = &mut all_vertex_fracs[quad];
-        vf.reserve(17 * 17);
+        let vt = &mut all_vertex_tex[quad];
+        vt.reserve(17 * 17);
 
         for qr in 0..17usize {
             for qc in 0..17usize {
@@ -399,50 +594,40 @@ fn compute_quad_textures(
                 let ax = cell_col as i32 * BLOCKS_PER_CELL + land_col as i32;
                 let az = cell_row as i32 * BLOCKS_PER_CELL + (VERTS - 1 - land_row) as i32;
 
-                let cx = (ax - origin_ax) as usize;
-                let cz = (az - origin_az) as usize;
-
-                let mut counts: BTreeMap<u32, i32> = BTreeMap::new();
-                for dz in 0..BLEND_DIAM {
-                    let sz = cz + dz - BLEND_RADIUS as usize;
-                    for dx in 0..BLEND_DIAM {
-                        let sx = cx + dx - BLEND_RADIUS as usize;
-                        let fid = tex_grid[sz * sample_size + sx];
-                        *counts.entry(fid).or_insert(0) += 1;
+                let tex = if road_grid.map_or(false, |rg| rg.is_road(ax, az)) {
+                    TEXTURE_ASPHALT
+                } else if slope_at(heights, land_row, land_col) >= SLOPE_ROCKY {
+                    TEXTURE_DIRT
+                } else {
+                    let lc = ground.cover_class(XZPoint::new(ax, az));
+                    if lc == 0 {
+                        default_texture
+                    } else {
+                        texture_for_cover(lc)
                     }
-                }
+                };
 
-                let mut fracs: BTreeMap<u32, f32> = BTreeMap::new();
-                for (&fid, &cnt) in &counts {
-                    let f = cnt as f32 / BLEND_TOTAL;
-                    fracs.insert(fid, f);
-                    *cell_weights.entry(fid).or_insert(0.0) += f;
-                }
-                vf.push(fracs);
+                vt.push(tex);
+                *cell_counts.entry(tex).or_insert(0) += 1;
             }
         }
     }
 
     // ── Cell-wide base texture ───────────────────────────────────────────────
-    // Using the same base for every quadrant ensures Gamebryo never has to
-    // render a hard BTXT flip at the internal quadrant boundaries (row 16 and
-    // col 16), which would show as a visible seam regardless of VTXT blending.
-    let cell_base_fid = cell_weights
+    let cell_base_fid = cell_counts
         .iter()
-        .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(f, _)| *f)
+        .max_by_key(|(_, &count)| count)
+        .map(|(&fid, _)| fid)
         .unwrap_or(TEXTURE_DIRT);
 
-    // ── Pass 2: build minority overlay layers using the shared base ──────────
-    let quads: Vec<QuadTexture> = all_vertex_fracs
+    // ── Pass 2: build ATXT/VTXT layers for non-base vertices (opacity 1.0) ───
+    let quads: Vec<QuadTexture> = all_vertex_tex
         .into_iter()
-        .map(|vertex_fracs| {
+        .map(|vertex_tex| {
             let mut extra: BTreeMap<u32, Vec<(u16, f32)>> = BTreeMap::new();
-            for (i, fracs) in vertex_fracs.iter().enumerate() {
-                for (&fid, &opacity) in fracs {
-                    if fid != cell_base_fid && opacity >= MIN_OPACITY {
-                        extra.entry(fid).or_default().push((i as u16, opacity));
-                    }
+            for (i, &tex) in vertex_tex.iter().enumerate() {
+                if tex != cell_base_fid {
+                    extra.entry(tex).or_default().push((i as u16, 1.0));
                 }
             }
             QuadTexture {
@@ -905,6 +1090,7 @@ pub fn generate_fnv_esm(
     output_dir: &Path,
     water_level: Option<f32>,
     world_scale: f64,
+    roads: &[Vec<(i32, i32)>],
 ) -> Result<(), String> {
     let max_x = xzbbox.max_x();
     let max_z = xzbbox.max_z();
@@ -987,7 +1173,10 @@ pub fn generate_fnv_esm(
         }
         let avg_water_mc_y = (water_height_sum / water_height_count as i64) as i32;
         let vhgt_units = (avg_water_mc_y - global_min) * effective_scale + HEIGHT_MARGIN;
-        Some(vhgt_units as f32 * 8.0)
+        // Terrain heights are always exact multiples of 8 game units.  Adding 2
+        // places the water plane just above the surface, preventing Z-fighting
+        // without visibly elevating the waterline.
+        Some(vhgt_units as f32 * 8.0 + 2.0)
     });
 
     println!(
@@ -1009,6 +1198,28 @@ pub fn generate_fnv_esm(
         TEXTURE_SNOW
     } else {
         TEXTURE_DIRT
+    };
+
+    // Build road raster — paint asphalt texture onto road-covered terrain blocks.
+    // Skip if the world scale is too small for roads to span even a single block.
+    let road_half_width = road_half_width_blocks(world_scale);
+    let road_grid: Option<RoadGrid> = if !roads.is_empty() /*&& road_half_width >= 1*/ {
+        println!(
+            "  Building road grid ({} road segments, half-width {} blocks)...",
+            roads.len(),
+            road_half_width
+        );
+        let road_grid_w = num_cols as i32 * BLOCKS_PER_CELL;
+        let road_grid_h = num_rows as i32 * BLOCKS_PER_CELL;
+        Some(build_road_grid(roads, road_grid_w, road_grid_h, road_half_width))
+    } else {
+        if !roads.is_empty() {
+            println!(
+                "  Skipping road painting (world scale {:.3} too small — roads < 1 block wide)",
+                world_scale
+            );
+        }
+        None
     };
 
     // Allocate FormIDs from testesm's nextObjectID upward so they share the
@@ -1054,7 +1265,7 @@ pub fn generate_fnv_esm(
                 sample_heights(ground, col as i32, row as i32, global_min, effective_scale);
             let (vhgt_offset, deltas) = encode_vhgt(&heights);
             let vnml = compute_vnml(&heights);
-            let quads = compute_quad_textures(ground, col, row, default_texture);
+            let quads = compute_quad_textures(ground, col, row, &heights, default_texture, road_grid.as_ref());
 
             let (tree_refs, tree_count) = place_tree_refs(
                 ground,

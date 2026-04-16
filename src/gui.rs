@@ -844,6 +844,7 @@ fn gui_start_generation(
                     &output_dir,
                     None,
                     world_scale,
+                    &[], // GUI does not fetch OSM data; roads omitted
                 ) {
                     Ok(_) => {
                         let msg = format!("Done! Saved to: {}", output_dir.display());

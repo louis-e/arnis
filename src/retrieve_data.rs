@@ -11,8 +11,68 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::fs::File;
 use std::io::{self, BufReader, Cursor, Write};
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
+
+/// Maximum age for cached OSM responses in days.
+const OSM_CACHE_MAX_AGE_DAYS: u64 = 7;
+const OSM_CACHE_DIR_NAME: &str = "arnis-osm-cache";
+
+fn get_osm_cache_dir() -> PathBuf {
+    if let Some(cache_dir) = dirs::cache_dir() {
+        cache_dir.join(OSM_CACHE_DIR_NAME)
+    } else {
+        PathBuf::from(format!("./{OSM_CACHE_DIR_NAME}"))
+    }
+}
+
+/// Derive a deterministic cache filename for a given bbox.
+/// Four coordinates rounded to 6 decimal places give sub-metre uniqueness.
+fn osm_cache_path(bbox: LLBBox) -> PathBuf {
+    let name = format!(
+        "{:.6}_{:.6}_{:.6}_{:.6}.json",
+        bbox.min().lat(),
+        bbox.min().lng(),
+        bbox.max().lat(),
+        bbox.max().lng(),
+    )
+    .replace('-', "m"); // avoid negative signs in filenames on Windows
+    get_osm_cache_dir().join(name)
+}
+
+/// Return cached OSM JSON for `bbox` if it exists and is younger than
+/// `OSM_CACHE_MAX_AGE_DAYS`.  Returns `None` on any error or cache miss.
+fn load_osm_cache(bbox: LLBBox) -> Option<String> {
+    let path = osm_cache_path(bbox);
+    if !path.is_file() {
+        return None;
+    }
+    // Age check
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if let Ok(modified) = meta.modified() {
+            let age = std::time::SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or_default();
+            if age.as_secs() > OSM_CACHE_MAX_AGE_DAYS * 86_400 {
+                let _ = std::fs::remove_file(&path);
+                return None;
+            }
+        }
+    }
+    std::fs::read_to_string(&path).ok()
+}
+
+/// Write `json` to the OSM cache for `bbox`.  Silently ignores errors so a
+/// full disk or read-only filesystem never aborts a successful run.
+fn save_osm_cache(bbox: LLBBox, json: &str) {
+    let dir = get_osm_cache_dir();
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let path = osm_cache_path(bbox);
+    let _ = std::fs::write(&path, json);
+}
 
 /// Function to download data using reqwest
 fn download_with_reqwest(
@@ -180,6 +240,25 @@ pub fn fetch_data_from_overpass(
     );
 
     {
+        // Check local cache first — avoids hitting Overpass when re-running
+        // the same bbox during testing.
+        if let Some(cached) = load_osm_cache(bbox) {
+            println!("  (Using cached OSM data)");
+            let mut deserializer =
+                serde_json::Deserializer::from_reader(Cursor::new(cached.as_bytes()));
+            match OsmData::deserialize(&mut deserializer) {
+                Ok(data) if !data.is_empty() => {
+                    emit_gui_progress_update(5.0, "");
+                    return Ok(data);
+                }
+                _ => {
+                    // Cached file is corrupt or empty — fall through to network.
+                    println!("  (Cache invalid, fetching from server...)");
+                    let _ = std::fs::remove_file(osm_cache_path(bbox));
+                }
+            }
+        }
+
         // Fetch data from Overpass API.
         // Strategy: try each primary server once (shuffled), then each
         // fallback server once, with a short delay between attempts.
@@ -229,6 +308,9 @@ pub fn fetch_data_from_overpass(
             // All servers exhausted
             return Err(last_error.unwrap_or_else(|| "All servers failed".into()));
         };
+
+        // Persist to cache so future runs with the same bbox skip the network.
+        save_osm_cache(bbox, &response);
 
         if let Some(save_file) = save_file {
             let mut file: File = File::create(save_file)?;

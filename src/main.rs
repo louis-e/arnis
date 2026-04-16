@@ -56,6 +56,19 @@ mod progress {
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
+/// Returns a non-zero priority for driveable highway types that should have
+/// the asphalt texture painted on FNV terrain, or 0 for non-road types
+/// (footways, paths, point features, etc.) that should be skipped.
+fn fnv_road_type(highway: &str) -> u8 {
+    match highway {
+        "motorway" | "motorway_link" => 4,
+        "trunk" | "trunk_link" | "primary" | "primary_link" => 3,
+        "secondary" | "secondary_link" | "tertiary" | "tertiary_link" => 2,
+        "residential" | "living_street" | "unclassified" | "service" | "road" => 1,
+        _ => 0, // footway, path, cycleway, steps, pedestrian, street_lamp, etc.
+    }
+}
+
 fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     floodfill_cache::configure_rayon_thread_pool(0.9);
@@ -132,14 +145,60 @@ fn run_cli() {
             args.disable_height_limit,
         );
 
+        // Fetch OSM data for road network — used to paint asphalt texture on roads.
+        // Failure is non-fatal; roads are simply omitted.
+        println!("{} Fetching road data...", "  [+]".bold());
+        let road_polylines: Vec<Vec<(i32, i32)>> = match match &args.file {
+            Some(file) => retrieve_data::fetch_data_from_file(file),
+            None => retrieve_data::fetch_data_from_overpass(
+                args.bbox,
+                args.debug,
+                args.downloader.as_str(),
+                args.save_json_file.as_deref(),
+            ),
+        } {
+            Ok(raw_data) => {
+                let (elements, _) =
+                    osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, false);
+                elements
+                    .iter()
+                    .filter_map(|e| {
+                        if let osm_parser::ProcessedElement::Way(way) = e {
+                            if way.tags.get("highway").map_or(false, |v| fnv_road_type(v) > 0) {
+                                let pts: Vec<(i32, i32)> =
+                                    way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                                if pts.len() >= 2 {
+                                    return Some(pts);
+                                }
+                            }
+                        }
+                        None
+                    })
+                    .collect()
+            }
+            Err(e) => {
+                println!(
+                    "  Road data unavailable ({}); roads will not be painted.",
+                    e
+                );
+                Vec::new()
+            }
+        };
+
         let output_dir = args
             .path
             .clone()
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
 
-        if let Err(e) =
-            fnv_esm::generate_fnv_esm(&ground, &args.bbox, &xzbbox, &output_dir, args.fnv_water_level, args.scale)
-        {
+        if let Err(e) = fnv_esm::generate_fnv_esm(
+            &ground,
+            &args.bbox,
+            &xzbbox,
+            &output_dir,
+            args.fnv_water_level,
+            args.scale,
+            &road_polylines,
+        ) {
             eprintln!("{} {}", "Error:".red().bold(), e);
             std::process::exit(1);
         }
