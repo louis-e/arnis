@@ -221,8 +221,13 @@ fn rotate_ground_data(
 
     let original_ground = ground.clone();
 
-    let new_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
-    let new_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
+    let new_world_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
+    let new_world_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
+
+    // Cap the rotation grid to avoid OOM on large worlds (same cap as elevation fetching)
+    const MAX_ROTATION_GRID_DIM: usize = 4096;
+    let new_w = new_world_w.min(MAX_ROTATION_GRID_DIM);
+    let new_h = new_world_h.min(MAX_ROTATION_GRID_DIM);
 
     // For each cell in the new grid, inverse-rotate to find the source cell
     let neg_sin_r = -sin_r; // Inverse rotation
@@ -241,8 +246,13 @@ fn rotate_ground_data(
         let mut water_row: Option<Vec<u8>> = has_land_cover.then(|| Vec::with_capacity(new_w));
 
         for x_idx in 0..new_w {
-            let world_x = xzbbox.min_x() + x_idx as i32;
-            let world_z = xzbbox.min_z() + z_idx as i32;
+            // Map grid index to world coordinate (accounts for grid being smaller than world)
+            let world_x = xzbbox.min_x()
+                + (x_idx as f64 / (new_w - 1).max(1) as f64 * (new_world_w - 1) as f64).round()
+                    as i32;
+            let world_z = xzbbox.min_z()
+                + (z_idx as f64 / (new_h - 1).max(1) as f64 * (new_world_h - 1) as f64).round()
+                    as i32;
 
             // Inverse-rotate this world coordinate back to original space
             let (orig_x, orig_z) =
@@ -301,8 +311,8 @@ fn rotate_ground_data(
         }
     }
 
-    // Update ground with rotated elevation
-    ground.set_elevation_data(new_heights, new_w, new_h);
+    // Update ground with rotated elevation (grid may be smaller than world)
+    ground.set_elevation_data(new_heights, new_w, new_h, new_world_w, new_world_h);
 
     // Update land cover with rotated data
     if let (Some(cover_grid), Some(water_dist)) = (new_cover, new_water) {

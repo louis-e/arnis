@@ -74,17 +74,33 @@ fn create_water_channel(editor: &mut WorldEditor, center_x: i32, center_z: i32, 
             let distance_from_center = dx.max(dz);
 
             if distance_from_center <= half_width {
-                // Single water block at surface
-                editor.set_block(WATER, x, 0, z, None, None);
+                // Single water block at surface, snapped to local minimum on steep terrain
+                let water_y = editor.get_water_level(x, z);
+                editor.set_block_absolute(WATER, x, water_y, z, None, None);
 
                 // Clear vegetation above the water
-                editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
+                editor.set_block_absolute(
+                    AIR,
+                    x,
+                    water_y + 1,
+                    z,
+                    Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
+                    None,
+                );
             } else if distance_from_center == half_width + 1 {
                 // Bank: single water block
-                editor.set_block(WATER, x, 0, z, None, None);
+                let water_y = editor.get_water_level(x, z);
+                editor.set_block_absolute(WATER, x, water_y, z, None, None);
 
                 // Clear vegetation above
-                editor.set_block(AIR, x, 1, z, Some(&[GRASS, WHEAT, CARROTS, POTATOES]), None);
+                editor.set_block_absolute(
+                    AIR,
+                    x,
+                    water_y + 1,
+                    z,
+                    Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
+                    None,
+                );
             }
         }
     }

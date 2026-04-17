@@ -177,6 +177,41 @@ impl Ground {
         self.interpolate_height(x_ratio, z_ratio, data)
     }
 
+    /// Returns the appropriate Y level for water placement.
+    /// On steep terrain, snaps to the local minimum within a small radius
+    /// to compensate for spatial misalignment between water classification
+    /// data (OSM/ESA) and the elevation DEM.
+    pub fn water_level(&self, coord: XZPoint) -> i32 {
+        let center = self.level(coord);
+        if !self.elevation_enabled {
+            return center;
+        }
+        // Check if terrain is steep here; if flat, no snapping needed
+        let slope = self.slope(coord);
+        if slope <= 2 {
+            return center;
+        }
+        // On steep terrain, find the minimum elevation in a small radius
+        // to snap water to the canyon/valley floor
+        let mut min_y = center;
+        for r in 1..=3i32 {
+            for &(dx, dz) in &[
+                (-r, 0),
+                (r, 0),
+                (0, -r),
+                (0, r),
+                (-r, -r),
+                (-r, r),
+                (r, -r),
+                (r, r),
+            ] {
+                let neighbor = self.level(XZPoint::new(coord.x + dx, coord.z + dz));
+                min_y = min_y.min(neighbor);
+            }
+        }
+        min_y
+    }
+
     #[allow(unused)]
     #[inline(always)]
     pub fn min_level<I: Iterator<Item = XZPoint>>(&self, coords: I) -> Option<i32> {
@@ -226,14 +261,20 @@ impl Ground {
 
     /// Replace the elevation grid with new rotated/transformed data.
     /// Used by the rotation operator to update elevation after rotating.
-    pub fn set_elevation_data(&mut self, heights: Vec<Vec<f64>>, width: usize, height: usize) {
+    pub fn set_elevation_data(
+        &mut self,
+        heights: Vec<Vec<f64>>,
+        grid_width: usize,
+        grid_height: usize,
+        world_width: usize,
+        world_height: usize,
+    ) {
         if let Some(ref mut data) = self.elevation_data {
             data.heights = heights;
-            data.width = width;
-            data.height = height;
-            // After rotation, grid and world dimensions are the same
-            data.world_width = width;
-            data.world_height = height;
+            data.width = grid_width;
+            data.height = grid_height;
+            data.world_width = world_width;
+            data.world_height = world_height;
         }
     }
 

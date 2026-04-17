@@ -132,8 +132,12 @@ pub fn generate_ground_layer(
                             has_land_cover && ground.cover_class(coord) == land_cover::LC_WATER;
 
                         if is_esa_water && !steep_override {
-                            // Single block of water at ground level
-                            editor.set_block_if_absent_absolute(WATER, x, ground_y, z);
+                            // Snap water to local minimum on steep terrain to compensate
+                            // for ESA/DEM spatial misalignment in canyons
+                            let water_y = ground.water_level(coord);
+
+                            // Single block of water at snapped level
+                            editor.set_block_if_absent_absolute(WATER, x, water_y, z);
 
                             // Floor: sand/gravel/clay + sandstone below
                             let h = land_cover::coord_hash(x, z);
@@ -142,16 +146,11 @@ pub fn generate_ground_layer(
                                 1 => CLAY,
                                 _ => SAND,
                             };
-                            if ground_y - 1 > MIN_Y {
-                                editor.set_block_if_absent_absolute(
-                                    floor_block,
-                                    x,
-                                    ground_y - 1,
-                                    z,
-                                );
+                            if water_y - 1 > MIN_Y {
+                                editor.set_block_if_absent_absolute(floor_block, x, water_y - 1, z);
                             }
-                            if ground_y - 2 > MIN_Y {
-                                editor.set_block_if_absent_absolute(SANDSTONE, x, ground_y - 2, z);
+                            if water_y - 2 > MIN_Y {
+                                editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
                             }
                         } else {
                             // Determine surface and sub-surface blocks based on available data
@@ -263,9 +262,13 @@ pub fn generate_ground_layer(
 
                             // Shoreline blending: land blocks adjacent to water get
                             // sand surface for a natural beach/shore transition.
+                            // Skip on steep terrain — canyon walls next to rivers
+                            // should remain rock, not sand.
                             // Check both ESA water classification AND placed water
                             // blocks (from OSM) to bridge any gap between the two.
-                            let (surface_block, under_block) = if surface_block != WATER {
+                            let (surface_block, under_block) = if surface_block != WATER
+                                && slope <= 3
+                            {
                                 let near_esa_water = has_land_cover
                                     && ground.water_distance(coord) == 0
                                     && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(
@@ -654,7 +657,7 @@ pub fn generate_ground_layer(
                                 min_neighbor_y = ny;
                             }
                         }
-                        let depth = (ground_y - min_neighbor_y + 1).max(2);
+                        let depth = (ground_y - min_neighbor_y + 1).clamp(2, 32);
                         for d in 1..=depth {
                             if ground_y - d > MIN_Y {
                                 editor.set_block_if_absent_absolute(STONE, x, ground_y - d, z);

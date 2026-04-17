@@ -427,7 +427,8 @@ fn scanline_fill_water(
 
         for (start, end) in fill_spans {
             for x in start..=end {
-                editor.set_block(WATER, x, 0, z, None, None);
+                let water_y = editor.get_water_level(x, z);
+                editor.set_block_absolute(WATER, x, water_y, z, None, None);
             }
         }
     }

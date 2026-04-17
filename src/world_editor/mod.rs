@@ -219,6 +219,21 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    /// Get the water-appropriate Y level at a world coordinate.
+    /// On steep terrain, snaps to the local minimum to compensate for
+    /// spatial misalignment between water data and the elevation DEM.
+    #[inline(always)]
+    pub fn get_water_level(&self, x: i32, z: i32) -> i32 {
+        if let Some(ground) = &self.ground {
+            ground.water_level(XZPoint::new(
+                x - self.xzbbox.min_x(),
+                z - self.xzbbox.min_z(),
+            ))
+        } else {
+            0
+        }
+    }
+
     /// Returns the minimum world coordinates
     pub fn get_min_coords(&self) -> (i32, i32) {
         (self.xzbbox.min_x(), self.xzbbox.min_z())

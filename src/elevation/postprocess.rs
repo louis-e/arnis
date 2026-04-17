@@ -71,6 +71,7 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
 }
 
 /// Fill in any NaN values by iteratively interpolating from nearest valid neighbors.
+/// Uses a snapshot each iteration to avoid directional bias from scan order.
 pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
     let height: usize = height_grid.len();
     if height == 0 {
@@ -81,7 +82,9 @@ pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
     let mut changes_made: bool = true;
     while changes_made {
         changes_made = false;
+        let snapshot: Vec<Vec<f64>> = height_grid.to_vec();
 
+        #[allow(clippy::needless_range_loop)]
         for y in 0..height {
             for x in 0..width {
                 if height_grid[y][x].is_nan() {
@@ -94,7 +97,7 @@ pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
                             let nx: i32 = x as i32 + dx;
 
                             if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
-                                let val: f64 = height_grid[ny as usize][nx as usize];
+                                let val: f64 = snapshot[ny as usize][nx as usize];
                                 if !val.is_nan() {
                                     sum += val;
                                     count += 1;
@@ -117,6 +120,9 @@ pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
 /// Uses 3× the interquartile range beyond Q1/Q3 to identify true outliers
 /// (corrupted data, sea-floor artifacts) without clipping real terrain on
 /// mountains or deep valleys.
+///
+/// A count guard prevents filtering when >5% of values fall outside the bounds,
+/// which indicates bimodal terrain (e.g., deep canyons) rather than corruption.
 pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     let height = height_grid.len();
     if height == 0 {
@@ -153,21 +159,37 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     let min_reasonable = q1 - 3.0 * iqr;
     let max_reasonable = q3 + 3.0 * iqr;
 
+    // Count guard: if >5% of values fall outside a bound, that tail represents
+    // real terrain (e.g., canyon floor), not corrupted data — skip that bound.
+    let below_count = all_heights.iter().filter(|&&h| h < min_reasonable).count();
+    let above_count = all_heights.iter().filter(|&&h| h > max_reasonable).count();
+    let threshold = (len as f64 * 0.05) as usize;
+    let filter_lower = below_count > 0 && below_count <= threshold;
+    let filter_upper = above_count > 0 && above_count <= threshold;
+
+    if !filter_lower && !filter_upper {
+        return;
+    }
+
     let mut outliers_filtered = 0;
 
     for row in height_grid.iter_mut().take(height) {
         for h in row.iter_mut().take(width) {
-            if !h.is_nan() && (*h < min_reasonable || *h > max_reasonable) {
-                *h = f64::NAN;
-                outliers_filtered += 1;
+            if !h.is_nan() {
+                let is_outlier =
+                    (filter_lower && *h < min_reasonable) || (filter_upper && *h > max_reasonable);
+                if is_outlier {
+                    *h = f64::NAN;
+                    outliers_filtered += 1;
+                }
             }
         }
     }
 
     if outliers_filtered > 0 {
         eprintln!(
-            "Filtered {} extreme outliers (IQR bounds: {:.1}m to {:.1}m)",
-            outliers_filtered, min_reasonable, max_reasonable
+            "Filtered {} extreme outliers (IQR bounds: {:.1}m to {:.1}m, lower={}, upper={})",
+            outliers_filtered, min_reasonable, max_reasonable, filter_lower, filter_upper
         );
         fill_nan_values(height_grid);
     }
