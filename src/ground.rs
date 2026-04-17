@@ -115,9 +115,9 @@ impl Ground {
     /// Returns 0 if land cover data is not available.
     #[inline(always)]
     pub fn cover_class(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let x_ratio = (coord.x as f64 / (lc.width - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (lc.height - 1).max(1) as f64).clamp(0.0, 1.0);
+        if let (Some(ref lc), Some(ref data)) = (&self.land_cover, &self.elevation_data) {
+            let x_ratio = (coord.x as f64 / (data.world_width - 1).max(1) as f64).clamp(0.0, 1.0);
+            let z_ratio = (coord.z as f64 / (data.world_height - 1).max(1) as f64).clamp(0.0, 1.0);
             let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
             let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
             lc.grid[z][x]
@@ -130,9 +130,9 @@ impl Ground {
     /// 0 = non-water, 1 = shore, 2+ = progressively deeper water.
     #[inline(always)]
     pub fn water_distance(&self, coord: XZPoint) -> u8 {
-        if let Some(ref lc) = self.land_cover {
-            let x_ratio = (coord.x as f64 / (lc.width - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (lc.height - 1).max(1) as f64).clamp(0.0, 1.0);
+        if let (Some(ref lc), Some(ref data)) = (&self.land_cover, &self.elevation_data) {
+            let x_ratio = (coord.x as f64 / (data.world_width - 1).max(1) as f64).clamp(0.0, 1.0);
+            let z_ratio = (coord.z as f64 / (data.world_height - 1).max(1) as f64).clamp(0.0, 1.0);
             let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
             let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
             lc.water_distance[z][x]
