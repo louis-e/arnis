@@ -130,20 +130,28 @@ pub fn generate_ground_layer(
                         // Handle ESA water with variable depth as a special case.
                         // Use bilinear interpolation of the water grid to produce
                         // organic shorelines instead of rectangular grid-cell edges.
+                        //
+                        // water_distance > 0 acts as a floor: cells the grid already
+                        // classifies as water are ALWAYS treated as water.  The blend
+                        // can only EXTEND water into land (organic fringe), never
+                        // retract it — so OSM rivers that overlap ESA water pixels
+                        // are never overwritten with grass.
                         let water_blend = if has_land_cover {
                             ground.water_blend(coord)
                         } else {
                             0.0
                         };
-                        let is_esa_water = if water_blend >= 0.99 {
-                            true // firmly inside water body
-                        } else if water_blend > 0.01 {
-                            // Transition zone: noise threshold creates organic edge
-                            let noise = (land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
-                            water_blend > noise * 0.6 + 0.2
-                        } else {
-                            false
-                        };
+                        let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
+                        let is_esa_water = grid_is_water
+                            || if water_blend >= 0.99 {
+                                true
+                            } else if water_blend > 0.01 {
+                                // Transition zone: noise threshold creates organic edge
+                                let noise = (land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
+                                water_blend > noise * 0.6 + 0.2
+                            } else {
+                                false
+                            };
 
                         if is_esa_water && !steep_override {
                             // Snap water to local minimum on steep terrain to compensate

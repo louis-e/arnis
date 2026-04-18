@@ -999,12 +999,24 @@ fn erode_water_corners(grid: &mut [Vec<u8>], width: usize, height: usize) {
                 // Helper: true when a cell is confirmed land (not water, not no-data)
                 let is_land = |v: u8| v != LC_WATER && v != 0;
 
-                // Check NW or NE corner (land to north + one side + diagonal)
+                // Only erode corners where the water body extends in both
+                // opposite cardinal directions, protecting narrow features
+                // (rivers 1-2 cells wide) from being eaten away.
+                //
+                // NW corner (n,w=land): require s=water AND e=water
+                // NE corner (n,e=land): require s=water AND w=water
+                // SW corner (s,w=land): require n=water AND e=water
+                // SE corner (s,e=land): require n=water AND w=water
                 let replacement = if is_land(n)
-                    && ((is_land(w) && is_land(nw)) || (is_land(e) && is_land(ne)))
+                    && ((is_land(w) && is_land(nw) && e == LC_WATER)
+                        || (is_land(e) && is_land(ne) && w == LC_WATER))
+                    && s == LC_WATER
                 {
                     Some(n)
-                } else if is_land(s) && ((is_land(w) && is_land(sw)) || (is_land(e) && is_land(se)))
+                } else if is_land(s)
+                    && ((is_land(w) && is_land(sw) && e == LC_WATER)
+                        || (is_land(e) && is_land(se) && w == LC_WATER))
+                    && n == LC_WATER
                 {
                     Some(s)
                 } else {
