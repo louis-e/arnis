@@ -142,13 +142,8 @@ pub fn generate_ground_layer(
                             0.0
                         };
                         let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
-                        let placed_water = editor.check_for_block_absolute(
-                            x,
-                            ground_y,
-                            z,
-                            Some(&[WATER]),
-                            None,
-                        );
+                        let placed_water =
+                            editor.check_for_block_absolute(x, ground_y, z, Some(&[WATER]), None);
                         let osm_gap = if placed_water {
                             false
                         } else {
@@ -228,11 +223,21 @@ pub fn generate_ground_layer(
                                 false
                             };
 
+                        let mut water_y = 0;
+                        let mut place_esa_water = false;
                         if is_esa_water && !steep_override {
                             // Snap water to local minimum on steep terrain to compensate
                             // for ESA/DEM spatial misalignment in canyons
-                            let water_y = ground.water_level(coord);
+                            let wy = ground.water_level(coord);
+                            // Skip columns that sit above the water surface to avoid
+                            // buried water pockets inside slopes.
+                            if ground_y <= wy {
+                                water_y = wy;
+                                place_esa_water = true;
+                            }
+                        }
 
+                        if place_esa_water {
                             // Single block of water at snapped level
                             editor.set_block_if_absent_absolute(WATER, x, water_y, z);
 
@@ -425,7 +430,8 @@ pub fn generate_ground_layer(
 
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
-                                // Use blacklist to avoid replacing water/bedrock
+                                // Use blacklist to avoid replacing water/bedrock and
+                                // common hard surfaces (roads/buildings).
                                 editor.set_block_absolute(
                                     surface_block,
                                     x,
@@ -444,7 +450,6 @@ pub fn generate_ground_layer(
                                         BRICK,
                                         OAK_PLANKS,
                                         BLACK_CONCRETE,
-                                        STONE,
                                     ]),
                                 );
                             } else {

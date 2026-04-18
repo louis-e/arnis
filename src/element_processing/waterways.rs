@@ -68,8 +68,9 @@ fn get_waterway_width(waterway_type: &str) -> i32 {
     }
 }
 
-/// Creates a water channel at a flat water level with the given width.
-/// Skips blocks where terrain is above the water surface (bank above waterline).
+/// Creates a water channel at a target water level with the given width.
+/// Skips blocks where terrain is above the water surface, with a small tolerance
+/// to avoid gaps on gentle slopes (can create stepped banks).
 fn create_water_channel(
     editor: &mut WorldEditor,
     center_x: i32,
