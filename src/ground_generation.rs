@@ -119,6 +119,7 @@ pub fn generate_ground_layer(
                     // (e.g., a quarry's stone, a park's grass) with slope-appropriate
                     // rock material. Steep cliffs should always look like rock.
                     let steep_override = terrain_enabled && slope > 3;
+                    let mut did_underfill = false;
 
                     // Determine surface and under-block material for this column.
                     // steep_override means we always compute & place the right blocks,
@@ -142,67 +143,40 @@ pub fn generate_ground_layer(
                             0.0
                         };
                         let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
-                        let placed_water =
-                            editor.check_for_block_absolute(x, ground_y, z, Some(&[WATER]), None);
+                        let water_scan_top = ground_y + 2;
+                        let has_water_in_column = |wx: i32, wz: i32| {
+                            for wy in ground_y..=water_scan_top {
+                                if editor.check_for_block_absolute(wx, wy, wz, Some(&[WATER]), None)
+                                {
+                                    return true;
+                                }
+                            }
+                            false
+                        };
+                        let mut placed_water = has_water_in_column(x, z);
+                        if !placed_water {
+                            let water_surface_y = editor.get_water_level(x, z);
+                            if water_surface_y > water_scan_top {
+                                placed_water = editor.check_for_block_absolute(
+                                    x,
+                                    water_surface_y,
+                                    z,
+                                    Some(&[WATER]),
+                                    None,
+                                );
+                            }
+                        }
                         let osm_gap = if placed_water {
                             false
                         } else {
-                            let water_n = editor.check_for_block_absolute(
-                                x,
-                                ground_y,
-                                z - 1,
-                                Some(&[WATER]),
-                                None,
-                            );
-                            let water_s = editor.check_for_block_absolute(
-                                x,
-                                ground_y,
-                                z + 1,
-                                Some(&[WATER]),
-                                None,
-                            );
-                            let water_w = editor.check_for_block_absolute(
-                                x - 1,
-                                ground_y,
-                                z,
-                                Some(&[WATER]),
-                                None,
-                            );
-                            let water_e = editor.check_for_block_absolute(
-                                x + 1,
-                                ground_y,
-                                z,
-                                Some(&[WATER]),
-                                None,
-                            );
-                            let water_ne = editor.check_for_block_absolute(
-                                x + 1,
-                                ground_y,
-                                z - 1,
-                                Some(&[WATER]),
-                                None,
-                            );
-                            let water_nw = editor.check_for_block_absolute(
-                                x - 1,
-                                ground_y,
-                                z - 1,
-                                Some(&[WATER]),
-                                None,
-                            );
-                            let water_se = editor.check_for_block_absolute(
-                                x + 1,
-                                ground_y,
-                                z + 1,
-                                Some(&[WATER]),
-                                None,
-                            );
-                            let water_sw = editor.check_for_block_absolute(
-                                x - 1,
-                                ground_y,
-                                z + 1,
-                                Some(&[WATER]),
-                                None,
-                            );
+                            let water_n = has_water_in_column(x, z - 1);
+                            let water_s = has_water_in_column(x, z + 1);
+                            let water_w = has_water_in_column(x - 1, z);
+                            let water_e = has_water_in_column(x + 1, z);
+                            let water_ne = has_water_in_column(x + 1, z - 1);
+                            let water_nw = has_water_in_column(x - 1, z - 1);
+                            let water_se = has_water_in_column(x + 1, z + 1);
+                            let water_sw = has_water_in_column(x - 1, z + 1);
 
                             // Fill single-cell gaps when water spans opposite neighbors.
                             (water_n && water_s)
@@ -506,6 +480,7 @@ pub fn generate_ground_layer(
                                         );
                                     }
                                 }
+                                did_underfill = true;
                             } else {
                                 // Under OSM water: find bottom of water column,
                                 // place sand/gravel/clay floor + sandstone below.
@@ -784,6 +759,7 @@ pub fn generate_ground_layer(
                     // material-specific under-blocks already placed above.
                     if terrain_enabled
                         && !editor.check_for_block_absolute(x, ground_y, z, Some(&[WATER]), None)
+                        && !did_underfill
                     {
                         let mut min_neighbor_y = ground_y;
                         for &(dx, dz) in &[
