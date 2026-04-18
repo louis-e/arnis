@@ -400,9 +400,11 @@ pub fn generate_ground_layer(
                                             min_neighbor_y = ny;
                                         }
                                     }
-                                    // Fill from ground_y-1 down to min_neighbor_y
-                                    // (minimum 2 for flat terrain)
-                                    (ground_y - min_neighbor_y + 1).max(2)
+                                    // Fill from ground_y-1 down toward the lowest
+                                    // neighbor, capped to avoid excessive work on
+                                    // extreme elevation changes (same cap as the
+                                    // universal depth fill below).
+                                    (ground_y - min_neighbor_y + 1).clamp(2, 32)
                                 } else {
                                     2
                                 };
