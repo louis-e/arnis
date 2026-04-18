@@ -271,11 +271,6 @@ button:hover {
   border-radius: 8px;
 }
 
-.button-block-row {
-  display: flex;
-  width: 100%;
-  gap: 0;
-}
 
 .format-toggle-btn {
   flex: 1;
