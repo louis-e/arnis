@@ -470,15 +470,17 @@ pub fn generate_ground_layer(
                                 } else {
                                     2
                                 };
-                                for d in 1..=depth {
-                                    if ground_y - d > MIN_Y {
-                                        editor.set_block_if_absent_absolute(
-                                            under_block,
-                                            x,
-                                            ground_y - d,
-                                            z,
-                                        );
-                                    }
+                                let y_max = ground_y - 1;
+                                if y_max > MIN_Y {
+                                    let y_min = (ground_y - depth).max(MIN_Y + 1);
+                                    editor.fill_column_absolute(
+                                        under_block,
+                                        x,
+                                        z,
+                                        y_min,
+                                        y_max,
+                                        true,
+                                    );
                                 }
                                 did_underfill = true;
                             } else {
