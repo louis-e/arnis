@@ -136,6 +136,12 @@ a:hover {
   margin-top: 8px;
 }
 
+.secret-parrot {
+  height: 100px;
+  width: auto;
+  display: none;
+}
+
 .progress-info-text {
   font-size: 0.9em;
   color: #ececec;

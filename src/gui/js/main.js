@@ -44,6 +44,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await applyLocalization(localization);
   updateFormatToggleUI(selectedWorldFormat);
   initFooter();
+  initEasterEggs();
   await checkForUpdates();
 });
 
@@ -269,6 +270,33 @@ function setupProgressListener() {
       await invoke("gui_show_in_folder", { path: filePath });
     } catch (error) {
       console.error("Failed to show file in folder:", error);
+    }
+  });
+}
+
+// Easter eggs
+function showEasterEggAnimal() {
+  const img = document.getElementById('secret-parrot');
+  img.src = './images/parrot.gif';
+  img.style.display = 'inline';
+}
+
+function initEasterEggs() {
+  // 1 in 50 chance at startup
+  if (Math.random() < 1 / 50) {
+    showEasterEggAnimal();
+  }
+
+  // 5 rapid clicks on progress bar
+  const progressBar = document.querySelector('.progress-bar-container');
+  let clicks = [];
+  progressBar.addEventListener('click', () => {
+    const now = Date.now();
+    clicks.push(now);
+    clicks = clicks.filter(t => now - t < 1500);
+    if (clicks.length >= 5) {
+      showEasterEggAnimal();
+      clicks = [];
     }
   });
 }
