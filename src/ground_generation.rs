@@ -15,12 +15,12 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
-    CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE, DIRT, DIRT_PATH, FARMLAND, GRASS,
-    GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD,
-    OAK_LEAVES, POTATOES, RED_FLOWER, SAND, SANDSTONE, SMOOTH_STONE, STONE, STONE_BRICKS,
-    TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER,
-    YELLOW_FLOWER,
+    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, BRICK, CARROTS, CLAY, COARSE_DIRT,
+    COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE, DIRT, DIRT_PATH,
+    FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE,
+    LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND, SANDSTONE,
+    SMOOTH_STONE, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER, WHEAT,
+    WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::tree;
@@ -271,14 +271,23 @@ pub fn generate_ground_layer(
                             {
                                 let near_esa_water = has_land_cover
                                     && ground.water_distance(coord) == 0
-                                    && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(
-                                        |(dx, dz)| {
-                                            ground.cover_class(XZPoint::new(
-                                                x + dx - xzbbox.min_x(),
-                                                z + dz - xzbbox.min_z(),
-                                            )) == land_cover::LC_WATER
-                                        },
-                                    );
+                                    && [
+                                        (-1i32, 0i32),
+                                        (1, 0),
+                                        (0, -1),
+                                        (0, 1),
+                                        (-1, -1),
+                                        (-1, 1),
+                                        (1, -1),
+                                        (1, 1),
+                                    ]
+                                    .iter()
+                                    .any(|(dx, dz)| {
+                                        ground.cover_class(XZPoint::new(
+                                            x + dx - xzbbox.min_x(),
+                                            z + dz - xzbbox.min_z(),
+                                        )) == land_cover::LC_WATER
+                                    });
                                 let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
                                     .iter()
                                     .any(|(dx, dz)| {
@@ -308,7 +317,20 @@ pub fn generate_ground_layer(
                                     ground_y,
                                     z,
                                     None,
-                                    Some(&[WATER, BEDROCK]),
+                                    Some(&[
+                                        WATER,
+                                        BEDROCK,
+                                        GRAY_CONCRETE_POWDER,
+                                        CYAN_TERRACOTTA,
+                                        GRAY_CONCRETE,
+                                        LIGHT_GRAY_CONCRETE,
+                                        DIRT_PATH,
+                                        STONE_BRICKS,
+                                        BRICK,
+                                        OAK_PLANKS,
+                                        BLACK_CONCRETE,
+                                        STONE,
+                                    ]),
                                 );
                             } else {
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
