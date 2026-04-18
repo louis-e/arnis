@@ -996,22 +996,20 @@ fn erode_water_corners(grid: &mut [Vec<u8>], width: usize, height: usize) {
                 // We also require the diagonal between the two land cardinals
                 // to be land, confirming a true corner rather than a thin
                 // peninsula.
-                let replacement =
-                    if n != LC_WATER && n != 0 && w != LC_WATER && w != 0 && nw != LC_WATER {
-                        // NW corner: land to north and west
-                        Some(n)
-                    } else if n != LC_WATER && n != 0 && e != LC_WATER && e != 0 && ne != LC_WATER {
-                        // NE corner: land to north and east
-                        Some(n)
-                    } else if s != LC_WATER && s != 0 && w != LC_WATER && w != 0 && sw != LC_WATER {
-                        // SW corner: land to south and west
-                        Some(s)
-                    } else if s != LC_WATER && s != 0 && e != LC_WATER && e != 0 && se != LC_WATER {
-                        // SE corner: land to south and east
-                        Some(s)
-                    } else {
-                        None
-                    };
+                // Helper: true when a cell is confirmed land (not water, not no-data)
+                let is_land = |v: u8| v != LC_WATER && v != 0;
+
+                // Check NW or NE corner (land to north + one side + diagonal)
+                let replacement = if is_land(n)
+                    && ((is_land(w) && is_land(nw)) || (is_land(e) && is_land(ne)))
+                {
+                    Some(n)
+                } else if is_land(s) && ((is_land(w) && is_land(sw)) || (is_land(e) && is_land(se)))
+                {
+                    Some(s)
+                } else {
+                    None
+                };
 
                 if let Some(land_class) = replacement {
                     // Deterministic probability based on coordinates and pass.
