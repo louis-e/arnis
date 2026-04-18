@@ -77,6 +77,7 @@ fn create_water_channel(
     width: i32,
     flat_water_y: i32,
 ) {
+    const BANK_TOLERANCE: i32 = 2;
     let half_width = width / 2;
 
     for x in (center_x - half_width - 1)..=(center_x + half_width + 1) {
@@ -87,15 +88,26 @@ fn create_water_channel(
 
             if distance_from_center <= half_width + 1 {
                 let ground_y = editor.get_ground_level(x, z);
-                // Only place water where terrain is at or below the water surface
-                if ground_y <= flat_water_y {
-                    editor.set_block_absolute(WATER, x, flat_water_y, z, None, None);
+                // Only place water where terrain is at or below the water surface,
+                // but allow small elevation steps to avoid gaps on gentle slopes.
+                let water_y = if ground_y <= flat_water_y {
+                    Some(flat_water_y)
+                } else if ground_y <= flat_water_y + BANK_TOLERANCE
+                    && !editor.block_exists_absolute(x, ground_y, z)
+                {
+                    Some(ground_y)
+                } else {
+                    None
+                };
+
+                if let Some(water_y) = water_y {
+                    editor.set_block_absolute(WATER, x, water_y, z, None, None);
 
                     // Clear vegetation above the water
                     editor.set_block_absolute(
                         AIR,
                         x,
-                        flat_water_y + 1,
+                        water_y + 1,
                         z,
                         Some(&[GRASS, WHEAT, CARROTS, POTATOES]),
                         None,

@@ -142,7 +142,82 @@ pub fn generate_ground_layer(
                             0.0
                         };
                         let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
+                        let placed_water = editor.check_for_block_absolute(
+                            x,
+                            ground_y,
+                            z,
+                            Some(&[WATER]),
+                            None,
+                        );
+                        let osm_gap = if placed_water {
+                            false
+                        } else {
+                            let water_n = editor.check_for_block_absolute(
+                                x,
+                                ground_y,
+                                z - 1,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            let water_s = editor.check_for_block_absolute(
+                                x,
+                                ground_y,
+                                z + 1,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            let water_w = editor.check_for_block_absolute(
+                                x - 1,
+                                ground_y,
+                                z,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            let water_e = editor.check_for_block_absolute(
+                                x + 1,
+                                ground_y,
+                                z,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            let water_ne = editor.check_for_block_absolute(
+                                x + 1,
+                                ground_y,
+                                z - 1,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            let water_nw = editor.check_for_block_absolute(
+                                x - 1,
+                                ground_y,
+                                z - 1,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            let water_se = editor.check_for_block_absolute(
+                                x + 1,
+                                ground_y,
+                                z + 1,
+                                Some(&[WATER]),
+                                None,
+                            );
+                            let water_sw = editor.check_for_block_absolute(
+                                x - 1,
+                                ground_y,
+                                z + 1,
+                                Some(&[WATER]),
+                                None,
+                            );
+
+                            // Fill single-cell gaps when water spans opposite neighbors.
+                            (water_n && water_s)
+                                || (water_e && water_w)
+                                || (water_ne && water_sw)
+                                || (water_nw && water_se)
+                        };
                         let is_esa_water = grid_is_water
+                            || placed_water
+                            || osm_gap
                             || if water_blend >= 0.99 {
                                 true
                             } else if water_blend > 0.01 {
