@@ -45,7 +45,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   updateFormatToggleUI(selectedWorldFormat);
   initFooter();
   initEasterEggs();
-  await checkForUpdates();
+  checkForUpdates();
 });
 
 // Expose language functions to window for use by language-selector.js
