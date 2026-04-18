@@ -450,7 +450,7 @@ fn compute_heightmaps(sections: &[Section], min_section_y: i8, total_height: i32
         .collect();
 
     // Sort by Y descending so we scan top-down
-    metas.sort_by(|a, b| b.y.cmp(&a.y));
+    metas.sort_by_key(|b| std::cmp::Reverse(b.y));
 
     let mut heights = [0i32; 256]; // 16x16 grid, Z-major order
     let min_block_y = min_section_y as i32 * 16;
