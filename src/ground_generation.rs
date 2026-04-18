@@ -16,11 +16,11 @@
 use crate::args::Args;
 use crate::block_definitions::{
     AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, BRICK, CARROTS, CLAY, COARSE_DIRT,
-    COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE, DIRT, DIRT_PATH,
-    FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE,
-    LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND, SANDSTONE,
-    SMOOTH_STONE, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER, WHEAT,
-    WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+    COBBLED_DEEPSLATE, COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE,
+    DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER,
+    HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND,
+    SANDSTONE, SMOOTH_STONE, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER,
+    WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::tree;
@@ -127,9 +127,23 @@ pub fn generate_ground_layer(
                         editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None);
 
                     if steep_override || !has_existing_stone {
-                        // Handle ESA water with variable depth as a special case
-                        let is_esa_water =
-                            has_land_cover && ground.cover_class(coord) == land_cover::LC_WATER;
+                        // Handle ESA water with variable depth as a special case.
+                        // Use bilinear interpolation of the water grid to produce
+                        // organic shorelines instead of rectangular grid-cell edges.
+                        let water_blend = if has_land_cover {
+                            ground.water_blend(coord)
+                        } else {
+                            0.0
+                        };
+                        let is_esa_water = if water_blend >= 0.99 {
+                            true // firmly inside water body
+                        } else if water_blend > 0.01 {
+                            // Transition zone: noise threshold creates organic edge
+                            let noise = (land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
+                            water_blend > noise * 0.6 + 0.2
+                        } else {
+                            false
+                        };
 
                         if is_esa_water && !steep_override {
                             // Snap water to local minimum on steep terrain to compensate
@@ -160,8 +174,13 @@ pub fn generate_ground_layer(
 
                                 // Steep terrain overrides land cover classification (steeper = darker/harder blocks)
                                 if slope > 8 {
-                                    // Extreme cliff: deepslate mass
-                                    (DEEPSLATE, DEEPSLATE)
+                                    // Extreme cliff: deepslate / cobbled deepslate mass
+                                    let h = land_cover::coord_hash(x, z);
+                                    if h.is_multiple_of(4) {
+                                        (COBBLED_DEEPSLATE, DEEPSLATE)
+                                    } else {
+                                        (DEEPSLATE, DEEPSLATE)
+                                    }
                                 } else if slope > 6 {
                                     // Very steep: stone surface, deepslate below
                                     (STONE, DEEPSLATE)
@@ -222,13 +241,15 @@ pub fn generate_ground_layer(
                                                 // Isolated pixel - blend with surroundings
                                                 (GRASS_BLOCK, DIRT)
                                             } else {
-                                                // Bare/sparse: coarse dirt, gravel, stone mix
+                                                // Bare/sparse: coarse dirt, gravel, stone, cobblestone, andesite mix
                                                 let h = land_cover::coord_hash(x, z);
-                                                match h % 10 {
-                                                    0..=3 => (COARSE_DIRT, DIRT), // 40% coarse dirt
-                                                    4..=5 => (GRAVEL, STONE),     // 20% gravel
-                                                    6..=7 => (STONE, STONE),      // 20% stone
-                                                    _ => (ANDESITE, STONE),       // 20% andesite
+                                                match h % 12 {
+                                                    0..=2 => (COARSE_DIRT, DIRT),   // 25% coarse dirt
+                                                    3..=4 => (GRAVEL, STONE),       // ~17% gravel
+                                                    5..=6 => (STONE, STONE),        // ~17% stone
+                                                    7..=8 => (ANDESITE, STONE),     // ~17% andesite
+                                                    9..=10 => (COBBLESTONE, STONE), // ~17% cobblestone
+                                                    _ => (COARSE_DIRT, STONE), // ~8% coarse dirt
                                                 }
                                             }
                                         }
@@ -241,7 +262,12 @@ pub fn generate_ground_layer(
                             } else if terrain_enabled {
                                 // No land cover data but terrain is enabled: apply slope-based materials
                                 if slope > 8 {
-                                    (DEEPSLATE, DEEPSLATE)
+                                    let h = land_cover::coord_hash(x, z);
+                                    if h.is_multiple_of(4) {
+                                        (COBBLED_DEEPSLATE, DEEPSLATE)
+                                    } else {
+                                        (DEEPSLATE, DEEPSLATE)
+                                    }
                                 } else if slope > 6 {
                                     (STONE, DEEPSLATE)
                                 } else if slope > 4 {
@@ -260,34 +286,40 @@ pub fn generate_ground_layer(
                                 (GRASS_BLOCK, DIRT)
                             };
 
-                            // Shoreline blending: land blocks adjacent to water get
-                            // sand surface for a natural beach/shore transition.
-                            // Skip on steep terrain — canyon walls next to rivers
-                            // should remain rock, not sand.
-                            // Check both ESA water classification AND placed water
-                            // blocks (from OSM) to bridge any gap between the two.
+                            // Shoreline blending: land blocks near water get sand
+                            // surface for a natural beach/shore transition.
+                            // Uses water_blend gradient for ESA water (scales with
+                            // grid resolution) plus neighbor check for OSM water.
+                            // Skip on steep terrain — canyon walls should stay rock.
                             let (surface_block, under_block) = if surface_block != WATER
                                 && slope <= 3
                             {
+                                // Transition-zone blocks that noise decided are "not
+                                // water" get sand via water_blend > 0.01 (at least one
+                                // surrounding grid cell is water).  For blocks fully
+                                // outside the blend zone, fall back to neighbor check.
                                 let near_esa_water = has_land_cover
-                                    && ground.water_distance(coord) == 0
-                                    && [
-                                        (-1i32, 0i32),
-                                        (1, 0),
-                                        (0, -1),
-                                        (0, 1),
-                                        (-1, -1),
-                                        (-1, 1),
-                                        (1, -1),
-                                        (1, 1),
-                                    ]
-                                    .iter()
-                                    .any(|(dx, dz)| {
-                                        ground.cover_class(XZPoint::new(
-                                            x + dx - xzbbox.min_x(),
-                                            z + dz - xzbbox.min_z(),
-                                        )) == land_cover::LC_WATER
-                                    });
+                                    && !is_esa_water
+                                    && (water_blend > 0.01
+                                        || [
+                                            (-1i32, 0i32),
+                                            (1, 0),
+                                            (0, -1),
+                                            (0, 1),
+                                            (-1, -1),
+                                            (-1, 1),
+                                            (1, -1),
+                                            (1, 1),
+                                        ]
+                                        .iter()
+                                        .any(|(dx, dz)| {
+                                            ground.cover_class(XZPoint::new(
+                                                x + dx - xzbbox.min_x(),
+                                                z + dz - xzbbox.min_z(),
+                                            )) == land_cover::LC_WATER
+                                        }));
+
+                                // Also check placed water blocks (OSM rivers, etc.)
                                 let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
                                     .iter()
                                     .any(|(dx, dz)| {

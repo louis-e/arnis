@@ -141,6 +141,62 @@ impl Ground {
         }
     }
 
+    /// Returns a continuous 0.0–1.0 value indicating how "watery" a block is,
+    /// using bilinear interpolation of the water classification grid.
+    ///
+    /// Nearest-neighbor grid lookups (`cover_class`) create rectangular water
+    /// edges when the grid is coarser than block resolution.  Bilinear
+    /// interpolation produces a smooth gradient across grid cell boundaries,
+    /// allowing noise-based thresholding to create organic shorelines.
+    #[inline(always)]
+    pub fn water_blend(&self, coord: XZPoint) -> f64 {
+        if let (Some(ref lc), Some(ref data)) = (&self.land_cover, &self.elevation_data) {
+            // Continuous grid coordinates (no rounding — that's the key difference
+            // from cover_class which uses .round())
+            let fx = (coord.x as f64 / (data.world_width - 1).max(1) as f64).clamp(0.0, 1.0)
+                * (lc.width - 1) as f64;
+            let fz = (coord.z as f64 / (data.world_height - 1).max(1) as f64).clamp(0.0, 1.0)
+                * (lc.height - 1) as f64;
+
+            let x0 = (fx.floor() as usize).min(lc.width - 1);
+            let x1 = (x0 + 1).min(lc.width - 1);
+            let z0 = (fz.floor() as usize).min(lc.height - 1);
+            let z1 = (z0 + 1).min(lc.height - 1);
+
+            let tx = fx - fx.floor();
+            let tz = fz - fz.floor();
+
+            // Sample water status at the 4 surrounding grid cells
+            let w00 = if lc.grid[z0][x0] == crate::land_cover::LC_WATER {
+                1.0
+            } else {
+                0.0
+            };
+            let w10 = if lc.grid[z0][x1] == crate::land_cover::LC_WATER {
+                1.0
+            } else {
+                0.0
+            };
+            let w01 = if lc.grid[z1][x0] == crate::land_cover::LC_WATER {
+                1.0
+            } else {
+                0.0
+            };
+            let w11 = if lc.grid[z1][x1] == crate::land_cover::LC_WATER {
+                1.0
+            } else {
+                0.0
+            };
+
+            // Bilinear interpolation
+            let top = w00 * (1.0 - tx) + w10 * tx;
+            let bottom = w01 * (1.0 - tx) + w11 * tx;
+            top * (1.0 - tz) + bottom * tz
+        } else {
+            0.0
+        }
+    }
+
     /// Computes terrain slope at the given coordinates.
     ///
     /// Slope is the difference between the maximum and minimum elevation of

@@ -151,6 +151,10 @@ pub fn fetch_land_cover_data(
     // Dither class boundaries to reduce the blocky appearance of 10m resolution data.
     dither_boundaries(&mut grid, grid_width, grid_height);
 
+    // Erode convex water corners to soften rectangular ESA water boundaries.
+    // Must run before compute_water_distance so the BFS sees the updated grid.
+    erode_water_corners(&mut grid, grid_width, grid_height);
+
     // Compute distance from each water cell to nearest shore via multi-source BFS.
     // Used for shoreline blending (land cells adjacent to water get sand surface).
     let water_distance = compute_water_distance(&grid, grid_width, grid_height);
@@ -944,6 +948,81 @@ fn dither_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
             // ~40% chance to adopt the neighbor's class at a boundary cell
             if hash % 5 < 2 {
                 grid[z][x] = neighbor_class;
+            }
+        }
+    }
+}
+
+/// Erodes convex corners of rectangular ESA water boundaries to produce
+/// more natural-looking shorelines.
+///
+/// ESA WorldCover data has 10m resolution, which creates blocky, rectangular
+/// water bodies when no OSM coastline data is available. This function detects
+/// water cells at convex corners (L-shaped water/land junctions) and
+/// probabilistically converts them to the adjacent land class.
+///
+/// Only *removes* water cells — never adds them — so the shoreline can only
+/// shrink slightly at corners, avoiding inland water artifacts. Multiple passes
+/// with decreasing aggressiveness progressively round off sharp edges.
+fn erode_water_corners(grid: &mut [Vec<u8>], width: usize, height: usize) {
+    // Two passes: first erodes the sharpest 90° corners, second smooths
+    // remaining jagged edges left by the first pass.
+    for pass in 0..2u64 {
+        let snapshot: Vec<Vec<u8>> = grid.to_vec();
+
+        for z in 1..height.saturating_sub(1) {
+            for x in 1..width.saturating_sub(1) {
+                if snapshot[z][x] != LC_WATER {
+                    continue;
+                }
+
+                // Read the 8 neighbors from the snapshot
+                let n = snapshot[z - 1][x];
+                let s = snapshot[z + 1][x];
+                let e = snapshot[z][x + 1];
+                let w = snapshot[z][x - 1];
+                let ne = snapshot[z - 1][x + 1];
+                let nw = snapshot[z - 1][x - 1];
+                let se = snapshot[z + 1][x + 1];
+                let sw = snapshot[z + 1][x - 1];
+
+                // Detect convex corner: two adjacent cardinal neighbors are
+                // non-water land, forming an L-shape. The water cell sits at
+                // the outer corner of the water body.
+                //
+                // Example (NW corner):   L L        Example (SE corner):   W W
+                //                        L W                               W L
+                //
+                // We also require the diagonal between the two land cardinals
+                // to be land, confirming a true corner rather than a thin
+                // peninsula.
+                let replacement =
+                    if n != LC_WATER && n != 0 && w != LC_WATER && w != 0 && nw != LC_WATER {
+                        // NW corner: land to north and west
+                        Some(n)
+                    } else if n != LC_WATER && n != 0 && e != LC_WATER && e != 0 && ne != LC_WATER {
+                        // NE corner: land to north and east
+                        Some(n)
+                    } else if s != LC_WATER && s != 0 && w != LC_WATER && w != 0 && sw != LC_WATER {
+                        // SW corner: land to south and west
+                        Some(s)
+                    } else if s != LC_WATER && s != 0 && e != LC_WATER && e != 0 && se != LC_WATER {
+                        // SE corner: land to south and east
+                        Some(s)
+                    } else {
+                        None
+                    };
+
+                if let Some(land_class) = replacement {
+                    // Deterministic probability based on coordinates and pass.
+                    // Pass 0 erodes ~50% of corners; pass 1 catches ~30% of
+                    // remaining jagged cells for a smoother result.
+                    let hash = coord_hash(x as i32, z as i32) ^ pass.wrapping_mul(0xDEADBEEF);
+                    let threshold = if pass == 0 { 5 } else { 3 };
+                    if hash % 10 < threshold {
+                        grid[z][x] = land_class;
+                    }
+                }
             }
         }
     }

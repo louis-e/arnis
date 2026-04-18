@@ -227,7 +227,17 @@ pub fn generate_natural(
                             editor.set_block(STONE, x, -1, z, None, None);
                         }
                         "bare_rock" => {
-                            editor.set_block(STONE, x, 0, z, None, None);
+                            // Varied rock surface: stone base with natural variation
+                            let h = crate::land_cover::coord_hash(x, z) % 12;
+                            let rock = match h {
+                                0..=4 => STONE,       // ~42% stone
+                                5..=6 => ANDESITE,    // ~17% andesite
+                                7..=8 => COBBLESTONE, // ~17% cobblestone
+                                9 => GRAVEL,          // ~8% gravel
+                                10 => TUFF,           // ~8% tuff
+                                _ => COARSE_DIRT,     // ~8% coarse dirt
+                            };
+                            editor.set_block(rock, x, 0, z, None, None);
                         }
                         _ => {}
                     }
