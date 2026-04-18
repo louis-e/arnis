@@ -470,7 +470,7 @@ pub fn generate_ground_layer(
                                             );
                                         }
                                     }
-                                    land_cover::LC_CROPLAND => {
+                                    land_cover::LC_CROPLAND
                                         // Only place crops if the ground is actually farmland
                                         if editor.check_for_block_absolute(
                                             x,
@@ -478,7 +478,7 @@ pub fn generate_ground_layer(
                                             z,
                                             Some(&[FARMLAND]),
                                             None,
-                                        ) {
+                                        ) => {
                                             if x % 9 == 0 && z % 9 == 0 {
                                                 editor.set_block_absolute(
                                                     WATER,
@@ -512,7 +512,6 @@ pub fn generate_ground_layer(
                                                 );
                                             }
                                         }
-                                    }
                                     land_cover::LC_WETLAND | land_cover::LC_MANGROVES
                                         if ground_is_natural =>
                                     {
@@ -555,9 +554,9 @@ pub fn generate_ground_layer(
                                             );
                                         }
                                     }
-                                    land_cover::LC_BARE if ground_is_natural => {
+                                    land_cover::LC_BARE if ground_is_natural
                                         // Sparse dead bushes
-                                        if rng.random_range(0..100) == 0 {
+                                        && rng.random_range(0..100) == 0 => {
                                             editor.set_block_absolute(
                                                 DEAD_BUSH,
                                                 x,
@@ -567,7 +566,6 @@ pub fn generate_ground_layer(
                                                 None,
                                             );
                                         }
-                                    }
                                     _ => {}
                                 }
                             }

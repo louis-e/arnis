@@ -44,5 +44,9 @@
   "disable_height_limit": "تعطيل حد الارتفاع",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "save_path": "مسار الحفظ",
-  "rotation_angle": "زاوية الدوران"
+  "rotation_angle": "زاوية الدوران",
+  "settings_section_generation": "التوليد",
+  "settings_section_world": "العالم",
+  "settings_section_map": "الخريطة والإدخال",
+  "settings_section_application": "التطبيق"
 }

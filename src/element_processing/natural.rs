@@ -300,17 +300,14 @@ pub fn generate_natural(
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }
-                        "sand" => {
+                        "sand"
                             if editor.check_for_block(x, 0, z, Some(&[SAND]))
-                                && rng.random_range(0..100) == 1
-                            {
-                                editor.set_block(DEAD_BUSH, x, 1, z, None, None);
-                            }
+                                && rng.random_range(0..100) == 1 =>
+                        {
+                            editor.set_block(DEAD_BUSH, x, 1, z, None, None);
                         }
-                        "shoal" => {
-                            if rng.random_bool(0.05) {
-                                editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
-                            }
+                        "shoal" if rng.random_bool(0.05) => {
+                            editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
                         }
                         "wetland" => {
                             if let Some(wetland_type) = element.tags().get("wetland") {
@@ -406,8 +403,8 @@ pub fn generate_natural(
                                 let cluster_size = rng.random_range(5..=10);
 
                                 // Create cluster around current position
-                                for dx in -(cluster_size as i32)..=(cluster_size as i32) {
-                                    for dz in -(cluster_size as i32)..=(cluster_size as i32) {
+                                for dx in -cluster_size..=cluster_size {
+                                    for dz in -cluster_size..=cluster_size {
                                         let cluster_x = x + dx;
                                         let cluster_z = z + dz;
 
