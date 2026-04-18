@@ -44,5 +44,9 @@
   "disable_height_limit": "禁用高度限制",
   "bedrock_auto_generated": "Bedrock 世界自动生成",
   "save_path": "存档路径",
-  "rotation_angle": "旋转角度"
+  "rotation_angle": "旋转角度",
+  "settings_section_generation": "生成",
+  "settings_section_world": "世界",
+  "settings_section_map": "地图与输入",
+  "settings_section_application": "应用"
 }

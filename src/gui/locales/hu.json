@@ -44,5 +44,9 @@
   "disable_height_limit": "Magasságkorlát kikapcsolása",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal",
-  "rotation_angle": "Forgatási Szög"
+  "rotation_angle": "Forgatási Szög",
+  "settings_section_generation": "Generálás",
+  "settings_section_world": "Világ",
+  "settings_section_map": "Térkép és bevitel",
+  "settings_section_application": "Alkalmazás"
 }

@@ -44,5 +44,9 @@
   "disable_height_limit": "Atspējot augstuma ierobežojumu",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "save_path": "Saglabāšanas ceļš",
-  "rotation_angle": "Rotācijas Leņķis"
+  "rotation_angle": "Rotācijas Leņķis",
+  "settings_section_generation": "Ģenerēšana",
+  "settings_section_world": "Pasaule",
+  "settings_section_map": "Karte un ievade",
+  "settings_section_application": "Lietotne"
 }
