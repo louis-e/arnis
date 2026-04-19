@@ -32,10 +32,22 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
     const RELATIVE_FACTOR: f64 = 3.0; // deviation must exceed this × MAD
 
     let r = RADIUS as usize;
+    // Reuse the snapshot buffer across passes (saves ~128 MB/pass of allocs
+    // on a 4096² grid). The inner `clone_from` copies in place.
+    let mut snapshot: Vec<Vec<f64>> = heights.to_vec();
+    let mut total_repaired = 0usize;
+    let mut passes_ran = 0usize;
 
     for pass in 0..PASSES {
-        let snapshot: Vec<Vec<f64>> = heights.to_vec();
+        if pass > 0 {
+            for (dst, src) in snapshot.iter_mut().zip(heights.iter()) {
+                dst.clone_from(src);
+            }
+        }
+
         let mut repaired = 0;
+        let mut neighbors: Vec<f64> = Vec::with_capacity(24);
+        let mut abs_devs: Vec<f64> = Vec::with_capacity(24);
 
         for y in r..grid_h - r {
             for x in r..grid_w - r {
@@ -44,8 +56,8 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
                     continue;
                 }
 
-                // Collect finite neighbors in the 5x5 window
-                let mut neighbors: Vec<f64> = Vec::with_capacity(24);
+                // Collect finite neighbors in the 5x5 window.
+                neighbors.clear();
                 for dy in -RADIUS..=RADIUS {
                     for dx in -RADIUS..=RADIUS {
                         if dy == 0 && dx == 0 {
@@ -61,19 +73,19 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
                     continue;
                 }
 
-                // Compute median of neighbors
-                neighbors.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-                let median = neighbors[neighbors.len() / 2];
+                // Median of neighbors — O(n) via select_nth (vs sort O(n log n)).
+                let mid = neighbors.len() / 2;
+                neighbors.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                let median = neighbors[mid];
 
-                // Compute MAD (median absolute deviation) — robust scale estimator.
+                // MAD (median absolute deviation) — robust scale estimator.
                 // High MAD = real terrain variation (slopes, ridges) → large deviations allowed.
                 // Low MAD = flat area → even moderate spikes get caught.
-                let mad: f64 = {
-                    let mut abs_devs: Vec<f64> =
-                        neighbors.iter().map(|&v| (v - median).abs()).collect();
-                    abs_devs.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap());
-                    abs_devs[abs_devs.len() / 2]
-                };
+                abs_devs.clear();
+                abs_devs.extend(neighbors.iter().map(|&v| (v - median).abs()));
+                let mad_mid = abs_devs.len() / 2;
+                abs_devs.select_nth_unstable_by(mad_mid, |a, b| a.partial_cmp(b).unwrap());
+                let mad = abs_devs[mad_mid];
 
                 let deviation = (center - median).abs();
                 // Flag as anomaly only if deviation exceeds BOTH:
@@ -86,16 +98,20 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
             }
         }
 
-        if repaired > 0 {
-            eprintln!(
-                "Repaired {} terrain anomalies (pass {}/{})",
-                repaired,
-                pass + 1,
-                PASSES
-            );
-        } else {
-            break; // No more anomalies found
+        if repaired == 0 {
+            break;
         }
+        total_repaired += repaired;
+        passes_ran = pass + 1;
+    }
+
+    if total_repaired > 0 {
+        eprintln!(
+            "Repaired {} terrain anomalies in {} pass{}",
+            total_repaired,
+            passes_ran,
+            if passes_ran == 1 { "" } else { "es" }
+        );
     }
 }
 
