@@ -313,6 +313,7 @@ impl<'a> WorldEditor<'a> {
             crate::world_editor::WorldFormat::BedrockMcWorld => {
                 self.set_bedrock_banner_block_entity_absolute(x, y, z, base_color, patterns);
             }
+            crate::world_editor::WorldFormat::LuantiWorld => {}
         }
     }
 
