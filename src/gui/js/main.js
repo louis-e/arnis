@@ -114,9 +114,11 @@ async function applyLocalization(localization) {
     "span[data-localize='interior']": "interior",
     "span[data-localize='roof']": "roof",
     "span[data-localize='fillground']": "fillground",
-    "span[data-localize='city_boundaries']": "city_boundaries",
+    "span[data-localize='land_cover']": "land_cover",
+    "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
+    "span[data-localize='rotation_angle']": "rotation_angle",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -203,6 +205,24 @@ function registerMessageEvent() {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
     }
+
+    // Handle angle measurement from the map polyline tool
+    if (event.data && event.data.type === 'angleMeasured') {
+      var angle = event.data.angle;
+      var rotationInput = document.getElementById("rotation-angle-input");
+      if (rotationInput) {
+        var clamped = Math.min(Math.max(angle, -90), 90);
+        rotationInput.value = clamped.toFixed(2);
+        // Also trigger the rotation preview update on the map
+        var mapFrame = document.querySelector('.map-container');
+        if (mapFrame && mapFrame.contentWindow) {
+          mapFrame.contentWindow.postMessage({
+            type: 'rotatePreview',
+            angle: clamped
+          }, '*');
+        }
+      }
+    }
   });
 }
 
@@ -241,14 +261,13 @@ function setupProgressListener() {
     showWorldPreviewButton();
   });
 
-  // Listen for open-mcworld-file event to show the generated Bedrock world in file explorer
-  window.__TAURI__.event.listen("open-mcworld-file", async (event) => {
+  // Listen for show-in-folder event to reveal the generated world in the file explorer
+  window.__TAURI__.event.listen("show-in-folder", async (event) => {
     const filePath = event.payload;
     try {
-      // Use our custom command to show the file in the system file explorer
       await invoke("gui_show_in_folder", { path: filePath });
     } catch (error) {
-      console.error("Failed to show mcworld file in folder:", error);
+      console.error("Failed to show file in folder:", error);
     }
   });
 }
@@ -292,17 +311,38 @@ function initSettings() {
   slider.addEventListener("input", () => {
     sliderValue.textContent = parseFloat(slider.value).toFixed(2);
   });
+  // Double-click to reset world scale to default (1.00)
+  slider.addEventListener("dblclick", () => {
+    slider.value = 1;
+    sliderValue.textContent = "1.00";
+  });
+
+  // Rotation angle input
+  const rotationInput = document.getElementById("rotation-angle-input");
+
+  function updateRotation(val) {
+    if (isNaN(val)) val = 0;
+    val = Math.min(Math.max(val, -90), 90);
+    rotationInput.value = val.toFixed(2);
+    // Tell the map iframe to update the rotation mask overlay
+    const mapFrame = document.querySelector('.map-container');
+    if (mapFrame && mapFrame.contentWindow) {
+      mapFrame.contentWindow.postMessage({
+        type: 'rotatePreview',
+        angle: val
+      }, '*');
+    }
+  }
+  rotationInput.addEventListener("input", () => {
+    updateRotation(parseFloat(rotationInput.value));
+  });
+  rotationInput.addEventListener("change", () => {
+    updateRotation(parseFloat(rotationInput.value));
+  });
+  window.updateRotation = updateRotation;
 
   // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
-
-  // Save Luanti game selection changes
-  const luantiGameSelect = document.getElementById('luanti-game-select');
-  if (luantiGameSelect) {
-    luantiGameSelect.addEventListener('change', () => {
-      localStorage.setItem('arnis-luanti-game', luantiGameSelect.value);
-    });
-  }
 
   // Save path setting
   initSavePathSetting();
@@ -429,13 +469,6 @@ function initWorldFormatToggle() {
     selectedWorldFormat = savedFormat;
   }
   
-  // Load saved Luanti game preference
-  const savedGame = localStorage.getItem('arnis-luanti-game');
-  const gameSelect = document.getElementById('luanti-game-select');
-  if (savedGame && gameSelect) {
-    gameSelect.value = savedGame;
-  }
-  
   // Apply the saved selection to UI
   updateFormatToggleUI(selectedWorldFormat);
 }
@@ -450,9 +483,7 @@ function setWorldFormat(format) {
 
 function getEffectiveWorldFormat() {
   if (selectedWorldFormat === 'luanti') {
-    const gameSelect = document.getElementById('luanti-game-select');
-    const game = gameSelect ? gameSelect.value : 'minetest_game';
-    return game === 'mineclonia' ? 'luanti_mineclonia' : 'luanti';
+    return 'luanti_mineclonia';
   }
   return selectedWorldFormat;
 }
@@ -463,16 +494,14 @@ function updateFormatToggleUI(format) {
   const luantiBtn = document.getElementById('format-luanti');
   const chooseWorldBtn = document.getElementById('choose-world-btn');
   const selectedWorldText = document.getElementById('selected-world');
-  const luantiDropdown = document.getElementById('luanti-game-dropdown');
   
   // Reset all buttons
   javaBtn.classList.remove('format-active');
   bedrockBtn.classList.remove('format-active');
   if (luantiBtn) luantiBtn.classList.remove('format-active');
   
-  // Hide Luanti dropdown by default
-  if (luantiDropdown) luantiDropdown.style.display = 'none';
-  
+  const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
+
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     // Enable Create World button for Java
@@ -480,6 +509,11 @@ function updateFormatToggleUI(format) {
       chooseWorldBtn.disabled = false;
       chooseWorldBtn.style.opacity = '1';
       chooseWorldBtn.style.cursor = 'pointer';
+    }
+    // Re-enable height limit toggle for Java
+    if (heightLimitToggle) {
+      heightLimitToggle.disabled = false;
+      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
     }
     // Show appropriate text based on whether a world was already created
     if (selectedWorldText && !worldPath) {
@@ -495,6 +529,12 @@ function updateFormatToggleUI(format) {
       chooseWorldBtn.style.opacity = '0.5';
       chooseWorldBtn.style.cursor = 'not-allowed';
     }
+    // Disable height limit toggle for Bedrock (not supported)
+    if (heightLimitToggle) {
+      heightLimitToggle.checked = false;
+      heightLimitToggle.disabled = true;
+      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
+    }
     // Clear world selection and show Bedrock info message
     worldPath = "";
     if (selectedWorldText) {
@@ -504,8 +544,6 @@ function updateFormatToggleUI(format) {
     }
   } else if (format === 'luanti') {
     if (luantiBtn) luantiBtn.classList.add('format-active');
-    // Show Luanti game dropdown
-    if (luantiDropdown) luantiDropdown.style.display = 'block';
     // Disable Create World button for Luanti (auto-generated)
     if (chooseWorldBtn) {
       chooseWorldBtn.disabled = true;
@@ -710,6 +748,11 @@ function handleBboxInput() {
         customBBoxValid = true;
         selectedBBox = bboxText.replace(/,/g, ' '); // Convert to space format for consistency
         setBboxSelectionInfo(bboxSelectionInfo, "custom_selection_confirmed", "#7bd864");
+
+        // Reset rotation when bbox changes via manual input
+        if (typeof window.updateRotation === 'function') {
+          window.updateRotation(0);
+        }
       } else {
         // Valid numbers but invalid order or range
         customBBoxValid = false;
@@ -805,10 +848,15 @@ function displayBboxInfoText(bboxText) {
   lat1 = parseFloat(normalizeLongitude(lat1).toFixed(6));
   lat2 = parseFloat(normalizeLongitude(lat2).toFixed(6));
   mapSelectedBBox = `${lng1} ${lat1} ${lng2} ${lat2}`;
-  
+
   // Map selection always takes priority - clear custom input and update selectedBBox
   selectedBBox = mapSelectedBBox;
   customBBoxValid = false;
+
+  // Reset rotation when bbox changes
+  if (typeof window.updateRotation === 'function') {
+    window.updateRotation(0);
+  }
 
   const bboxSelectionInfo = document.getElementById("bbox-selection-info");
   const bboxCoordsInput = document.getElementById("bbox-coords");
@@ -930,7 +978,8 @@ async function startGeneration() {
     var interior = document.getElementById("interior-toggle").checked;
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
-    var city_boundaries = document.getElementById("city-boundaries-toggle").checked;
+    var land_cover = document.getElementById("land-cover-toggle").checked;
+    var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -941,6 +990,9 @@ async function startGeneration() {
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
+
+    // Get rotation angle
+    var rotationAngle = parseFloat(document.getElementById("rotation-angle-input").value) || 0;
 
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
@@ -953,11 +1005,13 @@ async function startGeneration() {
         interiorEnabled: interior,
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
-        cityBoundariesEnabled: city_boundaries,
+        landCoverEnabled: land_cover,
+        disableHeightLimit: disable_height_limit,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: getEffectiveWorldFormat()
+        worldFormat: getEffectiveWorldFormat(),
+        rotationAngle: rotationAngle
     });
 
     console.log("Generation process started.");
