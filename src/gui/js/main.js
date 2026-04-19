@@ -973,7 +973,7 @@ async function startGeneration() {
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: selectedWorldFormat,
+        worldFormat: getEffectiveWorldFormat(),
         rotationAngle: rotationAngle
     });
 
