@@ -6,10 +6,12 @@ pub mod selector;
 
 use crate::{
     coordinate_system::{geographic::LLBBox, transformation::geo_distance},
+    land_cover::LandCoverData,
     progress::emit_gui_progress_update,
 };
 use postprocess::{
-    fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies, scale_to_minecraft,
+    apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
+    scale_to_minecraft,
 };
 use provider::ElevationProvider;
 use selector::select_provider;
@@ -34,12 +36,38 @@ pub struct ElevationData {
 /// any size by downloading multiple tiles, but WMS providers would reject
 /// oversized requests. The bilinear interpolation in ground.rs handles
 /// upscaling to full block resolution.
-const MAX_ELEVATION_GRID_DIM: usize = 4096;
+pub const MAX_ELEVATION_GRID_DIM: usize = 4096;
+
+/// Compute world and grid dimensions for the given bbox and scale.
+///
+/// Exposed so callers (e.g. `Ground::new_enabled`) can fetch land cover at the
+/// same dimensions as the elevation grid before elevation fetch starts.
+///
+/// Returns `(world_width, world_height, grid_width, grid_height)`.
+pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usize) {
+    let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
+    // Apply same floor() and scale operations as CoordTransformer.llbbox_to_xzbbox()
+    let scale_factor_z: f64 = base_scale_z.floor() * scale;
+    let scale_factor_x: f64 = base_scale_x.floor() * scale;
+    // World block positions span 0..=scale_factor (inclusive), so there are
+    // scale_factor+1 distinct positions.
+    let world_width: usize = scale_factor_x as usize + 1;
+    let world_height: usize = scale_factor_z as usize + 1;
+    // Cap grid dimensions to avoid WMS server rejections.
+    let grid_width: usize = world_width.clamp(2, MAX_ELEVATION_GRID_DIM);
+    let grid_height: usize = world_height.clamp(2, MAX_ELEVATION_GRID_DIM);
+    (world_width, world_height, grid_width, grid_height)
+}
 
 /// Fetch elevation data for the given bounding box.
 ///
 /// Automatically selects the best available elevation provider for the region,
 /// falling back to AWS Terrain Tiles for global coverage.
+///
+/// If `land_cover` is provided, applies land-cover-aware artifact repair
+/// (water leveling, built-up smoothing) before scaling. This fixes LiDAR
+/// classification errors at urban structures (tunnel portals, overpasses)
+/// and coastal tile-boundary artifacts.
 ///
 /// The returned ElevationData contains heights in Minecraft Y coordinates.
 pub fn fetch_elevation_data(
@@ -47,23 +75,9 @@ pub fn fetch_elevation_data(
     scale: f64,
     ground_level: i32,
     disable_height_limit: bool,
+    land_cover: Option<&LandCoverData>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
-    let (base_scale_z, base_scale_x) = geo_distance(bbox.min(), bbox.max());
-
-    // Apply same floor() and scale operations as CoordTransformer.llbbox_to_xzbbox()
-    let scale_factor_z: f64 = base_scale_z.floor() * scale;
-    let scale_factor_x: f64 = base_scale_x.floor() * scale;
-
-    // World block positions span 0..=scale_factor (inclusive), so there are
-    // scale_factor+1 distinct positions. Store that count so get_data_coordinates
-    // divides by (world_width-1) = scale_factor, mapping 0→0.0 and max→1.0.
-    let world_width: usize = scale_factor_x as usize + 1;
-    let world_height: usize = scale_factor_z as usize + 1;
-
-    // Cap grid dimensions to avoid WMS server rejections.
-    // The bilinear lookup in ground.rs handles upscaling to block resolution.
-    let grid_width: usize = world_width.clamp(2, MAX_ELEVATION_GRID_DIM);
-    let grid_height: usize = world_height.clamp(2, MAX_ELEVATION_GRID_DIM);
+    let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
     // Select the best provider for this region
     let provider = select_provider(bbox);
@@ -127,6 +141,48 @@ pub fn fetch_elevation_data(
     repair_terrain_anomalies(&mut height_grid);
     // Safety net: fill any remaining NaN from tile gaps or partial provider coverage
     fill_nan_values(&mut height_grid);
+
+    // Land-cover-aware repair (targets urban LiDAR/DSM classification
+    // errors and coastal tile-boundary artifacts; leaves natural terrain
+    // untouched).
+    //
+    // Both scales are expressed in *meters* and converted to grid cells
+    // via the actual meters-per-cell for this bbox/grid, so the smoothing
+    // covers the same physical scale regardless of world size or provider
+    // resolution.
+    //
+    // σ = 30 m for the built-up Gaussian: wide enough that a typical
+    // 20 m-wide DSM artifact (tunnel portal, overpass, parking deck) is
+    // reduced to a residual the user can't distinguish from one Minecraft
+    // block. Hilly cities (SF, Pittsburgh) still keep their macro shape —
+    // the kernel falls off long before a real urban slope does. On coarse
+    // providers (AWS fallback when σ < 1.5 cells) the Gaussian pass is
+    // skipped internally.
+    //
+    // 25 m coastal pull range: reaches far enough to cover DSM-captured
+    // piers/warehouses at the shoreline, short enough to leave the actual
+    // inland city alone.
+    const BUILT_UP_SIGMA_M: f64 = 30.0;
+    const COASTAL_PULL_M: f64 = 25.0;
+    let (bbox_height_m, bbox_width_m) = geo_distance(bbox.min(), bbox.max());
+    let m_per_cell = (bbox_width_m / grid_width as f64 + bbox_height_m / grid_height as f64) * 0.5;
+    let (built_up_sigma_cells, coastal_pull_cells) = if m_per_cell > 0.0 {
+        (
+            BUILT_UP_SIGMA_M / m_per_cell,
+            (COASTAL_PULL_M / m_per_cell).round() as u32,
+        )
+    } else {
+        (0.0, 0)
+    };
+
+    if let Some(lc) = land_cover {
+        apply_land_cover_repair(
+            &mut height_grid,
+            lc,
+            built_up_sigma_cells,
+            coastal_pull_cells,
+        );
+    }
 
     let mc_heights = scale_to_minecraft(&height_grid, scale, ground_level, disable_height_limit);
 

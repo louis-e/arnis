@@ -94,6 +94,9 @@ pub fn generate_world_with_options(
     let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
+    let desired_updates: u64 = 500;
+    let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
+    let mut element_counter: u64 = 0;
 
     // Pre-scan: detect building relation outlines that should be suppressed.
     // Only applies to type=building relations (NOT type=multipolygon).
@@ -124,7 +127,10 @@ pub fn generate_world_with_options(
 
     // Process all elements
     for element in elements.into_iter() {
-        process_pb.inc(1);
+        element_counter += 1;
+        if element_counter.is_multiple_of(pb_batch_size) {
+            process_pb.inc(pb_batch_size);
+        }
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {
             emit_gui_progress_update(current_progress_prcs, "");
@@ -137,7 +143,7 @@ pub fn generate_world_with_options(
                 element.id(),
                 element.kind()
             ));
-        } else {
+        } else if element_counter == 1 {
             process_pb.set_message("");
         }
 
@@ -330,6 +336,7 @@ pub fn generate_world_with_options(
         // Element is dropped here, freeing its memory immediately
     }
 
+    process_pb.inc(element_counter % pb_batch_size);
     process_pb.finish();
 
     // Drop remaining caches

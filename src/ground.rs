@@ -1,5 +1,6 @@
 use crate::args::Args;
 use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
+use crate::elevation::compute_grid_dims;
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
 use crate::progress::emit_gui_progress_update;
@@ -54,38 +55,37 @@ impl Ground {
         fetch_land_cover: bool,
         disable_height_limit: bool,
     ) -> Self {
-        match fetch_elevation_data(bbox, scale, ground_level, disable_height_limit) {
-            Ok(elevation_data) => {
-                // Fetch land cover data, capped to avoid OOM on large areas.
-                // The coordinate lookup in cover_class/water_distance handles
-                // upscaling from the capped grid to full world resolution.
-                const MAX_LAND_COVER_DIM: usize = 4096;
-                let land_cover = if fetch_land_cover {
-                    let lc = land_cover::fetch_land_cover_data(
-                        bbox,
-                        elevation_data.world_width.min(MAX_LAND_COVER_DIM),
-                        elevation_data.world_height.min(MAX_LAND_COVER_DIM),
-                    );
-                    if lc.is_some() {
-                        println!("Land cover data loaded successfully");
-                    } else {
-                        eprintln!(
-                            "Warning: Land cover data unavailable, using default ground blocks"
-                        );
-                    }
-                    lc
-                } else {
-                    None
-                };
-
-                Self {
-                    elevation_enabled: true,
-                    ground_level,
-                    elevation_data: Some(elevation_data),
-                    land_cover,
-                    rotation_mask: None,
-                }
+        // Fetch land cover FIRST so we can feed it into the elevation
+        // post-processing pipeline for land-cover-aware artifact repair.
+        // The elevation grid is built from the same (bbox, scale) so both
+        // grids share dimensions (both use compute_grid_dims).
+        let (_, _, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        let land_cover = if fetch_land_cover {
+            let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
+            if lc.is_some() {
+                println!("Land cover data loaded successfully");
+            } else {
+                eprintln!("Warning: Land cover data unavailable, using default ground blocks");
             }
+            lc
+        } else {
+            None
+        };
+
+        match fetch_elevation_data(
+            bbox,
+            scale,
+            ground_level,
+            disable_height_limit,
+            land_cover.as_ref(),
+        ) {
+            Ok(elevation_data) => Self {
+                elevation_enabled: true,
+                ground_level,
+                elevation_data: Some(elevation_data),
+                land_cover,
+                rotation_mask: None,
+            },
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
                 #[cfg(feature = "gui")]
@@ -93,7 +93,9 @@ impl Ground {
                     LogLevel::Warning,
                     "Elevation unavailable, using flat ground",
                 );
-                // Graceful fallback: disable elevation and keep provided ground_level
+                // Graceful fallback: disable elevation and keep provided ground_level.
+                // Land cover we already fetched is discarded since it has no
+                // elevation grid to align against.
                 Self {
                     elevation_enabled: false,
                     ground_level,

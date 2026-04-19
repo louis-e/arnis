@@ -349,7 +349,15 @@ fn sample_gsi_pixel(
 
 // --- Shared helpers ---
 
+/// Maximum retry attempts for transient failures (5xx, network errors).
+const MAX_RETRIES: u32 = 3;
+/// Base delay for exponential backoff between retries (ms).
+const RETRY_BASE_DELAY_MS: u64 = 750;
+
 /// Fetch data from URL or load from cache.
+///
+/// Retries on 5xx responses and network errors with exponential backoff.
+/// 4xx responses are returned immediately (request is malformed).
 /// If `client` is provided, reuse it; otherwise build a new one.
 fn fetch_or_cache(
     url: &str,
@@ -377,22 +385,52 @@ fn fetch_or_cache(
         }
     };
 
-    let response = client.get(url).send()?;
-    let status = response.status();
-    if !status.is_success() {
-        return Err(format!("HTTP {status} from elevation service").into());
-    }
+    let mut last_error: Option<Box<dyn std::error::Error>> = None;
 
-    let bytes = response.bytes()?.to_vec();
-
-    if bytes.len() > 100 && is_valid_payload(&bytes) {
-        if let Some(parent) = cache_path.parent() {
-            std::fs::create_dir_all(parent)?;
+    for attempt in 0..MAX_RETRIES {
+        if attempt > 0 {
+            let delay_ms = RETRY_BASE_DELAY_MS * (1 << (attempt - 1));
+            eprintln!(
+                "Elevation request retry {}/{} after {}ms...",
+                attempt,
+                MAX_RETRIES - 1,
+                delay_ms
+            );
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         }
-        std::fs::write(cache_path, &bytes)?;
+
+        match client.get(url).send() {
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    let bytes = response.bytes()?.to_vec();
+                    if bytes.len() <= 100 || !is_valid_payload(&bytes) {
+                        // Server returned 200 but with an error page / empty body -
+                        // treat as transient and retry.
+                        last_error =
+                            Some(format!("Invalid payload ({}B) from {url}", bytes.len()).into());
+                        continue;
+                    }
+                    if let Some(parent) = cache_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(cache_path, &bytes)?;
+                    return Ok(bytes);
+                }
+                if status.is_server_error() {
+                    last_error = Some(format!("HTTP {status} from elevation service").into());
+                    continue;
+                }
+                // 4xx: client error, no point retrying.
+                return Err(format!("HTTP {status} from elevation service").into());
+            }
+            Err(e) => {
+                last_error = Some(Box::new(e));
+            }
+        }
     }
 
-    Ok(bytes)
+    Err(last_error.unwrap_or_else(|| "Elevation request failed".into()))
 }
 
 /// Check if a payload looks like a valid image (TIFF or PNG), not an HTML error page.
