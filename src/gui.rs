@@ -726,7 +726,7 @@ fn gui_start_generation(
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
-    if is_new_world && world_format != "bedrock" {
+    if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
         let llbbox = match LLBBox::from_str(&bbox_text) {
             Ok(bbox) => bbox,
             Err(e) => {
@@ -781,8 +781,17 @@ fn gui_start_generation(
             let world_path = PathBuf::from(&selected_world);
 
             // Determine world format from UI selection first (needed for session lock decision)
+
+            let luanti_game = if world_format.starts_with("luanti") {
+                Some(crate::luanti_block_map::LuantiGame::Mineclonia)
+            } else {
+                None
+            };
+
             let world_format = if world_format == "bedrock" {
                 WorldFormat::BedrockMcWorld
+            } else if world_format.starts_with("luanti") {
+                WorldFormat::LuantiWorld
             } else {
                 WorldFormat::JavaAnvil
             };
@@ -855,6 +864,24 @@ fn gui_start_generation(
                         crate::world_utils::build_bedrock_output(&bbox, output_dir);
                     (output_path, Some(lvl_name))
                 }
+                WorldFormat::LuantiWorld => {
+                    // Luanti: create world directory in Minetest worlds folder
+                    let worlds_dir = dirs::home_dir()
+                        .unwrap_or_else(|| PathBuf::from("."))
+                        .join(".minetest")
+                        .join("worlds");
+                    let _ = std::fs::create_dir_all(&worlds_dir);
+                    let mut counter = 1;
+                    let world_name = loop {
+                        let candidate = format!("Arnis Luanti World {counter}");
+                        if !worlds_dir.join(&candidate).exists() {
+                            break candidate;
+                        }
+                        counter += 1;
+                    };
+                    let luanti_path = worlds_dir.join(&world_name);
+                    (luanti_path, Some(world_name))
+                }
             };
 
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
@@ -888,6 +915,8 @@ fn gui_start_generation(
                 format: world_format,
                 level_name,
                 spawn_point: mc_spawn_point,
+                luanti_game,
+                ground_level,
             };
 
             // Create an Args instance with the chosen bounding box
@@ -902,6 +931,7 @@ fn gui_start_generation(
                     world_path
                 }),
                 bedrock: world_format == WorldFormat::BedrockMcWorld,
+                luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,

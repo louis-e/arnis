@@ -17,6 +17,7 @@ mod floodfill_cache;
 mod ground;
 mod ground_generation;
 mod land_cover;
+mod luanti_block_map;
 mod map_renderer;
 mod map_transformation;
 mod osm_parser;
@@ -113,6 +114,8 @@ fn run_cli() {
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld
+    } else if args.luanti {
+        world_editor::WorldFormat::LuantiWorld
     } else {
         world_editor::WorldFormat::JavaAnvil
     };
@@ -126,6 +129,24 @@ fn run_cli() {
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
         let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
         (output_path, Some(lvl_name))
+    } else if args.luanti {
+        // Luanti: create world directory in the output path
+        let base_dir = args.path.clone().unwrap();
+        // Find a unique world name
+        let mut counter = 1;
+        let world_name = loop {
+            let candidate = format!("Arnis Luanti World {counter}");
+            if !base_dir.join(&candidate).exists() {
+                break candidate;
+            }
+            counter += 1;
+        };
+        let world_path = base_dir.join(&world_name);
+        println!(
+            "Creating Luanti world at: {}",
+            world_path.display().to_string().bright_white().bold()
+        );
+        (world_path, Some(world_name))
     } else {
         // Java: create a new world in the provided output directory
         let base_dir = args.path.clone().unwrap();
@@ -252,11 +273,19 @@ fn run_cli() {
     };
 
     // Build generation options
+    let luanti_game = if args.luanti {
+        Some(luanti_block_map::LuantiGame::Mineclonia)
+    } else {
+        None
+    };
+
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
         spawn_point,
+        luanti_game,
+        ground_level: args.ground_level,
     };
 
     // Generate world

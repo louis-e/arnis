@@ -28,6 +28,10 @@ pub struct Args {
     #[arg(long)]
     pub bedrock: bool,
 
+    /// Generate a Luanti/Minetest world (map.sqlite) instead of Java Edition
+    #[arg(long)]
+    pub luanti: bool,
+
     /// Downloader method (requests/curl/wget) (optional)
     #[arg(long, default_value = "requests")]
     pub downloader: String,
@@ -99,6 +103,10 @@ pub struct Args {
 /// For Java Edition: `--path` is required. If the directory doesn't exist, it will be created.
 /// For Bedrock Edition (`--bedrock`): `--path` is optional (defaults to Desktop output).
 pub fn validate_args(args: &Args) -> Result<(), String> {
+    if args.bedrock && args.luanti {
+        return Err("Cannot use --bedrock and --luanti together.".to_string());
+    }
+
     if args.bedrock {
         // Bedrock: path is optional; if provided, it must be an existing directory
         if let Some(ref path) = args.path {
@@ -107,6 +115,24 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
             }
             if !path.is_dir() {
                 return Err(format!("Path is not a directory: {}", path.display()));
+            }
+        }
+    } else if args.luanti {
+        // Luanti: path is required and must be an existing directory
+        match &args.path {
+            None => {
+                return Err(
+                    "The --output-dir argument is required for Luanti. Provide the directory where the world should be created."
+                        .to_string(),
+                );
+            }
+            Some(ref path) => {
+                if !path.exists() {
+                    return Err(format!("Path does not exist: {}", path.display()));
+                }
+                if !path.is_dir() {
+                    return Err(format!("Path is not a directory: {}", path.display()));
+                }
             }
         }
     } else {

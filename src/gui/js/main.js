@@ -370,7 +370,7 @@ function initSettings() {
   });
   window.updateRotation = updateRotation;
 
-  // World format toggle (Java/Bedrock)
+  // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
 
   // Save path setting
@@ -481,13 +481,15 @@ function initSettings() {
   window.closeLicense = closeLicense;
 }
 
-// World format selection (Java/Bedrock)
+// World format selection (Java/Bedrock/Luanti)
 let selectedWorldFormat = 'java'; // Default to Java
+
+const VALID_FORMATS = ['java', 'bedrock', 'luanti'];
 
 function initWorldFormatToggle() {
   // Load saved format preference
   const savedFormat = localStorage.getItem('arnis-world-format');
-  if (savedFormat && (savedFormat === 'java' || savedFormat === 'bedrock')) {
+  if (savedFormat && VALID_FORMATS.includes(savedFormat)) {
     selectedWorldFormat = savedFormat;
   }
   
@@ -496,11 +498,18 @@ function initWorldFormatToggle() {
 }
 
 function setWorldFormat(format) {
-  if (format !== 'java' && format !== 'bedrock') return;
+  if (!VALID_FORMATS.includes(format)) return;
   
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
   updateFormatToggleUI(format);
+}
+
+function getEffectiveWorldFormat() {
+  if (selectedWorldFormat === 'luanti') {
+    return 'luanti_mineclonia';
+  }
+  return selectedWorldFormat;
 }
 
 function updateFormatToggleUI(format) {
@@ -517,8 +526,7 @@ function updateFormatToggleUI(format) {
       heightLimitToggle.disabled = false;
       heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
     }
-  } else {
-    javaBtn.classList.remove('format-active');
+  } else if (format === 'bedrock') {
     bedrockBtn.classList.add('format-active');
     // Disable height limit toggle for Bedrock (not supported)
     if (heightLimitToggle) {
@@ -965,7 +973,7 @@ async function startGeneration() {
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: selectedWorldFormat,
+        worldFormat: getEffectiveWorldFormat(),
         rotationAngle: rotationAngle
     });
 
