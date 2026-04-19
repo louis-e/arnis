@@ -10,11 +10,9 @@ use fastnbt::Value;
  * version 2.1 of the License, or (at your option) any later version.
  */
 
-/// Supported Luanti game packs
+/// Supported Luanti game pack
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LuantiGame {
-    /// The default minetest_game (ships with Luanti)
-    MineTestGame,
     /// Mineclonia — Minecraft-like game for Luanti
     Mineclonia,
 }
@@ -23,19 +21,14 @@ impl LuantiGame {
     #[allow(dead_code)]
     pub fn from_str(s: &str) -> Result<Self, String> {
         match s {
-            "minetest_game" | "minetest" => Ok(Self::MineTestGame),
             "mineclonia" => Ok(Self::Mineclonia),
-            _ => Err(format!(
-                "Unknown Luanti game: '{}'. Supported: minetest_game, mineclonia",
-                s
-            )),
+            _ => Err(format!("Unknown Luanti game: '{}'. Supported: mineclonia", s)),
         }
     }
 
     /// Returns the gameid string for world.mt
     pub fn game_id(&self) -> &'static str {
         match self {
-            Self::MineTestGame => "minetest",
             Self::Mineclonia => "mineclonia",
         }
     }
@@ -151,236 +144,8 @@ fn conv_slab(
 /// (Minecraft NBT block properties) to compute the correct `param2` value.
 pub fn to_luanti_node(block: Block, game: LuantiGame, props: Option<&Value>) -> LuantiNode {
     match game {
-        LuantiGame::MineTestGame => to_minetest_game_node(block, props),
         LuantiGame::Mineclonia => to_mineclonia_node(block, props),
     }
-}
-
-fn to_minetest_game_node(block: Block, props: Option<&Value>) -> LuantiNode {
-    let name = match block.id() {
-        0 => "default:acacia_wood",  // acacia_planks
-        1 => "air",  // air
-        2 => "default:stone",  // andesite
-        3 => "default:aspen_leaves",  // birch_leaves
-        4 => "default:aspen_tree",  // birch_log
-        5 => "default:obsidianbrick",  // black_concrete
-        6 => "default:obsidian",  // blackstone
-        7 => "flowers:viola",  // blue_orchid
-        8 => "default:clay",  // blue_terracotta
-        9 => "default:brick",  // bricks
-        10 => "default:steelblock",  // cauldron
-        11 => "default:stonebrick",  // chiseled_stone_bricks
-        12 => "walls:cobble",  // cobblestone_wall
-        13 => "default:cobble",  // cobblestone
-        14 => "default:obsidianbrick",  // polished_blackstone_bricks
-        15 => "default:stonebrick",  // cracked_stone_bricks
-        16 => "default:wood",  // crimson_planks
-        17 => "default:sandstonebrick",  // cut_sandstone
-        18 => "wool:cyan",  // cyan_concrete
-        19 => "default:wood",  // dark_oak_planks
-        20 => "default:obsidianbrick",  // deepslate_bricks
-        21 => "default:stone",  // diorite
-        22 => "default:dirt",  // dirt
-        23 => "default:stonebrick",  // end_stone_bricks
-        24 => "farming:soil_wet",  // farmland
-        25 => "default:glass",  // glass
-        26 => "default:meselamp",  // glowstone
-        27 => "default:stone",  // granite
-        28 => "default:dirt_with_grass",  // grass_block
-        29 => "default:grass_3",  // short_grass
-        30 => "default:gravel",  // gravel
-        31 => "default:coalblock",  // gray_concrete
-        32 => "default:clay",  // gray_terracotta
-        33 => "default:clay",  // green_terracotta
-        34 => "wool:green",  // green_wool
-        35 => "farming:straw",  // hay_block
-        36 => "xpanes:bar_flat",  // iron_bars
-        37 => "default:steelblock",  // iron_block
-        38 => "default:junglewood",  // jungle_planks
-        39 => "default:ladder_wood",  // ladder
-        40 => "wool:cyan",  // light_blue_concrete
-        41 => "default:clay",  // light_blue_terracotta
-        42 => "wool:grey",  // light_gray_concrete
-        43 => "default:dirt_with_grass",  // moss_block
-        44 => "default:mossycobble",  // mossy_cobblestone
-        45 => "default:brick",  // mud_bricks
-        46 => "default:obsidianbrick",  // nether_bricks
-        47 => "default:obsidian",  // netherite_block
-        48 => "default:fence_wood",  // oak_fence
-        49 => "default:leaves",  // oak_leaves
-        50 => "default:tree",  // oak_log
-        51 => "default:wood",  // oak_planks
-        52 => "stairs:slab_wood",  // oak_slab
-        53 => "default:clay",  // orange_terracotta
-        54 => "default:dirt_with_coniferous_litter",  // podzol
-        55 => "default:stone",  // polished_andesite
-        56 => "default:obsidian",  // polished_basalt
-        57 => "default:sandstone",  // quartz_block
-        58 => "default:obsidian",  // polished_blackstone
-        59 => "default:obsidian",  // polished_deepslate
-        60 => "default:stone",  // polished_diorite
-        61 => "default:stone",  // polished_granite
-        62 => "default:stonebrick",  // prismarine
-        63 => "default:stonebrick",  // purpur_block
-        64 => "default:stonebrick",  // purpur_pillar
-        65 => "default:sandstone",  // quartz_bricks
-        66 => "carts:rail",  // rail
-        67 => "flowers:rose",  // poppy
-        68 => "default:obsidianbrick",  // red_nether_bricks
-        69 => "default:desert_stone",  // red_terracotta
-        70 => "wool:red",  // red_wool
-        71 => "default:sand",  // sand
-        72 => "default:sandstone",  // sandstone
-        73 => "default:wood",  // scaffolding
-        74 => "default:sandstone",  // smooth_quartz
-        75 => "default:desert_sandstone",  // smooth_red_sandstone
-        76 => "default:sandstone",  // smooth_sandstone
-        77 => "default:stone",  // smooth_stone
-        78 => "default:sand",  // sponge
-        79 => "default:pine_tree",  // spruce_log
-        80 => "default:pine_wood",  // spruce_planks
-        81 => "stairs:slab_stone",  // stone_slab
-        82 => "stairs:slab_stonebrick",  // stone_brick_slab
-        83 => "default:stonebrick",  // stone_bricks
-        84 => "default:stone",  // stone
-        85 => "default:clay",  // terracotta
-        86 => "default:wood",  // warped_planks
-        87 => "default:water_source",  // water
-        88 => "wool:white",  // white_concrete
-        89 => "flowers:dandelion_white",  // azure_bluet
-        90 => "default:glass",  // white_stained_glass
-        91 => "default:clay",  // white_terracotta
-        92 => "wool:white",  // white_wool
-        93 => "wool:yellow",  // yellow_concrete
-        94 => "flowers:dandelion_yellow",  // dandelion
-        95 => "wool:yellow",  // yellow_wool
-        96 => "wool:green",  // lime_concrete
-        97 => "wool:cyan",  // cyan_wool
-        98 => "wool:blue",  // blue_concrete
-        99 => "wool:violet",  // purple_concrete
-        100 => "wool:red",  // red_concrete
-        101 => "wool:magenta",  // magenta_concrete
-        102 => "wool:brown",  // brown_wool
-        103 => "default:copperblock",  // oxidized_copper
-        104 => "default:clay",  // yellow_terracotta
-        105 => "farming:wheat_8",  // carrots
-        106 => "doors:door_wood_b",  // dark_oak_door (lower)
-        107 => "doors:door_wood_a",  // dark_oak_door (upper)
-        108 => "farming:wheat_8",  // potatoes
-        109 => "farming:wheat_8",  // wheat
-        110 => "default:stone",  // bedrock
-        111 => "default:snowblock",  // snow_block
-        112 => "default:snow",  // snow (layer)
-        113 => "default:sign_wall_wood",  // oak_sign
-        114 => "walls:cobble",  // andesite_wall
-        115 => "walls:cobble",  // stone_brick_wall
-        // 116..=125: rail variants
-        116..=125 => "carts:rail",  // rail_north_south
-        126 => "default:dirt",  // coarse_dirt
-        127 => "default:stone_with_iron",  // iron_ore
-        128 => "default:stone_with_coal",  // coal_ore
-        129 => "default:stone_with_gold",  // gold_ore
-        130 => "default:stone_with_copper",  // copper_ore
-        131 => "default:clay",  // clay
-        132 => "default:dirt_with_grass",  // dirt_path
-        133 => "default:ice",  // ice
-        134 => "default:ice",  // packed_ice
-        135 => "default:dirt",  // mud
-        136 => "default:dry_shrub",  // dead_bush
-        137 => "default:grass_5",  // tall_grass (bottom)
-        138 => "default:grass_5",  // tall_grass (top)
-        139 => "default:wood",  // crafting_table
-        140 => "default:furnace",  // furnace
-        141 => "wool:white",  // white_carpet
-        142 => "default:bookshelf",  // bookshelf
-        143 => "default:wood",  // oak_pressure_plate
-        144 => return conv_stair(props, "stairs:stair_wood"),  // oak_stairs (MC2MT CONV_STAIR)
-        155 => "default:chest",  // chest
-        156 => "wool:red",  // red_carpet
-        157 => "default:steelblock",  // anvil
-        158 => "default:wood",  // note_block
-        159 => "doors:door_wood_b",  // oak_door
-        160 => "default:steelblock",  // brewing_stand
-        // 161..=168: red_bed variants
-        161..=168 => "wool:red",  // red_bed_north_head
-        169 => "default:glass",  // gray_stained_glass
-        170 => "default:glass",  // light_gray_stained_glass
-        171 => "default:glass",  // brown_stained_glass
-        172 => "default:obsidian_glass",  // tinted_glass
-        // 173, 236–239, 241–243: Trapdoors (MC2MT CONV_TRAPDOOR)
-        173 | 236 | 237 | 238 | 239 | 241 | 242 | 243 => {  // oak_trapdoor
-            return conv_trapdoor(props, "doors:trapdoor", "doors:trapdoor_open")
-        }
-        174 => "wool:brown",  // brown_concrete
-        175 => "default:obsidianbrick",  // black_terracotta
-        176 => "default:clay",  // brown_terracotta
-        // 177–187: Stairs (MC2MT CONV_STAIR)
-        177 => return conv_stair(props, "stairs:stair_stonebrick"),  // stone_brick_stairs
-        178 => return conv_stair(props, "stairs:stair_stonebrick"),  // mud_brick_stairs
-        179 => return conv_stair(props, "stairs:stair_obsidian"),  // polished_blackstone_brick_stairs
-        180 => return conv_stair(props, "stairs:stair_desert_cobble"),  // brick_stairs
-        181 => return conv_stair(props, "stairs:stair_desert_stone"),  // polished_granite_stairs
-        182 => return conv_stair(props, "stairs:stair_sandstone"),  // end_stone_brick_stairs
-        183 => return conv_stair(props, "stairs:stair_stone"),  // polished_diorite_stairs
-        184 => return conv_stair(props, "stairs:stair_sandstone"),  // smooth_sandstone_stairs
-        185 => return conv_stair(props, "stairs:stair_sandstone"),  // quartz_stairs
-        186 => return conv_stair(props, "stairs:stair_stone"),  // polished_andesite_stairs
-        187 => return conv_stair(props, "stairs:stair_obsidian"),  // nether_brick_stairs
-        188 => "default:chest",  // barrel
-        189 => "default:fern_1",  // fern
-        190 => "wool:white",  // cobweb
-        // 191..=194: chiseled_bookshelf (N/E/S/W)
-        191..=194 => "default:bookshelf",  // chiselled_bookshelf_north
-        195 => "default:steelblock",  // chipped_anvil
-        196 => "default:steelblock",  // damaged_anvil
-        197 => "default:fern_3",  // large_fern (lower)
-        198 => "default:fern_3",  // large_fern (upper)
-        199 => "default:fence_wood",  // chain
-        200 => "default:meselamp",  // end_rod
-        201 => "default:steelblock",  // lightning_rod
-        202 => "default:goldblock",  // gold_block
-        203 => "default:meselamp",  // sea_lantern
-        204 => "wool:orange",  // orange_concrete
-        205 => "wool:orange",  // orange_wool
-        206 => "wool:blue",  // blue_wool
-        207 => "wool:dark_green",  // green_concrete
-        208 => "default:brick",  // brick_wall
-        209 => "default:desert_stone_block",  // redstone_block
-        // 210..=211: chain variants
-        210..=211 => "default:fence_wood",  // chain_x
-        212 => "doors:door_wood_b",  // spruce_door (lower)
-        213 => "doors:door_wood_a",  // spruce_door (upper)
-        214 => "stairs:slab_stone",  // smooth_stone_slab
-        215 => "xpanes:pane_flat",  // glass_pane
-        216 => "default:clay",  // light_gray_terracotta
-        217 => "stairs:slab_wood",  // oak_slab (variant)
-        218 => "doors:door_wood_b",  // oak_door (variant)
-        219 => "default:tree",  // dark_oak_log
-        220 => "default:leaves",  // dark_oak_leaves
-        221 => "default:jungletree",  // jungle_log
-        222 => "default:jungleleaves",  // jungle_leaves
-        223 => "default:acacia_tree",  // acacia_log
-        224 => "default:acacia_leaves",  // acacia_leaves
-        225 => "default:pine_needles",  // spruce_leaves
-        226 => "default:glass",  // cyan_stained_glass
-        227 => "default:glass",  // blue_stained_glass
-        228 => "default:glass",  // light_blue_stained_glass
-        229 => "default:wood",  // daylight_detector
-        230 => "default:glass",  // red_stained_glass
-        231 => "default:glass",  // yellow_stained_glass
-        232 => "default:glass",  // purple_stained_glass
-        233 => "default:glass",  // orange_stained_glass
-        234 => "default:glass",  // magenta_stained_glass
-        235 => "flowers:rose",  // potted_poppy
-        240 => "stairs:slab_sandstone",  // quartz_slab
-        244 => "stairs:slab_stonebrick",  // mud_brick_slab
-        245 => "stairs:slab_brick",  // brick_slab
-        246 => "flowers:tulip",  // potted_red_tulip
-        247 => "flowers:dandelion_yellow",  // potted_dandelion
-        248 => "flowers:viola",  // potted_blue_orchid
-        _ => "default:stone",
-    };
-    LuantiNode { name, param2: 0 }
 }
 
 fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
