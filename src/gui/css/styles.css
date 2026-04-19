@@ -17,6 +17,13 @@
   --primary-accent-light: #fff2cc;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
 p {
   color: #ececec;
 }
@@ -24,10 +31,12 @@ p {
 .container {
   margin: 0;
   padding-top: 1vh;
+  padding-bottom: 0.5vh;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   text-align: center;
+  height: 100vh;
+  box-sizing: border-box;
 }
 
 .logo {
@@ -47,6 +56,7 @@ p {
 .row {
   display: flex;
   justify-content: center;
+  flex-shrink: 0;
 }
 
 a {
@@ -66,7 +76,8 @@ a:hover {
   justify-content: center;
   align-items: stretch;
   margin-top: 5px;
-  min-height: 70vh;
+  min-height: 420px;
+  flex: 1;
 }
 
 .section {
@@ -210,9 +221,11 @@ button:hover {
 }
 
 .footer {
-  margin-top: 20px;
+  margin-top: 8px;
+  padding-bottom: 6px;
   text-align: center;
   font-size: 0.9em;
+  flex-shrink: 0;
 }
 
 .footer-link {
@@ -322,31 +335,6 @@ button:hover {
   background-color: var(--primary-accent-dark);
 }
 
-/* Luanti Game Dropdown */
-.luanti-game-dropdown {
-  width: 100%;
-  margin-top: 4px;
-}
-
-.luanti-game-dropdown select {
-  width: 100%;
-  padding: 8px 10px;
-  font-size: 0.95em;
-  border: 1px solid #555;
-  border-radius: 6px;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.2s ease;
-}
-
-.luanti-game-dropdown select:hover {
-  border-color: var(--primary-accent);
-}
-
-.luanti-game-dropdown select:focus {
-  border-color: var(--primary-accent);
-}
-
 /* Customization Settings */
 .modal {
   position: fixed;
@@ -442,7 +430,11 @@ button:hover {
   margin: 15px 0;
 }
 
-#city-boundaries-toggle {
+#land-cover-toggle {
+  accent-color: #fecc44;
+}
+
+#disable-height-limit-toggle {
   accent-color: #fecc44;
 }
 
@@ -506,7 +498,7 @@ button:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
 
 .settings-row label {
@@ -606,6 +598,24 @@ button:hover {
 /* Save Path Setting */
 .save-path-control {
   gap: 0;
+}
+
+/* Rotation Angle Control */
+.rotation-control {
+  gap: 4px;
+}
+
+.rotation-control input[type="number"] {
+  width: 60px !important;
+  max-width: 60px !important;
+  text-align: center;
+  font-weight: bold;
+}
+
+.rotation-unit {
+  font-weight: bold;
+  color: #ececec;
+  font-size: 0.95em;
 }
 
 .save-path-input {
