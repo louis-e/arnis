@@ -32,10 +32,6 @@ pub struct Args {
     #[arg(long)]
     pub luanti: bool,
 
-    /// Luanti game pack to target (minetest_game or mineclonia)
-    #[arg(long, default_value = "minetest_game")]
-    pub luanti_game: String,
-
     /// Downloader method (requests/curl/wget) (optional)
     #[arg(long, default_value = "requests")]
     pub downloader: String,
