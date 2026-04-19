@@ -49,7 +49,7 @@ pub fn generate_world_with_options(
             llbbox,
             options
                 .luanti_game
-                .unwrap_or(crate::luanti_block_map::LuantiGame::MineTestGame),
+                .unwrap_or(crate::luanti_block_map::LuantiGame::Mineclonia),
             options.level_name.clone(),
             options.spawn_point,
             options.ground_level,
