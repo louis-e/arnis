@@ -840,7 +840,11 @@ fn fill_gaps(grid: &mut [Vec<u8>], width: usize, height: usize) {
 /// - 2+ = water cell N blocks from nearest shore
 ///
 /// Capped at 15 to limit BFS depth for very large oceans.
-fn compute_water_distance(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<u8>> {
+pub(crate) fn compute_water_distance(
+    grid: &[Vec<u8>],
+    width: usize,
+    height: usize,
+) -> Vec<Vec<u8>> {
     let mut distance = vec![vec![0u8; width]; height];
     let mut queue = VecDeque::new();
 

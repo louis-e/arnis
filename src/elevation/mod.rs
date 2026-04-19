@@ -75,7 +75,7 @@ pub fn fetch_elevation_data(
     scale: f64,
     ground_level: i32,
     disable_height_limit: bool,
-    land_cover: Option<&LandCoverData>,
+    land_cover: Option<&mut LandCoverData>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 

@@ -141,7 +141,7 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
 /// into a visible "rising ramp" between water and the city interior.
 pub fn apply_land_cover_repair(
     heights: &mut [Vec<f64>],
-    land_cover: &LandCoverData,
+    land_cover: &mut LandCoverData,
     built_up_sigma_cells: f64,
     coastal_pull_distance_cells: u32,
 ) {
@@ -168,6 +168,23 @@ pub fn apply_land_cover_repair(
     // source-masking) use the real water surface and not the contaminated
     // classification.
     let is_water_surface = level_water_surfaces(heights, &land_cover.grid);
+
+    // Reclassify LC_WATER cells that weren't actually flattened to water
+    // surface (ESA-misclassified riverbank walls / piers / shoreline
+    // structures kept at their DSM elevation). Without this, the downstream
+    // renderer still sees them as water, can't place water above the real
+    // water level, and falls through to grass + shoreline sand — producing
+    // visible embankments and grid-aligned ridges INSIDE the water body.
+    //
+    // After reclassification the water_distance grid must be refreshed so
+    // `grid_is_water = water_distance > 0` in ground.rs doesn't still treat
+    // these cells as water.
+    let reclassified = reclassify_non_surface_water_cells(&mut land_cover.grid, &is_water_surface);
+    if reclassified > 0 {
+        land_cover.water_distance =
+            crate::land_cover::compute_water_distance(&land_cover.grid, grid_w, grid_h);
+    }
+
     if coastal_pull_distance_cells > 0 {
         pull_coastal_builtup_toward_water(
             heights,
@@ -188,29 +205,46 @@ pub fn apply_land_cover_repair(
 /// return a grid marking which cells were actually treated as water.
 ///
 /// A single water body (ocean, lake, bay, river) should have a uniform
-/// surface. But ESA WorldCover is 10 m resolution: on narrow rivers in
-/// steep canyons (Grand Canyon, Swiss valleys, etc.) the pixels straddling
-/// the shoreline are mixed water/wall and get snapped to "water" by the
-/// classifier. A naïve median over the whole component then drags canyon
-/// wall cells down to river level (visible as terrain "cut off") or drags
-/// real river cells up toward wall height (visible as "uplifted").
+/// surface. But DEM/DSM data contaminates `LC_WATER` components from two
+/// opposite directions:
 ///
-/// This pass:
-/// - Uses the **25th percentile** of elevations (not the median) as the
-///   water-surface estimate. Walls are always *above* water, so a low
-///   percentile stays in real-water territory even with substantial
-///   wall contamination.
-/// - Only overwrites cells whose DSM elevation is within ±2 m of that
-///   level. Cells that stick well above are misclassified wall — we leave
-///   their DSM value alone and they render as normal terrain. **Terrain
-///   wins over water classification**, which is what the user expects.
+/// - **Above water (narrow rivers in canyons):** ESA 10 m pixels at the
+///   shoreline get mixed water/wall and snap to "water". Their DSM
+///   elevation is 2–30 m *above* the river surface.
+/// - **Below water (oceans/fjords with AWS Terrarium / bathymetric blends):**
+///   cells over deep water have DSM elevations 5–50 m *below* the surface.
 ///
-/// The returned bool grid lets downstream passes (coastal pull-down,
-/// Gaussian blur source-masking) see the true water surface rather than
-/// the ESA classification so misclassified wall cells propagate correctly.
+/// We handle both by:
+///
+/// 1. Estimating the water surface via the **histogram mode** (densest 1 m
+///    elevation bin). Wall-contaminated components have a peak at the real
+///    water surface and a long *upper* tail; bathymetric components have a
+///    peak at the real surface and a long *lower* tail. The mode picks the
+///    peak regardless of which side the tail is on — robust to both cases
+///    unlike a percentile, which implicitly assumes the bias direction.
+///
+/// 2. Applying an **asymmetric tolerance**: cells at-or-below `surface + 2 m`
+///    are flattened to the surface (catches true surface cells *and* all
+///    bathymetric cells; Minecraft renders water as a single-block layer
+///    so the depth variation we'd otherwise preserve never shows up
+///    anyway). Cells more than 2 m above surface are kept at their DSM
+///    elevation — they are real walls / piers / embankments and should
+///    render as terrain, reclassified away from LC_WATER by the next pass.
+///
+/// The returned bool grid marks which cells actually became water surface,
+/// so the coastal pull-down and Gaussian source-masking operate on the
+/// real water surface rather than the ESA classification.
 fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Vec<bool>> {
-    const WATER_LEVEL_PERCENTILE: usize = 25;
-    const WATER_LEVEL_TOLERANCE_M: f64 = 2.0;
+    // Cells up to this many metres above the estimated surface are still
+    // treated as water (covers noise / wave chop / 10 m ESA mixed-pixel
+    // bleed). Beyond this they are real walls and kept as terrain.
+    const WATER_UP_TOLERANCE_M: f64 = 2.0;
+    // Histogram bin width for mode estimation. 1 m is tight enough to
+    // resolve a distinct water-surface peak vs bathymetric tail.
+    const MODE_BIN_SIZE_M: f64 = 1.0;
+    // Components smaller than this fall back to the median (mode is unstable
+    // with too few samples).
+    const MIN_MODE_SAMPLES: usize = 16;
 
     let h = heights.len();
     let w = heights[0].len();
@@ -249,8 +283,8 @@ fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Ve
                 }
             }
 
-            // 25th percentile = robust low estimate of the water surface.
-            let mut values: Vec<f64> = component
+            // Collect finite elevations.
+            let values: Vec<f64> = component
                 .iter()
                 .filter_map(|&(x, y)| {
                     let v = heights[y][x];
@@ -264,19 +298,48 @@ fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Ve
             if values.is_empty() {
                 continue;
             }
-            let pct_idx = ((values.len() * WATER_LEVEL_PERCENTILE) / 100).min(values.len() - 1);
-            values.select_nth_unstable_by(pct_idx, |a, b| a.partial_cmp(b).unwrap());
-            let water_level = values[pct_idx];
 
-            // Only flatten cells close to that level. Wall cells stay at
-            // their original DSM elevation and render as terrain.
+            // Estimate water surface from water-cell elevations alone.
+            let raw_surface = if values.len() >= MIN_MODE_SAMPLES {
+                histogram_mode(&values, MODE_BIN_SIZE_M)
+            } else {
+                let mut v = values.clone();
+                let mid = v.len() / 2;
+                v.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                v[mid]
+            };
+
+            // Physical constraint: a body of water cannot sit above the land
+            // around it. If the mode lands above the adjacent terrain (because
+            // AWS Terrarium / mixed DSM data has an upward bias for this
+            // component, as observed in Baltic fjords), clamp down to the 25th
+            // percentile of adjacent non-water cells. 25th percentile instead
+            // of min gives some robustness against a single DSM-artifact pit
+            // in the shoreline; instead of median gives honest respect to any
+            // *real* low land (tidal flats, coastal meadows) around the body.
+            let surface = clamp_by_adjacent_land(raw_surface, &component, heights, lc_grid);
+
+            // Flatten rules:
+            //   * at-or-below surface+tol  → water (definitely on or under
+            //     the surface).
+            //   * above surface+tol AND on the component boundary (has a
+            //     non-water neighbor) → keep as terrain. This is the
+            //     canyon-wall / shoreline-embankment case: a real wall that
+            //     ESA 10 m classification bled onto. Reclassified later.
+            //   * above surface+tol AND surrounded entirely by water → ALSO
+            //     flatten. Interior "above surface" cells inside a large
+            //     water body come from AWS tile-boundary discontinuities or
+            //     DSM stitching artifacts; they are not real walls and
+            //     shouldn't poke up through the water as edge-line ridges.
             for &(x, y) in &component {
                 let orig = heights[y][x];
                 if !orig.is_finite() {
                     continue;
                 }
-                if (orig - water_level).abs() <= WATER_LEVEL_TOLERANCE_M {
-                    heights[y][x] = water_level;
+                let at_or_below = orig <= surface + WATER_UP_TOLERANCE_M;
+                let flatten = at_or_below || !has_non_water_neighbor(lc_grid, x, y);
+                if flatten {
+                    heights[y][x] = surface;
                     is_water_surface[y][x] = true;
                     cells_leveled += 1;
                 } else {
@@ -295,6 +358,220 @@ fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Ve
     }
 
     is_water_surface
+}
+
+/// Whether cell `(x, y)` has at least one 4-connected neighbor that is not
+/// classified as `LC_WATER`. Used to distinguish real shore walls (border
+/// cells, keep as terrain) from interior DSM artifacts (surrounded by water,
+/// flatten).
+fn has_non_water_neighbor(lc_grid: &[Vec<u8>], x: usize, y: usize) -> bool {
+    let h = lc_grid.len();
+    if h == 0 {
+        return false;
+    }
+    let w = lc_grid[0].len();
+    for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+        let nx = x as i32 + dx;
+        let ny = y as i32 + dy;
+        if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+            // Grid edge is treated as "outside the component" → counts as a
+            // non-water neighbor, so a component touching the grid edge can
+            // keep its edge cells as wall if they stick above the surface.
+            return true;
+        }
+        if lc_grid[ny as usize][nx as usize] != LC_WATER {
+            return true;
+        }
+    }
+    false
+}
+
+/// Estimate the mode of a set of elevation values by finding the densest
+/// bin of a fixed-width histogram. Robust to both upper tails (walls above
+/// water) and lower tails (bathymetric depths below water) — the surface
+/// cluster is the dense peak in either case.
+fn histogram_mode(values: &[f64], bin_size: f64) -> f64 {
+    debug_assert!(!values.is_empty() && bin_size > 0.0);
+    let (mut min_v, mut max_v) = (f64::INFINITY, f64::NEG_INFINITY);
+    for &v in values {
+        if v < min_v {
+            min_v = v;
+        }
+        if v > max_v {
+            max_v = v;
+        }
+    }
+    // Degenerate: all equal / near-equal → just return the minimum.
+    if max_v - min_v < bin_size {
+        return min_v;
+    }
+    let bin_count = ((max_v - min_v) / bin_size).ceil() as usize + 1;
+    let mut hist = vec![0usize; bin_count];
+    for &v in values {
+        let idx = (((v - min_v) / bin_size) as usize).min(bin_count - 1);
+        hist[idx] += 1;
+    }
+    let peak_idx = hist
+        .iter()
+        .enumerate()
+        .max_by_key(|(_, c)| *c)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+    min_v + (peak_idx as f64 + 0.5) * bin_size
+}
+
+/// Clamp a proposed water surface level so the body doesn't sit above the
+/// land around it.
+///
+/// A mode / median over water-cell elevations alone can come out above the
+/// adjacent terrain when the DSM has a systematic upward bias on the water
+/// (observed with AWS Terrarium mixing bathymetric and coastal averages in
+/// Baltic fjords). Flattening every water cell to that biased value then
+/// produces a visible water-on-plateau with a cliff down to the real shore.
+///
+/// We fix it by measuring the 25th percentile of the elevations of every
+/// *non-water* cell that touches the component (4-connected boundary, one
+/// sample per adjacent cell — dedup'd via HashSet) and taking the lower of
+/// that and the proposed surface.
+///
+/// - 25th percentile instead of **min**: robust to one DSM-artifact pit in
+///   the shoreline dragging the whole body down.
+/// - 25th percentile instead of **median**: honest respect for any real low
+///   land around the body (tidal flats, coastal meadows).
+///
+/// If the component has no adjacent non-water cells (bbox entirely inside
+/// one water body), there's nothing to clamp against — fall back to the
+/// mode estimate.
+fn clamp_by_adjacent_land(
+    proposed: f64,
+    component: &[(usize, usize)],
+    heights: &[Vec<f64>],
+    lc_grid: &[Vec<u8>],
+) -> f64 {
+    let h = heights.len();
+    if h == 0 {
+        return proposed;
+    }
+    let w = heights[0].len();
+
+    let mut seen = std::collections::HashSet::with_capacity(component.len());
+    let mut adjacent_land: Vec<f64> = Vec::new();
+    for &(x, y) in component {
+        for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+            let nx = x as i32 + dx;
+            let ny = y as i32 + dy;
+            if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                continue;
+            }
+            let nxu = nx as usize;
+            let nyu = ny as usize;
+            if lc_grid[nyu][nxu] == LC_WATER {
+                continue;
+            }
+            if !seen.insert((nxu, nyu)) {
+                continue;
+            }
+            let v = heights[nyu][nxu];
+            if v.is_finite() {
+                adjacent_land.push(v);
+            }
+        }
+    }
+
+    if adjacent_land.is_empty() {
+        return proposed;
+    }
+
+    let p25_idx = (adjacent_land.len() / 4).min(adjacent_land.len() - 1);
+    adjacent_land.select_nth_unstable_by(p25_idx, |a, b| a.partial_cmp(b).unwrap());
+    let land_p25 = adjacent_land[p25_idx];
+
+    proposed.min(land_p25)
+}
+
+/// Reclassify `LC_WATER` cells that `level_water_surfaces` left at their
+/// original DSM elevation (because they were more than ±2 m off the
+/// component water-surface estimate — ESA shoreline misclassification of
+/// riverbank walls, piers, bridge footings, embankments, etc.).
+///
+/// Without this the downstream renderer sees them as water, can't place
+/// water above the real water level at their elevation, and falls through
+/// to the `LC_WATER` match-default which is `GRASS_BLOCK`. The shoreline
+/// blender then adds sand around them. Visible result: thin linear grass
+/// + sand ridges cutting across a water body at a ~3 m elevation step.
+///
+/// Each misclassified cell adopts its nearest non-water neighbor's class
+/// so rendering is continuous with the surrounding terrain. If no
+/// non-water neighbor exists within the search radius (rare: an island of
+/// misclassified water completely surrounded by real water), falls back
+/// to `LC_BARE` which renders as a natural stone/gravel mix.
+///
+/// Returns the number of cells reclassified.
+fn reclassify_non_surface_water_cells(
+    lc_grid: &mut [Vec<u8>],
+    is_water_surface: &[Vec<bool>],
+) -> usize {
+    const SEARCH_RADIUS: i32 = 8;
+    const FALLBACK_CLASS: u8 = crate::land_cover::LC_BARE;
+
+    let h = lc_grid.len();
+    if h == 0 {
+        return 0;
+    }
+    let w = lc_grid[0].len();
+    if w == 0 {
+        return 0;
+    }
+
+    // Two-pass: compute replacements from the ORIGINAL grid first, then
+    // apply them. Otherwise earlier mutations influence later lookups and
+    // the classification ripples unpredictably.
+    let mut replacements: Vec<(usize, usize, u8)> = Vec::new();
+
+    for y in 0..h {
+        for x in 0..w {
+            if lc_grid[y][x] != LC_WATER || is_water_surface[y][x] {
+                continue;
+            }
+
+            // Expanding ring search for nearest non-water, non-zero class.
+            let mut found: Option<u8> = None;
+            'outer: for r in 1..=SEARCH_RADIUS {
+                for dy in -r..=r {
+                    for dx in -r..=r {
+                        // Only sample cells on the ring at distance exactly `r`.
+                        if dy.abs() != r && dx.abs() != r {
+                            continue;
+                        }
+                        let nx = x as i32 + dx;
+                        let ny = y as i32 + dy;
+                        if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                            continue;
+                        }
+                        let c = lc_grid[ny as usize][nx as usize];
+                        if c != LC_WATER && c != 0 {
+                            found = Some(c);
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            replacements.push((x, y, found.unwrap_or(FALLBACK_CLASS)));
+        }
+    }
+
+    let n = replacements.len();
+    for (x, y, c) in replacements {
+        lc_grid[y][x] = c;
+    }
+
+    if n > 0 {
+        eprintln!(
+            "Land cover repair: reclassified {} LC_WATER cells not on the water surface (embankments / piers / shoreline walls)",
+            n
+        );
+    }
+    n
 }
 
 /// Pull built-up cells near water down toward the local water surface.

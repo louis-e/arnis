@@ -60,7 +60,7 @@ impl Ground {
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
         let (_, _, grid_w, grid_h) = compute_grid_dims(bbox, scale);
-        let land_cover = if fetch_land_cover {
+        let mut land_cover = if fetch_land_cover {
             let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
             if lc.is_some() {
                 println!("Land cover data loaded successfully");
@@ -77,7 +77,7 @@ impl Ground {
             scale,
             ground_level,
             disable_height_limit,
-            land_cover.as_ref(),
+            land_cover.as_mut(),
         ) {
             Ok(elevation_data) => Self {
                 elevation_enabled: true,
