@@ -249,14 +249,38 @@ fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Ve
     // Components smaller than this fall back to the median (mode is unstable
     // with too few samples).
     const MIN_MODE_SAMPLES: usize = 16;
+    // A water component whose interquartile elevation range exceeds this
+    // threshold is classified as **flowing** water (river with gradient)
+    // rather than a still body (lake, fjord, ocean). Flowing components
+    // use a per-cell local-median surface so the gradient is preserved
+    // instead of collapsing to a single flat Y.
+    const FLOWING_IQR_THRESHOLD_M: f64 = 5.0;
+    // Radius (in grid cells) for the per-cell local-median surface on
+    // flowing water. Big enough to average out LiDAR noise and DSM tile
+    // seams, small enough to follow a river's gradient at the scale of
+    // a meander or pool. At 1-to-1 grid-to-world mapping this is also
+    // the smoothing radius in blocks.
+    const LOCAL_SURFACE_RADIUS: i32 = 12;
+    // Minimum neighbour water cells required to compute a stable local
+    // median for a flowing-component cell. Cells with fewer fall back
+    // to the component's own median.
+    const MIN_LOCAL_SAMPLES: usize = 8;
 
     let h = heights.len();
     let w = heights[0].len();
     let mut visited = vec![vec![false; w]; h];
     let mut is_water_surface = vec![vec![false; w]; h];
+
+    // Snapshot for reading so local-median / mode / clamp computations never
+    // see already-mutated heights from the current pass.
+    let heights_snapshot: Vec<Vec<f64>> = heights.to_vec();
+
     let mut components_leveled = 0usize;
+    let mut still_components = 0usize;
+    let mut flowing_components = 0usize;
     let mut cells_leveled = 0usize;
     let mut cells_skipped = 0usize;
+    let mut max_flowing_iqr = 0.0f64;
 
     for start_y in 0..h {
         for start_x in 0..w {
@@ -291,7 +315,7 @@ fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Ve
             let values: Vec<f64> = component
                 .iter()
                 .filter_map(|&(x, y)| {
-                    let v = heights[y][x];
+                    let v = heights_snapshot[y][x];
                     if v.is_finite() {
                         Some(v)
                     } else {
@@ -303,65 +327,180 @@ fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Ve
                 continue;
             }
 
-            // Estimate water surface from water-cell elevations alone.
-            let raw_surface = if values.len() >= MIN_MODE_SAMPLES {
-                histogram_mode(&values, MODE_BIN_SIZE_M)
-            } else {
+            // IQR-based flowing/still classification. IQR is robust to
+            // bathymetric tails (fjords) and outlier pits — it measures the
+            // width of the *bulk* of the distribution. A still lake has a
+            // tight bulk (near-zero IQR) even with a few noisy cells; a
+            // river descending 5+ m over the bbox has a broad bulk because
+            // roughly half the cells are at each end of the gradient.
+            let iqr = interquartile_range(&values);
+
+            let fallback_median = {
                 let mut v = values.clone();
                 let mid = v.len() / 2;
                 v.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
                 v[mid]
             };
 
-            // Physical constraint: a body of water cannot sit above the land
-            // around it. If the mode lands above the adjacent terrain (because
-            // AWS Terrarium / mixed DSM data has an upward bias for this
-            // component, as observed in Baltic fjords), clamp down to the 25th
-            // percentile of adjacent non-water cells. 25th percentile instead
-            // of min gives some robustness against a single DSM-artifact pit
-            // in the shoreline; instead of median gives honest respect to any
-            // *real* low land (tidal flats, coastal meadows) around the body.
-            let surface = clamp_by_adjacent_land(raw_surface, &component, heights, lc_grid);
-
-            // Flatten rules:
-            //   * at-or-below surface+tol  → water (definitely on or under
-            //     the surface).
-            //   * above surface+tol AND on the component boundary (has a
-            //     non-water neighbor) → keep as terrain. This is the
-            //     canyon-wall / shoreline-embankment case: a real wall that
-            //     ESA 10 m classification bled onto. Reclassified later.
-            //   * above surface+tol AND surrounded entirely by water → ALSO
-            //     flatten. Interior "above surface" cells inside a large
-            //     water body come from AWS tile-boundary discontinuities or
-            //     DSM stitching artifacts; they are not real walls and
-            //     shouldn't poke up through the water as edge-line ridges.
-            for &(x, y) in &component {
-                let orig = heights[y][x];
-                if !orig.is_finite() {
-                    continue;
+            if iqr > FLOWING_IQR_THRESHOLD_M {
+                // ── Flowing water (river-like) ─────────────────────────
+                // Use a per-cell local median surface so the gradient is
+                // preserved. Skip the adjacent-land clamp — that's meant
+                // for still water where the whole body must have a single
+                // surface level; for a river it would clamp the entire
+                // gradient to the low-percentile wall elevation at the
+                // downstream end, producing exactly the flat-band-across-
+                // the-canyon artifact we're fixing.
+                flowing_components += 1;
+                if iqr > max_flowing_iqr {
+                    max_flowing_iqr = iqr;
                 }
-                let at_or_below = orig <= surface + WATER_UP_TOLERANCE_M;
-                let flatten = at_or_below || !has_non_water_neighbor(lc_grid, x, y);
-                if flatten {
-                    heights[y][x] = surface;
-                    is_water_surface[y][x] = true;
-                    cells_leveled += 1;
+                for &(cx, cy) in &component {
+                    let orig = heights_snapshot[cy][cx];
+                    if !orig.is_finite() {
+                        continue;
+                    }
+                    let local_surface = local_water_median(
+                        &heights_snapshot,
+                        lc_grid,
+                        cx,
+                        cy,
+                        LOCAL_SURFACE_RADIUS,
+                        MIN_LOCAL_SAMPLES,
+                    )
+                    .unwrap_or(fallback_median);
+
+                    let at_or_below = orig <= local_surface + WATER_UP_TOLERANCE_M;
+                    let flatten = at_or_below || !has_non_water_neighbor(lc_grid, cx, cy);
+                    if flatten {
+                        heights[cy][cx] = local_surface;
+                        is_water_surface[cy][cx] = true;
+                        cells_leveled += 1;
+                    } else {
+                        cells_skipped += 1;
+                    }
+                }
+            } else {
+                // ── Still water (lake / fjord / ocean) ─────────────────
+                // Estimate a single surface for the whole component via
+                // histogram mode (robust to both upper and lower tails),
+                // then clamp by adjacent land p25 so the body can't sit
+                // above its own shore (Arnis Baltic fjord case).
+                still_components += 1;
+                let raw_surface = if values.len() >= MIN_MODE_SAMPLES {
+                    histogram_mode(&values, MODE_BIN_SIZE_M)
                 } else {
-                    cells_skipped += 1;
+                    fallback_median
+                };
+                let surface =
+                    clamp_by_adjacent_land(raw_surface, &component, &heights_snapshot, lc_grid);
+
+                for &(cx, cy) in &component {
+                    let orig = heights_snapshot[cy][cx];
+                    if !orig.is_finite() {
+                        continue;
+                    }
+                    let at_or_below = orig <= surface + WATER_UP_TOLERANCE_M;
+                    let flatten = at_or_below || !has_non_water_neighbor(lc_grid, cx, cy);
+                    if flatten {
+                        heights[cy][cx] = surface;
+                        is_water_surface[cy][cx] = true;
+                        cells_leveled += 1;
+                    } else {
+                        cells_skipped += 1;
+                    }
                 }
             }
+
             components_leveled += 1;
         }
     }
 
     if components_leveled > 0 {
-        eprintln!(
-            "Land cover repair: leveled {} water component(s), {} surface cells flattened, {} off-surface cells kept as terrain",
-            components_leveled, cells_leveled, cells_skipped
-        );
+        if flowing_components > 0 {
+            eprintln!(
+                "Land cover repair: leveled {} water component(s) ({} still, {} flowing, max IQR {:.1}m), {} surface cells flattened, {} off-surface cells kept as terrain",
+                components_leveled,
+                still_components,
+                flowing_components,
+                max_flowing_iqr,
+                cells_leveled,
+                cells_skipped
+            );
+        } else {
+            eprintln!(
+                "Land cover repair: leveled {} water component(s), {} surface cells flattened, {} off-surface cells kept as terrain",
+                components_leveled, cells_leveled, cells_skipped
+            );
+        }
     }
 
     is_water_surface
+}
+
+/// Compute the interquartile range of a slice of elevations.
+/// Uses `select_nth_unstable_by` twice — O(n) total, no full sort.
+/// Returns 0.0 for slices with fewer than 4 elements.
+fn interquartile_range(values: &[f64]) -> f64 {
+    if values.len() < 4 {
+        return 0.0;
+    }
+    let mut v = values.to_vec();
+    let q1_idx = v.len() / 4;
+    let q3_idx = (v.len() * 3) / 4;
+    v.select_nth_unstable_by(q1_idx, |a, b| a.partial_cmp(b).unwrap());
+    let q1 = v[q1_idx];
+    v.select_nth_unstable_by(q3_idx, |a, b| a.partial_cmp(b).unwrap());
+    let q3 = v[q3_idx];
+    (q3 - q1).max(0.0)
+}
+
+/// Return the median elevation of water cells within `radius` of `(cx, cy)`,
+/// or `None` if fewer than `min_samples` finite water heights are in range.
+///
+/// Used by the flowing-water path in `level_water_surfaces` to build a
+/// per-cell water surface that follows the river's gradient at scales
+/// longer than the radius, while still averaging out local DSM noise.
+fn local_water_median(
+    heights: &[Vec<f64>],
+    lc_grid: &[Vec<u8>],
+    cx: usize,
+    cy: usize,
+    radius: i32,
+    min_samples: usize,
+) -> Option<f64> {
+    let h = heights.len() as i32;
+    if h == 0 {
+        return None;
+    }
+    let w = heights[0].len() as i32;
+    let kernel_side = (radius * 2 + 1) as usize;
+    let mut samples: Vec<f64> = Vec::with_capacity(kernel_side * kernel_side);
+    for dy in -radius..=radius {
+        let ny = cy as i32 + dy;
+        if ny < 0 || ny >= h {
+            continue;
+        }
+        for dx in -radius..=radius {
+            let nx = cx as i32 + dx;
+            if nx < 0 || nx >= w {
+                continue;
+            }
+            if lc_grid[ny as usize][nx as usize] != LC_WATER {
+                continue;
+            }
+            let v = heights[ny as usize][nx as usize];
+            if v.is_finite() {
+                samples.push(v);
+            }
+        }
+    }
+    if samples.len() < min_samples {
+        return None;
+    }
+    let mid = samples.len() / 2;
+    samples.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+    Some(samples[mid])
 }
 
 /// Whether cell `(x, y)` has at least one 4-connected neighbor that is not
