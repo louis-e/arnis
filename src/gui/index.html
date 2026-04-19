@@ -289,9 +289,11 @@
     <!-- Telemetry Consent Modal (first run) -->
     <div id="telemetry-modal" class="modal" style="display: none;">
       <div class="modal-content">
-        <span class="close-button" onclick="rejectTelemetry()">&times;</span>
-        <h2>Help improve Arnis</h2>
-        <p style="text-align:left; margin-top:6px; color:#ececec;">
+        <div class="settings-header">
+          <h2>Help improve Arnis</h2>
+          <span class="close-button" onclick="rejectTelemetry()">&times;</span>
+        </div>
+        <p style="text-align:left; margin-top:12px; margin-bottom: -5px;color:#ececec;">
           We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
           <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank">No personal data or world contents are collected.</a>
         </p>
