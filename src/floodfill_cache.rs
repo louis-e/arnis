@@ -58,6 +58,18 @@ impl CoordinateBitmap {
         }
     }
 
+    /// Creates a zero-size bitmap that contains nothing and allocates no memory.
+    pub fn new_empty() -> Self {
+        Self {
+            bits: Vec::new(),
+            min_x: 0,
+            min_z: 0,
+            width: 0,
+            height: 0,
+            count: 0,
+        }
+    }
+
     /// Converts (x, z) coordinate to bit index, returning None if out of bounds.
     #[inline]
     fn coord_to_index(&self, x: i32, z: i32) -> Option<usize> {
@@ -225,6 +237,12 @@ impl CoordinateBitmap {
 /// Type alias for building footprint bitmap (for backwards compatibility).
 pub type BuildingFootprintBitmap = CoordinateBitmap;
 
+/// Type alias for the road surface bitmap used by amenity processors.
+/// Built by `highways::collect_road_surface_coords` using the same Bresenham +
+/// block_range geometry as the renderer, so every placed road/path block coordinate
+/// is marked as 1 and everything else is 0.
+pub type RoadMaskBitmap = CoordinateBitmap;
+
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
     /// Cached results: element_id -> filled coordinates
@@ -361,12 +379,13 @@ impl FloodFillCache {
 
         for element in elements {
             match element {
-                ProcessedElement::Way(way) => {
-                    if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                        if let Some(cached) = self.way_cache.get(&way.id) {
-                            for &(x, z) in cached {
-                                footprints.set(x, z);
-                            }
+                ProcessedElement::Way(way)
+                    if way.tags.contains_key("building")
+                        || way.tags.contains_key("building:part") =>
+                {
+                    if let Some(cached) = self.way_cache.get(&way.id) {
+                        for &(x, z) in cached {
+                            footprints.set(x, z);
                         }
                     }
                 }
@@ -393,64 +412,6 @@ impl FloodFillCache {
         }
 
         footprints
-    }
-
-    /// Collects centroids of all buildings from the pre-computed cache.
-    ///
-    /// This is used for urban ground detection - building clusters are identified
-    /// using their centroids, and a concave hull is computed around dense clusters
-    /// to determine where city ground (smooth stone) should be placed.
-    ///
-    /// Returns a vector of (x, z) centroid coordinates for all buildings.
-    pub fn collect_building_centroids(&self, elements: &[ProcessedElement]) -> Vec<(i32, i32)> {
-        let mut centroids = Vec::new();
-
-        for element in elements {
-            match element {
-                ProcessedElement::Way(way) => {
-                    if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                        if let Some(cached) = self.way_cache.get(&way.id) {
-                            if let Some(centroid) = Self::compute_centroid(cached) {
-                                centroids.push(centroid);
-                            }
-                        }
-                    }
-                }
-                ProcessedElement::Relation(rel) => {
-                    let is_building = rel.tags.contains_key("building")
-                        || rel.tags.contains_key("building:part")
-                        || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
-                    if is_building {
-                        // For building relations, compute centroid from outer ways
-                        let mut all_coords = Vec::new();
-                        for member in &rel.members {
-                            if member.role == ProcessedMemberRole::Outer {
-                                if let Some(cached) = self.way_cache.get(&member.way.id) {
-                                    all_coords.extend(cached.iter().copied());
-                                }
-                            }
-                        }
-                        if let Some(centroid) = Self::compute_centroid(&all_coords) {
-                            centroids.push(centroid);
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        centroids
-    }
-
-    /// Computes the centroid of a set of coordinates.
-    fn compute_centroid(coords: &[(i32, i32)]) -> Option<(i32, i32)> {
-        if coords.is_empty() {
-            return None;
-        }
-        let sum_x: i64 = coords.iter().map(|(x, _)| i64::from(*x)).sum();
-        let sum_z: i64 = coords.iter().map(|(_, z)| i64::from(*z)).sum();
-        let len = coords.len() as i64;
-        Some(((sum_x / len) as i32, (sum_z / len) as i32))
     }
 
     /// Removes a way's cached flood fill result, freeing memory.

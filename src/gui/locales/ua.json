@@ -40,7 +40,13 @@
   "interior": "Генерація інтер'єру",
   "roof": "Генерація даху",
   "fillground": "Заповнити землю",
-  "city_boundaries": "Міська земля",
+  "land_cover": "Земельне покриття",
+  "disable_height_limit": "Вимкнути обмеження висоти",
   "bedrock_auto_generated": "Bedrock світ генерується автоматично",
-  "save_path": "Шлях збереження"
+  "save_path": "Шлях збереження",
+  "rotation_angle": "Кут Обертання",
+  "settings_section_generation": "Генерація",
+  "settings_section_world": "Світ",
+  "settings_section_map": "Карта та введення",
+  "settings_section_application": "Застосунок"
 }

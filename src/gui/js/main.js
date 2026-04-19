@@ -34,7 +34,6 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
   registerMessageEvent();
-  window.createWorld = createWorld;
   window.startGeneration = startGeneration;
   setupProgressListener();
   await initSavePath();
@@ -45,7 +44,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   await applyLocalization(localization);
   updateFormatToggleUI(selectedWorldFormat);
   initFooter();
-  await checkForUpdates();
+  initEasterEggs();
+  checkForUpdates();
 });
 
 // Expose language functions to window for use by language-selector.js
@@ -97,8 +97,6 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 
 async function applyLocalization(localization) {
   const localizationElements = {
-    "span[id='choose_world']": "create_world",
-    "#selected-world": "no_world_selected",
     "#start-button": "start_generation",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
@@ -119,6 +117,10 @@ async function applyLocalization(localization) {
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
+    "div[data-localize='settings_section_generation']": "settings_section_generation",
+    "div[data-localize='settings_section_world']": "settings_section_world",
+    "div[data-localize='settings_section_map']": "settings_section_map",
+    "div[data-localize='settings_section_application']": "settings_section_application",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -272,6 +274,33 @@ function setupProgressListener() {
   });
 }
 
+// Easter eggs
+function showEasterEggAnimal() {
+  const img = document.getElementById('secret-parrot');
+  img.src = './images/parrot.gif';
+  img.style.display = 'inline';
+}
+
+function initEasterEggs() {
+  // 1 in 50 chance at startup
+  if (Math.random() < 1 / 50) {
+    showEasterEggAnimal();
+  }
+
+  // 5 rapid clicks on progress bar
+  const progressBar = document.querySelector('.progress-bar-container');
+  let clicks = [];
+  progressBar.addEventListener('click', () => {
+    const now = Date.now();
+    clicks.push(now);
+    clicks = clicks.filter(t => now - t < 1500);
+    if (clicks.length >= 5) {
+      showEasterEggAnimal();
+      clicks = [];
+    }
+  });
+}
+
 function initSettings() {
   // Settings
   const settingsModal = document.getElementById("settings-modal");
@@ -386,13 +415,8 @@ function initSettings() {
     const localization = await fetchLanguage(selectedLanguage);
     await applyLocalization(localization);
 
-    // Restore correct #selected-world text after localization overwrites it
+    // Restore correct format toggle state after localization
     updateFormatToggleUI(selectedWorldFormat);
-    // If a world was already created, show its name
-    if (worldPath) {
-      const lastSegment = worldPath.split(/[\\/]/).pop();
-      document.getElementById('selected-world').textContent = lastSegment;
-    }
   });
 
   // Tile theme selector
@@ -491,71 +515,27 @@ function getEffectiveWorldFormat() {
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
-  const luantiBtn = document.getElementById('format-luanti');
-  const chooseWorldBtn = document.getElementById('choose-world-btn');
-  const selectedWorldText = document.getElementById('selected-world');
-  
-  // Reset all buttons
-  javaBtn.classList.remove('format-active');
-  bedrockBtn.classList.remove('format-active');
-  if (luantiBtn) luantiBtn.classList.remove('format-active');
-  
+
   const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
 
   if (format === 'java') {
     javaBtn.classList.add('format-active');
-    // Enable Create World button for Java
-    if (chooseWorldBtn) {
-      chooseWorldBtn.disabled = false;
-      chooseWorldBtn.style.opacity = '1';
-      chooseWorldBtn.style.cursor = 'pointer';
-    }
+    bedrockBtn.classList.remove('format-active');
     // Re-enable height limit toggle for Java
     if (heightLimitToggle) {
       heightLimitToggle.disabled = false;
       heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
     }
-    // Show appropriate text based on whether a world was already created
-    if (selectedWorldText && !worldPath) {
-      const noWorldText = window.localization?.no_world_selected || 'No world created';
-      selectedWorldText.textContent = noWorldText;
-      selectedWorldText.style.color = '#fecc44';
-    }
   } else if (format === 'bedrock') {
     bedrockBtn.classList.add('format-active');
-    // Disable Create World button for Bedrock
-    if (chooseWorldBtn) {
-      chooseWorldBtn.disabled = true;
-      chooseWorldBtn.style.opacity = '0.5';
-      chooseWorldBtn.style.cursor = 'not-allowed';
-    }
     // Disable height limit toggle for Bedrock (not supported)
     if (heightLimitToggle) {
       heightLimitToggle.checked = false;
       heightLimitToggle.disabled = true;
       heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
     }
-    // Clear world selection and show Bedrock info message
+    // Clear world path for bedrock (auto-generated)
     worldPath = "";
-    if (selectedWorldText) {
-      const bedrockText = window.localization?.bedrock_auto_generated || 'Bedrock world is auto-generated';
-      selectedWorldText.textContent = bedrockText;
-      selectedWorldText.style.color = '#fecc44';
-    }
-  } else if (format === 'luanti') {
-    if (luantiBtn) luantiBtn.classList.add('format-active');
-    // Disable Create World button for Luanti (auto-generated)
-    if (chooseWorldBtn) {
-      chooseWorldBtn.disabled = true;
-      chooseWorldBtn.style.opacity = '0.5';
-      chooseWorldBtn.style.cursor = 'not-allowed';
-    }
-    // Clear world selection and show Luanti info message
-    worldPath = "";
-    if (selectedWorldText) {
-      selectedWorldText.textContent = 'Luanti world is auto-generated';
-      selectedWorldText.style.color = '#fecc44';
-    }
   }
 }
 
@@ -883,32 +863,6 @@ function displayBboxInfoText(bboxText) {
 
 let worldPath = "";
 
-async function createWorld() {
-  // Don't create if format is Bedrock or Luanti (button should be disabled)
-  if (selectedWorldFormat === 'bedrock' || selectedWorldFormat === 'luanti') return;
-
-  // Don't create if save path hasn't been initialized
-  if (!savePath) {
-    console.warn("Cannot create world: save path not set");
-    return;
-  }
-
-  try {
-    const worldName = await invoke('gui_create_world', { savePath: savePath });
-    if (worldName) {
-      worldPath = worldName;
-      const lastSegment = worldName.split(/[\\/]/).pop();
-      document.getElementById('selected-world').textContent = lastSegment;
-      document.getElementById('selected-world').style.color = "#fecc44";
-
-      // Notify that world changed (reset preview)
-      notifyWorldChanged();
-    }
-  } catch (error) {
-    handleWorldSelectionError(error);
-  }
-}
-
 /**
  * Handles world selection errors and displays appropriate messages
  * @param {number} errorCode - Error code from the backend
@@ -922,9 +876,9 @@ function handleWorldSelectionError(errorCode) {
   };
 
   const errorKey = errorKeys[errorCode] || "unknown_error";
-  const selectedWorld = document.getElementById('selected-world');
-  localizeElement(window.localization, { element: selectedWorld }, errorKey);
-  selectedWorld.style.color = "#fa7878";
+  const progressInfo = document.getElementById('progress-info');
+  localizeElement(window.localization, { element: progressInfo }, errorKey);
+  progressInfo.style.color = "#fa7878";
   worldPath = "";
   console.error(errorCode);
 }
@@ -947,12 +901,21 @@ async function startGeneration() {
       return;
     }
 
-    // Only require world creation for Java format (Bedrock generates a new .mcworld file)
-    if (selectedWorldFormat === 'java' && (!worldPath || worldPath === "")) {
-      const selectedWorld = document.getElementById('selected-world');
-      localizeElement(window.localization, { element: selectedWorld }, "create_world_first");
-      selectedWorld.style.color = "#fa7878";
-      return;
+    // Auto-create world for Java format
+    if (selectedWorldFormat === 'java') {
+      if (!savePath) {
+        console.warn("Cannot create world: save path not set");
+        return;
+      }
+      try {
+        const worldName = await invoke('gui_create_world', { savePath: savePath });
+        if (worldName) {
+          worldPath = worldName;
+        }
+      } catch (error) {
+        handleWorldSelectionError(error);
+        return;
+      }
     }
 
     // Clear any existing world preview since we're generating a new one
@@ -1010,7 +973,7 @@ async function startGeneration() {
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: getEffectiveWorldFormat(),
+        worldFormat: selectedWorldFormat,
         rotationAngle: rotationAngle
     });
 

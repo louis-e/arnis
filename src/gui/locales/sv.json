@@ -40,7 +40,13 @@
   "interior": "Interiörgenerering",
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
-  "city_boundaries": "Stadsmark",
+  "land_cover": "Marktäcke",
+  "disable_height_limit": "Inaktivera höjdgräns",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
-  "save_path": "Sökväg"
+  "save_path": "Sökväg",
+  "rotation_angle": "Rotationsvinkel",
+  "settings_section_generation": "Generering",
+  "settings_section_world": "Värld",
+  "settings_section_map": "Karta och inmatning",
+  "settings_section_application": "Applikation"
 }

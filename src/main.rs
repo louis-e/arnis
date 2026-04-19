@@ -17,7 +17,6 @@ mod floodfill_cache;
 mod ground;
 mod ground_generation;
 mod land_cover;
-mod luanti_block_map;
 mod map_renderer;
 mod map_transformation;
 mod osm_parser;

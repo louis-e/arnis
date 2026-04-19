@@ -1,11 +1,27 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::XZPoint;
-use crate::floodfill_cache::FloodFillCache;
+use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
+
+/// Pick a road surface block deterministically based on coordinates.
+/// Returns a random-looking mix of gray_concrete_powder and cyan_terracotta.
+#[inline]
+fn road_block(x: i32, z: i32) -> Block {
+    // Combine coordinates into a single value and apply bit mixing for a scattered look
+    let mut h = (x as u32).wrapping_mul(0x9E3779B9) ^ (z as u32).wrapping_mul(0x517CC1B7);
+    h ^= h >> 16;
+    h = h.wrapping_mul(0x45D9F3B);
+    h ^= h >> 16;
+    if h & 1 == 0 {
+        GRAY_CONCRETE_POWDER
+    } else {
+        CYAN_TERRACOTTA
+    }
+}
 
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
@@ -98,13 +114,43 @@ fn generate_highways_internal(
                         let x: i32 = node.x;
                         let z: i32 = node.z;
 
-                        for dy in 1..=3 {
-                            editor.set_block(COBBLESTONE_WALL, x, dy, z, None, None);
-                        }
+                        // Traffic light blocks
+                        editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                        editor.set_block(IRON_BARS, x, 2, z, None, None);
+                        editor.set_block(IRON_BARS, x, 3, z, None, None);
+                        editor.set_block(BLACK_WOOL, x, 4, z, None, None);
+                        editor.set_block(BLACK_WOOL, x, 5, z, None, None);
 
-                        editor.set_block(GREEN_WOOL, x, 4, z, None, None);
-                        editor.set_block(YELLOW_WOOL, x, 5, z, None, None);
-                        editor.set_block(RED_WOOL, x, 6, z, None, None);
+                        // Banner placement logic
+                        let abs_y = editor.get_absolute_y(x, 5, z);
+                        let banner_offsets: [(i32, i32, &str); 4] = [
+                            (0, -1, "north"),
+                            (0, 1, "south"),
+                            (-1, 0, "west"),
+                            (1, 0, "east"),
+                        ];
+
+                        // patterns expressed as (java_color, java_pattern_id) pairs
+                        // so both Java and Bedrock writers can use them.
+                        const BANNER_PATTERNS: &[(&str, &str)] = &[
+                            ("red", "minecraft:triangle_top"),
+                            ("lime", "minecraft:triangle_bottom"),
+                            ("yellow", "minecraft:circle"),
+                            ("black", "minecraft:curly_border"),
+                            ("black", "minecraft:border"),
+                        ];
+
+                        for (dx, dz, facing) in &banner_offsets {
+                            editor.place_wall_banner(
+                                LIGHT_GRAY_WALL_BANNER,
+                                x + dx,
+                                abs_y,
+                                z + dz,
+                                facing,
+                                "light_gray",
+                                BANNER_PATTERNS,
+                            );
+                        }
                     }
                 }
             }
@@ -157,7 +203,8 @@ fn generate_highways_internal(
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
-            let mut block_type = BLACK_CONCRETE;
+            let mut block_type = GRAY_CONCRETE_POWDER; // placeholder, overridden per-block by road_block() when use_road_mix is true
+            let mut use_road_mix = true;
             let mut block_range: i32 = 2;
             let mut add_stripe = false;
             let mut add_outline = false;
@@ -200,10 +247,12 @@ fn generate_highways_internal(
             match highway_type.as_str() {
                 "footway" | "pedestrian" => {
                     block_type = GRAY_CONCRETE;
+                    use_road_mix = false;
                     block_range = 1;
                 }
                 "path" => {
                     block_type = DIRT_PATH;
+                    use_road_mix = false;
                     block_range = 1;
                 }
                 "motorway" | "primary" | "trunk" => {
@@ -222,21 +271,23 @@ fn generate_highways_internal(
                 }
                 "service" => {
                     block_type = GRAY_CONCRETE;
+                    use_road_mix = false;
                     block_range = 2;
                 }
                 "secondary_link" | "tertiary_link" => {
                     //Exit ramps, sliproads
-                    block_type = BLACK_CONCRETE;
                     block_range = 1;
                 }
                 "escape" => {
                     // Sand trap for vehicles on mountainous roads
                     block_type = SAND;
+                    use_road_mix = false;
                     block_range = 1;
                 }
                 "steps" => {
                     //TODO: Add correct stairs respecting height, step_count, etc.
                     block_type = GRAY_CONCRETE;
+                    use_road_mix = false;
                     block_range = 1;
                 }
 
@@ -351,6 +402,15 @@ fn generate_highways_internal(
 
             let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize; // 35% of way length, max 50 blocks, min 15 blocks
 
+            // Check if this is a marked zebra crossing (only depends on tags, compute once)
+            let is_zebra_crossing = highway_type == "footway"
+                && element.tags().get("footway").map(|s| s.as_str()) == Some("crossing")
+                && !matches!(
+                    element.tags().get("crossing").map(|s| s.as_str()),
+                    Some("no" | "unmarked")
+                )
+                && element.tags().get("crossing:markings").map(|s| s.as_str()) != Some("no");
+
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
             let total_segments = way.nodes.len() - 1;
@@ -404,10 +464,7 @@ fn generate_highways_internal(
                                 let set_z: i32 = z + dz;
 
                                 // Zebra crossing logic
-                                if highway_type == "footway"
-                                    && element.tags().get("footway")
-                                        == Some(&"crossing".to_string())
-                                {
+                                if is_zebra_crossing {
                                     let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
                                     if is_horizontal {
                                         if set_x % 2 < 1 {
@@ -417,7 +474,11 @@ fn generate_highways_internal(
                                                     set_x,
                                                     current_y,
                                                     set_z,
-                                                    Some(&[BLACK_CONCRETE]),
+                                                    Some(&[
+                                                        BLACK_CONCRETE,
+                                                        GRAY_CONCRETE_POWDER,
+                                                        CYAN_TERRACOTTA,
+                                                    ]),
                                                     None,
                                                 );
                                             } else {
@@ -426,13 +487,17 @@ fn generate_highways_internal(
                                                     set_x,
                                                     current_y,
                                                     set_z,
-                                                    Some(&[BLACK_CONCRETE]),
+                                                    Some(&[
+                                                        BLACK_CONCRETE,
+                                                        GRAY_CONCRETE_POWDER,
+                                                        CYAN_TERRACOTTA,
+                                                    ]),
                                                     None,
                                                 );
                                             }
                                         } else if use_absolute_y {
                                             editor.set_block_absolute(
-                                                BLACK_CONCRETE,
+                                                road_block(set_x, set_z),
                                                 set_x,
                                                 current_y,
                                                 set_z,
@@ -441,7 +506,7 @@ fn generate_highways_internal(
                                             );
                                         } else {
                                             editor.set_block(
-                                                BLACK_CONCRETE,
+                                                road_block(set_x, set_z),
                                                 set_x,
                                                 current_y,
                                                 set_z,
@@ -456,7 +521,7 @@ fn generate_highways_internal(
                                                 set_x,
                                                 current_y,
                                                 set_z,
-                                                Some(&[BLACK_CONCRETE]),
+                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                                 None,
                                             );
                                         } else {
@@ -465,13 +530,13 @@ fn generate_highways_internal(
                                                 set_x,
                                                 current_y,
                                                 set_z,
-                                                Some(&[BLACK_CONCRETE]),
+                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                                 None,
                                             );
                                         }
                                     } else if use_absolute_y {
                                         editor.set_block_absolute(
-                                            BLACK_CONCRETE,
+                                            road_block(set_x, set_z),
                                             set_x,
                                             current_y,
                                             set_z,
@@ -480,7 +545,7 @@ fn generate_highways_internal(
                                         );
                                     } else {
                                         editor.set_block(
-                                            BLACK_CONCRETE,
+                                            road_block(set_x, set_z),
                                             set_x,
                                             current_y,
                                             set_z,
@@ -488,24 +553,41 @@ fn generate_highways_internal(
                                             None,
                                         );
                                     }
-                                } else if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        block_type,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        None,
-                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
-                                    );
                                 } else {
-                                    editor.set_block(
-                                        block_type,
-                                        set_x,
-                                        current_y,
-                                        set_z,
-                                        None,
-                                        Some(&[BLACK_CONCRETE, WHITE_CONCRETE]),
-                                    );
+                                    let effective_block = if use_road_mix {
+                                        road_block(set_x, set_z)
+                                    } else {
+                                        block_type
+                                    };
+                                    if use_absolute_y {
+                                        editor.set_block_absolute(
+                                            effective_block,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            None,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                GRAY_CONCRETE_POWDER,
+                                                CYAN_TERRACOTTA,
+                                                WHITE_CONCRETE,
+                                            ]),
+                                        );
+                                    } else {
+                                        editor.set_block(
+                                            effective_block,
+                                            set_x,
+                                            current_y,
+                                            set_z,
+                                            None,
+                                            Some(&[
+                                                BLACK_CONCRETE,
+                                                GRAY_CONCRETE_POWDER,
+                                                CYAN_TERRACOTTA,
+                                                WHITE_CONCRETE,
+                                            ]),
+                                        );
+                                    }
                                 }
 
                                 // Add stone brick foundation underneath elevated highways/bridges for thickness
@@ -622,7 +704,7 @@ fn generate_highways_internal(
                                         stripe_x,
                                         current_y,
                                         stripe_z,
-                                        Some(&[BLACK_CONCRETE]),
+                                        Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                         None,
                                     );
                                 } else {
@@ -631,7 +713,7 @@ fn generate_highways_internal(
                                         stripe_x,
                                         current_y,
                                         stripe_z,
-                                        Some(&[BLACK_CONCRETE]),
+                                        Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                         None,
                                     );
                                 }
@@ -838,7 +920,17 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
             );
 
             for (bx, _, bz) in bresenham_points {
-                if !editor.check_for_block(bx, 0, bz, Some(&[BLACK_CONCRETE, WHITE_CONCRETE])) {
+                if !editor.check_for_block(
+                    bx,
+                    0,
+                    bz,
+                    Some(&[
+                        BLACK_CONCRETE,
+                        GRAY_CONCRETE_POWDER,
+                        CYAN_TERRACOTTA,
+                        WHITE_CONCRETE,
+                    ]),
+                ) {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
             }
@@ -873,4 +965,183 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
         }
         previous_node = Some((node.x, node.z));
     }
+}
+
+/// Returns the half-width (block_range) for a highway type.
+///
+/// This extracts the same logic used inside `generate_highways_internal` so
+/// that pre-scan passes (e.g. building-passage collection) can determine road
+/// width without generating any blocks.
+pub(crate) fn highway_block_range(
+    highway_type: &str,
+    tags: &HashMap<String, String>,
+    scale: f64,
+) -> i32 {
+    let mut block_range: i32 = match highway_type {
+        "footway" | "pedestrian" => 1,
+        "path" => 1,
+        "motorway" | "primary" | "trunk" => 5,
+        "secondary" => 4,
+        "tertiary" => 2,
+        "track" => 1,
+        "service" => 2,
+        "secondary_link" | "tertiary_link" => 1,
+        "escape" => 1,
+        "steps" => 1,
+        _ => {
+            if let Some(lanes) = tags.get("lanes") {
+                if lanes == "2" {
+                    3
+                } else if lanes != "1" {
+                    4
+                } else {
+                    2
+                }
+            } else {
+                2
+            }
+        }
+    };
+
+    if scale < 1.0 {
+        block_range = ((block_range as f64) * scale).floor() as i32;
+    }
+
+    block_range
+}
+
+/// Collect all (x, z) coordinates that are covered by any rendered road or path
+/// surface. The returned bitmap has 1 for every block that the highway renderer
+/// places as a road/path surface and 0 everywhere else.
+///
+/// Geometry is computed identically to `generate_highways_internal`:
+/// - Bresenham line between each consecutive pair of OSM nodes
+/// - Expanded by `block_range` in both axes (same value as the renderer uses)
+/// - `area=yes` ways, indoor ways, negative-level ways, and pure node types
+///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
+///   early-return guards.
+///
+/// This lets `find_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
+/// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
+pub fn collect_road_surface_coords(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+) -> CoordinateBitmap {
+    let mut bitmap = CoordinateBitmap::new(xzbbox);
+
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+
+        let Some(highway_type) = way.tags.get("highway") else {
+            continue;
+        };
+
+        // Exclude non-surface node-only highway types
+        match highway_type.as_str() {
+            "street_lamp" | "crossing" | "bus_stop" => continue,
+            _ => {}
+        }
+
+        // Exclude area highways (pedestrian plazas etc.) — flood-filled separately
+        if way.tags.get("area").is_some_and(|v| v == "yes") {
+            continue;
+        }
+
+        // Exclude indoor ways (same guard as generate_highways_internal)
+        if way.tags.get("indoor").is_some_and(|v| v == "yes") {
+            continue;
+        }
+
+        // Exclude negative-level ways (indoor mapping)
+        if way
+            .tags
+            .get("level")
+            .and_then(|l| l.parse::<i32>().ok())
+            .is_some_and(|l| l < 0)
+        {
+            continue;
+        }
+
+        // Use the same block_range the renderer uses for this highway type
+        let block_range = highway_block_range(highway_type, &way.tags, scale);
+
+        for i in 1..way.nodes.len() {
+            let prev = way.nodes[i - 1].xz();
+            let cur = way.nodes[i].xz();
+
+            let points = bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z);
+
+            for (bx, _, bz) in &points {
+                for dx in -block_range..=block_range {
+                    for dz in -block_range..=block_range {
+                        bitmap.set(bx + dx, bz + dz);
+                    }
+                }
+            }
+        }
+    }
+
+    bitmap
+}
+
+/// Collect all (x, z) coordinates covered by highways tagged
+/// `tunnel=building_passage`.  The returned bitmap can be passed into building
+/// generation to cut ground-level openings through walls and floors.
+pub fn collect_building_passage_coords(
+    elements: &[ProcessedElement],
+    xzbbox: &XZBBox,
+    scale: f64,
+) -> CoordinateBitmap {
+    // Quick scan: skip bitmap allocation entirely when there are no passage ways.
+    let has_any = elements.iter().any(|e| {
+        if let ProcessedElement::Way(w) = e {
+            w.tags.get("tunnel").map(|v| v.as_str()) == Some("building_passage")
+                && w.tags.contains_key("highway")
+        } else {
+            false
+        }
+    });
+    if !has_any {
+        return CoordinateBitmap::new_empty();
+    }
+
+    let mut bitmap = CoordinateBitmap::new(xzbbox);
+
+    for element in elements {
+        let ProcessedElement::Way(way) = element else {
+            continue;
+        };
+
+        // Must be tunnel=building_passage
+        if way.tags.get("tunnel").map(|v| v.as_str()) != Some("building_passage") {
+            continue;
+        }
+
+        // Must have a highway tag so we know the road width
+        let Some(highway_type) = way.tags.get("highway") else {
+            continue;
+        };
+
+        let block_range = highway_block_range(highway_type, &way.tags, scale);
+
+        for i in 1..way.nodes.len() {
+            let prev = way.nodes[i - 1].xz();
+            let cur = way.nodes[i].xz();
+
+            let points = bresenham_line(prev.x, 0, prev.z, cur.x, 0, cur.z);
+
+            for (bx, _, bz) in &points {
+                for dx in -block_range..=block_range {
+                    for dz in -block_range..=block_range {
+                        bitmap.set(bx + dx, bz + dz);
+                    }
+                }
+            }
+        }
+    }
+
+    bitmap
 }

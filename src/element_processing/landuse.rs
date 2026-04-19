@@ -29,20 +29,18 @@ pub fn generate_landuse(
         "cemetery" => PODZOL,
         "construction" => COARSE_DIRT,
         "traffic_island" => STONE_BLOCK_SLAB,
-        "residential" => {
-            let residential_tag = element.tags.get("residential").unwrap_or(&binding);
-            if residential_tag == "rural" {
-                GRASS_BLOCK
-            } else {
-                STONE_BRICKS // Placeholder, will be randomized per-block
-            }
-        }
-        "commercial" => SMOOTH_STONE, // Placeholder, will be randomized per-block
+        // residential and commercial are too broad, they cover entire zones including
+        // gardens, parks, and green spaces. ESA WorldCover handles built-up classification
+        // at 10m satellite resolution, which is far more precise.
+        "residential" | "commercial" => return,
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
         "industrial" => STONE, // Placeholder, will be randomized per-block
-        "military" => GRAY_CONCRETE,
+        "military" => GRAY_CONCRETE, // Placeholder, will be randomized per-block
         "railway" => GRAVEL,
+        "vineyard" => COARSE_DIRT,
+        "winter_sports" => SNOW_BLOCK,
+        "brownfield" => COARSE_DIRT,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
             let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);
@@ -85,31 +83,7 @@ pub fn generate_landuse(
 
     for (x, z) in floor_area {
         // Apply per-block randomness for certain landuse types
-        let actual_block = if landuse_tag == "residential" && block_type == STONE_BRICKS {
-            // Urban residential: mix of stone bricks, cracked stone bricks, stone, cobblestone
-            let random_value = rng.random_range(0..100);
-            if random_value < 72 {
-                STONE_BRICKS
-            } else if random_value < 87 {
-                CRACKED_STONE_BRICKS
-            } else if random_value < 92 {
-                STONE
-            } else {
-                COBBLESTONE
-            }
-        } else if landuse_tag == "commercial" {
-            // Commercial: mix of smooth stone, stone, cobblestone, stone bricks
-            let random_value = rng.random_range(0..100);
-            if random_value < 40 {
-                SMOOTH_STONE
-            } else if random_value < 70 {
-                STONE_BRICKS
-            } else if random_value < 90 {
-                STONE
-            } else {
-                COBBLESTONE
-            }
-        } else if landuse_tag == "industrial" {
+        let actual_block = if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone
             let random_value = rng.random_range(0..100);
             if random_value < 70 {
@@ -119,22 +93,50 @@ pub fn generate_landuse(
             } else {
                 SMOOTH_STONE
             }
+        } else if landuse_tag == "military" {
+            // Military: primarily gray concrete, with some stone bricks and cobblestone
+            let random_value = rng.random_range(0..100);
+            if random_value < 89 {
+                GRAY_CONCRETE
+            } else if random_value < 99 {
+                STONE_BRICKS
+            } else {
+                COBBLESTONE
+            }
         } else {
             block_type
         };
+
+        // Don't overwrite roads or water with landuse ground blocks
+        let is_protected = editor.check_for_block(
+            x,
+            0,
+            z,
+            Some(&[
+                BLACK_CONCRETE,
+                GRAY_CONCRETE_POWDER,
+                CYAN_TERRACOTTA,
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
+                DIRT_PATH,
+                SMOOTH_STONE,
+                WATER,
+            ]),
+        );
 
         if landuse_tag == "traffic_island" {
             editor.set_block(actual_block, x, 1, z, None, None);
         } else if landuse_tag == "construction" || landuse_tag == "railway" {
             editor.set_block(actual_block, x, 0, z, None, Some(&[SPONGE]));
-        } else {
+        } else if !is_protected {
             editor.set_block(actual_block, x, 0, z, None, None);
         }
 
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
-            "cemetery" => {
-                if (x % 3 == 0) && (z % 3 == 0) {
+            "cemetery"
+                if (x % 3 == 0) && (z % 3 == 0) => {
                     let random_choice: i32 = rng.random_range(0..100);
                     if random_choice < 15 {
                         // Place graves
@@ -157,18 +159,17 @@ pub fn generate_landuse(
                         }
                     } else if random_choice < 33 {
                         Tree::create(editor, (x, 1, z), Some(building_footprints));
-                    } else if random_choice < 35 {
+                    } else if !is_protected && random_choice < 35 {
                         editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                    } else if random_choice < 37 {
+                    } else if !is_protected && random_choice < 37 {
                         editor.set_block(FERN, x, 1, z, None, None);
-                    } else if random_choice < 41 {
+                    } else if !is_protected && random_choice < 41 {
                         editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
                         editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
                     }
                 }
-            }
-            "forest" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+            "forest"
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                     let random_choice: i32 = rng.random_range(0..30);
                     if random_choice == 20 {
                         let tree_type = *trees_ok_to_generate
@@ -198,10 +199,9 @@ pub fn generate_landuse(
                         }
                     }
                 }
-            }
-            "farmland" => {
+            "farmland"
                 // Check if the current block is not water or another undesired block
-                if !editor.check_for_block(x, 0, z, Some(&[WATER])) {
+                if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
                     if x % 9 == 0 && z % 9 == 0 {
                         // Place water in dot pattern
                         editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
@@ -220,7 +220,6 @@ pub fn generate_landuse(
                         }
                     }
                 }
-            }
             "construction" => {
                 let random_choice: i32 = rng.random_range(0..1501);
                 if random_choice < 15 {
@@ -293,8 +292,8 @@ pub fn generate_landuse(
                     editor.set_block(COBBLESTONE, x, 0, z, None, Some(&[SPONGE]));
                 }
             }
-            "grass" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+            "grass"
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                     match rng.random_range(0..200) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
                         1..=8 => editor.set_block(FERN, x, 1, z, None, None),
@@ -302,9 +301,8 @@ pub fn generate_landuse(
                         _ => {}
                     }
                 }
-            }
-            "greenfield" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+            "greenfield"
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                     match rng.random_range(0..200) {
                         0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
                         1..=2 => editor.set_block(FERN, x, 1, z, None, None),
@@ -312,9 +310,8 @@ pub fn generate_landuse(
                         _ => {}
                     }
                 }
-            }
-            "meadow" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
+            "meadow"
+                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
                     let random_choice: i32 = rng.random_range(0..1001);
                     if random_choice < 5 {
                         Tree::create(editor, (x, 1, z), Some(building_footprints));
@@ -331,7 +328,6 @@ pub fn generate_landuse(
                         editor.set_block(GRASS, x, 1, z, None, None);
                     }
                 }
-            }
             "orchard" => {
                 if x % 18 == 0 && z % 10 == 0 {
                     Tree::create(editor, (x, 1, z), Some(building_footprints));
@@ -435,7 +431,9 @@ pub fn generate_place(
     // Determine block type based on place tag
     let block_type = match place_tag.as_str() {
         "square" => STONE_BRICKS,
-        "neighbourhood" | "city_block" | "quarter" | "suburb" => SMOOTH_STONE,
+        // neighbourhood/city_block/quarter/suburb are too broad, ESA WorldCover
+        // land cover data handles built-up classification at 10m resolution instead
+        "neighbourhood" | "city_block" | "quarter" | "suburb" => return,
         _ => return,
     };
 

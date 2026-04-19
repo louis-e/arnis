@@ -40,7 +40,13 @@
   "interior": "Генерация Интерьера",
   "roof": "Генерация Крыши",
   "fillground": "Заполнить Землю",
-  "city_boundaries": "Городской грунт",
+  "land_cover": "Земельный покров",
+  "disable_height_limit": "Отключить ограничение высоты",
   "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",
-  "save_path": "Путь сохранения"
+  "save_path": "Путь сохранения",
+  "rotation_angle": "Угол Поворота",
+  "settings_section_generation": "Генерация",
+  "settings_section_world": "Мир",
+  "settings_section_map": "Карта и ввод",
+  "settings_section_application": "Приложение"
 }

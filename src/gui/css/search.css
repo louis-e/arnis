@@ -24,14 +24,14 @@
 }
 
 #city-search:focus {
-    border-color: #007cbb;
-    box-shadow: 0 0 5px rgba(0, 124, 187, 0.3);
+    border-color: #fecc44;
+    box-shadow: 0 0 5px rgba(254, 204, 68, 0.3);
 }
 
 #search-btn {
-    background: #007cbb;
-    color: white;
-    border: 1px solid #007cbb;
+    background: #5d5d5d;
+    color: #ffffff;
+    border: 1px solid #5d5d5d;
     border-radius: 0 3px 3px 0;
     padding: 4.5px 10px;
     cursor: pointer;
@@ -70,7 +70,7 @@
 
 .search-result-name {
     font-weight: bold;
-    color: #007cbb;
+    color: #e6b73d;
     word-wrap: break-word;
     overflow-wrap: break-word;
 }

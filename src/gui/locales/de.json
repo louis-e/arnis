@@ -40,7 +40,13 @@
   "interior": "Innenraum Generierung",
   "roof": "Dach Generierung",
   "fillground": "Boden füllen",
-  "city_boundaries": "Stadtboden",
+  "land_cover": "Landbedeckung",
+  "disable_height_limit": "Höhenlimit deaktivieren",
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",
-  "save_path": "Speicherpfad"
+  "save_path": "Speicherpfad",
+  "rotation_angle": "Rotationswinkel",
+  "settings_section_generation": "Generierung",
+  "settings_section_world": "Welt",
+  "settings_section_map": "Karte & Eingabe",
+  "settings_section_application": "Anwendung"
 }

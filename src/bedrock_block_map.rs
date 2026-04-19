@@ -5,19 +5,35 @@
 //! state properties that differ slightly from Java Edition.
 
 use crate::block_definitions::Block;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 
 /// Represents a Bedrock block with its identifier and state properties.
-#[derive(Debug, Clone)]
+///
+/// Uses `BTreeMap` for deterministic iteration order, which is required for
+/// correct `Hash`/`Eq` implementations (used as palette dedup key).
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BedrockBlock {
     /// The Bedrock block identifier (e.g., "minecraft:stone")
     pub name: String,
     /// Block state properties as key-value pairs
-    pub states: HashMap<String, BedrockBlockStateValue>,
+    pub states: BTreeMap<String, BedrockBlockStateValue>,
+}
+
+/// `BTreeMap` does not implement `Hash`, so we hash entries in sorted-key order
+/// (guaranteed by `BTreeMap::iter`).
+impl Hash for BedrockBlock {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        for (k, v) in &self.states {
+            k.hash(state);
+            v.hash(state);
+        }
+    }
 }
 
 /// Bedrock block state values can be strings, booleans, or integers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum BedrockBlockStateValue {
     String(String),
     Bool(bool),
@@ -29,13 +45,13 @@ impl BedrockBlock {
     pub fn simple(name: &str) -> Self {
         Self {
             name: format!("minecraft:{name}"),
-            states: HashMap::new(),
+            states: BTreeMap::new(),
         }
     }
 
     /// Creates a block with state properties.
     pub fn with_states(name: &str, states: Vec<(&str, BedrockBlockStateValue)>) -> Self {
-        let mut state_map = HashMap::new();
+        let mut state_map = BTreeMap::new();
         for (key, value) in states {
             state_map.insert(key.to_string(), value);
         }
@@ -341,6 +357,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "concrete",
             vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
         ),
+        "gray_concrete_powder" => BedrockBlock::with_states(
+            "concretePowder",
+            vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
+        ),
         "light_gray_concrete" => BedrockBlock::with_states(
             "concrete",
             vec![(
@@ -438,6 +458,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "stained_hardened_clay",
             vec![("color", BedrockBlockStateValue::String("blue".to_string()))],
         ),
+        "cyan_terracotta" => BedrockBlock::with_states(
+            "stained_hardened_clay",
+            vec![("color", BedrockBlockStateValue::String("cyan".to_string()))],
+        ),
         "gray_terracotta" => BedrockBlock::with_states(
             "stained_hardened_clay",
             vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
@@ -467,11 +491,42 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         ),
         // Plain terracotta
         "terracotta" => BedrockBlock::simple("hardened_clay"),
-
+        // Wall banner — Bedrock uses "minecraft:wall_banner" with a
+        // "facing_direction" int state: 2=north, 3=south, 4=west, 5=east.
+        // The color is stored in the block entity (Base field), not the block state.
+        // The facing string→int mapping is handled by to_bedrock_block_with_properties.
+        "light_gray_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))], // default north
+        ),
+        "white_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))], // default north
+        ),
+        "blue_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
+        "black_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
+        "red_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
+        "green_wall_banner" => BedrockBlock::with_states(
+            "wall_banner",
+            vec![("facing_direction", BedrockBlockStateValue::Int(2))],
+        ),
         // Wool colors
         "white_wool" => BedrockBlock::with_states(
             "wool",
             vec![("color", BedrockBlockStateValue::String("white".to_string()))],
+        ),
+        "black_wool" => BedrockBlock::with_states(
+            "wool",
+            vec![("color", BedrockBlockStateValue::String("black".to_string()))],
         ),
         "red_wool" => BedrockBlock::with_states(
             "wool",
@@ -787,6 +842,29 @@ pub fn to_bedrock_block_with_properties(
         return convert_trapdoor(java_name, props_map);
     }
 
+    // Handle beds with facing/part/occupied properties
+    if java_name.ends_with("_bed") {
+        return convert_bed(java_name, props_map);
+    }
+
+    // Handle rails with shape property
+    if java_name == "rail" {
+        return convert_rail(props_map);
+    }
+
+    // Handle wall banners with facing property
+    if matches!(
+        java_name,
+        "light_gray_wall_banner"
+            | "white_wall_banner"
+            | "blue_wall_banner"
+            | "black_wall_banner"
+            | "red_wall_banner"
+            | "green_wall_banner"
+    ) {
+        return convert_wall_banner(props_map);
+    }
+
     // Fall back to basic conversion without properties
     to_bedrock_block(block)
 }
@@ -802,7 +880,7 @@ fn convert_stairs(
         _ => java_name, // Most stairs have the same name
     };
 
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     // Convert facing: Java uses "north/south/east/west", Bedrock uses "weirdo_direction" (0-3)
     // Bedrock: 0=east, 1=west, 2=south, 3=north
@@ -854,7 +932,7 @@ fn convert_barrel(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     if let Some(props) = props {
         if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
@@ -894,7 +972,7 @@ fn convert_slab(
     java_name: &str,
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     // Convert type: Java uses "top/bottom/double", Bedrock uses "top_slot_bit"
     if let Some(props) = props {
@@ -963,7 +1041,7 @@ fn convert_log(
     props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
 ) -> BedrockBlock {
     let bedrock_name = java_name;
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     // Convert axis: Java uses "x/y/z", Bedrock uses "pillar_axis"
     if let Some(props) = props {
@@ -1002,7 +1080,7 @@ fn convert_door(
         _ => java_name, // spruce_door, dark_oak_door, etc. keep their name
     };
 
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     if let Some(props) = props {
         // Convert half: Java "upper"/"lower" → Bedrock upper_block_bit true/false
@@ -1077,17 +1155,18 @@ fn convert_trapdoor(
         _ => java_name, // spruce_trapdoor, dark_oak_trapdoor, birch_trapdoor, etc.
     };
 
-    let mut states = HashMap::new();
+    let mut states = BTreeMap::new();
 
     if let Some(props) = props {
         // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3)
-        // Bedrock trapdoor: 0=south, 1=north, 2=east, 3=west
+        // Bedrock trapdoor direction: 0=east, 1=west, 2=south, 3=north
+        // (same encoding as stairs weirdo_direction).
         if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
             let direction = match facing.as_str() {
-                "south" => 0,
-                "north" => 1,
-                "east" => 2,
-                "west" => 3,
+                "east" => 0,
+                "west" => 1,
+                "south" => 2,
+                "north" => 3,
                 _ => 0,
             };
             states.insert(
@@ -1135,6 +1214,155 @@ fn convert_trapdoor(
     }
 }
 
+/// Convert Java bed block to Bedrock format with direction, head/foot, and occupied states.
+fn convert_bed(
+    java_name: &str,
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let mut states = BTreeMap::new();
+
+    // Derive bed color from Java name (e.g. "red_bed" → "red", "blue_bed" → "blue")
+    let color = java_name
+        .strip_suffix("_bed")
+        .filter(|prefix| !prefix.is_empty())
+        .unwrap_or("red");
+    states.insert(
+        "color".to_string(),
+        BedrockBlockStateValue::String(color.to_string()),
+    );
+
+    if let Some(props) = props {
+        // Convert facing: Java "north/south/east/west" → Bedrock "direction" (0-3)
+        // Bedrock bed direction: 0=east, 1=west, 2=south, 3=north
+        // (same encoding as trapdoors and stairs weirdo_direction).
+        if let Some(fastnbt::Value::String(facing)) = props.get("facing") {
+            let direction = match facing.as_str() {
+                "east" => 0,
+                "west" => 1,
+                "south" => 2,
+                "north" => 3,
+                _ => 0,
+            };
+            states.insert(
+                "direction".to_string(),
+                BedrockBlockStateValue::Int(direction),
+            );
+        }
+
+        // Convert part: Java "head"/"foot" → Bedrock head_piece_bit
+        if let Some(fastnbt::Value::String(part)) = props.get("part") {
+            let is_head = part == "head";
+            states.insert(
+                "head_piece_bit".to_string(),
+                BedrockBlockStateValue::Bool(is_head),
+            );
+        }
+
+        // Convert occupied: Java "true"/"false" → Bedrock occupied_bit
+        if let Some(fastnbt::Value::String(occupied)) = props.get("occupied") {
+            let is_occupied = occupied == "true";
+            states.insert(
+                "occupied_bit".to_string(),
+                BedrockBlockStateValue::Bool(is_occupied),
+            );
+        }
+    }
+
+    // Defaults if no properties were set
+    if !states.contains_key("direction") {
+        states.insert("direction".to_string(), BedrockBlockStateValue::Int(0));
+    }
+    if !states.contains_key("head_piece_bit") {
+        states.insert(
+            "head_piece_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
+    }
+    if !states.contains_key("occupied_bit") {
+        states.insert(
+            "occupied_bit".to_string(),
+            BedrockBlockStateValue::Bool(false),
+        );
+    }
+
+    BedrockBlock {
+        name: "minecraft:bed".to_string(),
+        states,
+    }
+}
+
+/// Convert Java wall banner to Bedrock format.
+///
+/// Java stores facing as a string ("north"/"south"/"east"/"west") on the block state.
+/// Bedrock uses `facing_direction` as an integer on `minecraft:wall_banner`:
+///   2 = north, 3 = south, 4 = west, 5 = east
+///
+/// The banner color (light_gray = 7) and patterns live in the block entity, not here.
+fn convert_wall_banner(
+    props: Option<&std::collections::HashMap<String, fastnbt::Value>>,
+) -> BedrockBlock {
+    let facing_direction = props
+        .and_then(|p| p.get("facing"))
+        .and_then(|v| match v {
+            fastnbt::Value::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .map(|f| match f {
+            "north" => 2,
+            "south" => 3,
+            "west" => 4,
+            "east" => 5,
+            _ => 2, // default north
+        })
+        .unwrap_or(2);
+
+    BedrockBlock::with_states(
+        "wall_banner",
+        vec![(
+            "facing_direction",
+            BedrockBlockStateValue::Int(facing_direction),
+        )],
+    )
+}
+
+/// Convert Java rail to Bedrock format with rail_direction from shape property.
+///
+/// Java uses `shape` strings ("north_south", "east_west", "ascending_east", etc.)
+/// while Bedrock uses `rail_direction` integers (0–9).
+fn convert_rail(props: Option<&std::collections::HashMap<String, fastnbt::Value>>) -> BedrockBlock {
+    let direction = props
+        .and_then(|p| p.get("shape"))
+        .and_then(|v| match v {
+            fastnbt::Value::String(s) => Some(s.as_str()),
+            _ => None,
+        })
+        .map(|shape| match shape {
+            "north_south" => 0,
+            "east_west" => 1,
+            "ascending_east" => 2,
+            "ascending_west" => 3,
+            "ascending_north" => 4,
+            "ascending_south" => 5,
+            "south_east" => 6,
+            "south_west" => 7,
+            "north_west" => 8,
+            "north_east" => 9,
+            _ => 0,
+        })
+        .unwrap_or(0);
+
+    let mut states = BTreeMap::new();
+    states.insert(
+        "rail_direction".to_string(),
+        BedrockBlockStateValue::Int(direction),
+    );
+
+    BedrockBlock {
+        name: "minecraft:rail".to_string(),
+        states,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1164,6 +1392,28 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(s)) if s == "white"
+        ));
+    }
+
+    #[test]
+    fn test_gray_concrete_powder_bedrock_mapping() {
+        use crate::block_definitions::GRAY_CONCRETE_POWDER;
+        let bedrock = to_bedrock_block(GRAY_CONCRETE_POWDER);
+        assert_eq!(bedrock.name, "minecraft:concretePowder");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "gray"
+        ));
+    }
+
+    #[test]
+    fn test_cyan_terracotta_bedrock_mapping() {
+        use crate::block_definitions::CYAN_TERRACOTTA;
+        let bedrock = to_bedrock_block(CYAN_TERRACOTTA);
+        assert_eq!(bedrock.name, "minecraft:stained_hardened_clay");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "cyan"
         ));
     }
 
@@ -1229,6 +1479,127 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("upside_down_bit"),
             Some(BedrockBlockStateValue::Bool(true))
+        ));
+    }
+
+    #[test]
+    fn test_bed_with_properties() {
+        use crate::block_definitions::RED_BED_NORTH_HEAD;
+        use std::collections::HashMap as StdHashMap;
+
+        let mut props = StdHashMap::new();
+        props.insert(
+            "facing".to_string(),
+            fastnbt::Value::String("north".to_string()),
+        );
+        props.insert(
+            "part".to_string(),
+            fastnbt::Value::String("head".to_string()),
+        );
+        props.insert(
+            "occupied".to_string(),
+            fastnbt::Value::String("false".to_string()),
+        );
+        let java_props = fastnbt::Value::Compound(props);
+
+        let bedrock = to_bedrock_block_with_properties(RED_BED_NORTH_HEAD, Some(&java_props));
+        assert_eq!(bedrock.name, "minecraft:bed");
+
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(c)) if c == "red"
+        ));
+        // Bedrock bed: facing=north → direction=3
+        assert!(matches!(
+            bedrock.states.get("direction"),
+            Some(BedrockBlockStateValue::Int(3))
+        ));
+        assert!(matches!(
+            bedrock.states.get("head_piece_bit"),
+            Some(BedrockBlockStateValue::Bool(true))
+        ));
+        assert!(matches!(
+            bedrock.states.get("occupied_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        ));
+    }
+
+    #[test]
+    fn test_bed_defaults_without_properties() {
+        use crate::block_definitions::RED_BED_SOUTH_FOOT;
+
+        let bedrock = to_bedrock_block_with_properties(RED_BED_SOUTH_FOOT, None);
+        assert_eq!(bedrock.name, "minecraft:bed");
+
+        // Should use defaults from block.properties() (south facing, foot)
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(c)) if c == "red"
+        ));
+        // facing=south → direction=2
+        assert!(matches!(
+            bedrock.states.get("direction"),
+            Some(BedrockBlockStateValue::Int(2))
+        ));
+        assert!(matches!(
+            bedrock.states.get("head_piece_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        ));
+        assert!(matches!(
+            bedrock.states.get("occupied_bit"),
+            Some(BedrockBlockStateValue::Bool(false))
+        ));
+    }
+
+    #[test]
+    fn test_rail_shape_conversion() {
+        use crate::block_definitions::RAIL;
+
+        let cases = [
+            ("north_south", 0),
+            ("east_west", 1),
+            ("ascending_east", 2),
+            ("ascending_west", 3),
+            ("ascending_north", 4),
+            ("ascending_south", 5),
+            ("south_east", 6),
+            ("south_west", 7),
+            ("north_west", 8),
+            ("north_east", 9),
+        ];
+
+        for (shape, expected_direction) in cases {
+            let mut props = std::collections::HashMap::new();
+            props.insert(
+                "shape".to_string(),
+                fastnbt::Value::String(shape.to_string()),
+            );
+            let java_props = fastnbt::Value::Compound(props);
+
+            let bedrock = to_bedrock_block_with_properties(RAIL, Some(&java_props));
+            assert_eq!(bedrock.name, "minecraft:rail");
+            assert!(
+                matches!(
+                    bedrock.states.get("rail_direction"),
+                    Some(BedrockBlockStateValue::Int(d)) if *d == expected_direction
+                ),
+                "shape={shape}: expected rail_direction={expected_direction}, got {:?}",
+                bedrock.states.get("rail_direction")
+            );
+        }
+    }
+
+    #[test]
+    fn test_rail_default_without_properties() {
+        use crate::block_definitions::RAIL;
+
+        let bedrock = to_bedrock_block_with_properties(RAIL, None);
+        assert_eq!(bedrock.name, "minecraft:rail");
+        // RAIL (id=66) has no built-in properties, so falls back to
+        // to_bedrock_block which hardcodes rail_direction=0
+        assert!(matches!(
+            bedrock.states.get("rail_direction"),
+            Some(BedrockBlockStateValue::Int(0))
         ));
     }
 }

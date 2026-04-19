@@ -112,6 +112,9 @@ const ACACIA_LEAVES_FILL: [(Coord, Coord); 5] = [
 
 //////////////////////////////////////////////////
 
+/// Maximum horizontal canopy radius used by the predefined tree patterns.
+const MAX_CANOPY_RADIUS: i32 = 3;
+
 /// Helper function to set blocks in various patterns.
 fn round(editor: &mut WorldEditor, material: Block, (x, y, z): Coord, block_pattern: &[Coord]) {
     for (i, j, k) in block_pattern {
@@ -140,6 +143,26 @@ pub struct Tree<'a> {
 }
 
 impl Tree<'_> {
+    fn canopy_might_intersect_building(
+        x: i32,
+        z: i32,
+        building_footprints: Option<&BuildingFootprintBitmap>,
+    ) -> bool {
+        let Some(footprints) = building_footprints else {
+            return false;
+        };
+
+        for check_x in (x - MAX_CANOPY_RADIUS)..=(x + MAX_CANOPY_RADIUS) {
+            for check_z in (z - MAX_CANOPY_RADIUS)..=(z + MAX_CANOPY_RADIUS) {
+                if footprints.contains(check_x, check_z) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     /// Creates a tree at the specified coordinates.
     ///
     /// # Arguments
@@ -183,6 +206,25 @@ impl Tree<'_> {
             }
         }
 
+        // Skip if this coordinate is on a road, path, or other paved surface
+        if editor.check_for_block(
+            x,
+            0,
+            z,
+            Some(&[
+                BLACK_CONCRETE,
+                GRAY_CONCRETE_POWDER,
+                CYAN_TERRACOTTA,
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                DIRT_PATH,
+                SMOOTH_STONE,
+                WATER,
+            ]),
+        ) {
+            return;
+        }
+
         let mut blacklist: Vec<Block> = Vec::new();
         blacklist.extend(Self::get_building_wall_blocks());
         blacklist.extend(Self::get_building_floor_blocks());
@@ -191,6 +233,8 @@ impl Tree<'_> {
         blacklist.push(WATER);
 
         let tree = Self::get_tree(tree_type);
+        let check_canopy_collision =
+            Self::canopy_might_intersect_building(x, z, building_footprints);
 
         // Build the logs
         editor.fill_blocks(
@@ -207,23 +251,59 @@ impl Tree<'_> {
 
         // Fill in the leaves
         for ((i1, j1, k1), (i2, j2, k2)) in tree.leaves_fill {
-            editor.fill_blocks(
-                tree.leaves_block,
-                x + i1,
-                y + j1,
-                z + k1,
-                x + i2,
-                y + j2,
-                z + k2,
-                None,
-                None,
-            );
+            if check_canopy_collision {
+                for leaf_x in (x + i1)..=(x + i2) {
+                    for leaf_y in (y + j1)..=(y + j2) {
+                        for leaf_z in (z + k1)..=(z + k2) {
+                            if building_footprints.is_none_or(|fp| !fp.contains(leaf_x, leaf_z)) {
+                                editor.set_block(
+                                    tree.leaves_block,
+                                    leaf_x,
+                                    leaf_y,
+                                    leaf_z,
+                                    None,
+                                    None,
+                                );
+                            }
+                        }
+                    }
+                }
+            } else {
+                editor.fill_blocks(
+                    tree.leaves_block,
+                    x + i1,
+                    y + j1,
+                    z + k1,
+                    x + i2,
+                    y + j2,
+                    z + k2,
+                    None,
+                    None,
+                );
+            }
         }
 
         // Do the three rounds
         for (round_range, round_pattern) in tree.round_ranges.iter().zip(ROUND_PATTERNS) {
             for offset in round_range {
-                round(editor, tree.leaves_block, (x, y + offset, z), round_pattern);
+                if check_canopy_collision {
+                    for &(i, j, k) in round_pattern {
+                        let leaf_x = x + i;
+                        let leaf_z = z + k;
+                        if building_footprints.is_none_or(|fp| !fp.contains(leaf_x, leaf_z)) {
+                            editor.set_block(
+                                tree.leaves_block,
+                                leaf_x,
+                                y + offset + j,
+                                leaf_z,
+                                None,
+                                None,
+                            );
+                        }
+                    }
+                } else {
+                    round(editor, tree.leaves_block, (x, y + offset, z), round_pattern);
+                }
             }
         }
     }
@@ -337,6 +417,8 @@ impl Tree<'_> {
             BLUE_TERRACOTTA,
             YELLOW_TERRACOTTA,
             BLACK_CONCRETE,
+            GRAY_CONCRETE_POWDER,
+            CYAN_TERRACOTTA,
             WHITE_CONCRETE,
             GRAY_CONCRETE,
             LIGHT_GRAY_CONCRETE,

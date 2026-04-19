@@ -3,8 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
-use crate::floodfill::flood_fill_area; // Needed for inline amenity flood fills
-use crate::floodfill_cache::FloodFillCache;
+use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
@@ -14,11 +13,40 @@ use rand::{
 };
 use std::collections::{HashMap, HashSet};
 
+/// Looks outward from (x, z) in each of the four cardinal directions,
+/// up to max_radius blocks away, and returns the (x, z) position of
+/// the nearest road node found.
+///
+/// Returns None if no road node exists within range.
+/// Callers can use the returned position to derive a facing direction,
+/// compute a distance, or do anything else they need.
+fn get_nearest_road_block(
+    x: i32,
+    z: i32,
+    max_radius: i32,
+    road_mask: &RoadMaskBitmap,
+) -> Option<(i32, i32)> {
+    // Begins at 2 and skips to 4, 6, 8, etc.
+    for dist in (2..=max_radius).step_by(2) {
+        // Cross pattern: North, South, West, East
+        let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
+
+        for (cx, cz) in candidates {
+            if road_mask.contains(cx, cz) {
+                return Some((cx, cz));
+            }
+        }
+    }
+
+    None
+}
+
 pub fn generate_amenities(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
@@ -132,18 +160,62 @@ pub fn generate_amenities(
             "bench" => {
                 // Place a bench
                 if let Some(pt) = first_node {
-                    // Use deterministic RNG for consistent bench orientation across region boundaries
                     let mut rng = element_rng(element.id());
-                    // 50% chance to 90 degrees rotate the bench
-                    if rng.random_bool(0.5) {
-                        editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
-                        editor.set_block(OAK_LOG, pt.x + 1, 1, pt.z, None, None);
-                        editor.set_block(OAK_LOG, pt.x - 1, 1, pt.z, None, None);
+                    let road_pos = get_nearest_road_block(pt.x, pt.z, 4, road_mask);
+
+                    let use_east_west = if let Some((rx, rz)) = road_pos {
+                        let dx = (rx - pt.x).abs();
+                        let dz = (rz - pt.z).abs();
+                        dz >= dx
                     } else {
-                        editor.set_block(SMOOTH_STONE, pt.x, 1, pt.z, None, None);
-                        editor.set_block(OAK_LOG, pt.x, 1, pt.z + 1, None, None);
-                        editor.set_block(OAK_LOG, pt.x, 1, pt.z - 1, None, None);
-                    }
+                        rng.random_bool(0.5)
+                    };
+
+                    // facing_a and facing_b must face AWAY from the center (pt.x, pt.z)
+                    let (facing_a, facing_b, dx, dz) = if use_east_west {
+                        // Bench stretches along X axis.
+                        // Stair A is at -1 (West), so it faces West.
+                        // Stair B is at +1 (East), so it faces East.
+                        (StairFacing::West, StairFacing::East, 1, 0)
+                    } else {
+                        // Bench stretches along Z axis.
+                        // Stair A is at -1 (North), so it faces North.
+                        // Stair B is at +1 (South), so it faces South.
+                        (StairFacing::North, StairFacing::South, 0, 1)
+                    };
+
+                    let abs_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    let bench_blacklist = [OAK_LOG, SPRUCE_LOG];
+                    //place bench
+                    let stair_a = top_stair(create_stair_with_properties(
+                        OAK_STAIRS,
+                        facing_a,
+                        StairShape::Straight,
+                    ));
+                    editor.set_block_with_properties_absolute(
+                        stair_a,
+                        pt.x - dx,
+                        abs_y,
+                        pt.z - dz,
+                        None,
+                        Some(&bench_blacklist),
+                    );
+
+                    editor.set_block(OAK_SLAB_TOP, pt.x, 1, pt.z, None, Some(&bench_blacklist));
+
+                    let stair_b = top_stair(create_stair_with_properties(
+                        OAK_STAIRS,
+                        facing_b,
+                        StairShape::Straight,
+                    ));
+                    editor.set_block_with_properties_absolute(
+                        stair_b,
+                        pt.x + dx,
+                        abs_y,
+                        pt.z + dz,
+                        None,
+                        Some(&bench_blacklist),
+                    );
                 }
             }
             "shelter" => {
@@ -169,145 +241,269 @@ pub fn generate_amenities(
                     editor.set_block(roof_block, *x, 5, *z, None, None);
                 }
             }
-            "parking" | "fountain" => {
-                // Process parking or fountain areas
+            "fountain" => {
+                generate_fountain(editor, element, args, flood_fill_cache);
+            }
+            "parking" => {
+                // Process parking areas
                 let mut previous_node: Option<XZPoint> = None;
-                let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
-                let mut current_amenity: Vec<(i32, i32)> = vec![];
 
-                let block_type = match amenity_type.as_str() {
-                    "fountain" => WATER,
-                    "parking" => GRAY_CONCRETE,
-                    _ => GRAY_CONCRETE,
-                };
+                let block_type = GRAY_CONCRETE;
 
                 for node in element.nodes() {
                     let pt: XZPoint = node.xz();
 
                     if let Some(prev) = previous_node {
-                        // Create borders for fountain or parking area
+                        // Create borders for parking area
                         let bresenham_points: Vec<(i32, i32, i32)> =
                             bresenham_line(prev.x, 0, prev.z, pt.x, 0, pt.z);
                         for (bx, _, bz) in bresenham_points {
-                            editor.set_block(block_type, bx, 0, bz, Some(&[BLACK_CONCRETE]), None);
-
-                            // Decorative border around fountains
-                            if amenity_type == "fountain" {
-                                for dx in [-1, 0, 1].iter() {
-                                    for dz in [-1, 0, 1].iter() {
-                                        if (*dx, *dz) != (0, 0) {
-                                            editor.set_block(
-                                                LIGHT_GRAY_CONCRETE,
-                                                bx + dx,
-                                                0,
-                                                bz + dz,
-                                                None,
-                                                None,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-
-                            current_amenity.push((node.x, node.z));
-                            corner_addup.0 += node.x;
-                            corner_addup.1 += node.z;
-                            corner_addup.2 += 1;
+                            editor.set_block(
+                                block_type,
+                                bx,
+                                0,
+                                bz,
+                                Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                None,
+                            );
                         }
                     }
                     previous_node = Some(pt);
                 }
 
-                // Flood-fill the interior area for parking or fountains
-                if corner_addup.2 > 0 {
-                    let polygon_coords: Vec<(i32, i32)> = current_amenity.to_vec();
-                    let flood_area: Vec<(i32, i32)> =
-                        flood_fill_area(&polygon_coords, args.timeout.as_ref());
+                // Flood-fill the interior area for parking
+                let flood_area: Vec<(i32, i32)> =
+                    flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
-                    for (x, z) in flood_area {
-                        editor.set_block(
-                            block_type,
-                            x,
-                            0,
-                            z,
-                            Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
-                            None,
-                        );
+                for (x, z) in flood_area {
+                    editor.set_block(
+                        block_type,
+                        x,
+                        0,
+                        z,
+                        Some(&[
+                            BLACK_CONCRETE,
+                            GRAY_CONCRETE_POWDER,
+                            CYAN_TERRACOTTA,
+                            GRAY_CONCRETE,
+                        ]),
+                        None,
+                    );
 
-                        // Enhanced parking space markings
-                        if amenity_type == "parking" {
-                            // Create defined parking spaces with realistic layout
-                            let space_width = 4; // Width of each parking space
-                            let space_length = 6; // Length of each parking space
-                            let lane_width = 5; // Width of driving lanes
+                    // Enhanced parking space markings
+                    if amenity_type == "parking" {
+                        // Create defined parking spaces with realistic layout
+                        let space_width = 4; // Width of each parking space
+                        let space_length = 6; // Length of each parking space
+                        let lane_width = 5; // Width of driving lanes
 
-                            // Calculate which "zone" this coordinate falls into
-                            let zone_x = x / space_width;
-                            let zone_z = z / (space_length + lane_width);
-                            let local_x = x % space_width;
-                            let local_z = z % (space_length + lane_width);
+                        // Calculate which "zone" this coordinate falls into
+                        let zone_x = x / space_width;
+                        let zone_z = z / (space_length + lane_width);
+                        let local_x = x % space_width;
+                        let local_z = z % (space_length + lane_width);
 
-                            // Create parking space boundaries (only within parking areas, not in driving lanes)
-                            if local_z < space_length {
-                                // We're in a parking space area, not in the driving lane
-                                if local_x == 0 {
-                                    // Vertical parking space lines (only on the left edge)
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        x,
-                                        0,
-                                        z,
-                                        Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
-                                        None,
-                                    );
-                                } else if local_z == 0 {
-                                    // Horizontal parking space lines (only on the top edge)
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        x,
-                                        0,
-                                        z,
-                                        Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
-                                        None,
-                                    );
-                                }
-                            } else if local_z == space_length {
-                                // Bottom edge of parking spaces (border with driving lane)
+                        // Create parking space boundaries (only within parking areas, not in driving lanes)
+                        if local_z < space_length {
+                            // We're in a parking space area, not in the driving lane
+                            if local_x == 0 {
+                                // Vertical parking space lines (only on the left edge)
                                 editor.set_block(
                                     LIGHT_GRAY_CONCRETE,
                                     x,
                                     0,
                                     z,
-                                    Some(&[BLACK_CONCRETE, GRAY_CONCRETE]),
+                                    Some(&[
+                                        BLACK_CONCRETE,
+                                        GRAY_CONCRETE_POWDER,
+                                        CYAN_TERRACOTTA,
+                                        GRAY_CONCRETE,
+                                    ]),
                                     None,
                                 );
-                            } else if local_z > space_length && local_z < space_length + lane_width
-                            {
-                                // Driving lane - use darker concrete
+                            } else if local_z == 0 {
+                                // Horizontal parking space lines (only on the top edge)
                                 editor.set_block(
-                                    BLACK_CONCRETE,
+                                    LIGHT_GRAY_CONCRETE,
                                     x,
                                     0,
                                     z,
-                                    Some(&[GRAY_CONCRETE]),
+                                    Some(&[
+                                        BLACK_CONCRETE,
+                                        GRAY_CONCRETE_POWDER,
+                                        CYAN_TERRACOTTA,
+                                        GRAY_CONCRETE,
+                                    ]),
                                     None,
                                 );
                             }
+                        } else if local_z == space_length {
+                            // Bottom edge of parking spaces (border with driving lane)
+                            editor.set_block(
+                                LIGHT_GRAY_CONCRETE,
+                                x,
+                                0,
+                                z,
+                                Some(&[
+                                    BLACK_CONCRETE,
+                                    GRAY_CONCRETE_POWDER,
+                                    CYAN_TERRACOTTA,
+                                    GRAY_CONCRETE,
+                                ]),
+                                None,
+                            );
+                        } else if local_z > space_length && local_z < space_length + lane_width {
+                            // Driving lane - use darker concrete
+                            editor.set_block(BLACK_CONCRETE, x, 0, z, Some(&[GRAY_CONCRETE]), None);
+                        }
 
-                            // Add light posts at parking space outline corners
-                            if local_x == 0 && local_z == 0 && zone_x % 3 == 0 && zone_z % 2 == 0 {
-                                // Light posts at regular intervals on parking space corners
-                                editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
-                                for dy in 2..=4 {
-                                    editor.set_block(OAK_FENCE, x, dy, z, None, None);
-                                }
-                                editor.set_block(GLOWSTONE, x, 5, z, None, None);
+                        // Add light posts at parking space outline corners
+                        if local_x == 0 && local_z == 0 && zone_x % 3 == 0 && zone_z % 2 == 0 {
+                            // Light posts at regular intervals on parking space corners
+                            editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
+                            for dy in 2..=4 {
+                                editor.set_block(OAK_FENCE, x, dy, z, None, None);
                             }
+                            editor.set_block(GLOWSTONE, x, 5, z, None, None);
                         }
                     }
                 }
             }
             _ => {}
+        }
+    }
+}
+
+/// Generates a 3D fountain that adapts to the polygon shape of the element.
+///
+/// Layout (inside→out):
+///   - Smooth stone interior floor with stone brick wall rim at polygon edge (2 blocks tall)
+///   - Water fills the interior at y=1
+///   - Central pillar of chiseled stone bricks + sea lantern at base
+///   - Water basin (Wasserbecken) on top of the pillar
+///
+/// For node-based fountains (single point) a compact 3×3 basin is built.
+fn generate_fountain(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    // ── Node fountain (single point) ───────────────────────────────
+    let nodes: Vec<_> = element.nodes().collect();
+    if nodes.len() < 3 {
+        if let Some(node) = nodes.first() {
+            let cx = node.x;
+            let cz = node.z;
+            // 3×3 basin with rim + central pillar + raised basin
+            for dx in -1i32..=1 {
+                for dz in -1i32..=1 {
+                    let is_rim = dx.abs() == 1 || dz.abs() == 1;
+                    if is_rim {
+                        editor.set_block(STONE_BRICK_WALL, cx + dx, 1, cz + dz, None, None);
+                    }
+                }
+            }
+            // Central pillar with small basin on top
+            editor.set_block(SEA_LANTERN, cx, 1, cz, None, None);
+            editor.set_block(CHISELED_STONE_BRICKS, cx, 2, cz, None, None);
+            // Basin at y=3: cardinal walls + water center
+            editor.set_block(WATER, cx, 3, cz, None, None);
+            editor.set_block(STONE_BRICK_WALL, cx - 1, 3, cz, None, None);
+            editor.set_block(STONE_BRICK_WALL, cx + 1, 3, cz, None, None);
+            editor.set_block(STONE_BRICK_WALL, cx, 3, cz - 1, None, None);
+            editor.set_block(STONE_BRICK_WALL, cx, 3, cz + 1, None, None);
+        }
+        return;
+    }
+
+    // ── Way fountain (polygon) ─────────────────────────────────────
+    let floor_area: Vec<(i32, i32)> =
+        flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
+
+    if floor_area.is_empty() {
+        return;
+    }
+
+    // Compute centroid
+    let (sum_x, sum_z) = floor_area.iter().fold((0i64, 0i64), |(sx, sz), &(x, z)| {
+        (sx + x as i64, sz + z as i64)
+    });
+    let count = floor_area.len() as i64;
+    let cx = (sum_x / count) as i32;
+    let cz = (sum_z / count) as i32;
+
+    // Compute approximate radius (average distance from centroid)
+    let avg_dist: f64 = floor_area
+        .iter()
+        .map(|&(x, z)| {
+            let dx = (x - cx) as f64;
+            let dz = (z - cz) as f64;
+            (dx * dx + dz * dz).sqrt()
+        })
+        .sum::<f64>()
+        / floor_area.len() as f64;
+
+    // Pillar height scales with fountain size (min 2, max 5)
+    let pillar_height = (avg_dist as i32).clamp(2, 5);
+
+    // Collect edge outline via Bresenham
+    let mut edge_set: HashSet<(i32, i32)> = HashSet::new();
+    let mut prev: Option<(i32, i32)> = None;
+    for node in element.nodes() {
+        if let Some((px, pz)) = prev {
+            for (bx, _, bz) in bresenham_line(px, 0, pz, node.x, 0, node.z) {
+                edge_set.insert((bx, bz));
+            }
+        }
+        prev = Some((node.x, node.z));
+    }
+
+    // Place rim (stone brick wall, 2 blocks high) along the edge
+    for &(ex, ez) in &edge_set {
+        editor.set_block(STONE_BRICKS, ex, 0, ez, None, None);
+        editor.set_block(STONE_BRICK_WALL, ex, 1, ez, None, None);
+    }
+
+    // Fill interior with water at y=1 (and a stone floor at y=0)
+    for &(x, z) in &floor_area {
+        if !edge_set.contains(&(x, z)) {
+            editor.set_block(SMOOTH_STONE, x, 0, z, None, None);
+            editor.set_block(WATER, x, 1, z, None, None);
+        }
+    }
+
+    // Central pillar — find closest interior point to centroid
+    let pillar_pos = floor_area
+        .iter()
+        .filter(|&&(x, z)| !edge_set.contains(&(x, z)))
+        .min_by_key(|&&(x, z)| {
+            let dx = (x - cx) as i64;
+            let dz = (z - cz) as i64;
+            dx * dx + dz * dz
+        })
+        .copied()
+        .unwrap_or((cx, cz));
+
+    let (px, pz) = pillar_pos;
+
+    // Build pillar: sea lantern at base, chiseled stone bricks upward
+    editor.set_block(SEA_LANTERN, px, 1, pz, None, None);
+    for h in 2..=pillar_height {
+        editor.set_block(CHISELED_STONE_BRICKS, px, h, pz, None, None);
+    }
+
+    // Basin (Wasserbecken) on top: stone brick wall ring with water inside
+    let basin_y = pillar_height + 1;
+    for dx in -1i32..=1 {
+        for dz in -1i32..=1 {
+            if dx == 0 && dz == 0 {
+                // Centre of basin: water
+                editor.set_block(WATER, px, basin_y, pz, None, None);
+            } else if dx.abs() + dz.abs() <= 1 {
+                // Cardinal neighbours: stone brick wall rim
+                editor.set_block(STONE_BRICK_WALL, px + dx, basin_y, pz + dz, None, None);
+            }
         }
     }
 }

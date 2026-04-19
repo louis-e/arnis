@@ -24,9 +24,38 @@ pub fn generate_tourisms(editor: &mut WorldEditor, element: &ProcessedNode) {
             if let Some(info_type) = element.tags.get("information").map(|x: &String| x.as_str()) {
                 if info_type != "office" && info_type != "visitor_centre" {
                     // Draw an information board
-                    // TODO draw a sign with text if provided
                     editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
                     editor.set_block(OAK_PLANKS, x, 2, z, None, None);
+
+                    // White banner with blue masking to form a lowercase "i" shape.
+                    // Layers: start white, paint blue on left/right/top/middle/border,
+                    // leaving a dot (between top and middle) and a stem below.
+                    let abs_y = editor.get_absolute_y(x, 2, z);
+                    const INFO_PATTERNS: &[(&str, &str)] = &[
+                        ("blue", "minecraft:stripe_left"),
+                        ("blue", "minecraft:stripe_right"),
+                        ("blue", "minecraft:stripe_top"),
+                        ("blue", "minecraft:stripe_middle"),
+                        ("blue", "minecraft:border"),
+                    ];
+                    // Place info banners on all four sides
+                    let banner_faces: [(i32, i32, &str); 4] = [
+                        (0, 1, "south"),
+                        (0, -1, "north"),
+                        (1, 0, "east"),
+                        (-1, 0, "west"),
+                    ];
+                    for (dx, dz, facing) in &banner_faces {
+                        editor.place_wall_banner(
+                            WHITE_WALL_BANNER,
+                            x + dx,
+                            abs_y,
+                            z + dz,
+                            facing,
+                            "white",
+                            INFO_PATTERNS,
+                        );
+                    }
                 }
             }
         }

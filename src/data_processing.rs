@@ -1,24 +1,21 @@
 use crate::args::Args;
-use crate::block_definitions::{BEDROCK, DIRT, GRASS_BLOCK, SMOOTH_STONE, STONE};
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
 use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
+use crate::ground_generation;
 use crate::map_renderer;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
-use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_open_mcworld_file};
+use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
-use crate::urban_ground;
 use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-
-pub const MIN_Y: i32 = -64;
 
 /// Generation options that can be passed separately from CLI Args
 #[derive(Clone)]
@@ -42,6 +39,7 @@ pub fn generate_world_with_options(
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
+    let generation_start = args.benchmark.then(std::time::Instant::now);
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
@@ -73,6 +71,9 @@ pub fn generate_world_with_options(
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
 
+    // Collect subway centerline points for post-ground-fill air carving (phase 2).
+    let mut subway_points: Vec<(i32, i32)> = Vec::new();
+
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(Arc::clone(&ground));
 
@@ -86,13 +87,17 @@ pub fn generate_world_with_options(
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
     let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
 
-    // Collect building centroids for urban ground generation (only if enabled)
-    // This must be done before the processing loop clears the flood fill cache
-    let building_centroids = if args.city_boundaries {
-        flood_fill_cache.collect_building_centroids(&elements)
-    } else {
-        Vec::new()
-    };
+    // Collect coordinates covered by tunnel=building_passage highways so that
+    // building generation can cut ground-level openings through walls and floors.
+    let building_passages =
+        highways::collect_building_passage_coords(&elements, &xzbbox, args.scale);
+
+    // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
+    // road or path surface. Uses the same Bresenham + block_range geometry as
+    // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
+    // Amenity processors use this for O(1) nearest-road-block lookups.
+    // TODO Use this data to create overhanging traffic signals.
+    let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
@@ -165,6 +170,7 @@ pub fn generate_world_with_options(
                             None,
                             None,
                             &flood_fill_cache,
+                            &building_passages,
                         );
                     }
                 } else if way.tags.contains_key("highway") {
@@ -192,7 +198,13 @@ pub fn generate_world_with_options(
                         &building_footprints,
                     );
                 } else if way.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
+                    amenities::generate_amenities(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &road_mask,
+                    );
                 } else if way.tags.contains_key("leisure") {
                     leisure::generate_leisure(
                         &mut editor,
@@ -213,7 +225,7 @@ pub fn generate_world_with_options(
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way);
+                    railways::generate_railways(&mut editor, way, &mut subway_points);
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
@@ -247,7 +259,13 @@ pub fn generate_world_with_options(
                         &building_footprints,
                     );
                 } else if node.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
+                    amenities::generate_amenities(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &road_mask,
+                    );
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
@@ -283,6 +301,7 @@ pub fn generate_world_with_options(
                         args,
                         &flood_fill_cache,
                         &xzbbox,
+                        &building_passages,
                     );
                 } else if rel.tags.contains_key("water")
                     || rel
@@ -329,136 +348,34 @@ pub fn generate_world_with_options(
 
     process_pb.finish();
 
-    // Compute urban ground lookup (if enabled)
-    // Uses a compact cell-based representation instead of storing all coordinates.
-    // Memory usage: ~270 KB vs ~560 MB for coordinate-based approach.
-    let urban_lookup = if args.city_boundaries && !building_centroids.is_empty() {
-        urban_ground::compute_urban_ground_lookup(building_centroids, &xzbbox)
-    } else {
-        urban_ground::UrbanGroundLookup::empty()
-    };
-    let has_urban_ground = !urban_lookup.is_empty();
-
     // Drop remaining caches
     drop(highway_connectivity);
     drop(flood_fill_cache);
+    drop(road_mask);
 
-    // Generate ground layer
-    let total_blocks: u64 = xzbbox.bounding_rect().total_blocks();
-    let desired_updates: u64 = 1500;
-    let batch_size: u64 = (total_blocks / desired_updates).max(1);
+    // Generate ground layer (surface blocks, vegetation, shorelines, underground fill)
+    ground_generation::generate_ground_layer(
+        &mut editor,
+        ground.as_ref(),
+        args,
+        &xzbbox,
+        &building_footprints,
+    )?;
 
-    let mut block_counter: u64 = 0;
-
-    println!("{} Generating ground...", "[6/7]".bold());
-    emit_gui_progress_update(70.0, "Generating ground...");
-
-    let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
-    ground_pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} blocks ({eta})")
-            .unwrap()
-            .progress_chars("█▓░"),
-    );
-
-    let mut gui_progress_grnd: f64 = 70.0;
-    let mut last_emitted_progress: f64 = gui_progress_grnd;
-    let total_iterations_grnd: f64 = total_blocks as f64;
-    let progress_increment_grnd: f64 = 20.0 / total_iterations_grnd;
-
-    // Check if terrain elevation is enabled; when disabled, we can skip ground level lookups entirely
-    let terrain_enabled = ground.elevation_enabled;
-
-    // Process ground generation chunk-by-chunk for better cache locality.
-    // This keeps the same region/chunk HashMap entries hot in CPU cache,
-    // rather than jumping between regions on every Z iteration.
-    let min_chunk_x = xzbbox.min_x() >> 4;
-    let max_chunk_x = xzbbox.max_x() >> 4;
-    let min_chunk_z = xzbbox.min_z() >> 4;
-    let max_chunk_z = xzbbox.max_z() >> 4;
-
-    for chunk_x in min_chunk_x..=max_chunk_x {
-        for chunk_z in min_chunk_z..=max_chunk_z {
-            // Calculate the block range for this chunk, clamped to bbox
-            let chunk_min_x = (chunk_x << 4).max(xzbbox.min_x());
-            let chunk_max_x = ((chunk_x << 4) + 15).min(xzbbox.max_x());
-            let chunk_min_z = (chunk_z << 4).max(xzbbox.min_z());
-            let chunk_max_z = ((chunk_z << 4) + 15).min(xzbbox.max_z());
-
-            for x in chunk_min_x..=chunk_max_x {
-                for z in chunk_min_z..=chunk_max_z {
-                    // Get ground level, when terrain is enabled, look it up once per block
-                    // When disabled, use constant ground_level (no function call overhead)
-                    let ground_y = if terrain_enabled {
-                        editor.get_ground_level(x, z)
-                    } else {
-                        args.ground_level
-                    };
-
-                    // Check if this coordinate is in an urban area (O(1) lookup)
-                    let is_urban = has_urban_ground && urban_lookup.is_urban(x, z);
-
-                    // Add default dirt and grass layer if there isn't a stone layer already
-                    if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
-                        if is_urban {
-                            // Urban area: smooth stone ground
-                            editor.set_block_if_absent_absolute(SMOOTH_STONE, x, ground_y, z);
-                        } else {
-                            // Rural/natural area: grass and dirt
-                            editor.set_block_if_absent_absolute(GRASS_BLOCK, x, ground_y, z);
-                        }
-                        editor.set_block_if_absent_absolute(DIRT, x, ground_y - 1, z);
-                        editor.set_block_if_absent_absolute(DIRT, x, ground_y - 2, z);
-                    }
-
-                    // Fill underground with stone
-                    if args.fillground {
-                        editor.fill_column_absolute(
-                            STONE,
-                            x,
-                            z,
-                            MIN_Y + 1,
-                            ground_y - 3,
-                            true, // skip_existing: don't overwrite blocks placed by element processing
-                        );
-                    }
-                    // Generate a bedrock level at MIN_Y
-                    editor.set_block_absolute(BEDROCK, x, MIN_Y, z, None, Some(&[BEDROCK]));
-
-                    block_counter += 1;
-                    #[allow(clippy::manual_is_multiple_of)]
-                    if block_counter % batch_size == 0 {
-                        ground_pb.inc(batch_size);
-                    }
-
-                    gui_progress_grnd += progress_increment_grnd;
-                    if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                        emit_gui_progress_update(gui_progress_grnd, "");
-                        last_emitted_progress = gui_progress_grnd;
-                    }
-                }
-            }
-        }
+    // Carve subway tunnel interiors now that underground is filled with stone.
+    // This must happen after ground generation so AIR blocks are not overwritten.
+    if !subway_points.is_empty() {
+        railways::carve_subway_interior(&mut editor, &subway_points);
     }
-
-    // Set sign for player orientation
-    /*editor.set_sign(
-        "↑".to_string(),
-        "Generated World".to_string(),
-        "This direction".to_string(),
-        "".to_string(),
-        9,
-        -61,
-        9,
-        6,
-    );*/
-
-    ground_pb.inc(block_counter % batch_size);
-    ground_pb.finish();
 
     // Save world
     if let Err(e) = editor.save() {
         return Err(e.to_string());
+    }
+
+    if let Some(start) = generation_start {
+        let gen_secs = start.elapsed().as_secs();
+        eprintln!("[BENCHMARK] generation_time={gen_secs}");
     }
 
     emit_gui_progress_update(99.0, "Finalizing world...");
@@ -496,7 +413,19 @@ pub fn generate_world_with_options(
     // For Bedrock format, emit event to open the mcworld file
     if world_format == WorldFormat::BedrockMcWorld {
         if let Some(path_str) = output_path.to_str() {
-            emit_open_mcworld_file(path_str);
+            emit_show_in_folder(path_str);
+        }
+    }
+
+    // For Java worlds saved to the Desktop (GUI falls back there when .minecraft/saves
+    // is missing), open the folder in the file explorer so the user can find the world.
+    if world_format == WorldFormat::JavaAnvil {
+        if let Some(desktop) = dirs::desktop_dir() {
+            if output_path.starts_with(&desktop) {
+                if let Some(path_str) = output_path.to_str() {
+                    emit_show_in_folder(path_str);
+                }
+            }
         }
     }
 

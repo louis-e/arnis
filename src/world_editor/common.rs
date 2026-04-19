@@ -6,9 +6,12 @@
 use crate::block_definitions::*;
 
 /// Minimum Y coordinate in Minecraft (1.18+)
-const MIN_Y: i32 = -64;
-/// Maximum Y coordinate in Minecraft (1.18+)
-const MAX_Y: i32 = 319;
+pub const MIN_Y: i32 = -64;
+/// Maximum Y coordinate in Minecraft (data pack maximum: 2031)
+/// Vanilla limit is 319, but data packs can extend this up to 2031.
+/// The world editor supports the full range; the elevation system controls
+/// the actual heights used based on the disable_height_limit setting.
+const MAX_Y: i32 = 2031;
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};

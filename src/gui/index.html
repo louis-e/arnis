@@ -15,7 +15,7 @@
   <main class="container">
     <div class="row">
       <a href="https://arnismc.com" target="_blank">
-        <img src="./images/logo.png" id="arnis-logo" class="logo arnis" alt="Arnis Logo" style="width: 35%; height: auto;">
+        <img src="./images/logo.png" id="arnis-logo" class="logo arnis" alt="Arnis Logo" style="width: 30%; height: auto;">
       </a>
     </div>
 
@@ -29,19 +29,15 @@
       <section class="section controls-box">
         <div class="controls-content">
           <div class="controls-top">
-            <!-- World Selection Container -->
-            <div class="world-selection-container">
-              <div class="tooltip" style="width: 100%;">
-                <button type="button" id="choose-world-btn" onclick="createWorld()" class="choose-world-btn">
-                  <span id="choose_world">Create World</span>
-                  <br>
-                  <span id="selected-world" style="font-size: 0.8em; color: #fecc44; display: block; margin-top: 4px;" data-localize="no_world_selected">
-                    No world created
-                  </span>
+            <!-- Combined Button Block -->
+            <div class="button-block">
+              <div class="button-block-row">
+                <button type="button" id="start-button" class="start-button" onclick="startGeneration()" data-localize="start_generation">Start Generation</button>
+                <button type="button" class="settings-button" onclick="openSettings()" aria-label="Settings">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                 </button>
               </div>
-              <!-- World Format Toggle -->
-              <div class="format-toggle-container">
+              <div class="button-block-row">
                 <button type="button" id="format-java" class="format-toggle-btn format-active" onclick="setWorldFormat('java')">
                   Java
                 </button>
@@ -53,17 +49,11 @@
                 </button>
               </div>
             </div>
-            
-            <div class="button-container">
-              <button type="button" id="start-button" class="start-button" onclick="startGeneration()" data-localize="start_generation">Start Generation</button>
-              <button type="button" class="settings-button" onclick="openSettings()" aria-label="Settings">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-              </button>
-            </div>
             <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
           </div>
 
           <div class="progress-section">
+            <img src="" alt="" class="secret-parrot" id="secret-parrot">
             <span id="progress-info" class="progress-info-text"></span>
             <div class="progress-row">
               <div class="progress-bar-container">
@@ -79,8 +69,14 @@
     <!-- Settings Modal -->
     <div id="settings-modal" class="modal" style="display: none;">
       <div class="modal-content">
-        <span class="close-button" onclick="closeSettings()">&times;</span>
-        <h2 data-localize="customization_settings">Customization Settings</h2>
+        <div class="settings-header">
+          <h2 data-localize="customization_settings">Settings</h2>
+          <span class="close-button" onclick="closeSettings()">&times;</span>
+        </div>
+
+        <div class="settings-scrollable">
+        <!-- Section: Generation -->
+        <div class="settings-section-header" data-localize="settings_section_generation">Generation</div>
 
         <!-- Generation Mode Dropdown -->
         <div class="settings-row">
@@ -141,6 +137,9 @@
           </div>
         </div>
 
+        <!-- Section: World -->
+        <div class="settings-section-header" data-localize="settings_section_world">World</div>
+
         <!-- Disable Height Limit Toggle -->
         <div class="settings-row">
           <label for="disable-height-limit-toggle">
@@ -176,6 +175,9 @@
           </div>
         </div>
 
+        <!-- Section: Map & Input -->
+        <div class="settings-section-header" data-localize="settings_section_map">Map & Input</div>
+
         <!-- Bounding Box Input -->
         <div class="settings-row">
           <label for="bbox-coords">
@@ -203,6 +205,9 @@
             </select>
           </div>
         </div>
+
+        <!-- Section: Application -->
+        <div class="settings-section-header" data-localize="settings_section_application">Application</div>
 
         <!-- Save Path -->
         <div class="settings-row">
@@ -259,19 +264,24 @@
           </div>
         </div>
 
-        <!-- License and Credits Button -->
-        <div class="settings-row license-button-row">
-          <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
         </div>
+        <!-- end settings-scrollable -->
 
-        <!-- Buy Me a Coffee and Discord -->
-        <div class="settings-row buymeacoffee-row">
-          <a href="https://buymeacoffee.com/louisdev" target="_blank" class="buymeacoffee-link">
-            <img src="./images/buymeacoffee.png" alt="Buy Me a Coffee" class="buymeacoffee-logo">
+        <div class="settings-footer">
+          <!-- License and Credits Button -->
+          <div class="settings-row license-button-row">
+            <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
+          </div>
+
+          <!-- Buy Me a Coffee and Discord -->
+          <div class="settings-row buymeacoffee-row">
+            <a href="https://buymeacoffee.com/louisdev" target="_blank" class="buymeacoffee-link">
+              <img src="./images/buymeacoffee.png" alt="Buy Me a Coffee" class="buymeacoffee-logo">
+            </a>
+            <a href="https://discord.gg/mA2g69Fhxq" target="_blank" class="discord-link">
+              <img src="./images/discord.png" alt="Discord" class="discord-logo">
           </a>
-          <a href="https://discord.gg/mA2g69Fhxq" target="_blank" class="discord-link">
-            <img src="./images/discord.png" alt="Discord" class="discord-logo">
-          </a>
+          </div>
         </div>
       </div>
     </div>
@@ -295,9 +305,11 @@
     <!-- License Modal -->
     <div id="license-modal" class="modal" style="display: none;">
       <div class="modal-content">
-        <span class="close-button" onclick="closeLicense()">&times;</span>
-        <h2 data-localize="license_and_credits">License and Credits</h2>
-        <div id="license-content" style="overflow-y: auto; max-height: 300px; font-size: 0.85em; line-height: 1.3; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
+        <div class="settings-header">
+          <h2 data-localize="license_and_credits">License and Credits</h2>
+          <span class="close-button" onclick="closeLicense()">&times;</span>
+        </div>
+        <div id="license-content" class="license-scrollable" style="font-size: 0.85em; line-height: 1.3; padding: 10px; border: 1px solid #ccc; border-radius: 4px;">
           Loading...
         </div>
       </div>

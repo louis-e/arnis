@@ -4,7 +4,7 @@ use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
-use rand::prelude::IndexedRandom;
+use rand::prelude::SliceRandom;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
 use serde::Deserialize;
@@ -15,9 +15,14 @@ use std::process::Command;
 use std::time::Duration;
 
 /// Function to download data using reqwest
-fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::error::Error>> {
+fn download_with_reqwest(
+    url: &str,
+    query: &str,
+    timeout_secs: u64,
+) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
-        .timeout(Duration::from_secs(360))
+        .timeout(Duration::from_secs(timeout_secs))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -29,11 +34,19 @@ fn download_with_reqwest(url: &str, query: &str) -> Result<String, Box<dyn std::
             if resp.status().is_success() {
                 let text = resp.text()?;
                 if text.is_empty() {
-                    return Err("Error! Received invalid from server".into());
+                    return Err("Received invalid data from server".into());
                 }
                 Ok(text)
             } else {
-                Err(format!("Error! Received response code: {}", resp.status()).into())
+                let status = resp.status();
+                let user_msg = match status.as_u16() {
+                    429 => "Rate limited. Try again later.".to_string(),
+                    403 => "Server overloaded. Try again.".to_string(),
+                    500 | 502 | 503 | 504 => "Server unavailable. Try again.".to_string(),
+                    _ => format!("Response code: {}", status.as_u16()),
+                };
+                eprintln!("{}", format!("Error! {user_msg}").red().bold());
+                Err(user_msg.into())
             }
         }
         Err(e) => {
@@ -112,25 +125,27 @@ pub fn fetch_data_from_overpass(
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
         "https://z.overpass-api.de/api/interpreter",
-        //"https://overpass.kumi.systems/api/interpreter", // This server is not reliable anymore
-        //"https://overpass.private.coffee/api/interpreter", // This server is not reliable anymore
     ];
-    let fallback_api_servers: Vec<&str> =
-        vec!["https://maps.mail.ru/osm/tools/overpass/api/interpreter"];
-    let mut url: &&str = api_servers.choose(&mut rand::rng()).unwrap();
+    let fallback_api_servers: Vec<&str> = vec![
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+        "https://overpass.private.coffee/api/interpreter",
+    ];
 
-    // Generate Overpass API query for bounding box
+    // Generate Overpass API query for bounding box.
+    // Ocean/coastal elements are excluded because ESA WorldCover satellite data
+    // handles ocean detection more reliably at 10m resolution (LC_WATER class).
+    // Inland water (lakes, rivers, ponds) is still fetched from OSM.
     let query: String = format!(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
         nwr["building"];
         nwr["building:part"];
         nwr["highway"];
-        nwr["landuse"];
-        nwr["natural"];
+        nwr["landuse"]["landuse"!="salt_pond"];
+        nwr["natural"]["natural"!="coastline"]["natural"!="bay"]["natural"!="strait"];
         nwr["leisure"];
-        nwr["water"];
-        nwr["waterway"];
+        nwr["water"]["water"!="bay"]["water"!="ocean"]["water"!="sea"]["tidal"!="yes"];
+        nwr["waterway"]["waterway"!="tidal_channel"];
         nwr["amenity"];
         nwr["tourism"];
         nwr["bridge"];
@@ -145,7 +160,7 @@ pub fn fetch_data_from_overpass(
         nwr["advertising"];
         nwr["man_made"];
         nwr["aeroway"];
-        way["place"];
+        way["place"]["place"!~"^(ocean|sea|bay|strait|sound|fjord)$"];
         way;
     )->.relsinbbox;
     (
@@ -165,30 +180,54 @@ pub fn fetch_data_from_overpass(
     );
 
     {
-        // Fetch data from Overpass API
-        let mut attempt = 0;
-        let max_attempts = 1;
-        let response: String = loop {
-            println!("Downloading from {url} with method {download_method}...");
-            let result = match download_method {
-                "requests" => download_with_reqwest(url, &query),
-                "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
-                "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
-                _ => download_with_reqwest(url, &query), // Default to requests
-            };
+        // Fetch data from Overpass API.
+        // Strategy: try each primary server once (shuffled), then each
+        // fallback server once, with a short delay between attempts.
+        let mut servers: Vec<&str> = api_servers.clone();
+        servers.shuffle(&mut rand::rng());
+        let mut fallbacks: Vec<&str> = fallback_api_servers.clone();
+        fallbacks.shuffle(&mut rand::rng());
+        servers.extend(fallbacks);
 
-            match result {
-                Ok(response) => break response,
-                Err(error) => {
-                    if attempt >= max_attempts {
-                        return Err(error);
+        let total = servers.len();
+        let mut last_error: Option<Box<dyn std::error::Error>> = None;
+        let response: String = 'server_loop: {
+            for (i, server) in servers.iter().enumerate() {
+                let url = server;
+                let timeout_secs = if url.contains("private.coffee") {
+                    120
+                } else {
+                    360
+                };
+                println!("Downloading from {url} with method {download_method}...");
+                let result = match download_method {
+                    "requests" => download_with_reqwest(url, &query, timeout_secs),
+                    "curl" => download_with_curl(url, &query).map_err(|e| e.into()),
+                    "wget" => download_with_wget(url, &query).map_err(|e| e.into()),
+                    _ => download_with_reqwest(url, &query, timeout_secs), // Default to requests
+                };
+
+                match result {
+                    Ok(response) => break 'server_loop response,
+                    Err(error) => {
+                        if download_method != "requests" {
+                            eprintln!("Request failed: {error}");
+                        }
+                        last_error = Some(error);
+
+                        if i + 1 < total {
+                            let delay_secs = if i < api_servers.len() { 3 } else { 5 };
+                            println!("Retrying in {delay_secs}s (attempt {}/{total})...", i + 1);
+                            std::thread::sleep(Duration::from_secs(delay_secs));
+                            if i + 1 == api_servers.len() {
+                                println!("Primary servers exhausted, trying fallback servers...");
+                            }
+                        }
                     }
-
-                    println!("Request failed. Switching to fallback url...");
-                    url = fallback_api_servers.choose(&mut rand::rng()).unwrap();
-                    attempt += 1;
                 }
             }
+            // All servers exhausted
+            return Err(last_error.unwrap_or_else(|| "All servers failed".into()));
         };
 
         if let Some(save_file) = save_file {
@@ -242,11 +281,14 @@ pub fn fetch_data_from_overpass(
 
 /// Fetches a short area name using Nominatim for the given lat/lon
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let client = Client::builder().timeout(Duration::from_secs(20)).build()?;
+    let client = Client::builder()
+        .timeout(Duration::from_secs(20))
+        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .build()?;
 
     let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
 
-    let resp = client.get(&url).header("User-Agent", "arnis-rust").send()?;
+    let resp = client.get(&url).send()?;
 
     if !resp.status().is_success() {
         return Ok(None);

@@ -40,7 +40,13 @@
   "interior": "Interjero generavimas",
   "roof": "Stogo generavimas",
   "fillground": "Užpildyti pagrindą",
-  "city_boundaries": "Miesto žemė",
+  "land_cover": "Žemės danga",
+  "disable_height_limit": "Išjungti aukščio ribą",
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
-  "save_path": "Išsaugojimo kelias"
+  "save_path": "Išsaugojimo kelias",
+  "rotation_angle": "Pasukimo Kampas",
+  "settings_section_generation": "Generavimas",
+  "settings_section_world": "Pasaulis",
+  "settings_section_map": "Žemėlapis ir įvestis",
+  "settings_section_application": "Programa"
 }

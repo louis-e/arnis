@@ -40,7 +40,13 @@
   "interior": "Génération d'intérieur",
   "roof": "Génération de toit",
   "fillground": "Remplir le sol",
-  "city_boundaries": "Sol urbain",
+  "land_cover": "Couverture du sol",
+  "disable_height_limit": "Désactiver la limite de hauteur",
   "bedrock_auto_generated": "Le monde Bedrock est généré automatiquement",
-  "save_path": "Chemin de sauvegarde"
+  "save_path": "Chemin de sauvegarde",
+  "rotation_angle": "Angle de Rotation",
+  "settings_section_generation": "Génération",
+  "settings_section_world": "Monde",
+  "settings_section_map": "Carte et saisie",
+  "settings_section_application": "Application"
 }
