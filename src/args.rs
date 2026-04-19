@@ -135,15 +135,6 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
                 }
             }
         }
-
-        // Validate luanti-game value
-        let game = args.luanti_game.as_str();
-        if game != "minetest_game" && game != "mineclonia" {
-            return Err(format!(
-                "Invalid --luanti-game value '{}'. Must be 'minetest_game' or 'mineclonia'.",
-                game
-            ));
-        }
     } else {
         // Java: path is required. If it exists, it must be a directory.
         // If it doesn't exist, create_new_world will create it.
