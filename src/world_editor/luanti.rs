@@ -30,7 +30,7 @@ fn encode_block_pos(x: i32, y: i32, z: i32) -> i64 {
 ///
 /// The mapblock contains 16×16×16 nodes. Each node has:
 /// - param0: content ID (u16) — mapped to block-local IDs via name-id mapping
-/// - param1: lighting (u8) — set to 0, engine fix_light recalculates on first load
+/// - param1: lighting (u8) — lower nibble = day light, upper nibble = night light
 /// - param2: rotation/facedir (u8)
 ///
 /// Returns `(encoded_pos, blob)` ready for SQLite insertion.
@@ -82,13 +82,28 @@ fn serialize_mapblock(
                 };
 
                 param0[serial_idx] = local_id;
-
-                // Set lighting: air blocks get full sunlight
-                if block == AIR {
-                    param1[serial_idx] = 15; // Full sunlight (lower nibble)
-                }
-
                 param2[serial_idx] = node.param2;
+            }
+        }
+    }
+
+    // Intra-mapblock sunlight propagation: for each (x,z) column, scan top-down.
+    // If we encounter air, it gets full sunlight (day=15). Once we hit a solid
+    // (non-air) block, all air below it is dark (day=0). This is a heuristic that
+    // works correctly for roofed buildings and underground spaces within one mapblock.
+    // Cross-mapblock boundaries are handled by the engine via lighting_complete flags.
+    for sz in 0u8..16 {
+        for x in 0u8..16 {
+            let mut has_sunlight = true;
+            for y in (0u8..16).rev() {
+                let idx = (sz as usize) * 256 + (y as usize) * 16 + (x as usize);
+                if param0[idx] == 0 {
+                    // Air node: gets sunlight if no solid block above in this mapblock
+                    param1[idx] = if has_sunlight { 15 } else { 0 };
+                } else {
+                    // Solid block: blocks sunlight, param1 stays 0
+                    has_sunlight = false;
+                }
             }
         }
     }
@@ -264,35 +279,8 @@ pub fn save_luanti_world(
     write_env_meta(world_dir)?;
 
     // Write worldmod for singlenode mapgen + spawn
-    // Compute world bounds in Luanti coordinates for fix_light
-    let mut min_x = i32::MAX;
-    let mut max_x = i32::MIN;
-    let mut min_y = i32::MAX;
-    let mut max_y = i32::MIN;
-    let mut min_z = i32::MAX;
-    let mut max_z = i32::MIN;
-    for (&(region_x, region_z), region) in &world.regions {
-        for (&(chunk_x, chunk_z), chunk) in &region.chunks {
-            for (&section_y, _) in &chunk.sections {
-                let mb_x = region_x * 32 + chunk_x;
-                let orig_z = region_z * 32 + chunk_z;
-                let mb_z = -orig_z - 1;
-                let mb_y = section_y as i32;
-                min_x = min_x.min(mb_x * 16);
-                max_x = max_x.max(mb_x * 16 + 15);
-                min_y = min_y.min(mb_y * 16);
-                max_y = max_y.max(mb_y * 16 + 15);
-                min_z = min_z.min(mb_z * 16);
-                max_z = max_z.max(mb_z * 16 + 15);
-            }
-        }
-    }
-    // Extend fix_light area 32 nodes (2 mapblocks) above the highest content
-    // so the engine can propagate sunlight down from the sky
-    let fix_max_y = max_y + 32;
-
     write_worldmod(
-        world_dir, spawn_x, spawn_y, spawn_z, game, min_x, min_y, min_z, max_x, fix_max_y, max_z,
+        world_dir, spawn_x, spawn_y, spawn_z, game,
     )?;
 
     // Remove stale mod storage so fix_light runs again on regenerated worlds
@@ -376,12 +364,6 @@ fn write_worldmod(
     spawn_y: i32,
     spawn_z: i32,
     game: LuantiGame,
-    area_min_x: i32,
-    area_min_y: i32,
-    area_min_z: i32,
-    area_max_x: i32,
-    area_max_y: i32,
-    area_max_z: i32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mod_dir = world_dir.join("worldmods").join("arnis_mapgen");
     fs::create_dir_all(&mod_dir)?;
@@ -436,42 +418,56 @@ fn write_worldmod(
     writeln!(f, "    return true")?;
     writeln!(f, "end)")?;
     writeln!(f)?;
-    writeln!(f, "-- Fix lighting on first load")?;
-    writeln!(
-        f,
-        "local AREA_MIN = {{x={}, y={}, z={}}}",
-        area_min_x, area_min_y, area_min_z
-    )?;
-    writeln!(
-        f,
-        "local AREA_MAX = {{x={}, y={}, z={}}}",
-        area_max_x, area_max_y, area_max_z
-    )?;
-    writeln!(f, "local storage = minetest.get_mod_storage()")?;
+
+    // Grant fast and fly privileges to all joining players
+    writeln!(f, "-- Grant fast and fly privileges")?;
     writeln!(f, "minetest.register_on_joinplayer(function(player)")?;
-    writeln!(
-        f,
-        "    if storage:get_string(\"lighting_fixed\") ~= \"true\" then"
-    )?;
-    writeln!(
-        f,
-        "        minetest.chat_send_all(\"Loading map and fixing lighting...\")"
-    )?;
-    writeln!(f, "        minetest.emerge_area(AREA_MIN, AREA_MAX, function(blockpos, action, calls_remaining)")?;
-    writeln!(f, "            if calls_remaining == 0 then")?;
-    writeln!(f, "                minetest.fix_light(AREA_MIN, AREA_MAX)")?;
-    writeln!(
-        f,
-        "                storage:set_string(\"lighting_fixed\", \"true\")"
-    )?;
-    writeln!(
-        f,
-        "                minetest.chat_send_all(\"Lighting recalculated.\")"
-    )?;
-    writeln!(f, "            end")?;
-    writeln!(f, "        end)")?;
-    writeln!(f, "    end")?;
+    writeln!(f, "    local name = player:get_player_name()")?;
+    writeln!(f, "    local privs = minetest.get_player_privs(name)")?;
+    writeln!(f, "    privs.fast = true")?;
+    writeln!(f, "    privs.fly = true")?;
+    writeln!(f, "    minetest.set_player_privs(name, privs)")?;
     writeln!(f, "end)")?;
+    writeln!(f)?;
+
+    writeln!(f, "-- Lazy fix-lighting: fix mapblock lighting around players as they move")?;
+        writeln!(f, "-- instead of fixing the entire world at once on first load.")?;
+        writeln!(f, "local fixed_blocks = {{}}")?;
+        writeln!(f, "local RADIUS = 3          -- fix 3 mapblocks in each direction")?;
+        writeln!(f, "local CHECK_INTERVAL = 0.3 -- seconds between checks")?;
+        writeln!(f, "local MAX_FIXES = 8        -- max fix_light calls per check")?;
+        writeln!(f, "local timer = 0")?;
+        writeln!(f)?;
+        writeln!(f, "minetest.register_globalstep(function(dtime)")?;
+        writeln!(f, "    timer = timer + dtime")?;
+        writeln!(f, "    if timer < CHECK_INTERVAL then return end")?;
+        writeln!(f, "    timer = 0")?;
+        writeln!(f, "    local fixes = 0")?;
+        writeln!(f, "    for _, player in ipairs(minetest.get_connected_players()) do")?;
+        writeln!(f, "        local pos = player:get_pos()")?;
+        writeln!(f, "        local bx = math.floor(pos.x / 16)")?;
+        writeln!(f, "        local by = math.floor(pos.y / 16)")?;
+        writeln!(f, "        local bz = math.floor(pos.z / 16)")?;
+        writeln!(f, "        for dx = -RADIUS, RADIUS do")?;
+        writeln!(f, "            for dy = -RADIUS, RADIUS do")?;
+        writeln!(f, "                for dz = -RADIUS, RADIUS do")?;
+        writeln!(f, "                    local key = (bx+dx) .. \",\" .. (by+dy) .. \",\" .. (bz+dz)")?;
+        writeln!(f, "                    if not fixed_blocks[key] then")?;
+        writeln!(f, "                        fixed_blocks[key] = true")?;
+        writeln!(f, "                        local x1 = (bx+dx) * 16")?;
+        writeln!(f, "                        local y1 = (by+dy) * 16")?;
+        writeln!(f, "                        local z1 = (bz+dz) * 16")?;
+        writeln!(f, "                        minetest.fix_light(")?;
+        writeln!(f, "                            {{x=x1, y=y1, z=z1}},")?;
+        writeln!(f, "                            {{x=x1+15, y=y1+15, z=z1+15}})")?;
+        writeln!(f, "                        fixes = fixes + 1")?;
+        writeln!(f, "                        if fixes >= MAX_FIXES then return end")?;
+        writeln!(f, "                    end")?;
+        writeln!(f, "                end")?;
+        writeln!(f, "            end")?;
+        writeln!(f, "        end")?;
+        writeln!(f, "    end")?;
+        writeln!(f, "end)")?;
 
     Ok(())
 }
@@ -503,7 +499,7 @@ fn serialize_air_mapblock(game: LuantiGame) -> Vec<u8> {
 
     // param0: all zeros (air = ID 0)
     buf.extend_from_slice(&[0u8; NODES_PER_BLOCK * 2]);
-    // param1: all 15 (full sunlight)
+    // param1: full day-light for all air (day=15 in lower nibble, night=0 in upper)
     buf.extend_from_slice(&[15u8; NODES_PER_BLOCK]);
     // param2: all zeros
     buf.extend_from_slice(&[0u8; NODES_PER_BLOCK]);
