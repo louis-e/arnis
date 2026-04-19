@@ -63,6 +63,43 @@ impl Drop for SessionLock {
     }
 }
 
+/// Removes a freshly created Java world directory. Called whenever generation
+/// bails out before producing anything useful, so the user isn't left with a
+/// growing pile of empty "Arnis World N" folders.
+fn remove_new_java_world(path: &Path) {
+    if path.exists() {
+        if let Err(e) = fs::remove_dir_all(path) {
+            eprintln!("Failed to remove newly created world after failure: {e}");
+        }
+    }
+}
+
+/// RAII guard that removes a newly created Java world on drop unless disarmed.
+/// Must be declared *before* any `SessionLock` so the lock's file handle is
+/// released first (Windows blocks folder removal otherwise).
+struct NewWorldCleanup {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl NewWorldCleanup {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for NewWorldCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            remove_new_java_world(&self.path);
+        }
+    }
+}
+
 pub fn run_gui() {
     // Configure thread pool with 90% CPU cap to keep system responsive
     crate::floodfill_cache::configure_rayon_thread_pool(0.9);
@@ -737,53 +774,46 @@ fn gui_start_generation(
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
     if is_new_world && world_format != "bedrock" {
-        let llbbox = match LLBBox::from_str(&bbox_text) {
-            Ok(bbox) => bbox,
-            Err(e) => {
-                let error_msg = format!("Failed to parse bounding box: {e}");
-                eprintln!("{error_msg}");
-                emit_gui_error(&error_msg);
-                return Err(error_msg);
-            }
-        };
+        let prep_result: Result<(), String> = (|| -> Result<(), String> {
+            let llbbox = LLBBox::from_str(&bbox_text)
+                .map_err(|e| format!("Failed to parse bounding box: {e}"))?;
 
-        let (transformer, xzbbox) = match CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale) {
-            Ok(result) => result,
-            Err(e) => {
-                let error_msg = format!("Failed to create coordinate transformer: {e}");
-                eprintln!("{error_msg}");
-                emit_gui_error(&error_msg);
-                return Err(error_msg);
-            }
-        };
+            let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale)
+                .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
-        let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
-            // User selected a spawn point - verify it's within bounds and convert to XZ
-            let llpoint = LLPoint::new(coords.0, coords.1)
-                .map_err(|e| format!("Failed to parse spawn point: {e}"))?;
+            let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
+                let llpoint = LLPoint::new(coords.0, coords.1)
+                    .map_err(|e| format!("Failed to parse spawn point: {e}"))?;
 
-            if llbbox.contains(&llpoint) {
-                let xzpoint = transformer.transform_point(llpoint);
-                (xzpoint.x, xzpoint.z)
+                if llbbox.contains(&llpoint) {
+                    let xzpoint = transformer.transform_point(llpoint);
+                    (xzpoint.x, xzpoint.z)
+                } else {
+                    calculate_default_spawn(&xzbbox)
+                }
             } else {
-                // Spawn point outside bounds, use default
                 calculate_default_spawn(&xzbbox)
-            }
-        } else {
-            // No user-selected spawn point - use default at X=1, Z=1 relative to world origin
-            calculate_default_spawn(&xzbbox)
-        };
+            };
 
-        // Rotate spawn point to match the rotated world
-        let (spawn_x, spawn_z) = map_transformation::rotate::rotate_xz_point(
-            spawn_x,
-            spawn_z,
-            rotation_angle.clamp(-90.0, 90.0),
-            &xzbbox,
-        );
+            let (spawn_x, spawn_z) = map_transformation::rotate::rotate_xz_point(
+                spawn_x,
+                spawn_z,
+                rotation_angle.clamp(-90.0, 90.0),
+                &xzbbox,
+            );
 
-        set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
-            .map_err(|e| format!("Failed to set spawn point: {e}"))?;
+            set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
+                .map_err(|e| format!("Failed to set spawn point: {e}"))?;
+
+            Ok(())
+        })();
+
+        if let Err(error_msg) = prep_result {
+            eprintln!("{error_msg}");
+            emit_gui_error(&error_msg);
+            remove_new_java_world(&PathBuf::from(&selected_world));
+            return Err(error_msg);
+        }
     }
 
     tauri::async_runtime::spawn(async move {
@@ -796,6 +826,16 @@ fn gui_start_generation(
             } else {
                 WorldFormat::JavaAnvil
             };
+
+            // Arm cleanup for freshly created Java worlds. Declared before the
+            // SessionLock so the lock's file handle is released first on drop
+            // (Windows needs that to remove the parent folder).
+            let mut cleanup_guard: Option<NewWorldCleanup> =
+                if is_new_world && world_format == WorldFormat::JavaAnvil {
+                    Some(NewWorldCleanup::new(world_path.clone()))
+                } else {
+                    None
+                };
 
             // Check available disk space before starting generation (minimum 3GB required)
             const MIN_DISK_SPACE_BYTES: u64 = 3 * 1024 * 1024 * 1024; // 3 GB
@@ -949,6 +989,9 @@ fn gui_start_generation(
                     &args,
                     generation_options.clone(),
                 );
+                if let Some(g) = cleanup_guard.as_mut() {
+                    g.disarm();
+                }
                 // Explicitly release session lock before showing Done message
                 // so Minecraft can open the world immediately
                 drop(_session_lock);
@@ -1027,6 +1070,9 @@ fn gui_start_generation(
                         &args,
                         generation_options.clone(),
                     );
+                    if let Some(g) = cleanup_guard.as_mut() {
+                        g.disarm();
+                    }
                     // Explicitly release session lock before showing Done message
                     // so Minecraft can open the world immediately
                     drop(_session_lock);
@@ -1046,19 +1092,8 @@ fn gui_start_generation(
                 }
                 Err(e) => {
                     emit_gui_error(&e.to_string());
-                    // Drop the session lock before removing the world directory, on Windows
-                    // the open lock file handle would block removal of its parent folder.
-                    drop(_session_lock);
-                    if is_new_world
-                        && world_format == WorldFormat::JavaAnvil
-                        && generation_path.exists()
-                    {
-                        if let Err(cleanup_err) = std::fs::remove_dir_all(&generation_path) {
-                            eprintln!(
-                                "Failed to remove newly created world after fetch failure: {cleanup_err}"
-                            );
-                        }
-                    }
+                    // cleanup_guard removes the new world, and SessionLock releases
+                    // its file handle first via reverse drop order.
                     Err(e.to_string())
                 }
             }
