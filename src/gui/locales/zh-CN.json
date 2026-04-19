@@ -1,6 +1,7 @@
 {
   "create_world": "创建世界",
   "no_world_selected": "未创建世界",
+  "no_world_generated_yet": "尚未生成世界",
   "start_generation": "开始生成",
   "custom_selection_confirmed": "自定义选择已确认！",
   "error_coordinates_out_of_range": "错误：坐标超出范围或顺序不正确（需要先纬度后经度）。",

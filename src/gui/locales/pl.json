@@ -1,6 +1,7 @@
 {
   "create_world": "Utwórz świat",
   "no_world_selected": "Nie utworzono świata",
+  "no_world_generated_yet": "Nie wygenerowano jeszcze świata",
   "start_generation": "Rozpocznij generowanie",
   "custom_selection_confirmed": "Niestandardowy wybór potwierdzony!",
   "error_coordinates_out_of_range": "Błąd: Współrzędne są poza zakresem lub w złej kolejności (wymagana szerokość przed długością).",

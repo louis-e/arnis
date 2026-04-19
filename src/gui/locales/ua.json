@@ -1,6 +1,7 @@
 {
   "create_world": "Створити світ",
   "no_world_selected": "Світ не створено",
+  "no_world_generated_yet": "Світ ще не згенеровано",
   "start_generation": "Почати генерацію",
   "custom_selection_confirmed": "Користувацький вибір підтверджено!",
   "error_coordinates_out_of_range": "Помилка: Координати поза діапазоном або неправильно впорядковані (потрібно широта перед довгота)",

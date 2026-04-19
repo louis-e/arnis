@@ -1,6 +1,7 @@
 {
   "create_world": "Welt erstellen",
   "no_world_selected": "Keine Welt erstellt",
+  "no_world_generated_yet": "Noch keine Welt generiert",
   "start_generation": "Generierung starten",
   "custom_selection_confirmed": "Benutzerdefinierte Auswahl bestätigt!",
   "error_coordinates_out_of_range": "Fehler: Koordinaten sind außerhalb des Bereichs oder falsch geordnet (Lat vor Lng erforderlich).",

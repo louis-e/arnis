@@ -296,6 +296,7 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
         };
 
     let new_name = format!("{base_name}: {truncated_area_name}");
+    let mut write_succeeded = false;
 
     // Update the level.dat file with the new name
     if let Ok(level_data) = std::fs::read(&level_path) {
@@ -306,7 +307,7 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                 // Update the level name in NBT data
                 if let Value::Compound(ref mut root) = nbt_data {
                     if let Some(Value::Compound(ref mut data)) = root.get_mut("Data") {
-                        data.insert("LevelName".to_string(), Value::String(new_name));
+                        data.insert("LevelName".to_string(), Value::String(new_name.clone()));
 
                         // Save the updated NBT data
                         if let Ok(serialized_data) = fastnbt::to_bytes(&nbt_data) {
@@ -316,13 +317,18 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                             );
                             if encoder.write_all(&serialized_data).is_ok() {
                                 if let Ok(compressed_data) = encoder.finish() {
-                                    if let Err(e) = std::fs::write(&level_path, compressed_data) {
-                                        eprintln!("Failed to update level.dat with area name: {e}");
-                                        #[cfg(feature = "gui")]
-                                        send_log(
-                                            LogLevel::Warning,
-                                            "Failed to update level.dat with area name",
-                                        );
+                                    match std::fs::write(&level_path, compressed_data) {
+                                        Ok(_) => write_succeeded = true,
+                                        Err(e) => {
+                                            eprintln!(
+                                                "Failed to update level.dat with area name: {e}"
+                                            );
+                                            #[cfg(feature = "gui")]
+                                            send_log(
+                                                LogLevel::Warning,
+                                                "Failed to update level.dat with area name",
+                                            );
+                                        }
                                     }
                                 }
                             }
@@ -331,6 +337,10 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
                 }
             }
         }
+    }
+
+    if write_succeeded {
+        progress::emit_world_name_update(&new_name);
     }
 
     // Return the original path since we didn't change the directory name
@@ -853,6 +863,7 @@ fn gui_start_generation(
                     let output_dir = crate::world_utils::get_bedrock_output_directory();
                     let (output_path, lvl_name) =
                         crate::world_utils::build_bedrock_output(&bbox, output_dir);
+                    progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }
             };
@@ -897,7 +908,7 @@ fn gui_start_generation(
                 file: None,
                 save_json_file: None,
                 path: Some(if world_format == WorldFormat::JavaAnvil {
-                    generation_path
+                    generation_path.clone()
                 } else {
                     world_path
                 }),
@@ -1035,7 +1046,19 @@ fn gui_start_generation(
                 }
                 Err(e) => {
                     emit_gui_error(&e.to_string());
-                    // Session lock will be automatically released when _session_lock goes out of scope
+                    // Drop the session lock before removing the world directory, on Windows
+                    // the open lock file handle would block removal of its parent folder.
+                    drop(_session_lock);
+                    if is_new_world
+                        && world_format == WorldFormat::JavaAnvil
+                        && generation_path.exists()
+                    {
+                        if let Err(cleanup_err) = std::fs::remove_dir_all(&generation_path) {
+                            eprintln!(
+                                "Failed to remove newly created world after fetch failure: {cleanup_err}"
+                            );
+                        }
+                    }
                     Err(e.to_string())
                 }
             }
