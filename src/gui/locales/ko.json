@@ -44,5 +44,9 @@
   "disable_height_limit": "높이 제한 비활성화",
   "bedrock_auto_generated": "Bedrock 월드는 자동 생성됩니다",
   "save_path": "저장 경로",
-  "rotation_angle": "회전 각도"
+  "rotation_angle": "회전 각도",
+  "settings_section_generation": "생성",
+  "settings_section_world": "월드",
+  "settings_section_map": "지도 및 입력",
+  "settings_section_application": "애플리케이션"
 }

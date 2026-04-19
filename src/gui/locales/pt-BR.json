@@ -44,5 +44,9 @@
   "disable_height_limit": "Desativar limite de altura",
   "bedrock_auto_generated": "O mundo de bedrock é gerado automaticamente",
   "save_path": "Caminho de salvamento",
-  "rotation_angle": "Ângulo de Rotação"
+  "rotation_angle": "Ângulo de Rotação",
+  "settings_section_generation": "Geração",
+  "settings_section_world": "Mundo",
+  "settings_section_map": "Mapa e entrada",
+  "settings_section_application": "Aplicação"
 }

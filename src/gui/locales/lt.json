@@ -44,5 +44,9 @@
   "disable_height_limit": "Išjungti aukščio ribą",
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
   "save_path": "Išsaugojimo kelias",
-  "rotation_angle": "Pasukimo Kampas"
+  "rotation_angle": "Pasukimo Kampas",
+  "settings_section_generation": "Generavimas",
+  "settings_section_world": "Pasaulis",
+  "settings_section_map": "Žemėlapis ir įvestis",
+  "settings_section_application": "Programa"
 }
