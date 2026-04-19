@@ -183,6 +183,10 @@ pub fn apply_land_cover_repair(
     if reclassified > 0 {
         land_cover.water_distance =
             crate::land_cover::compute_water_distance(&land_cover.grid, grid_w, grid_h);
+        // The water-blend smoothing was derived from the pre-reclassify
+        // grid — refresh it so the softened shoreline reflects the updated
+        // classification.
+        land_cover.refresh_water_blend_grid();
     }
 
     if coastal_pull_distance_cells > 0 {
@@ -790,7 +794,7 @@ fn smooth_built_up_gaussian(
 /// 2D Gaussian blur (separable: horizontal then vertical pass).
 /// Edges are handled by renormalizing weights over the valid samples so the
 /// blur doesn't darken the border of the grid.
-fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
+pub(crate) fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel = create_gaussian_kernel(kernel_size, sigma);
     let half = kernel_size as i32 / 2;

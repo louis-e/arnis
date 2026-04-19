@@ -168,27 +168,17 @@ impl Ground {
             let tx = fx - fx.floor();
             let tz = fz - fz.floor();
 
-            // Sample water status at the 4 surrounding grid cells
-            let w00 = if lc.grid[z0][x0] == crate::land_cover::LC_WATER {
-                1.0
-            } else {
-                0.0
-            };
-            let w10 = if lc.grid[z0][x1] == crate::land_cover::LC_WATER {
-                1.0
-            } else {
-                0.0
-            };
-            let w01 = if lc.grid[z1][x0] == crate::land_cover::LC_WATER {
-                1.0
-            } else {
-                0.0
-            };
-            let w11 = if lc.grid[z1][x1] == crate::land_cover::LC_WATER {
-                1.0
-            } else {
-                0.0
-            };
+            // Sample pre-smoothed water-ness at the 4 surrounding grid cells.
+            // The grid was Gaussian-blurred from the binary LC_WATER mask so
+            // that even at integer block positions (1-to-1 grid-to-world
+            // mapping, where tx == tz == 0 below) the sampled value is
+            // continuous — the renderer's hard `> 0.5` threshold then traces
+            // a clean curved shoreline contour instead of the raw ESA 10 m
+            // rectangular grid edge.
+            let w00 = lc.water_blend_grid[z0][x0];
+            let w10 = lc.water_blend_grid[z0][x1];
+            let w01 = lc.water_blend_grid[z1][x0];
+            let w11 = lc.water_blend_grid[z1][x1];
 
             // Bilinear interpolation
             let top = w00 * (1.0 - tx) + w10 * tx;
@@ -350,6 +340,10 @@ impl Ground {
             lc.water_distance = water_distance;
             lc.width = width;
             lc.height = height;
+            // The water-blend mask was derived from the pre-rotation grid —
+            // refresh it from the rotated grid so the shoreline softening
+            // stays aligned with the new classification.
+            lc.refresh_water_blend_grid();
         }
     }
 

@@ -62,10 +62,54 @@ pub struct LandCoverData {
     /// Distance from each water cell to nearest shore, indexed as [z][x].
     /// 0 = non-water, 1 = shore water, 2+ = progressively deeper water.
     pub water_distance: Vec<Vec<u8>>,
+    /// Pre-smoothed water-ness field in [0, 1] — a Gaussian-blurred version
+    /// of the binary `grid == LC_WATER` mask. Used by `ground.water_blend()`
+    /// and compared against a hard 0.5 threshold in the renderer so the
+    /// shoreline follows the smoothed contour's 0.5 isoline instead of the
+    /// raw ESA 10 m rectangular grid edge.
+    pub water_blend_grid: Vec<Vec<f64>>,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
     pub height: usize,
+}
+
+impl LandCoverData {
+    /// Recompute `water_blend_grid` from the current classification grid.
+    /// Call this after any mutation to `grid` (reclassification in
+    /// `apply_land_cover_repair`, or grid rotation in the rotator).
+    pub(crate) fn refresh_water_blend_grid(&mut self) {
+        self.water_blend_grid = compute_water_blend_smooth(&self.grid, self.width, self.height);
+    }
+}
+
+/// Build a smooth `[0, 1]` water-ness field from the binary `LC_WATER` mask
+/// in the classification grid, by applying a Gaussian blur.
+///
+/// σ = 3 cells is a compromise:
+/// - 1-to-1 grid-to-world mapping (small/medium bbox on a high-res provider):
+///   gives a ~3 block softening band — enough to break the ESA 10 m grid
+///   rectangular steps without visibly eroding the shoreline.
+/// - Coarser grid-to-world (large bbox, capped at 4096): each cell already
+///   represents many blocks, so a 3-cell blur represents many blocks of
+///   softening — appropriate for the coarser effective resolution.
+fn compute_water_blend_smooth(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<f64>> {
+    const SIGMA_CELLS: f64 = 3.0;
+
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
+    let binary: Vec<Vec<f64>> = grid
+        .iter()
+        .take(height)
+        .map(|row| {
+            row.iter()
+                .take(width)
+                .map(|&c| if c == LC_WATER { 1.0 } else { 0.0 })
+                .collect()
+        })
+        .collect();
+    crate::elevation::postprocess::gaussian_blur_grid(&binary, SIGMA_CELLS)
 }
 
 /// Metadata parsed from a COG (Cloud-Optimized GeoTIFF) IFD.
@@ -148,16 +192,26 @@ pub fn fetch_land_cover_data(
     // Fill gaps (0 values surrounded by valid data) with nearest neighbor
     fill_gaps(&mut grid, grid_width, grid_height);
 
-    // Dither class boundaries to reduce the blocky appearance of 10m resolution data.
-    dither_boundaries(&mut grid, grid_width, grid_height);
+    // Smooth class boundaries via Gaussian-weighted local voting. Replaces
+    // the rectangular axis-aligned 10 m ESA steps with clean smooth contours
+    // for every class (including water shorelines).
+    smooth_class_boundaries(&mut grid, grid_width, grid_height);
 
     // Compute distance from each water cell to nearest shore via multi-source BFS.
     // Used for shoreline blending (land cells adjacent to water get sand surface).
     let water_distance = compute_water_distance(&grid, grid_width, grid_height);
 
+    // Pre-smooth the water mask so `ground.water_blend()` returns continuous
+    // values around the shoreline even when grid-to-world mapping is 1-to-1
+    // (otherwise bilinear sampling of a binary grid at integer block
+    // positions just returns the cell's binary value and the renderer's
+    // noise-threshold organic-edge pass never fires).
+    let water_blend_grid = compute_water_blend_smooth(&grid, grid_width, grid_height);
+
     Some(LandCoverData {
         grid,
         water_distance,
+        water_blend_grid,
         width: grid_width,
         height: grid_height,
     })
@@ -894,60 +948,122 @@ pub(crate) fn compute_water_distance(
     distance
 }
 
-// ─── Boundary dithering ───────────────────────────────────────────────────
+// ─── Boundary smoothing ───────────────────────────────────────────────────
 
-/// Dithers the boundaries between land cover classes to reduce blockiness.
+/// Smooths class boundaries via Gaussian-weighted local voting.
 ///
-/// ESA WorldCover data has 10m resolution, which can produce visible rectangular
-/// class boundaries in the Minecraft world. This function softens those edges by
-/// randomly assigning a neighbor's class to cells that sit on a boundary.
+/// ESA WorldCover is 10 m resolution. At Minecraft block resolution this
+/// translates to rectangular, axis-aligned class edges with 10-block steps
+/// — visible as a staircase coastline and tile-grid-looking class regions.
 ///
-/// The dithering uses a deterministic coordinate-based hash so results are
-/// reproducible. Only cells adjacent to a different class are affected;
-/// interior cells stay untouched.
-fn dither_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
+/// For every cell that sits on a class boundary (any 4-connected neighbor
+/// has a different class), we tally a Gaussian-weighted vote over the cell's
+/// neighborhood: each nearby cell contributes to its own class's tally with
+/// a weight that falls off as a Gaussian. The cell is reassigned to the
+/// class with the highest total vote.
+///
+/// Effect:
+/// - Interior cells (surrounded by same class) are untouched — flood-fills
+///   of a single class stay intact.
+/// - Straight boundaries stay straight (the vote is symmetric along the
+///   edge) but convex corners get rounded off and concave corners get
+///   filled, producing clean smooth contours instead of axis-aligned steps.
+/// - A class's overall footprint is preserved — the same number of votes
+///   for class C are cast on either side of a boundary, so the smoothed
+///   contour follows the underlying ESA boundary rather than shifting it.
+///
+/// Tradeoff: 1–2-cell-wide strips (narrow rivers, hedgerows at ESA 10 m
+/// resolution) can get absorbed into the surrounding class because the
+/// vote neighborhood is dominated by the surroundings. For water this is
+/// usually fine because OSM waterways render rivers as a separate
+/// overlay; for other classes it cleans up what's often classifier noise
+/// at the 10 m grain.
+fn smooth_class_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
+    const SIGMA_CELLS: f64 = 2.0;
+    let radius = (SIGMA_CELLS * 3.0).ceil() as i32;
+    let kernel_size = (radius * 2 + 1) as usize;
+
+    // Precompute the 2D Gaussian kernel as a flat vec.
+    let mut kernel = vec![0.0f64; kernel_size * kernel_size];
+    let center = radius as f64;
+    let two_sigma_sq = 2.0 * SIGMA_CELLS * SIGMA_CELLS;
+    for ky in 0..kernel_size {
+        for kx in 0..kernel_size {
+            let dy = ky as f64 - center;
+            let dx = kx as f64 - center;
+            kernel[ky * kernel_size + kx] = (-(dx * dx + dy * dy) / two_sigma_sq).exp();
+        }
+    }
+
+    // Snapshot once so all cells vote against the pre-mutation grid.
     let snapshot: Vec<Vec<u8>> = grid.to_vec();
 
-    for z in 0..height {
+    for y in 0..height {
         for x in 0..width {
-            let center = snapshot[z][x];
-            if center == 0 {
+            let center_class = snapshot[y][x];
+            if center_class == 0 {
                 continue;
             }
 
-            // Check if this cell is on a class boundary (any neighbor differs)
-            let mut neighbor_class = 0u8;
+            // Skip unless this cell is on a class boundary. Everything inside
+            // a flood-fill of one class has identical votes across the cell
+            // and all its neighbors, so it would win itself — expensive no-op.
             let mut is_boundary = false;
-            let offsets: [(i64, i64); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
-            for (dx, dz) in offsets {
-                let nx = x as i64 + dx;
-                let nz = z as i64 + dz;
-                if nx >= 0 && nx < width as i64 && nz >= 0 && nz < height as i64 {
-                    let nc = snapshot[nz as usize][nx as usize];
-                    if nc != 0 && nc != center {
-                        is_boundary = true;
-                        neighbor_class = nc;
-                        break;
-                    }
+            for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = x as i32 + dx;
+                let nz = y as i32 + dz;
+                if nx < 0 || nz < 0 || nx >= width as i32 || nz >= height as i32 {
+                    continue;
+                }
+                let nc = snapshot[nz as usize][nx as usize];
+                if nc != 0 && nc != center_class {
+                    is_boundary = true;
+                    break;
                 }
             }
-
             if !is_boundary {
                 continue;
             }
 
-            // Never dither water boundaries - water/land edges must stay crisp
-            // to prevent the shoreline from shifting inland
-            if center == LC_WATER || neighbor_class == LC_WATER {
-                continue;
+            // Gaussian-weighted class votes. Fixed-size array keyed by class
+            // code avoids a per-cell HashMap allocation.
+            let mut votes = [0.0f64; 256];
+            for ky in 0..kernel_size {
+                let nz = y as i32 + ky as i32 - radius;
+                if nz < 0 || nz >= height as i32 {
+                    continue;
+                }
+                let kernel_row = ky * kernel_size;
+                let row = &snapshot[nz as usize];
+                for kx in 0..kernel_size {
+                    let nx = x as i32 + kx as i32 - radius;
+                    if nx < 0 || nx >= width as i32 {
+                        continue;
+                    }
+                    let nc = row[nx as usize];
+                    if nc == 0 {
+                        continue;
+                    }
+                    votes[nc as usize] += kernel[kernel_row + kx];
+                }
             }
 
-            // Deterministic hash from coordinates for reproducible dithering
-            let hash = coord_hash(x as i32, z as i32);
-
-            // ~40% chance to adopt the neighbor's class at a boundary cell
-            if hash % 5 < 2 {
-                grid[z][x] = neighbor_class;
+            let (best_idx, best_val) =
+                votes
+                    .iter()
+                    .enumerate()
+                    .fold(
+                        (0usize, 0.0f64),
+                        |acc, (i, &v)| {
+                            if v > acc.1 {
+                                (i, v)
+                            } else {
+                                acc
+                            }
+                        },
+                    );
+            if best_val > 0.0 {
+                grid[y][x] = best_idx as u8;
             }
         }
     }

@@ -184,18 +184,15 @@ pub fn generate_ground_layer(
                                 || (water_ne && water_sw)
                                 || (water_nw && water_se)
                         };
-                        let is_esa_water = grid_is_water
-                            || placed_water
-                            || osm_gap
-                            || if water_blend >= 0.99 {
-                                true
-                            } else if water_blend > 0.01 {
-                                // Transition zone: noise threshold creates organic edge
-                                let noise = (land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
-                                water_blend > noise * 0.6 + 0.2
-                            } else {
-                                false
-                            };
+                        // Water classification: hard threshold on the
+                        // Gaussian-smoothed water_blend_grid. Combined with
+                        // the grid-level smoothing in `smooth_class_boundaries`
+                        // this produces a clean curved shoreline contour —
+                        // the 0.5 isoline of the smoothed water mask —
+                        // instead of either the raw ESA 10 m rectangle grid
+                        // or a stochastic noise-dithered transition.
+                        let is_esa_water =
+                            grid_is_water || placed_water || osm_gap || water_blend > 0.5;
 
                         let mut water_y = 0;
                         let mut place_esa_water = false;
