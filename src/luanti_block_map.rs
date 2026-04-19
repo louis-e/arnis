@@ -397,7 +397,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         9 => "mcl_core:brick_block",  // bricks
         10 => "mcl_cauldrons:cauldron",  // cauldron
         11 => "mcl_core:stonebrickcarved",  // chiseled_stone_bricks
-        12 => "mcl:walls_cobble_wall_side",  // cobblestone_wall
+        12 => "mcl_walls:cobble",  // cobblestone_wall
         13 => "mcl_core:cobble",  // cobblestone
         14 => "mcl_blackstone:blackstone_brick_polished",  // polished_blackstone_bricks
         15 => "mcl_core:stonebrickcracked",  // cracked_stone_bricks
