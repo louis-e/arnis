@@ -1,6 +1,7 @@
 use super::Operator;
 use crate::coordinate_system::cartesian::{XZBBox, XZBBoxRect, XZPoint};
 use crate::ground::{Ground, RotationMask};
+use crate::land_cover::LC_WATER;
 use crate::osm_parser::ProcessedElement;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -291,7 +292,14 @@ fn rotate_ground_data(
     }
 
     // Apply Laplacian smoothing (3 iterations) to reduce jagged edges
-    // from coordinate discretization during rotation
+    // from coordinate discretization during rotation. Skip cells that are
+    // LC_WATER or that touch an LC_WATER neighbor — the water surface was
+    // flattened (by apply_land_cover_repair pre-rotation) and smoothing
+    // across that boundary would lift the water toward adjacent land
+    // heights and drag the shore down toward the water, creating a 1-3 m
+    // rounded rim at every rotated coastline. The `new_cover` grid was
+    // populated in the main loop above with the rotated land-cover
+    // classification, so we can check water-adjacency per cell.
     const SMOOTH_ITERATIONS: usize = 3;
     for _ in 0..SMOOTH_ITERATIONS {
         let prev = new_heights.clone();
@@ -299,6 +307,19 @@ fn rotate_ground_data(
             for x_idx in 1..new_w.saturating_sub(1) {
                 if !has_data[z_idx][x_idx] {
                     continue; // Don't smooth padding areas
+                }
+                if let Some(ref cover) = new_cover {
+                    // If this cell or any 4-neighbour is water, skip.
+                    // Preserves the flat water surface and the natural
+                    // crispness of the shoreline through rotation.
+                    if cover[z_idx][x_idx] == LC_WATER
+                        || cover[z_idx - 1][x_idx] == LC_WATER
+                        || cover[z_idx + 1][x_idx] == LC_WATER
+                        || cover[z_idx][x_idx - 1] == LC_WATER
+                        || cover[z_idx][x_idx + 1] == LC_WATER
+                    {
+                        continue;
+                    }
                 }
                 let neighbors_sum = prev[z_idx - 1][x_idx]
                     + prev[z_idx + 1][x_idx]
