@@ -31,12 +31,28 @@ pub struct ElevationData {
     pub(crate) world_height: usize,
 }
 
-/// Maximum elevation grid dimension to request from providers.
-/// WMS servers typically cap at 4096x4096. AWS tile-based providers handle
-/// any size by downloading multiple tiles, but WMS providers would reject
-/// oversized requests. The bilinear interpolation in ground.rs handles
-/// upscaling to full block resolution.
-pub const MAX_ELEVATION_GRID_DIM: usize = 4096;
+/// Maximum elevation grid dimension requested from providers per axis.
+///
+/// Verified provider limits (queried directly from their capability
+/// endpoints / docs):
+///   - USGS 3DEP (ArcGIS ImageServer): 8000 × 8000 max
+///   - IGN France / WMS servers: typically 4096 (MapServer default) but
+///     GeoServer-backed ones allow more. If a provider rejects the
+///     request we fall back to AWS Terrain Tiles automatically.
+///   - AWS Terrain / Japan GSI (tile-based): no single-request cap, they
+///     stitch multiple 256 px tiles, so this value is irrelevant to them.
+///
+/// Chosen value 8000 matches the USGS 3DEP cap — the provider that
+/// benefits most from a larger grid (1 m LiDAR over the continental US).
+/// At the default `--scale 1.0` this raises the precision boundary from
+/// ~16.8 km² (4096²) to ~64 km² (8000²). Above that the grid is still
+/// capped and block-level elevation is filled via bilinear interpolation
+/// — terrain remains generated, just with sub-native sampling.
+///
+/// Memory note: a full 8000 × 8000 f64 grid is ~512 MB; with the
+/// water_blend_grid and a snapshot during repair we can peak around
+/// 1.5 GB for the maximum case. Typical bboxes stay well below that.
+pub const MAX_ELEVATION_GRID_DIM: usize = 8000;
 
 /// Compute world and grid dimensions for the given bbox and scale.
 ///

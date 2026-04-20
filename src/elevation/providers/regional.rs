@@ -459,51 +459,90 @@ fn decode_geotiff_f32(
     let cursor = Cursor::new(bytes);
     let mut decoder = Decoder::new(cursor)?;
 
-    let (src_width, src_height) = decoder.dimensions()?;
+    let (src_width, _src_height) = decoder.dimensions()?;
     let src_width = src_width as usize;
-    let src_height = src_height as usize;
 
-    // Read the raster data
+    // Read the raster data. The decoder hands us its own typed buffer;
+    // we resample directly from it in `resample_nearest` below — casting
+    // on the fly per sample — instead of first materialising a whole
+    // Vec<f64> copy of the raster. On a 4096² F32 raster that saves
+    // ~128 MB of peak memory.
     let result = decoder.read_image()?;
-    let float_data: Vec<f64> = match result {
-        tiff::decoder::DecodingResult::F32(data) => data.iter().map(|&v| v as f64).collect(),
-        tiff::decoder::DecodingResult::F64(data) => data.to_vec(),
-        tiff::decoder::DecodingResult::U8(data) => data.iter().map(|&v| v as f64).collect(),
-        tiff::decoder::DecodingResult::U16(data) => data.iter().map(|&v| v as f64).collect(),
-        tiff::decoder::DecodingResult::I16(data) => data.iter().map(|&v| v as f64).collect(),
-        tiff::decoder::DecodingResult::U32(data) => data.iter().map(|&v| v as f64).collect(),
-        tiff::decoder::DecodingResult::I32(data) => data.iter().map(|&v| v as f64).collect(),
+
+    let height_grid = match result {
+        tiff::decoder::DecodingResult::F32(data) => {
+            resample_nearest(&data, src_width, target_width, target_height, |v| v as f64)
+        }
+        tiff::decoder::DecodingResult::F64(data) => {
+            resample_nearest(&data, src_width, target_width, target_height, |v| v)
+        }
+        tiff::decoder::DecodingResult::U8(data) => {
+            resample_nearest(&data, src_width, target_width, target_height, |v| v as f64)
+        }
+        tiff::decoder::DecodingResult::U16(data) => {
+            resample_nearest(&data, src_width, target_width, target_height, |v| v as f64)
+        }
+        tiff::decoder::DecodingResult::I16(data) => {
+            resample_nearest(&data, src_width, target_width, target_height, |v| v as f64)
+        }
+        tiff::decoder::DecodingResult::U32(data) => {
+            resample_nearest(&data, src_width, target_width, target_height, |v| v as f64)
+        }
+        tiff::decoder::DecodingResult::I32(data) => {
+            resample_nearest(&data, src_width, target_width, target_height, |v| v as f64)
+        }
         _ => return Err("Unsupported TIFF pixel type".into()),
     };
 
-    // Resample to target dimensions using nearest-neighbor
+    Ok(RawElevationGrid {
+        heights_meters: height_grid,
+    })
+}
+
+/// Nearest-neighbour resample from a typed source slice into an
+/// `Vec<Vec<f64>>` target grid, casting each sampled pixel on the fly.
+///
+/// Keeping the source in its native type (F32/U16/...) and casting only
+/// the pixels we actually sample avoids an intermediate full-raster
+/// `Vec<f64>` copy. For a 4096² F32 raster that's ~128 MB of peak
+/// memory saved — the difference between \"fits in 512 MB\" and
+/// \"OOM on memory-constrained systems\".
+///
+/// `cast` is monomorphised per call site, so there's no runtime dispatch
+/// overhead versus the old match-then-collect version.
+fn resample_nearest<T: Copy>(
+    src: &[T],
+    src_width: usize,
+    target_width: usize,
+    target_height: usize,
+    cast: impl Fn(T) -> f64,
+) -> Vec<Vec<f64>> {
     let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; target_width]; target_height];
+    let src_height = src.len().checked_div(src_width).unwrap_or(0);
     let target_y_den = target_height.saturating_sub(1).max(1);
     let target_x_den = target_width.saturating_sub(1).max(1);
     let src_y_extent = src_height.saturating_sub(1);
     let src_x_extent = src_width.saturating_sub(1);
 
-    #[allow(clippy::needless_range_loop)]
-    for ty in 0..target_height {
+    for (ty, row) in height_grid.iter_mut().enumerate().take(target_height) {
         let sy = (ty as f64 / target_y_den as f64 * src_y_extent as f64) as usize;
         let sy = sy.min(src_y_extent);
-        for tx in 0..target_width {
+        for (tx, slot) in row.iter_mut().enumerate().take(target_width) {
             let sx = (tx as f64 / target_x_den as f64 * src_x_extent as f64) as usize;
             let sx = sx.min(src_x_extent);
             let idx = sy * src_width + sx;
-            if idx < float_data.len() {
-                let val = float_data[idx];
-                // Common nodata values
+            if let Some(&raw) = src.get(idx) {
+                let val = cast(raw);
+                // Common nodata values filtered here — keep only finite,
+                // in-range elevations.
                 if val > -9999.0 && val < 100000.0 && val.is_finite() {
-                    height_grid[ty][tx] = val;
+                    *slot = val;
                 }
             }
         }
     }
 
-    Ok(RawElevationGrid {
-        heights_meters: height_grid,
-    })
+    height_grid
 }
 
 /// Compute a hash key for caching based on bbox and grid dimensions.

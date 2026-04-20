@@ -1,5 +1,6 @@
 use super::Operator;
 use crate::coordinate_system::cartesian::{XZBBox, XZBBoxRect, XZPoint};
+use crate::elevation::MAX_ELEVATION_GRID_DIM;
 use crate::ground::{Ground, RotationMask};
 use crate::land_cover::LC_WATER;
 use crate::osm_parser::ProcessedElement;
@@ -225,10 +226,13 @@ fn rotate_ground_data(
     let new_world_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
     let new_world_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
 
-    // Cap the rotation grid to avoid OOM on large worlds (same cap as elevation fetching)
-    const MAX_ROTATION_GRID_DIM: usize = 4096;
-    let new_w = new_world_w.min(MAX_ROTATION_GRID_DIM);
-    let new_h = new_world_h.min(MAX_ROTATION_GRID_DIM);
+    // Cap the rotation grid using the same constant as elevation
+    // fetching (`crate::elevation::MAX_ELEVATION_GRID_DIM`). Having two
+    // local copies of the number would let them silently drift, so we
+    // import the shared source of truth — if you tune one, the other
+    // follows.
+    let new_w = new_world_w.min(MAX_ELEVATION_GRID_DIM);
+    let new_h = new_world_h.min(MAX_ELEVATION_GRID_DIM);
 
     // For each cell in the new grid, inverse-rotate to find the source cell
     let neg_sin_r = -sin_r; // Inverse rotation
