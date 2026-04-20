@@ -152,6 +152,19 @@ a:hover {
   margin-bottom: 5px;
 }
 
+.world-name-label {
+  font-size: 0.8em;
+  color: #fecc44;
+  display: block;
+  line-height: 1;
+  min-height: 1em;
+  margin-top: 3px;
+  margin-bottom: -3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .map-container {
   border: none;
   border-radius: 8px;

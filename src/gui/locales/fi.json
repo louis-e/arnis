@@ -1,6 +1,7 @@
 {
   "create_world": "Luo maailma",
   "no_world_selected": "Maailmaa ei luotu",
+  "no_world_generated_yet": "Maailmaa ei vielä generoitu",
   "start_generation": "Aloita generointi",
   "custom_selection_confirmed": "Mukautettu valinta vahvistettu!",
   "error_coordinates_out_of_range": "Virhe: Koordinaatit ovat kantaman ulkopuolella tai vääriin aseteltu (Lat ennen Lng vaadittu).",

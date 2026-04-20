@@ -1,6 +1,7 @@
 {
   "create_world": "Ustvari svet",
   "no_world_selected": "Ni ustvarjenega sveta",
+  "no_world_generated_yet": "Svet še ni generiran",
   "start_generation": "Začni generiranje",
   "custom_selection_confirmed": "Izbira po meri potrjena!",
   "error_coordinates_out_of_range": "Napaka: Koordinate so izven obsega ali nepravilno urejene (zahtevana najprej zemljepisna širina, potem zemljepisna dolžina).",

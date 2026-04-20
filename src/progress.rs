@@ -57,6 +57,16 @@ pub fn emit_gui_error(message: &str) {
     emit_gui_progress_update(0.0, &format!("Error! {truncated_message}"));
 }
 
+/// Emits the final in-game level name (including localized area suffix for Java,
+/// or the location-based name for Bedrock) so the GUI can display it.
+pub fn emit_world_name_update(name: &str) {
+    if let Some(window) = get_main_window() {
+        if let Err(e) = window.emit("world-name-update", name) {
+            eprintln!("Failed to emit world-name-update event: {e}");
+        }
+    }
+}
+
 /// Emits an event when the world map preview is ready
 pub fn emit_map_preview_ready() {
     if let Some(window) = get_main_window() {

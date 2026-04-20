@@ -1,6 +1,7 @@
 {
   "create_world": "Világ létrehozása",
   "no_world_selected": "Nincs világ létrehozva",
+  "no_world_generated_yet": "Még nincs világ generálva",
   "start_generation": "Generálás indítása",
   "custom_selection_confirmed": "Egyéni kiválasztás megerősítve",
   "error_coordinates_out_of_range": "Hiba: A koordináták tartományon kívül vannak vagy hibásan rendezettek (a szélességi foknak a hosszúsági fok előtt kell lennie)",
