@@ -231,29 +231,54 @@ pub fn generate_ground_layer(
                                 // ESA WorldCover + slope-based material selection
                                 let cover = ground.cover_class(coord);
 
-                                // Steep terrain overrides land cover classification (steeper = darker/harder blocks)
+                                // Steep terrain overrides land cover classification.
+                                //
+                                // slope is max-min of 4 cardinal neighbours sampled
+                                // STEP=4 away, so `slope = 8 · tan(incline)`. Thresholds:
+                                //
+                                //   slope > 8  → ≥ 45° : sheer cliff face
+                                //   slope > 6  → ≥ 37° : very steep rocky face
+                                //   slope > 4  → ≥ 27° : steep slope with scree
+                                //   slope ≤ 4  → < 27° : falls through to land cover
+                                //                        (alpine meadow, forest, etc.)
+                                //
+                                // We don't force rock materials onto 21–27° slopes
+                                // any more — that's a normal hiking incline where
+                                // grass and trees belong.
                                 if slope > 8 {
-                                    // Extreme cliff: deepslate / cobbled deepslate mass
+                                    // Sheer cliff: deepslate face with weathered breaks.
                                     let h = land_cover::coord_hash(x, z);
                                     if h.is_multiple_of(4) {
-                                        (COBBLED_DEEPSLATE, DEEPSLATE)
+                                        (COBBLED_DEEPSLATE, DEEPSLATE) // 25%
                                     } else {
-                                        (DEEPSLATE, DEEPSLATE)
+                                        (DEEPSLATE, DEEPSLATE) // 75%
                                     }
                                 } else if slope > 6 {
-                                    // Very steep: stone surface, deepslate below
-                                    (STONE, DEEPSLATE)
-                                } else if slope > 4 {
-                                    // Steep: andesite/tuff mix based on hash
-                                    let h = land_cover::coord_hash(x, z);
-                                    if h.is_multiple_of(3) {
-                                        (TUFF, STONE)
+                                    // Very steep rock face: stone-dominant with
+                                    // weathered cobblestone chunks and occasional
+                                    // andesite banding. Deepslate stays below-surface
+                                    // only — it would read as "cliff" if exposed here.
+                                    let h = land_cover::coord_hash(x, z) % 20;
+                                    if h < 12 {
+                                        (STONE, DEEPSLATE) // 60%
+                                    } else if h < 17 {
+                                        (COBBLESTONE, DEEPSLATE) // 25%
                                     } else {
-                                        (ANDESITE, STONE)
+                                        (ANDESITE, DEEPSLATE) // 15%
                                     }
-                                } else if slope > 3 {
-                                    // Moderate slope: gravel scree
-                                    (GRAVEL, STONE)
+                                } else if slope > 4 {
+                                    // Steep slope with natural scree: rocky mix where
+                                    // the gravel is a minority patch (not the whole
+                                    // surface) so it looks like real scree rather
+                                    // than a grey slope.
+                                    let h = land_cover::coord_hash(x, z) % 12;
+                                    match h {
+                                        0..=3 => (ANDESITE, STONE),    // 33%
+                                        4..=5 => (TUFF, STONE),        // 17%
+                                        6..=7 => (STONE, STONE),       // 17%
+                                        8..=9 => (COBBLESTONE, STONE), // 17%
+                                        _ => (GRAVEL, STONE),          // 17% scree
+                                    }
                                 } else {
                                     // Select surface block based on ESA land cover class
                                     match cover {
@@ -319,7 +344,10 @@ pub fn generate_ground_layer(
                                     }
                                 }
                             } else if terrain_enabled {
-                                // No land cover data but terrain is enabled: apply slope-based materials
+                                // No land cover data: same slope-based cascade
+                                // as the has_land_cover path, falling through
+                                // to plain grass for the ≤4 slopes (no ESA
+                                // class to pick instead).
                                 if slope > 8 {
                                     let h = land_cover::coord_hash(x, z);
                                     if h.is_multiple_of(4) {
@@ -328,16 +356,23 @@ pub fn generate_ground_layer(
                                         (DEEPSLATE, DEEPSLATE)
                                     }
                                 } else if slope > 6 {
-                                    (STONE, DEEPSLATE)
-                                } else if slope > 4 {
-                                    let h = land_cover::coord_hash(x, z);
-                                    if h.is_multiple_of(3) {
-                                        (TUFF, STONE)
+                                    let h = land_cover::coord_hash(x, z) % 20;
+                                    if h < 12 {
+                                        (STONE, DEEPSLATE)
+                                    } else if h < 17 {
+                                        (COBBLESTONE, DEEPSLATE)
                                     } else {
-                                        (ANDESITE, STONE)
+                                        (ANDESITE, DEEPSLATE)
                                     }
-                                } else if slope > 3 {
-                                    (GRAVEL, STONE)
+                                } else if slope > 4 {
+                                    let h = land_cover::coord_hash(x, z) % 12;
+                                    match h {
+                                        0..=3 => (ANDESITE, STONE),
+                                        4..=5 => (TUFF, STONE),
+                                        6..=7 => (STONE, STONE),
+                                        8..=9 => (COBBLESTONE, STONE),
+                                        _ => (GRAVEL, STONE),
+                                    }
                                 } else {
                                     (GRASS_BLOCK, DIRT)
                                 }
