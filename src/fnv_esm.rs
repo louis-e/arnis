@@ -7,6 +7,8 @@ use crate::land_cover;
 use colored::Colorize;
 use rand::Rng;
 use std::collections::BTreeMap;
+use std::io;
+use std::io::Write;
 use std::fs;
 use std::path::Path;
 
@@ -126,12 +128,15 @@ const TEXTURE_DIRT: u32 = 0x00000A8A;
 // Static object FormIDs (all reference FalloutNV.esm, plugin index 0x00)
 // ---------------------------------------------------------------------------
 
-/// Juniper tree placed in tree-cover terrain cells.
-const JUNIPER_FID: u32 = 0x001479E2;
+// Forest trees — placed in LC_TREE_COVER cells (random Cedar or Aspen per point).
+const CEDAR_FID: u32 = 0x001479DF;
+const ASPEN_FID: u32 = 0x001479DB;
+
+// Desert trees — placed in LC_BARE cells (random Joshua Tree or Palm per point).
+const JOSHUA_TREE_FID: u32 = 0x0008D47C;
+const PALM_TREE_FID: u32 = 0x00111DA0;
 
 /// Grid spacing (in arnis blocks) between candidate tree placement points.
-/// A value of 8 gives a 4×4 = 16-point grid per cell; with the placement
-/// probability this yields a natural-looking low-to-medium density.
 const TREE_GRID_SPACING: i32 = 8;
 
 // Rock variants — sizes are approximate model extents.
@@ -140,15 +145,47 @@ const ROCK_TALL_FID: u32 = 0x00119882;           // ~2 m wide × 4 m tall
 const ROCK_MEDIUM_FID: u32 = 0x00119887;         // ~4 m × 8 m
 const ROCK_LARGE_FID: u32 = 0x00119888;          // ~8 m × 16 m
 
-/// Grid spacing for rock placement.  Coarser than trees to avoid wall-of-rocks
-/// effect and to leave room for the larger variants.
+/// Grid spacing for rock placement.  Coarser than trees to avoid wall-of-rocks effect.
 const ROCK_GRID_SPACING: i32 = 10;
 
-/// Desert shrub/bush placed in shrubland and grassland cells.
-const SHRUB_FID: u32 = 0x000EC8D2;
+// House models — placed in LC_BUILT_UP cells near roads.
+// Each model is 744 game units per side (≈5.8 arnis blocks).
+// Awning adds 241 units (≈1.9 blocks) of extra depth on one face.
+const HOUSE1_FID: u32 = 0x000C_B15C; // awning on front; default front faces -X (west)
+const HOUSE2_FID: u32 = 0x000C_B15E; // awning on front; default front faces -Y (south)
+const HOUSE3_FID: u32 = 0x000C_B15F; // awning on back;  default front faces -Y (south)
 
-/// Grid spacing for shrub placement.  Denser than rocks; shrubs are small.
-const SHRUB_GRID_SPACING: i32 = 6;
+/// Spacing along road polylines (arnis blocks) between house placement intervals.
+/// Houses are attempted on both sides of every road at this interval.
+const HOUSE_ROAD_SPACING: i32 = 10;
+
+/// Distance beyond the road edge (arnis blocks) to the house centre.
+/// Actual offset from road centreline = road_half_width + HOUSE_SETBACK.
+const HOUSE_SETBACK: i32 = 5;
+
+// Commercial buildings — placed alongside higher-priority roads (priority ≥ 2).
+const COMM_2STORY_FID: u32 = 0x000F_1B07; // 1093×790 units,  entry on −Y axis
+const COMM_1STORY_FID: u32 = 0x000E_EEAF; //  916×2258 units, entry on +Y axis
+const COMM_4STORY_FID: u32 = 0x0010_388E; //  930×930 units,  entry on −Y axis
+
+/// Spacing along road polylines (arnis blocks) between commercial placement intervals.
+const COMMERCIAL_ROAD_SPACING: i32 = 14;
+
+/// Setback from road edge to commercial building centre (arnis blocks).
+const COMMERCIAL_SETBACK: i32 = 6;
+
+/// Lamp post placed alongside roads.
+const LAMP_POST_FID: u32 = 0x0003A74A;
+
+/// Spacing along road polylines between consecutive lamp posts, in arnis blocks.
+/// At scale 1.0 (1 block ≈ 1 m) this is one post roughly every 16 m.
+const LAMP_SPACING_BLOCKS: i32 = 16;
+
+/// Juniper — placed in LC_SHRUBLAND and LC_GRASSLAND cells.
+const JUNIPER_FID: u32 = 0x001479E2;
+
+/// Grid spacing for juniper placement.
+const JUNIPER_GRID_SPACING: i32 = 8;
 
 // ---------------------------------------------------------------------------
 // Road rasterisation
@@ -206,7 +243,7 @@ impl RoadGrid {
 /// expanded by `half_width` blocks in every direction to give the road its
 /// painted width.
 fn build_road_grid(
-    polylines: &[Vec<(i32, i32)>],
+    polylines: &[(u8, Vec<(i32, i32)>)],
     world_width: i32,
     world_height: i32,
     half_width: i32,
@@ -224,7 +261,7 @@ fn build_road_grid(
         }
     };
 
-    for polyline in polylines {
+    for (_, polyline) in polylines {
         for segment in polyline.windows(2) {
             let (x0, z0) = segment[0];
             let (x1, z1) = segment[1];
@@ -244,7 +281,7 @@ fn build_road_grid(
     let endpoints: Vec<(i32, i32, usize)> = polylines
         .iter()
         .enumerate()
-        .flat_map(|(i, pl)| {
+        .flat_map(|(i, (_, pl))| {
             let mut ep = Vec::new();
             if let Some(&(x, z)) = pl.first() { ep.push((x, z, i)); }
             if pl.len() > 1 {
@@ -271,6 +308,72 @@ fn build_road_grid(
 
     grid
 }
+
+// ---------------------------------------------------------------------------
+// Per-cell occupancy grid
+// ---------------------------------------------------------------------------
+
+/// Per-cell occupancy bitmap that prevents overlapping object placement.
+///
+/// Before placing an object, call `is_clear(ax, az, radius)`. If it returns
+/// true, place the object and then call `mark(ax, az, radius)` to claim the
+/// space. Objects placed earlier in the call sequence take priority.
+struct OccupancyGrid {
+    data: Vec<bool>, // BLOCKS_PER_CELL × BLOCKS_PER_CELL, one bool per arnis block
+    cell_min_ax: i32,
+    cell_min_az: i32,
+}
+
+impl OccupancyGrid {
+    fn new(cell_col: i32, cell_row: i32) -> Self {
+        Self {
+            data: vec![false; (BLOCKS_PER_CELL * BLOCKS_PER_CELL) as usize],
+            cell_min_ax: cell_col * BLOCKS_PER_CELL,
+            cell_min_az: cell_row * BLOCKS_PER_CELL,
+        }
+    }
+
+    /// Returns true if every block within `radius` of `(ax, az)` is unoccupied.
+    /// Positions outside this cell's boundary are treated as clear.
+    fn is_clear(&self, ax: i32, az: i32, radius: i32) -> bool {
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                let lx = ax + dx - self.cell_min_ax;
+                let lz = az + dz - self.cell_min_az;
+                if lx >= 0
+                    && lz >= 0
+                    && lx < BLOCKS_PER_CELL
+                    && lz < BLOCKS_PER_CELL
+                    && self.data[(lz * BLOCKS_PER_CELL + lx) as usize]
+                {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// Mark all blocks within `radius` of `(ax, az)` as occupied.
+    fn mark(&mut self, ax: i32, az: i32, radius: i32) {
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                let lx = ax + dx - self.cell_min_ax;
+                let lz = az + dz - self.cell_min_az;
+                if lx >= 0 && lz >= 0 && lx < BLOCKS_PER_CELL && lz < BLOCKS_PER_CELL {
+                    self.data[(lz * BLOCKS_PER_CELL + lx) as usize] = true;
+                }
+            }
+        }
+    }
+}
+
+/// Exclusion radius (arnis blocks) for each object category.
+/// A placed object claims a square of side `2*radius+1` centred on its position.
+const OCC_RADIUS_BUILDING: i32 = 5; // houses (~5.8 blocks/side) and commercial
+const OCC_RADIUS_TREE: i32 = 3;     // forest / desert trees
+const OCC_RADIUS_SHRUB: i32 = 2;    // junipers
+const OCC_RADIUS_ROCK: i32 = 2;     // rock clusters
+const OCC_RADIUS_LAMP: i32 = 1;     // lamp posts (tiny footprint)
 
 // --- binary helpers ---
 
@@ -865,13 +968,14 @@ fn build_tree_refr(form_id: u32, base_fid: u32, x: f32, y: f32, z: f32, rot_z: f
     buf
 }
 
-/// Generate REFR records for vegetation in one cell.
+/// Generate REFR records for trees in one cell.
 ///
 /// Iterates a regular grid across the cell at `TREE_GRID_SPACING`-block
-/// intervals. At each grid point, samples the land-cover class and places a
-/// Juniper tree if the class is LC_TREE_COVER. A deterministic per-coordinate
-/// RNG decides whether to actually place (density thinning) and adds small
-/// positional/rotational jitter.
+/// intervals. At each grid point, samples the land-cover class and places:
+///   - LC_TREE_COVER → Cedar or Aspen (random 50/50, ~60% density)
+///   - LC_BARE       → Joshua Tree or Palm (random 50/50, ~20% density)
+/// A deterministic per-coordinate RNG decides placement and adds positional/
+/// rotational jitter.
 ///
 /// Returns the concatenated REFR byte data and the number of records written.
 /// `next_fid` is advanced by the returned count.
@@ -885,6 +989,7 @@ fn place_tree_refs(
     effective_scale: i32,
     water_height_game: Option<f32>,
     next_fid: &mut u32,
+    occ: &mut OccupancyGrid,
 ) -> (Vec<u8>, u32) {
     let mut refs = Vec::new();
     let mut count = 0u32;
@@ -898,15 +1003,26 @@ fn place_tree_refs(
             let arnis_z = cell_row * BLOCKS_PER_CELL + (BLOCKS_PER_CELL - 1 - local_row_fnv);
 
             let lc = ground.cover_class(XZPoint::new(arnis_x, arnis_z));
-            if lc == land_cover::LC_TREE_COVER {
-                let mut rng = coord_rng(arnis_x, arnis_z, 0x4A554E49_50455200);
+            let place_prob = match lc {
+                land_cover::LC_TREE_COVER => 0.6,
+                land_cover::LC_BARE       => 0.2,
+                _                         => 0.0,
+            };
+            if place_prob > 0.0 {
+                let mut rng = coord_rng(arnis_x, arnis_z, 0x54524545_00000000);
 
-                // ~60% placement probability to avoid uniform grid appearance.
-                if rng.random_bool(0.6) {
-                    // Jitter within ±48 game units (< half a block = 64 units).
+                if rng.random_bool(place_prob) {
+                    let tree_fid = match lc {
+                        land_cover::LC_TREE_COVER => {
+                            if rng.random_bool(0.5) { CEDAR_FID } else { ASPEN_FID }
+                        }
+                        _ => {
+                            if rng.random_bool(0.5) { JOSHUA_TREE_FID } else { PALM_TREE_FID }
+                        }
+                    };
+
                     let jitter_x: f32 = rng.random_range(-48.0_f32..48.0_f32);
                     let jitter_y: f32 = rng.random_range(-48.0_f32..48.0_f32);
-                    // Random Z rotation 0..2π.
                     let rot_z: f32 = rng.random_range(0.0_f32..std::f32::consts::TAU);
 
                     let game_x = cell_x as f32 * CELL_GAME_UNITS
@@ -922,11 +1038,13 @@ fn place_tree_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    // Skip trees submerged below the water surface.
-                    if water_height_game.map_or(true, |wl| game_z >= wl) {
-                        refs.extend(build_tree_refr(*next_fid, JUNIPER_FID, game_x, game_y, game_z, rot_z));
+                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                        && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_TREE)
+                    {
+                        refs.extend(build_tree_refr(*next_fid, tree_fid, game_x, game_y, game_z, rot_z));
                         *next_fid += 1;
                         count += 1;
+                        occ.mark(arnis_x, arnis_z, OCC_RADIUS_TREE);
                     }
                 }
             }
@@ -955,6 +1073,7 @@ fn place_rock_refs(
     effective_scale: i32,
     water_height_game: Option<f32>,
     next_fid: &mut u32,
+    occ: &mut OccupancyGrid,
 ) -> (Vec<u8>, u32) {
     let mut refs = Vec::new();
     let mut count = 0u32;
@@ -1005,10 +1124,13 @@ fn place_rock_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    if water_height_game.map_or(true, |wl| game_z >= wl) {
+                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                        && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_ROCK)
+                    {
                         refs.extend(build_tree_refr(*next_fid, rock_fid, game_x, game_y, game_z, rot_z));
                         *next_fid += 1;
                         count += 1;
+                        occ.mark(arnis_x, arnis_z, OCC_RADIUS_ROCK);
                     }
                 }
             }
@@ -1021,11 +1143,10 @@ fn place_rock_refs(
     (refs, count)
 }
 
-/// Generate REFR records for shrubs/bushes in one cell.
+/// Generate REFR records for Juniper trees in one cell.
 ///
-/// Dense in `LC_SHRUBLAND`, sparser in `LC_GRASSLAND` and `LC_BARE` (scrubby
-/// outskirts of rocky areas).  Rotation is fully random — the asset looks fine
-/// from any angle.
+/// Dense in `LC_SHRUBLAND`, sparser in `LC_GRASSLAND`.  Rotation is fully
+/// random — the asset looks fine from any angle.
 fn place_shrub_refs(
     ground: &Ground,
     cell_col: i32,
@@ -1036,6 +1157,7 @@ fn place_shrub_refs(
     effective_scale: i32,
     water_height_game: Option<f32>,
     next_fid: &mut u32,
+    occ: &mut OccupancyGrid,
 ) -> (Vec<u8>, u32) {
     let mut refs = Vec::new();
     let mut count = 0u32;
@@ -1052,12 +1174,11 @@ fn place_shrub_refs(
             let place_prob = match lc {
                 land_cover::LC_SHRUBLAND => 0.70,
                 land_cover::LC_GRASSLAND => 0.35,
-                land_cover::LC_BARE      => 0.15,
                 _ => 0.0,
             };
 
             if place_prob > 0.0 {
-                let mut rng = coord_rng(arnis_x, arnis_z, 0x42555348_00000000);
+                let mut rng = coord_rng(arnis_x, arnis_z, 0x4A554E49_50455200);
 
                 if rng.random_bool(place_prob) {
                     let jitter_x: f32 = rng.random_range(-40.0_f32..40.0_f32);
@@ -1077,17 +1198,429 @@ fn place_shrub_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    if water_height_game.map_or(true, |wl| game_z >= wl) {
-                        refs.extend(build_tree_refr(*next_fid, SHRUB_FID, game_x, game_y, game_z, rot_z));
+                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                        && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_SHRUB)
+                    {
+                        refs.extend(build_tree_refr(*next_fid, JUNIPER_FID, game_x, game_y, game_z, rot_z));
                         *next_fid += 1;
                         count += 1;
+                        occ.mark(arnis_x, arnis_z, OCC_RADIUS_SHRUB);
                     }
                 }
             }
 
-            local_col += SHRUB_GRID_SPACING;
+            local_col += JUNIPER_GRID_SPACING;
         }
-        local_row_fnv += SHRUB_GRID_SPACING;
+        local_row_fnv += JUNIPER_GRID_SPACING;
+    }
+
+    (refs, count)
+}
+
+/// Generate REFR records for houses in one cell.
+///
+/// Walks every road polyline and at each `HOUSE_ROAD_SPACING`-block interval
+/// attempts to place a house on both sides at `road_half_width + HOUSE_SETBACK`
+/// blocks from the centreline.  This produces even street frontage regardless
+/// of patchy land-cover data.
+///
+/// Only water and snow-ice land cover classes are hard disqualifiers; all other
+/// terrain (grassland, built-up, cropland, etc.) is allowed.
+///
+/// Rotation: the house front is aimed toward the road centreline.
+///   toward_fnv = (side × sdz/len,  side × sdx/len)   [arnis Z → FNV −Y]
+///   House1 (default front = −X): rot_z = atan2(−toward_y, −toward_x)
+///   House2/3 (default front = −Y): rot_z = atan2( toward_x, −toward_y)
+fn place_house_refs(
+    roads: &[(u8, Vec<(i32, i32)>)],
+    road_grid: Option<&RoadGrid>,
+    road_half_width: i32,
+    world_scale: f64,
+    cell_col: i32,
+    cell_row: i32,
+    cell_x: i32,
+    cell_y: i32,
+    ground: &Ground,
+    global_min: i32,
+    effective_scale: i32,
+    water_height_game: Option<f32>,
+    next_fid: &mut u32,
+    occ: &mut OccupancyGrid,
+) -> (Vec<u8>, u32) {
+    let mut refs = Vec::new();
+    let mut count = 0u32;
+
+    if roads.is_empty() {
+        return (refs, count);
+    }
+
+    let cell_min_ax = cell_col * BLOCKS_PER_CELL;
+    let cell_max_ax = cell_min_ax + BLOCKS_PER_CELL;
+    let cell_min_az = cell_row * BLOCKS_PER_CELL;
+    let cell_max_az = cell_min_az + BLOCKS_PER_CELL;
+
+    let setback = road_half_width as f64 + HOUSE_SETBACK as f64;
+
+    // Scale-dependent keep probability, mirroring the lamp-post thinning.
+    //   p(s) = clamp(0.70 × s^1.89, 0, 0.70)
+    //   s = 0.142 → p ≈ 0.018  (~97.5 % fewer than scale 1)
+    //   s = 1.00  → p = 0.70   (baseline)
+    //   s ≥ 1.00  → p = 0.70   (capped)
+    let keep_prob = (0.70_f64 * world_scale.powf(1.89)).clamp(0.0, 0.70);
+
+    for (priority, polyline) in roads {
+        if *priority != 1 {
+            continue; // houses only on residential/local roads
+        }
+        for segment in polyline.windows(2) {
+            let (x0, z0) = (segment[0].0 as f64, segment[0].1 as f64);
+            let (x1, z1) = (segment[1].0 as f64, segment[1].1 as f64);
+            let sdx = x1 - x0;
+            let sdz = z1 - z0;
+            let seg_len = (sdx * sdx + sdz * sdz).sqrt();
+            if seg_len < 1.0 {
+                continue;
+            }
+
+            // Perpendicular unit vector (left of travel direction in arnis XZ).
+            let perp_x = -sdz / seg_len;
+            let perp_z = sdx / seg_len;
+
+            let num_steps = (seg_len / HOUSE_ROAD_SPACING as f64).ceil() as i32;
+
+            for step in 0..=num_steps {
+                let t = (step as f64 * HOUSE_ROAD_SPACING as f64).min(seg_len) / seg_len;
+                let cx = x0 + sdx * t;
+                let cz = z0 + sdz * t;
+
+                for &side in &[1.0f64, -1.0f64] {
+                    let px = (cx + side * perp_x * setback).round() as i32;
+                    let pz = (cz + side * perp_z * setback).round() as i32;
+
+                    if px < cell_min_ax || px >= cell_max_ax
+                        || pz < cell_min_az || pz >= cell_max_az
+                    {
+                        continue;
+                    }
+
+                    // Skip positions on a road surface.
+                    if road_grid.map_or(false, |rg| rg.is_road(px, pz)) {
+                        continue;
+                    }
+
+                    // Hard disqualifiers: water and snow/ice only.
+                    let lc = ground.cover_class(XZPoint::new(px, pz));
+                    if lc == land_cover::LC_WATER || lc == land_cover::LC_SNOW_ICE {
+                        continue;
+                    }
+
+                    // Scale-dependent density thinning.
+                    let mut rng = coord_rng(px, pz, 0x484F555345_000000u64);
+                    if !rng.random_bool(keep_prob) {
+                        continue;
+                    }
+
+                    let house_fid = match rng.random_range(0u32..3) {
+                        0 => HOUSE1_FID,
+                        1 => HOUSE2_FID,
+                        _ => HOUSE3_FID,
+                    };
+
+                    // "Toward road" unit vector in FNV XY (arnis Z → FNV −Y).
+                    let toward_fnv_x = side * sdz / seg_len;
+                    let toward_fnv_y = side * sdx / seg_len;
+
+                    let rot_z = if house_fid == HOUSE1_FID {
+                        f64::atan2(-toward_fnv_y, -toward_fnv_x) as f32
+                    } else {
+                        f64::atan2(toward_fnv_x, -toward_fnv_y) as f32
+                    };
+
+                    let local_col = px - cell_min_ax;
+                    let local_row_fnv = BLOCKS_PER_CELL - 1 - (pz - cell_min_az);
+
+                    let game_x = cell_x as f32 * CELL_GAME_UNITS
+                        + local_col as f32 * 128.0 + 64.0;
+                    let game_y = cell_y as f32 * CELL_GAME_UNITS
+                        + local_row_fnv as f32 * 128.0 + 64.0;
+
+                    let raw_h = ground.level(XZPoint::new(px, pz));
+                    let game_z =
+                        ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+
+                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                        && occ.is_clear(px, pz, OCC_RADIUS_BUILDING)
+                    {
+                        refs.extend(build_tree_refr(
+                            *next_fid, house_fid, game_x, game_y, game_z, rot_z,
+                        ));
+                        *next_fid += 1;
+                        count += 1;
+                        occ.mark(px, pz, OCC_RADIUS_BUILDING);
+                    }
+                }
+            }
+        }
+    }
+
+    (refs, count)
+}
+
+/// Generate REFR records for commercial buildings alongside higher-priority roads.
+///
+/// Walks road polylines with priority ≥ 2 (secondary, primary, trunk, motorway)
+/// and at each `COMMERCIAL_ROAD_SPACING` interval places a building on both sides.
+///
+/// Rotation per model default-front axis:
+///   COMM_2STORY / COMM_4STORY (entry −Y): rot_z = atan2( toward_x, −toward_y)
+///   COMM_1STORY               (entry +Y): rot_z = atan2(−toward_x,  toward_y)
+fn place_commercial_refs(
+    roads: &[(u8, Vec<(i32, i32)>)],
+    road_grid: Option<&RoadGrid>,
+    road_half_width: i32,
+    world_scale: f64,
+    cell_col: i32,
+    cell_row: i32,
+    cell_x: i32,
+    cell_y: i32,
+    ground: &Ground,
+    global_min: i32,
+    effective_scale: i32,
+    water_height_game: Option<f32>,
+    next_fid: &mut u32,
+    occ: &mut OccupancyGrid,
+) -> (Vec<u8>, u32) {
+    let mut refs = Vec::new();
+    let mut count = 0u32;
+
+    if roads.is_empty() {
+        return (refs, count);
+    }
+
+    let cell_min_ax = cell_col * BLOCKS_PER_CELL;
+    let cell_max_ax = cell_min_ax + BLOCKS_PER_CELL;
+    let cell_min_az = cell_row * BLOCKS_PER_CELL;
+    let cell_max_az = cell_min_az + BLOCKS_PER_CELL;
+
+    let setback = road_half_width as f64 + COMMERCIAL_SETBACK as f64;
+
+    //   p(s) = clamp(0.60 × s^1.53, 0, 0.60)
+    //   s = 0.142 → p ≈ 0.030  (~95 % fewer than scale 1)
+    //   s = 1.00  → p = 0.60   (baseline)
+    //   s ≥ 1.00  → p = 0.60   (capped)
+    let keep_prob = (0.60_f64 * world_scale.powf(1.53)).clamp(0.0, 0.60);
+
+    for (priority, polyline) in roads {
+        if *priority < 2 {
+            continue; // commercial buildings only on main roads
+        }
+        for segment in polyline.windows(2) {
+            let (x0, z0) = (segment[0].0 as f64, segment[0].1 as f64);
+            let (x1, z1) = (segment[1].0 as f64, segment[1].1 as f64);
+            let sdx = x1 - x0;
+            let sdz = z1 - z0;
+            let seg_len = (sdx * sdx + sdz * sdz).sqrt();
+            if seg_len < 1.0 {
+                continue;
+            }
+
+            let perp_x = -sdz / seg_len;
+            let perp_z = sdx / seg_len;
+
+            let num_steps = (seg_len / COMMERCIAL_ROAD_SPACING as f64).ceil() as i32;
+
+            for step in 0..=num_steps {
+                let t = (step as f64 * COMMERCIAL_ROAD_SPACING as f64).min(seg_len) / seg_len;
+                let cx = x0 + sdx * t;
+                let cz = z0 + sdz * t;
+
+                for &side in &[1.0f64, -1.0f64] {
+                    let px = (cx + side * perp_x * setback).round() as i32;
+                    let pz = (cz + side * perp_z * setback).round() as i32;
+
+                    if px < cell_min_ax || px >= cell_max_ax
+                        || pz < cell_min_az || pz >= cell_max_az
+                    {
+                        continue;
+                    }
+
+                    if road_grid.map_or(false, |rg| rg.is_road(px, pz)) {
+                        continue;
+                    }
+
+                    let lc = ground.cover_class(XZPoint::new(px, pz));
+                    if lc == land_cover::LC_WATER || lc == land_cover::LC_SNOW_ICE {
+                        continue;
+                    }
+
+                    let mut rng = coord_rng(px, pz, 0x434F4D4D_00000000u64);
+                    if !rng.random_bool(keep_prob) {
+                        continue;
+                    }
+
+                    let building_fid = match rng.random_range(0u32..3) {
+                        0 => COMM_2STORY_FID,
+                        1 => COMM_1STORY_FID,
+                        _ => COMM_4STORY_FID,
+                    };
+
+                    // toward_road in FNV XY: (side×sdz/len, side×sdx/len)
+                    let toward_fnv_x = side * sdz / seg_len;
+                    let toward_fnv_y = side * sdx / seg_len;
+
+                    let rot_z = if building_fid == COMM_1STORY_FID {
+                        // entry on +Y axis
+                        f64::atan2(-toward_fnv_x, toward_fnv_y) as f32
+                    } else {
+                        // entry on −Y axis (2-story and 4-story)
+                        f64::atan2(toward_fnv_x, -toward_fnv_y) as f32
+                    };
+
+                    let local_col = px - cell_min_ax;
+                    let local_row_fnv = BLOCKS_PER_CELL - 1 - (pz - cell_min_az);
+
+                    let game_x = cell_x as f32 * CELL_GAME_UNITS
+                        + local_col as f32 * 128.0 + 64.0;
+                    let game_y = cell_y as f32 * CELL_GAME_UNITS
+                        + local_row_fnv as f32 * 128.0 + 64.0;
+
+                    let raw_h = ground.level(XZPoint::new(px, pz));
+                    let game_z =
+                        ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+
+                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                        && occ.is_clear(px, pz, OCC_RADIUS_BUILDING)
+                    {
+                        refs.extend(build_tree_refr(
+                            *next_fid, building_fid, game_x, game_y, game_z, rot_z,
+                        ));
+                        *next_fid += 1;
+                        count += 1;
+                        occ.mark(px, pz, OCC_RADIUS_BUILDING);
+                    }
+                }
+            }
+        }
+    }
+
+    (refs, count)
+}
+
+/// Generate REFR records for lamp posts alongside roads in one cell.
+///
+/// Walks every road polyline segment and places a lamp post at each
+/// `LAMP_SPACING_BLOCKS` interval, offset perpendicularly from the road
+/// centreline by `road_half_width + 2` blocks (just outside the road edge).
+/// Posts falling outside this cell's arnis bounds are skipped, so each cell
+/// independently produces only its own posts without coordination overhead.
+fn place_lamp_refs(
+    roads: &[(u8, Vec<(i32, i32)>)],
+    road_half_width: i32,
+    world_scale: f64,
+    cell_col: i32,
+    cell_row: i32,
+    cell_x: i32,
+    cell_y: i32,
+    ground: &Ground,
+    global_min: i32,
+    effective_scale: i32,
+    water_height_game: Option<f32>,
+    next_fid: &mut u32,
+    occ: &mut OccupancyGrid,
+) -> (Vec<u8>, u32) {
+    let mut refs = Vec::new();
+    let mut count = 0u32;
+
+    if roads.is_empty() {
+        return (refs, count);
+    }
+
+    // Scale-dependent keep probability.  At small scales (e.g. 0.142×) the
+    // world is compressed so fewer lamp posts are appropriate; at scales ≥ 1
+    // the count is capped at the scale-1 baseline.
+    //   p(s) = clamp(0.5 × s^1.53, 0, 0.5)
+    //   s = 0.142 → p ≈ 0.025  (~97.5 % fewer than scale 1)
+    //   s = 1.00  → p = 0.50   (baseline — half of candidate posts kept)
+    //   s ≥ 1.00  → p = 0.50   (capped; no extra posts at larger scales)
+    let keep_prob = (0.5_f64 * world_scale.powf(1.53)).clamp(0.0, 0.5);
+
+    let cell_min_ax = cell_col * BLOCKS_PER_CELL;
+    let cell_max_ax = cell_min_ax + BLOCKS_PER_CELL;
+    let cell_min_az = cell_row * BLOCKS_PER_CELL;
+    let cell_max_az = cell_min_az + BLOCKS_PER_CELL;
+
+    // Lamp sits just outside the road edge.
+    let offset_dist = (road_half_width + 2) as f64;
+
+    let mut emit = |px: i32, pz: i32| {
+        if px < cell_min_ax || px >= cell_max_ax || pz < cell_min_az || pz >= cell_max_az {
+            return;
+        }
+
+        // Convert arnis (x, z) to FNV local row (0 = south, increases northward).
+        let local_col     = px - cell_min_ax;
+        let local_row_fnv = BLOCKS_PER_CELL - 1 - (pz - cell_min_az);
+
+        let game_x = cell_x as f32 * CELL_GAME_UNITS + local_col as f32 * 128.0 + 64.0;
+        let game_y = cell_y as f32 * CELL_GAME_UNITS + local_row_fnv as f32 * 128.0 + 64.0;
+
+        let raw_h  = ground.level(XZPoint::new(px, pz));
+        let game_z = ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+
+        if water_height_game.map_or(true, |wl| game_z >= wl) {
+            refs.extend(build_tree_refr(*next_fid, LAMP_POST_FID, game_x, game_y, game_z, 0.0));
+            *next_fid += 1;
+            count += 1;
+        }
+    };
+
+    for (_, polyline) in roads {
+        for segment in polyline.windows(2) {
+            let (x0, z0) = (segment[0].0 as f64, segment[0].1 as f64);
+            let (x1, z1) = (segment[1].0 as f64, segment[1].1 as f64);
+            let dx = x1 - x0;
+            let dz = z1 - z0;
+            let seg_len = (dx * dx + dz * dz).sqrt();
+            if seg_len < 1.0 {
+                continue;
+            }
+
+            // Perpendicular unit vector (left side of travel direction in arnis XZ).
+            // CW 90°: (dx, dz) → (dz, -dx); scale to offset_dist.
+            let perp_x = dz / seg_len * offset_dist;
+            let perp_z = -dx / seg_len * offset_dist;
+
+            // Number of evenly-spaced lamp posts along this segment.
+            let num_steps = ((seg_len / LAMP_SPACING_BLOCKS as f64).floor() as i32).max(1);
+
+            for step in 0..=num_steps {
+                let t = (step as f64 * LAMP_SPACING_BLOCKS as f64).min(seg_len) / seg_len;
+                let cx = x0 + dx * t;
+                let cz = z0 + dz * t;
+
+                // Scale-dependent thinning — skip this pair of posts based on
+                // a deterministic RNG seeded from the centreline position.
+                let mut rng = coord_rng(cx.round() as i32, cz.round() as i32, 0x4C414D50_00000000u64);
+                if !rng.random_bool(keep_prob) {
+                    continue;
+                }
+
+                // Place on both sides of the road, skipping occupied positions.
+                let px_l = (cx + perp_x).round() as i32;
+                let pz_l = (cz + perp_z).round() as i32;
+                let px_r = (cx - perp_x).round() as i32;
+                let pz_r = (cz - perp_z).round() as i32;
+
+                if occ.is_clear(px_l, pz_l, OCC_RADIUS_LAMP) {
+                    emit(px_l, pz_l);
+                    occ.mark(px_l, pz_l, OCC_RADIUS_LAMP);
+                }
+                if occ.is_clear(px_r, pz_r, OCC_RADIUS_LAMP) {
+                    emit(px_r, pz_r);
+                    occ.mark(px_r, pz_r, OCC_RADIUS_LAMP);
+                }
+            }
+        }
     }
 
     (refs, count)
@@ -1102,7 +1635,8 @@ pub fn generate_fnv_esm(
     output_dir: &Path,
     water_level: Option<f32>,
     world_scale: f64,
-    roads: &[Vec<(i32, i32)>],
+    roads: &[(u8, Vec<(i32, i32)>)],
+    terrain_only: bool,
 ) -> Result<(), String> {
     let max_x = xzbbox.max_x();
     let max_z = xzbbox.max_z();
@@ -1233,6 +1767,7 @@ pub fn generate_fnv_esm(
         }
         None
     };
+    println!("  Done building road grid");
 
     // Allocate FormIDs from testesm's nextObjectID upward so they share the
     // same verified namespace as the WRLD FormID (0x01000ADD).
@@ -1260,79 +1795,155 @@ pub fn generate_fnv_esm(
         rock_count: u32,
         shrub_refs: Vec<u8>,
         shrub_count: u32,
+        lamp_refs: Vec<u8>,
+        lamp_count: u32,
+        house_refs: Vec<u8>,
+        house_count: u32,
+        commercial_refs: Vec<u8>,
+        commercial_count: u32,
     }
 
     let mut cells: Vec<CellInfo> = Vec::with_capacity(num_cols * num_rows);
+    if !terrain_only {
+        print!("  Placing objects");
+        for row in 0..num_rows {
+            for col in 0..num_cols {
+                print!(".");
+                io::stdout().flush().unwrap();
+                let cell_x = col as i32 - x_offset;
+                // Arnis Z increases southward; FNV Y increases northward.
+                let cell_y = (num_rows - 1 - row) as i32 - y_offset;
+                let cell_fid = next_fid;
+                let land_fid = next_fid + 1;
+                next_fid += 2;
 
-    for row in 0..num_rows {
-        for col in 0..num_cols {
-            let cell_x = col as i32 - x_offset;
-            // Arnis Z increases southward; FNV Y increases northward.
-            let cell_y = (num_rows - 1 - row) as i32 - y_offset;
-            let cell_fid = next_fid;
-            let land_fid = next_fid + 1;
-            next_fid += 2;
+                let heights =
+                    sample_heights(ground, col as i32, row as i32, global_min, effective_scale);
+                let (vhgt_offset, deltas) = encode_vhgt(&heights);
+                let vnml = compute_vnml(&heights);
+                let quads = compute_quad_textures(ground, col, row, &heights, default_texture, road_grid.as_ref());
 
-            let heights =
-                sample_heights(ground, col as i32, row as i32, global_min, effective_scale);
-            let (vhgt_offset, deltas) = encode_vhgt(&heights);
-            let vnml = compute_vnml(&heights);
-            let quads = compute_quad_textures(ground, col, row, &heights, default_texture, road_grid.as_ref());
+                // Shared occupancy grid for this cell.  Buildings are placed first so
+                // they take priority; vegetation fills in the remaining space.
+                let mut occ = OccupancyGrid::new(col as i32, row as i32);
 
-            let (tree_refs, tree_count) = place_tree_refs(
-                ground,
-                col as i32,
-                row as i32,
-                cell_x,
-                cell_y,
-                global_min,
-                effective_scale,
-                effective_water_level,
-                &mut next_fid,
-            );
+                let (house_refs, house_count) = place_house_refs(
+                    roads,
+                    road_grid.as_ref(),
+                    road_half_width,
+                    world_scale,
+                    col as i32,
+                    row as i32,
+                    cell_x,
+                    cell_y,
+                    ground,
+                    global_min,
+                    effective_scale,
+                    effective_water_level,
+                    &mut next_fid,
+                    &mut occ,
+                );
 
-            let (rock_refs, rock_count) = place_rock_refs(
-                ground,
-                col as i32,
-                row as i32,
-                cell_x,
-                cell_y,
-                global_min,
-                effective_scale,
-                effective_water_level,
-                &mut next_fid,
-            );
+                let (commercial_refs, commercial_count) = place_commercial_refs(
+                    roads,
+                    road_grid.as_ref(),
+                    road_half_width,
+                    world_scale,
+                    col as i32,
+                    row as i32,
+                    cell_x,
+                    cell_y,
+                    ground,
+                    global_min,
+                    effective_scale,
+                    effective_water_level,
+                    &mut next_fid,
+                    &mut occ,
+                );
 
-            let (shrub_refs, shrub_count) = place_shrub_refs(
-                ground,
-                col as i32,
-                row as i32,
-                cell_x,
-                cell_y,
-                global_min,
-                effective_scale,
-                effective_water_level,
-                &mut next_fid,
-            );
+                let (lamp_refs, lamp_count) = place_lamp_refs(
+                    roads,
+                    road_half_width,
+                    world_scale,
+                    col as i32,
+                    row as i32,
+                    cell_x,
+                    cell_y,
+                    ground,
+                    global_min,
+                    effective_scale,
+                    effective_water_level,
+                    &mut next_fid,
+                    &mut occ,
+                );
 
-            cells.push(CellInfo {
-                cell_x,
-                cell_y,
-                cell_fid,
-                land_fid,
-                vhgt_offset,
-                deltas,
-                vnml,
-                water_height_game: effective_water_level,
-                quads,
-                tree_refs,
-                tree_count,
-                rock_refs,
-                rock_count,
-                shrub_refs,
-                shrub_count,
-            });
+                let (tree_refs, tree_count) = place_tree_refs(
+                    ground,
+                    col as i32,
+                    row as i32,
+                    cell_x,
+                    cell_y,
+                    global_min,
+                    effective_scale,
+                    effective_water_level,
+                    &mut next_fid,
+                    &mut occ,
+                );
+
+                let (rock_refs, rock_count) = place_rock_refs(
+                    ground,
+                    col as i32,
+                    row as i32,
+                    cell_x,
+                    cell_y,
+                    global_min,
+                    effective_scale,
+                    effective_water_level,
+                    &mut next_fid,
+                    &mut occ,
+                );
+
+                let (shrub_refs, shrub_count) = place_shrub_refs(
+                    ground,
+                    col as i32,
+                    row as i32,
+                    cell_x,
+                    cell_y,
+                    global_min,
+                    effective_scale,
+                    effective_water_level,
+                    &mut next_fid,
+                    &mut occ,
+                );
+
+                cells.push(CellInfo {
+                    cell_x,
+                    cell_y,
+                    cell_fid,
+                    land_fid,
+                    vhgt_offset,
+                    deltas,
+                    vnml,
+                    water_height_game: effective_water_level,
+                    quads,
+                    tree_refs,
+                    tree_count,
+                    rock_refs,
+                    rock_count,
+                    shrub_refs,
+                    shrub_count,
+                    lamp_refs,
+                    lamp_count,
+                    house_refs,
+                    house_count,
+                    commercial_refs,
+                    commercial_count,
+                });
+            }
         }
+        println!("Done!");
+    } else {
+        println!("Skipping object placement");
     }
 
     // Group cells into exterior blocks (div_euclid 8) and subblocks (div_euclid 2).
@@ -1386,6 +1997,9 @@ pub fn generate_fnv_esm(
                 temp_children_content.extend_from_slice(&cell.tree_refs);
                 temp_children_content.extend_from_slice(&cell.rock_refs);
                 temp_children_content.extend_from_slice(&cell.shrub_refs);
+                temp_children_content.extend_from_slice(&cell.lamp_refs);
+                temp_children_content.extend_from_slice(&cell.house_refs);
+                temp_children_content.extend_from_slice(&cell.commercial_refs);
 
                 let mut tmp_grup = Vec::new();
                 push_grup(&mut tmp_grup, cell_label, 9, &temp_children_content);
@@ -1431,7 +2045,7 @@ pub fn generate_fnv_esm(
     // reflect our content size.
     let mut tes4 = TESTESM_BYTES[..TESTESM_TES4_LEN].to_vec();
 
-    let total_refrs: u32 = cells.iter().map(|c| c.tree_count + c.rock_count + c.shrub_count).sum();
+    let total_refrs: u32 = cells.iter().map(|c| c.tree_count + c.rock_count + c.shrub_count + c.lamp_count + c.house_count + c.commercial_count).sum();
     let num_records = 1u32 + cells.len() as u32 * 2 + total_refrs; // WRLD + CELL + LAND + REFRs
     tes4[TES4_NUM_RECORDS_OFFSET..TES4_NUM_RECORDS_OFFSET + 4]
         .copy_from_slice(&num_records.to_le_bytes());

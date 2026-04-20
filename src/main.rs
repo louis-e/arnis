@@ -135,7 +135,7 @@ fn run_cli() {
         // Fetch OSM data for road network — used to paint asphalt texture on roads.
         // Failure is non-fatal; roads are simply omitted.
         println!("{} Fetching road data...", "  [+]".bold());
-        let road_polylines: Vec<Vec<(i32, i32)>> = match match &args.file {
+        let road_polylines: Vec<(u8, Vec<(i32, i32)>)> = match match &args.file {
             Some(file) => retrieve_data::fetch_data_from_file(file),
             None => retrieve_data::fetch_data_from_overpass(
                 args.bbox,
@@ -151,11 +151,14 @@ fn run_cli() {
                     .iter()
                     .filter_map(|e| {
                         if let osm_parser::ProcessedElement::Way(way) = e {
-                            if way.tags.get("highway").map_or(false, |v| fnv_esm::fnv_road_type(v) > 0) {
-                                let pts: Vec<(i32, i32)> =
-                                    way.nodes.iter().map(|n| (n.x, n.z)).collect();
-                                if pts.len() >= 2 {
-                                    return Some(pts);
+                            if let Some(highway) = way.tags.get("highway") {
+                                let priority = fnv_esm::fnv_road_type(highway);
+                                if priority > 0 {
+                                    let pts: Vec<(i32, i32)> =
+                                        way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                                    if pts.len() >= 2 {
+                                        return Some((priority, pts));
+                                    }
                                 }
                             }
                         }
@@ -185,6 +188,7 @@ fn run_cli() {
             args.fnv_water_level,
             args.scale,
             &road_polylines,
+            false
         ) {
             eprintln!("{} {}", "Error:".red().bold(), e);
             std::process::exit(1);

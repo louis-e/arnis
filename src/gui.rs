@@ -840,7 +840,7 @@ fn gui_start_generation(
                 // Fetch OSM road network for asphalt texture painting.
                 // Failure is non-fatal; roads are simply omitted.
                 emit_gui_progress_update(10.0, "Fetching road data...");
-                let road_polylines: Vec<Vec<(i32, i32)>> = match retrieve_data::fetch_data_from_overpass(
+                let road_polylines: Vec<(u8, Vec<(i32, i32)>)> = match retrieve_data::fetch_data_from_overpass(
                     bbox,
                     false,
                     "requests",
@@ -853,13 +853,14 @@ fn gui_start_generation(
                             .iter()
                             .filter_map(|e| {
                                 if let crate::osm_parser::ProcessedElement::Way(way) = e {
-                                    if way.tags.get("highway").map_or(false, |v| {
-                                        crate::fnv_esm::fnv_road_type(v) > 0
-                                    }) {
-                                        let pts: Vec<(i32, i32)> =
-                                            way.nodes.iter().map(|n| (n.x, n.z)).collect();
-                                        if pts.len() >= 2 {
-                                            return Some(pts);
+                                    if let Some(highway) = way.tags.get("highway") {
+                                        let priority = crate::fnv_esm::fnv_road_type(highway);
+                                        if priority > 0 {
+                                            let pts: Vec<(i32, i32)> =
+                                                way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                                            if pts.len() >= 2 {
+                                                return Some((priority, pts));
+                                            }
                                         }
                                     }
                                 }
@@ -881,6 +882,7 @@ fn gui_start_generation(
                     None,
                     world_scale,
                     &road_polylines,
+                    skip_osm_objects
                 ) {
                     Ok(_) => {
                         let msg = format!("Done! Saved to: {}", output_dir.display());
