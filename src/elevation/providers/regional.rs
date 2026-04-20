@@ -9,13 +9,18 @@ use std::hash::{Hash, Hasher};
 /// the native-resolution data is preserved instead of the server
 /// downsampling (or rejecting the request).
 ///
-/// - **USGS 3DEP (ArcGIS ImageServer)**: 8000 is the documented cap for
-///   `exportImage`. Going higher returns HTTP 400.
+/// - **USGS 3DEP (ArcGIS ImageServer)**: documented hard cap is 8000,
+///   but empirically the server returns HTTP 500 ("Error exporting
+///   image") at ≥ 3000 per axis and hits gateway timeouts (504) at 4096+
+///   under load, even though smaller requests succeed quickly. Measured
+///   on the Grand Canyon bbox: 1024/2048/2500/2800 all return 200 in
+///   6-17 s; 3000/3717 return 500 after 18-22 s of server work. 2048 is
+///   a clean power-of-2 comfortably below the failure threshold.
 /// - **IGN France (WMS 1.3.0)**: 4096 is the safe MapServer default;
 ///   `data.geopf.fr` silently caps larger requests and interpolates.
 /// - **IGN Spain (WCS 2.0.1)**: 4096 is the conservative safe value for
 ///   `servicios.idee.es` — larger requests time out under load.
-const USGS_MAX_SINGLE: usize = 8000;
+const USGS_MAX_SINGLE: usize = 2048;
 const IGN_FRANCE_MAX_SINGLE: usize = 4096;
 const IGN_SPAIN_MAX_SINGLE: usize = 4096;
 
@@ -533,9 +538,13 @@ fn fetch_or_cache(
     let client = match client {
         Some(c) => c,
         None => {
+            // 180s: tiled single-request providers (USGS 3DEP, IGN WMS/WCS)
+            // generate GeoTIFFs server-side; 120s was occasionally tight
+            // under load even at cap 4096. Japan GSI keeps its own 120s
+            // client since it fetches 256 px PNGs.
             owned_client = reqwest::blocking::Client::builder()
                 .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
-                .timeout(std::time::Duration::from_secs(120))
+                .timeout(std::time::Duration::from_secs(180))
                 .build()?;
             &owned_client
         }
@@ -863,5 +872,68 @@ mod tests {
             Err::<RawElevationGrid, _>("boom".into())
         });
         assert!(res.is_err());
+    }
+
+    /// Live end-to-end test against USGS 3DEP over the Grand Canyon
+    /// (~170 km²). At the current cap this triggers a 4×4 = 16 sub-tile
+    /// fetch and stitches a ~1.5 GB f64 grid. Verifies the server
+    /// doesn't 504 at the chosen cap and that the stitched output is
+    /// coherent (>98 % valid cells, elevations in the known physical
+    /// range for this bbox: floor ~700 m, rim ~2600 m).
+    ///
+    /// Manual run: `cargo test --release -- --ignored --nocapture
+    /// test_usgs_3dep_grand_canyon_tiling`
+    #[test]
+    #[ignore = "hits live USGS 3DEP servers and is memory-heavy"]
+    fn test_usgs_3dep_grand_canyon_tiling() {
+        let bbox = LLBBox::new(36.042437, -112.180023, 36.157281, -112.014542).unwrap();
+        let grid_w = 14868usize;
+        let grid_h = 12771usize;
+        let provider = Usgs3dep;
+
+        let start = std::time::Instant::now();
+        let raw = provider
+            .fetch_raw(&bbox, grid_w, grid_h)
+            .expect("USGS fetch must succeed — check for 504s in stderr");
+        let elapsed = start.elapsed();
+
+        assert_eq!(raw.heights_meters.len(), grid_h);
+        assert_eq!(raw.heights_meters[0].len(), grid_w);
+
+        let mut valid = 0usize;
+        let mut min_h = f64::INFINITY;
+        let mut max_h = f64::NEG_INFINITY;
+        for row in &raw.heights_meters {
+            for &h in row {
+                if h.is_finite() {
+                    valid += 1;
+                    min_h = min_h.min(h);
+                    max_h = max_h.max(h);
+                }
+            }
+        }
+        let total = grid_w * grid_h;
+        let ratio = valid as f64 / total as f64;
+        eprintln!(
+            "OK: {grid_w}×{grid_h} stitched in {:.1}s, {:.2}% valid, elev {:.0}..{:.0} m",
+            elapsed.as_secs_f64(),
+            ratio * 100.0,
+            min_h,
+            max_h
+        );
+
+        assert!(
+            ratio > 0.98,
+            "only {:.2}% valid cells — coverage or decoding problem",
+            ratio * 100.0
+        );
+        assert!(
+            (500.0..1500.0).contains(&min_h),
+            "min elevation {min_h} m outside Grand Canyon floor range"
+        );
+        assert!(
+            (1800.0..3000.0).contains(&max_h),
+            "max elevation {max_h} m outside Grand Canyon rim range"
+        );
     }
 }
