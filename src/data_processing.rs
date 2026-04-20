@@ -143,7 +143,12 @@ pub fn generate_world_with_options(
                 element.id(),
                 element.kind()
             ));
-        } else if element_counter == 1 {
+        } else {
+            // Clear on every non-debug iteration so any transient warning
+            // message set by downstream element processing (missing nodes,
+            // etc.) doesn't stick for the rest of the run. The cost is
+            // trivial — indicatif's set_message is just a mutex + string
+            // compare (~20 ns), ~40 ms over a full world.
             process_pb.set_message("");
         }
 

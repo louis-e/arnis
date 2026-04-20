@@ -167,25 +167,7 @@ pub fn generate_ground_layer(
                             }
                             false
                         };
-                        let mut placed_water = has_water_in_column(x, z);
-                        if !placed_water {
-                            // Extra probe for water placed at the snapped
-                            // water_level on steep terrain (canyon path).
-                            // This path is rarely hit in practice because
-                            // water_level is the local *min* and so is
-                            // usually at or below ground_y — but we keep it
-                            // as a safety net for edge cases.
-                            let water_surface_y = editor.get_water_level(x, z);
-                            if water_surface_y > ground_y + 2 {
-                                placed_water = editor.check_for_block_absolute(
-                                    x,
-                                    water_surface_y,
-                                    z,
-                                    Some(&[WATER]),
-                                    None,
-                                );
-                            }
-                        }
+                        let placed_water = has_water_in_column(x, z);
                         let osm_gap = if placed_water {
                             false
                         } else {

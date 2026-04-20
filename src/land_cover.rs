@@ -13,6 +13,7 @@
 use crate::telemetry::{send_log, LogLevel};
 use crate::{coordinate_system::geographic::LLBBox, progress::emit_gui_progress_update};
 use flate2::read::DeflateDecoder;
+use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -998,7 +999,12 @@ fn smooth_class_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
     // Snapshot once so all cells vote against the pre-mutation grid.
     let snapshot: Vec<Vec<u8>> = grid.to_vec();
 
-    for y in 0..height {
+    // Parallelise over rows. Each row reads from `snapshot` (shared
+    // read-only) and writes only to its own row of `grid`, so there's no
+    // data dependency between rows. On a 4096² grid this typically
+    // amounts to 0.8M–2.4M boundary cells each doing ~169 kernel samples
+    // — clearly worth the rayon dispatch.
+    grid.par_iter_mut().enumerate().for_each(|(y, row)| {
         for x in 0..width {
             let center_class = snapshot[y][x];
             if center_class == 0 {
@@ -1025,48 +1031,62 @@ fn smooth_class_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
                 continue;
             }
 
-            // Gaussian-weighted class votes. Fixed-size array keyed by class
-            // code avoids a per-cell HashMap allocation.
+            // Gaussian-weighted class votes. Fixed-size stack array keyed
+            // by class code avoids a per-cell heap allocation.
             let mut votes = [0.0f64; 256];
+            // Also track the set of seen class codes so we only scan
+            // those when finding the max — ESA WorldCover has ~10
+            // classes in practice, so scanning all 256 entries is mostly
+            // wasted work. Small fixed-capacity list keeps this on the
+            // stack.
+            let mut seen: [u8; 16] = [0; 16];
+            let mut seen_len = 0usize;
+
             for ky in 0..kernel_size {
                 let nz = y as i32 + ky as i32 - radius;
                 if nz < 0 || nz >= height as i32 {
                     continue;
                 }
                 let kernel_row = ky * kernel_size;
-                let row = &snapshot[nz as usize];
+                let src_row = &snapshot[nz as usize];
                 for kx in 0..kernel_size {
                     let nx = x as i32 + kx as i32 - radius;
                     if nx < 0 || nx >= width as i32 {
                         continue;
                     }
-                    let nc = row[nx as usize];
+                    let nc = src_row[nx as usize];
                     if nc == 0 {
                         continue;
                     }
-                    votes[nc as usize] += kernel[kernel_row + kx];
+                    let prev = votes[nc as usize];
+                    votes[nc as usize] = prev + kernel[kernel_row + kx];
+                    // Track the class code on first contribution only.
+                    // `seen` maxes at 16 classes — ESA has ~11 defined —
+                    // so we never overflow in practice.
+                    if prev == 0.0 && seen_len < seen.len() {
+                        seen[seen_len] = nc;
+                        seen_len += 1;
+                    }
                 }
             }
 
-            let (best_idx, best_val) =
-                votes
-                    .iter()
-                    .enumerate()
-                    .fold(
-                        (0usize, 0.0f64),
-                        |acc, (i, &v)| {
-                            if v > acc.1 {
-                                (i, v)
-                            } else {
-                                acc
-                            }
-                        },
-                    );
+            // Find the max over only the class codes actually seen in
+            // the neighbourhood (typically 2-5 at a class boundary)
+            // rather than scanning all 256 entries.
+            let mut best_idx = 0u8;
+            let mut best_val = 0.0f64;
+            for &cls in &seen[..seen_len] {
+                let v = votes[cls as usize];
+                if v > best_val {
+                    best_idx = cls;
+                    best_val = v;
+                }
+            }
             if best_val > 0.0 {
-                grid[y][x] = best_idx as u8;
+                row[x] = best_idx;
             }
         }
-    }
+    });
 }
 
 /// Simple deterministic hash from coordinates (for dithering and block variety).
