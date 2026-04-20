@@ -284,12 +284,29 @@ pub fn generate_ground_layer(
                                     match cover {
                                         land_cover::LC_TREE_COVER => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_SHRUBLAND => {
-                                            // Primarily grass with some coarse dirt patches
+                                            // Primarily grass with coarse-dirt patches.
+                                            // Uses value noise (bilinear + smoothstep)
+                                            // at ~5-block resolution so patch contours
+                                            // are organic blobs, not axis-aligned
+                                            // rectangles that an integer-division zone
+                                            // hash would produce. A finer per-block
+                                            // hash adds occasional grass peek-through
+                                            // inside each blob so they don't look
+                                            // stamped.
+                                            let noise = value_noise_01(x, z, 5);
                                             let h = land_cover::coord_hash(x, z);
-                                            if h.is_multiple_of(5) {
-                                                (COARSE_DIRT, DIRT) // 20% coarse dirt
+                                            // Threshold 0.4 yields roughly 20 % dirt
+                                            // coverage (value noise from uniform
+                                            // samples concentrates around 0.5, so 0.4
+                                            // catches a band below that).
+                                            if noise < 0.4 {
+                                                if h.is_multiple_of(5) {
+                                                    (GRASS_BLOCK, DIRT) // grass peek-through
+                                                } else {
+                                                    (COARSE_DIRT, DIRT) // dirt patch interior
+                                                }
                                             } else {
-                                                (GRASS_BLOCK, DIRT) // 80% grass
+                                                (GRASS_BLOCK, DIRT)
                                             }
                                         }
                                         land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
@@ -325,15 +342,34 @@ pub fn generate_ground_layer(
                                                 // Isolated pixel - blend with surroundings
                                                 (GRASS_BLOCK, DIRT)
                                             } else {
-                                                // Bare/sparse: coarse dirt, gravel, stone, cobblestone, andesite mix
+                                                // Bare/sparse terrain: soil patches
+                                                // interspersed with varied rock. Value
+                                                // noise at ~6-block resolution groups
+                                                // coarse dirt into organic earth
+                                                // patches (rather than scattering it
+                                                // as single pixels whose warm brown
+                                                // stands out against grey rock), then
+                                                // a finer per-block hash picks the
+                                                // specific block within each zone.
+                                                let noise = value_noise_01(x, z, 6);
                                                 let h = land_cover::coord_hash(x, z);
-                                                match h % 12 {
-                                                    0..=2 => (COARSE_DIRT, DIRT),   // 25% coarse dirt
-                                                    3..=4 => (GRAVEL, STONE),       // ~17% gravel
-                                                    5..=6 => (STONE, STONE),        // ~17% stone
-                                                    7..=8 => (ANDESITE, STONE),     // ~17% andesite
-                                                    9..=10 => (COBBLESTONE, STONE), // ~17% cobblestone
-                                                    _ => (COARSE_DIRT, STONE), // ~8% coarse dirt
+                                                // Threshold 0.45 → roughly 30 % dirt
+                                                // coverage given the bell-shaped
+                                                // distribution of bilinear-interpolated
+                                                // uniform samples.
+                                                if noise < 0.45 {
+                                                    match h % 10 {
+                                                        0..=7 => (COARSE_DIRT, DIRT), // 80% inside dirt patch
+                                                        _ => (STONE, STONE), // 20% stone poking through
+                                                    }
+                                                } else {
+                                                    match h % 12 {
+                                                        0..=3 => (STONE, STONE),       // 33%
+                                                        4..=5 => (ANDESITE, STONE),    // 17%
+                                                        6..=7 => (COBBLESTONE, STONE), // 17%
+                                                        8..=9 => (GRAVEL, STONE),      // 17% scree
+                                                        _ => (ANDESITE, STONE), // 17% more andesite
+                                                    }
                                                 }
                                             }
                                         }
@@ -926,4 +962,43 @@ pub fn generate_ground_layer(
     ground_pb.finish();
 
     Ok(())
+}
+
+/// Smooth scalar noise in `[0, 1]` at approximately `scale`-block resolution.
+///
+/// Used for organic surface-material patches (coarse-dirt vs rock, etc.).
+/// Works by sampling the deterministic coord_hash at the four corners of
+/// a `scale × scale` lattice cell containing `(x, z)`, then bilinearly
+/// interpolating with a cubic Hermite smoothstep so the boundaries between
+/// high- and low-noise regions curve rather than snap along axis-aligned
+/// lattice edges. Compared to `coord_hash(x / scale, z / scale)` (which
+/// produces the rectangular patches seen in the first iteration of the
+/// patch code) the output has organic blob-shaped contours.
+///
+/// Cost: 4 hash calls + a few f64 ops per block — still well under 100 ns,
+/// negligible over the whole ground pass.
+fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
+    let s = scale.max(1);
+    // Integer lattice cell containing (x, z). div_euclid gives floor
+    // division for negative coordinates too, so patches tile uniformly
+    // across the origin.
+    let x0 = x.div_euclid(s) * s;
+    let z0 = z.div_euclid(s) * s;
+    let x1 = x0 + s;
+    let z1 = z0 + s;
+    // Fractional position inside the cell.
+    let tx = (x - x0) as f64 / s as f64;
+    let tz = (z - z0) as f64 / s as f64;
+    // Cubic Hermite smoothstep: derivative = 0 at both ends, so neighbouring
+    // cells join smoothly instead of with a visible slope change.
+    let fx = tx * tx * (3.0 - 2.0 * tx);
+    let fz = tz * tz * (3.0 - 2.0 * tz);
+    let sample = |x: i32, z: i32| (land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
+    let v00 = sample(x0, z0);
+    let v10 = sample(x1, z0);
+    let v01 = sample(x0, z1);
+    let v11 = sample(x1, z1);
+    let a = v00 * (1.0 - fx) + v10 * fx;
+    let b = v01 * (1.0 - fx) + v11 * fx;
+    a * (1.0 - fz) + b * fz
 }
