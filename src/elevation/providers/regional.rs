@@ -4,10 +4,56 @@ use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+/// Per-provider ceilings on the pixel dimension of a single upstream
+/// request. Beyond this, `tiled_fetch` splits the bbox into sub-tiles so
+/// the native-resolution data is preserved instead of the server
+/// downsampling (or rejecting the request).
+///
+/// - **USGS 3DEP (ArcGIS ImageServer)**: 8000 is the documented cap for
+///   `exportImage`. Going higher returns HTTP 400.
+/// - **IGN France (WMS 1.3.0)**: 4096 is the safe MapServer default;
+///   `data.geopf.fr` silently caps larger requests and interpolates.
+/// - **IGN Spain (WCS 2.0.1)**: 4096 is the conservative safe value for
+///   `servicios.idee.es` — larger requests time out under load.
+const USGS_MAX_SINGLE: usize = 8000;
+const IGN_FRANCE_MAX_SINGLE: usize = 4096;
+const IGN_SPAIN_MAX_SINGLE: usize = 4096;
+
 /// USGS 3D Elevation Program (3DEP) — USA + territories.
 /// Resolution: up to 1m LiDAR (CONUS), 3m/10m elsewhere, fallback 30m.
 /// License: Public Domain (USGS).
 pub struct Usgs3dep;
+
+impl Usgs3dep {
+    fn fetch_tile(
+        &self,
+        bbox: &LLBBox,
+        grid_width: usize,
+        grid_height: usize,
+    ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
+        let url = format!(
+            "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage\
+             ?bbox={},{},{},{}\
+             &bboxSR=4326&imageSR=4326\
+             &size={},{}\
+             &format=tiff&pixelType=F32\
+             &interpolation=RSP_BilinearInterpolation\
+             &f=image",
+            bbox.min().lng(), bbox.min().lat(),
+            bbox.max().lng(), bbox.max().lat(),
+            grid_width, grid_height
+        );
+
+        let cache_dir = get_cache_dir(self.name());
+        std::fs::create_dir_all(&cache_dir)?;
+
+        let cache_key = bbox_hash(bbox, grid_width, grid_height);
+        let cache_path = cache_dir.join(format!("{cache_key}.tiff"));
+
+        let bytes = fetch_or_cache(&url, &cache_path, None)?;
+        decode_geotiff_f32(&bytes, grid_width, grid_height)
+    }
+}
 
 impl ElevationProvider for Usgs3dep {
     fn name(&self) -> &'static str {
@@ -39,27 +85,13 @@ impl ElevationProvider for Usgs3dep {
         grid_width: usize,
         grid_height: usize,
     ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
-        let url = format!(
-            "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage\
-             ?bbox={},{},{},{}\
-             &bboxSR=4326&imageSR=4326\
-             &size={},{}\
-             &format=tiff&pixelType=F32\
-             &interpolation=RSP_BilinearInterpolation\
-             &f=image",
-            bbox.min().lng(), bbox.min().lat(),
-            bbox.max().lng(), bbox.max().lat(),
-            grid_width, grid_height
-        );
-
-        let cache_dir = get_cache_dir(self.name());
-        std::fs::create_dir_all(&cache_dir)?;
-
-        let cache_key = bbox_hash(bbox, grid_width, grid_height);
-        let cache_path = cache_dir.join(format!("{cache_key}.tiff"));
-
-        let bytes = fetch_or_cache(&url, &cache_path, None)?;
-        decode_geotiff_f32(&bytes, grid_width, grid_height)
+        tiled_fetch(
+            bbox,
+            grid_width,
+            grid_height,
+            USGS_MAX_SINGLE,
+            |sub_bbox, sub_w, sub_h| self.fetch_tile(sub_bbox, sub_w, sub_h),
+        )
     }
 }
 
@@ -68,33 +100,8 @@ impl ElevationProvider for Usgs3dep {
 /// License: Licence Ouverte 2.0.
 pub struct IgnFrance;
 
-impl ElevationProvider for IgnFrance {
-    fn name(&self) -> &'static str {
-        "ign_france"
-    }
-
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        Some(vec![
-            // Metropolitan France
-            LLBBox::new(41.0, -5.5, 51.5, 10.0).unwrap(),
-            // Guadeloupe
-            LLBBox::new(15.8, -61.9, 16.6, -60.9).unwrap(),
-            // Martinique
-            LLBBox::new(14.3, -61.3, 14.9, -60.8).unwrap(),
-            // French Guiana
-            LLBBox::new(2.0, -55.0, 6.0, -51.0).unwrap(),
-            // Réunion
-            LLBBox::new(-21.5, 55.1, -20.8, 55.9).unwrap(),
-            // Mayotte
-            LLBBox::new(-13.1, 44.9, -12.5, 45.4).unwrap(),
-        ])
-    }
-
-    fn native_resolution_m(&self) -> f64 {
-        1.0
-    }
-
-    fn fetch_raw(
+impl IgnFrance {
+    fn fetch_tile(
         &self,
         bbox: &LLBBox,
         grid_width: usize,
@@ -130,30 +137,55 @@ impl ElevationProvider for IgnFrance {
     }
 }
 
+impl ElevationProvider for IgnFrance {
+    fn name(&self) -> &'static str {
+        "ign_france"
+    }
+
+    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
+        Some(vec![
+            // Metropolitan France
+            LLBBox::new(41.0, -5.5, 51.5, 10.0).unwrap(),
+            // Guadeloupe
+            LLBBox::new(15.8, -61.9, 16.6, -60.9).unwrap(),
+            // Martinique
+            LLBBox::new(14.3, -61.3, 14.9, -60.8).unwrap(),
+            // French Guiana
+            LLBBox::new(2.0, -55.0, 6.0, -51.0).unwrap(),
+            // Réunion
+            LLBBox::new(-21.5, 55.1, -20.8, 55.9).unwrap(),
+            // Mayotte
+            LLBBox::new(-13.1, 44.9, -12.5, 45.4).unwrap(),
+        ])
+    }
+
+    fn native_resolution_m(&self) -> f64 {
+        1.0
+    }
+
+    fn fetch_raw(
+        &self,
+        bbox: &LLBBox,
+        grid_width: usize,
+        grid_height: usize,
+    ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
+        tiled_fetch(
+            bbox,
+            grid_width,
+            grid_height,
+            IGN_FRANCE_MAX_SINGLE,
+            |sub_bbox, sub_w, sub_h| self.fetch_tile(sub_bbox, sub_w, sub_h),
+        )
+    }
+}
+
 /// IGN España MDT — Spain + Canary Islands + Balearic Islands.
 /// Resolution: 5m (MDT05).
 /// License: CC BY 4.0.
 pub struct IgnSpain;
 
-impl ElevationProvider for IgnSpain {
-    fn name(&self) -> &'static str {
-        "ign_spain"
-    }
-
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        Some(vec![
-            // Mainland Spain + Balearic Islands
-            LLBBox::new(35.5, -10.0, 44.0, 5.0).unwrap(),
-            // Canary Islands
-            LLBBox::new(27.5, -18.5, 29.5, -13.0).unwrap(),
-        ])
-    }
-
-    fn native_resolution_m(&self) -> f64 {
-        5.0
-    }
-
-    fn fetch_raw(
+impl IgnSpain {
+    fn fetch_tile(
         &self,
         bbox: &LLBBox,
         grid_width: usize,
@@ -183,6 +215,40 @@ impl ElevationProvider for IgnSpain {
 
         let bytes = fetch_or_cache(&url, &cache_path, None)?;
         decode_geotiff_f32(&bytes, grid_width, grid_height)
+    }
+}
+
+impl ElevationProvider for IgnSpain {
+    fn name(&self) -> &'static str {
+        "ign_spain"
+    }
+
+    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
+        Some(vec![
+            // Mainland Spain + Balearic Islands
+            LLBBox::new(35.5, -10.0, 44.0, 5.0).unwrap(),
+            // Canary Islands
+            LLBBox::new(27.5, -18.5, 29.5, -13.0).unwrap(),
+        ])
+    }
+
+    fn native_resolution_m(&self) -> f64 {
+        5.0
+    }
+
+    fn fetch_raw(
+        &self,
+        bbox: &LLBBox,
+        grid_width: usize,
+        grid_height: usize,
+    ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
+        tiled_fetch(
+            bbox,
+            grid_width,
+            grid_height,
+            IGN_SPAIN_MAX_SINGLE,
+            |sub_bbox, sub_w, sub_h| self.fetch_tile(sub_bbox, sub_w, sub_h),
+        )
     }
 }
 
@@ -348,6 +414,96 @@ fn sample_gsi_pixel(
 }
 
 // --- Shared helpers ---
+
+/// Split a large request into sub-tiles and stitch the results.
+///
+/// When the requested grid fits in a single upstream request
+/// (`grid_width <= per_request_max && grid_height <= per_request_max`)
+/// this calls `fetch_tile` once and returns its result unchanged.
+///
+/// Otherwise the grid is partitioned into a `tiles_x × tiles_y` mosaic
+/// covering disjoint pixel ranges `[0..grid_width) × [0..grid_height)`.
+/// Each sub-bbox corresponds *exactly* to its pixel range using the
+/// cell-edge convention (pixel `x` covers lng `[min + x*cell, min + (x+1)*cell]`),
+/// so the stitched result is sample-identical to what a single oversized
+/// request would return — just without the server-side downsampling or
+/// rejection that happens past each provider's documented cap.
+///
+/// Row 0 is north (`max_lat`) to match the rest of the elevation pipeline.
+///
+/// Fetches run sequentially: tile payloads are already hundreds of MB at
+/// this scale, and `fetch_or_cache` hits disk/network — parallelism would
+/// multiply peak memory without meaningfully shortening first-run time,
+/// and repeat runs are instant from cache anyway.
+fn tiled_fetch<F>(
+    bbox: &LLBBox,
+    grid_width: usize,
+    grid_height: usize,
+    per_request_max: usize,
+    fetch_tile: F,
+) -> Result<RawElevationGrid, Box<dyn std::error::Error>>
+where
+    F: Fn(&LLBBox, usize, usize) -> Result<RawElevationGrid, Box<dyn std::error::Error>>,
+{
+    if grid_width <= per_request_max && grid_height <= per_request_max {
+        return fetch_tile(bbox, grid_width, grid_height);
+    }
+
+    let tiles_x = grid_width.div_ceil(per_request_max);
+    let tiles_y = grid_height.div_ceil(per_request_max);
+    // Balance tile sizes so none exceeds per_request_max.
+    let tile_size_x = grid_width.div_ceil(tiles_x);
+    let tile_size_y = grid_height.div_ceil(tiles_y);
+
+    let min_lng = bbox.min().lng();
+    let min_lat = bbox.min().lat();
+    let max_lng = bbox.max().lng();
+    let max_lat = bbox.max().lat();
+    let lng_span = max_lng - min_lng;
+    let lat_span = max_lat - min_lat;
+
+    let total_tiles = tiles_x * tiles_y;
+    eprintln!(
+        "Tiled elevation fetch: {grid_width}×{grid_height} grid split into {tiles_x}×{tiles_y} = {total_tiles} sub-tiles (cap {per_request_max}/req)"
+    );
+
+    let mut stitched: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
+
+    for ty in 0..tiles_y {
+        let y0 = ty * tile_size_y;
+        let y1 = ((ty + 1) * tile_size_y).min(grid_height);
+        let sub_h = y1 - y0;
+        // Row 0 = north (max_lat), row grid_height-1 = south (min_lat).
+        let sub_max_lat = max_lat - (y0 as f64 / grid_height as f64) * lat_span;
+        let sub_min_lat = max_lat - (y1 as f64 / grid_height as f64) * lat_span;
+        // Clamp to bbox floor to defend against FP drift on the last row.
+        let sub_min_lat = sub_min_lat.max(min_lat);
+
+        for tx in 0..tiles_x {
+            let x0 = tx * tile_size_x;
+            let x1 = ((tx + 1) * tile_size_x).min(grid_width);
+            let sub_w = x1 - x0;
+
+            let sub_min_lng = min_lng + (x0 as f64 / grid_width as f64) * lng_span;
+            let sub_max_lng = min_lng + (x1 as f64 / grid_width as f64) * lng_span;
+            let sub_max_lng = sub_max_lng.min(max_lng);
+
+            let sub_bbox = LLBBox::new(sub_min_lat, sub_min_lng, sub_max_lat, sub_max_lng)?;
+
+            let raw = fetch_tile(&sub_bbox, sub_w, sub_h)?;
+
+            for (dy, src_row) in raw.heights_meters.iter().enumerate().take(sub_h) {
+                let dst_row = &mut stitched[y0 + dy];
+                let copy_n = src_row.len().min(sub_w);
+                dst_row[x0..x0 + copy_n].copy_from_slice(&src_row[..copy_n]);
+            }
+        }
+    }
+
+    Ok(RawElevationGrid {
+        heights_meters: stitched,
+    })
+}
 
 /// Maximum retry attempts for transient failures (5xx, network errors).
 const MAX_RETRIES: u32 = 3;
@@ -576,4 +732,136 @@ fn get_xyz_tile_coordinates(bbox: &LLBBox, zoom: u8) -> Vec<(u32, u32)> {
         }
     }
     tiles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// When the grid fits in a single request, tiled_fetch must pass through
+    /// untouched — same bbox, same dimensions, same payload as a direct call.
+    #[test]
+    fn tiled_fetch_single_request_passthrough() {
+        let bbox = LLBBox::new(40.0, -120.0, 41.0, -119.0).unwrap();
+        let call_count = std::cell::Cell::new(0usize);
+        let got = tiled_fetch(&bbox, 100, 80, 4096, |sb, w, h| {
+            call_count.set(call_count.get() + 1);
+            // Bbox and size must be unchanged on fast path.
+            assert_eq!(w, 100);
+            assert_eq!(h, 80);
+            assert!((sb.min().lat() - 40.0).abs() < 1e-12);
+            assert!((sb.max().lng() - -119.0).abs() < 1e-12);
+            Ok(RawElevationGrid {
+                heights_meters: vec![vec![7.0; w]; h],
+            })
+        })
+        .unwrap();
+        assert_eq!(call_count.get(), 1);
+        assert_eq!(got.heights_meters.len(), 80);
+        assert_eq!(got.heights_meters[0].len(), 100);
+        assert_eq!(got.heights_meters[5][50], 7.0);
+    }
+
+    /// Tiles must partition the pixel range exactly and stitch without gaps
+    /// or overlaps. We encode (col, row) into each cell and verify every
+    /// cell in the output lands at its expected index.
+    #[test]
+    fn tiled_fetch_stitches_disjoint_tiles() {
+        // 2×2 mosaic: cap 30, total 50×40 → tiles_x=2, tiles_y=2
+        let bbox = LLBBox::new(40.0, -120.0, 42.0, -118.0).unwrap();
+        let grid_w = 50usize;
+        let grid_h = 40usize;
+        let per_req = 30usize;
+
+        let calls = std::cell::RefCell::new(Vec::<(f64, f64, f64, f64, usize, usize)>::new());
+
+        // The fetch closure encodes the *sub-bbox origin* in each pixel so
+        // we can check the stitched result against expected coordinates.
+        // Each cell = sub_min_lng + x_local / 1000 + (sub_max_lat * 1000).
+        let got = tiled_fetch(&bbox, grid_w, grid_h, per_req, |sb, w, h| {
+            calls.borrow_mut().push((
+                sb.min().lng(),
+                sb.max().lng(),
+                sb.min().lat(),
+                sb.max().lat(),
+                w,
+                h,
+            ));
+            let mut rows = vec![vec![0.0f64; w]; h];
+            for (y, row) in rows.iter_mut().enumerate() {
+                for (x, cell) in row.iter_mut().enumerate() {
+                    *cell =
+                        sb.min().lng() * 1e6 + sb.max().lat() * 1e3 + x as f64 + y as f64 * 1e-3;
+                }
+            }
+            Ok(RawElevationGrid {
+                heights_meters: rows,
+            })
+        })
+        .unwrap();
+
+        // 4 tiles expected
+        assert_eq!(calls.borrow().len(), 4);
+
+        // Output shape
+        assert_eq!(got.heights_meters.len(), grid_h);
+        assert_eq!(got.heights_meters[0].len(), grid_w);
+
+        // No NaNs anywhere (full coverage)
+        for row in &got.heights_meters {
+            for &v in row {
+                assert!(v.is_finite(), "stitched grid has non-finite cell");
+            }
+        }
+
+        // Sub-tile partition: with per_req=30, grid_w=50 → tiles_x=2,
+        // tile_size_x = ceil(50/2) = 25. Same for y: ceil(40/2) = 20.
+        // So expected tile pixel ranges: x∈{[0,25),[25,50)}, y∈{[0,20),[20,40)}.
+        // Corresponding lng slices (lng_span=2, grid=50 → 0.04/px): tile0
+        // x: [-120.0, -119.0], tile1 x: [-119.0, -118.0].
+        let tile0_x_min_lng = -120.0;
+        let tile1_x_min_lng = -119.0;
+        // Top-left cell of tile1 (x=25, y=0): value encoded with
+        // sub_min_lng = -119.0, sub_max_lat = 42.0, local (0,0).
+        let expected_top_right = tile1_x_min_lng * 1e6 + 42.0 * 1e3;
+        assert!((got.heights_meters[0][25] - expected_top_right).abs() < 1e-6);
+        // Top-left cell of tile0 (x=0, y=0): sub_min_lng = -120.0,
+        // sub_max_lat = 42.0, local (0,0).
+        let expected_top_left = tile0_x_min_lng * 1e6 + 42.0 * 1e3;
+        assert!((got.heights_meters[0][0] - expected_top_left).abs() < 1e-6);
+    }
+
+    /// Uneven tiling: last tile along each axis can be smaller than the
+    /// others. Stitching must still cover the whole grid.
+    #[test]
+    fn tiled_fetch_uneven_last_tile() {
+        // cap 4, grid 10×7 → tiles_x=3 (sizes 4,4,2), tiles_y=2 (sizes 4,3)
+        let bbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let got = tiled_fetch(&bbox, 10, 7, 4, |_sb, w, h| {
+            assert!(w <= 4 && h <= 4, "sub-request exceeded per_request_max");
+            Ok(RawElevationGrid {
+                heights_meters: vec![vec![1.5; w]; h],
+            })
+        })
+        .unwrap();
+        assert_eq!(got.heights_meters.len(), 7);
+        assert_eq!(got.heights_meters[6].len(), 10);
+        // Every cell filled
+        for row in &got.heights_meters {
+            for &v in row {
+                assert_eq!(v, 1.5);
+            }
+        }
+    }
+
+    /// An error from a single tile must abort the whole stitch and
+    /// propagate, not produce a partially-filled grid.
+    #[test]
+    fn tiled_fetch_propagates_tile_error() {
+        let bbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+        let res = tiled_fetch(&bbox, 10, 10, 4, |_sb, _w, _h| {
+            Err::<RawElevationGrid, _>("boom".into())
+        });
+        assert!(res.is_err());
+    }
 }

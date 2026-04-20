@@ -33,26 +33,30 @@ pub struct ElevationData {
 
 /// Maximum elevation grid dimension requested from providers per axis.
 ///
-/// Verified provider limits (queried directly from their capability
-/// endpoints / docs):
-///   - USGS 3DEP (ArcGIS ImageServer): 8000 × 8000 max
-///   - IGN France / WMS servers: typically 4096 (MapServer default) but
-///     GeoServer-backed ones allow more. If a provider rejects the
-///     request we fall back to AWS Terrain Tiles automatically.
-///   - AWS Terrain / Japan GSI (tile-based): no single-request cap, they
-///     stitch multiple 256 px tiles, so this value is irrelevant to them.
+/// This is the *stitched* ceiling — internally each single-request
+/// provider (USGS 3DEP, IGN France, IGN Spain) splits the bbox into
+/// sub-tiles that respect its own documented per-request cap and stitches
+/// the results. Tile-based providers (AWS Terrain Tiles, Japan GSI)
+/// already fetch at their native tile granularity and ignore this cap
+/// structurally.
 ///
-/// Chosen value 8000 matches the USGS 3DEP cap — the provider that
-/// benefits most from a larger grid (1 m LiDAR over the continental US).
-/// At the default `--scale 1.0` this raises the precision boundary from
-/// ~16.8 km² (4096²) to ~64 km² (8000²). Above that the grid is still
+/// Per-provider single-request caps (defined in `providers::regional`):
+///   - USGS 3DEP (ArcGIS ImageServer): 8000 × 8000 per request
+///   - IGN France (WMS 1.3.0): 4096 × 4096 per request
+///   - IGN Spain (WCS 2.0.1): 4096 × 4096 per request
+///
+/// Chosen value 16384 covers bboxes up to ~256 km² at the default
+/// `--scale 1.0` without losing native resolution. The precision
+/// boundary rose from ~16.8 km² (4096²) → ~64 km² (8000²) → ~268 km²
+/// (16384²) across these revisions. Above 16384 per axis the grid is
 /// capped and block-level elevation is filled via bilinear interpolation
 /// — terrain remains generated, just with sub-native sampling.
 ///
-/// Memory note: a full 8000 × 8000 f64 grid is ~512 MB; with the
+/// Memory note: a full 16384 × 16384 f64 grid is ~2 GB; with the
 /// water_blend_grid and a snapshot during repair we can peak around
-/// 1.5 GB for the maximum case. Typical bboxes stay well below that.
-pub const MAX_ELEVATION_GRID_DIM: usize = 8000;
+/// 6 GB for the maximum case. Target deployment (MapSmith) has >20 GB
+/// available. Typical user bboxes stay well below the cap.
+pub const MAX_ELEVATION_GRID_DIM: usize = 16384;
 
 /// Compute world and grid dimensions for the given bbox and scale.
 ///
