@@ -143,11 +143,25 @@ pub fn generate_ground_layer(
                             0.0
                         };
                         let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
-                        let water_scan_top = ground_y + 2;
+                        // Probe a column for water at its *own* ground level.
+                        // Previously this closed over the outer-cell ground_y,
+                        // so probing a neighbour column whose terrain sits at
+                        // a different elevation (common on any sloped terrain)
+                        // scanned the wrong Y range and silently missed water
+                        // that OSM had placed at the neighbour's own ground
+                        // level. Per-probe get_ground_level is a cheap
+                        // bilinear lookup and fixes the false negatives in
+                        // the osm_gap detection below.
                         let has_water_in_column = |wx: i32, wz: i32| {
-                            for wy in ground_y..=water_scan_top {
-                                if editor.check_for_block_absolute(wx, wy, wz, Some(&[WATER]), None)
-                                {
+                            let gy = editor.get_ground_level(wx, wz);
+                            for dy in 0..=2 {
+                                if editor.check_for_block_absolute(
+                                    wx,
+                                    gy + dy,
+                                    wz,
+                                    Some(&[WATER]),
+                                    None,
+                                ) {
                                     return true;
                                 }
                             }
@@ -155,8 +169,14 @@ pub fn generate_ground_layer(
                         };
                         let mut placed_water = has_water_in_column(x, z);
                         if !placed_water {
+                            // Extra probe for water placed at the snapped
+                            // water_level on steep terrain (canyon path).
+                            // This path is rarely hit in practice because
+                            // water_level is the local *min* and so is
+                            // usually at or below ground_y — but we keep it
+                            // as a safety net for edge cases.
                             let water_surface_y = editor.get_water_level(x, z);
-                            if water_surface_y > water_scan_top {
+                            if water_surface_y > ground_y + 2 {
                                 placed_water = editor.check_for_block_absolute(
                                     x,
                                     water_surface_y,
