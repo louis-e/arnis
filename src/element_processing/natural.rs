@@ -112,9 +112,16 @@ pub fn generate_natural(
             };
 
             // Whether this natural type should have per-block rock variation
+            // via `vary_rock_block`. Note: "bare_rock" is deliberately NOT in
+            // this list — it has its own dedicated 6-class mix in the match
+            // arm below (STONE/ANDESITE/COBBLESTONE/GRAVEL/TUFF/COARSE_DIRT)
+            // which overwrites whatever we put here. Including it in
+            // rock_variation would mean two different mixes race against each
+            // other at the same cell, where the match-arm mix wins but the
+            // first placement is wasted work.
             let rock_variation = matches!(
                 natural_type.as_str(),
-                "bare_rock" | "blockfield" | "cliff" | "saddle" | "ridge" | "mountain_range"
+                "blockfield" | "cliff" | "saddle" | "ridge" | "mountain_range"
             );
 
             let ProcessedElement::Way(way) = element else {
