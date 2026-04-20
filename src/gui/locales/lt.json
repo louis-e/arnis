@@ -1,6 +1,7 @@
 {
   "create_world": "Sukurti pasaulį",
   "no_world_selected": "Pasaulis nesukurtas",
+  "no_world_generated_yet": "Pasaulis dar nesugeneruotas",
   "start_generation": "Pradėti generaciją",
   "custom_selection_confirmed": "Rėmo pasirinkimas patvirtintas!",
   "error_coordinates_out_of_range": "Klaida: Koordinatės yra už ribų arba neteisingai išdėstytos (plat turi būti prieš ilg).",

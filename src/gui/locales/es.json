@@ -1,6 +1,7 @@
 {
   "create_world": "Crear mundo",
   "no_world_selected": "Ningún mundo creado",
+  "no_world_generated_yet": "Ningún mundo generado todavía",
   "start_generation": "Iniciar generación",
   "custom_selection_confirmed": "¡Selección personalizada confirmada!",
   "error_coordinates_out_of_range": "Error: Las coordenadas están fuera de rango o están ordenadas incorrectamente (Lat antes de Lng requerido).",

@@ -97,7 +97,8 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 
 async function applyLocalization(localization) {
   const localizationElements = {
-    "#start-button": "start_generation",
+    "#start-button > span[data-localize='start_generation']": "start_generation",
+    "#world-name-label[data-placeholder]": "no_world_generated_yet",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
@@ -248,12 +249,21 @@ function setupProgressListener() {
       if (message.startsWith("Error!")) {
         progressInfo.style.color = "#fa7878";
         generationButtonEnabled = true;
+        setWorldNameLabel("");
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
       } else {
         progressInfo.style.color = "#ececec";
       }
+    }
+  });
+
+  // Listen for the finalized world name (Java adds the localized area suffix
+  // during generation; Bedrock derives the name from the area up-front).
+  window.__TAURI__.event.listen("world-name-update", (event) => {
+    if (typeof event.payload === 'string') {
+      setWorldNameLabel(event.payload);
     }
   });
 
@@ -855,6 +865,23 @@ function displayBboxInfoText(bboxText) {
 
 let worldPath = "";
 
+function setWorldNameLabel(text) {
+  const label = document.getElementById('world-name-label');
+  if (!label) return;
+  if (text) {
+    label.removeAttribute('data-placeholder');
+    label.textContent = text;
+  } else {
+    label.setAttribute('data-placeholder', 'true');
+    localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
+  }
+}
+
+function basenameFromPath(p) {
+  if (!p) return "";
+  return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
+}
+
 /**
  * Handles world selection errors and displays appropriate messages
  * @param {number} errorCode - Error code from the backend
@@ -872,6 +899,7 @@ function handleWorldSelectionError(errorCode) {
   localizeElement(window.localization, { element: progressInfo }, errorKey);
   progressInfo.style.color = "#fa7878";
   worldPath = "";
+  setWorldNameLabel("");
   console.error(errorCode);
 }
 
@@ -903,6 +931,7 @@ async function startGeneration() {
         const worldName = await invoke('gui_create_world', { savePath: savePath });
         if (worldName) {
           worldPath = worldName;
+          setWorldNameLabel(basenameFromPath(worldName));
         }
       } catch (error) {
         handleWorldSelectionError(error);
