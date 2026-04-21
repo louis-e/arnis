@@ -209,8 +209,15 @@ fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
 fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {
     let lat_rad: f64 = lat.to_radians();
     let n: f64 = 2.0_f64.powi(zoom as i32);
-    let x: u32 = ((lng + 180.0) / 360.0 * n).floor() as u32;
-    let y: u32 = ((1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n).floor() as u32;
+    // Clamp via i64 so ±90° lat and +180° lng (all legal LLPoint values)
+    // can't produce wrapped u32 tile indices. `lat = +90°` is the critical
+    // case: `fy_global` comes out large and NEGATIVE, which a bare
+    // `as u32` cast wraps to ~4.3 billion and would explode the fetch
+    // range in `get_tile_coordinates` into billions of 404s.
+    let n_tiles = n as i64;
+    let x = (((lng + 180.0) / 360.0 * n).floor() as i64).clamp(0, n_tiles - 1) as u32;
+    let y = (((1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n).floor() as i64)
+        .clamp(0, n_tiles - 1) as u32;
     (x, y)
 }
 

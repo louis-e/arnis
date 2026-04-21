@@ -828,13 +828,18 @@ fn bbox_hash(bbox: &LLBBox, width: usize, height: usize) -> u64 {
 fn get_xyz_tile_coordinates(bbox: &LLBBox, zoom: u8) -> Vec<(u32, u32)> {
     let n = 2.0_f64.powi(zoom as i32);
 
-    let x1 = ((bbox.min().lng() + 180.0) / 360.0 * n).floor() as u32;
-    let x2 = ((bbox.max().lng() + 180.0) / 360.0 * n).floor() as u32;
-
-    let y1 = ((1.0 - bbox.max().lat().to_radians().tan().asinh() / std::f64::consts::PI) / 2.0 * n)
-        .floor() as u32;
-    let y2 = ((1.0 - bbox.min().lat().to_radians().tan().asinh() / std::f64::consts::PI) / 2.0 * n)
-        .floor() as u32;
+    // Clamp via i64 so ±90° lat / +180° lng can't wrap the u32 cast —
+    // same rationale as in `aws_terrain::lat_lng_to_tile`.
+    let n_tiles = n as i64;
+    let clamp_tile = |v: f64| (v.floor() as i64).clamp(0, n_tiles - 1) as u32;
+    let x1 = clamp_tile((bbox.min().lng() + 180.0) / 360.0 * n);
+    let x2 = clamp_tile((bbox.max().lng() + 180.0) / 360.0 * n);
+    let y1 = clamp_tile(
+        (1.0 - bbox.max().lat().to_radians().tan().asinh() / std::f64::consts::PI) / 2.0 * n,
+    );
+    let y2 = clamp_tile(
+        (1.0 - bbox.min().lat().to_radians().tan().asinh() / std::f64::consts::PI) / 2.0 * n,
+    );
 
     let mut tiles = Vec::new();
     for x in x1.min(x2)..=x1.max(x2) {
