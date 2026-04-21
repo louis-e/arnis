@@ -420,26 +420,51 @@ fn sample_gsi_pixel(
 
 // --- Shared helpers ---
 
-/// Split a large request into sub-tiles and stitch the results.
+/// Pixels of overlap between adjacent sub-tiles. Adjacent tile requests
+/// are expanded by `BLEND_OVERLAP` pixels into the neighbour's
+/// authoritative area, and the overlap region is linearly cross-faded
+/// so that any discontinuity at the authoritative boundary is smeared
+/// over `2 * BLEND_OVERLAP` pixels instead of appearing as a vertical
+/// cliff.
+///
+/// This is needed because USGS 3DEP (and likely any provider that
+/// stitches multi-flight LiDAR internally) returns slightly different
+/// elevations for the SAME latitude depending on the surrounding
+/// request bbox — measured ~50 m mean and up to 500 m max discontinuity
+/// between adjacent sub-bboxes over the Grand Canyon, caused by
+/// inter-flight vertical calibration offsets. Verified that the effect
+/// is independent of the resampling method (bilinear vs nearest give
+/// identical seams), so the fix has to happen client-side.
+///
+/// 64 is chosen to make a 170 m mean seam (typical case) transition
+/// over ~128 rows ≈ 1.3 m / row — visually indistinguishable from a
+/// real slope. Widening further consumes more bandwidth and extra
+/// sub-tiles without meaningfully improving the common case.
+const BLEND_OVERLAP: usize = 64;
+
+/// Split a large request into overlapping sub-tiles and linearly
+/// cross-fade the overlap regions.
 ///
 /// When the requested grid fits in a single upstream request
 /// (`grid_width <= per_request_max && grid_height <= per_request_max`)
 /// this calls `fetch_tile` once and returns its result unchanged.
 ///
 /// Otherwise the grid is partitioned into a `tiles_x × tiles_y` mosaic
-/// covering disjoint pixel ranges `[0..grid_width) × [0..grid_height)`.
-/// Each sub-bbox corresponds *exactly* to its pixel range using the
-/// cell-edge convention (pixel `x` covers lng `[min + x*cell, min + (x+1)*cell]`),
-/// so the stitched result is sample-identical to what a single oversized
-/// request would return — just without the server-side downsampling or
-/// rejection that happens past each provider's documented cap.
+/// of **authoritative** regions covering disjoint pixel ranges
+/// `[0..grid_width) × [0..grid_height)`. Each tile's upstream request
+/// covers its authoritative region **plus `BLEND_OVERLAP` pixels of
+/// padding** on every side that borders another authoritative region
+/// (the outer edges of the full grid have no padding). Those padded
+/// pixels are fetched twice — once by each tile — and the two copies
+/// are linearly blended in the overlap zone, so any per-tile seam is
+/// smoothed instead of appearing as a sharp step.
 ///
 /// Row 0 is north (`max_lat`) to match the rest of the elevation pipeline.
 ///
-/// Fetches run sequentially: tile payloads are already hundreds of MB at
-/// this scale, and `fetch_or_cache` hits disk/network — parallelism would
-/// multiply peak memory without meaningfully shortening first-run time,
-/// and repeat runs are instant from cache anyway.
+/// Fetches run sequentially: `fetch_or_cache` hits disk/network and
+/// subsequent runs are instant from cache, so parallelism's modest
+/// first-run speedup isn't worth the extra memory + risk of upstream
+/// rate-limiting (USGS is already flaky under load).
 fn tiled_fetch<F>(
     bbox: &LLBBox,
     grid_width: usize,
@@ -454,11 +479,17 @@ where
         return fetch_tile(bbox, grid_width, grid_height);
     }
 
-    let tiles_x = grid_width.div_ceil(per_request_max);
-    let tiles_y = grid_height.div_ceil(per_request_max);
-    // Balance tile sizes so none exceeds per_request_max.
-    let tile_size_x = grid_width.div_ceil(tiles_x);
-    let tile_size_y = grid_height.div_ceil(tiles_y);
+    // Authoritative tile size must leave room for BLEND_OVERLAP padding
+    // on both sides of the request (the extreme case: a middle tile that
+    // has two internal borders). Shrink accordingly so each request
+    // still fits under per_request_max.
+    let overlap = BLEND_OVERLAP.min(per_request_max / 4);
+    let auth_max = per_request_max.saturating_sub(2 * overlap).max(1);
+    let tiles_x = grid_width.div_ceil(auth_max);
+    let tiles_y = grid_height.div_ceil(auth_max);
+    // Balance authoritative sizes so none exceeds auth_max.
+    let auth_size_x = grid_width.div_ceil(tiles_x);
+    let auth_size_y = grid_height.div_ceil(tiles_y);
 
     let min_lng = bbox.min().lng();
     let min_lat = bbox.min().lat();
@@ -469,38 +500,106 @@ where
 
     let total_tiles = tiles_x * tiles_y;
     eprintln!(
-        "Tiled elevation fetch: {grid_width}×{grid_height} grid split into {tiles_x}×{tiles_y} = {total_tiles} sub-tiles (cap {per_request_max}/req)"
+        "Tiled elevation fetch: {grid_width}×{grid_height} grid split into {tiles_x}×{tiles_y} = {total_tiles} sub-tiles (cap {per_request_max}/req, {overlap}px blended overlap)"
     );
 
-    let mut stitched: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
+    // Accumulator + weight grids for the weighted-average blend.
+    let mut accum: Vec<Vec<f64>> = vec![vec![0.0; grid_width]; grid_height];
+    let mut weight: Vec<Vec<f64>> = vec![vec![0.0; grid_width]; grid_height];
 
     for ty in 0..tiles_y {
-        let y0 = ty * tile_size_y;
-        let y1 = ((ty + 1) * tile_size_y).min(grid_height);
-        let sub_h = y1 - y0;
-        // Row 0 = north (max_lat), row grid_height-1 = south (min_lat).
-        let sub_max_lat = max_lat - (y0 as f64 / grid_height as f64) * lat_span;
-        let sub_min_lat = max_lat - (y1 as f64 / grid_height as f64) * lat_span;
-        // Clamp to bbox floor to defend against FP drift on the last row.
+        let auth_y0 = ty * auth_size_y;
+        let auth_y1 = ((ty + 1) * auth_size_y).min(grid_height);
+        let has_north_overlap = ty > 0;
+        let has_south_overlap = ty + 1 < tiles_y && auth_y1 < grid_height;
+        let req_y0 = if has_north_overlap {
+            auth_y0 - overlap
+        } else {
+            auth_y0
+        };
+        let req_y1 = if has_south_overlap {
+            (auth_y1 + overlap).min(grid_height)
+        } else {
+            auth_y1
+        };
+        let sub_h = req_y1 - req_y0;
+
+        let sub_max_lat = max_lat - (req_y0 as f64 / grid_height as f64) * lat_span;
+        let sub_min_lat = max_lat - (req_y1 as f64 / grid_height as f64) * lat_span;
         let sub_min_lat = sub_min_lat.max(min_lat);
 
         for tx in 0..tiles_x {
-            let x0 = tx * tile_size_x;
-            let x1 = ((tx + 1) * tile_size_x).min(grid_width);
-            let sub_w = x1 - x0;
+            let auth_x0 = tx * auth_size_x;
+            let auth_x1 = ((tx + 1) * auth_size_x).min(grid_width);
+            let has_west_overlap = tx > 0;
+            let has_east_overlap = tx + 1 < tiles_x && auth_x1 < grid_width;
+            let req_x0 = if has_west_overlap {
+                auth_x0 - overlap
+            } else {
+                auth_x0
+            };
+            let req_x1 = if has_east_overlap {
+                (auth_x1 + overlap).min(grid_width)
+            } else {
+                auth_x1
+            };
+            let sub_w = req_x1 - req_x0;
 
-            let sub_min_lng = min_lng + (x0 as f64 / grid_width as f64) * lng_span;
-            let sub_max_lng = min_lng + (x1 as f64 / grid_width as f64) * lng_span;
+            let sub_min_lng = min_lng + (req_x0 as f64 / grid_width as f64) * lng_span;
+            let sub_max_lng = min_lng + (req_x1 as f64 / grid_width as f64) * lng_span;
             let sub_max_lng = sub_max_lng.min(max_lng);
 
             let sub_bbox = LLBBox::new(sub_min_lat, sub_min_lng, sub_max_lat, sub_max_lng)?;
 
             let raw = fetch_tile(&sub_bbox, sub_w, sub_h)?;
 
+            // Per-pixel weights: 1.0 in the authoritative interior; linear
+            // ramp from 0 at the request edge to 1 at the authoritative
+            // edge along any side that has blend overlap. When two tiles
+            // cover the same pixel their weights blend smoothly because
+            // one tile's ramp is decreasing as the neighbour's is
+            // increasing over the shared region.
+            let weight_axis =
+                |g: usize, req_lo: usize, auth_lo: usize, auth_hi: usize, req_hi: usize| -> f64 {
+                    if g < auth_lo {
+                        // In north/west overlap ramp.
+                        ((g - req_lo) + 1) as f64 / (auth_lo - req_lo + 1) as f64
+                    } else if g >= auth_hi {
+                        // In south/east overlap ramp.
+                        ((req_hi - 1) - g + 1) as f64 / (req_hi - auth_hi + 1) as f64
+                    } else {
+                        1.0
+                    }
+                };
+
             for (dy, src_row) in raw.heights_meters.iter().enumerate().take(sub_h) {
-                let dst_row = &mut stitched[y0 + dy];
-                let copy_n = src_row.len().min(sub_w);
-                dst_row[x0..x0 + copy_n].copy_from_slice(&src_row[..copy_n]);
+                let global_y = req_y0 + dy;
+                if global_y >= grid_height {
+                    continue;
+                }
+                let wy = weight_axis(global_y, req_y0, auth_y0, auth_y1, req_y1);
+                let accum_row = &mut accum[global_y];
+                let weight_row = &mut weight[global_y];
+                for (dx, &v) in src_row.iter().enumerate().take(sub_w) {
+                    let global_x = req_x0 + dx;
+                    if global_x >= grid_width || !v.is_finite() {
+                        continue;
+                    }
+                    let wx = weight_axis(global_x, req_x0, auth_x0, auth_x1, req_x1);
+                    let w = wy * wx;
+                    accum_row[global_x] += v * w;
+                    weight_row[global_x] += w;
+                }
+            }
+        }
+    }
+
+    // Normalize accumulator into final blended grid.
+    let mut stitched: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
+    for y in 0..grid_height {
+        for x in 0..grid_width {
+            if weight[y][x] > 0.0 {
+                stitched[y][x] = accum[y][x] / weight[y][x];
             }
         }
     }
@@ -771,80 +870,89 @@ mod tests {
         assert_eq!(got.heights_meters[5][50], 7.0);
     }
 
-    /// Tiles must partition the pixel range exactly and stitch without gaps
-    /// or overlaps. We encode (col, row) into each cell and verify every
-    /// cell in the output lands at its expected index.
+    /// Constant-value input: every cell reported by every sub-tile is
+    /// the same number. The blend of two equal values is that value, so
+    /// the stitched grid must be uniform — no gaps, no numerical drift
+    /// from the weighted normalisation.
     #[test]
-    fn tiled_fetch_stitches_disjoint_tiles() {
-        // 2×2 mosaic: cap 30, total 50×40 → tiles_x=2, tiles_y=2
+    fn tiled_fetch_blends_constant_tiles() {
         let bbox = LLBBox::new(40.0, -120.0, 42.0, -118.0).unwrap();
-        let grid_w = 50usize;
-        let grid_h = 40usize;
-        let per_req = 30usize;
-
-        let calls = std::cell::RefCell::new(Vec::<(f64, f64, f64, f64, usize, usize)>::new());
-
-        // The fetch closure encodes the *sub-bbox origin* in each pixel so
-        // we can check the stitched result against expected coordinates.
-        // Each cell = sub_min_lng + x_local / 1000 + (sub_max_lat * 1000).
-        let got = tiled_fetch(&bbox, grid_w, grid_h, per_req, |sb, w, h| {
-            calls.borrow_mut().push((
-                sb.min().lng(),
-                sb.max().lng(),
-                sb.min().lat(),
-                sb.max().lat(),
-                w,
-                h,
-            ));
-            let mut rows = vec![vec![0.0f64; w]; h];
-            for (y, row) in rows.iter_mut().enumerate() {
-                for (x, cell) in row.iter_mut().enumerate() {
-                    *cell =
-                        sb.min().lng() * 1e6 + sb.max().lat() * 1e3 + x as f64 + y as f64 * 1e-3;
-                }
-            }
+        // per_req=30 leaves overlap=7 (per_req/4), auth_max=16 → tiles
+        // partition 50×40 into several pieces with meaningful overlap.
+        let got = tiled_fetch(&bbox, 50, 40, 30, |_sb, w, h| {
             Ok(RawElevationGrid {
-                heights_meters: rows,
+                heights_meters: vec![vec![42.0; w]; h],
             })
         })
         .unwrap();
 
-        // 4 tiles expected
-        assert_eq!(calls.borrow().len(), 4);
-
-        // Output shape
-        assert_eq!(got.heights_meters.len(), grid_h);
-        assert_eq!(got.heights_meters[0].len(), grid_w);
-
-        // No NaNs anywhere (full coverage)
+        assert_eq!(got.heights_meters.len(), 40);
+        assert_eq!(got.heights_meters[0].len(), 50);
         for row in &got.heights_meters {
             for &v in row {
-                assert!(v.is_finite(), "stitched grid has non-finite cell");
+                assert!(v.is_finite(), "unfilled cell in stitched grid");
+                assert!(
+                    (v - 42.0).abs() < 1e-9,
+                    "blend produced unexpected value: {v}"
+                );
             }
         }
+    }
 
-        // Sub-tile partition: with per_req=30, grid_w=50 → tiles_x=2,
-        // tile_size_x = ceil(50/2) = 25. Same for y: ceil(40/2) = 20.
-        // So expected tile pixel ranges: x∈{[0,25),[25,50)}, y∈{[0,20),[20,40)}.
-        // Corresponding lng slices (lng_span=2, grid=50 → 0.04/px): tile0
-        // x: [-120.0, -119.0], tile1 x: [-119.0, -118.0].
-        let tile0_x_min_lng = -120.0;
-        let tile1_x_min_lng = -119.0;
-        // Top-left cell of tile1 (x=25, y=0): value encoded with
-        // sub_min_lng = -119.0, sub_max_lat = 42.0, local (0,0).
-        let expected_top_right = tile1_x_min_lng * 1e6 + 42.0 * 1e3;
-        assert!((got.heights_meters[0][25] - expected_top_right).abs() < 1e-6);
-        // Top-left cell of tile0 (x=0, y=0): sub_min_lng = -120.0,
-        // sub_max_lat = 42.0, local (0,0).
-        let expected_top_left = tile0_x_min_lng * 1e6 + 42.0 * 1e3;
-        assert!((got.heights_meters[0][0] - expected_top_left).abs() < 1e-6);
+    /// Two tiles with constant values A and B on either side of a single
+    /// authoritative boundary. Outside the blend zone the grid must
+    /// contain exactly A or B; inside the blend zone the grid must
+    /// transition monotonically from A to B.
+    #[test]
+    fn tiled_fetch_smooths_step_across_boundary() {
+        // Shape: 20×60. per_req=30 → overlap=7, auth_max=16, so tiles_y
+        // partitions 60 into two pieces of 30 each; the shared
+        // authoritative boundary is at row 30.
+        let bbox = LLBBox::new(0.0, 0.0, 60.0, 20.0).unwrap();
+        let got = tiled_fetch(&bbox, 20, 60, 30, |sb, w, h| {
+            // Tile with sub_max_lat >= 45 is the northern tile (lat span
+            // 60, south tile ends near lat 30). Use max_lat to decide.
+            let value = if sb.max().lat() > 31.0 { 100.0 } else { 0.0 };
+            Ok(RawElevationGrid {
+                heights_meters: vec![vec![value; w]; h],
+            })
+        })
+        .unwrap();
+
+        // Top rows (inside north tile's authoritative interior) must be
+        // exactly 100; bottom rows (south authoritative interior) exactly 0.
+        assert!((got.heights_meters[0][10] - 100.0).abs() < 1e-6);
+        assert!((got.heights_meters[59][10] - 0.0).abs() < 1e-6);
+
+        // Middle band should contain a monotonically decreasing column
+        // (values go from ~100 above the boundary to ~0 below) with no
+        // sharp step.
+        let col_10: Vec<f64> = got.heights_meters.iter().map(|r| r[10]).collect();
+        for i in 1..col_10.len() {
+            assert!(
+                col_10[i] <= col_10[i - 1] + 1e-9,
+                "column is not monotonically non-increasing at row {i}: {} -> {}",
+                col_10[i - 1],
+                col_10[i]
+            );
+        }
+        // No single-row step larger than half the original discontinuity
+        // — the whole point of overlap+blend is to smear the transition
+        // across many rows.
+        let max_step = (1..col_10.len())
+            .map(|i| (col_10[i - 1] - col_10[i]).abs())
+            .fold(0.0f64, f64::max);
+        assert!(
+            max_step < 50.0,
+            "largest single-row step {max_step} is larger than expected after blending a 100→0 boundary"
+        );
     }
 
     /// Uneven tiling: last tile along each axis can be smaller than the
     /// others. Stitching must still cover the whole grid.
     #[test]
     fn tiled_fetch_uneven_last_tile() {
-        // cap 4, grid 10×7 → tiles_x=3 (sizes 4,4,2), tiles_y=2 (sizes 4,3)
+        // cap 4, grid 10×7 → overlap clamped to 1, auth_max=2.
         let bbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
         let got = tiled_fetch(&bbox, 10, 7, 4, |_sb, w, h| {
             assert!(w <= 4 && h <= 4, "sub-request exceeded per_request_max");
@@ -855,10 +963,9 @@ mod tests {
         .unwrap();
         assert_eq!(got.heights_meters.len(), 7);
         assert_eq!(got.heights_meters[6].len(), 10);
-        // Every cell filled
         for row in &got.heights_meters {
             for &v in row {
-                assert_eq!(v, 1.5);
+                assert!((v - 1.5).abs() < 1e-9, "unfilled or drifted cell: {v}");
             }
         }
     }
@@ -872,6 +979,217 @@ mod tests {
             Err::<RawElevationGrid, _>("boom".into())
         });
         assert!(res.is_err());
+    }
+
+    /// Diagnose tile-boundary elevation discontinuities for the bbox that
+    /// produced the "horizontal cliff" artifacts. Fetches the user's bbox
+    /// via `tiled_fetch`, then measures the max absolute elevation jump
+    /// between adjacent rows (a) within a tile interior and (b) across
+    /// each horizontal tile boundary. If (b) >> (a), the raw stitched
+    /// grid has seams. Also independently fetches two adjacent sub-tiles
+    /// and checks whether their shared-boundary rows match — which isolates
+    /// whether the issue is in my stitching math or in what the server
+    /// returns.
+    ///
+    /// Manual run: `cargo test --release -- --ignored --nocapture
+    /// diag_usgs_tile_boundary_seam`
+    #[test]
+    #[ignore = "hits live USGS 3DEP servers; diagnostic for tile-boundary seams"]
+    fn diag_usgs_tile_boundary_seam() {
+        // User-reported bbox (smaller Grand Canyon area, 3 horizontal seams).
+        let bbox = LLBBox::new(36.061589, -112.148781, 36.135102, -112.038574).unwrap();
+        let grid_w = 9902usize;
+        let grid_h = 8175usize;
+        let provider = Usgs3dep;
+
+        eprintln!("=== Fetching stitched grid via tiled_fetch ===");
+        let raw = provider.fetch_raw(&bbox, grid_w, grid_h).expect("fetch");
+        let heights = raw.heights_meters;
+
+        // Compute expected tile partition (same math as tiled_fetch).
+        let tiles_y = grid_h.div_ceil(USGS_MAX_SINGLE);
+        let tile_size_y = grid_h.div_ceil(tiles_y);
+        let boundaries: Vec<usize> = (1..tiles_y).map(|ty| ty * tile_size_y).collect();
+        eprintln!(
+            "Expect {} horizontal boundaries at rows: {:?}",
+            boundaries.len(),
+            boundaries
+        );
+
+        // For each boundary, compute max |Δ| and mean |Δ| between the two
+        // adjacent stitched rows across all columns. Also compute the same
+        // for rows 5 above the boundary (within-tile reference).
+        let column_diff = |y_a: usize, y_b: usize| -> (f64, f64, usize) {
+            let mut max_abs = 0.0f64;
+            let mut sum_abs = 0.0f64;
+            let mut n = 0usize;
+            for (a, b) in heights[y_a].iter().zip(heights[y_b].iter()) {
+                if a.is_finite() && b.is_finite() {
+                    let d = (a - b).abs();
+                    if d > max_abs {
+                        max_abs = d;
+                    }
+                    sum_abs += d;
+                    n += 1;
+                }
+            }
+            (max_abs, if n > 0 { sum_abs / n as f64 } else { 0.0 }, n)
+        };
+
+        eprintln!("\n=== Row-to-row elevation deltas ===");
+        eprintln!(
+            "{:<8} {:<15} {:<15} {:<15}",
+            "row", "boundary?", "max|Δ|m", "mean|Δ|m"
+        );
+        for &yb in &boundaries {
+            // 5 rows above (within-tile), the boundary, and 5 rows below (within-tile).
+            if yb >= 5 {
+                let (m, a, _) = column_diff(yb - 5 - 1, yb - 5);
+                eprintln!("{:<8} {:<15} {:<15.3} {:<15.3}", yb - 5, "-", m, a);
+            }
+            let (m, a, n) = column_diff(yb - 1, yb);
+            eprintln!(
+                "{:<8} {:<15} {:<15.3} {:<15.3} (n={})",
+                yb, "YES (seam?)", m, a, n
+            );
+            if yb + 5 < grid_h {
+                let (m, a, _) = column_diff(yb + 5, yb + 5 + 1);
+                eprintln!("{:<8} {:<15} {:<15.3} {:<15.3}", yb + 5, "-", m, a);
+            }
+            eprintln!();
+        }
+
+        // Now independently fetch two adjacent sub-tiles and compare their
+        // shared-boundary rows.
+        eprintln!("=== Independent fetch of two adjacent sub-tiles ===");
+        let lat_span = 36.135102 - 36.061589;
+        let lng_span = -112.038574_f64 - (-112.148781);
+        let tile_size_x = grid_w.div_ceil(grid_w.div_ceil(USGS_MAX_SINGLE));
+        let sub_w = tile_size_x;
+        let sub_h = tile_size_y;
+
+        // Tile (0,0) — top-left
+        let t0_max_lat = 36.135102;
+        let t0_min_lat = 36.135102 - (sub_h as f64 / grid_h as f64) * lat_span;
+        let t0_min_lng = -112.148781;
+        let t0_max_lng = -112.148781 + (sub_w as f64 / grid_w as f64) * lng_span;
+        let t0_bbox = LLBBox::new(t0_min_lat, t0_min_lng, t0_max_lat, t0_max_lng).unwrap();
+        let t0 = provider.fetch_tile(&t0_bbox, sub_w, sub_h).expect("t0");
+
+        // Tile (1,0) — directly below tile 0 (same x column)
+        let t1_max_lat = t0_min_lat;
+        let t1_min_lat = 36.135102 - (2.0 * sub_h as f64 / grid_h as f64) * lat_span;
+        let t1_bbox = LLBBox::new(t1_min_lat, t0_min_lng, t1_max_lat, t0_max_lng).unwrap();
+        let t1 = provider.fetch_tile(&t1_bbox, sub_w, sub_h).expect("t1");
+
+        // Compare: last row of t0 (south edge) vs first row of t1 (north edge).
+        // With cell-edge convention, these sample different cells ~cell_h apart.
+        // A big mean |Δ| here means the server's sampling convention disagrees
+        // with my partition convention — real seam source.
+        let t0_last = &t0.heights_meters[sub_h - 1];
+        let t1_first = &t1.heights_meters[0];
+        let mut max_abs = 0.0f64;
+        let mut sum_abs = 0.0f64;
+        let mut n = 0usize;
+        for x in 0..sub_w {
+            let a = t0_last[x];
+            let b = t1_first[x];
+            if a.is_finite() && b.is_finite() {
+                let d = (a - b).abs();
+                if d > max_abs {
+                    max_abs = d;
+                }
+                sum_abs += d;
+                n += 1;
+            }
+        }
+        eprintln!(
+            "Tile0.last_row vs Tile1.first_row — max|Δ|={:.3} m, mean|Δ|={:.3} m (n={})",
+            max_abs,
+            if n > 0 { sum_abs / n as f64 } else { 0.0 },
+            n
+        );
+
+        // Also compare: what if we take tile0's SECOND-TO-LAST row (one cell
+        // above the boundary) and tile1's first row? If values are closer,
+        // the server is using inclusive-endpoints convention and there's a
+        // 1-row overlap at boundaries.
+        let t0_second_last = &t0.heights_meters[sub_h - 2];
+        let mut max_abs_2 = 0.0f64;
+        let mut sum_abs_2 = 0.0f64;
+        let mut n_2 = 0usize;
+        for x in 0..sub_w {
+            let a = t0_second_last[x];
+            let b = t1_first[x];
+            if a.is_finite() && b.is_finite() {
+                let d = (a - b).abs();
+                if d > max_abs_2 {
+                    max_abs_2 = d;
+                }
+                sum_abs_2 += d;
+                n_2 += 1;
+            }
+        }
+        eprintln!(
+            "Tile0.second_last_row vs Tile1.first_row — max|Δ|={:.3} m, mean|Δ|={:.3} m (n={})",
+            max_abs_2,
+            if n_2 > 0 { sum_abs_2 / n_2 as f64 } else { 0.0 },
+            n_2
+        );
+
+        // Orientation check. Tile 0 covers lat 36.117..36.135 (northern
+        // half of the bbox), tile 1 covers 36.098..36.117. In the Grand
+        // Canyon area this bbox straddles, northern latitudes are
+        // higher-elevation (closer to the North Rim), southern are lower
+        // (canyon interior). If the server returns rows top-down (row 0
+        // = max_lat), tile0.row0.mean should be HIGHER than
+        // tile0.row_last.mean. If bottom-up, the relationship inverts.
+        let row_mean = |row: &[f64]| -> f64 {
+            let (sum, n) = row
+                .iter()
+                .filter(|h| h.is_finite())
+                .fold((0.0f64, 0usize), |(s, c), h| (s + h, c + 1));
+            if n > 0 {
+                sum / n as f64
+            } else {
+                f64::NAN
+            }
+        };
+        eprintln!("\n=== Orientation probe ===");
+        eprintln!(
+            "Tile0 bbox: lat [{:.6}..{:.6}]   (row 0 SHOULD be north edge, row {} SHOULD be south edge if top-down)",
+            t0_bbox.min().lat(),
+            t0_bbox.max().lat(),
+            sub_h - 1
+        );
+        eprintln!(
+            "  row 0 mean: {:.1} m,   row {} mean: {:.1} m",
+            row_mean(&t0.heights_meters[0]),
+            sub_h - 1,
+            row_mean(&t0.heights_meters[sub_h - 1])
+        );
+        eprintln!(
+            "Tile1 bbox: lat [{:.6}..{:.6}]",
+            t1_bbox.min().lat(),
+            t1_bbox.max().lat()
+        );
+        eprintln!(
+            "  row 0 mean: {:.1} m,   row {} mean: {:.1} m",
+            row_mean(&t1.heights_meters[0]),
+            sub_h - 1,
+            row_mean(&t1.heights_meters[sub_h - 1])
+        );
+
+        // Also: if tiles are internally bottom-up, the stitched grid's
+        // row 0 (tile 0's row 0) would actually sample near the boundary
+        // between tile 0 and tile 1, NOT at the global max_lat. Check
+        // stitched[0] vs stitched[grid_h - 1].
+        eprintln!(
+            "Stitched row 0 mean: {:.1} m,  stitched row {} mean: {:.1} m",
+            row_mean(&heights[0]),
+            grid_h - 1,
+            row_mean(&heights[grid_h - 1])
+        );
     }
 
     /// Live end-to-end test against USGS 3DEP over the Grand Canyon
