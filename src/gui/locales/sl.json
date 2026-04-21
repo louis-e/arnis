@@ -1,6 +1,7 @@
 {
   "create_world": "Ustvari svet",
   "no_world_selected": "Ni ustvarjenega sveta",
+  "no_world_generated_yet": "Svet še ni generiran",
   "start_generation": "Začni generiranje",
   "custom_selection_confirmed": "Izbira po meri potrjena!",
   "error_coordinates_out_of_range": "Napaka: Koordinate so izven obsega ali nepravilno urejene (zahtevana najprej zemljepisna širina, potem zemljepisna dolžina).",
@@ -44,5 +45,9 @@
   "disable_height_limit": "Onemogoči omejitev višine",
   "bedrock_auto_generated": "Bedrock svet je samodejno ustvarjen",
   "save_path": "Pot shranjevanja",
-  "rotation_angle": "Kot zasuka"
+  "rotation_angle": "Kot zasuka",
+  "settings_section_generation": "Generiranje",
+  "settings_section_world": "Svet",
+  "settings_section_map": "Zemljevid in vnos",
+  "settings_section_application": "Aplikacija"
 }

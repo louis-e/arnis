@@ -35,11 +35,10 @@ pub fn generate_landuse(
         "residential" | "commercial" => return,
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
-        "industrial" => STONE, // Placeholder, will be randomized per-block
-        "military" => GRAY_CONCRETE, // Placeholder, will be randomized per-block
+        "industrial" => STONE,       // Randomized per-block below
+        "military" => GRAY_CONCRETE, // Randomized per-block below
         "railway" => GRAVEL,
         "vineyard" => COARSE_DIRT,
-        "winter_sports" => SNOW_BLOCK,
         "brownfield" => COARSE_DIRT,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
@@ -50,7 +49,7 @@ pub fn generate_landuse(
                 COARSE_DIRT
             }
         }
-        "quarry" => STONE,
+        "quarry" => STONE, // Randomized per-block below
         _ => GRASS_BLOCK,
     };
 
@@ -103,6 +102,18 @@ pub fn generate_landuse(
             } else {
                 COBBLESTONE
             }
+        } else if landuse_tag == "quarry" {
+            // Quarry: mix of stone, gravel, cobblestone, andesite
+            let random_value = rng.random_range(0..100);
+            if random_value < 40 {
+                STONE
+            } else if random_value < 60 {
+                GRAVEL
+            } else if random_value < 80 {
+                COBBLESTONE
+            } else {
+                ANDESITE
+            }
         } else {
             block_type
         };
@@ -135,91 +146,80 @@ pub fn generate_landuse(
 
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
-            "cemetery" => {
-                if (x % 3 == 0) && (z % 3 == 0) {
-                    let random_choice: i32 = rng.random_range(0..100);
-                    if random_choice < 15 {
-                        // Place graves
-                        if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
-                            if rng.random_bool(0.5) {
-                                editor.set_block(COBBLESTONE, x - 1, 1, z, None, None);
-                                editor.set_block(STONE_BRICK_SLAB, x - 1, 2, z, None, None);
-                                editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
-                                editor.set_block(STONE_BRICK_SLAB, x + 1, 1, z, None, None);
-                            } else {
-                                editor.set_block(COBBLESTONE, x, 1, z - 1, None, None);
-                                editor.set_block(STONE_BRICK_SLAB, x, 2, z - 1, None, None);
-                                editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
-                                editor.set_block(STONE_BRICK_SLAB, x, 1, z + 1, None, None);
-                            }
+            "cemetery" if (x % 3 == 0) && (z % 3 == 0) => {
+                let random_choice: i32 = rng.random_range(0..100);
+                if random_choice < 15 {
+                    // Place graves
+                    if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
+                        if rng.random_bool(0.5) {
+                            editor.set_block(COBBLESTONE, x - 1, 1, z, None, None);
+                            editor.set_block(STONE_BRICK_SLAB, x - 1, 2, z, None, None);
+                            editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
+                            editor.set_block(STONE_BRICK_SLAB, x + 1, 1, z, None, None);
+                        } else {
+                            editor.set_block(COBBLESTONE, x, 1, z - 1, None, None);
+                            editor.set_block(STONE_BRICK_SLAB, x, 2, z - 1, None, None);
+                            editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
+                            editor.set_block(STONE_BRICK_SLAB, x, 1, z + 1, None, None);
                         }
-                    } else if random_choice < 30 {
-                        if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
-                            editor.set_block(RED_FLOWER, x, 1, z, None, None);
-                        }
-                    } else if random_choice < 33 {
-                        Tree::create(editor, (x, 1, z), Some(building_footprints));
-                    } else if !is_protected && random_choice < 35 {
-                        editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                    } else if !is_protected && random_choice < 37 {
+                    }
+                } else if random_choice < 30 {
+                    if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
+                        editor.set_block(RED_FLOWER, x, 1, z, None, None);
+                    }
+                } else if random_choice < 33 {
+                    Tree::create(editor, (x, 1, z), Some(building_footprints));
+                } else if !is_protected && random_choice < 35 {
+                    editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                } else if !is_protected && random_choice < 37 {
+                    editor.set_block(FERN, x, 1, z, None, None);
+                } else if !is_protected && random_choice < 41 {
+                    editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
+                    editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
+                }
+            }
+            "forest" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
+                let random_choice: i32 = rng.random_range(0..30);
+                if random_choice == 20 {
+                    let tree_type = *trees_ok_to_generate
+                        .choose(&mut rng)
+                        .unwrap_or(&TreeType::Oak);
+                    Tree::create_of_type(editor, (x, 1, z), tree_type, Some(building_footprints));
+                } else if random_choice == 2 {
+                    let flower_block: Block = match rng.random_range(1..=6) {
+                        1 => OAK_LEAVES,
+                        2 => RED_FLOWER,
+                        3 => BLUE_FLOWER,
+                        4 => YELLOW_FLOWER,
+                        5 => FERN,
+                        _ => WHITE_FLOWER,
+                    };
+                    editor.set_block(flower_block, x, 1, z, None, None);
+                } else if random_choice <= 12 {
+                    if rng.random_range(0..100) < 12 {
                         editor.set_block(FERN, x, 1, z, None, None);
-                    } else if !is_protected && random_choice < 41 {
-                        editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
-                        editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
-                    }
-                }
-            }
-            "forest" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
-                    let random_choice: i32 = rng.random_range(0..30);
-                    if random_choice == 20 {
-                        let tree_type = *trees_ok_to_generate
-                            .choose(&mut rng)
-                            .unwrap_or(&TreeType::Oak);
-                        Tree::create_of_type(
-                            editor,
-                            (x, 1, z),
-                            tree_type,
-                            Some(building_footprints),
-                        );
-                    } else if random_choice == 2 {
-                        let flower_block: Block = match rng.random_range(1..=6) {
-                            1 => OAK_LEAVES,
-                            2 => RED_FLOWER,
-                            3 => BLUE_FLOWER,
-                            4 => YELLOW_FLOWER,
-                            5 => FERN,
-                            _ => WHITE_FLOWER,
-                        };
-                        editor.set_block(flower_block, x, 1, z, None, None);
-                    } else if random_choice <= 12 {
-                        if rng.random_range(0..100) < 12 {
-                            editor.set_block(FERN, x, 1, z, None, None);
-                        } else {
-                            editor.set_block(GRASS, x, 1, z, None, None);
-                        }
-                    }
-                }
-            }
-            "farmland" => {
-                // Check if the current block is not water or another undesired block
-                if !editor.check_for_block(x, 0, z, Some(&[WATER])) {
-                    if x % 9 == 0 && z % 9 == 0 {
-                        // Place water in dot pattern
-                        editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
-                    } else if rng.random_range(0..76) == 0 {
-                        let special_choice: i32 = rng.random_range(1..=10);
-                        if special_choice <= 4 {
-                            editor.set_block(HAY_BALE, x, 1, z, None, Some(&[SPONGE]));
-                        } else {
-                            editor.set_block(OAK_LEAVES, x, 1, z, None, Some(&[SPONGE]));
-                        }
                     } else {
-                        // Set crops only if the block below is farmland
-                        if editor.check_for_block(x, 0, z, Some(&[FARMLAND])) {
-                            let crop_choice = [WHEAT, CARROTS, POTATOES][rng.random_range(0..3)];
-                            editor.set_block(crop_choice, x, 1, z, None, None);
-                        }
+                        editor.set_block(GRASS, x, 1, z, None, None);
+                    }
+                }
+            }
+            "farmland" if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
+                // Check if the current block is not water or another undesired block
+                if x % 9 == 0 && z % 9 == 0 {
+                    // Place water in dot pattern
+                    editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
+                } else if rng.random_range(0..76) == 0 {
+                    let special_choice: i32 = rng.random_range(1..=10);
+                    if special_choice <= 4 {
+                        editor.set_block(HAY_BALE, x, 1, z, None, Some(&[SPONGE]));
+                    } else {
+                        editor.set_block(OAK_LEAVES, x, 1, z, None, Some(&[SPONGE]));
+                    }
+                } else {
+                    // Set crops only if the block below is farmland
+                    if editor.check_for_block(x, 0, z, Some(&[FARMLAND])) {
+                        let crop_choice = [WHEAT, CARROTS, POTATOES][rng.random_range(0..3)];
+                        editor.set_block(crop_choice, x, 1, z, None, None);
                     }
                 }
             }
@@ -295,43 +295,37 @@ pub fn generate_landuse(
                     editor.set_block(COBBLESTONE, x, 0, z, None, Some(&[SPONGE]));
                 }
             }
-            "grass" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
-                    match rng.random_range(0..200) {
-                        0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
-                        1..=8 => editor.set_block(FERN, x, 1, z, None, None),
-                        9..=170 => editor.set_block(GRASS, x, 1, z, None, None),
-                        _ => {}
-                    }
+            "grass" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
+                match rng.random_range(0..200) {
+                    0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
+                    1..=8 => editor.set_block(FERN, x, 1, z, None, None),
+                    9..=170 => editor.set_block(GRASS, x, 1, z, None, None),
+                    _ => {}
                 }
             }
-            "greenfield" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
-                    match rng.random_range(0..200) {
-                        0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
-                        1..=2 => editor.set_block(FERN, x, 1, z, None, None),
-                        3..=16 => editor.set_block(GRASS, x, 1, z, None, None),
-                        _ => {}
-                    }
+            "greenfield" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
+                match rng.random_range(0..200) {
+                    0 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
+                    1..=2 => editor.set_block(FERN, x, 1, z, None, None),
+                    3..=16 => editor.set_block(GRASS, x, 1, z, None, None),
+                    _ => {}
                 }
             }
-            "meadow" => {
-                if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
-                    let random_choice: i32 = rng.random_range(0..1001);
-                    if random_choice < 5 {
-                        Tree::create(editor, (x, 1, z), Some(building_footprints));
-                    } else if random_choice < 6 {
-                        editor.set_block(RED_FLOWER, x, 1, z, None, None);
-                    } else if random_choice < 9 {
-                        editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                    } else if random_choice < 40 {
-                        editor.set_block(FERN, x, 1, z, None, None);
-                    } else if random_choice < 65 {
-                        editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
-                        editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
-                    } else if random_choice < 825 {
-                        editor.set_block(GRASS, x, 1, z, None, None);
-                    }
+            "meadow" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
+                let random_choice: i32 = rng.random_range(0..1001);
+                if random_choice < 5 {
+                    Tree::create(editor, (x, 1, z), Some(building_footprints));
+                } else if random_choice < 6 {
+                    editor.set_block(RED_FLOWER, x, 1, z, None, None);
+                } else if random_choice < 9 {
+                    editor.set_block(OAK_LEAVES, x, 1, z, None, None);
+                } else if random_choice < 40 {
+                    editor.set_block(FERN, x, 1, z, None, None);
+                } else if random_choice < 65 {
+                    editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
+                    editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
+                } else if random_choice < 825 {
+                    editor.set_block(GRASS, x, 1, z, None, None);
                 }
             }
             "orchard" => {

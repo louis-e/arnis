@@ -1,6 +1,7 @@
 {
   "create_world": "Világ létrehozása",
   "no_world_selected": "Nincs világ létrehozva",
+  "no_world_generated_yet": "Még nincs világ generálva",
   "start_generation": "Generálás indítása",
   "custom_selection_confirmed": "Egyéni kiválasztás megerősítve",
   "error_coordinates_out_of_range": "Hiba: A koordináták tartományon kívül vannak vagy hibásan rendezettek (a szélességi foknak a hosszúsági fok előtt kell lennie)",
@@ -44,5 +45,9 @@
   "disable_height_limit": "Magasságkorlát kikapcsolása",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal",
-  "rotation_angle": "Forgatási Szög"
+  "rotation_angle": "Forgatási Szög",
+  "settings_section_generation": "Generálás",
+  "settings_section_world": "Világ",
+  "settings_section_map": "Térkép és bevitel",
+  "settings_section_application": "Alkalmazás"
 }

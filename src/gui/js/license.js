@@ -21,7 +21,23 @@ export const licenseText = `
 <p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
 
 <b>AWS Terrain Tiles:</b><br>
-Elevation data derived from the <a href="https://registry.opendata.aws/terrain-tiles/" style="color: inherit;" target="_blank">AWS Terrain Tiles</a> dataset.
+Elevation data derived from the <a href="https://registry.opendata.aws/terrain-tiles/" style="color: inherit;" target="_blank">AWS Terrain Tiles</a> dataset (global fallback).
+<br><br>
+
+<b>USGS 3D Elevation Program (3DEP):</b><br>
+Elevation data provided by the <a href="https://www.usgs.gov/3d-elevation-program" style="color: inherit;" target="_blank">U.S. Geological Survey, 3D Elevation Program</a>. Public Domain.
+<br><br>
+
+<b>IGN France RGE ALTI:</b><br>
+Elevation data &copy; <a href="https://geoservices.ign.fr/" style="color: inherit;" target="_blank">IGN France</a>, RGE ALTI. Licensed under <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence/" style="color: inherit;" target="_blank">Licence Ouverte 2.0</a>.
+<br><br>
+
+<b>IGN España MDT:</b><br>
+Elevation data &copy; <a href="https://www.ign.es/" style="color: inherit;" target="_blank">Instituto Geogr&aacute;fico Nacional de Espa&ntilde;a</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a>.
+<br><br>
+
+<b>GSI Japan Elevation Tiles:</b><br>
+Elevation data provided by the <a href="https://maps.gsi.go.jp/" style="color: inherit;" target="_blank">Geospatial Information Authority of Japan</a>.
 <br><br>
 
 <b>ESA WorldCover 2021:</b><br>

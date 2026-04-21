@@ -1,6 +1,7 @@
 {
   "create_world": "Створити світ",
   "no_world_selected": "Світ не створено",
+  "no_world_generated_yet": "Світ ще не згенеровано",
   "start_generation": "Почати генерацію",
   "custom_selection_confirmed": "Користувацький вибір підтверджено!",
   "error_coordinates_out_of_range": "Помилка: Координати поза діапазоном або неправильно впорядковані (потрібно широта перед довгота)",
@@ -44,5 +45,9 @@
   "disable_height_limit": "Вимкнути обмеження висоти",
   "bedrock_auto_generated": "Bedrock світ генерується автоматично",
   "save_path": "Шлях збереження",
-  "rotation_angle": "Кут Обертання"
+  "rotation_angle": "Кут Обертання",
+  "settings_section_generation": "Генерація",
+  "settings_section_world": "Світ",
+  "settings_section_map": "Карта та введення",
+  "settings_section_application": "Застосунок"
 }

@@ -235,6 +235,7 @@ dependencies = [
  "tauri-plugin-log",
  "tauri-plugin-shell",
  "tempfile",
+ "tiff",
  "tokio",
  "vek",
  "windows 0.62.2",
@@ -6548,7 +6549,7 @@ version = "1.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
- "cfg-if 1.0.4",
+ "cfg-if 0.1.10",
  "static_assertions",
 ]
 

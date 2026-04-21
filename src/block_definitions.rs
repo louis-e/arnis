@@ -239,6 +239,9 @@ impl Block {
             148 => "red_wall_banner",
             149 => "green_wall_banner",
             150 => "mossy_stone_bricks",
+            151 => "deepslate",
+            152 => "tuff",
+            153 => "cobbled_deepslate",
             155 => "chest",
             156 => "red_carpet",
             157 => "anvil",
@@ -342,6 +345,8 @@ impl Block {
             255 => "light_gray_wall_banner",
             _ => panic!("Invalid id"),
         }
+        // Note: If you want to add more blocks, please find unused ID
+        // slots below 255 so we don't need to update to u16 or higher.
     }
 
     pub fn properties(&self) -> Option<Value> {
@@ -896,6 +901,9 @@ pub const BLACK_WALL_BANNER: Block = Block::new(147);
 pub const RED_WALL_BANNER: Block = Block::new(148);
 pub const GREEN_WALL_BANNER: Block = Block::new(149);
 pub const MOSSY_STONE_BRICKS: Block = Block::new(150);
+pub const DEEPSLATE: Block = Block::new(151);
+pub const TUFF: Block = Block::new(152);
+pub const COBBLED_DEEPSLATE: Block = Block::new(153);
 pub const CHEST: Block = Block::new(155);
 pub const RED_CARPET: Block = Block::new(156);
 pub const ANVIL: Block = Block::new(157);

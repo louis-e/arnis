@@ -111,6 +111,19 @@ pub fn generate_natural(
                 _ => GRASS_BLOCK,
             };
 
+            // Whether this natural type should have per-block rock variation
+            // via `vary_rock_block`. Note: "bare_rock" is deliberately NOT in
+            // this list — it has its own dedicated 6-class mix in the match
+            // arm below (STONE/ANDESITE/COBBLESTONE/GRAVEL/TUFF/COARSE_DIRT)
+            // which overwrites whatever we put here. Including it in
+            // rock_variation would mean two different mixes race against each
+            // other at the same cell, where the match-arm mix wins but the
+            // first placement is wasted work.
+            let rock_variation = matches!(
+                natural_type.as_str(),
+                "blockfield" | "cliff" | "saddle" | "ridge" | "mountain_range"
+            );
+
             let ProcessedElement::Way(way) = element else {
                 return;
             };
@@ -141,7 +154,12 @@ pub fn generate_natural(
                                 SMOOTH_STONE,
                             ]),
                         ) {
-                            editor.set_block(block_type, bx, 0, bz, None, None);
+                            let b = if rock_variation {
+                                vary_rock_block(block_type, bx, bz)
+                            } else {
+                                block_type
+                            };
+                            editor.set_block(b, bx, 0, bz, None, None);
                         }
                     }
 
@@ -199,7 +217,12 @@ pub fn generate_natural(
                 for (x, z) in filled_area {
                     // Don't overwrite road/path blocks with natural ground
                     if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
-                        editor.set_block(block_type, x, 0, z, None, None);
+                        let b = if rock_variation {
+                            vary_rock_block(block_type, x, z)
+                        } else {
+                            block_type
+                        };
+                        editor.set_block(b, x, 0, z, None, None);
                     }
                     // Generate custom layer instead of dirt, must be stone on the lowest level
                     match natural_type.as_str() {
@@ -211,7 +234,17 @@ pub fn generate_natural(
                             editor.set_block(STONE, x, -1, z, None, None);
                         }
                         "bare_rock" => {
-                            editor.set_block(STONE, x, 0, z, None, None);
+                            // Varied rock surface: stone base with natural variation
+                            let h = crate::land_cover::coord_hash(x, z) % 12;
+                            let rock = match h {
+                                0..=4 => STONE,       // ~42% stone
+                                5..=6 => ANDESITE,    // ~17% andesite
+                                7..=8 => COBBLESTONE, // ~17% cobblestone
+                                9 => GRAVEL,          // ~8% gravel
+                                10 => TUFF,           // ~8% tuff
+                                _ => COARSE_DIRT,     // ~8% coarse dirt
+                            };
+                            editor.set_block(rock, x, 0, z, None, None);
                         }
                         _ => {}
                     }
@@ -300,17 +333,14 @@ pub fn generate_natural(
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
                         }
-                        "sand" => {
+                        "sand"
                             if editor.check_for_block(x, 0, z, Some(&[SAND]))
-                                && rng.random_range(0..100) == 1
-                            {
-                                editor.set_block(DEAD_BUSH, x, 1, z, None, None);
-                            }
+                                && rng.random_range(0..100) == 1 =>
+                        {
+                            editor.set_block(DEAD_BUSH, x, 1, z, None, None);
                         }
-                        "shoal" => {
-                            if rng.random_bool(0.05) {
-                                editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
-                            }
+                        "shoal" if rng.random_bool(0.05) => {
+                            editor.set_block(WATER, x, 0, z, Some(&[SAND, GRAVEL]), None);
                         }
                         "wetland" => {
                             if let Some(wetland_type) = element.tags().get("wetland") {
@@ -406,8 +436,8 @@ pub fn generate_natural(
                                 let cluster_size = rng.random_range(5..=10);
 
                                 // Create cluster around current position
-                                for dx in -(cluster_size as i32)..=(cluster_size as i32) {
-                                    for dz in -(cluster_size as i32)..=(cluster_size as i32) {
+                                for dx in -cluster_size..=cluster_size {
+                                    for dz in -cluster_size..=cluster_size {
                                         let cluster_x = x + dx;
                                         let cluster_z = z + dz;
 
@@ -605,5 +635,26 @@ pub fn generate_natural_from_relation(
                 );
             }
         }
+    }
+}
+
+/// Vary a rock block type per-coordinate for natural rock areas.
+/// Uses coord_hash for deterministic, spatially-coherent variation.
+fn vary_rock_block(base: Block, x: i32, z: i32) -> Block {
+    let h = crate::land_cover::coord_hash(x, z) % 10;
+    match base {
+        STONE => match h {
+            0..=4 => STONE,
+            5..=6 => ANDESITE,
+            7 => COBBLESTONE,
+            _ => GRAVEL,
+        },
+        COBBLESTONE => match h {
+            0..=4 => COBBLESTONE,
+            5..=6 => ANDESITE,
+            7 => STONE,
+            _ => GRAVEL,
+        },
+        _ => base,
     }
 }

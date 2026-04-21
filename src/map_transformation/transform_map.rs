@@ -25,16 +25,13 @@ pub fn transform_map(
         });
 
     let nop: usize = ops.len();
-    let mut iop: usize = 1;
 
     let progress_increment_prcs: f64 = 5.0 / nop as f64;
 
-    for op in ops {
+    for (iop, op) in (1..).zip(ops) {
         let current_progress_prcs = 20.0 + (iop as f64 * progress_increment_prcs);
         //let message = format!("Applying operation: {}, {}/{}", op.repr(), iop, nop);
         emit_gui_progress_update(current_progress_prcs, "");
-
-        iop += 1;
 
         op.operate(elements, xzbbox, ground);
     }

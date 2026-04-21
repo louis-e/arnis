@@ -379,12 +379,13 @@ impl FloodFillCache {
 
         for element in elements {
             match element {
-                ProcessedElement::Way(way) => {
-                    if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                        if let Some(cached) = self.way_cache.get(&way.id) {
-                            for &(x, z) in cached {
-                                footprints.set(x, z);
-                            }
+                ProcessedElement::Way(way)
+                    if way.tags.contains_key("building")
+                        || way.tags.contains_key("building:part") =>
+                {
+                    if let Some(cached) = self.way_cache.get(&way.id) {
+                        for &(x, z) in cached {
+                            footprints.set(x, z);
                         }
                     }
                 }
