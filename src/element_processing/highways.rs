@@ -7,6 +7,104 @@ use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
+/// Median of the ground levels along the road's width-perpendicular
+/// strip at one along-length coordinate. Pure primitive — no along-length
+/// smoothing. Callers should use `perpendicular_median_ground_y` unless
+/// they specifically need the unsmoothed value.
+#[inline]
+fn perpendicular_median_raw(
+    editor: &WorldEditor,
+    set_x: i32,
+    set_z: i32,
+    centerline_x: i32,
+    centerline_z: i32,
+    block_range: i32,
+    dir_horizontal: bool,
+) -> i32 {
+    let capacity = 2 * block_range as usize + 1;
+    let mut ys: Vec<i32> = Vec::with_capacity(capacity);
+    if dir_horizontal {
+        for t in -block_range..=block_range {
+            ys.push(editor.get_ground_level(set_x, centerline_z + t));
+        }
+    } else {
+        for t in -block_range..=block_range {
+            ys.push(editor.get_ground_level(centerline_x + t, set_z));
+        }
+    }
+    ys.sort_unstable();
+    ys[ys.len() / 2]
+}
+
+/// Median of the ground levels along the road's width-perpendicular strip
+/// **at this specific cell's along-length coordinate**. Does NOT sample
+/// anything in the travel direction, so the target Y varies naturally
+/// along the length of the road (terrain-following) while staying
+/// identical across the width at any given length position — meaning
+/// every block in one lateral cross-section sits flat (not pitched
+/// sideways down a slope).
+///
+/// A 3-tap median along the road's length axis is layered on top, purely
+/// to kill 1-cell terrain noise that would otherwise leave single-block
+/// potholes in the road surface (e.g. `…1 1 0 1 1…` → `…1 1 1 1 1…`).
+/// A monotone ramp is unaffected because the 3-tap median of any
+/// monotonic triple is the middle value.
+///
+/// - `set_x, set_z` — the cell whose Y we're computing.
+/// - `centerline_x, centerline_z` — the current centerline bresenham point.
+///   Only the axis perpendicular to travel is used (e.g. `centerline_z`
+///   for a horizontal-dominant segment); the cell's own along-length
+///   coordinate drives the other axis, which is what makes the sampling
+///   cell-specific instead of centerline-specific.
+/// - `dir_horizontal` — true when `|dx_segment| >= |dz_segment|`, telling
+///   us travel is x-dominant (so perpendicular sampling runs along z).
+#[inline]
+fn perpendicular_median_ground_y(
+    editor: &WorldEditor,
+    set_x: i32,
+    set_z: i32,
+    centerline_x: i32,
+    centerline_z: i32,
+    block_range: i32,
+    dir_horizontal: bool,
+) -> i32 {
+    let (prev_x, prev_z, next_x, next_z) = if dir_horizontal {
+        (set_x - 1, set_z, set_x + 1, set_z)
+    } else {
+        (set_x, set_z - 1, set_x, set_z + 1)
+    };
+    let t_prev = perpendicular_median_raw(
+        editor,
+        prev_x,
+        prev_z,
+        centerline_x,
+        centerline_z,
+        block_range,
+        dir_horizontal,
+    );
+    let t_curr = perpendicular_median_raw(
+        editor,
+        set_x,
+        set_z,
+        centerline_x,
+        centerline_z,
+        block_range,
+        dir_horizontal,
+    );
+    let t_next = perpendicular_median_raw(
+        editor,
+        next_x,
+        next_z,
+        centerline_x,
+        centerline_z,
+        block_range,
+        dir_horizontal,
+    );
+    let mut arr = [t_prev, t_curr, t_next];
+    arr.sort_unstable();
+    arr[1]
+}
+
 /// Pick a road surface block deterministically based on coordinates.
 /// Returns a random-looking mix of gray_concrete_powder and cyan_terracotta.
 #[inline]
@@ -428,23 +526,42 @@ fn generate_highways_internal(
                     // Calculate elevation for this segment
                     let segment_length = bresenham_points.len();
 
+                    // Travel direction for this segment. The perpendicular
+                    // median sampling runs along the *other* axis, so that
+                    // lateral cross-sections end up level while the road's
+                    // Y still varies along length as the terrain climbs /
+                    // descends.
+                    let dir_horizontal = (x2 - x1).abs() >= (z2 - z1).abs();
+
+                    // Whether wide-road Y-flattening applies to this
+                    // segment. Bridges and 1-cell paths keep their legacy
+                    // per-call behaviour; everything else gets the
+                    // perpendicular median via
+                    // `perpendicular_median_ground_y`.
+                    let flatten_width = !is_valley_bridge && block_range >= 1;
+                    // Whether the road cross-section also registers an
+                    // effective-ground override is decided per bresenham
+                    // point below — `offset` varies inside a segment (slope
+                    // ramps at layer transitions), and elevated sections
+                    // (offset > 0) must NOT register, otherwise
+                    // `ground_generation` fills terrain all the way up to
+                    // the deck and bridges become giant embankments.
+
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
                     let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
                     let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
 
                     for (point_index, (x, _, z)) in bresenham_points.iter().enumerate() {
-                        // Calculate Y elevation for this point
-                        // For valley bridges: use fixed deck height (max of endpoints) to stay level
-                        // For overpasses and regular roads: use terrain-relative elevation with slopes
-                        let (current_y, use_absolute_y) = if is_valley_bridge {
-                            // Valley bridge deck is level at the maximum endpoint elevation
-                            // Don't add base_elevation - the layer tag indicates it's above water/road,
-                            // not that it should be higher than the terrain endpoints
-                            (bridge_deck_y, true)
+                        // Centerline-invariant Y offset for this point
+                        // (slope ramps at layer transitions, valley bridge
+                        // flat deck, etc.). Same for every cell in this
+                        // cross-section — only the *ground reference* we
+                        // add it to changes per cell, below.
+                        let offset = if is_valley_bridge {
+                            0
                         } else {
-                            // Regular road or overpass: use terrain-relative calculation with ramps
-                            let y = calculate_point_elevation(
+                            calculate_point_elevation(
                                 segment_index,
                                 point_index,
                                 segment_length,
@@ -453,9 +570,28 @@ fn generate_highways_internal(
                                 effective_start_slope,
                                 effective_end_slope,
                                 slope_length,
-                            );
-                            (y, false)
+                            )
                         };
+
+                        // Register override only when the road sits at its
+                        // natural ground level at this point. See the
+                        // segment-level comment above.
+                        let register_ground_override = flatten_width && offset == 0;
+
+                        // Per-cell target Y computation. Wide roads use a
+                        // 1×(2b+1) perpendicular median sampled at the
+                        // cell's *own* along-length coordinate: every cell
+                        // in one lateral cross-section therefore gets the
+                        // identical Y (width level — no sideways pitch on
+                        // a slope) while adjacent cross-sections along
+                        // the road's length see the terrain vary naturally.
+                        //
+                        // Closures can't wrap this because we need mutable
+                        // borrows of `editor` (for `set_block_*`) right
+                        // after the shared borrow used to read ground
+                        // levels; inlining below keeps each borrow scoped
+                        // to a single statement.
+                        let use_absolute_y = is_valley_bridge || flatten_width;
 
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
@@ -463,16 +599,40 @@ fn generate_highways_internal(
                                 let set_x: i32 = x + dx;
                                 let set_z: i32 = z + dz;
 
+                                // Per-cell Y. For wide roads this is the
+                                // perpendicular median at the cell's own
+                                // along-length coord — so all cells at the
+                                // same along-length coord share one Y
+                                // (flat cross-section) and register the
+                                // same effective-ground override.
+                                let cell_y = if is_valley_bridge {
+                                    bridge_deck_y
+                                } else if flatten_width {
+                                    perpendicular_median_ground_y(
+                                        editor,
+                                        set_x,
+                                        set_z,
+                                        *x,
+                                        *z,
+                                        block_range,
+                                        dir_horizontal,
+                                    ) + offset
+                                } else {
+                                    offset
+                                };
+                                if register_ground_override {
+                                    editor.register_road_surface_y(set_x, set_z, cell_y);
+                                }
+
                                 // Zebra crossing logic
                                 if is_zebra_crossing {
-                                    let is_horizontal: bool = (x2 - x1).abs() >= (z2 - z1).abs();
-                                    if is_horizontal {
+                                    if dir_horizontal {
                                         if set_x % 2 < 1 {
                                             if use_absolute_y {
                                                 editor.set_block_absolute(
                                                     WHITE_CONCRETE,
                                                     set_x,
-                                                    current_y,
+                                                    cell_y,
                                                     set_z,
                                                     Some(&[
                                                         BLACK_CONCRETE,
@@ -485,7 +645,7 @@ fn generate_highways_internal(
                                                 editor.set_block(
                                                     WHITE_CONCRETE,
                                                     set_x,
-                                                    current_y,
+                                                    cell_y,
                                                     set_z,
                                                     Some(&[
                                                         BLACK_CONCRETE,
@@ -499,7 +659,7 @@ fn generate_highways_internal(
                                             editor.set_block_absolute(
                                                 road_block(set_x, set_z),
                                                 set_x,
-                                                current_y,
+                                                cell_y,
                                                 set_z,
                                                 None,
                                                 None,
@@ -508,7 +668,7 @@ fn generate_highways_internal(
                                             editor.set_block(
                                                 road_block(set_x, set_z),
                                                 set_x,
-                                                current_y,
+                                                cell_y,
                                                 set_z,
                                                 None,
                                                 None,
@@ -519,7 +679,7 @@ fn generate_highways_internal(
                                             editor.set_block_absolute(
                                                 WHITE_CONCRETE,
                                                 set_x,
-                                                current_y,
+                                                cell_y,
                                                 set_z,
                                                 Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                                 None,
@@ -528,7 +688,7 @@ fn generate_highways_internal(
                                             editor.set_block(
                                                 WHITE_CONCRETE,
                                                 set_x,
-                                                current_y,
+                                                cell_y,
                                                 set_z,
                                                 Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                                 None,
@@ -538,7 +698,7 @@ fn generate_highways_internal(
                                         editor.set_block_absolute(
                                             road_block(set_x, set_z),
                                             set_x,
-                                            current_y,
+                                            cell_y,
                                             set_z,
                                             None,
                                             None,
@@ -547,7 +707,7 @@ fn generate_highways_internal(
                                         editor.set_block(
                                             road_block(set_x, set_z),
                                             set_x,
-                                            current_y,
+                                            cell_y,
                                             set_z,
                                             None,
                                             None,
@@ -563,7 +723,7 @@ fn generate_highways_internal(
                                         editor.set_block_absolute(
                                             effective_block,
                                             set_x,
-                                            current_y,
+                                            cell_y,
                                             set_z,
                                             None,
                                             Some(&[
@@ -577,7 +737,7 @@ fn generate_highways_internal(
                                         editor.set_block(
                                             effective_block,
                                             set_x,
-                                            current_y,
+                                            cell_y,
                                             set_z,
                                             None,
                                             Some(&[
@@ -590,14 +750,19 @@ fn generate_highways_internal(
                                     }
                                 }
 
-                                // Add stone brick foundation underneath elevated highways/bridges for thickness
-                                if (effective_elevation > 0 || use_absolute_y) && current_y > 0 {
+                                // Add stone brick foundation and support pillars only for
+                                // genuinely elevated decks — bridges and explicit overpasses.
+                                // (Regular wide roads now flow through `use_absolute_y == true`
+                                // too, but they aren't floating decks; they get embankments
+                                // from the registered ground-surface override instead.)
+                                let is_elevated_deck = is_valley_bridge || effective_elevation > 0;
+                                if is_elevated_deck && cell_y > 0 {
                                     // Add 1 layer of stone bricks underneath the highway surface
                                     if use_absolute_y {
                                         editor.set_block_absolute(
                                             STONE_BRICKS,
                                             set_x,
-                                            current_y - 1,
+                                            cell_y - 1,
                                             set_z,
                                             None,
                                             None,
@@ -606,21 +771,18 @@ fn generate_highways_internal(
                                         editor.set_block(
                                             STONE_BRICKS,
                                             set_x,
-                                            current_y - 1,
+                                            cell_y - 1,
                                             set_z,
                                             None,
                                             None,
                                         );
                                     }
-                                }
 
-                                // Add support pillars for elevated highways/bridges
-                                if (effective_elevation != 0 || use_absolute_y) && current_y > 0 {
                                     if use_absolute_y {
                                         add_highway_support_pillar_absolute(
                                             editor,
                                             set_x,
-                                            current_y,
+                                            cell_y,
                                             set_z,
                                             dx,
                                             dz,
@@ -630,7 +792,7 @@ fn generate_highways_internal(
                                         add_highway_support_pillar(
                                             editor,
                                             set_x,
-                                            current_y,
+                                            cell_y,
                                             set_z,
                                             dx,
                                             dz,
@@ -641,68 +803,103 @@ fn generate_highways_internal(
                             }
                         }
 
-                        // Add light gray concrete outline for multi-lane roads
+                        // Light-gray curb on the two long edges of the road.
+                        // The sides are PERPENDICULAR to travel, so for a
+                        // horizontal-dominant segment they sit at
+                        // `z = cz ± (block_range + 1)` while x sweeps with
+                        // the road; for a vertical-dominant segment, roles
+                        // swap. An earlier version placed these at
+                        // `x ± (block_range + 1)` regardless of direction,
+                        // which for horizontal roads put each centerline's
+                        // outline inside the NEXT centerline's road stamp —
+                        // whenever the two Y values disagreed (diagonal
+                        // segments, smoothing-window shifts), the curb's
+                        // light-gray block survived at its own Y and showed
+                        // up as stray streaks on or beside the road surface.
+                        // The direction-aware placement below guarantees
+                        // outline cells land strictly outside every
+                        // centerline's road footprint.
                         if add_outline {
-                            // Left outline
-                            for dz in -block_range..=block_range {
-                                let outline_x = x - block_range - 1;
-                                let outline_z = z + dz;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
+                            let (edge_a, edge_b): ((i32, i32), (i32, i32)) = if dir_horizontal {
+                                ((0, -block_range - 1), (0, block_range + 1))
+                            } else {
+                                ((-block_range - 1, 0), (block_range + 1, 0))
+                            };
+                            for delta in -block_range..=block_range {
+                                let (sweep_dx, sweep_dz) = if dir_horizontal {
+                                    (delta, 0)
                                 } else {
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                }
-                            }
-                            // Right outline
-                            for dz in -block_range..=block_range {
-                                let outline_x = x + block_range + 1;
-                                let outline_z = z + dz;
-                                if use_absolute_y {
-                                    editor.set_block_absolute(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
-                                } else {
-                                    editor.set_block(
-                                        LIGHT_GRAY_CONCRETE,
-                                        outline_x,
-                                        current_y,
-                                        outline_z,
-                                        None,
-                                        None,
-                                    );
+                                    (0, delta)
+                                };
+                                for (off_dx, off_dz) in [edge_a, edge_b] {
+                                    let outline_x = x + sweep_dx + off_dx;
+                                    let outline_z = z + sweep_dz + off_dz;
+                                    let outline_y = if is_valley_bridge {
+                                        bridge_deck_y
+                                    } else if flatten_width {
+                                        perpendicular_median_ground_y(
+                                            editor,
+                                            outline_x,
+                                            outline_z,
+                                            *x,
+                                            *z,
+                                            block_range,
+                                            dir_horizontal,
+                                        ) + offset
+                                    } else {
+                                        offset
+                                    };
+                                    if use_absolute_y {
+                                        editor.set_block_absolute(
+                                            LIGHT_GRAY_CONCRETE,
+                                            outline_x,
+                                            outline_y,
+                                            outline_z,
+                                            None,
+                                            None,
+                                        );
+                                    } else {
+                                        editor.set_block(
+                                            LIGHT_GRAY_CONCRETE,
+                                            outline_x,
+                                            outline_y,
+                                            outline_z,
+                                            None,
+                                            None,
+                                        );
+                                    }
                                 }
                             }
                         }
 
-                        // Add a dashed white line in the middle for larger roads
+                        // Add a dashed white line in the middle for larger roads.
+                        // Stripe sits exactly on the centerline (*x, *z),
+                        // so its Y is the centerline's own perpendicular
+                        // median (same rule as any other road cell).
                         if add_stripe {
                             if stripe_length < dash_length {
                                 let stripe_x: i32 = *x;
                                 let stripe_z: i32 = *z;
+                                let stripe_y = if is_valley_bridge {
+                                    bridge_deck_y
+                                } else if flatten_width {
+                                    perpendicular_median_ground_y(
+                                        editor,
+                                        stripe_x,
+                                        stripe_z,
+                                        *x,
+                                        *z,
+                                        block_range,
+                                        dir_horizontal,
+                                    ) + offset
+                                } else {
+                                    offset
+                                };
                                 if use_absolute_y {
                                     editor.set_block_absolute(
                                         WHITE_CONCRETE,
                                         stripe_x,
-                                        current_y,
+                                        stripe_y,
                                         stripe_z,
                                         Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                         None,
@@ -711,7 +908,7 @@ fn generate_highways_internal(
                                     editor.set_block(
                                         WHITE_CONCRETE,
                                         stripe_x,
-                                        current_y,
+                                        stripe_y,
                                         stripe_z,
                                         Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
                                         None,

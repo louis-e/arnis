@@ -52,7 +52,7 @@ fn download_with_reqwest(
         }
         Err(e) => {
             if e.is_timeout() {
-                let msg = "Request timed out. Try selecting a smaller area.";
+                let msg = "Request timed out. Try again!";
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else if e.is_connect() {
@@ -200,7 +200,6 @@ pub fn fetch_data_from_overpass(
         if rng.random_bool(0.25) {
             let probe_idx = rng.random_range(0..api_servers.len());
             let probe_server = api_servers[probe_idx];
-            println!("Trying one official OSM server first (25% path): {probe_server}");
             request_plan.push((probe_server, ServerKind::Primary));
             probed_server = Some(probe_server);
         }
