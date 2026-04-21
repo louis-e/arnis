@@ -1005,6 +1005,16 @@ fn smooth_class_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
     // amounts to 0.8M–2.4M boundary cells each doing ~169 kernel samples
     // — clearly worth the rayon dispatch.
     grid.par_iter_mut().enumerate().for_each(|(y, row)| {
+        // Per-row scratch buffers reused across every boundary cell on
+        // this row. `votes` is 2 KB on the stack; zero-filling it anew
+        // per cell dominated runtime on large grids (1-2 M boundary
+        // cells × 2 KB zero-fill per cell). We now clear only the class
+        // slots we actually touched (`seen`) between cells — typically
+        // 2-5 writes instead of 256.
+        let mut votes = [0.0f64; 256];
+        let mut seen: [u8; 16] = [0; 16];
+        let mut seen_len = 0usize;
+
         for x in 0..width {
             let center_class = snapshot[y][x];
             if center_class == 0 {
@@ -1031,16 +1041,13 @@ fn smooth_class_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
                 continue;
             }
 
-            // Gaussian-weighted class votes. Fixed-size stack array keyed
-            // by class code avoids a per-cell heap allocation.
-            let mut votes = [0.0f64; 256];
-            // Also track the set of seen class codes so we only scan
-            // those when finding the max — ESA WorldCover has ~10
-            // classes in practice, so scanning all 256 entries is mostly
-            // wasted work. Small fixed-capacity list keeps this on the
-            // stack.
-            let mut seen: [u8; 16] = [0; 16];
-            let mut seen_len = 0usize;
+            // Reset only the slots touched by the previous boundary cell
+            // on this row. `seen` maxes at 16 classes — ESA has ~11 —
+            // so this is a handful of writes, not a 256-entry memset.
+            for i in 0..seen_len {
+                votes[seen[i] as usize] = 0.0;
+            }
+            seen_len = 0;
 
             for ky in 0..kernel_size {
                 let nz = y as i32 + ky as i32 - radius;

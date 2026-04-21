@@ -40,8 +40,13 @@ pub struct ElevationData {
 /// already fetch at their native tile granularity and ignore this cap
 /// structurally.
 ///
-/// Per-provider single-request caps (defined in `providers::regional`):
-///   - USGS 3DEP (ArcGIS ImageServer): 8000 × 8000 per request
+/// Per-provider single-request caps (defined in `providers::regional`
+/// as `USGS_MAX_SINGLE` / `IGN_*_MAX_SINGLE` — see those constants for
+/// the empirical measurements behind each value):
+///   - USGS 3DEP (ArcGIS ImageServer): 2048 × 2048 per request
+///     (documented cap is 8000, but the server returns HTTP 500 past
+///     ~3000 even though the LiDAR is 1 m native; 2048 is the reliable
+///     sweet spot)
 ///   - IGN France (WMS 1.3.0): 4096 × 4096 per request
 ///   - IGN Spain (WCS 2.0.1): 4096 × 4096 per request
 ///

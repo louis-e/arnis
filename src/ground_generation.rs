@@ -850,10 +850,10 @@ pub fn generate_ground_layer(
                             }
                         }
                         let depth = (ground_y - min_neighbor_y + 1).clamp(2, 32);
-                        for d in 1..=depth {
-                            if ground_y - d > MIN_Y {
-                                editor.set_block_if_absent_absolute(STONE, x, ground_y - d, z);
-                            }
+                        let y_max = ground_y - 1;
+                        let y_min = (ground_y - depth).max(MIN_Y + 1);
+                        if y_min <= y_max {
+                            editor.fill_column_absolute(STONE, x, z, y_min, y_max, true);
                         }
                     }
 
