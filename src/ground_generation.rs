@@ -475,7 +475,11 @@ pub fn generate_ground_layer(
                             if steep_override {
                                 // Force-replace existing OSM blocks on steep terrain
                                 // Use blacklist to avoid replacing water/bedrock and
-                                // common hard surfaces (roads/buildings).
+                                // common hard surfaces (roads/buildings). WHITE_CONCRETE
+                                // protects lane-centre stripes and zebra crossings —
+                                // without it, every dashed line on a hillside street
+                                // gets buried under andesite/stone bricks by the
+                                // slope-tier rock selector above.
                                 editor.set_block_absolute(
                                     surface_block,
                                     x,
@@ -489,6 +493,7 @@ pub fn generate_ground_layer(
                                         CYAN_TERRACOTTA,
                                         GRAY_CONCRETE,
                                         LIGHT_GRAY_CONCRETE,
+                                        WHITE_CONCRETE,
                                         DIRT_PATH,
                                         STONE_BRICKS,
                                         BRICK,
