@@ -185,8 +185,8 @@ pub fn fetch_data_from_overpass(
         // Fetch data from Overpass API.
         // Strategy:
         // 1) 25% chance: probe one random official server first.
-        // 2) Always run the normal path: arnis API once, then shuffled official,
-        //    then shuffled fallback servers.
+        // 2) If the probe does not succeed, run the normal path: arnis API once,
+        //    then shuffled official, then shuffled fallback servers.
         #[derive(Clone, Copy, PartialEq, Eq)]
         enum ServerKind {
             Primary,
