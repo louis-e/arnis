@@ -187,35 +187,54 @@ pub fn fetch_data_from_overpass(
         // 1) 25% chance: probe one random official server first.
         // 2) Always run the normal path: arnis API once, then shuffled official,
         //    then shuffled fallback servers.
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum ServerKind {
+            Primary,
+            Fallback,
+        }
+
         let mut rng = rand::rng();
-        let mut request_plan: Vec<(&str, bool)> = Vec::new();
+        let mut request_plan: Vec<(&str, ServerKind)> = Vec::new();
+        let mut probed_server: Option<&str> = None;
 
         if rng.random_bool(0.25) {
             let probe_idx = rng.random_range(0..api_servers.len());
             let probe_server = api_servers[probe_idx];
             println!("Trying one official OSM server first (25% path): {probe_server}");
-            request_plan.push((probe_server, false));
+            request_plan.push((probe_server, ServerKind::Primary));
+            probed_server = Some(probe_server);
         }
 
-        request_plan.push((arnis_api_server, false));
+        request_plan.push((arnis_api_server, ServerKind::Primary));
 
         let mut shuffled_primary_servers = api_servers.clone();
         shuffled_primary_servers.shuffle(&mut rng);
-        request_plan.extend(shuffled_primary_servers.into_iter().map(|url| (url, false)));
+        if let Some(probed_server) = probed_server {
+            shuffled_primary_servers.retain(|&url| url != probed_server);
+        }
+        request_plan.extend(
+            shuffled_primary_servers
+                .into_iter()
+                .map(|url| (url, ServerKind::Primary)),
+        );
 
         let mut shuffled_fallback_servers = fallback_api_servers.clone();
         shuffled_fallback_servers.shuffle(&mut rng);
-        request_plan.extend(shuffled_fallback_servers.into_iter().map(|url| (url, true)));
+        request_plan.extend(
+            shuffled_fallback_servers
+                .into_iter()
+                .map(|url| (url, ServerKind::Fallback)),
+        );
 
         let first_fallback_index = request_plan
             .iter()
-            .position(|(_, is_fallback)| *is_fallback)
+            .position(|(_, kind)| *kind == ServerKind::Fallback)
             .unwrap_or(request_plan.len());
 
         let total = request_plan.len();
         let mut last_error: Option<Box<dyn std::error::Error>> = None;
         let response: String = 'server_loop: {
-            for (i, (url, is_fallback)) in request_plan.iter().enumerate() {
+            for (i, (url, kind)) in request_plan.iter().enumerate() {
                 let timeout_secs = if url.contains("private.coffee") {
                     120
                 } else {
@@ -238,7 +257,7 @@ pub fn fetch_data_from_overpass(
                         last_error = Some(error);
 
                         if i + 1 < total {
-                            let delay_secs = if *is_fallback { 5 } else { 3 };
+                            let delay_secs = if *kind == ServerKind::Fallback { 5 } else { 3 };
                             println!("Retrying in {delay_secs}s (attempt {}/{total})...", i + 1);
                             std::thread::sleep(Duration::from_secs(delay_secs));
                             if i + 1 == first_fallback_index {
