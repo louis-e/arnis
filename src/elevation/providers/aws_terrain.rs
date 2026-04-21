@@ -126,9 +126,15 @@ impl ElevationProvider for AwsTerrain {
                 let fy_global =
                     (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n * 256.0;
 
-                // Determine tile and fractional pixel within tile
-                let tile_x = (fx_global / 256.0).floor() as u32;
-                let tile_y = (fy_global / 256.0).floor() as u32;
+                // Determine tile and fractional pixel within tile.
+                // Clamp via i64 so ±180° lng (which LLPoint permits at
+                // the upper bound) and ±90° lat (where f64 `tan` is
+                // huge-but-finite, driving fy_global extremely negative)
+                // can't wrap a bare `as u32` cast to a wrong tile index;
+                // missing tiles at the bbox edge fall back to NaN-fill.
+                let n_tiles = n as i64;
+                let tile_x = ((fx_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
+                let tile_y = ((fy_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
                 let px = fx_global - tile_x as f64 * 256.0;
                 let py = fy_global - tile_y as f64 * 256.0;
 

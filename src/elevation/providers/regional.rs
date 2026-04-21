@@ -347,8 +347,11 @@ impl ElevationProvider for JapanGsi {
                 let fy_global =
                     (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n * 256.0;
 
-                let tile_x = (fx_global / 256.0).floor() as u32;
-                let tile_y = (fy_global / 256.0).floor() as u32;
+                // Clamp via i64 so ±180° lng / ±90° lat can't wrap a bare
+                // `as u32` cast; see aws_terrain.rs for the full rationale.
+                let n_tiles = n as i64;
+                let tile_x = ((fx_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
+                let tile_y = ((fy_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
                 let px = fx_global - tile_x as f64 * 256.0;
                 let py = fy_global - tile_y as f64 * 256.0;
 
