@@ -118,7 +118,14 @@ pub fn generate_ground_layer(
                     // On steep terrain, override any existing OSM surface block
                     // (e.g., a quarry's stone, a park's grass) with slope-appropriate
                     // rock material. Steep cliffs should always look like rock.
-                    let steep_override = terrain_enabled && slope > 3;
+                    //
+                    // Threshold must match the first "rock" tier below (`slope > 4`).
+                    // At `slope == 4`, the material cascade falls through to land-
+                    // cover selection (grass / farmland / etc.), so force-replacing
+                    // at that slope would wipe e.g. a `landuse=quarry` STONE surface
+                    // with GRASS_BLOCK for no good reason — it's only a 27° hiking
+                    // slope, not a cliff.
+                    let steep_override = terrain_enabled && slope > 4;
                     let mut did_underfill = false;
 
                     // Determine surface and under-block material for this column.
