@@ -175,10 +175,14 @@ impl Ground {
             // continuous — the renderer's hard `> 0.5` threshold then traces
             // a clean curved shoreline contour instead of the raw ESA 10 m
             // rectangular grid edge.
-            let w00 = lc.water_blend_grid[z0][x0];
-            let w10 = lc.water_blend_grid[z0][x1];
-            let w01 = lc.water_blend_grid[z1][x0];
-            let w11 = lc.water_blend_grid[z1][x1];
+            // Widen f32 storage to f64 for the bilinear arithmetic. This
+            // doesn't recover the ~10⁻⁷ precision lost at storage, but it
+            // prevents extra rounding from accumulating in the four
+            // multiply-adds + the threshold comparison downstream.
+            let w00 = lc.water_blend_grid[z0][x0] as f64;
+            let w10 = lc.water_blend_grid[z0][x1] as f64;
+            let w01 = lc.water_blend_grid[z1][x0] as f64;
+            let w11 = lc.water_blend_grid[z1][x1] as f64;
 
             // Bilinear interpolation
             let top = w00 * (1.0 - tx) + w10 * tx;
@@ -297,10 +301,17 @@ impl Ground {
         let z1 = (z0 + 1).min(data.height - 1);
         let dx = fx - x0 as f64;
         let dz = fz - z0 as f64;
-        let v00 = data.heights[z0][x0];
-        let v10 = data.heights[z0][x1];
-        let v01 = data.heights[z1][x0];
-        let v11 = data.heights[z1][x1];
+        // Widen f32 storage to f64 for the bilinear arithmetic. The real
+        // property we rely on: across the Minecraft Y range (roughly −64 up
+        // through a few thousand even with --disable-height-limit), f32's
+        // mantissa gives ~10⁻⁷ precision per stored cell, which is far
+        // smaller than the 0.5-block half-width used by `round()` below.
+        // So for any value that isn't pathologically close to a half-integer
+        // boundary, the final `result.round() as i32` matches the f64 path.
+        let v00 = data.heights[z0][x0] as f64;
+        let v10 = data.heights[z0][x1] as f64;
+        let v01 = data.heights[z1][x0] as f64;
+        let v11 = data.heights[z1][x1] as f64;
         let lerp_top = v00 + (v10 - v00) * dx;
         let lerp_bot = v01 + (v11 - v01) * dx;
         let result = lerp_top + (lerp_bot - lerp_top) * dz;
@@ -318,7 +329,12 @@ impl Ground {
         world_height: usize,
     ) {
         if let Some(ref mut data) = self.elevation_data {
-            data.heights = heights;
+            // Rotation operators build a fresh f64 work grid; downcast here to
+            // match `ElevationData::heights`'s f32 storage layout.
+            data.heights = heights
+                .into_iter()
+                .map(|row| row.into_iter().map(|v| v as f32).collect())
+                .collect();
             data.width = grid_width;
             data.height = grid_height;
             data.world_width = world_width;
@@ -389,8 +405,8 @@ impl Ground {
         let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> =
             RgbImage::new(width as u32, height as u32);
 
-        let mut min_height: f64 = f64::MAX;
-        let mut max_height: f64 = f64::MIN;
+        let mut min_height: f32 = f32::MAX;
+        let mut max_height: f32 = f32::MIN;
 
         for row in heights {
             for &h in row {
