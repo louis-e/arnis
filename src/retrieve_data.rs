@@ -23,7 +23,11 @@ fn download_with_reqwest(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(timeout_secs))
-        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "Arnis/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/louis-e/arnis)"
+        ))
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -323,7 +327,11 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
-        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "Arnis/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/louis-e/arnis)"
+        ))
         .build()?;
 
     let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");
