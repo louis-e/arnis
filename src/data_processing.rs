@@ -370,8 +370,8 @@ pub fn generate_world_with_options(
     }
 
     if let Some(start) = generation_start {
-        let gen_secs = start.elapsed().as_secs();
-        eprintln!("[BENCHMARK] generation_time={gen_secs}");
+        let gen_ms = start.elapsed().as_millis();
+        eprintln!("[BENCHMARK] generation_time_ms={gen_ms}");
     }
 
     emit_gui_progress_update(99.0, "Finalizing world...");
