@@ -29,6 +29,7 @@ use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
+use fnv::FnvHashMap;
 use serde::Serialize;
 use std::collections::{hash_map::Entry, HashMap};
 use std::fs::File;
@@ -125,7 +126,10 @@ pub struct WorldEditor<'a> {
     /// `ground_generation` pass builds the surface at the road's level —
     /// producing a natural-looking embankment on the low side and a cut on
     /// the high side rather than a floating strip with cliffs at the edges.
-    road_surface_overrides: HashMap<(i32, i32), i32>,
+    ///
+    /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
+    /// path (called per-block during placement), so the hash cost matters.
+    road_surface_overrides: FnvHashMap<(i32, i32), i32>,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
     #[cfg(feature = "bedrock")]
     bedrock_level_name: Option<String>,
@@ -147,7 +151,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format: WorldFormat::JavaAnvil,
-            road_surface_overrides: HashMap::new(),
+            road_surface_overrides: FnvHashMap::default(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name: None,
             #[cfg(feature = "bedrock")]
@@ -178,7 +182,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format,
-            road_surface_overrides: HashMap::new(),
+            road_surface_overrides: FnvHashMap::default(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name,
             #[cfg(feature = "bedrock")]
@@ -213,10 +217,18 @@ impl<'a> WorldEditor<'a> {
     /// Checks the road-surface override map first so that a later
     /// `ground_generation` pass will build terrain matching the road's
     /// flattened cross-section. Falls back to `Ground::level` otherwise.
+    ///
+    /// The `is_empty` guard matters: this function is called per-block
+    /// during element processing, so every element placed before highways
+    /// run (most elements in small bboxes, all non-road elements before
+    /// priority-ordering kicks highways to the front) would otherwise pay
+    /// a hash + bucket-probe per call even though the map is empty.
     #[inline(always)]
     pub fn get_ground_level(&self, x: i32, z: i32) -> i32 {
-        if let Some(&y) = self.road_surface_overrides.get(&(x, z)) {
-            return y;
+        if !self.road_surface_overrides.is_empty() {
+            if let Some(&y) = self.road_surface_overrides.get(&(x, z)) {
+                return y;
+            }
         }
         if let Some(ground) = &self.ground {
             ground.level(XZPoint::new(
