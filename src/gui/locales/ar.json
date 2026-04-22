@@ -1,6 +1,7 @@
 {
   "create_world": "إنشاء عالم",
   "no_world_selected": "لم يتم إنشاء عالم",
+  "no_world_generated_yet": "لم يتم توليد عالم بعد",
   "start_generation": "بدء البناء",
   "custom_selection_confirmed": "تم تأكيد التحديد المخصص!",
   "error_coordinates_out_of_range": "خطأ: الإحداثيات خارج النطاق أو مرتبة بشكل غير صحيح (مطلوب خط العرض قبل خط الطول).",
@@ -44,5 +45,9 @@
   "disable_height_limit": "تعطيل حد الارتفاع",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "save_path": "مسار الحفظ",
-  "rotation_angle": "زاوية الدوران"
+  "rotation_angle": "زاوية الدوران",
+  "settings_section_generation": "التوليد",
+  "settings_section_world": "العالم",
+  "settings_section_map": "الخريطة والإدخال",
+  "settings_section_application": "التطبيق"
 }

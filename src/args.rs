@@ -100,6 +100,9 @@ pub struct Args {
     /// Omit to generate terrain without water.
     #[arg(long, allow_hyphen_values = true)]
     pub fnv_water_level: Option<f32>,
+    /// Print generation-only timing to stderr (excludes data fetching)
+    #[arg(long, hide = true)]
+    pub benchmark: bool,
 }
 
 /// Validates CLI arguments after parsing.

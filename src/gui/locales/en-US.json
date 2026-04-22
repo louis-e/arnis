@@ -1,6 +1,7 @@
 {
   "create_world": "Create World",
   "no_world_selected": "No world created",
+  "no_world_generated_yet": "No world generated yet",
   "start_generation": "Start Generation",
   "custom_selection_confirmed": "Custom selection confirmed!",
   "error_coordinates_out_of_range": "Error: Coordinates are out of range or incorrectly ordered (Lat before Lng required).",
@@ -11,7 +12,7 @@
   "custom_bounding_box": "Custom Bounding Box",
   "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Ground Level",
-  "customization_settings": "Customization Settings",
+  "customization_settings": "Settings",
   "footer_text": "© {year} Arnis v{version} by louis-e",
   "new_version_available": "There's a new version available! Click here to download it.",
   "minecraft_directory_not_found": "Minecraft directory not found",
@@ -44,5 +45,9 @@
   "disable_height_limit": "Disable Height Limit",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "save_path": "Save Path",
-  "rotation_angle": "Rotation Angle"
+  "rotation_angle": "Rotation Angle",
+  "settings_section_generation": "Generation",
+  "settings_section_world": "World",
+  "settings_section_map": "Map & Input",
+  "settings_section_application": "Application"
 }

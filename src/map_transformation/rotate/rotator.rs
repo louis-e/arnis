@@ -1,6 +1,8 @@
 use super::Operator;
 use crate::coordinate_system::cartesian::{XZBBox, XZBBoxRect, XZPoint};
+use crate::elevation::MAX_ELEVATION_GRID_DIM;
 use crate::ground::{Ground, RotationMask};
+use crate::land_cover::LC_WATER;
 use crate::osm_parser::ProcessedElement;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -221,12 +223,20 @@ fn rotate_ground_data(
 
     let original_ground = ground.clone();
 
-    let new_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
-    let new_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
+    let new_world_w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
+    let new_world_h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
+
+    // Cap the rotation grid using the same constant as elevation
+    // fetching (`crate::elevation::MAX_ELEVATION_GRID_DIM`). Having two
+    // local copies of the number would let them silently drift, so we
+    // import the shared source of truth — if you tune one, the other
+    // follows.
+    let new_w = new_world_w.min(MAX_ELEVATION_GRID_DIM);
+    let new_h = new_world_h.min(MAX_ELEVATION_GRID_DIM);
 
     // For each cell in the new grid, inverse-rotate to find the source cell
     let neg_sin_r = -sin_r; // Inverse rotation
-    let mut new_heights: Vec<Vec<i32>> = Vec::with_capacity(new_h);
+    let mut new_heights: Vec<Vec<f64>> = Vec::with_capacity(new_h);
     let mut has_data: Vec<Vec<bool>> = Vec::with_capacity(new_h);
 
     // Also rotate land-cover grids if present
@@ -241,8 +251,13 @@ fn rotate_ground_data(
         let mut water_row: Option<Vec<u8>> = has_land_cover.then(|| Vec::with_capacity(new_w));
 
         for x_idx in 0..new_w {
-            let world_x = xzbbox.min_x() + x_idx as i32;
-            let world_z = xzbbox.min_z() + z_idx as i32;
+            // Map grid index to world coordinate (accounts for grid being smaller than world)
+            let world_x = xzbbox.min_x()
+                + (x_idx as f64 / (new_w - 1).max(1) as f64 * (new_world_w - 1) as f64).round()
+                    as i32;
+            let world_z = xzbbox.min_z()
+                + (z_idx as f64 / (new_h - 1).max(1) as f64 * (new_world_h - 1) as f64).round()
+                    as i32;
 
             // Inverse-rotate this world coordinate back to original space
             let (orig_x, orig_z) =
@@ -260,7 +275,7 @@ fn rotate_ground_data(
                 && (rel_z as usize) < orig_height;
 
             let coord = XZPoint::new(rel_x, rel_z);
-            height_row.push(original_ground.level(coord));
+            height_row.push(original_ground.level(coord) as f64);
             data_row.push(in_original);
 
             if let Some(ref mut cr) = cover_row {
@@ -281,7 +296,14 @@ fn rotate_ground_data(
     }
 
     // Apply Laplacian smoothing (3 iterations) to reduce jagged edges
-    // from coordinate discretization during rotation
+    // from coordinate discretization during rotation. Skip cells that are
+    // LC_WATER or that touch an LC_WATER neighbor — the water surface was
+    // flattened (by apply_land_cover_repair pre-rotation) and smoothing
+    // across that boundary would lift the water toward adjacent land
+    // heights and drag the shore down toward the water, creating a 1-3 m
+    // rounded rim at every rotated coastline. The `new_cover` grid was
+    // populated in the main loop above with the rotated land-cover
+    // classification, so we can check water-adjacency per cell.
     const SMOOTH_ITERATIONS: usize = 3;
     for _ in 0..SMOOTH_ITERATIONS {
         let prev = new_heights.clone();
@@ -290,20 +312,32 @@ fn rotate_ground_data(
                 if !has_data[z_idx][x_idx] {
                     continue; // Don't smooth padding areas
                 }
-                let neighbors_sum = prev[z_idx - 1][x_idx] as f64
-                    + prev[z_idx + 1][x_idx] as f64
-                    + prev[z_idx][x_idx - 1] as f64
-                    + prev[z_idx][x_idx + 1] as f64;
+                if let Some(ref cover) = new_cover {
+                    // If this cell or any 4-neighbour is water, skip.
+                    // Preserves the flat water surface and the natural
+                    // crispness of the shoreline through rotation.
+                    if cover[z_idx][x_idx] == LC_WATER
+                        || cover[z_idx - 1][x_idx] == LC_WATER
+                        || cover[z_idx + 1][x_idx] == LC_WATER
+                        || cover[z_idx][x_idx - 1] == LC_WATER
+                        || cover[z_idx][x_idx + 1] == LC_WATER
+                    {
+                        continue;
+                    }
+                }
+                let neighbors_sum = prev[z_idx - 1][x_idx]
+                    + prev[z_idx + 1][x_idx]
+                    + prev[z_idx][x_idx - 1]
+                    + prev[z_idx][x_idx + 1];
                 let avg = neighbors_sum / 4.0;
                 // Blend: 70% original + 30% neighbor average
-                new_heights[z_idx][x_idx] =
-                    (0.7 * prev[z_idx][x_idx] as f64 + 0.3 * avg).round() as i32;
+                new_heights[z_idx][x_idx] = 0.7 * prev[z_idx][x_idx] + 0.3 * avg;
             }
         }
     }
 
-    // Update ground with rotated elevation
-    ground.set_elevation_data(new_heights, new_w, new_h);
+    // Update ground with rotated elevation (grid may be smaller than world)
+    ground.set_elevation_data(new_heights, new_w, new_h, new_world_w, new_world_h);
 
     // Update land cover with rotated data
     if let (Some(cover_grid), Some(water_dist)) = (new_cover, new_water) {

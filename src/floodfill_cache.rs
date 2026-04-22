@@ -237,6 +237,12 @@ impl CoordinateBitmap {
 /// Type alias for building footprint bitmap (for backwards compatibility).
 pub type BuildingFootprintBitmap = CoordinateBitmap;
 
+/// Type alias for the road surface bitmap used by amenity processors.
+/// Built by `highways::collect_road_surface_coords` using the same Bresenham +
+/// block_range geometry as the renderer, so every placed road/path block coordinate
+/// is marked as 1 and everything else is 0.
+pub type RoadMaskBitmap = CoordinateBitmap;
+
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
     /// Cached results: element_id -> filled coordinates
@@ -373,12 +379,13 @@ impl FloodFillCache {
 
         for element in elements {
             match element {
-                ProcessedElement::Way(way) => {
-                    if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                        if let Some(cached) = self.way_cache.get(&way.id) {
-                            for &(x, z) in cached {
-                                footprints.set(x, z);
-                            }
+                ProcessedElement::Way(way)
+                    if way.tags.contains_key("building")
+                        || way.tags.contains_key("building:part") =>
+                {
+                    if let Some(cached) = self.way_cache.get(&way.id) {
+                        for &(x, z) in cached {
+                            footprints.set(x, z);
                         }
                     }
                 }

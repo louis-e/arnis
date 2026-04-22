@@ -37,6 +37,7 @@ pub fn generate_world_with_options(
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
+    let generation_start = args.benchmark.then(std::time::Instant::now);
 
     // Create editor with appropriate format
     let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
@@ -53,6 +54,9 @@ pub fn generate_world_with_options(
 
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
+
+    // Collect subway centerline points for post-ground-fill air carving (phase 2).
+    let mut subway_points: Vec<(i32, i32)> = Vec::new();
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(Arc::clone(&ground));
@@ -72,6 +76,13 @@ pub fn generate_world_with_options(
     let building_passages =
         highways::collect_building_passage_coords(&elements, &xzbbox, args.scale);
 
+    // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
+    // road or path surface. Uses the same Bresenham + block_range geometry as
+    // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
+    // Amenity processors use this for O(1) nearest-road-block lookups.
+    // TODO Use this data to create overhanging traffic signals.
+    let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
+
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
@@ -83,6 +94,9 @@ pub fn generate_world_with_options(
     let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
+    let desired_updates: u64 = 500;
+    let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
+    let mut element_counter: u64 = 0;
 
     // Pre-scan: detect building relation outlines that should be suppressed.
     // Only applies to type=building relations (NOT type=multipolygon).
@@ -113,7 +127,10 @@ pub fn generate_world_with_options(
 
     // Process all elements
     for element in elements.into_iter() {
-        process_pb.inc(1);
+        element_counter += 1;
+        if element_counter.is_multiple_of(pb_batch_size) {
+            process_pb.inc(pb_batch_size);
+        }
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {
             emit_gui_progress_update(current_progress_prcs, "");
@@ -127,6 +144,11 @@ pub fn generate_world_with_options(
                 element.kind()
             ));
         } else {
+            // Clear on every non-debug iteration so any transient warning
+            // message set by downstream element processing (missing nodes,
+            // etc.) doesn't stick for the rest of the run. The cost is
+            // trivial — indicatif's set_message is just a mutex + string
+            // compare (~20 ns), ~40 ms over a full world.
             process_pb.set_message("");
         }
 
@@ -171,7 +193,13 @@ pub fn generate_world_with_options(
                         &building_footprints,
                     );
                 } else if way.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
+                    amenities::generate_amenities(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &road_mask,
+                    );
                 } else if way.tags.contains_key("leisure") {
                     leisure::generate_leisure(
                         &mut editor,
@@ -192,7 +220,7 @@ pub fn generate_world_with_options(
                 } else if way.tags.contains_key("bridge") {
                     //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way);
+                    railways::generate_railways(&mut editor, way, &mut subway_points);
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
@@ -226,7 +254,13 @@ pub fn generate_world_with_options(
                         &building_footprints,
                     );
                 } else if node.tags.contains_key("amenity") {
-                    amenities::generate_amenities(&mut editor, &element, args, &flood_fill_cache);
+                    amenities::generate_amenities(
+                        &mut editor,
+                        &element,
+                        args,
+                        &flood_fill_cache,
+                        &road_mask,
+                    );
                 } else if node.tags.contains_key("barrier") {
                     barriers::generate_barrier_nodes(&mut editor, node);
                 } else if node.tags.contains_key("highway") {
@@ -307,11 +341,13 @@ pub fn generate_world_with_options(
         // Element is dropped here, freeing its memory immediately
     }
 
+    process_pb.inc(element_counter % pb_batch_size);
     process_pb.finish();
 
     // Drop remaining caches
     drop(highway_connectivity);
     drop(flood_fill_cache);
+    drop(road_mask);
 
     // Generate ground layer (surface blocks, vegetation, shorelines, underground fill)
     ground_generation::generate_ground_layer(
@@ -322,9 +358,20 @@ pub fn generate_world_with_options(
         &building_footprints,
     )?;
 
+    // Carve subway tunnel interiors now that underground is filled with stone.
+    // This must happen after ground generation so AIR blocks are not overwritten.
+    if !subway_points.is_empty() {
+        railways::carve_subway_interior(&mut editor, &subway_points);
+    }
+
     // Save world
     if let Err(e) = editor.save() {
         return Err(e.to_string());
+    }
+
+    if let Some(start) = generation_start {
+        let gen_secs = start.elapsed().as_secs();
+        eprintln!("[BENCHMARK] generation_time={gen_secs}");
     }
 
     emit_gui_progress_update(99.0, "Finalizing world...");

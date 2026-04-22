@@ -11,6 +11,7 @@ mod coordinate_system;
 mod data_processing;
 mod deterministic_rng;
 mod element_processing;
+mod elevation;
 mod elevation_data;
 mod floodfill;
 mod floodfill_cache;
