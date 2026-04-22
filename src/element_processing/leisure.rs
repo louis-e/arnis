@@ -84,13 +84,12 @@ pub fn generate_leisure(
 
         // Flood-fill the interior of the leisure area using cache
         if corner_addup != (0, 0, 0) {
-            let filled_area: Vec<(i32, i32)> =
-                flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+            let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
             // Use deterministic RNG seeded by element ID for consistent results across region boundaries
             let mut rng = element_rng(element.id);
 
-            for (x, z) in filled_area {
+            for &(x, z) in filled_area.iter() {
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens

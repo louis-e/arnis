@@ -3467,9 +3467,14 @@ pub fn generate_buildings(
         multiply_scale(min_level * 4, scale_factor)
     };
 
-    // Get cached floor area
-    let mut cached_floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    // Get cached floor area. Hole carving below needs `retain`, which requires
+    // ownership, so we materialize a Vec here. Buildings typically have small
+    // footprints (tens to hundreds of cells), so the deep copy is cheap — the
+    // big Arc wins come from landuse/natural/leisure handlers.
+    let mut cached_floor_area: Vec<(i32, i32)> = flood_fill_cache
+        .get_or_compute(element, args.timeout.as_ref())
+        .as_ref()
+        .clone();
 
     if let Some(holes) = hole_polygons {
         if !holes.is_empty() {
@@ -3490,7 +3495,7 @@ pub fn generate_buildings(
                     continue;
                 }
 
-                for point in hole_area {
+                for &point in hole_area.iter() {
                     hole_points.insert(point);
                 }
             }
@@ -5722,13 +5727,13 @@ fn generate_bridge(
     }
 
     // Flood fill the area between the bridge path nodes (uses cache)
-    let bridge_area: Vec<(i32, i32)> = flood_fill_cache.get_or_compute(element, floodfill_timeout);
+    let bridge_area = flood_fill_cache.get_or_compute(element, floodfill_timeout);
 
     // Use the same level bridge deck height for filled areas
     let floor_y = bridge_deck_ground_y + bridge_y_offset;
 
     // Place floor blocks
-    for (x, z) in bridge_area {
+    for &(x, z) in bridge_area.iter() {
         editor.set_block_absolute(floor_block, x, floor_y, z, None, None);
     }
 }

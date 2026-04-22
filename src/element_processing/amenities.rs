@@ -127,7 +127,7 @@ pub fn generate_amenities(
                 let roof_block: Block = STONE_BLOCK_SLAB;
 
                 // Use pre-computed flood fill from cache
-                let floor_area: Vec<(i32, i32)> =
+                let floor_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 if floor_area.is_empty() {
@@ -222,7 +222,7 @@ pub fn generate_amenities(
                 let roof_block: Block = STONE_BRICK_SLAB;
 
                 // Use pre-computed flood fill from cache
-                let roof_area: Vec<(i32, i32)> =
+                let roof_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 // Place fences and roof slabs at each corner node directly
@@ -272,10 +272,10 @@ pub fn generate_amenities(
                 }
 
                 // Flood-fill the interior area for parking
-                let flood_area: Vec<(i32, i32)> =
+                let flood_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
-                for (x, z) in flood_area {
+                for &(x, z) in flood_area.iter() {
                     editor.set_block(
                         block_type,
                         x,
@@ -418,8 +418,7 @@ fn generate_fountain(
     }
 
     // ── Way fountain (polygon) ─────────────────────────────────────
-    let floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
+    let floor_area = flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
     if floor_area.is_empty() {
         return;
@@ -466,7 +465,7 @@ fn generate_fountain(
     }
 
     // Fill interior with water at y=1 (and a stone floor at y=0)
-    for &(x, z) in &floor_area {
+    for &(x, z) in floor_area.iter() {
         if !edge_set.contains(&(x, z)) {
             editor.set_block(SMOOTH_STONE, x, 0, z, None, None);
             editor.set_block(WATER, x, 1, z, None, None);
