@@ -7,6 +7,12 @@ use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
+/// Upper bound on `block_range` used by wide-road width flattening. The
+/// stamp is `2 * block_range + 1`; with `MAX_BLOCK_RANGE = 8` we can sort
+/// up to 17 samples on the stack. Keep this generous — a `debug_assert`
+/// below catches it if a caller ever exceeds it.
+const MAX_BLOCK_RANGE: usize = 8;
+
 /// Median of the ground levels along the road's width-perpendicular
 /// strip at one along-length coordinate. Pure primitive — no along-length
 /// smoothing. Callers should use `perpendicular_median_ground_y` unless
@@ -21,19 +27,65 @@ fn perpendicular_median_raw(
     block_range: i32,
     dir_horizontal: bool,
 ) -> i32 {
-    let capacity = 2 * block_range as usize + 1;
-    let mut ys: Vec<i32> = Vec::with_capacity(capacity);
+    debug_assert!(block_range as usize <= MAX_BLOCK_RANGE);
+    let len = 2 * block_range as usize + 1;
+    // Stack buffer keeps this allocation-free on a hot path that runs
+    // millions of times for a city-scale bbox.
+    let mut ys = [0i32; 2 * MAX_BLOCK_RANGE + 1];
     if dir_horizontal {
-        for t in -block_range..=block_range {
-            ys.push(editor.get_ground_level(set_x, centerline_z + t));
+        for (i, t) in (-block_range..=block_range).enumerate() {
+            ys[i] = editor.get_ground_level(set_x, centerline_z + t);
         }
     } else {
-        for t in -block_range..=block_range {
-            ys.push(editor.get_ground_level(centerline_x + t, set_z));
+        for (i, t) in (-block_range..=block_range).enumerate() {
+            ys[i] = editor.get_ground_level(centerline_x + t, set_z);
         }
     }
-    ys.sort_unstable();
-    ys[ys.len() / 2]
+    ys[..len].sort_unstable();
+    ys[len / 2]
+}
+
+/// Precompute one perpendicular-median Y per axial position in a
+/// centerline's stamp. Hot-loop optimization: inside a single centerline
+/// point's `(2b+1) × (2b+1)` stamp, every cell that shares a given axial
+/// offset (dx for horizontal travel, dz for vertical travel) produces
+/// the same target Y — `perpendicular_median_ground_y` ignores the
+/// cross-axis position entirely. Computing it once per axial value and
+/// reading from this table in the inner loop cuts `get_ground_level`
+/// call count by a factor of `2b+1` on the main road-stamp path.
+///
+/// The table layout maps axial offset `a ∈ [-block_range, block_range]`
+/// to index `(a + block_range) as usize`. `out.len()` must be at least
+/// `2 * block_range + 1`.
+#[inline]
+fn precompute_row_medians(
+    editor: &WorldEditor,
+    centerline_x: i32,
+    centerline_z: i32,
+    block_range: i32,
+    dir_horizontal: bool,
+    out: &mut [i32],
+) {
+    debug_assert!(block_range as usize <= MAX_BLOCK_RANGE);
+    let len = 2 * block_range as usize + 1;
+    debug_assert!(out.len() >= len);
+    for (i, slot) in out[..len].iter_mut().enumerate() {
+        let axial = -block_range + i as i32;
+        let (sx, sz) = if dir_horizontal {
+            (centerline_x + axial, centerline_z)
+        } else {
+            (centerline_x, centerline_z + axial)
+        };
+        *slot = perpendicular_median_ground_y(
+            editor,
+            sx,
+            sz,
+            centerline_x,
+            centerline_z,
+            block_range,
+            dir_horizontal,
+        );
+    }
 }
 
 /// Median of the ground levels along the road's width-perpendicular strip
@@ -593,6 +645,24 @@ fn generate_highways_internal(
                         // to a single statement.
                         let use_absolute_y = is_valley_bridge || flatten_width;
 
+                        // Precompute per-axial-offset perpendicular medians
+                        // once for this centerline. Every cell in the stamp
+                        // that shares an axial offset picks up the same
+                        // value — without this cache, we'd recompute the
+                        // full 3-tap median (which itself touches ~15
+                        // ground samples) for every `(dx, dz)` cell, making
+                        // wide-road rendering O(width²) per centerline.
+                        let mut row_medians = [0i32; 2 * MAX_BLOCK_RANGE + 1];
+                        if flatten_width {
+                            precompute_row_medians(
+                                editor,
+                                *x,
+                                *z,
+                                block_range,
+                                dir_horizontal,
+                                &mut row_medians,
+                            );
+                        }
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
                             for dz in -block_range..=block_range {
@@ -608,15 +678,8 @@ fn generate_highways_internal(
                                 let cell_y = if is_valley_bridge {
                                     bridge_deck_y
                                 } else if flatten_width {
-                                    perpendicular_median_ground_y(
-                                        editor,
-                                        set_x,
-                                        set_z,
-                                        *x,
-                                        *z,
-                                        block_range,
-                                        dir_horizontal,
-                                    ) + offset
+                                    let axial = if dir_horizontal { dx } else { dz };
+                                    row_medians[(axial + block_range) as usize] + offset
                                 } else {
                                     offset
                                 };
@@ -834,18 +897,15 @@ fn generate_highways_internal(
                                 for (off_dx, off_dz) in [edge_a, edge_b] {
                                     let outline_x = x + sweep_dx + off_dx;
                                     let outline_z = z + sweep_dz + off_dz;
+                                    // Outline rides the same cross-section Y
+                                    // as the adjacent road cell at this
+                                    // axial offset. Reuse the precomputed
+                                    // table so we don't redo the 3-tap
+                                    // median twice per delta.
                                     let outline_y = if is_valley_bridge {
                                         bridge_deck_y
                                     } else if flatten_width {
-                                        perpendicular_median_ground_y(
-                                            editor,
-                                            outline_x,
-                                            outline_z,
-                                            *x,
-                                            *z,
-                                            block_range,
-                                            dir_horizontal,
-                                        ) + offset
+                                        row_medians[(delta + block_range) as usize] + offset
                                     } else {
                                         offset
                                     };
@@ -880,18 +940,13 @@ fn generate_highways_internal(
                             if stripe_length < dash_length {
                                 let stripe_x: i32 = *x;
                                 let stripe_z: i32 = *z;
+                                // Stripe sits on the centerline itself —
+                                // axial offset 0, so the precomputed
+                                // middle entry is the one we want.
                                 let stripe_y = if is_valley_bridge {
                                     bridge_deck_y
                                 } else if flatten_width {
-                                    perpendicular_median_ground_y(
-                                        editor,
-                                        stripe_x,
-                                        stripe_z,
-                                        *x,
-                                        *z,
-                                        block_range,
-                                        dir_horizontal,
-                                    ) + offset
+                                    row_medians[block_range as usize] + offset
                                 } else {
                                     offset
                                 };
