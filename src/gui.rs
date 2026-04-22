@@ -3,6 +3,7 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
+use crate::fnv_esm;
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
@@ -833,7 +834,7 @@ fn gui_start_generation(
                 };
 
                 let output_dir = if world_path.as_os_str().is_empty() {
-                    crate::world_utils::get_bedrock_output_directory()
+                    PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR)
                 } else {
                     world_path.clone()
                 };

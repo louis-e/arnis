@@ -28,6 +28,7 @@ const BLOCKS_PER_CELL: i32 = 32;
 const VERTS: usize = 33;
 const HEIGHT_MARGIN: i32 = 16;
 const FNV_FORM_VERSION: u16 = 15;
+pub const DEFAULT_OUTPUT_DIR: &str = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Fallout New Vegas\\Data";
 
 // ---------------------------------------------------------------------------
 // Terrain smoothing
