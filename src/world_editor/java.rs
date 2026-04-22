@@ -12,6 +12,7 @@ use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
@@ -450,7 +451,7 @@ fn compute_heightmaps(sections: &[Section], min_section_y: i8, total_height: i32
         .collect();
 
     // Sort by Y descending so we scan top-down
-    metas.sort_by_key(|b| std::cmp::Reverse(b.y));
+    metas.sort_by_key(|b| Reverse(b.y));
 
     let mut heights = [0i32; 256]; // 16x16 grid, Z-major order
     let min_block_y = min_section_y as i32 * 16;

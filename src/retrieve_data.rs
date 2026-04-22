@@ -5,6 +5,7 @@ use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_
 use crate::telemetry::{send_log, LogLevel};
 use colored::Colorize;
 use rand::prelude::SliceRandom;
+use rand::Rng;
 use reqwest::blocking::Client;
 use reqwest::blocking::ClientBuilder;
 use serde::Deserialize;
@@ -55,7 +56,7 @@ fn download_with_reqwest(
         }
         Err(e) => {
             if e.is_timeout() {
-                let msg = "Request timed out. Try selecting a smaller area.";
+                let msg = "Request timed out. Try again!";
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else if e.is_connect() {
@@ -125,6 +126,7 @@ pub fn fetch_data_from_overpass(
     emit_gui_progress_update(1.0, "Fetching data...");
 
     // List of Overpass API servers
+    let arnis_api_server = "https://api.arnismc.com/overpass/api/interpreter";
     let api_servers: Vec<&str> = vec![
         "https://overpass-api.de/api/interpreter",
         "https://lz4.overpass-api.de/api/interpreter",
@@ -185,19 +187,57 @@ pub fn fetch_data_from_overpass(
 
     {
         // Fetch data from Overpass API.
-        // Strategy: try each primary server once (shuffled), then each
-        // fallback server once, with a short delay between attempts.
-        let mut servers: Vec<&str> = api_servers.clone();
-        servers.shuffle(&mut rand::rng());
-        let mut fallbacks: Vec<&str> = fallback_api_servers.clone();
-        fallbacks.shuffle(&mut rand::rng());
-        servers.extend(fallbacks);
+        // Strategy:
+        // 1) 25% chance: probe one random official server first.
+        // 2) If the probe does not succeed, run the normal path: arnis API once,
+        //    then shuffled official, then shuffled fallback servers.
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum ServerKind {
+            Primary,
+            Fallback,
+        }
 
-        let total = servers.len();
+        let mut rng = rand::rng();
+        let mut request_plan: Vec<(&str, ServerKind)> = Vec::new();
+        let mut probed_server: Option<&str> = None;
+
+        if rng.random_bool(0.25) {
+            let probe_idx = rng.random_range(0..api_servers.len());
+            let probe_server = api_servers[probe_idx];
+            request_plan.push((probe_server, ServerKind::Primary));
+            probed_server = Some(probe_server);
+        }
+
+        request_plan.push((arnis_api_server, ServerKind::Primary));
+
+        let mut shuffled_primary_servers = api_servers.clone();
+        shuffled_primary_servers.shuffle(&mut rng);
+        if let Some(probed_server) = probed_server {
+            shuffled_primary_servers.retain(|&url| url != probed_server);
+        }
+        request_plan.extend(
+            shuffled_primary_servers
+                .into_iter()
+                .map(|url| (url, ServerKind::Primary)),
+        );
+
+        let mut shuffled_fallback_servers = fallback_api_servers.clone();
+        shuffled_fallback_servers.shuffle(&mut rng);
+        request_plan.extend(
+            shuffled_fallback_servers
+                .into_iter()
+                .map(|url| (url, ServerKind::Fallback)),
+        );
+
+        let first_fallback_index = request_plan
+            .iter()
+            .position(|(_, kind)| *kind == ServerKind::Fallback)
+            .unwrap_or(request_plan.len());
+
+        let total = request_plan.len();
         let mut last_error: Option<Box<dyn std::error::Error>> = None;
         let response: String = 'server_loop: {
-            for (i, server) in servers.iter().enumerate() {
-                let url = server;
+            for (i, (url, kind)) in request_plan.iter().enumerate() {
                 let timeout_secs = if url.contains("private.coffee") {
                     120
                 } else {
@@ -220,10 +260,10 @@ pub fn fetch_data_from_overpass(
                         last_error = Some(error);
 
                         if i + 1 < total {
-                            let delay_secs = if i < api_servers.len() { 3 } else { 5 };
+                            let delay_secs = if *kind == ServerKind::Fallback { 5 } else { 3 };
                             println!("Retrying in {delay_secs}s (attempt {}/{total})...", i + 1);
                             std::thread::sleep(Duration::from_secs(delay_secs));
-                            if i + 1 == api_servers.len() {
+                            if i + 1 == first_fallback_index {
                                 println!("Primary servers exhausted, trying fallback servers...");
                             }
                         }
