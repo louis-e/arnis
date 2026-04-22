@@ -252,10 +252,14 @@ pub fn generate_ground_layer(
                         let has_water_in_column = |wx: i32, wz: i32| {
                             // Pull from the chunk cache so the 9-neighbour
                             // fan-out around each cell doesn't trigger nine
-                            // bilinear interpolations per cell.
+                            // bilinear interpolations per cell. In flat-ground
+                            // mode every column has the same constant Y, so
+                            // we skip the `editor.get_ground_level` fallback
+                            // (road overrides in flat mode always resolve to
+                            // the same `args.ground_level` anyway).
                             let gy = match chunk_ground_cache {
                                 Some(ref cache) => cache.get(editor, wx, wz),
-                                None => editor.get_ground_level(wx, wz),
+                                None => args.ground_level,
                             };
                             for dy in 0..=2 {
                                 if editor.check_for_block_absolute(
