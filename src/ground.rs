@@ -175,9 +175,10 @@ impl Ground {
             // continuous — the renderer's hard `> 0.5` threshold then traces
             // a clean curved shoreline contour instead of the raw ESA 10 m
             // rectangular grid edge.
-            // Widen f32 storage to f64 here so the bilinear interpolation
-            // (and the downstream 0.5-threshold comparison) doesn't lose any
-            // precision vs the previous all-f64 implementation.
+            // Widen f32 storage to f64 for the bilinear arithmetic. This
+            // doesn't recover the ~10⁻⁷ precision lost at storage, but it
+            // prevents extra rounding from accumulating in the four
+            // multiply-adds + the threshold comparison downstream.
             let w00 = lc.water_blend_grid[z0][x0] as f64;
             let w10 = lc.water_blend_grid[z0][x1] as f64;
             let w01 = lc.water_blend_grid[z1][x0] as f64;
@@ -300,11 +301,13 @@ impl Ground {
         let z1 = (z0 + 1).min(data.height - 1);
         let dx = fx - x0 as f64;
         let dz = fz - z0 as f64;
-        // Widen f32 storage to f64 for the bilinear, same as we always did
-        // before f32 storage — the arithmetic stays in f64 so rounding to the
-        // nearest block Y matches the old behaviour bit-for-bit on anything
-        // the previous f64 storage could represent exactly (integer-valued
-        // elevations do).
+        // Widen f32 storage to f64 for the bilinear arithmetic. The real
+        // property we rely on: across the Minecraft Y range (roughly −64 up
+        // through a few thousand even with --disable-height-limit), f32's
+        // mantissa gives ~10⁻⁷ precision per stored cell, which is far
+        // smaller than the 0.5-block half-width used by `round()` below.
+        // So for any value that isn't pathologically close to a half-integer
+        // boundary, the final `result.round() as i32` matches the f64 path.
         let v00 = data.heights[z0][x0] as f64;
         let v10 = data.heights[z0][x1] as f64;
         let v01 = data.heights[z1][x0] as f64;

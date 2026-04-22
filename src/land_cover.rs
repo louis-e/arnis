@@ -64,10 +64,11 @@ pub struct LandCoverData {
     /// 0 = non-water, 1 = shore water, 2+ = progressively deeper water.
     pub water_distance: Vec<Vec<u8>>,
     /// Pre-smoothed water-ness field in [0, 1] — a Gaussian-blurred version
-    /// of the binary `grid == LC_WATER` mask. Used by `ground.water_blend()`
-    /// and compared against a hard 0.5 threshold in the renderer so the
-    /// shoreline follows the smoothed contour's 0.5 isoline instead of the
-    /// raw ESA 10 m rectangular grid edge.
+    /// of the binary `grid == LC_WATER` mask. Sampled via `ground.water_blend()`
+    /// and compared against a hard 0.5 threshold inside `ground_generation`
+    /// (water classification path) so the shoreline follows the smoothed
+    /// contour's 0.5 isoline instead of the raw ESA 10 m rectangular grid
+    /// edge.
     ///
     /// Stored as `f32` on purpose — the grid can be tens of millions of cells
     /// on large bboxes, and the values are bounded to `[0, 1]` and only ever
