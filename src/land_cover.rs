@@ -68,7 +68,13 @@ pub struct LandCoverData {
     /// and compared against a hard 0.5 threshold in the renderer so the
     /// shoreline follows the smoothed contour's 0.5 isoline instead of the
     /// raw ESA 10 m rectangular grid edge.
-    pub water_blend_grid: Vec<Vec<f64>>,
+    ///
+    /// Stored as `f32` on purpose — the grid can be tens of millions of cells
+    /// on large bboxes, and the values are bounded to `[0, 1]` and only ever
+    /// compared against a 0.5 threshold, so f32's ~7 decimal digits are
+    /// overkill. Halving the storage saves ~46 MB peak on a Munich-sized
+    /// area.
+    pub water_blend_grid: Vec<Vec<f32>>,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
@@ -94,7 +100,7 @@ impl LandCoverData {
 /// - Coarser grid-to-world (large bbox, capped at 4096): each cell already
 ///   represents many blocks, so a 3-cell blur represents many blocks of
 ///   softening — appropriate for the coarser effective resolution.
-fn compute_water_blend_smooth(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<f64>> {
+fn compute_water_blend_smooth(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<f32>> {
     const SIGMA_CELLS: f64 = 3.0;
 
     if width == 0 || height == 0 {
@@ -110,7 +116,13 @@ fn compute_water_blend_smooth(grid: &[Vec<u8>], width: usize, height: usize) -> 
                 .collect()
         })
         .collect();
+    // Gaussian blur runs in f64 for numerical stability, then we drop down to
+    // f32 for storage — values land in [0, 1] and are only ever compared to a
+    // 0.5 threshold, so precision beyond f32 is wasted.
     crate::elevation::postprocess::gaussian_blur_grid(&binary, SIGMA_CELLS)
+        .into_iter()
+        .map(|row| row.into_iter().map(|v| v as f32).collect())
+        .collect()
 }
 
 /// Metadata parsed from a COG (Cloud-Optimized GeoTIFF) IFD.
