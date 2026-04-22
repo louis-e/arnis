@@ -305,10 +305,17 @@ impl FloodFillCache {
             })
             .collect();
 
-        // Build the cache
+        // Build the cache. Empty flood-fill results (degenerate rings or
+        // flood-fill timeouts) reuse the process-wide empty sentinel so a
+        // noisy input doesn't spawn many distinct empty allocations.
         let mut cache = Self::new();
         for (id, filled) in way_results {
-            cache.way_cache.insert(id, Arc::new(filled));
+            let entry = if filled.is_empty() {
+                Arc::clone(empty_flood_fill_result())
+            } else {
+                Arc::new(filled)
+            };
+            cache.way_cache.insert(id, entry);
         }
 
         cache
@@ -332,9 +339,15 @@ impl FloodFillCache {
         } else {
             // Fallback: compute on demand for synthetic/combined ways from relations.
             // These are rare (only relations with tag-inherited members), so the
-            // extra Arc allocation here is fine.
+            // extra Arc allocation here is fine. Empty results still go through
+            // the shared sentinel to stay consistent with the cached path.
             let polygon_coords: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
-            Arc::new(flood_fill_area(&polygon_coords, timeout))
+            let filled = flood_fill_area(&polygon_coords, timeout);
+            if filled.is_empty() {
+                Arc::clone(empty_flood_fill_result())
+            } else {
+                Arc::new(filled)
+            }
         }
     }
 
