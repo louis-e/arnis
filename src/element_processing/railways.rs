@@ -1,8 +1,5 @@
-use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::element_processing::surfaces::get_blocks_for_surface_way;
-use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
 
@@ -46,37 +43,8 @@ pub fn generate_railways(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     subway_points: &mut Vec<(i32, i32)>,
-    args: &Args,
-    flood_fill_cache: &FloodFillCache,
 ) {
     if let Some(railway_type) = element.tags.get("railway") {
-        if railway_type == "platform" {
-            // Resolve the platform surface block once — inside the loop this
-            // would allocate a Vec every cell and look up the tag hash map.
-            let platform_block = get_blocks_for_surface_way(element, &[POLISHED_ANDESITE])[0];
-            // Skip platform cells that would sit on top of a street. OSM
-            // platforms often share their flood-fill footprint with the
-            // adjacent road, and a polished-andesite slab over asphalt
-            // would bury the road surface underneath.
-            const ROAD_SURFACE_BLOCKS: &[Block] = &[
-                BLACK_CONCRETE,
-                GRAY_CONCRETE_POWDER,
-                CYAN_TERRACOTTA,
-                GRAY_CONCRETE,
-                LIGHT_GRAY_CONCRETE,
-                WHITE_CONCRETE,
-                DIRT_PATH,
-            ];
-            let platform_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
-            for &(x, z) in platform_area.iter() {
-                if editor.check_for_block(x, 0, z, Some(ROAD_SURFACE_BLOCKS)) {
-                    continue;
-                }
-                editor.set_block(platform_block, x, 1, z, None, None);
-            }
-            return;
-        }
-
         // Subway lines get their own two-phase generation pipeline.
         let is_subway = railway_type == "subway"
             || element

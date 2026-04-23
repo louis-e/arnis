@@ -1,6 +1,6 @@
 use crate::block_definitions::{
     Block, BRICK, COBBLESTONE, CYAN_TERRACOTTA, DIRT, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE_POWDER,
-    LIGHT_GRAY_CONCRETE, OAK_PLANKS, PODZOL, RED_TERRACOTTA, SAND, STONE_BRICKS, TERRACOTTA,
+    OAK_PLANKS, PODZOL, RED_TERRACOTTA, SAND, TERRACOTTA,
 };
 use crate::osm_parser::ProcessedWay;
 
@@ -13,18 +13,19 @@ pub fn get_blocks_for_surface(surface_type: &str) -> Option<&'static [Block]> {
         "dirt" | "ground" | "earth" => Some(&[DIRT]),
         "mulch" => Some(&[PODZOL]),
         "pebblestone" | "cobblestone" | "unhewn_cobblestone" => Some(&[COBBLESTONE]),
-        // Paving-stones, sett and poured concrete roads in real life have
-        // enough tonal variation that a solid-colour block reads as flat
-        // and unnatural from a distance. Blending in the asphalt mix
-        // (gray_concrete_powder + cyan_terracotta) gives them the same
-        // worn-street speckle that asphalt gets while keeping the
-        // surface's own material visible about a third of the time.
-        "paving_stones" | "sett" => Some(&[STONE_BRICKS, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+        // Paving-stones, sett and poured concrete roads render with the
+        // same asphalt mix as `surface=asphalt`. Using the mix directly
+        // (rather than a palette that also includes stone_bricks /
+        // light_gray_concrete) is what guarantees these surfaces never
+        // place L/S blocks that could later show up as islands inside
+        // adjacent major roads — the road-overwrite blacklist already
+        // protects the asphalt mix, so overlap resolves cleanly.
+        "paving_stones" | "sett" => Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
         "bricks" => Some(&[BRICK]),
         "wood" => Some(&[OAK_PLANKS]),
         "asphalt" => Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
         "gravel" | "fine_gravel" => Some(&[GRAVEL]),
-        "concrete" => Some(&[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+        "concrete" => Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
         _ => None,
     }
 }
@@ -40,8 +41,11 @@ pub fn get_blocks_for_surface_way<'a>(way: &ProcessedWay, default: &'a [Block]) 
         .unwrap_or(default)
 }
 
-/// Pick a surface block deterministically based on coordinates.
-/// Returns a random-looking mix of gray_concrete_powder and cyan_terracotta.
+/// Pick a surface block deterministically from `block_types` based on
+/// coordinates. The same `(x, z)` always returns the same block (so a
+/// later overwrite pass sees a stable result), while adjacent cells
+/// scatter across the palette for a varied, speckled look.
+/// A 1-element slice effectively returns that single block everywhere.
 #[inline]
 pub fn semirandom_surface(x: i32, z: i32, block_types: &[Block]) -> Block {
     // Combine coordinates into a single value and apply bit mixing for a scattered look

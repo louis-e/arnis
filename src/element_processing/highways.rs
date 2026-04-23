@@ -165,42 +165,42 @@ fn perpendicular_median_ground_y(
 /// consistently across the file.
 const DEFAULT_ROAD_MIX: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
 
-/// Blocks that an already-placed road way must not be overwritten by a
-/// second way's surface pass. Covers the default asphalt mix, stripe/zebra
-/// whites, and every hard-surface block that `get_blocks_for_surface` can
-/// produce (light-gray concrete for `surface=concrete`, stone bricks for
-/// `paving_stones`/`sett`, etc.).
-///
-/// Rationale: without this, when two ways overlap — a `surface=concrete`
-/// sidewalk adjacent to an asphalt road, or two sidewalks of different
-/// surfaces crossing — the second way's `semirandom_surface` can replace
-/// the first way's base block (the one *not* in the old short blacklist)
-/// while leaving the shared `GRAY_CONCRETE_POWDER`/`CYAN_TERRACOTTA` cells
-/// untouched. The result was a visibly chaotic speckle of 3-4 different
-/// surface blocks where a clean boundary was expected (most noticeable on
-/// sidewalks because they almost always overlap a road). With every
-/// possible pavement block protected, the first way wins each cell and
-/// boundaries stay crisp.
-///
-/// Soft/natural surfaces (sand, gravel, dirt, grass, mud, podzol) are
-/// deliberately excluded so a road over those landuses still paves
-/// correctly — those blocks also appear as natural terrain and blocking
-/// overwrite would leave gaps.
+/// Blocks that a road write must NOT overwrite. Intentionally narrow:
+/// only the default asphalt mix and stripe/zebra whites. Any other
+/// hard-surface block a way places (`SMOOTH_STONE` for pedestrian
+/// footways, `BRICK`, `OAK_PLANKS`, etc.) is left out so major roads
+/// can freely pave over them when their footprints overlap, keeping
+/// the road surface clean end-to-end.
 const ROAD_PROTECTED_SURFACES: &[Block] = &[
     BLACK_CONCRETE,
     GRAY_CONCRETE_POWDER,
     CYAN_TERRACOTTA,
     WHITE_CONCRETE,
-    GRAY_CONCRETE,
-    LIGHT_GRAY_CONCRETE,
-    STONE_BRICKS,
-    BRICK,
-    OAK_PLANKS,
-    TERRACOTTA,
-    RED_TERRACOTTA,
-    COBBLESTONE,
-    DIRT_PATH,
 ];
+
+/// True when the way should render as a pedestrian walkway — dedicated
+/// footways, pedestrian plazas, stairs, footway subtypes (sidewalk,
+/// crossing, …), or the area-style `area:highway=footway`/`pedestrian`.
+/// Used together with a `surface=concrete`/`paving_stones`/`sett` tag to
+/// switch the block to `SMOOTH_STONE`, which reads as a paved sidewalk
+/// rather than asphalt.
+fn is_pedestrian_way(element: &ProcessedElement) -> bool {
+    let tags = element.tags();
+    if let Some(h) = tags.get("highway") {
+        if matches!(h.as_str(), "footway" | "pedestrian" | "steps") {
+            return true;
+        }
+    }
+    if let Some(h) = tags.get("area:highway") {
+        if matches!(h.as_str(), "footway" | "pedestrian") {
+            return true;
+        }
+    }
+    // `footway=*` subtag (sidewalk, crossing, access_aisle, traffic_island,
+    // yes, …) implies a pedestrian way. Exclude the explicit `footway=no`,
+    // which is occasionally used on roads to assert "this is not a footway".
+    matches!(tags.get("footway").map(|s| s.as_str()), Some(v) if v != "no")
+}
 
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
@@ -378,7 +378,18 @@ fn generate_highways_internal(
 
             // Handle areas like pedestrian plazas. Unified surface handling
             // via the shared surfaces module.
-            let surface_block: Block = get_blocks_for_surface_way(way, &[STONE])[0];
+            let surface_block: Block = if is_pedestrian_way(element)
+                && matches!(
+                    element.tags().get("surface").map(|s| s.as_str()),
+                    Some("concrete" | "paving_stones" | "sett")
+                ) {
+                // Same smooth-stone override as the linear pedestrian
+                // path: keeps plazas visually coherent with the sidewalks
+                // feeding into them.
+                SMOOTH_STONE
+            } else {
+                get_blocks_for_surface_way(way, &[STONE])[0]
+            };
 
             // Fill the area using flood fill cache
             let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
@@ -396,7 +407,6 @@ fn generate_highways_internal(
             // center stripe; flipped to `lanes > 1` check below after we
             // resolve the lanes tag. Keeps the same visual default.
             let mut default_lanes: i32 = 1;
-            let mut add_outline = false;
             let scale_factor = args.scale;
 
             // Check if this is a bridge - bridges need special elevation handling
@@ -466,11 +476,9 @@ fn generate_highways_internal(
                         if lanes == "2" {
                             block_range = 3;
                             default_lanes = 2;
-                            add_outline = true;
                         } else if lanes != "1" {
                             block_range = 4;
                             default_lanes = 2;
-                            add_outline = true;
                         }
                     }
                 }
@@ -490,6 +498,20 @@ fn generate_highways_internal(
                 .and_then(|s| get_blocks_for_surface(s))
             {
                 block_types = blocks;
+            }
+
+            // Pedestrian walkways tagged with a paved surface render as
+            // smooth stone, overriding the `surface=*` palette. Real-world
+            // sidewalks in concrete or paving stones read as uniformly grey
+            // from a distance, not as an asphalt speckle, so this gives
+            // them a distinct look from the roads they run alongside.
+            if is_pedestrian_way(element)
+                && matches!(
+                    element.tags().get("surface").map(|s| s.as_str()),
+                    Some("concrete" | "paving_stones" | "sett")
+                )
+            {
+                block_types = &[SMOOTH_STONE];
             }
 
             // Optional explicit width via `width=*` (meters ≈ blocks).
@@ -895,72 +917,6 @@ fn generate_highways_internal(
                                             dx,
                                             dz,
                                             block_range,
-                                        );
-                                    }
-                                }
-                            }
-                        }
-
-                        // Light-gray curb on the two long edges of the road.
-                        // The sides are PERPENDICULAR to travel, so for a
-                        // horizontal-dominant segment they sit at
-                        // `z = cz ± (block_range + 1)` while x sweeps with
-                        // the road; for a vertical-dominant segment, roles
-                        // swap. An earlier version placed these at
-                        // `x ± (block_range + 1)` regardless of direction,
-                        // which for horizontal roads put each centerline's
-                        // outline inside the NEXT centerline's road stamp —
-                        // whenever the two Y values disagreed (diagonal
-                        // segments, smoothing-window shifts), the curb's
-                        // light-gray block survived at its own Y and showed
-                        // up as stray streaks on or beside the road surface.
-                        // The direction-aware placement below guarantees
-                        // outline cells land strictly outside every
-                        // centerline's road footprint.
-                        if add_outline {
-                            let (edge_a, edge_b): ((i32, i32), (i32, i32)) = if dir_horizontal {
-                                ((0, -block_range - 1), (0, block_range + 1))
-                            } else {
-                                ((-block_range - 1, 0), (block_range + 1, 0))
-                            };
-                            for delta in -block_range..=block_range {
-                                let (sweep_dx, sweep_dz) = if dir_horizontal {
-                                    (delta, 0)
-                                } else {
-                                    (0, delta)
-                                };
-                                for (off_dx, off_dz) in [edge_a, edge_b] {
-                                    let outline_x = x + sweep_dx + off_dx;
-                                    let outline_z = z + sweep_dz + off_dz;
-                                    // Outline rides the same cross-section Y
-                                    // as the adjacent road cell at this
-                                    // axial offset. Reuse the precomputed
-                                    // table so we don't redo the 3-tap
-                                    // median twice per delta.
-                                    let outline_y = if is_valley_bridge {
-                                        bridge_deck_y
-                                    } else if flatten_width {
-                                        row_medians[(delta + block_range) as usize] + offset
-                                    } else {
-                                        offset
-                                    };
-                                    if use_absolute_y {
-                                        editor.set_block_absolute(
-                                            LIGHT_GRAY_CONCRETE,
-                                            outline_x,
-                                            outline_y,
-                                            outline_z,
-                                            None,
-                                            None,
-                                        );
-                                    } else {
-                                        editor.set_block(
-                                            LIGHT_GRAY_CONCRETE,
-                                            outline_x,
-                                            outline_y,
-                                            outline_z,
-                                            None,
-                                            None,
                                         );
                                     }
                                 }

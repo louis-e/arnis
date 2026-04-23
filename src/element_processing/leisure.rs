@@ -37,8 +37,13 @@ pub fn generate_leisure(
             "ice_rink" => PACKED_ICE, // TODO: Ice for Ice Rink, needs building defined
             _ => GRASS_BLOCK,
         };
+        // Explicit surface=* overrides the category default. Leave
+        // `block_type` untouched for unknown surface values so existing
+        // behaviour is preserved.
         if let Some(surface) = element.tags.get("surface") {
-            block_type = get_blocks_for_surface(surface).unwrap_or(&[block_type])[0];
+            if let Some(blocks) = get_blocks_for_surface(surface) {
+                block_type = blocks[0];
+            }
         }
 
         // Process leisure area nodes
