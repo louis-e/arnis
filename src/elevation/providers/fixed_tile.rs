@@ -60,7 +60,6 @@ use rayon::prelude::*;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Pixels per tile edge. 512 matches the Tellus reference mod and the
 /// classic slippy-map conventions; small enough that a tile usually
@@ -208,11 +207,17 @@ pub(super) fn covering_tiles<R: Resolution>(bbox: &LLBBox, level: R) -> Vec<Tile
     tiles
 }
 
-/// Pick the finest level whose native pixel size is ≤ `1.5 × cell_size`.
-/// The factor allows up to a modest 1.5× upsample instead of forcing the
-/// next coarser level, so a slight oversampling request (e.g. scale 2.5
-/// → 0.4 m/cell on a 1 m/px source) still uses the finer level and
-/// preserves apparent detail through bilinear.
+/// Pick the finest level such that
+/// `level.meters_per_pixel() * 1.5 >= cell_size_m`, i.e. the level
+/// whose native pixels are no more than 1.5× finer than the output
+/// cell. The factor tolerates a modest amount of *downsampling* from
+/// the source (up to 1.5× finer-than-needed) before we give up on it
+/// and step to the next coarser level, which avoids pulling dense
+/// LiDAR tiles we'd immediately average away. Upsampling the other
+/// direction (output finer than source) is unbounded by this rule —
+/// if the user asks for 0.4 m cells on a 1 m source, the condition
+/// `1.0 * 1.5 ≥ 0.4` holds easily and we use the 1 m level with
+/// bilinear fill-in.
 ///
 /// `levels` must be ordered finest-to-coarsest. When no level qualifies
 /// the coarsest is returned as a fallback.
@@ -420,8 +425,6 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     type FetchResult<R> = (TileKey<R>, Result<Vec<Vec<f64>>, String>);
-    let downloaded = AtomicU32::new(0);
-    let total_tiles = tile_keys.len() as u32;
     let tile_results: Vec<FetchResult<P::Level>> = pool.install(|| {
         tile_keys
             .par_iter()
@@ -429,15 +432,6 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
                 let url = provider.tile_url(key);
                 let cache_path = key.cache_path(&cache_dir);
                 let res = fetch_tile_raster(&url, &cache_path, &client);
-                let done = downloaded.fetch_add(1, Ordering::Relaxed) + 1;
-                if done == total_tiles || done.is_multiple_of(16) {
-                    eprintln!(
-                        "  {}: {}/{} tiles ready",
-                        provider.log_prefix(),
-                        done,
-                        total_tiles
-                    );
-                }
                 (*key, res)
             })
             .collect()
@@ -523,6 +517,26 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
     let w_denom = (grid_width - 1).max(1) as f64;
     let h_denom = (grid_height - 1).max(1) as f64;
 
+    // Precompute mercator X + tile_x once per output column. `tile_x`
+    // depends only on `mx` (i.e. `gx`), so the per-cell hash-lookup key
+    // is `(level, tile_x[gx], tile_y[gy])` — both components are column-
+    // or row-constant. Hoisting the lon→mercator and tile-index work out
+    // of the inner loop saves a few percent on multi-megapixel grids.
+    // `TileKey::for_mercator` keeps the world-edge clamp logic in one
+    // place; we pass a dummy `my = 0.0` here because we only need its
+    // `tile_x` component (same trick on the row side below for tile_y).
+    let col_mx: Vec<f64> = (0..grid_width)
+        .map(|gx| {
+            let lng_frac = gx as f64 / w_denom;
+            let lng = min_lng + lng_frac * lng_span;
+            lon_to_mercator_x(lng)
+        })
+        .collect();
+    let col_tile_x: Vec<i32> = col_mx
+        .iter()
+        .map(|&mx| TileKey::<P::Level>::for_mercator(level, mx, 0.0).tile_x)
+        .collect();
+
     let height_grid: Vec<Vec<f64>> = pool.install(|| {
         (0..grid_height)
             .into_par_iter()
@@ -530,14 +544,31 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
                 let lat_frac = gy as f64 / h_denom;
                 let lat = max_lat - lat_frac * lat_span;
                 let my = lat_to_mercator_y(lat);
+                let tile_y = TileKey::<P::Level>::for_mercator(level, 0.0, my).tile_y;
                 let mut row = vec![f64::NAN; grid_width];
+                // Carry the current tile reference across cells; tile_x
+                // changes every ~TILE_PIXELS cells, so most cells reuse
+                // the same tile and skip the hashmap lookup entirely.
+                let mut cur_tile_x: i32 = i32::MIN;
+                let mut cur_tile: Option<&Vec<Vec<f64>>> = None;
+                let mut cur_key = TileKey {
+                    level,
+                    tile_x: 0,
+                    tile_y,
+                };
                 for (gx, cell) in row.iter_mut().enumerate() {
-                    let lng_frac = gx as f64 / w_denom;
-                    let lng = min_lng + lng_frac * lng_span;
-                    let mx = lon_to_mercator_x(lng);
-                    let key = TileKey::for_mercator(level, mx, my);
-                    if let Some(tile) = tile_cache.get(&key) {
-                        *cell = sample_tile_bilinear(tile, mx, my, &key);
+                    let tile_x = col_tile_x[gx];
+                    if tile_x != cur_tile_x {
+                        cur_tile_x = tile_x;
+                        cur_key = TileKey {
+                            level,
+                            tile_x,
+                            tile_y,
+                        };
+                        cur_tile = tile_cache.get(&cur_key);
+                    }
+                    if let Some(tile) = cur_tile {
+                        *cell = sample_tile_bilinear(tile, col_mx[gx], my, &cur_key);
                     }
                 }
                 row
