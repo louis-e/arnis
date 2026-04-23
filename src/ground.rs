@@ -90,10 +90,15 @@ impl Ground {
             },
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
+                // One summary log per session — the final failure message
+                // is actionable (it tells us the whole chain went down,
+                // not just a single provider). Including the truncated
+                // error distinguishes network outages from provider
+                // coverage gaps.
                 #[cfg(feature = "gui")]
                 send_log(
                     LogLevel::Warning,
-                    "Elevation unavailable, using flat ground",
+                    &format!("Elevation unavailable, using flat ground ({e:.200})"),
                 );
                 // Graceful fallback: disable elevation and keep provided ground_level.
                 // Land cover we already fetched is discarded since it has no
