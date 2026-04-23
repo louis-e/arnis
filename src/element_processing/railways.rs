@@ -51,15 +51,11 @@ pub fn generate_railways(
 ) {
     if let Some(railway_type) = element.tags.get("railway") {
         if railway_type == "platform" {
+            // Resolve the platform surface block once — inside the loop this
+            // would allocate a Vec every cell and look up the tag hash map.
+            let platform_block = get_blocks_for_surface_way(element, &[POLISHED_ANDESITE])[0];
             for (x, z) in flood_fill_cache.get_or_compute(element, args.timeout.as_ref()) {
-                editor.set_block(
-                    get_blocks_for_surface_way(element, vec![POLISHED_ANDESITE])[0],
-                    x,
-                    1,
-                    z,
-                    None,
-                    None,
-                )
+                editor.set_block(platform_block, x, 1, z, None, None);
             }
             return;
         }

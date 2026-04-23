@@ -339,7 +339,7 @@ fn generate_highways_internal(
 
             // Handle areas like pedestrian plazas. Unified surface handling
             // via the shared surfaces module.
-            let surface_block: Block = get_blocks_for_surface_way(way, vec![STONE])[0];
+            let surface_block: Block = get_blocks_for_surface_way(way, &[STONE])[0];
 
             // Fill the area using flood fill cache
             let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
@@ -703,64 +703,30 @@ fn generate_highways_internal(
                                     editor.register_road_surface_y(set_x, set_z, cell_y);
                                 }
 
-                                // Zebra crossing logic
+                                // Zebra crossing logic. Background uses the
+                                // default asphalt mix (not the footway's own
+                                // surface), matching main's pre-rebase
+                                // behaviour — a zebra crossing is painted on
+                                // the underlying road, so it reads more
+                                // naturally against the road mix than the
+                                // footway's single grey.
                                 if is_zebra_crossing {
-                                    if dir_horizontal {
-                                        if set_x % 2 < 1 {
-                                            if use_absolute_y {
-                                                editor.set_block_absolute(
-                                                    WHITE_CONCRETE,
-                                                    set_x,
-                                                    cell_y,
-                                                    set_z,
-                                                    Some(&[
-                                                        BLACK_CONCRETE,
-                                                        GRAY_CONCRETE_POWDER,
-                                                        CYAN_TERRACOTTA,
-                                                    ]),
-                                                    None,
-                                                );
-                                            } else {
-                                                editor.set_block(
-                                                    WHITE_CONCRETE,
-                                                    set_x,
-                                                    cell_y,
-                                                    set_z,
-                                                    Some(&[
-                                                        BLACK_CONCRETE,
-                                                        GRAY_CONCRETE_POWDER,
-                                                        CYAN_TERRACOTTA,
-                                                    ]),
-                                                    None,
-                                                );
-                                            }
-                                        } else if use_absolute_y {
-                                            editor.set_block_absolute(
-                                                semirandom_surface(set_x, set_z, block_types),
-                                                set_x,
-                                                cell_y,
-                                                set_z,
-                                                None,
-                                                None,
-                                            );
-                                        } else {
-                                            editor.set_block(
-                                                semirandom_surface(set_x, set_z, block_types),
-                                                set_x,
-                                                cell_y,
-                                                set_z,
-                                                None,
-                                                None,
-                                            );
-                                        }
-                                    } else if set_z % 2 < 1 {
+                                    let on_stripe = if dir_horizontal {
+                                        set_x % 2 < 1
+                                    } else {
+                                        set_z % 2 < 1
+                                    };
+                                    if on_stripe {
+                                        // White bar. Whitelist the mix we
+                                        // place for the non-bar cells so the
+                                        // bar only replaces zebra background.
                                         if use_absolute_y {
                                             editor.set_block_absolute(
                                                 WHITE_CONCRETE,
                                                 set_x,
                                                 cell_y,
                                                 set_z,
-                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                                Some(DEFAULT_ROAD_MIX),
                                                 None,
                                             );
                                         } else {
@@ -769,28 +735,20 @@ fn generate_highways_internal(
                                                 set_x,
                                                 cell_y,
                                                 set_z,
-                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                                Some(DEFAULT_ROAD_MIX),
                                                 None,
                                             );
                                         }
-                                    } else if use_absolute_y {
-                                        editor.set_block_absolute(
-                                            semirandom_surface(set_x, set_z, block_types),
-                                            set_x,
-                                            cell_y,
-                                            set_z,
-                                            None,
-                                            None,
-                                        );
                                     } else {
-                                        editor.set_block(
-                                            semirandom_surface(set_x, set_z, block_types),
-                                            set_x,
-                                            cell_y,
-                                            set_z,
-                                            None,
-                                            None,
-                                        );
+                                        // Non-bar cell: asphalt mix.
+                                        let bg = semirandom_surface(set_x, set_z, DEFAULT_ROAD_MIX);
+                                        if use_absolute_y {
+                                            editor.set_block_absolute(
+                                                bg, set_x, cell_y, set_z, None, None,
+                                            );
+                                        } else {
+                                            editor.set_block(bg, set_x, cell_y, set_z, None, None);
+                                        }
                                     }
                                 } else {
                                     // Unified surface selection. For single-block
@@ -977,8 +935,10 @@ fn generate_highways_internal(
                                         // Signed perpendicular offset of this
                                         // divider from the centerline.
                                         let perp_dist = l as f32 * lane_width - half_width;
-                                        let stripe_x = (*x as f32 + perp_x * perp_dist).round() as i32;
-                                        let stripe_z = (*z as f32 + perp_z * perp_dist).round() as i32;
+                                        let stripe_x =
+                                            (*x as f32 + perp_x * perp_dist).round() as i32;
+                                        let stripe_z =
+                                            (*z as f32 + perp_z * perp_dist).round() as i32;
 
                                         // Y follows the perpendicular median
                                         // at this divider's axial position in
@@ -991,9 +951,9 @@ fn generate_highways_internal(
                                             bridge_deck_y
                                         } else if flatten_width {
                                             let axial = if dir_horizontal {
-                                                stripe_x - x
+                                                stripe_x - *x
                                             } else {
-                                                stripe_z - z
+                                                stripe_z - *z
                                             };
                                             let idx = (axial + block_range)
                                                 .clamp(0, 2 * block_range)
@@ -1003,13 +963,19 @@ fn generate_highways_internal(
                                             offset
                                         };
 
+                                        // Whitelist on the actual road
+                                        // surface so dividers appear on
+                                        // non-default `surface=*` roads too
+                                        // (hardcoding the default mix caused
+                                        // markings to vanish on e.g.
+                                        // concrete/asphalt-tagged highways).
                                         if use_absolute_y {
                                             editor.set_block_absolute(
                                                 WHITE_CONCRETE,
                                                 stripe_x,
                                                 stripe_y,
                                                 stripe_z,
-                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                                Some(block_types),
                                                 None,
                                             );
                                         } else {
@@ -1018,7 +984,7 @@ fn generate_highways_internal(
                                                 stripe_x,
                                                 stripe_y,
                                                 stripe_z,
-                                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                                Some(block_types),
                                                 None,
                                             );
                                         }

@@ -4,7 +4,7 @@ use crate::block_definitions::{
 };
 use crate::osm_parser::ProcessedWay;
 
-pub fn get_blocks_for_surface(surface_type: &str) -> Option<&[Block]> {
+pub fn get_blocks_for_surface(surface_type: &str) -> Option<&'static [Block]> {
     match surface_type {
         "clay" => Some(&[TERRACOTTA]),
         "sand" => Some(&[SAND]),
@@ -23,12 +23,15 @@ pub fn get_blocks_for_surface(surface_type: &str) -> Option<&[Block]> {
     }
 }
 
-pub fn get_blocks_for_surface_way(way: &ProcessedWay, default: Vec<Block>) -> Vec<Block> {
+/// Returns the block slice for a way's `surface=*` tag, or `default` when
+/// the tag is missing or unknown. Takes and returns `&[Block]` so the hot
+/// paths don't allocate — the tables in `get_blocks_for_surface` are all
+/// `&'static [Block]`.
+pub fn get_blocks_for_surface_way<'a>(way: &ProcessedWay, default: &'a [Block]) -> &'a [Block] {
     way.tags
         .get("surface")
         .and_then(|s| get_blocks_for_surface(s))
-        .unwrap_or(&*default)
-        .to_vec()
+        .unwrap_or(default)
 }
 
 /// Pick a surface block deterministically based on coordinates.
