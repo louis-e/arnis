@@ -49,5 +49,7 @@
   "settings_section_generation": "Generiranje",
   "settings_section_world": "Svet",
   "settings_section_map": "Zemljevid in vnos",
-  "settings_section_application": "Aplikacija"
+  "settings_section_application": "Aplikacija",
+  "clear_tile_cache": "Počisti predpomnilnik ploščic",
+  "clear_tile_cache_button": "Počisti"
 }

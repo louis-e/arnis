@@ -49,5 +49,7 @@
   "settings_section_generation": "Генерація",
   "settings_section_world": "Світ",
   "settings_section_map": "Карта та введення",
-  "settings_section_application": "Застосунок"
+  "settings_section_application": "Застосунок",
+  "clear_tile_cache": "Очистити кеш плиток",
+  "clear_tile_cache_button": "Очистити"
 }

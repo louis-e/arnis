@@ -591,33 +591,55 @@ function initTelemetryConsent() {
 }
 
 // Wires the "Clear Tile Cache" button in the Application settings panel
-// to the Rust-side `gui_clear_tile_caches` command. The button stays
+// to the Rust-side `gui_clear_tile_caches` command. User feedback is a
+// brief background flash (green on success, red on partial failure)
+// rather than a sibling status label — keeps the row visually
+// consistent with the other checkbox/slider rows. The button stays
 // disabled while the call is in flight so repeated clicks can't fire
-// multiple concurrent wipes (the Rust side is idempotent, but the UI
-// feedback would be confusing). Status text is written into the adjacent
-// span with aria-live="polite" so screen readers announce the result.
+// multiple concurrent wipes (Rust is idempotent, but the UI would look
+// confused). The button itself carries `aria-live="polite"` so assistive
+// tech announces the temporary disabled/success state.
 function initClearCacheButton() {
   const button = document.getElementById('clear-cache-button');
-  const status = document.getElementById('clear-cache-status');
-  if (!button || !status) {
+  if (!button) {
     return;
   }
+
+  // How long the success/error flash stays applied before reverting to
+  // the default outline. Long enough to register as confirmation, short
+  // enough that a user can click again quickly if they want.
+  const FLASH_MS = 1500;
+  let flashTimer = null;
+
+  const flash = (cls) => {
+    button.classList.remove('is-success', 'is-error');
+    button.classList.add(cls);
+    if (flashTimer) {
+      clearTimeout(flashTimer);
+    }
+    flashTimer = setTimeout(() => {
+      button.classList.remove('is-success', 'is-error');
+      flashTimer = null;
+    }, FLASH_MS);
+  };
 
   button.addEventListener('click', async () => {
     if (button.disabled) {
       return;
     }
     button.disabled = true;
-    const workingText = (window.localization && window.localization.clear_tile_cache_working)
-      || 'Clearing…';
-    status.textContent = workingText;
+    // Pre-emptively drop any lingering flash class from a previous run
+    // so "clearing…" state isn't tinted green/red left over from before.
+    button.classList.remove('is-success', 'is-error');
     try {
-      const message = await invoke('gui_clear_tile_caches');
-      status.textContent = typeof message === 'string' ? message : '';
-    } catch (error) {
-      // Tauri returns `Err(String)` as a plain string here; fall back to
-      // String() for the defensive case where a JS exception leaks through.
-      status.textContent = typeof error === 'string' ? error : String(error);
+      await invoke('gui_clear_tile_caches');
+      flash('is-success');
+    } catch (_error) {
+      // The Rust side returns Err(String) for partial failures (files
+      // still locked). The user sees the red flash; the full text goes
+      // to the browser console for debugging, not the UI.
+      console.warn('Clear tile cache failed:', _error);
+      flash('is-error');
     } finally {
       button.disabled = false;
     }

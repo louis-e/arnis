@@ -631,7 +631,12 @@ button:hover {
   background-color: rgba(254, 204, 68, 0.5);
 }
 
-/* Arnis-styled tooltip box */
+/* Arnis-styled tooltip box.
+   Wraps onto multiple lines (white-space: normal + max-width) so
+   longer descriptions stay within the settings scroll container
+   instead of being clipped by `.settings-scrollable`'s
+   overflow-x: hidden. The `max-width` sits comfortably inside the
+   280 px settings panel width at the default sidebar size. */
 .tooltip-icon::after {
   content: attr(data-tooltip);
   position: absolute;
@@ -644,7 +649,13 @@ button:hover {
   border-radius: 6px;
   font-size: 12px;
   font-weight: normal;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  width: max-content;
+  max-width: 220px;
+  text-align: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   border: 1px solid #fecc44;
   opacity: 0;
@@ -752,51 +763,51 @@ button:hover {
   fill: #fecc44;
 }
 
-/* Clear-cache control: button + adjacent status text.
-   Matches the golden-outline style used by other secondary buttons in
-   the settings panel (save-path-browse, license-button). The status
-   span sits to the left, reveals the last result inline, and gracefully
-   truncates on narrow widths so it never pushes the button off-row. */
-.clear-cache-control {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  min-width: 0;
-}
-
-.clear-cache-status {
-  font-size: 0.8em;
-  opacity: 0.75;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1 1 auto;
-  text-align: right;
-}
-
+/* Clear-cache button: compact golden-outline button that sits in the
+   settings row's standard right-aligned `.settings-control` slot, no
+   extra wrapper element. Success/error feedback is expressed by a
+   brief class-driven background flash rather than a separate status
+   label — keeps the row visually consistent with the checkbox and
+   slider rows next to it. */
 .clear-cache-button {
   background: none;
   border: 1px solid #fecc44;
   border-radius: 4px;
   color: #fecc44;
-  padding: 2px 12px;
+  padding: 2px 14px;
   margin: 0;
   box-shadow: none;
   cursor: pointer;
   font-size: 0.85em;
-  transition: background 0.2s ease, opacity 0.2s ease;
-  flex: 0 0 auto;
+  /* Include `color` in the transition so the success flash fades both
+     the background and foreground back to default together, instead of
+     one property snapping. */
+  transition: background 0.4s ease, color 0.4s ease,
+              border-color 0.4s ease, opacity 0.2s ease;
 }
 
-.clear-cache-button:hover:not(:disabled) {
+.clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error) {
   background: rgba(254, 204, 68, 0.15);
 }
 
 .clear-cache-button:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.6;
+}
+
+/* Green flash on success — background + text reinforce the confirmation
+   without touching layout. The button stays the same size so the row
+   doesn't reflow between idle / confirming states. */
+.clear-cache-button.is-success {
+  background: rgba(76, 175, 80, 0.85);
+  color: #ffffff;
+  border-color: #4caf50;
+}
+
+.clear-cache-button.is-error {
+  background: rgba(207, 102, 121, 0.85);
+  color: #ffffff;
+  border-color: #cf6679;
 }
 
 .license-button-row {

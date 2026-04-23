@@ -49,5 +49,7 @@
   "settings_section_generation": "Geração",
   "settings_section_world": "Mundo",
   "settings_section_map": "Mapa e entrada",
-  "settings_section_application": "Aplicação"
+  "settings_section_application": "Aplicação",
+  "clear_tile_cache": "Limpar cache de tiles",
+  "clear_tile_cache_button": "Limpar"
 }

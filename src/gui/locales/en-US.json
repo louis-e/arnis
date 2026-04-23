@@ -51,6 +51,5 @@
   "settings_section_map": "Map & Input",
   "settings_section_application": "Application",
   "clear_tile_cache": "Clear Tile Cache",
-  "clear_tile_cache_button": "Clear",
-  "clear_tile_cache_working": "Clearing…"
+  "clear_tile_cache_button": "Clear"
 }

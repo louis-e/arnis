@@ -49,5 +49,7 @@
   "settings_section_generation": "Generálás",
   "settings_section_world": "Világ",
   "settings_section_map": "Térkép és bevitel",
-  "settings_section_application": "Alkalmazás"
+  "settings_section_application": "Alkalmazás",
+  "clear_tile_cache": "Csempe-gyorsítótár törlése",
+  "clear_tile_cache_button": "Törlés"
 }

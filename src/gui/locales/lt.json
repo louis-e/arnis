@@ -49,5 +49,7 @@
   "settings_section_generation": "Generavimas",
   "settings_section_world": "Pasaulis",
   "settings_section_map": "Žemėlapis ir įvestis",
-  "settings_section_application": "Programa"
+  "settings_section_application": "Programa",
+  "clear_tile_cache": "Išvalyti plytelių talpyklą",
+  "clear_tile_cache_button": "Išvalyti"
 }

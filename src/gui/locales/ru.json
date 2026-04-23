@@ -49,5 +49,7 @@
   "settings_section_generation": "Генерация",
   "settings_section_world": "Мир",
   "settings_section_map": "Карта и ввод",
-  "settings_section_application": "Приложение"
+  "settings_section_application": "Приложение",
+  "clear_tile_cache": "Очистить кэш тайлов",
+  "clear_tile_cache_button": "Очистить"
 }
