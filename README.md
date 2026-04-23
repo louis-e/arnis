@@ -10,42 +10,62 @@ Generate your hometown, big cities, and natural landscapes with ease!
 _**Want mobile generation or larger map sizes?** [MapSmith](https://arnismc.com/mapsmith/) generates worlds in your browser, no install required._
 
 ![Minecraft Preview](assets/git/preview.jpg)
-<i>This GitHub page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
+> <i>This GitHub page and [arnismc.com](https://arnismc.com) are the only official project websites. Do not download Arnis from any other website.</i>
 
-## :keyboard: Usage
+## ⌨️ Usage
 <img width="60%" src="assets/git/gui.png"><br>
-Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#trophy-open-source) the project on your own.
+Download the [latest release](https://github.com/louis-e/arnis/releases/) or [compile](#installation) the project on your own.
 
-Choose your area on the map using the rectangle tool and select your Minecraft world - then simply click on <i>Start Generation</i>!
-Additionally, you can customize various generation settings, such as world scale, spawn point, or building interior generation.
+Choose your area on the map using the rectangle tool and select your Minecraft world—then simply click on ***Start Generation***!
+Additionally, you can customize various generation settings, such as world scale, spawn point, or building interiors.
 
 ## 📚 Documentation
 
 <img src="assets/git/documentation.png" width="100%" alt="Banner">
 
-Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/arnis/wiki/), covering topics such as technical explanations, FAQs, contribution guidelines and roadmaps.
+> Full documentation is available in the [GitHub Wiki](https://github.com/louis-e/arnis/wiki/), covering technical explanations, FAQs, contribution guidelines, and roadmaps.
 
 [backgroundvid.webm](https://github.com/user-attachments/assets/420acc19-a850-418e-8397-1a45b05582ab)
 
-## :trophy: Open Source
+## 🏆 Open Source
 #### Key objectives of this project
-- **Modularity**: Ensure that all components (e.g., data fetching, processing, and world generation) are cleanly separated into distinct modules for better maintainability and scalability.
-- **Performance Optimization**: We aim to maintain strong performance and fast world generation.
-- **Comprehensive Documentation**: Detailed in-code documentation for a clear structure and logic.
-- **User-Friendly Experience**: Focus on making the project easy to use for end users.
-- **Cross-Platform Support**: We want this project to run smoothly on Windows, macOS, and Linux.
+- **Modularity**: Separating components—data fetching, processing, and world generation—into distinct modules for better maintainability.
+- **Performance**: Maintaining high efficiency and fast world generation speeds.
+- **Comprehensive Documentation**: Providing detailed in-code documentation and a clear logical structure.
+- **User Experience**: Focusing on ease of use and accessibility for all end users.
+- **Cross-Platform Support**: Ensuring seamless performance across Windows, macOS, and Linux.
 
-#### How to contribute
-This project is open source and welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable. Simply fork the repository, make your changes, and submit a pull request. Please respect the above-mentioned key objectives. Contributions of all levels are appreciated, and your efforts help improve this tool for everyone.
+## 🚀 Getting Started
 
-Command line Build: ```cargo run --no-default-features -- --terrain --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lat,min_lng,max_lat,max_lng"```<br>
-GUI Build: ```cargo run```<br>
+### Installation
+Ensure you have the [Rust toolchain](https://www.rust-lang.org/tools/install) installed.
 
-After your pull request is merged, I will take care of regularly creating update releases which will include your changes.
+##### Command line Build: 
+```
+cargo run --no-default-features -- --terrain --path="C:/YOUR_PATH/.minecraft/saves/worldname" --bbox="min_lat,min_lng,max_lat,max_lng"
+```
 
-If you are using Nix, you can run the program directly with `nix run github:louis-e/arnis -- --terrain --path=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"`
+##### GUI Build:
+```
+cargo run
+```
 
-## :star: Star History
+##### Nix
+If you use [Nix](https://nixos.org/), you can run the program directly:
+```
+nix run github:louis-e/arnis -- --terrain --path=YOUR_PATH/.minecraft/saves/worldname --bbox="min_lat,min_lng,max_lat,max_lng"
+```
+
+#### 🤝 How to contribute
+This project welcomes contributions from everyone! Whether you're interested in fixing bugs, improving performance, adding new features, or enhancing documentation, your input is valuable.
+
+1. ***Fork*** the repository.
+2. ***Make your changes*** while respecting the [Key Objectives](#key-objectives-of-this-project).
+3. ***Submit a pull request*** with a description.
+
+Once merged, your changes will be included in the next regular update release. Contributions of all levels are appreciated!
+
+## ⭐ Star History
 
 <a href="https://star-history.com/#louis-e/arnis&Date">
  <picture>
@@ -55,32 +75,32 @@ If you are using Nix, you can run the program directly with `nix run github:loui
  </picture>
 </a>
 
-## :newspaper: Academic & Press Recognition
+## 📰 Academic & Press Recognition
 
 <img src="assets/git/recognition.png" width="100%" alt="Banner">
 
-Arnis has been recognized in various academic and press publications after gaining more attention in December 2024.
+Arnis has been featured in several academic and press publications following its growth in late 2024.
 
-[Building realistic Minecraft worlds with Open Data on AWS: How Arnis uses elevation datasets at scale](https://aws.amazon.com/de/blogs/publicsector/building-realistic-minecraft-worlds-with-open-data-on-aws-how-arnis-uses-elevation-datasets-at-scale/)
+- [Building realistic Minecraft worlds with Open Data on AWS: How Arnis uses elevation datasets at scale](https://aws.amazon.com/de/blogs/publicsector/building-realistic-minecraft-worlds-with-open-data-on-aws-how-arnis-uses-elevation-datasets-at-scale/)
 
-[Floodcraft: Game-based Interactive Learning Environment using Minecraft for Flood Mitigation and Preparedness for K-12 Education](https://www.researchgate.net/publication/384644535_Floodcraft_Game-based_Interactive_Learning_Environment_using_Minecraft_for_Flood_Mitigation_and_Preparedness_for_K-12_Education)
+- [Floodcraft: Game-based Interactive Learning Environment using Minecraft for Flood Mitigation and Preparedness for K-12 Education](https://www.researchgate.net/publication/384644535_Floodcraft_Game-based_Interactive_Learning_Environment_using_Minecraft_for_Flood_Mitigation_and_Preparedness_for_K-12_Education)
 
-[Hackaday: Bringing OpenStreetMap Data into Minecraft](https://hackaday.com/2024/12/30/bringing-openstreetmap-data-into-minecraft/)
+- [Hackaday: Bringing OpenStreetMap Data into Minecraft](https://hackaday.com/2024/12/30/bringing-openstreetmap-data-into-minecraft/)
 
-[TomsHardware: Minecraft Tool Lets You Create Scale Replicas of Real-World Locations](https://www.tomshardware.com/video-games/pc-gaming/minecraft-tool-lets-you-create-scale-replicas-of-real-world-locations-arnis-uses-geospatial-data-from-openstreetmap-to-generate-minecraft-maps)
+- [TomsHardware: Minecraft Tool Lets You Create Scale Replicas of Real-World Locations](https://www.tomshardware.com/video-games/pc-gaming/minecraft-tool-lets-you-create-scale-replicas-of-real-world-locations-arnis-uses-geospatial-data-from-openstreetmap-to-generate-minecraft-maps)
 
-[XDA Developers: Hometown Minecraft Map: Arnis](https://www.xda-developers.com/hometown-minecraft-map-arnis/)
+- [XDA Developers: Hometown Minecraft Map: Arnis](https://www.xda-developers.com/hometown-minecraft-map-arnis/)
 
-Free to use press assets, including screenshots and logos, can be found [here](https://drive.google.com/file/d/1T1IsZSyT8oa6qAO_40hVF5KR8eEVCJjo/view?usp=sharing).
+> Free to use press assets, including screenshots and logos, can be found [here](https://drive.google.com/file/d/1T1IsZSyT8oa6qAO_40hVF5KR8eEVCJjo/view?usp=sharing).
 
-## :copyright: License Information
+## ©️ License Information
 Copyright (c) 2022-2026 Louis Erbkamm (louis-e)
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-http://www.apache.org/licenses/LICENSE-2.0
+[http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0)
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -90,9 +110,11 @@ limitations under the License.[^3]
 
 Download Arnis only from the official source https://arnismc.com or https://github.com/louis-e/arnis/. Every other website providing a download and claiming to be affiliated with the project is unofficial and may be malicious.
 
-The logo was made by @nxfx21.
+The logo was made by **@nxfx21**.
 
-NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.
+---
+
+*NOT AN OFFICIAL MINECRAFT PRODUCT. NOT APPROVED BY OR ASSOCIATED WITH MOJANG OR MICROSOFT.*
 
 
 [^1]: https://en.wikipedia.org/wiki/OpenStreetMap
