@@ -266,6 +266,16 @@ fn run_cli() {
         _ => None,
     };
 
+    // Derive terrain-aware spawn Y while `ground` is still in scope (it gets
+    // moved into `generate_world_with_options` below). Used only for Java's
+    // post-generation `set_spawn_in_level_dat` call — Bedrock derives spawn Y
+    // independently inside `BedrockWriter::write_level_dat`.
+    let spawn_y_for_java = spawn_point.map(|(sx, sz)| {
+        use coordinate_system::cartesian::XZPoint;
+        let rel = XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z());
+        ground.level(rel) + 3
+    });
+
     // Build generation options
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
@@ -294,10 +304,13 @@ fn run_cli() {
 
             // For Java Edition, update spawn point in level.dat if provided
             if !args.bedrock {
-                if let Some((spawn_x, spawn_z)) = spawn_point {
-                    if let Err(e) =
-                        world_utils::set_spawn_in_level_dat(&generation_path, spawn_x, spawn_z)
-                    {
+                if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (spawn_point, spawn_y_for_java) {
+                    if let Err(e) = world_utils::set_spawn_in_level_dat(
+                        &generation_path,
+                        spawn_x,
+                        spawn_y,
+                        spawn_z,
+                    ) {
                         eprintln!(
                             "{} Failed to set spawn point in level.dat: {}",
                             "Warning:".yellow().bold(),

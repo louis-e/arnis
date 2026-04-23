@@ -236,6 +236,11 @@ impl BedrockWriter {
             .as_secs() as i64;
 
         // Extended worlds require 1.21.40+ for Custom Biomes / dimension_bounds.
+        // Only the user-facing version markers are bumped; network_version and
+        // inventory_version stay at 1.21.0 because they're used for multiplayer
+        // protocol and inventory storage format, neither of which changes with
+        // the dimension_bounds feature. Bedrock tolerates this mix — what it
+        // gates on is last_opened_with_version and minimum_compatible_client_version.
         let version_array: Vec<i32> = if self.extend_build_height {
             vec![1, 21, 40, 0, 0]
         } else {

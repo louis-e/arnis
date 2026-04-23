@@ -237,7 +237,9 @@ pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Idempotent — entry goes after `"vanilla"` so our override wins.
+/// Appends the pack entry if missing. Expected to run on a fresh level.dat
+/// template whose Enabled list starts with `["vanilla"]`, so the appended
+/// entry naturally lands after vanilla and our dimension_type override wins.
 fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
@@ -304,11 +306,15 @@ fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> 
 /// Sets the player spawn point in an existing Java Edition level.dat file.
 ///
 /// Updates both the world spawn point (SpawnX/SpawnY/SpawnZ) and the player
-/// position if a Player compound exists. The Y coordinate is set to 150 as a
-/// safe default above terrain; Minecraft will adjust it on first load.
-pub fn set_spawn_in_level_dat(world_path: &Path, spawn_x: i32, spawn_z: i32) -> Result<(), String> {
-    let spawn_y = 150;
-
+/// position if a Player compound exists. Callers derive `spawn_y` from the
+/// generated terrain so the player spawns above ground even in extended-height
+/// worlds where terrain may reach Y≈2000.
+pub fn set_spawn_in_level_dat(
+    world_path: &Path,
+    spawn_x: i32,
+    spawn_y: i32,
+    spawn_z: i32,
+) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
         return Err(format!("level.dat not found at {level_path:?}"));
