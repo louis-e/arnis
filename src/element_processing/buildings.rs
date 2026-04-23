@@ -3391,23 +3391,53 @@ fn calculate_roof_peak_height(
     base_height + roof_height_boost
 }
 
-/// Parses roof:shape tag into RoofType enum
+/// Parses roof:shape tag into RoofType enum.
+///
+/// Tag frequencies from OSM taginfo are used to decide which synonyms
+/// deserve a mapping: anything above ~0.1% is handled here so those
+/// buildings get a pitched roof instead of falling through to Flat.
 fn parse_roof_type(roof_shape: &str) -> RoofType {
     match roof_shape {
-        "gabled" => RoofType::Gabled,
-        "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" => RoofType::Hipped,
-        "skillion" => RoofType::Skillion,
+        // Gabled variants: "pitched" is a common synonym; saltbox/gabled_row
+        // are asymmetric/repeated gables that still read as gabled at block
+        // resolution.
+        "gabled" | "pitched" | "saltbox" | "double_saltbox" | "quadruple_saltbox"
+        | "gabled_row" => RoofType::Gabled,
+        "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" | "side_hipped"
+        | "side_half-hipped" => RoofType::Hipped,
+        "skillion" | "lean_to" => RoofType::Skillion,
         "pyramidal" => RoofType::Pyramidal,
         "dome" | "onion" | "cone" | "circular" | "spherical" => RoofType::Dome,
         _ => RoofType::Flat,
     }
 }
 
-/// Checks if building type qualifies for automatic gabled roof
+/// Checks if building type qualifies for automatic gabled roof.
+///
+/// Single-family/low-rise residential and agricultural buildings should
+/// default to a pitched roof in the absence of an explicit roof:shape tag,
+/// since real-world buildings of these types almost never have flat roofs.
 fn qualifies_for_auto_gabled_roof(building_type: &str) -> bool {
     matches!(
         building_type,
-        "apartments" | "residential" | "house" | "yes"
+        "apartments"
+            | "residential"
+            | "house"
+            | "yes"
+            | "detached"
+            | "semidetached_house"
+            | "terrace"
+            | "bungalow"
+            | "villa"
+            | "cabin"
+            | "hut"
+            | "farm"
+            | "farm_auxiliary"
+            | "barn"
+            | "stable"
+            | "cowshed"
+            | "sty"
+            | "sheepfold"
     )
 }
 

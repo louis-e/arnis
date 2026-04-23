@@ -340,6 +340,22 @@ pub fn generate_landuse(
                     }
                 }
             }
+            "vineyard" | "brownfield" | "landfill"
+                if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT])) =>
+            {
+                // Sparse weeds/regrowth on coarse-dirt surfaces: vineyard rows
+                // grow some grass between vines, and brownfield/landfill are
+                // abandoned land that nature is slowly reclaiming. Kept rare so
+                // the ground still reads as dry/disturbed rather than meadow.
+                // (Skipped for landfill spoil heaps — those are GRAVEL, not
+                // COARSE_DIRT, and the guard above filters them out.)
+                match rng.random_range(0..150) {
+                    0..=3 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
+                    4 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    5..=15 => editor.set_block(GRASS, x, 1, z, None, None),
+                    _ => {}
+                }
+            }
             "quarry" => {
                 // Add stone layer under it
                 editor.set_block(STONE, x, -1, z, Some(&[STONE]), None);

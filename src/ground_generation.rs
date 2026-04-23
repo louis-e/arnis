@@ -916,18 +916,59 @@ pub fn generate_ground_layer(
                                             );
                                         }
                                     }
-                                    land_cover::LC_BARE
-                                        if ground_is_natural && rng.random_range(0..100) == 0 =>
-                                    {
-                                        // Sparse dead bushes
-                                        editor.set_block_absolute(
-                                            DEAD_BUSH,
+                                    land_cover::LC_BARE if ground_is_natural => {
+                                        // Coarse-dirt patches (from the bare-terrain soil
+                                        // blobs above) get a light scatter of weeds: a bit
+                                        // of grass with rare fallen-leaf clumps and dead
+                                        // bushes. Kept sparse on purpose so the terrain
+                                        // still reads as bare/arid rather than shrubland.
+                                        // Other bare surfaces (stone/gravel scree) keep
+                                        // only the original occasional dead bush.
+                                        let on_coarse_dirt = editor.check_for_block_absolute(
                                             x,
-                                            ground_y + 1,
+                                            ground_y,
                                             z,
-                                            None,
+                                            Some(&[COARSE_DIRT]),
                                             None,
                                         );
+                                        if on_coarse_dirt {
+                                            match rng.random_range(0..100) {
+                                                0..=5 => editor.set_block_absolute(
+                                                    GRASS,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                ),
+                                                6..=8 => editor.set_block_absolute(
+                                                    OAK_LEAVES,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                ),
+                                                9 => editor.set_block_absolute(
+                                                    DEAD_BUSH,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                ),
+                                                _ => {}
+                                            }
+                                        } else if rng.random_range(0..100) == 0 {
+                                            editor.set_block_absolute(
+                                                DEAD_BUSH,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
                                     }
                                     _ => {}
                                 }
