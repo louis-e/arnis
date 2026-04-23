@@ -62,7 +62,25 @@ impl CacheClearStats {
 ///   file busy-locked by another reader) just increment `errors`.
 pub fn clear_cache_dir(dir: &std::path::Path) -> CacheClearStats {
     let mut stats = CacheClearStats::default();
-    if !dir.exists() {
+    // Use `symlink_metadata` so a symlink pointing to another directory
+    // doesn't trick us into recursing through it — `read_dir` follows
+    // symlinks, so even though `clear_recursive` doesn't walk across
+    // individual symlinked children, an entire symlinked *root* would
+    // still traverse a foreign filesystem. A non-existent root is a
+    // no-op; any other error is counted and surfaced.
+    let meta = match std::fs::symlink_metadata(dir) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return stats,
+        Err(_) => {
+            stats.errors += 1;
+            return stats;
+        }
+    };
+    if meta.file_type().is_symlink() {
+        // Refuse to clear when the root itself is a symlink — we'd be
+        // operating on whatever lives at the target, which may be far
+        // outside the cache directory the user thinks they're wiping.
+        stats.errors += 1;
         return stats;
     }
     clear_recursive(dir, &mut stats);
@@ -77,7 +95,18 @@ fn clear_recursive(dir: &std::path::Path, stats: &mut CacheClearStats) {
             return;
         }
     };
-    for entry in entries.flatten() {
+    // Intentionally NOT using `.flatten()`, which would silently swallow
+    // Err iterator items and under-report failures. The doc comment on
+    // `clear_cache_dir` promises unreadable entries count as errors,
+    // so we match each entry explicitly.
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(_) => {
+                stats.errors += 1;
+                continue;
+            }
+        };
         let path = entry.path();
         // Use `entry.file_type()` (never follows symlinks, cross-platform)
         // before any call to `std::fs::metadata`, which DOES follow
@@ -137,7 +166,19 @@ pub fn clear_all_cached_tiles() -> CacheClearStats {
 pub fn cleanup_old_cached_files() {
     let base_dir = get_base_cache_dir();
 
-    if !base_dir.exists() || !base_dir.is_dir() {
+    // Mirror the `clear_cache_dir` safety check: refuse to walk when
+    // the root is itself a symlink, since `read_dir` would follow it
+    // out of the cache root. Missing directory is a silent no-op (the
+    // startup path runs this best-effort on every launch).
+    let meta = match std::fs::symlink_metadata(&base_dir) {
+        Ok(m) => m,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+        Err(e) => {
+            eprintln!("Warning: cannot stat cache dir {}: {e}", base_dir.display());
+            return;
+        }
+    };
+    if !meta.is_dir() || meta.file_type().is_symlink() {
         return;
     }
 
@@ -177,19 +218,40 @@ fn cleanup_dir_recursive(
         Err(_) => return,
     };
 
-    for entry in entries.flatten() {
+    // Same reasoning as `clear_recursive`: `DirEntry::file_type()`
+    // never follows symlinks on any platform, while `Path::is_dir()` /
+    // `is_file()` DO. Following a symlink here could make a link-to-
+    // directory look like a real directory and cause us to age-delete
+    // files outside the cache root entirely.
+    for entry_result in entries {
+        let entry = match entry_result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
         let path = entry.path();
+        let file_type = match entry.file_type() {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
 
-        if path.is_dir() {
+        if file_type.is_symlink() {
+            // Don't touch symlinks from the aging-cleanup path. The
+            // explicit "Clear Tile Cache" button is the one place we
+            // remove cache entries that happen to be links; from here
+            // it's safer to leave them alone.
+            continue;
+        }
+
+        if file_type.is_dir() {
             cleanup_dir_recursive(&path, max_age, now, deleted_count, error_count);
             continue;
         }
 
-        if !path.is_file() {
+        if !file_type.is_file() {
             continue;
         }
 
-        let metadata = match std::fs::metadata(&path) {
+        let metadata = match std::fs::symlink_metadata(&path) {
             Ok(m) => m,
             Err(_) => continue,
         };
@@ -218,5 +280,60 @@ fn cleanup_dir_recursive(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clear_missing_dir_is_noop() {
+        let stats = clear_cache_dir(std::path::Path::new("this/path/does/not/exist/ever"));
+        assert_eq!(stats.files_deleted, 0);
+        assert_eq!(stats.bytes_freed, 0);
+        assert_eq!(stats.errors, 0);
+    }
+
+    #[test]
+    fn clear_populated_dir_counts_and_frees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let sub = root.join("provider");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("a.bin"), b"hello").unwrap();
+        std::fs::write(sub.join("b.bin"), b"world!").unwrap();
+        std::fs::write(root.join("c.bin"), b"x").unwrap();
+
+        let stats = clear_cache_dir(root);
+        assert_eq!(stats.files_deleted, 3);
+        assert_eq!(stats.bytes_freed, 5 + 6 + 1);
+        assert_eq!(stats.errors, 0);
+        // Root itself must still exist; only its contents were wiped.
+        assert!(root.exists());
+        assert!(!sub.exists());
+    }
+
+    /// The root directory being a symlink is rejected wholesale, even
+    /// if it happens to point at another valid cache-shaped directory.
+    /// Regression: prior implementation would have happily `read_dir`ed
+    /// the target, which is outside the cache root the caller named.
+    /// Symlink creation on Windows usually requires dev-mode / admin,
+    /// so this test is Unix-only.
+    #[cfg(unix)]
+    #[test]
+    fn clear_refuses_symlink_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::write(real.join("important.txt"), b"dont delete me").unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let stats = clear_cache_dir(&link);
+        assert_eq!(stats.errors, 1);
+        assert_eq!(stats.files_deleted, 0);
+        // Target must be untouched.
+        assert!(real.join("important.txt").exists());
     }
 }
