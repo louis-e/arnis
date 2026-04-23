@@ -833,7 +833,7 @@ fn gui_start_generation(
                     }
                 };
 
-                let output_dir = if world_path.as_os_str().is_empty() {
+                let output_dir = if world_path.as_os_str().is_empty() && fnv_esm::is_dir_writeable(&world_path) {
                     // Output dir is empty, try using  default "Data" folder.
                     if PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR).is_dir() {
                         PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR)

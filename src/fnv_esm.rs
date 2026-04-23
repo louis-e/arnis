@@ -1650,6 +1650,21 @@ fn place_lamp_refs(
 
 // --- public entry point ---
 
+pub fn is_dir_writeable(test_dir: &Path) -> bool {
+    let test_path = test_dir.join(".rust_write_test.tmp");
+    match fs::File::create(&test_path) {
+        Ok(_) => {
+            let _ = fs::remove_file(&test_path); // clean up
+            true
+        }
+        Err(_e) => {
+            // You can be more specific if you want:
+            // e.kind() == io::ErrorKind::PermissionDenied
+            false
+        }
+    }
+}
+
 pub fn generate_fnv_esm(
     ground: &Ground,
     bbox: &LLBBox,
@@ -2081,7 +2096,7 @@ pub fn generate_fnv_esm(
     file_bytes.extend_from_slice(&tes4);
     file_bytes.extend_from_slice(&wrld_grup);
 
-    let resolved_dir = if output_dir.is_dir() {
+    let resolved_dir = if output_dir.is_dir() && is_dir_writeable(output_dir){
         output_dir.to_path_buf()
     } else {
         println!(
