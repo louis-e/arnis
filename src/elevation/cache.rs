@@ -79,25 +79,26 @@ fn clear_recursive(dir: &std::path::Path, stats: &mut CacheClearStats) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let meta = match entry.metadata() {
-            Ok(m) => m,
+        // Use `entry.file_type()` (never follows symlinks, cross-platform)
+        // before any call to `std::fs::metadata`, which DOES follow
+        // symlinks and could otherwise make a link-to-directory look
+        // like a real directory and cause us to recurse outside the
+        // cache — the exact scenario this branch is guarding against.
+        let file_type = match entry.file_type() {
+            Ok(t) => t,
             Err(_) => {
                 stats.errors += 1;
                 continue;
             }
         };
-        // Symlink: remove the link itself, don't traverse into it.
-        // `std::fs::symlink_metadata` would be another way but the
-        // iterator's `metadata()` already returns lstat-style info on
-        // most platforms — we explicitly check `is_symlink()` before
-        // the dir/file branches for clarity.
-        if meta.file_type().is_symlink() {
+        if file_type.is_symlink() {
+            // Remove the link itself; never traverse into its target.
             if std::fs::remove_file(&path).is_err() {
                 stats.errors += 1;
             }
             continue;
         }
-        if meta.is_dir() {
+        if file_type.is_dir() {
             clear_recursive(&path, stats);
             // `remove_dir` only succeeds once the directory is empty;
             // if a nested clear left something behind that's already
@@ -107,8 +108,13 @@ fn clear_recursive(dir: &std::path::Path, stats: &mut CacheClearStats) {
             }
             continue;
         }
-        if meta.is_file() {
-            let size = meta.len();
+        if file_type.is_file() {
+            // Only look up size *after* confirming this is a regular
+            // file — symlink_metadata avoids accidentally resolving
+            // anything surprising between the type check and the read.
+            let size = std::fs::symlink_metadata(&path)
+                .map(|m| m.len())
+                .unwrap_or(0);
             match std::fs::remove_file(&path) {
                 Ok(()) => {
                     stats.files_deleted += 1;
