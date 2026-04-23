@@ -791,34 +791,22 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
     ) {
-        // Check if coordinates are within bounds
+        // Short-circuit for out-of-bbox writes before we pay for a
+        // ground-level lookup (bilinear interpolation of the elevation
+        // grid). The downstream `set_block_with_properties_absolute`
+        // does the same check, but only *after* we would have done the
+        // elevation work.
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
-
-        // Calculate the absolute Y coordinate based on ground level
-        let absolute_y = self.get_absolute_y(x, y, z);
-
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            // Check against whitelist and blacklist
-            if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-            } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-            } else {
-                false
-            }
-        } else {
-            true
-        };
-
-        if should_insert {
-            self.world.set_block(x, absolute_y, z, block);
-        }
+        self.set_block_absolute(
+            block,
+            x,
+            self.get_absolute_y(x, y, z),
+            z,
+            override_whitelist,
+            override_blacklist,
+        );
     }
 
     /// Sets a block of the specified type at the given coordinates with absolute Y value.
@@ -832,31 +820,17 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
     ) {
-        // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
-        }
-
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            // Check against whitelist and blacklist
-            if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-            } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-            } else {
-                false
-            }
-        } else {
-            true
-        };
-
-        if should_insert {
-            self.world.set_block(x, absolute_y, z, block);
-        }
+        self.set_block_with_properties_absolute(
+            BlockWithProperties {
+                block,
+                properties: None,
+            },
+            x,
+            absolute_y,
+            z,
+            override_whitelist,
+            override_blacklist,
+        )
     }
 
     /// Sets a block with properties at the given coordinates with absolute Y value.
