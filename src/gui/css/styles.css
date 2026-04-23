@@ -632,20 +632,23 @@ button:hover {
 }
 
 /* Arnis-styled tooltip box.
-   Wraps onto multiple lines (white-space: normal + max-width) so
-   longer descriptions stay within the settings scroll container
-   instead of being clipped by `.settings-scrollable`'s
-   overflow-x: hidden. The `max-width` sits comfortably inside the
-   280 px settings panel width at the default sidebar size. */
-.tooltip-icon::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
+   The tooltip element is a single `<div class="global-tooltip">`
+   appended to `<body>` by `initTooltips()` in main.js, NOT a
+   `::after` on each icon. That lets it escape the
+   `.settings-scrollable` container's overflow clip, so tooltips on
+   icons near the panel's top or right edge extend past the panel
+   rather than being cut off. JS positions the box via
+   `getBoundingClientRect` on hover and flips it above/below the
+   icon based on available viewport space. */
+.global-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  max-width: 240px;
+  padding: 6px 14px;
   background-color: #2a2a2a;
   color: #fecc44;
-  padding: 6px 14px;
+  border: 1px solid #fecc44;
   border-radius: 6px;
   font-size: 12px;
   font-weight: normal;
@@ -653,38 +656,45 @@ button:hover {
   white-space: normal;
   overflow-wrap: break-word;
   word-break: break-word;
-  width: max-content;
-  max-width: 220px;
   text-align: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  border: 1px solid #fecc44;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
-  z-index: 1000;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  z-index: 10000;
   pointer-events: none;
 }
 
-/* Tooltip arrow */
-.tooltip-icon::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 2px);
-  transform: translateX(-50%);
-  border: 6px solid transparent;
-  border-top-color: #fecc44;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
-  z-index: 1001;
-  pointer-events: none;
-}
-
-.tooltip-icon:hover::after,
-.tooltip-icon:hover::before {
+.global-tooltip.is-visible {
   opacity: 1;
   visibility: visible;
+}
+
+/* Arrow. Positioned via JS (`left` per icon center), flipped to the
+   opposite edge when the tooltip opens below the icon. */
+.global-tooltip-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border: 6px solid transparent;
+  /* Default: arrow on the bottom edge, pointing down toward an icon
+     that sits below the tooltip. */
+  bottom: -12px;
+  border-top-color: #fecc44;
+  transform: translateX(-50%);
+}
+
+.global-tooltip.flipped .global-tooltip-arrow {
+  /* When flipped below the icon, arrow points up at the icon from the
+     top edge of the tooltip. */
+  bottom: auto;
+  top: -12px;
+  border-top-color: transparent;
+  border-bottom-color: #fecc44;
+}
+
+.global-tooltip-body {
+  position: relative;
 }
 
 .settings-control {
