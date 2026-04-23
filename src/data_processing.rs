@@ -47,6 +47,7 @@ pub fn generate_world_with_options(
         options.format,
         options.level_name.clone(),
         options.spawn_point,
+        args.disable_height_limit,
     );
     let ground = Arc::new(ground);
 

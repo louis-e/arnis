@@ -42,7 +42,7 @@
   "roof": "Katon luonti",
   "fillground": "Täytä maa",
   "land_cover": "Maanpeite",
-  "disable_height_limit": "Poista korkeusraja käytöstä",
+  "disable_height_limit": "Laajenna rakennuskorkeutta",
   "bedrock_auto_generated": "Bedrock-maailma luodaan automaattisesti",
   "save_path": "Tallennuspolku",
   "rotation_angle": "Kiertokulma",
@@ -51,5 +51,6 @@
   "settings_section_map": "Kartta ja syöte",
   "settings_section_application": "Sovellus",
   "clear_tile_cache": "Tyhjennä laattojen välimuisti",
-  "clear_tile_cache_button": "Tyhjennä"
+  "clear_tile_cache_button": "Tyhjennä",
+  "anonymous_crash_reports": "Anonyymit kaatumisraportit"
 }

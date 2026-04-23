@@ -42,7 +42,7 @@
   "roof": "Tető generálás",
   "fillground": "Talaj feltöltése",
   "land_cover": "Felszínborítás",
-  "disable_height_limit": "Magasságkorlát kikapcsolása",
+  "disable_height_limit": "Építési magasság kiterjesztése",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal",
   "rotation_angle": "Forgatási Szög",
@@ -51,5 +51,6 @@
   "settings_section_map": "Térkép és bevitel",
   "settings_section_application": "Alkalmazás",
   "clear_tile_cache": "Csempe-gyorsítótár törlése",
-  "clear_tile_cache_button": "Törlés"
+  "clear_tile_cache_button": "Törlés",
+  "anonymous_crash_reports": "Névtelen összeomlási jelentések"
 }

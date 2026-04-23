@@ -76,7 +76,7 @@ jobs:
           # the road-flatten perf fix (PR #965), and the grid-precision shrink.
           # Update this value whenever main-branch generation changes materially
           # so the verdict thresholds below stay meaningful.
-          baseline_time=30
+          baseline_time=27
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 

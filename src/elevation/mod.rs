@@ -106,6 +106,7 @@ pub fn fetch_elevation_data(
     scale: f64,
     ground_level: i32,
     disable_height_limit: bool,
+    extended_max_y: i32,
     land_cover: Option<&mut LandCoverData>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
@@ -215,7 +216,13 @@ pub fn fetch_elevation_data(
         );
     }
 
-    let mc_heights = scale_to_minecraft(&height_grid, scale, ground_level, disable_height_limit);
+    let mc_heights = scale_to_minecraft(
+        &height_grid,
+        scale,
+        ground_level,
+        disable_height_limit,
+        extended_max_y,
+    );
 
     // Log min/max block heights
     let mut min_block_height = f64::MAX;

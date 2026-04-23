@@ -54,6 +54,7 @@ impl Ground {
         ground_level: i32,
         fetch_land_cover: bool,
         disable_height_limit: bool,
+        extended_max_y: i32,
     ) -> Self {
         // Fetch land cover FIRST so we can feed it into the elevation
         // post-processing pipeline for land-cover-aware artifact repair.
@@ -77,6 +78,7 @@ impl Ground {
             scale,
             ground_level,
             disable_height_limit,
+            extended_max_y,
             land_cover.as_mut(),
         ) {
             Ok(elevation_data) => Self {
@@ -456,6 +458,7 @@ pub fn generate_ground_data(args: &Args) -> Ground {
             args.ground_level,
             args.land_cover,
             args.disable_height_limit,
+            extended_max_y_for(args),
         );
         if args.debug {
             ground.save_debug_image("elevation_debug");
@@ -463,4 +466,14 @@ pub fn generate_ground_data(args: &Args) -> Ground {
         return ground;
     }
     Ground::new_flat(args.ground_level)
+}
+
+/// Per-format build-height cap when the user opts into extended build height:
+/// 2031 for the Java datapack, 512 for the Bedrock behavior pack.
+pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
+    if args.bedrock {
+        512
+    } else {
+        2031
+    }
 }

@@ -136,6 +136,8 @@ pub struct WorldEditor<'a> {
     /// Optional spawn point for Bedrock worlds (x, z coordinates)
     #[cfg(feature = "bedrock")]
     bedrock_spawn_point: Option<(i32, i32)>,
+    #[cfg(feature = "bedrock")]
+    bedrock_extend_height: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -156,6 +158,8 @@ impl<'a> WorldEditor<'a> {
             bedrock_level_name: None,
             #[cfg(feature = "bedrock")]
             bedrock_spawn_point: None,
+            #[cfg(feature = "bedrock")]
+            bedrock_extend_height: false,
         }
     }
 
@@ -174,6 +178,7 @@ impl<'a> WorldEditor<'a> {
         #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_spawn_point: Option<
             (i32, i32),
         >,
+        #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_extend_height: bool,
     ) -> Self {
         Self {
             world_dir,
@@ -187,6 +192,8 @@ impl<'a> WorldEditor<'a> {
             bedrock_level_name,
             #[cfg(feature = "bedrock")]
             bedrock_spawn_point,
+            #[cfg(feature = "bedrock")]
+            bedrock_extend_height,
         }
     }
 
@@ -1118,6 +1125,7 @@ impl<'a> WorldEditor<'a> {
             level_name,
             self.bedrock_spawn_point,
             self.ground.clone(),
+            self.bedrock_extend_height,
         )
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }

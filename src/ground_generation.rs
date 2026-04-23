@@ -355,12 +355,14 @@ pub fn generate_ground_layer(
                                 // any more — that's a normal hiking incline where
                                 // grass and trees belong.
                                 if slope > 8 {
-                                    // Sheer cliff: deepslate face with weathered breaks.
+                                    // Sheer cliff: each column is 100% one material
+                                    // so the downward under-fill matches the surface,
+                                    // producing vertical stripes of cobbled/deepslate.
                                     let h = land_cover::coord_hash(x, z);
-                                    if h.is_multiple_of(4) {
-                                        (COBBLED_DEEPSLATE, DEEPSLATE) // 25%
+                                    if h.is_multiple_of(2) {
+                                        (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
                                     } else {
-                                        (DEEPSLATE, DEEPSLATE) // 75%
+                                        (DEEPSLATE, DEEPSLATE)
                                     }
                                 } else if slope > 6 {
                                     // Very steep rock face: stone-dominant with
@@ -495,8 +497,8 @@ pub fn generate_ground_layer(
                                 // class to pick instead).
                                 if slope > 8 {
                                     let h = land_cover::coord_hash(x, z);
-                                    if h.is_multiple_of(4) {
-                                        (COBBLED_DEEPSLATE, DEEPSLATE)
+                                    if h.is_multiple_of(2) {
+                                        (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
                                     } else {
                                         (DEEPSLATE, DEEPSLATE)
                                     }
@@ -648,7 +650,7 @@ pub fn generate_ground_layer(
                                     // neighbor, capped to avoid excessive work on
                                     // extreme elevation changes (same cap as the
                                     // universal depth fill below).
-                                    (ground_y - min_neighbor_y + 1).clamp(2, 32)
+                                    (ground_y - min_neighbor_y + 1).clamp(2, 64)
                                 } else {
                                     2
                                 };
@@ -1002,7 +1004,7 @@ pub fn generate_ground_layer(
                                     min_neighbor_y = ny;
                                 }
                             }
-                            let depth = (ground_y - min_neighbor_y + 1).clamp(2, 32);
+                            let depth = (ground_y - min_neighbor_y + 1).clamp(2, 64);
                             let y_max = ground_y - 1;
                             let y_min = (ground_y - depth).max(MIN_Y + 1);
                             if y_min <= y_max {

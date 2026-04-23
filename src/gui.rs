@@ -851,6 +851,11 @@ fn gui_start_generation(
             set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
                 .map_err(|e| format!("Failed to set spawn point: {e}"))?;
 
+            if disable_height_limit {
+                crate::world_utils::install_tall_datapack(std::path::Path::new(&selected_world))
+                    .map_err(|e| format!("Failed to install tall-world datapack: {e}"))?;
+            }
+
             Ok(())
         })();
 
