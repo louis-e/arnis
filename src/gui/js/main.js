@@ -593,13 +593,11 @@ function initTelemetryConsent() {
 
 // Wires the "Clear Tile Cache" button in the Application settings panel
 // to the Rust-side `gui_clear_tile_caches` command. User feedback is a
-// brief background flash (green on success, red on partial failure)
-// rather than a sibling status label — keeps the row visually
-// consistent with the other checkbox/slider rows. The button stays
-// disabled while the call is in flight so repeated clicks can't fire
-// multiple concurrent wipes (Rust is idempotent, but the UI would look
-// confused). The button itself carries `aria-live="polite"` so assistive
-// tech announces the temporary disabled/success state.
+// brief background flash (green on success, red on partial failure) —
+// keeps the row visually consistent with the other checkbox/slider
+// rows, no extra status label. The button stays disabled while the
+// call is in flight so repeated clicks can't fire multiple concurrent
+// wipes (Rust is idempotent, but the UI would look confused).
 function initClearCacheButton() {
   const button = document.getElementById('clear-cache-button');
   if (!button) {
@@ -635,11 +633,11 @@ function initClearCacheButton() {
     try {
       await invoke('gui_clear_tile_caches');
       flash('is-success');
-    } catch (_error) {
+    } catch (error) {
       // The Rust side returns Err(String) for partial failures (files
       // still locked). The user sees the red flash; the full text goes
       // to the browser console for debugging, not the UI.
-      console.warn('Clear tile cache failed:', _error);
+      console.warn('Clear tile cache failed:', error);
       flash('is-error');
     } finally {
       button.disabled = false;
@@ -727,11 +725,35 @@ function initTooltips() {
   };
 
   const bind = (icon) => {
+    // Make `<span class="tooltip-icon">` focusable via Tab so keyboard
+    // users can reveal the tooltip. Spans are not focusable by default,
+    // so the focus/blur listeners below are dead without this. Done in
+    // JS rather than HTML so every icon picks it up automatically and
+    // we don't have to keep the 14 call sites in sync. `role="button"`
+    // is a reasonable hint for screen readers that this thing is
+    // interactive even though it doesn't do anything on click.
+    if (icon.tabIndex < 0) {
+      icon.tabIndex = 0;
+    }
+    if (!icon.hasAttribute('role')) {
+      icon.setAttribute('role', 'button');
+    }
+    if (!icon.hasAttribute('aria-label')) {
+      const text = icon.getAttribute('data-tooltip');
+      if (text) {
+        icon.setAttribute('aria-label', text);
+      }
+    }
     icon.addEventListener('mouseenter', () => show(icon));
     icon.addEventListener('mouseleave', hide);
-    // Keyboard accessibility: tooltips reachable via Tab.
     icon.addEventListener('focus', () => show(icon));
     icon.addEventListener('blur', hide);
+    // Escape closes the tooltip while it's focused.
+    icon.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hide();
+      }
+    });
   };
 
   document.querySelectorAll('.tooltip-icon').forEach(bind);
