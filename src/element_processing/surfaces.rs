@@ -19,9 +19,7 @@ pub fn get_blocks_for_surface(surface_type: &str) -> Option<&'static [Block]> {
         // (gray_concrete_powder + cyan_terracotta) gives them the same
         // worn-street speckle that asphalt gets while keeping the
         // surface's own material visible about a third of the time.
-        "paving_stones" | "sett" => {
-            Some(&[STONE_BRICKS, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA])
-        }
+        "paving_stones" | "sett" => Some(&[STONE_BRICKS, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
         "bricks" => Some(&[BRICK]),
         "wood" => Some(&[OAK_PLANKS]),
         "asphalt" => Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),

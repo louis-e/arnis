@@ -165,6 +165,43 @@ fn perpendicular_median_ground_y(
 /// consistently across the file.
 const DEFAULT_ROAD_MIX: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
 
+/// Blocks that an already-placed road way must not be overwritten by a
+/// second way's surface pass. Covers the default asphalt mix, stripe/zebra
+/// whites, and every hard-surface block that `get_blocks_for_surface` can
+/// produce (light-gray concrete for `surface=concrete`, stone bricks for
+/// `paving_stones`/`sett`, etc.).
+///
+/// Rationale: without this, when two ways overlap — a `surface=concrete`
+/// sidewalk adjacent to an asphalt road, or two sidewalks of different
+/// surfaces crossing — the second way's `semirandom_surface` can replace
+/// the first way's base block (the one *not* in the old short blacklist)
+/// while leaving the shared `GRAY_CONCRETE_POWDER`/`CYAN_TERRACOTTA` cells
+/// untouched. The result was a visibly chaotic speckle of 3-4 different
+/// surface blocks where a clean boundary was expected (most noticeable on
+/// sidewalks because they almost always overlap a road). With every
+/// possible pavement block protected, the first way wins each cell and
+/// boundaries stay crisp.
+///
+/// Soft/natural surfaces (sand, gravel, dirt, grass, mud, podzol) are
+/// deliberately excluded so a road over those landuses still paves
+/// correctly — those blocks also appear as natural terrain and blocking
+/// overwrite would leave gaps.
+const ROAD_PROTECTED_SURFACES: &[Block] = &[
+    BLACK_CONCRETE,
+    GRAY_CONCRETE_POWDER,
+    CYAN_TERRACOTTA,
+    WHITE_CONCRETE,
+    GRAY_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    STONE_BRICKS,
+    BRICK,
+    OAK_PLANKS,
+    TERRACOTTA,
+    RED_TERRACOTTA,
+    COBBLESTONE,
+    DIRT_PATH,
+];
+
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
@@ -635,10 +672,10 @@ fn generate_highways_internal(
                         if seg_len > 0.0 {
                             let road_width_blocks = (2 * block_range + 1) as f32;
                             Some((
-                                -dz_seg / seg_len,             // perp_x
-                                dx_seg / seg_len,              // perp_z
+                                -dz_seg / seg_len,                // perp_x
+                                dx_seg / seg_len,                 // perp_z
                                 road_width_blocks / lanes as f32, // lane_width
-                                road_width_blocks / 2.0,       // half_width
+                                road_width_blocks / 2.0,          // half_width
                             ))
                         } else {
                             None
@@ -784,6 +821,10 @@ fn generate_highways_internal(
                                     // every cell picks the same block; for
                                     // multi-block mixes (default road, asphalt)
                                     // the hash scatters the blocks randomly.
+                                    // Blacklist covers every hard surface any
+                                    // way could have placed, so overlapping
+                                    // ways don't cross-contaminate each
+                                    // other's cells (see ROAD_PROTECTED_SURFACES).
                                     let effective_block =
                                         semirandom_surface(set_x, set_z, block_types);
                                     if use_absolute_y {
@@ -793,12 +834,7 @@ fn generate_highways_internal(
                                             cell_y,
                                             set_z,
                                             None,
-                                            Some(&[
-                                                BLACK_CONCRETE,
-                                                GRAY_CONCRETE_POWDER,
-                                                CYAN_TERRACOTTA,
-                                                WHITE_CONCRETE,
-                                            ]),
+                                            Some(ROAD_PROTECTED_SURFACES),
                                         );
                                     } else {
                                         editor.set_block(
@@ -807,12 +843,7 @@ fn generate_highways_internal(
                                             cell_y,
                                             set_z,
                                             None,
-                                            Some(&[
-                                                BLACK_CONCRETE,
-                                                GRAY_CONCRETE_POWDER,
-                                                CYAN_TERRACOTTA,
-                                                WHITE_CONCRETE,
-                                            ]),
+                                            Some(ROAD_PROTECTED_SURFACES),
                                         );
                                     }
                                 }
@@ -945,18 +976,14 @@ fn generate_highways_internal(
                         // rides at the same terrain-aware Y as the adjacent
                         // road cell (reuses `row_medians` so the per-cell
                         // flat cross-section is preserved).
-                        if let Some((perp_x, perp_z, lane_width, half_width)) =
-                            lane_divider_geom
-                        {
+                        if let Some((perp_x, perp_z, lane_width, half_width)) = lane_divider_geom {
                             if stripe_length < dash_length {
                                 for l in 1..lanes {
                                     // Signed perpendicular offset of this
                                     // divider from the centerline.
                                     let perp_dist = l as f32 * lane_width - half_width;
-                                    let stripe_x =
-                                        (*x as f32 + perp_x * perp_dist).round() as i32;
-                                    let stripe_z =
-                                        (*z as f32 + perp_z * perp_dist).round() as i32;
+                                    let stripe_x = (*x as f32 + perp_x * perp_dist).round() as i32;
+                                    let stripe_z = (*z as f32 + perp_z * perp_dist).round() as i32;
 
                                     // Y follows the perpendicular median
                                     // at this divider's axial position in
@@ -973,8 +1000,8 @@ fn generate_highways_internal(
                                         } else {
                                             stripe_z - *z
                                         };
-                                        let idx =
-                                            (axial + block_range).clamp(0, 2 * block_range) as usize;
+                                        let idx = (axial + block_range).clamp(0, 2 * block_range)
+                                            as usize;
                                         row_medians[idx] + offset
                                     } else {
                                         offset
