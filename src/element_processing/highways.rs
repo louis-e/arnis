@@ -166,11 +166,21 @@ fn perpendicular_median_ground_y(
 const DEFAULT_ROAD_MIX: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
 
 /// Blocks that a road write must NOT overwrite. Intentionally narrow:
-/// only the default asphalt mix and stripe/zebra whites. Any other
-/// hard-surface block a way places (`SMOOTH_STONE` for pedestrian
-/// footways, `BRICK`, `OAK_PLANKS`, etc.) is left out so major roads
-/// can freely pave over them when their footprints overlap, keeping
-/// the road surface clean end-to-end.
+/// - `GRAY_CONCRETE_POWDER`, `CYAN_TERRACOTTA`: the default asphalt mix,
+///   preserved so two asphalt roads overlapping produce a consistent
+///   surface instead of re-rolling the hash per pass.
+/// - `WHITE_CONCRETE`: preserves lane stripes and zebra crossings from
+///   being erased when a later road pass crosses them.
+/// - `BLACK_CONCRETE`: not produced by highways directly, but widely
+///   placed by other element processors — schoolyards in `leisure.rs`,
+///   gas-station / parking forecourts in `amenities.rs`, some landuse
+///   patches. A highway shouldn't paint over those.
+///
+/// Any other hard-surface block a way places (`SMOOTH_STONE` for
+/// pedestrian footways, `BRICK`, `OAK_PLANKS`, `LIGHT_GRAY_CONCRETE`,
+/// `STONE_BRICKS`, etc.) is left out so major roads can freely pave
+/// over them when their footprints overlap, keeping the road surface
+/// clean end-to-end.
 const ROAD_PROTECTED_SURFACES: &[Block] = &[
     BLACK_CONCRETE,
     GRAY_CONCRETE_POWDER,
@@ -528,11 +538,19 @@ fn generate_highways_internal(
             // `lanes=*` overrides the default for this highway type.
             // Multi-lane inner dividers are drawn for lanes >= 2 (one line
             // between every pair of adjacent lanes).
+            //
+            // Clamped to a realistic upper bound: the world's widest real
+            // roads have ~12 lanes, but an `i32` parse will accept
+            // arbitrary OSM values. Without the cap, a stray `lanes=999999`
+            // tag (typo or vandalism) would send the inner divider loop
+            // into millions of iterations per bresenham point.
+            const MAX_LANES: i32 = 16;
             let mut lanes = element
                 .tags()
                 .get("lanes")
                 .and_then(|l| l.parse::<i32>().ok())
-                .unwrap_or(default_lanes);
+                .unwrap_or(default_lanes)
+                .clamp(0, MAX_LANES);
             if element.tags().get("lane_markings").map(|s| s.as_str()) == Some("no") {
                 lanes = 1;
             }
@@ -843,10 +861,10 @@ fn generate_highways_internal(
                                     // every cell picks the same block; for
                                     // multi-block mixes (default road, asphalt)
                                     // the hash scatters the blocks randomly.
-                                    // Blacklist covers every hard surface any
-                                    // way could have placed, so overlapping
-                                    // ways don't cross-contaminate each
-                                    // other's cells (see ROAD_PROTECTED_SURFACES).
+                                    // Blacklist is the narrow asphalt-mix set
+                                    // defined in ROAD_PROTECTED_SURFACES — see
+                                    // its doc comment for the overlap-handling
+                                    // rationale.
                                     let effective_block =
                                         semirandom_surface(set_x, set_z, block_types);
                                     if use_absolute_y {
