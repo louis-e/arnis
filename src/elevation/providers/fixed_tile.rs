@@ -54,7 +54,7 @@
 
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
-use crate::elevation::provider::RawElevationGrid;
+use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::fmt::Debug;
@@ -405,6 +405,20 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
         .build()
         .map_err(|e| format!("Failed to create tile-fetch thread pool: {e}"))?;
 
+    // One blocking HTTP client shared across every tile in this run.
+    // Builds the TLS stack + connection pool once; subsequent requests
+    // reuse keep-alive connections, which matters when fetching dozens
+    // of tiles from the same host.
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(concat!(
+            "Arnis/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/louis-e/arnis)"
+        ))
+        .timeout(std::time::Duration::from_secs(180))
+        .build()
+        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
     type FetchResult<R> = (TileKey<R>, Result<Vec<Vec<f64>>, String>);
     let downloaded = AtomicU32::new(0);
     let total_tiles = tile_keys.len() as u32;
@@ -414,7 +428,7 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
             .map(|key| {
                 let url = provider.tile_url(key);
                 let cache_path = key.cache_path(&cache_dir);
-                let res = fetch_tile_raster(&url, &cache_path);
+                let res = fetch_tile_raster(&url, &cache_path, &client);
                 let done = downloaded.fetch_add(1, Ordering::Relaxed) + 1;
                 if done == total_tiles || done.is_multiple_of(16) {
                     eprintln!(
@@ -430,30 +444,74 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
     });
 
     let mut tile_cache: FnvHashMap<TileKey<P::Level>, Vec<Vec<f64>>> = FnvHashMap::default();
-    let mut failures = 0usize;
+    let mut failed_keys: Vec<TileKey<P::Level>> = Vec::new();
     for (key, res) in tile_results {
         match res {
             Ok(raster) => {
                 tile_cache.insert(key, raster);
             }
             Err(e) => {
-                failures += 1;
                 eprintln!(
                     "  {} tile ({}, {}) failed: {e}",
                     provider.log_prefix(),
                     key.tile_x,
                     key.tile_y
                 );
+                failed_keys.push(key);
             }
         }
     }
-    if failures > 0 {
+
+    // AWS Terrarium fallback: for any tile the primary provider couldn't
+    // deliver after all retries, synthesise a replacement from the global
+    // AWS Terrain XYZ service. Lower resolution than USGS/IGN LiDAR but
+    // far better than a NaN hole — and only runs for the small minority
+    // of tiles that permanently failed upstream. Results stay in-memory
+    // (no disk cache under the primary provider's path) so the next run
+    // gets a fresh attempt at the primary source.
+    let primary_failures = failed_keys.len();
+    let mut fallback_recovered = 0usize;
+    if !failed_keys.is_empty() {
         eprintln!(
-            "{}: {}/{} tiles failed; affected regions will be NaN-filled by post-processing",
+            "{}: {} tile{} failed; attempting AWS Terrarium fallback...",
             provider.log_prefix(),
-            failures,
-            tile_keys.len()
+            primary_failures,
+            if primary_failures == 1 { "" } else { "s" },
         );
+        for key in &failed_keys {
+            match fetch_aws_fallback_tile(key) {
+                Ok(raster) => {
+                    tile_cache.insert(*key, raster);
+                    fallback_recovered += 1;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "  AWS fallback for {} tile ({}, {}) failed: {e}",
+                        provider.log_prefix(),
+                        key.tile_x,
+                        key.tile_y
+                    );
+                }
+            }
+        }
+        let still_failed = primary_failures - fallback_recovered;
+        if fallback_recovered > 0 {
+            eprintln!(
+                "{}: recovered {}/{} failed tile{} via AWS Terrarium",
+                provider.log_prefix(),
+                fallback_recovered,
+                primary_failures,
+                if primary_failures == 1 { "" } else { "s" },
+            );
+        }
+        if still_failed > 0 {
+            eprintln!(
+                "{}: {}/{} tiles still failed; affected regions will be NaN-filled by post-processing",
+                provider.log_prefix(),
+                still_failed,
+                tile_keys.len(),
+            );
+        }
     }
 
     let min_lat = bbox.min().lat();
@@ -494,14 +552,39 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
 
 // ─── Tile fetch + TIFF decode ──────────────────────────────────────────
 
-fn fetch_tile_raster(url: &str, cache_path: &Path) -> Result<Vec<Vec<f64>>, String> {
+fn fetch_tile_raster(
+    url: &str,
+    cache_path: &Path,
+    client: &reqwest::blocking::Client,
+) -> Result<Vec<Vec<f64>>, String> {
     if let Some(parent) = cache_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let bytes =
-        super::regional::fetch_or_cache(url, cache_path, None).map_err(|e| e.to_string())?;
+    let bytes = super::regional::fetch_or_cache(url, cache_path, Some(client))
+        .map_err(|e| e.to_string())?;
     let raw = super::regional::decode_geotiff_f32(&bytes, TILE_PIXELS, TILE_PIXELS)
         .map_err(|e| e.to_string())?;
+    Ok(raw.heights_meters)
+}
+
+/// Fill one fixed-grid tile from AWS Terrarium as a last-resort
+/// fallback. Reprojects the tile's mercator bbox into lat/lng and asks
+/// `AwsTerrain::fetch_raw` for a `TILE_PIXELS`-square grid; AWS handles
+/// its own XYZ tile download and bilinear sampling internally. Returns
+/// the result as the same `Vec<Vec<f64>>` shape the primary provider's
+/// TIFF decoder would have produced, so the caller can insert it into
+/// the shared tile cache and the downstream sampler is unaware the
+/// data came from a different source.
+fn fetch_aws_fallback_tile<R: Resolution>(
+    key: &TileKey<R>,
+) -> Result<Vec<Vec<f64>>, Box<dyn std::error::Error>> {
+    let min_lng = mercator_x_to_lon(key.min_mx());
+    let max_lng = mercator_x_to_lon(key.max_mx());
+    let min_lat = mercator_y_to_lat(key.min_my());
+    let max_lat = mercator_y_to_lat(key.max_my());
+    let bbox = LLBBox::new(min_lat, min_lng, max_lat, max_lng)
+        .map_err(|e| format!("Invalid AWS fallback bbox: {e}"))?;
+    let raw = super::aws_terrain::AwsTerrain.fetch_raw(&bbox, TILE_PIXELS, TILE_PIXELS)?;
     Ok(raw.heights_meters)
 }
 

@@ -191,7 +191,13 @@ fn sample_gsi_pixel(
 }
 
 /// Maximum retry attempts for transient failures (5xx, network errors).
-const MAX_RETRIES: u32 = 3;
+///
+/// 5 attempts + exponential backoff gives a total wait budget of roughly
+/// 0.75 + 1.5 + 3 + 6 s ≈ 11 s between the first and last attempt (plus
+/// jitter), which is enough for most ArcGIS gateway blips (empirically
+/// 5–15 s on USGS 3DEP) without making end-to-end generation visibly
+/// slower when individual tiles fail transiently.
+const MAX_RETRIES: u32 = 5;
 /// Base delay for exponential backoff between retries (ms).
 const RETRY_BASE_DELAY_MS: u64 = 750;
 
@@ -238,7 +244,16 @@ pub(super) fn fetch_or_cache(
 
     for attempt in 0..MAX_RETRIES {
         if attempt > 0 {
-            let delay_ms = RETRY_BASE_DELAY_MS * (1 << (attempt - 1));
+            // Exponential backoff with ±50% jitter. Without jitter, all
+            // concurrent tile fetches that failed together retry on the
+            // same millisecond and re-synchronise pressure on the same
+            // flaky endpoint (thundering herd). The jitter multiplier
+            // picks from [0.5, 1.5), so two concurrent retries end up
+            // offset by up to one base-delay.
+            use rand::Rng;
+            let base = RETRY_BASE_DELAY_MS * (1 << (attempt - 1));
+            let jitter = rand::rng().random_range(0.5_f64..1.5_f64);
+            let delay_ms = (base as f64 * jitter).round() as u64;
             eprintln!(
                 "Elevation request retry {}/{} after {}ms...",
                 attempt,
