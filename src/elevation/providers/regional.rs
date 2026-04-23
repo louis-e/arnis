@@ -190,14 +190,15 @@ fn sample_gsi_pixel(
     Some(height)
 }
 
-/// Maximum retry attempts for transient failures (5xx, network errors).
+/// Maximum total attempts per request, including the initial one.
 ///
-/// 5 attempts + exponential backoff gives a total wait budget of roughly
-/// 0.75 + 1.5 + 3 + 6 s ≈ 11 s between the first and last attempt (plus
-/// jitter), which is enough for most ArcGIS gateway blips (empirically
-/// 5–15 s on USGS 3DEP) without making end-to-end generation visibly
-/// slower when individual tiles fail transiently.
-const MAX_RETRIES: u32 = 5;
+/// 3 attempts + exponential backoff gives roughly 0.75 + 1.5 s ≈ 2.25 s
+/// of wait between the first and last attempt (plus ±50% jitter). Any
+/// tile still failing after that is handed off to the AWS Terrarium
+/// fallback in `fetch_fixed_tile_grid`, which is cheap enough that we
+/// prefer getting there quickly over retrying the primary provider
+/// for longer.
+const MAX_RETRIES: u32 = 3;
 /// Base delay for exponential backoff between retries (ms).
 const RETRY_BASE_DELAY_MS: u64 = 750;
 
