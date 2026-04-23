@@ -784,6 +784,14 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
     ) {
+        // Short-circuit for out-of-bbox writes before we pay for a
+        // ground-level lookup (bilinear interpolation of the elevation
+        // grid). The downstream `set_block_with_properties_absolute`
+        // does the same check, but only *after* we would have done the
+        // elevation work.
+        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
         self.set_block_absolute(
             block,
             x,

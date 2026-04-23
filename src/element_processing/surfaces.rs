@@ -13,12 +13,20 @@ pub fn get_blocks_for_surface(surface_type: &str) -> Option<&'static [Block]> {
         "dirt" | "ground" | "earth" => Some(&[DIRT]),
         "mulch" => Some(&[PODZOL]),
         "pebblestone" | "cobblestone" | "unhewn_cobblestone" => Some(&[COBBLESTONE]),
-        "paving_stones" | "sett" => Some(&[STONE_BRICKS]),
+        // Paving-stones, sett and poured concrete roads in real life have
+        // enough tonal variation that a solid-colour block reads as flat
+        // and unnatural from a distance. Blending in the asphalt mix
+        // (gray_concrete_powder + cyan_terracotta) gives them the same
+        // worn-street speckle that asphalt gets while keeping the
+        // surface's own material visible about a third of the time.
+        "paving_stones" | "sett" => {
+            Some(&[STONE_BRICKS, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA])
+        }
         "bricks" => Some(&[BRICK]),
         "wood" => Some(&[OAK_PLANKS]),
         "asphalt" => Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
         "gravel" | "fine_gravel" => Some(&[GRAVEL]),
-        "concrete" => Some(&[LIGHT_GRAY_CONCRETE]),
+        "concrete" => Some(&[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
         _ => None,
     }
 }

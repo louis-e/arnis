@@ -54,7 +54,23 @@ pub fn generate_railways(
             // Resolve the platform surface block once — inside the loop this
             // would allocate a Vec every cell and look up the tag hash map.
             let platform_block = get_blocks_for_surface_way(element, &[POLISHED_ANDESITE])[0];
+            // Skip platform cells that would sit on top of a street. OSM
+            // platforms often share their flood-fill footprint with the
+            // adjacent road, and a polished-andesite slab over asphalt
+            // would bury the road surface underneath.
+            const ROAD_SURFACE_BLOCKS: &[Block] = &[
+                BLACK_CONCRETE,
+                GRAY_CONCRETE_POWDER,
+                CYAN_TERRACOTTA,
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
+                DIRT_PATH,
+            ];
             for (x, z) in flood_fill_cache.get_or_compute(element, args.timeout.as_ref()) {
+                if editor.check_for_block(x, 0, z, Some(ROAD_SURFACE_BLOCKS)) {
+                    continue;
+                }
                 editor.set_block(platform_block, x, 1, z, None, None);
             }
             return;

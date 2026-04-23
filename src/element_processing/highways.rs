@@ -276,15 +276,17 @@ fn generate_highways_internal(
                         let x: i32 = node.x;
                         let z: i32 = node.z;
 
-                        // Traffic light blocks
-                        editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
-                        editor.set_block(IRON_BARS, x, 2, z, None, None);
-                        editor.set_block(IRON_BARS, x, 3, z, None, None);
-                        editor.set_block(BLACK_WOOL, x, 4, z, None, None);
-                        editor.set_block(BLACK_WOOL, x, 5, z, None, None);
+                        // Traffic light blocks. Layer boost rides with the
+                        // overpass the signal belongs to — consistent with
+                        // street_lamp / bus_stop above.
+                        editor.set_block(COBBLESTONE_WALL, x, layer_boost + 1, z, None, None);
+                        editor.set_block(IRON_BARS, x, layer_boost + 2, z, None, None);
+                        editor.set_block(IRON_BARS, x, layer_boost + 3, z, None, None);
+                        editor.set_block(BLACK_WOOL, x, layer_boost + 4, z, None, None);
+                        editor.set_block(BLACK_WOOL, x, layer_boost + 5, z, None, None);
 
                         // Banner placement logic
-                        let abs_y = editor.get_absolute_y(x, 5, z);
+                        let abs_y = editor.get_absolute_y(x, layer_boost + 5, z);
                         let banner_offsets: [(i32, i32, &str); 4] = [
                             (0, -1, "north"),
                             (0, 1, "south"),
@@ -620,6 +622,31 @@ fn generate_highways_internal(
                     let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
                     let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
 
+                    // Segment-constants for multi-lane divider placement.
+                    // Computed once here instead of at every bresenham point:
+                    // `seg_len` needs a sqrt and all the perpendicular-unit-
+                    // vector math is identical across the whole segment.
+                    // `None` means there are no inner dividers to draw (either
+                    // a single-lane road or a degenerate zero-length segment).
+                    let lane_divider_geom = if lanes >= 2 {
+                        let dx_seg = (x2 - x1) as f32;
+                        let dz_seg = (z2 - z1) as f32;
+                        let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();
+                        if seg_len > 0.0 {
+                            let road_width_blocks = (2 * block_range + 1) as f32;
+                            Some((
+                                -dz_seg / seg_len,             // perp_x
+                                dx_seg / seg_len,              // perp_z
+                                road_width_blocks / lanes as f32, // lane_width
+                                road_width_blocks / 2.0,       // half_width
+                            ))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
                     for (point_index, (x, _, z)) in bresenham_points.iter().enumerate() {
                         // Centerline-invariant Y offset for this point
                         // (slope ramps at layer transitions, valley bridge
@@ -918,76 +945,65 @@ fn generate_highways_internal(
                         // rides at the same terrain-aware Y as the adjacent
                         // road cell (reuses `row_medians` so the per-cell
                         // flat cross-section is preserved).
-                        if lanes >= 2 {
+                        if let Some((perp_x, perp_z, lane_width, half_width)) =
+                            lane_divider_geom
+                        {
                             if stripe_length < dash_length {
-                                let road_width_blocks = (2 * block_range + 1) as f32;
-                                let lane_width = road_width_blocks / lanes as f32;
-                                let dx_seg = (x2 - x1) as f32;
-                                let dz_seg = (z2 - z1) as f32;
-                                let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();
-                                if seg_len > 0.0 {
-                                    // Perpendicular unit vector (90° from travel).
-                                    let perp_x = -dz_seg / seg_len;
-                                    let perp_z = dx_seg / seg_len;
-                                    let half_width = road_width_blocks / 2.0;
+                                for l in 1..lanes {
+                                    // Signed perpendicular offset of this
+                                    // divider from the centerline.
+                                    let perp_dist = l as f32 * lane_width - half_width;
+                                    let stripe_x =
+                                        (*x as f32 + perp_x * perp_dist).round() as i32;
+                                    let stripe_z =
+                                        (*z as f32 + perp_z * perp_dist).round() as i32;
 
-                                    for l in 1..lanes {
-                                        // Signed perpendicular offset of this
-                                        // divider from the centerline.
-                                        let perp_dist = l as f32 * lane_width - half_width;
-                                        let stripe_x =
-                                            (*x as f32 + perp_x * perp_dist).round() as i32;
-                                        let stripe_z =
-                                            (*z as f32 + perp_z * perp_dist).round() as i32;
-
-                                        // Y follows the perpendicular median
-                                        // at this divider's axial position in
-                                        // the cross-section (same rule as the
-                                        // road cells). Clamp because the
-                                        // rounded (stripe_x, stripe_z) could
-                                        // land 1 cell outside the stamp on
-                                        // diagonals.
-                                        let stripe_y = if is_valley_bridge {
-                                            bridge_deck_y
-                                        } else if flatten_width {
-                                            let axial = if dir_horizontal {
-                                                stripe_x - *x
-                                            } else {
-                                                stripe_z - *z
-                                            };
-                                            let idx = (axial + block_range)
-                                                .clamp(0, 2 * block_range)
-                                                as usize;
-                                            row_medians[idx] + offset
+                                    // Y follows the perpendicular median
+                                    // at this divider's axial position in
+                                    // the cross-section (same rule as the
+                                    // road cells). Clamp because the
+                                    // rounded (stripe_x, stripe_z) could
+                                    // land 1 cell outside the stamp on
+                                    // diagonals.
+                                    let stripe_y = if is_valley_bridge {
+                                        bridge_deck_y
+                                    } else if flatten_width {
+                                        let axial = if dir_horizontal {
+                                            stripe_x - *x
                                         } else {
-                                            offset
+                                            stripe_z - *z
                                         };
+                                        let idx =
+                                            (axial + block_range).clamp(0, 2 * block_range) as usize;
+                                        row_medians[idx] + offset
+                                    } else {
+                                        offset
+                                    };
 
-                                        // Whitelist on the actual road
-                                        // surface so dividers appear on
-                                        // non-default `surface=*` roads too
-                                        // (hardcoding the default mix caused
-                                        // markings to vanish on e.g.
-                                        // concrete/asphalt-tagged highways).
-                                        if use_absolute_y {
-                                            editor.set_block_absolute(
-                                                WHITE_CONCRETE,
-                                                stripe_x,
-                                                stripe_y,
-                                                stripe_z,
-                                                Some(block_types),
-                                                None,
-                                            );
-                                        } else {
-                                            editor.set_block(
-                                                WHITE_CONCRETE,
-                                                stripe_x,
-                                                stripe_y,
-                                                stripe_z,
-                                                Some(block_types),
-                                                None,
-                                            );
-                                        }
+                                    // Whitelist on the actual road
+                                    // surface so dividers appear on
+                                    // non-default `surface=*` roads too
+                                    // (hardcoding the default mix caused
+                                    // markings to vanish on e.g.
+                                    // concrete/asphalt-tagged highways).
+                                    if use_absolute_y {
+                                        editor.set_block_absolute(
+                                            WHITE_CONCRETE,
+                                            stripe_x,
+                                            stripe_y,
+                                            stripe_z,
+                                            Some(block_types),
+                                            None,
+                                        );
+                                    } else {
+                                        editor.set_block(
+                                            WHITE_CONCRETE,
+                                            stripe_x,
+                                            stripe_y,
+                                            stripe_z,
+                                            Some(block_types),
+                                            None,
+                                        );
                                     }
                                 }
                             }
