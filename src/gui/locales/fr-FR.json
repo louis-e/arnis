@@ -49,5 +49,7 @@
   "settings_section_generation": "Génération",
   "settings_section_world": "Monde",
   "settings_section_map": "Carte et saisie",
-  "settings_section_application": "Application"
+  "settings_section_application": "Application",
+  "clear_tile_cache": "Vider le cache de tuiles",
+  "clear_tile_cache_button": "Vider"
 }

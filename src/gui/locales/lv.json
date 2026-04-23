@@ -49,5 +49,7 @@
   "settings_section_generation": "Ģenerēšana",
   "settings_section_world": "Pasaule",
   "settings_section_map": "Karte un ievade",
-  "settings_section_application": "Lietotne"
+  "settings_section_application": "Lietotne",
+  "clear_tile_cache": "Notīrīt flīžu kešatmiņu",
+  "clear_tile_cache_button": "Notīrīt"
 }

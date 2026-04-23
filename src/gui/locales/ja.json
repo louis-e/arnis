@@ -49,5 +49,7 @@
   "settings_section_generation": "生成",
   "settings_section_world": "ワールド",
   "settings_section_map": "マップと入力",
-  "settings_section_application": "アプリケーション"
+  "settings_section_application": "アプリケーション",
+  "clear_tile_cache": "タイルキャッシュをクリア",
+  "clear_tile_cache_button": "クリア"
 }

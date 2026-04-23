@@ -49,5 +49,7 @@
   "settings_section_generation": "생성",
   "settings_section_world": "월드",
   "settings_section_map": "지도 및 입력",
-  "settings_section_application": "애플리케이션"
+  "settings_section_application": "애플리케이션",
+  "clear_tile_cache": "타일 캐시 지우기",
+  "clear_tile_cache_button": "지우기"
 }

@@ -49,5 +49,7 @@
   "settings_section_generation": "Generointi",
   "settings_section_world": "Maailma",
   "settings_section_map": "Kartta ja syöte",
-  "settings_section_application": "Sovellus"
+  "settings_section_application": "Sovellus",
+  "clear_tile_cache": "Tyhjennä laattojen välimuisti",
+  "clear_tile_cache_button": "Tyhjennä"
 }
