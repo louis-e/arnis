@@ -537,44 +537,48 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
         .map(|&mx| TileKey::<P::Level>::for_mercator(level, mx, 0.0).tile_x)
         .collect();
 
-    let height_grid: Vec<Vec<f64>> = pool.install(|| {
-        (0..grid_height)
-            .into_par_iter()
-            .map(|gy| {
-                let lat_frac = gy as f64 / h_denom;
-                let lat = max_lat - lat_frac * lat_span;
-                let my = lat_to_mercator_y(lat);
-                let tile_y = TileKey::<P::Level>::for_mercator(level, 0.0, my).tile_y;
-                let mut row = vec![f64::NAN; grid_width];
-                // Carry the current tile reference across cells; tile_x
-                // changes every ~TILE_PIXELS cells, so most cells reuse
-                // the same tile and skip the hashmap lookup entirely.
-                let mut cur_tile_x: i32 = i32::MIN;
-                let mut cur_tile: Option<&Vec<Vec<f64>>> = None;
-                let mut cur_key = TileKey {
-                    level,
-                    tile_x: 0,
-                    tile_y,
-                };
-                for (gx, cell) in row.iter_mut().enumerate() {
-                    let tile_x = col_tile_x[gx];
-                    if tile_x != cur_tile_x {
-                        cur_tile_x = tile_x;
-                        cur_key = TileKey {
-                            level,
-                            tile_x,
-                            tile_y,
-                        };
-                        cur_tile = tile_cache.get(&cur_key);
-                    }
-                    if let Some(tile) = cur_tile {
-                        *cell = sample_tile_bilinear(tile, col_mx[gx], my, &cur_key);
-                    }
+    // Sampling runs on Rayon's global pool, NOT the download pool.
+    // `pool` is sized to `MAX_CONCURRENT_DOWNLOADS` (4) to be polite to
+    // upstream providers, but bilinear sampling is CPU-bound and has no
+    // reason to be capped to 4 threads on high-core machines — doing so
+    // needlessly slows multi-megapixel grids. The global pool defaults
+    // to `num_cpus::get()` threads, which is what we want here.
+    let height_grid: Vec<Vec<f64>> = (0..grid_height)
+        .into_par_iter()
+        .map(|gy| {
+            let lat_frac = gy as f64 / h_denom;
+            let lat = max_lat - lat_frac * lat_span;
+            let my = lat_to_mercator_y(lat);
+            let tile_y = TileKey::<P::Level>::for_mercator(level, 0.0, my).tile_y;
+            let mut row = vec![f64::NAN; grid_width];
+            // Carry the current tile reference across cells; tile_x
+            // changes every ~TILE_PIXELS cells, so most cells reuse
+            // the same tile and skip the hashmap lookup entirely.
+            let mut cur_tile_x: i32 = i32::MIN;
+            let mut cur_tile: Option<&Vec<Vec<f64>>> = None;
+            let mut cur_key = TileKey {
+                level,
+                tile_x: 0,
+                tile_y,
+            };
+            for (gx, cell) in row.iter_mut().enumerate() {
+                let tile_x = col_tile_x[gx];
+                if tile_x != cur_tile_x {
+                    cur_tile_x = tile_x;
+                    cur_key = TileKey {
+                        level,
+                        tile_x,
+                        tile_y,
+                    };
+                    cur_tile = tile_cache.get(&cur_key);
                 }
-                row
-            })
-            .collect()
-    });
+                if let Some(tile) = cur_tile {
+                    *cell = sample_tile_bilinear(tile, col_mx[gx], my, &cur_key);
+                }
+            }
+            row
+        })
+        .collect();
 
     Ok(RawElevationGrid {
         heights_meters: height_grid,
