@@ -301,7 +301,11 @@ impl ElevationProvider for JapanGsi {
 
         // Build a shared HTTP client for all tile downloads
         let client = reqwest::blocking::Client::builder()
-            .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!(
+                "Arnis/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/louis-e/arnis)"
+            ))
             .timeout(std::time::Duration::from_secs(120))
             .build()?;
 
@@ -645,7 +649,11 @@ fn fetch_or_cache(
             // under load even at cap 4096. Japan GSI keeps its own 120s
             // client since it fetches 256 px PNGs.
             owned_client = reqwest::blocking::Client::builder()
-                .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+                .user_agent(concat!(
+                    "Arnis/",
+                    env!("CARGO_PKG_VERSION"),
+                    " (+https://github.com/louis-e/arnis)"
+                ))
                 .timeout(std::time::Duration::from_secs(180))
                 .build()?;
             &owned_client

@@ -34,6 +34,78 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
 
+/// Per-chunk cache of ground Y values.
+///
+/// Each Minecraft-chunk worth of surface/vegetation/depth logic fires
+/// roughly 20-plus `get_ground_level` lookups per cell (own column + 8
+/// water-column neighbours + 8 depth-fill neighbours + a handful of
+/// slope/surface checks). At a typical city bbox that's ~10⁸ calls,
+/// each touching the road-override map, an elevation-grid bilinear, and
+/// a few f32→f64 casts. Precomputing one Y per cell up front — via a
+/// flat 256-entry stack array aligned to the chunk's 16×16 footprint —
+/// turns the 20-plus per-cell calls into stack array reads for
+/// everything inside the chunk; neighbours that escape the chunk
+/// boundary fall back to `editor.get_ground_level`. The cache is
+/// populated once per chunk, read many times, then dropped.
+struct ChunkGroundCache {
+    /// Row-major `16*lz + lx` where `lx = x - base_x`, `lz = z - base_z`.
+    /// Positions outside `[min_x..=max_x, min_z..=max_z]` are never read.
+    grid: [i32; 256],
+    base_x: i32,
+    base_z: i32,
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+}
+
+impl ChunkGroundCache {
+    #[inline]
+    fn populate(
+        editor: &WorldEditor,
+        chunk_x: i32,
+        chunk_z: i32,
+        min_x: i32,
+        max_x: i32,
+        min_z: i32,
+        max_z: i32,
+    ) -> Self {
+        let base_x = chunk_x << 4;
+        let base_z = chunk_z << 4;
+        let mut grid = [0i32; 256];
+        for x in min_x..=max_x {
+            for z in min_z..=max_z {
+                let lx = (x - base_x) as usize;
+                let lz = (z - base_z) as usize;
+                grid[lz * 16 + lx] = editor.get_ground_level(x, z);
+            }
+        }
+        ChunkGroundCache {
+            grid,
+            base_x,
+            base_z,
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+        }
+    }
+
+    /// Get the ground Y at `(nx, nz)`. Cached for cells inside this chunk's
+    /// populated range; falls through to `editor.get_ground_level` for
+    /// neighbour reads that cross a chunk boundary.
+    #[inline]
+    fn get(&self, editor: &WorldEditor, nx: i32, nz: i32) -> i32 {
+        if nx >= self.min_x && nx <= self.max_x && nz >= self.min_z && nz <= self.max_z {
+            let lx = (nx - self.base_x) as usize;
+            let lz = (nz - self.base_z) as usize;
+            self.grid[lz * 16 + lx]
+        } else {
+            editor.get_ground_level(nx, nz)
+        }
+    }
+}
+
 /// Generate the ground layer for the entire bounding box.
 ///
 /// This must be called after all OSM element processing is complete and the
@@ -87,6 +159,23 @@ pub fn generate_ground_layer(
             let chunk_min_z = (chunk_z << 4).max(xzbbox.min_z());
             let chunk_max_z = ((chunk_z << 4) + 15).min(xzbbox.max_z());
 
+            // Precompute a per-chunk ground-Y cache so subsequent lookups
+            // (main column + water-column + depth-fill neighbours, ~20+ per
+            // cell) hit a stack array instead of re-running the bilinear
+            // elevation interpolation. Only populated when terrain is on —
+            // the flat-ground path never calls `editor.get_ground_level`.
+            let chunk_ground_cache = terrain_enabled.then(|| {
+                ChunkGroundCache::populate(
+                    editor,
+                    chunk_x,
+                    chunk_z,
+                    chunk_min_x,
+                    chunk_max_x,
+                    chunk_min_z,
+                    chunk_max_z,
+                )
+            });
+
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
                     // Skip blocks outside the rotated original bounding box
@@ -98,10 +187,11 @@ pub fn generate_ground_layer(
                         continue;
                     }
 
-                    // Get ground level, when terrain is enabled, look it up once per block
-                    // When disabled, use constant ground_level (no function call overhead)
-                    let ground_y = if terrain_enabled {
-                        editor.get_ground_level(x, z)
+                    // Get ground level. When terrain is enabled, pull from the
+                    // per-chunk cache (one populated lookup, no bilinear); when
+                    // disabled, use the constant ground_level.
+                    let ground_y = if let Some(ref cache) = chunk_ground_cache {
+                        cache.get(editor, x, z)
                     } else {
                         args.ground_level
                     };
@@ -160,7 +250,17 @@ pub fn generate_ground_layer(
                         // bilinear lookup and fixes the false negatives in
                         // the osm_gap detection below.
                         let has_water_in_column = |wx: i32, wz: i32| {
-                            let gy = editor.get_ground_level(wx, wz);
+                            // Pull from the chunk cache so the 9-neighbour
+                            // fan-out around each cell doesn't trigger nine
+                            // bilinear interpolations per cell. In flat-ground
+                            // mode every column has the same constant Y, so
+                            // we skip the `editor.get_ground_level` fallback
+                            // (road overrides in flat mode always resolve to
+                            // the same `args.ground_level` anyway).
+                            let gy = match chunk_ground_cache {
+                                Some(ref cache) => cache.get(editor, wx, wz),
+                                None => args.ground_level,
+                            };
                             for dy in 0..=2 {
                                 if editor.check_for_block_absolute(
                                     wx,
@@ -527,7 +627,7 @@ pub fn generate_ground_layer(
                                 // gap on cliff faces. Check all 8 neighbors (cardinal
                                 // + diagonal) and fill down to the lowest neighbor's
                                 // ground level so no void is ever visible.
-                                let depth = if terrain_enabled {
+                                let depth = if let Some(ref cache) = chunk_ground_cache {
                                     let mut min_neighbor_y = ground_y;
                                     for &(dx, dz) in &[
                                         (-1i32, 0i32),
@@ -539,7 +639,7 @@ pub fn generate_ground_layer(
                                         (1, -1),
                                         (1, 1),
                                     ] {
-                                        let ny = editor.get_ground_level(x + dx, z + dz);
+                                        let ny = cache.get(editor, x + dx, z + dz);
                                         if ny < min_neighbor_y {
                                             min_neighbor_y = ny;
                                         }
@@ -841,31 +941,32 @@ pub fn generate_ground_layer(
                     // quarries, landuse areas, and other OSM elements on slopes don't
                     // leave visible gaps. Uses set_block_if_absent so it won't overwrite
                     // material-specific under-blocks already placed above.
-                    if terrain_enabled
-                        && !editor.check_for_block_absolute(x, ground_y, z, Some(&[WATER]), None)
-                        && !did_underfill
-                    {
-                        let mut min_neighbor_y = ground_y;
-                        for &(dx, dz) in &[
-                            (-1i32, 0i32),
-                            (1, 0),
-                            (0, -1),
-                            (0, 1),
-                            (-1, -1),
-                            (-1, 1),
-                            (1, -1),
-                            (1, 1),
-                        ] {
-                            let ny = editor.get_ground_level(x + dx, z + dz);
-                            if ny < min_neighbor_y {
-                                min_neighbor_y = ny;
+                    if let Some(ref cache) = chunk_ground_cache {
+                        if !editor.check_for_block_absolute(x, ground_y, z, Some(&[WATER]), None)
+                            && !did_underfill
+                        {
+                            let mut min_neighbor_y = ground_y;
+                            for &(dx, dz) in &[
+                                (-1i32, 0i32),
+                                (1, 0),
+                                (0, -1),
+                                (0, 1),
+                                (-1, -1),
+                                (-1, 1),
+                                (1, -1),
+                                (1, 1),
+                            ] {
+                                let ny = cache.get(editor, x + dx, z + dz);
+                                if ny < min_neighbor_y {
+                                    min_neighbor_y = ny;
+                                }
                             }
-                        }
-                        let depth = (ground_y - min_neighbor_y + 1).clamp(2, 32);
-                        let y_max = ground_y - 1;
-                        let y_min = (ground_y - depth).max(MIN_Y + 1);
-                        if y_min <= y_max {
-                            editor.fill_column_absolute(STONE, x, z, y_min, y_max, true);
+                            let depth = (ground_y - min_neighbor_y + 1).clamp(2, 32);
+                            let y_max = ground_y - 1;
+                            let y_min = (ground_y - depth).max(MIN_Y + 1);
+                            if y_min <= y_max {
+                                editor.fill_column_absolute(STONE, x, z, y_min, y_max, true);
+                            }
                         }
                     }
 
