@@ -241,6 +241,13 @@ fn get_cache_dir() -> PathBuf {
     }
 }
 
+/// Clear every cached ESA WorldCover tile. Wrapper around the generic
+/// [`crate::elevation::cache::clear_cache_dir`] so the GUI cache-clean
+/// command only has to call one entry point per cache root.
+pub fn clear_land_cover_cache() -> crate::elevation::cache::CacheClearStats {
+    crate::elevation::cache::clear_cache_dir(&get_cache_dir())
+}
+
 // ─── ESA tile URL computation ─────────────────────────────────────────────
 
 /// Returns a list of (tile_lat, tile_lng, url) for ESA tiles overlapping the bbox.

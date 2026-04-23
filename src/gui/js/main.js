@@ -39,6 +39,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   await initSavePath();
   initSettings();
   initTelemetryConsent();
+  initClearCacheButton();
   handleBboxInput();
   const localization = await getLocalization();
   await applyLocalization(localization);
@@ -122,6 +123,8 @@ async function applyLocalization(localization) {
     "div[data-localize='settings_section_world']": "settings_section_world",
     "div[data-localize='settings_section_map']": "settings_section_map",
     "div[data-localize='settings_section_application']": "settings_section_application",
+    "span[data-localize='clear_tile_cache']": "clear_tile_cache",
+    "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -585,6 +588,40 @@ function initTelemetryConsent() {
     const v = localStorage.getItem(key);
     return v === null ? null : v === 'true';
   };
+}
+
+// Wires the "Clear Tile Cache" button in the Application settings panel
+// to the Rust-side `gui_clear_tile_caches` command. The button stays
+// disabled while the call is in flight so repeated clicks can't fire
+// multiple concurrent wipes (the Rust side is idempotent, but the UI
+// feedback would be confusing). Status text is written into the adjacent
+// span with aria-live="polite" so screen readers announce the result.
+function initClearCacheButton() {
+  const button = document.getElementById('clear-cache-button');
+  const status = document.getElementById('clear-cache-status');
+  if (!button || !status) {
+    return;
+  }
+
+  button.addEventListener('click', async () => {
+    if (button.disabled) {
+      return;
+    }
+    button.disabled = true;
+    const workingText = (window.localization && window.localization.clear_tile_cache_working)
+      || 'Clearing…';
+    status.textContent = workingText;
+    try {
+      const message = await invoke('gui_clear_tile_caches');
+      status.textContent = typeof message === 'string' ? message : '';
+    } catch (error) {
+      // Tauri returns `Err(String)` as a plain string here; fall back to
+      // String() for the defensive case where a JS exception leaks through.
+      status.textContent = typeof error === 'string' ? error : String(error);
+    } finally {
+      button.disabled = false;
+    }
+  });
 }
 
 /// Save path management

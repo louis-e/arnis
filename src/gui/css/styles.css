@@ -752,6 +752,53 @@ button:hover {
   fill: #fecc44;
 }
 
+/* Clear-cache control: button + adjacent status text.
+   Matches the golden-outline style used by other secondary buttons in
+   the settings panel (save-path-browse, license-button). The status
+   span sits to the left, reveals the last result inline, and gracefully
+   truncates on narrow widths so it never pushes the button off-row. */
+.clear-cache-control {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.clear-cache-status {
+  font-size: 0.8em;
+  opacity: 0.75;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 1 1 auto;
+  text-align: right;
+}
+
+.clear-cache-button {
+  background: none;
+  border: 1px solid #fecc44;
+  border-radius: 4px;
+  color: #fecc44;
+  padding: 2px 12px;
+  margin: 0;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 0.85em;
+  transition: background 0.2s ease, opacity 0.2s ease;
+  flex: 0 0 auto;
+}
+
+.clear-cache-button:hover:not(:disabled) {
+  background: rgba(254, 204, 68, 0.15);
+}
+
+.clear-cache-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .license-button-row {
   justify-content: center;
   margin-top: 5px;
