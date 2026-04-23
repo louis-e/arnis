@@ -91,10 +91,13 @@ impl Ground {
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
                 #[cfg(feature = "gui")]
-                send_log(
-                    LogLevel::Warning,
-                    &format!("Elevation unavailable, using flat ground ({e:.200})"),
-                );
+                {
+                    let short: String = e.to_string().chars().take(200).collect();
+                    send_log(
+                        LogLevel::Warning,
+                        &format!("Elevation unavailable, using flat ground ({short})"),
+                    );
+                }
                 // Graceful fallback: disable elevation and keep provided ground_level.
                 // Land cover we already fetched is discarded since it has no
                 // elevation grid to align against.

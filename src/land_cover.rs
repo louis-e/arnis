@@ -201,8 +201,7 @@ pub fn fetch_land_cover_data(
         #[cfg(feature = "gui")]
         send_log(
             LogLevel::Warning,
-            "ESA WorldCover returned no data for the requested bbox \
-             (generation proceeding without land cover).",
+            "ESA WorldCover returned no data for the requested bbox (generation proceeding without land cover).",
         );
         return None;
     }

@@ -74,8 +74,9 @@ fn download_with_reqwest(
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else {
-                eprintln!("{}", format!("Error! {e:.52}").red().bold());
-                Err(format!("{e:.52}").into())
+                let short: String = e.to_string().chars().take(52).collect();
+                eprintln!("{}", format!("Error! {short}").red().bold());
+                Err(short.into())
             }
         }
     }
@@ -282,7 +283,7 @@ pub fn fetch_data_from_overpass(
             {
                 let err_summary = last_error
                     .as_ref()
-                    .map(|e| format!("{e:.120}"))
+                    .map(|e| e.to_string().chars().take(120).collect::<String>())
                     .unwrap_or_else(|| "unknown".to_string());
                 send_log(
                     LogLevel::Error,
