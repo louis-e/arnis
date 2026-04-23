@@ -497,7 +497,7 @@ let selectedWorldFormat = 'java'; // Default to Java
 function initWorldFormatToggle() {
   // Load saved format preference
   const savedFormat = localStorage.getItem('arnis-world-format');
-  if (savedFormat && (savedFormat === 'java' || savedFormat === 'bedrock')) {
+  if (savedFormat && (savedFormat === 'java' || savedFormat === 'bedrock' || savedFormat === 'fnv')) {
     selectedWorldFormat = savedFormat;
   }
   
@@ -506,7 +506,7 @@ function initWorldFormatToggle() {
 }
 
 function setWorldFormat(format) {
-  if (format !== 'java' && format !== 'bedrock') return;
+  if (format !== 'java' && format !== 'bedrock' && format !== 'fnv') return;
   
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
@@ -516,16 +516,72 @@ function setWorldFormat(format) {
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
+  const fnvBtn = document.getElementById('format-fnv');
+  const chooseWorldBtn = document.getElementById('choose-world-btn');
+  const selectedWorldText = document.getElementById('selected-world');
 
   const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
 
+  // Update active button state
+  if (javaBtn) javaBtn.classList.toggle('format-active', format === 'java');
+  if (bedrockBtn) bedrockBtn.classList.toggle('format-active', format === 'bedrock');
+  if (fnvBtn) fnvBtn.classList.toggle('format-active', format === 'fnv');
+
+  const chooseWorldLabel = document.getElementById('choose_world');
+
   if (format === 'java') {
+    // Enable Create World button for Java
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = false;
+      chooseWorldBtn.style.opacity = '1';
+      chooseWorldBtn.style.cursor = 'pointer';
+    }
+    // Restore button label
+    if (chooseWorldLabel) {
+      chooseWorldLabel.textContent = window.localization?.choose_world || 'Create World';
+    }
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
     // Re-enable height limit toggle for Java
     if (heightLimitToggle) {
       heightLimitToggle.disabled = false;
       heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
+    }
+    // Show appropriate text based on whether a world was already created
+    if (selectedWorldText && !worldPath) {
+      const noWorldText = window.localization?.no_world_selected || 'No world created';
+      selectedWorldText.textContent = noWorldText;
+      selectedWorldText.style.color = '#fecc44';
+    }
+  } else if (format === 'bedrock') {
+    // Disable Create World button for Bedrock
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = true;
+      chooseWorldBtn.style.opacity = '0.5';
+      chooseWorldBtn.style.cursor = 'not-allowed';
+    }
+  } else if (format === 'fnv') {
+    // Enable button but repurpose it for output folder selection
+    if (chooseWorldBtn) {
+      chooseWorldBtn.disabled = false;
+      chooseWorldBtn.style.opacity = '1';
+      chooseWorldBtn.style.cursor = 'pointer';
+    }
+    // Change button label to reflect FNV purpose
+    if (chooseWorldLabel) {
+      chooseWorldLabel.textContent = 'Choose Output Folder';
+    }
+    // Disable height limit toggle for FNV (not applicable)
+    if (heightLimitToggle) {
+      heightLimitToggle.checked = false;
+      heightLimitToggle.disabled = true;
+      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
+    }
+    // Clear world selection and show default info message
+    worldPath = "";
+    if (selectedWorldText) {
+      selectedWorldText.textContent = 'Desktop (default)';
+      selectedWorldText.style.color = '#fecc44';
     }
   } else {
     javaBtn.classList.remove('format-active');
@@ -538,6 +594,11 @@ function updateFormatToggleUI(format) {
     }
     // Clear world path for bedrock (auto-generated)
     worldPath = "";
+    if (selectedWorldText) {
+      const bedrockText = window.localization?.bedrock_auto_generated || 'Bedrock world is auto-generated';
+      selectedWorldText.textContent = bedrockText;
+      selectedWorldText.style.color = '#fecc44';
+    }
   }
 }
 
@@ -864,6 +925,33 @@ function displayBboxInfoText(bboxText) {
 }
 
 let worldPath = "";
+
+async function createWorld() {
+  // Don't create if format is Bedrock (button should be disabled)
+  if (selectedWorldFormat === 'bedrock') return;
+
+  // For FNV, pick an output folder instead of creating a Minecraft world
+  if (selectedWorldFormat === 'fnv') {
+    try {
+      const picked = await invoke('gui_pick_save_directory', { startPath: savePath || '' });
+      if (picked) {
+        worldPath = picked;
+        const lastSegment = picked.split(/[\\/]/).pop() || picked;
+        document.getElementById('selected-world').textContent = lastSegment;
+        document.getElementById('selected-world').style.color = '#fecc44';
+      }
+    } catch (error) {
+      console.error('Folder picker failed:', error);
+    }
+    return;
+  }
+
+  // Don't create if save path hasn't been initialized
+  if (!savePath) {
+    console.warn("Cannot create world: save path not set");
+    return;
+  }
+}
 
 function setWorldNameLabel(text) {
   const label = document.getElementById('world-name-label');

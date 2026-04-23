@@ -90,6 +90,16 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub disable_height_limit: bool,
 
+    /// Generate a Fallout: New Vegas .esm plugin with a new worldspace and terrain height data.
+    /// Output file is written to --output-dir (optional; defaults to Desktop).
+    #[arg(long, default_value_t = false)]
+    pub fnv_esm: bool,
+
+    /// Water level for the FNV worldspace, in game units (XCLW value applied to every cell).
+    /// Example: --fnv-water-level 140
+    /// Omit to generate terrain without water.
+    #[arg(long, allow_hyphen_values = true)]
+    pub fnv_water_level: Option<f32>,
     /// Print generation-only timing to stderr (excludes data fetching)
     #[arg(long, hide = true)]
     pub benchmark: bool,
@@ -101,6 +111,16 @@ pub struct Args {
 pub fn validate_args(args: &Args) -> Result<(), String> {
     if args.bedrock {
         // Bedrock: path is optional; if provided, it must be an existing directory
+        if let Some(ref path) = args.path {
+            if !path.exists() {
+                return Err(format!("Path does not exist: {}", path.display()));
+            }
+            if !path.is_dir() {
+                return Err(format!("Path is not a directory: {}", path.display()));
+            }
+        }
+    } else if args.fnv_esm {
+        // FNV ESM: path is optional; if provided, it must be an existing directory
         if let Some(ref path) = args.path {
             if !path.exists() {
                 return Err(format!("Path does not exist: {}", path.display()));

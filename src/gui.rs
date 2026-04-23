@@ -3,6 +3,7 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
+use crate::fnv_esm;
 use crate::ground::{self, Ground};
 use crate::map_transformation;
 use crate::osm_parser;
@@ -773,7 +774,7 @@ fn gui_start_generation(
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
-    if is_new_world && world_format != "bedrock" {
+    if is_new_world && world_format != "bedrock" && world_format != "fnv" {
         let prep_result: Result<(), String> = (|| -> Result<(), String> {
             let llbbox = LLBBox::from_str(&bbox_text)
                 .map_err(|e| format!("Failed to parse bounding box: {e}"))?;
@@ -819,6 +820,138 @@ fn gui_start_generation(
     tauri::async_runtime::spawn(async move {
         if let Err(e) = tokio::task::spawn_blocking(move || {
             let world_path = PathBuf::from(&selected_world);
+
+            // FNV ESM: completely separate pipeline — generate .esm and return early
+            if world_format == "fnv" {
+                let bbox = match LLBBox::from_str(&bbox_text) {
+                    Ok(bbox) => bbox,
+                    Err(e) => {
+                        let error_msg = format!("Failed to parse bounding box: {e}");
+                        eprintln!("{error_msg}");
+                        progress::emit_gui_error(&error_msg);
+                        return Err(error_msg);
+                    }
+                };
+
+                let output_dir = if world_path.as_os_str().is_empty() && fnv_esm::is_dir_writeable(&world_path) {
+                    // Output dir is empty, try using  default "Data" folder.
+                    if PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR).is_dir() {
+                        PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR)
+                    }
+                    else {
+                        // Data folder does not exist, use current directory
+                        std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    }
+                } else {
+                    world_path.clone()
+                };
+
+                eprintln!("[FNV] selected_world={:?}  output_dir={:?}", world_path, output_dir);
+
+                let (_transformer, xzbbox) =
+                    match CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
+                        Ok(result) => result,
+                        Err(e) => {
+                            let error_msg =
+                                format!("Failed to create coordinate transformer: {e}");
+                            eprintln!("{error_msg}");
+                            progress::emit_gui_error(&error_msg);
+                            return Err(error_msg);
+                        }
+                    };
+
+                let args = Args {
+                    bbox,
+                    file: None,
+                    save_json_file: None,
+                    path: Some(output_dir.clone()),
+                    bedrock: false,
+                    downloader: "requests".to_string(),
+                    scale: world_scale,
+                    ground_level,
+                    terrain: true,
+                    interior: false,
+                    roof: false,
+                    fillground: false,
+                    land_cover: true,
+                    debug: false,
+                    timeout: Some(std::time::Duration::from_secs(40)),
+                    spawn_lat: None,
+                    spawn_lng: None,
+                    rotation: 0.0,
+                    disable_height_limit: false,
+                    benchmark: false,
+                    fnv_esm: true,
+                    fnv_water_level: None,
+                };
+
+                let ground = ground::generate_ground_data(&args);
+
+                // Fetch OSM road network for asphalt texture painting.
+                // Failure is non-fatal; roads are simply omitted.
+                emit_gui_progress_update(10.0, "Fetching road data...");
+                let road_polylines: Vec<(u8, Vec<(i32, i32)>)> = match retrieve_data::fetch_data_from_overpass(
+                    bbox,
+                    false,
+                    "requests",
+                    None,
+                ) {
+                    Ok(raw_data) => {
+                        let (elements, _) =
+                            crate::osm_parser::parse_osm_data(raw_data, bbox, world_scale, false);
+                        elements
+                            .iter()
+                            .filter_map(|e| {
+                                if let crate::osm_parser::ProcessedElement::Way(way) = e {
+                                    if let Some(highway) = way.tags.get("highway") {
+                                        let priority = crate::fnv_esm::fnv_road_type(highway);
+                                        if priority > 0 {
+                                            let pts: Vec<(i32, i32)> =
+                                                way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                                            if pts.len() >= 2 {
+                                                return Some((priority, pts));
+                                            }
+                                        }
+                                    }
+                                }
+                                None
+                            })
+                            .collect()
+                    }
+                    Err(e) => {
+                        println!("Road data unavailable ({}); roads will not be painted.", e);
+                        Vec::new()
+                    }
+                };
+
+                return match crate::fnv_esm::generate_fnv_esm(
+                    &ground,
+                    &args.bbox,
+                    &xzbbox,
+                    &output_dir,
+                    None,
+                    world_scale,
+                    &road_polylines,
+                    skip_osm_objects
+                ) {
+                    Ok(_) => {
+                        let msg = format!("Done! Saved to: {}", output_dir.display());
+                        emit_gui_progress_update(100.0, &msg);
+                        println!("{}", msg.green().bold());
+                        // Pass the directory so Explorer opens to the folder, not tries to launch the .esm
+                        progress::emit_show_in_folder(&output_dir.to_string_lossy());
+                        Ok(())
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        progress::emit_gui_error(&e.to_string());
+                        Err(e.to_string())
+                    }
+                };
+            }
 
             // Determine world format from UI selection first (needed for session lock decision)
             let world_format = if world_format == "bedrock" {
@@ -967,6 +1100,8 @@ fn gui_start_generation(
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
                 disable_height_limit,
+                fnv_esm: false,
+                fnv_water_level: None,
                 benchmark: false,
             };
 
