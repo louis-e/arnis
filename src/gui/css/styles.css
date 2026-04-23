@@ -661,7 +661,11 @@ button:hover {
   opacity: 0;
   visibility: hidden;
   transition: opacity 0.15s ease, visibility 0.15s ease;
-  z-index: 10000;
+  /* Must exceed `.modal`'s z-index (20001). The tooltip element is a
+     body-level sibling of the settings modal, so without this the
+     modal overlay paints on top and the tooltip stays invisible even
+     though it's correctly positioned. */
+  z-index: 30000;
   pointer-events: none;
 }
 
