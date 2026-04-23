@@ -2,6 +2,7 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
 use crate::elevation::providers::regional::*;
+use crate::elevation::providers::usgs_3dep::Usgs3dep;
 
 /// Check if two EPSG:4326 bounding boxes overlap.
 pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {

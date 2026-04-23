@@ -9,96 +9,20 @@ use std::hash::{Hash, Hasher};
 /// the native-resolution data is preserved instead of the server
 /// downsampling (or rejecting the request).
 ///
-/// - **USGS 3DEP (ArcGIS ImageServer)**: documented hard cap is 8000,
-///   but empirically the server returns HTTP 500 ("Error exporting
-///   image") at ≥ 3000 per axis and hits gateway timeouts (504) at 4096+
-///   under load, even though smaller requests succeed quickly. Measured
-///   on the Grand Canyon bbox: 1024/2048/2500/2800 all return 200 in
-///   6-17 s; 3000/3717 return 500 after 18-22 s of server work. 2048 is
-///   a clean power-of-2 comfortably below the failure threshold.
 /// - **IGN France (WMS 1.3.0)**: 4096 is the safe MapServer default;
 ///   `data.geopf.fr` silently caps larger requests and interpolates.
 /// - **IGN Spain (WCS 2.0.1)**: 4096 is the conservative safe value for
 ///   `servicios.idee.es` — larger requests time out under load.
-const USGS_MAX_SINGLE: usize = 2048;
+///
+/// USGS 3DEP intentionally no longer appears here — its own implementation
+/// in `usgs_3dep.rs` uses a fixed global Web Mercator tile grid so adjacent
+/// user bboxes hit the same cacheable tiles, eliminating the inter-flight
+/// LiDAR seam artefacts that `tiled_fetch`'s bbox-adaptive splits produced.
+/// `tiled_fetch` is kept for the IGN providers because they (a) haven't
+/// reported the same artefacts in practice and (b) have different server
+/// behaviour than USGS 3DEP.
 const IGN_FRANCE_MAX_SINGLE: usize = 4096;
 const IGN_SPAIN_MAX_SINGLE: usize = 4096;
-
-/// USGS 3D Elevation Program (3DEP) — USA + territories.
-/// Resolution: up to 1m LiDAR (CONUS), 3m/10m elsewhere, fallback 30m.
-/// License: Public Domain (USGS).
-pub struct Usgs3dep;
-
-impl Usgs3dep {
-    fn fetch_tile(
-        &self,
-        bbox: &LLBBox,
-        grid_width: usize,
-        grid_height: usize,
-    ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
-        let url = format!(
-            "https://elevation.nationalmap.gov/arcgis/rest/services/3DEPElevation/ImageServer/exportImage\
-             ?bbox={},{},{},{}\
-             &bboxSR=4326&imageSR=4326\
-             &size={},{}\
-             &format=tiff&pixelType=F32\
-             &interpolation=RSP_BilinearInterpolation\
-             &f=image",
-            bbox.min().lng(), bbox.min().lat(),
-            bbox.max().lng(), bbox.max().lat(),
-            grid_width, grid_height
-        );
-
-        let cache_dir = get_cache_dir(self.name());
-        std::fs::create_dir_all(&cache_dir)?;
-
-        let cache_key = bbox_hash(bbox, grid_width, grid_height);
-        let cache_path = cache_dir.join(format!("{cache_key}.tiff"));
-
-        let bytes = fetch_or_cache(&url, &cache_path, None)?;
-        decode_geotiff_f32(&bytes, grid_width, grid_height)
-    }
-}
-
-impl ElevationProvider for Usgs3dep {
-    fn name(&self) -> &'static str {
-        "usgs_3dep"
-    }
-
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        Some(vec![
-            // CONUS
-            LLBBox::new(24.0, -125.0, 50.0, -66.0).unwrap(),
-            // Alaska
-            LLBBox::new(51.0, -180.0, 72.0, -129.0).unwrap(),
-            // Hawaii
-            LLBBox::new(18.5, -161.0, 22.5, -154.0).unwrap(),
-            // Puerto Rico + USVI
-            LLBBox::new(17.5, -68.0, 18.7, -64.0).unwrap(),
-            // Guam
-            LLBBox::new(13.2, 144.5, 13.7, 145.0).unwrap(),
-        ])
-    }
-
-    fn native_resolution_m(&self) -> f64 {
-        1.0
-    }
-
-    fn fetch_raw(
-        &self,
-        bbox: &LLBBox,
-        grid_width: usize,
-        grid_height: usize,
-    ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
-        tiled_fetch(
-            bbox,
-            grid_width,
-            grid_height,
-            USGS_MAX_SINGLE,
-            |sub_bbox, sub_w, sub_h| self.fetch_tile(sub_bbox, sub_w, sub_h),
-        )
-    }
-}
 
 /// IGN France RGE ALTI — France + overseas territories.
 /// Resolution: 1m mainland France, 1-5m overseas.
@@ -626,7 +550,7 @@ const RETRY_BASE_DELAY_MS: u64 = 750;
 /// Retries on 5xx responses and network errors with exponential backoff.
 /// 4xx responses are returned immediately (request is malformed).
 /// If `client` is provided, reuse it; otherwise build a new one.
-fn fetch_or_cache(
+pub(super) fn fetch_or_cache(
     url: &str,
     cache_path: &std::path::Path,
     client: Option<&reqwest::blocking::Client>,
@@ -723,7 +647,7 @@ fn is_valid_payload(bytes: &[u8]) -> bool {
 
 /// Decode a GeoTIFF containing float32 elevation values.
 /// Attempts to read the raster data and resample to requested grid dimensions.
-fn decode_geotiff_f32(
+pub(super) fn decode_geotiff_f32(
     bytes: &[u8],
     target_width: usize,
     target_height: usize,
@@ -995,279 +919,5 @@ mod tests {
             Err::<RawElevationGrid, _>("boom".into())
         });
         assert!(res.is_err());
-    }
-
-    /// Diagnose tile-boundary elevation discontinuities for the bbox that
-    /// produced the "horizontal cliff" artifacts. Fetches the user's bbox
-    /// via `tiled_fetch`, then measures the max absolute elevation jump
-    /// between adjacent rows (a) within a tile interior and (b) across
-    /// each horizontal tile boundary. If (b) >> (a), the raw stitched
-    /// grid has seams. Also independently fetches two adjacent sub-tiles
-    /// and checks whether their shared-boundary rows match — which isolates
-    /// whether the issue is in my stitching math or in what the server
-    /// returns.
-    ///
-    /// Manual run: `cargo test --release -- --ignored --nocapture
-    /// diag_usgs_tile_boundary_seam`
-    #[test]
-    #[ignore = "hits live USGS 3DEP servers; diagnostic for tile-boundary seams"]
-    fn diag_usgs_tile_boundary_seam() {
-        // User-reported bbox (smaller Grand Canyon area, 3 horizontal seams).
-        let bbox = LLBBox::new(36.061589, -112.148781, 36.135102, -112.038574).unwrap();
-        let grid_w = 9902usize;
-        let grid_h = 8175usize;
-        let provider = Usgs3dep;
-
-        eprintln!("=== Fetching stitched grid via tiled_fetch ===");
-        let raw = provider.fetch_raw(&bbox, grid_w, grid_h).expect("fetch");
-        let heights = raw.heights_meters;
-
-        // Compute expected tile partition (same math as tiled_fetch).
-        let tiles_y = grid_h.div_ceil(USGS_MAX_SINGLE);
-        let tile_size_y = grid_h.div_ceil(tiles_y);
-        let boundaries: Vec<usize> = (1..tiles_y).map(|ty| ty * tile_size_y).collect();
-        eprintln!(
-            "Expect {} horizontal boundaries at rows: {:?}",
-            boundaries.len(),
-            boundaries
-        );
-
-        // For each boundary, compute max |Δ| and mean |Δ| between the two
-        // adjacent stitched rows across all columns. Also compute the same
-        // for rows 5 above the boundary (within-tile reference).
-        let column_diff = |y_a: usize, y_b: usize| -> (f64, f64, usize) {
-            let mut max_abs = 0.0f64;
-            let mut sum_abs = 0.0f64;
-            let mut n = 0usize;
-            for (a, b) in heights[y_a].iter().zip(heights[y_b].iter()) {
-                if a.is_finite() && b.is_finite() {
-                    let d = (a - b).abs();
-                    if d > max_abs {
-                        max_abs = d;
-                    }
-                    sum_abs += d;
-                    n += 1;
-                }
-            }
-            (max_abs, if n > 0 { sum_abs / n as f64 } else { 0.0 }, n)
-        };
-
-        eprintln!("\n=== Row-to-row elevation deltas ===");
-        eprintln!(
-            "{:<8} {:<15} {:<15} {:<15}",
-            "row", "boundary?", "max|Δ|m", "mean|Δ|m"
-        );
-        for &yb in &boundaries {
-            // 5 rows above (within-tile), the boundary, and 5 rows below (within-tile).
-            if yb >= 5 {
-                let (m, a, _) = column_diff(yb - 5 - 1, yb - 5);
-                eprintln!("{:<8} {:<15} {:<15.3} {:<15.3}", yb - 5, "-", m, a);
-            }
-            let (m, a, n) = column_diff(yb - 1, yb);
-            eprintln!(
-                "{:<8} {:<15} {:<15.3} {:<15.3} (n={})",
-                yb, "YES (seam?)", m, a, n
-            );
-            if yb + 5 < grid_h {
-                let (m, a, _) = column_diff(yb + 5, yb + 5 + 1);
-                eprintln!("{:<8} {:<15} {:<15.3} {:<15.3}", yb + 5, "-", m, a);
-            }
-            eprintln!();
-        }
-
-        // Now independently fetch two adjacent sub-tiles and compare their
-        // shared-boundary rows.
-        eprintln!("=== Independent fetch of two adjacent sub-tiles ===");
-        let lat_span = 36.135102 - 36.061589;
-        let lng_span = -112.038574_f64 - (-112.148781);
-        let tile_size_x = grid_w.div_ceil(grid_w.div_ceil(USGS_MAX_SINGLE));
-        let sub_w = tile_size_x;
-        let sub_h = tile_size_y;
-
-        // Tile (0,0) — top-left
-        let t0_max_lat = 36.135102;
-        let t0_min_lat = 36.135102 - (sub_h as f64 / grid_h as f64) * lat_span;
-        let t0_min_lng = -112.148781;
-        let t0_max_lng = -112.148781 + (sub_w as f64 / grid_w as f64) * lng_span;
-        let t0_bbox = LLBBox::new(t0_min_lat, t0_min_lng, t0_max_lat, t0_max_lng).unwrap();
-        let t0 = provider.fetch_tile(&t0_bbox, sub_w, sub_h).expect("t0");
-
-        // Tile (1,0) — directly below tile 0 (same x column)
-        let t1_max_lat = t0_min_lat;
-        let t1_min_lat = 36.135102 - (2.0 * sub_h as f64 / grid_h as f64) * lat_span;
-        let t1_bbox = LLBBox::new(t1_min_lat, t0_min_lng, t1_max_lat, t0_max_lng).unwrap();
-        let t1 = provider.fetch_tile(&t1_bbox, sub_w, sub_h).expect("t1");
-
-        // Compare: last row of t0 (south edge) vs first row of t1 (north edge).
-        // With cell-edge convention, these sample different cells ~cell_h apart.
-        // A big mean |Δ| here means the server's sampling convention disagrees
-        // with my partition convention — real seam source.
-        let t0_last = &t0.heights_meters[sub_h - 1];
-        let t1_first = &t1.heights_meters[0];
-        let mut max_abs = 0.0f64;
-        let mut sum_abs = 0.0f64;
-        let mut n = 0usize;
-        for x in 0..sub_w {
-            let a = t0_last[x];
-            let b = t1_first[x];
-            if a.is_finite() && b.is_finite() {
-                let d = (a - b).abs();
-                if d > max_abs {
-                    max_abs = d;
-                }
-                sum_abs += d;
-                n += 1;
-            }
-        }
-        eprintln!(
-            "Tile0.last_row vs Tile1.first_row — max|Δ|={:.3} m, mean|Δ|={:.3} m (n={})",
-            max_abs,
-            if n > 0 { sum_abs / n as f64 } else { 0.0 },
-            n
-        );
-
-        // Also compare: what if we take tile0's SECOND-TO-LAST row (one cell
-        // above the boundary) and tile1's first row? If values are closer,
-        // the server is using inclusive-endpoints convention and there's a
-        // 1-row overlap at boundaries.
-        let t0_second_last = &t0.heights_meters[sub_h - 2];
-        let mut max_abs_2 = 0.0f64;
-        let mut sum_abs_2 = 0.0f64;
-        let mut n_2 = 0usize;
-        for x in 0..sub_w {
-            let a = t0_second_last[x];
-            let b = t1_first[x];
-            if a.is_finite() && b.is_finite() {
-                let d = (a - b).abs();
-                if d > max_abs_2 {
-                    max_abs_2 = d;
-                }
-                sum_abs_2 += d;
-                n_2 += 1;
-            }
-        }
-        eprintln!(
-            "Tile0.second_last_row vs Tile1.first_row — max|Δ|={:.3} m, mean|Δ|={:.3} m (n={})",
-            max_abs_2,
-            if n_2 > 0 { sum_abs_2 / n_2 as f64 } else { 0.0 },
-            n_2
-        );
-
-        // Orientation check. Tile 0 covers lat 36.117..36.135 (northern
-        // half of the bbox), tile 1 covers 36.098..36.117. In the Grand
-        // Canyon area this bbox straddles, northern latitudes are
-        // higher-elevation (closer to the North Rim), southern are lower
-        // (canyon interior). If the server returns rows top-down (row 0
-        // = max_lat), tile0.row0.mean should be HIGHER than
-        // tile0.row_last.mean. If bottom-up, the relationship inverts.
-        let row_mean = |row: &[f64]| -> f64 {
-            let (sum, n) = row
-                .iter()
-                .filter(|h| h.is_finite())
-                .fold((0.0f64, 0usize), |(s, c), h| (s + h, c + 1));
-            if n > 0 {
-                sum / n as f64
-            } else {
-                f64::NAN
-            }
-        };
-        eprintln!("\n=== Orientation probe ===");
-        eprintln!(
-            "Tile0 bbox: lat [{:.6}..{:.6}]   (row 0 SHOULD be north edge, row {} SHOULD be south edge if top-down)",
-            t0_bbox.min().lat(),
-            t0_bbox.max().lat(),
-            sub_h - 1
-        );
-        eprintln!(
-            "  row 0 mean: {:.1} m,   row {} mean: {:.1} m",
-            row_mean(&t0.heights_meters[0]),
-            sub_h - 1,
-            row_mean(&t0.heights_meters[sub_h - 1])
-        );
-        eprintln!(
-            "Tile1 bbox: lat [{:.6}..{:.6}]",
-            t1_bbox.min().lat(),
-            t1_bbox.max().lat()
-        );
-        eprintln!(
-            "  row 0 mean: {:.1} m,   row {} mean: {:.1} m",
-            row_mean(&t1.heights_meters[0]),
-            sub_h - 1,
-            row_mean(&t1.heights_meters[sub_h - 1])
-        );
-
-        // Also: if tiles are internally bottom-up, the stitched grid's
-        // row 0 (tile 0's row 0) would actually sample near the boundary
-        // between tile 0 and tile 1, NOT at the global max_lat. Check
-        // stitched[0] vs stitched[grid_h - 1].
-        eprintln!(
-            "Stitched row 0 mean: {:.1} m,  stitched row {} mean: {:.1} m",
-            row_mean(&heights[0]),
-            grid_h - 1,
-            row_mean(&heights[grid_h - 1])
-        );
-    }
-
-    /// Live end-to-end test against USGS 3DEP over the Grand Canyon
-    /// (~170 km²). At the current cap this triggers a 4×4 = 16 sub-tile
-    /// fetch and stitches a ~1.5 GB f64 grid. Verifies the server
-    /// doesn't 504 at the chosen cap and that the stitched output is
-    /// coherent (>98 % valid cells, elevations in the known physical
-    /// range for this bbox: floor ~700 m, rim ~2600 m).
-    ///
-    /// Manual run: `cargo test --release -- --ignored --nocapture
-    /// test_usgs_3dep_grand_canyon_tiling`
-    #[test]
-    #[ignore = "hits live USGS 3DEP servers and is memory-heavy"]
-    fn test_usgs_3dep_grand_canyon_tiling() {
-        let bbox = LLBBox::new(36.042437, -112.180023, 36.157281, -112.014542).unwrap();
-        let grid_w = 14868usize;
-        let grid_h = 12771usize;
-        let provider = Usgs3dep;
-
-        let start = std::time::Instant::now();
-        let raw = provider
-            .fetch_raw(&bbox, grid_w, grid_h)
-            .expect("USGS fetch must succeed — check for 504s in stderr");
-        let elapsed = start.elapsed();
-
-        assert_eq!(raw.heights_meters.len(), grid_h);
-        assert_eq!(raw.heights_meters[0].len(), grid_w);
-
-        let mut valid = 0usize;
-        let mut min_h = f64::INFINITY;
-        let mut max_h = f64::NEG_INFINITY;
-        for row in &raw.heights_meters {
-            for &h in row {
-                if h.is_finite() {
-                    valid += 1;
-                    min_h = min_h.min(h);
-                    max_h = max_h.max(h);
-                }
-            }
-        }
-        let total = grid_w * grid_h;
-        let ratio = valid as f64 / total as f64;
-        eprintln!(
-            "OK: {grid_w}×{grid_h} stitched in {:.1}s, {:.2}% valid, elev {:.0}..{:.0} m",
-            elapsed.as_secs_f64(),
-            ratio * 100.0,
-            min_h,
-            max_h
-        );
-
-        assert!(
-            ratio > 0.98,
-            "only {:.2}% valid cells — coverage or decoding problem",
-            ratio * 100.0
-        );
-        assert!(
-            (500.0..1500.0).contains(&min_h),
-            "min elevation {min_h} m outside Grand Canyon floor range"
-        );
-        assert!(
-            (1800.0..3000.0).contains(&max_h),
-            "max elevation {max_h} m outside Grand Canyon rim range"
-        );
     }
 }
