@@ -54,8 +54,7 @@ pub fn generate_landuse(
     };
 
     // Get the area of the landuse element using cache
-    let floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
     let trees_ok_to_generate: Vec<TreeType> = {
         let mut trees: Vec<TreeType> = vec![];
@@ -80,7 +79,7 @@ pub fn generate_landuse(
         trees
     };
 
-    for (x, z) in floor_area {
+    for &(x, z) in floor_area.iter() {
         // Apply per-block randomness for certain landuse types
         let actual_block = if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone
@@ -454,11 +453,10 @@ pub fn generate_place(
     };
 
     // Get the area using flood fill cache
-    let floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
     // Place ground blocks
-    for (x, z) in floor_area {
+    for &(x, z) in floor_area.iter() {
         editor.set_block(block_type, x, 0, z, None, None);
     }
 }

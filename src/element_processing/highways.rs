@@ -345,10 +345,9 @@ fn generate_highways_internal(
             }
 
             // Fill the area using flood fill cache
-            let filled_area: Vec<(i32, i32)> =
-                flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+            let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
-            for (x, z) in filled_area {
+            for &(x, z) in filled_area.iter() {
                 editor.set_block(surface_block, x, 0, z, None, None);
             }
         } else {

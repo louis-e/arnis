@@ -48,7 +48,11 @@ jobs:
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
           echo "peak_memory=${peak_mb}" >> $GITHUB_OUTPUT
-          gen_time=$(grep -oP '(?<=generation_time=)\d+' benchmark_log.txt || echo "")
+          gen_time_ms=$(grep -oP '(?<=generation_time_ms=)\d+' benchmark_log.txt || echo "")
+          gen_time=""
+          if [ -n "$gen_time_ms" ]; then
+            gen_time=$(( (gen_time_ms + 500) / 1000 ))
+          fi
           echo "gen_time=${gen_time}" >> $GITHUB_OUTPUT
 
       - name: End timer and calculate duration

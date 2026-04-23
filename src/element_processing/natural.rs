@@ -172,8 +172,7 @@ pub fn generate_natural(
 
             // If there are natural nodes, flood-fill the area using cache
             if corner_addup != (0, 0, 0) {
-                let filled_area: Vec<(i32, i32)> =
-                    flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+                let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
                 let trees_ok_to_generate: Vec<TreeType> = {
                     let mut trees: Vec<TreeType> = vec![];
@@ -214,7 +213,7 @@ pub fn generate_natural(
                     WATER,
                 ];
 
-                for (x, z) in filled_area {
+                for &(x, z) in filled_area.iter() {
                     // Don't overwrite road/path blocks with natural ground
                     if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
                         let b = if rock_variation {
