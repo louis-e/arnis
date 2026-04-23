@@ -67,7 +67,8 @@ pub fn generate_railways(
                 WHITE_CONCRETE,
                 DIRT_PATH,
             ];
-            for (x, z) in flood_fill_cache.get_or_compute(element, args.timeout.as_ref()) {
+            let platform_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+            for &(x, z) in platform_area.iter() {
                 if editor.check_for_block(x, 0, z, Some(ROAD_SURFACE_BLOCKS)) {
                     continue;
                 }
