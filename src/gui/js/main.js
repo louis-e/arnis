@@ -117,6 +117,7 @@ async function applyLocalization(localization) {
     "span[data-localize='fillground']": "fillground",
     "span[data-localize='land_cover']": "land_cover",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
+    "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
@@ -523,23 +524,18 @@ function updateFormatToggleUI(format) {
 
   const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
 
+  // Toggle now supported on both formats (Java datapack + Bedrock BP).
+  if (heightLimitToggle) {
+    heightLimitToggle.disabled = false;
+    heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
+  }
+
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
-    // Re-enable height limit toggle for Java
-    if (heightLimitToggle) {
-      heightLimitToggle.disabled = false;
-      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
-    }
   } else {
     javaBtn.classList.remove('format-active');
     bedrockBtn.classList.add('format-active');
-    // Disable height limit toggle for Bedrock (not supported)
-    if (heightLimitToggle) {
-      heightLimitToggle.checked = false;
-      heightLimitToggle.disabled = true;
-      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
-    }
     // Clear world path for bedrock (auto-generated)
     worldPath = "";
   }

@@ -1,6 +1,4 @@
 use crate::land_cover::{LandCoverData, LC_BUILT_UP, LC_WATER};
-#[cfg(feature = "gui")]
-use crate::telemetry::{send_log, LogLevel};
 use rayon::prelude::*;
 use std::collections::VecDeque;
 
@@ -1157,11 +1155,14 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
 }
 
 /// Scale raw elevation (meters) to Minecraft Y coordinates, keeping f64 precision.
+/// `extended_max_y` is the cap when `disable_height_limit` is on (Java datapack:
+/// 2031; Bedrock BP: 512); ignored otherwise.
 pub fn scale_to_minecraft(
     blurred_heights: &[Vec<f64>],
     scale: f64,
     ground_level: i32,
     disable_height_limit: bool,
+    extended_max_y: i32,
 ) -> Vec<Vec<f64>> {
     // Derive min/max
     let (min_height, max_height) = blurred_heights
@@ -1189,16 +1190,17 @@ pub fn scale_to_minecraft(
             (min_height, max_height, max_height - min_height)
         };
 
-    let ideal_scaled_range: f64 = height_range * scale;
-    let available_y_range: f64 = (MAX_Y - TERRAIN_HEIGHT_BUFFER - ground_level) as f64;
+    let effective_max_y = if disable_height_limit {
+        extended_max_y
+    } else {
+        MAX_Y
+    };
+    let upper_clamp = (effective_max_y - TERRAIN_HEIGHT_BUFFER) as f64;
 
-    let scaled_range: f64 = if disable_height_limit {
-        eprintln!(
-            "Height limit disabled: {:.1}m range => {:.0} blocks (no compression)",
-            height_range, ideal_scaled_range
-        );
-        ideal_scaled_range
-    } else if ideal_scaled_range <= available_y_range {
+    let ideal_scaled_range: f64 = height_range * scale;
+    let available_y_range: f64 = (effective_max_y - TERRAIN_HEIGHT_BUFFER - ground_level) as f64;
+
+    let scaled_range: f64 = if ideal_scaled_range <= available_y_range {
         eprintln!(
             "Realistic elevation: {:.1}m range fits in {} available blocks",
             height_range, available_y_range as i32
@@ -1229,41 +1231,11 @@ pub fn scale_to_minecraft(
                     };
                     let scaled_height: f64 = relative_height * scaled_range;
                     let mc_y = ground_level as f64 + scaled_height;
-                    if disable_height_limit {
-                        mc_y
-                    } else {
-                        mc_y.clamp(ground_level as f64, (MAX_Y - TERRAIN_HEIGHT_BUFFER) as f64)
-                    }
+                    mc_y.clamp(ground_level as f64, upper_clamp)
                 })
                 .collect()
         })
         .collect();
-
-    // Warn if terrain exceeds the absolute Minecraft data pack maximum
-    const DATA_PACK_MAX_Y: i32 = 2031;
-    if disable_height_limit {
-        let max_block_height = mc_heights
-            .iter()
-            .flat_map(|row| row.iter())
-            .copied()
-            .fold(f64::MIN, f64::max)
-            .round() as i32;
-        if max_block_height > DATA_PACK_MAX_Y {
-            eprintln!(
-                "Warning: Terrain peak reaches Y={}, which exceeds the maximum data pack height (Y={}). \
-                 Blocks above Y={} will be truncated.",
-                max_block_height, DATA_PACK_MAX_Y, DATA_PACK_MAX_Y
-            );
-            #[cfg(feature = "gui")]
-            send_log(
-                LogLevel::Warning,
-                &format!(
-                    "Terrain peak Y={} exceeds data pack max Y={}. Blocks will be truncated.",
-                    max_block_height, DATA_PACK_MAX_Y
-                ),
-            );
-        }
-    }
 
     mc_heights
 }

@@ -42,7 +42,7 @@
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
   "land_cover": "Marktäcke",
-  "disable_height_limit": "Inaktivera höjdgräns",
+  "disable_height_limit": "Utöka byggnadshöjd",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "save_path": "Sökväg",
   "rotation_angle": "Rotationsvinkel",
@@ -51,5 +51,6 @@
   "settings_section_map": "Karta och inmatning",
   "settings_section_application": "Applikation",
   "clear_tile_cache": "Rensa plattcache",
-  "clear_tile_cache_button": "Rensa"
+  "clear_tile_cache_button": "Rensa",
+  "anonymous_crash_reports": "Anonyma kraschrapporter"
 }

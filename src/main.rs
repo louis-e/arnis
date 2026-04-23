@@ -141,6 +141,20 @@ fn run_cli() {
             "Created new world at: {}",
             world_path.display().to_string().bright_white().bold()
         );
+        if args.disable_height_limit {
+            if let Err(e) = world_utils::install_tall_datapack(&world_path) {
+                eprintln!(
+                    "{} Failed to install tall-world datapack: {}",
+                    "Error:".red().bold(),
+                    e
+                );
+                std::process::exit(1);
+            }
+            eprintln!(
+                "Note: tall-world datapack installed (requires Minecraft 1.21.4+). \
+                 First load will prompt 'Experimental Features'; world can't be uploaded to Realms."
+            );
+        }
         (world_path, None)
     };
 

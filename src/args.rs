@@ -83,10 +83,8 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
 
-    /// Disable the Minecraft build height limit (Y=319).
-    /// When enabled, terrain will use realistic 1:1 scaling without compression,
-    /// even if it exceeds the vanilla height limit.
-    /// Requires a Minecraft data pack that increases the world height.
+    /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031;
+    /// Bedrock 1.21.40+: Y=-512..512). Both are experimental.
     #[arg(long, default_value_t = false)]
     pub disable_height_limit: bool,
 
