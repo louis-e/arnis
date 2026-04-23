@@ -136,8 +136,16 @@ pub(super) struct TileKey<R: Resolution> {
 impl<R: Resolution> TileKey<R> {
     pub fn for_mercator(level: R, mx: f64, my: f64) -> Self {
         let span = level.tile_span_meters();
-        let tile_x = ((mx + MERCATOR_LIMIT) / span).floor() as i32;
-        let tile_y = ((MERCATOR_LIMIT - my) / span).floor() as i32;
+        // Clamp to the same [0, max_tile] range covering_tiles emits.
+        // At the exact east edge (mx == MERCATOR_LIMIT, i.e. lng = +180°)
+        // or south edge (my == -MERCATOR_LIMIT, i.e. latitudes clamped
+        // below the Mercator south limit), the raw floor produces `N`
+        // while covering_tiles caps at `N - 1` via ceil()-1. Without the
+        // clamp, those boundary samples would miss the cache and the
+        // eastmost/southmost column/row would stay NaN.
+        let max_tile = (((2.0 * MERCATOR_LIMIT) / span).ceil() as i32 - 1).max(0);
+        let tile_x = (((mx + MERCATOR_LIMIT) / span).floor() as i32).clamp(0, max_tile);
+        let tile_y = (((MERCATOR_LIMIT - my) / span).floor() as i32).clamp(0, max_tile);
         Self {
             level,
             tile_x,
@@ -359,9 +367,16 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
     }
 
     let (bbox_w_m, bbox_h_m) = bbox_dimensions_m(bbox);
-    let cell_x = bbox_w_m / grid_width.max(1) as f64;
-    let cell_y = bbox_h_m / grid_height.max(1) as f64;
-    // Use the finer axis so we don't picked a coarse level when one
+    // Divide by (grid - 1) to match the sampling convention below
+    // (`lng_frac = gx / (grid_width - 1)`): actual per-cell spacing is
+    // bbox_w_m / (grid_width - 1), not bbox_w_m / grid_width. Using the
+    // wrong denominator here slightly underestimates cell size and can
+    // push a borderline request into a finer level (more downloads).
+    let w_div = (grid_width - 1).max(1) as f64;
+    let h_div = (grid_height - 1).max(1) as f64;
+    let cell_x = bbox_w_m / w_div;
+    let cell_y = bbox_h_m / h_div;
+    // Use the finer axis so we don't pick a coarse level when one
     // axis is much more sampled than the other (e.g. a thin strip).
     let cell_size_m = cell_x.min(cell_y);
 
@@ -546,6 +561,38 @@ mod tests {
             let k: TileKey<TestLevel> = TileKey::for_mercator(level, mx, my);
             assert!(k.min_mx() <= mx && mx < k.max_mx());
             assert!(k.min_my() < my && my <= k.max_my());
+        }
+    }
+
+    /// Regression: samples exactly on the world's east / south Mercator
+    /// edge used to produce a tile index one past `covering_tiles`' max,
+    /// leaving the edge row/column NaN. `for_mercator`'s clamp now keeps
+    /// those points inside `[0, max_tile]`, matching the range
+    /// `covering_tiles` populates via `.ceil() - 1`.
+    #[test]
+    fn for_mercator_clamps_at_world_edges() {
+        for level in [TestLevel::M1, TestLevel::M3, TestLevel::M10] {
+            let span = level.tile_span_meters();
+            let max_tile = ((2.0 * MERCATOR_LIMIT) / span).ceil() as i32 - 1;
+
+            // East edge: mx == +MERCATOR_LIMIT. Without the clamp, the
+            // raw floor produced max_tile + 1.
+            let k_east: TileKey<TestLevel> = TileKey::for_mercator(level, MERCATOR_LIMIT, 0.0);
+            assert!(k_east.tile_x >= 0 && k_east.tile_x <= max_tile);
+
+            // South edge: my == -MERCATOR_LIMIT.
+            let k_south: TileKey<TestLevel> = TileKey::for_mercator(level, 0.0, -MERCATOR_LIMIT);
+            assert!(k_south.tile_y >= 0 && k_south.tile_y <= max_tile);
+
+            // Interior points are untouched — the tile still contains
+            // the sample coordinate.
+            let mx = -5_000_000.0;
+            let my = 4_321_000.0;
+            let k_mid: TileKey<TestLevel> = TileKey::for_mercator(level, mx, my);
+            assert!(k_mid.tile_x >= 0 && k_mid.tile_x <= max_tile);
+            assert!(k_mid.tile_y >= 0 && k_mid.tile_y <= max_tile);
+            assert!(k_mid.min_mx() <= mx && mx < k_mid.max_mx());
+            assert!(k_mid.min_my() < my && my <= k_mid.max_my());
         }
     }
 
