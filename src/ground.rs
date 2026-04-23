@@ -90,11 +90,6 @@ impl Ground {
             },
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
-                // One summary log per session — the final failure message
-                // is actionable (it tells us the whole chain went down,
-                // not just a single provider). Including the truncated
-                // error distinguishes network outages from provider
-                // coverage gaps.
                 #[cfg(feature = "gui")]
                 send_log(
                     LogLevel::Warning,

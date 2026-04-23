@@ -50,7 +50,7 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
 
 pub fn emit_gui_error(message: &str) {
     // Truncate by characters (not bytes) to avoid panicking when the GUI
-    // status bar receives an error containing multi-byte UTF-8 — e.g.
+    // status bar receives an error containing multi-byte UTF-8. e.g.
     // localized OS error messages like "Недостаточно системных ресурсов…"
     // where byte 35 lands inside a Cyrillic character.
     const MAX_CHARS: usize = 35;

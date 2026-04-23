@@ -189,11 +189,6 @@ pub fn fetch_land_cover_data(
         ) {
             Ok(()) => {}
             Err(e) => {
-                // Tile-level failure is graceful degradation: the affected
-                // cells stay at 0 and the generation continues. Logged to
-                // stderr for developer debugging but NOT telemetered —
-                // it fired ~20% of telemetry volume without ever being
-                // actionable by us or the user.
                 eprintln!("Warning: Failed to read ESA tile {tile_url}: {e}");
             }
         }
@@ -203,11 +198,6 @@ pub fn fetch_land_cover_data(
     let has_data = grid.iter().any(|row| row.iter().any(|&v| v != 0));
     if !has_data {
         eprintln!("Warning: No land cover data received for this area");
-        // One summary log per session if ESA WorldCover returned nothing
-        // for the bbox at all — generation continues without land-cover
-        // (only OSM surfaces), but the visual result is noticeably worse
-        // and the user usually can't tell why. Knowing that the entire
-        // coverage was empty (not just a few tiles) is actionable for us.
         #[cfg(feature = "gui")]
         send_log(
             LogLevel::Warning,

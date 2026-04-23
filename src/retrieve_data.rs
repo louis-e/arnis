@@ -15,9 +15,7 @@ use std::io::{self, BufReader, Cursor, Write};
 use std::process::Command;
 use std::time::Duration;
 
-/// Extract the host portion of a URL for telemetry (strips the scheme,
-/// path, and query — no need to log the entire Overpass QL query when
-/// identifying which provider a request hit).
+/// Extract the host portion of a URL for telemetry
 fn url_host(url: &str) -> String {
     let after_scheme = url.split("://").nth(1).unwrap_or(url);
     after_scheme
@@ -76,10 +74,6 @@ fn download_with_reqwest(
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else {
-                // Per-attempt errors intentionally NOT telemetered — the
-                // outer retry loop falls through to other providers and
-                // logs a single summary only if the entire chain fails.
-                // See `fetch_data_from_overpass`.
                 eprintln!("{}", format!("Error! {e:.52}").red().bold());
                 Err(format!("{e:.52}").into())
             }
@@ -283,10 +277,7 @@ pub fn fetch_data_from_overpass(
                     }
                 }
             }
-            // All servers exhausted — telemeter one summary log instead of
-            // one per attempt, since the retry chain is expected to see
-            // individual failures and only the "every provider is down"
-            // outcome is actionable.
+            // All servers exhausted
             #[cfg(feature = "gui")]
             {
                 let err_summary = last_error
