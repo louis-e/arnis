@@ -2081,7 +2081,19 @@ pub fn generate_fnv_esm(
     file_bytes.extend_from_slice(&tes4);
     file_bytes.extend_from_slice(&wrld_grup);
 
-    let out_path = output_dir.join("arnis_worldspace.esm");
+    let resolved_dir = if output_dir.is_dir() {
+        output_dir.to_path_buf()
+    } else {
+        println!(
+            "  Note: specified output directory not found; writing to executable directory instead."
+        );
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    };
+
+    let out_path = resolved_dir.join("arnis_worldspace.esm");
     fs::write(&out_path, &file_bytes)
         .map_err(|e| format!("Failed to write ESM file: {}", e))?;
 

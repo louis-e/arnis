@@ -834,10 +834,21 @@ fn gui_start_generation(
                 };
 
                 let output_dir = if world_path.as_os_str().is_empty() {
-                    PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR)
+                    // Output dir is empty, try using  default "Data" folder.
+                    if PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR).is_dir() {
+                        PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR)
+                    }
+                    else {
+                        // Data folder does not exist, use current directory
+                        std::env::current_exe()
+                        .ok()
+                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                    }
                 } else {
                     world_path.clone()
                 };
+
                 eprintln!("[FNV] selected_world={:?}  output_dir={:?}", world_path, output_dir);
 
                 let (_transformer, xzbbox) =
