@@ -190,8 +190,6 @@ pub fn fetch_land_cover_data(
             Ok(()) => {}
             Err(e) => {
                 eprintln!("Warning: Failed to read ESA tile {tile_url}: {e}");
-                #[cfg(feature = "gui")]
-                send_log(LogLevel::Warning, "Failed to fetch some land cover data");
             }
         }
     }
@@ -200,6 +198,11 @@ pub fn fetch_land_cover_data(
     let has_data = grid.iter().any(|row| row.iter().any(|&v| v != 0));
     if !has_data {
         eprintln!("Warning: No land cover data received for this area");
+        #[cfg(feature = "gui")]
+        send_log(
+            LogLevel::Warning,
+            "ESA WorldCover returned no data for the requested bbox (generation proceeding without land cover).",
+        );
         return None;
     }
 
