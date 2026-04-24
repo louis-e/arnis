@@ -83,21 +83,6 @@ pub fn generate_world_with_options(
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
-    // Process all elements (no longer need to partition boundaries)
-    let elements_count: usize = elements.len();
-    let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
-    process_pb.set_style(ProgressStyle::default_bar()
-        .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
-        .unwrap()
-        .progress_chars("█▓░"));
-
-    let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
-    let mut current_progress_prcs: f64 = 25.0;
-    let mut last_emitted_progress: f64 = current_progress_prcs;
-    let desired_updates: u64 = 500;
-    let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
-    let mut element_counter: u64 = 0;
-
     // Pre-scan: detect building relation outlines that should be suppressed.
     // Only applies to type=building relations (NOT type=multipolygon).
     // When a type=building relation has "part" members, the outline way should not
@@ -125,8 +110,73 @@ pub fn generate_world_with_options(
         outlines
     };
 
-    // Process all elements
+    // Separate landuse elements from other elements
+    let mut landuse_elements: Vec<ProcessedElement> = Vec::new();
+    let mut other_elements: Vec<ProcessedElement> = Vec::new();
+
     for element in elements.into_iter() {
+        match &element {
+            // First landuse
+            ProcessedElement::Way(way) if way.tags.contains_key("landuse") => {
+                landuse_elements.push(element);
+            }
+            ProcessedElement::Relation(rel) if rel.tags.contains_key("landuse") => {
+                landuse_elements.push(element);
+            }
+            // Then others
+            _ => {
+                other_elements.push(element);
+            }
+        }
+    }
+
+    // Sort landuse elements by priority (grass > meadow > forest)
+    landuse_elements.sort_by(|a, b| {
+        let get_priority = |elem: &ProcessedElement| -> u8 {
+            match elem {
+                ProcessedElement::Way(way) => match way.tags.get("landuse").unwrap().as_str() {
+                    "grass" => 3,
+                    "meadow" => 2,
+                    "forest" => 1,
+                    _ => 0,
+                },
+                ProcessedElement::Relation(rel) => match rel.tags.get("landuse").unwrap().as_str() {
+                    "grass" => 3,
+                    "meadow" => 2,
+                    "forest" => 1,
+                    _ => 0,
+                },
+                _ => 0,
+            }
+        };
+        let b_prio = get_priority(b);
+        let a_prio = get_priority(a);
+        b_prio.cmp(&a_prio)
+    });
+
+    // Combine all elements in the correct order
+    let sorted_elements = other_elements
+        .into_iter()
+        .chain(landuse_elements.into_iter())
+        .collect::<Vec<_>>();
+
+    // Set elements count to new length
+    let elements_count: usize = sorted_elements.len();
+    let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
+    process_pb.set_style(ProgressStyle::default_bar()
+        .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} elements ({eta}) {msg}")
+        .unwrap()
+        .progress_chars("█▓░"));
+
+    let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
+    let mut current_progress_prcs: f64 = 25.0;
+    let mut last_emitted_progress: f64 = current_progress_prcs;
+    let desired_updates: u64 = 500;
+    let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
+    let mut element_counter: u64 = 0;
+
+    // Process all elements
+    for element in sorted_elements.into_iter() {
         element_counter += 1;
         if element_counter.is_multiple_of(pb_batch_size) {
             process_pb.inc(pb_batch_size);

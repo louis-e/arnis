@@ -135,6 +135,17 @@ pub fn generate_landuse(
             ]),
         );
 
+        let new_prio = WorldEditor::landuse_priority(landuse_tag);
+
+        // Check if high prio landuse already exists
+        if let Some(existing_prio) = editor.get_landuse_priority(x, z) {
+            if existing_prio >= new_prio {
+                continue;
+            }
+        }
+
+        editor.set_landuse(x, z, landuse_tag);
+
         if landuse_tag == "traffic_island" {
             editor.set_block(actual_block, x, 1, z, None, None);
         } else if landuse_tag == "construction" || landuse_tag == "railway" {
