@@ -114,7 +114,7 @@ impl Block {
             13 => "cobblestone",
             14 => "polished_blackstone_bricks",
             15 => "cracked_stone_bricks",
-            16 => "crimson_planks",
+            16 => "lever",
             17 => "cut_sandstone",
             18 => "cyan_concrete",
             19 => "dark_oak_planks",
@@ -242,6 +242,7 @@ impl Block {
             151 => "deepslate",
             152 => "tuff",
             153 => "cobbled_deepslate",
+            154 => "water_cauldron",
             155 => "chest",
             156 => "red_carpet",
             157 => "anvil",
@@ -770,6 +771,7 @@ pub const COBBLESTONE_WALL: Block = Block::new(12);
 pub const COBBLESTONE: Block = Block::new(13);
 pub const POLISHED_BLACKSTONE_BRICKS: Block = Block::new(14);
 pub const CRACKED_STONE_BRICKS: Block = Block::new(15);
+pub const LEVER: Block = Block::new(16);
 
 pub const CYAN_CONCRETE: Block = Block::new(18);
 pub const DARK_OAK_PLANKS: Block = Block::new(19);
@@ -904,6 +906,7 @@ pub const MOSSY_STONE_BRICKS: Block = Block::new(150);
 pub const DEEPSLATE: Block = Block::new(151);
 pub const TUFF: Block = Block::new(152);
 pub const COBBLED_DEEPSLATE: Block = Block::new(153);
+pub const WATER_CAULDRON: Block = Block::new(154);
 pub const CHEST: Block = Block::new(155);
 pub const RED_CARPET: Block = Block::new(156);
 pub const ANVIL: Block = Block::new(157);
