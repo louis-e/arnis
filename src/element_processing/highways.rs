@@ -2,10 +2,11 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::surfaces::{
     get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
 };
-use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
@@ -188,21 +189,12 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     WHITE_CONCRETE,
 ];
 
-/// True when the way should render as a pedestrian walkway — dedicated
-/// footways, pedestrian plazas, stairs, footway subtypes (sidewalk,
-/// crossing, …), or the area-style `area:highway=footway`/`pedestrian`.
-/// Used together with a `surface=concrete`/`paving_stones`/`sett` tag to
-/// switch the block to `SMOOTH_STONE`, which reads as a paved sidewalk
+/// True when the way should render as a pedestrian walkway
 /// rather than asphalt.
 fn is_pedestrian_way(element: &ProcessedElement) -> bool {
     let tags = element.tags();
     if let Some(h) = tags.get("highway") {
         if matches!(h.as_str(), "footway" | "pedestrian" | "steps") {
-            return true;
-        }
-    }
-    if let Some(h) = tags.get("area:highway") {
-        if matches!(h.as_str(), "footway" | "pedestrian") {
             return true;
         }
     }
@@ -225,6 +217,7 @@ pub fn generate_highways(
     args: &Args,
     highway_connectivity: &HighwayConnectivityMap,
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap,
 ) {
     generate_highways_internal(
         editor,
@@ -232,6 +225,7 @@ pub fn generate_highways(
         args,
         highway_connectivity,
         flood_fill_cache,
+        road_mask,
     );
 }
 
@@ -282,6 +276,7 @@ fn generate_highways_internal(
     args: &Args,
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
     flood_fill_cache: &FloodFillCache,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Shared `indoor=yes` / layer parsing for the whole function. Indoor
     // highways must never produce elevated geometry (they sit inside
@@ -320,29 +315,65 @@ fn generate_highways_internal(
             if let Some(crossing_type) = element.tags().get("crossing") {
                 if crossing_type == "traffic_signals" {
                     if let ProcessedElement::Node(node) = element {
-                        let x: i32 = node.x;
-                        let z: i32 = node.z;
+                        let x = node.x;
+                        let z = node.z;
 
-                        // Traffic light blocks. Layer boost rides with the
-                        // overpass the signal belongs to — consistent with
-                        // street_lamp / bus_stop above.
-                        editor.set_block(COBBLESTONE_WALL, x, layer_boost + 1, z, None, None);
-                        editor.set_block(IRON_BARS, x, layer_boost + 2, z, None, None);
-                        editor.set_block(IRON_BARS, x, layer_boost + 3, z, None, None);
+                        // Try to build a hanging signal if it's on a road
+                        let anchor = road_mask
+                            .contains(x, z)
+                            .then(|| get_nearest_non_road_block(x, z, 4, road_mask))
+                            .flatten();
+
+                        match anchor {
+                            Some((ax, az)) => {
+                                // Hanging signal: pole at roadside anchor, bars strung across
+                                editor.set_block(
+                                    COBBLESTONE_WALL,
+                                    ax,
+                                    layer_boost + 1,
+                                    az,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block(IRON_BARS, ax, layer_boost + 2, az, None, None);
+                                editor.set_block(IRON_BARS, ax, layer_boost + 3, az, None, None);
+                                editor.set_block(IRON_BARS, ax, layer_boost + 4, az, None, None);
+                                editor.set_block(IRON_BARS, ax, layer_boost + 5, az, None, None);
+
+                                let y = editor.get_absolute_y(x, layer_boost + 5, z);
+                                for (lx, _, lz) in bresenham_line(x, y, z, ax, y, az) {
+                                    editor.set_block(
+                                        IRON_BARS,
+                                        lx,
+                                        layer_boost + 6,
+                                        lz,
+                                        None,
+                                        None,
+                                    );
+                                }
+                            }
+                            None => {
+                                // Standalone pole (off-road or no anchor found)
+                                editor.set_block(
+                                    COBBLESTONE_WALL,
+                                    x,
+                                    layer_boost + 1,
+                                    z,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block(IRON_BARS, x, layer_boost + 2, z, None, None);
+                                editor.set_block(IRON_BARS, x, layer_boost + 3, z, None, None);
+                            }
+                        }
+
+                        // Signal head (shared for both cases)
                         editor.set_block(BLACK_WOOL, x, layer_boost + 4, z, None, None);
                         editor.set_block(BLACK_WOOL, x, layer_boost + 5, z, None, None);
 
-                        // Banner placement logic
-                        let abs_y = editor.get_absolute_y(x, layer_boost + 5, z);
-                        let banner_offsets: [(i32, i32, &str); 4] = [
-                            (0, -1, "north"),
-                            (0, 1, "south"),
-                            (-1, 0, "west"),
-                            (1, 0, "east"),
-                        ];
-
-                        // patterns expressed as (java_color, java_pattern_id) pairs
-                        // so both Java and Bedrock writers can use them.
+                        // Banner placement logic. Patterns expressed as
+                        // (java_color, java_pattern_id) pairs so both Java
+                        // and Bedrock writers can use them.
                         const BANNER_PATTERNS: &[(&str, &str)] = &[
                             ("red", "minecraft:triangle_top"),
                             ("lime", "minecraft:triangle_bottom"),
@@ -351,6 +382,13 @@ fn generate_highways_internal(
                             ("black", "minecraft:border"),
                         ];
 
+                        let abs_y = editor.get_absolute_y(x, layer_boost + 5, z);
+                        let banner_offsets: [(i32, i32, &str); 4] = [
+                            (0, -1, "north"),
+                            (0, 1, "south"),
+                            (-1, 0, "west"),
+                            (1, 0, "east"),
+                        ];
                         for (dx, dz, facing) in &banner_offsets {
                             editor.place_wall_banner(
                                 LIGHT_GRAY_WALL_BANNER,
@@ -388,18 +426,7 @@ fn generate_highways_internal(
 
             // Handle areas like pedestrian plazas. Unified surface handling
             // via the shared surfaces module.
-            let surface_block: Block = if is_pedestrian_way(element)
-                && matches!(
-                    element.tags().get("surface").map(|s| s.as_str()),
-                    Some("concrete" | "paving_stones" | "sett")
-                ) {
-                // Same smooth-stone override as the linear pedestrian
-                // path: keeps plazas visually coherent with the sidewalks
-                // feeding into them.
-                SMOOTH_STONE
-            } else {
-                get_blocks_for_surface_way(way, &[STONE])[0]
-            };
+            let surface_block: Block = get_blocks_for_surface_way(way, &[STONE])[0];
 
             // Fill the area using flood fill cache
             let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
@@ -1314,7 +1341,7 @@ pub(crate) fn highway_block_range(
 ///   (street_lamp, crossing, bus_stop) are excluded, matching the renderer's
 ///   early-return guards.
 ///
-/// This lets `find_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
+/// This lets `get_nearest_road_block` in `amenities.rs` or other processors do a single O(1) bitmap lookup
 /// instead of live `get_ground_level` + `check_for_block_absolute` world scans.
 pub fn collect_road_surface_coords(
     elements: &[ProcessedElement],

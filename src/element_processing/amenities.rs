@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
 use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
+use crate::element_processing::get_nearest_road_block;
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
@@ -13,33 +14,8 @@ use rand::{
 };
 use std::collections::{HashMap, HashSet};
 
-/// Looks outward from (x, z) in each of the four cardinal directions,
-/// up to max_radius blocks away, and returns the (x, z) position of
-/// the nearest road node found.
-///
-/// Returns None if no road node exists within range.
-/// Callers can use the returned position to derive a facing direction,
-/// compute a distance, or do anything else they need.
-fn get_nearest_road_block(
-    x: i32,
-    z: i32,
-    max_radius: i32,
-    road_mask: &RoadMaskBitmap,
-) -> Option<(i32, i32)> {
-    // Begins at 2 and skips to 4, 6, 8, etc.
-    for dist in (2..=max_radius).step_by(2) {
-        // Cross pattern: North, South, West, East
-        let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
 
-        for (cx, cz) in candidates {
-            if road_mask.contains(cx, cz) {
-                return Some((cx, cz));
-            }
-        }
-    }
 
-    None
-}
 
 pub fn generate_amenities(
     editor: &mut WorldEditor,
