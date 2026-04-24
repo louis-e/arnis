@@ -496,13 +496,6 @@ impl Block {
                 map
             })),
 
-            // water_cauldron defaults to full (level=3)
-            154 => Some(Value::Compound({
-                let mut map: HashMap<String, Value> = HashMap::new();
-                map.insert("level".to_string(), Value::String("3".to_string()));
-                map
-            })),
-
             // Red bed variations by direction and part
             161 => Some(Value::Compound({
                 let mut map: HashMap<String, Value> = HashMap::new();
