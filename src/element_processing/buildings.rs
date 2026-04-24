@@ -3391,23 +3391,53 @@ fn calculate_roof_peak_height(
     base_height + roof_height_boost
 }
 
-/// Parses roof:shape tag into RoofType enum
+/// Parses roof:shape tag into RoofType enum.
+///
+/// Tag frequencies from OSM taginfo are used to decide which synonyms
+/// deserve a mapping: anything above ~0.1% is handled here so those
+/// buildings get a pitched roof instead of falling through to Flat.
 fn parse_roof_type(roof_shape: &str) -> RoofType {
     match roof_shape {
-        "gabled" => RoofType::Gabled,
-        "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" => RoofType::Hipped,
-        "skillion" => RoofType::Skillion,
+        // Gabled variants: "pitched" is a common synonym; saltbox/gabled_row
+        // are asymmetric/repeated gables that still read as gabled at block
+        // resolution.
+        "gabled" | "pitched" | "saltbox" | "double_saltbox" | "quadruple_saltbox"
+        | "gabled_row" => RoofType::Gabled,
+        "hipped" | "half-hipped" | "gambrel" | "mansard" | "round" | "side_hipped"
+        | "side_half-hipped" => RoofType::Hipped,
+        "skillion" | "lean_to" => RoofType::Skillion,
         "pyramidal" => RoofType::Pyramidal,
         "dome" | "onion" | "cone" | "circular" | "spherical" => RoofType::Dome,
         _ => RoofType::Flat,
     }
 }
 
-/// Checks if building type qualifies for automatic gabled roof
+/// Checks if building type qualifies for automatic gabled roof.
+///
+/// Single-family/low-rise residential and agricultural buildings should
+/// default to a pitched roof in the absence of an explicit roof:shape tag,
+/// since real-world buildings of these types almost never have flat roofs.
 fn qualifies_for_auto_gabled_roof(building_type: &str) -> bool {
     matches!(
         building_type,
-        "apartments" | "residential" | "house" | "yes"
+        "apartments"
+            | "residential"
+            | "house"
+            | "yes"
+            | "detached"
+            | "semidetached_house"
+            | "terrace"
+            | "bungalow"
+            | "villa"
+            | "cabin"
+            | "hut"
+            | "farm"
+            | "farm_auxiliary"
+            | "barn"
+            | "stable"
+            | "cowshed"
+            | "sty"
+            | "sheepfold"
     )
 }
 
@@ -3467,9 +3497,14 @@ pub fn generate_buildings(
         multiply_scale(min_level * 4, scale_factor)
     };
 
-    // Get cached floor area
-    let mut cached_floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    // Get cached floor area. Hole carving below needs `retain`, which requires
+    // ownership, so we materialize a Vec here. Buildings typically have small
+    // footprints (tens to hundreds of cells), so the deep copy is cheap — the
+    // big Arc wins come from landuse/natural/leisure handlers.
+    let mut cached_floor_area: Vec<(i32, i32)> = flood_fill_cache
+        .get_or_compute(element, args.timeout.as_ref())
+        .as_ref()
+        .clone();
 
     if let Some(holes) = hole_polygons {
         if !holes.is_empty() {
@@ -3490,7 +3525,7 @@ pub fn generate_buildings(
                     continue;
                 }
 
-                for point in hole_area {
+                for &point in hole_area.iter() {
                     hole_points.insert(point);
                 }
             }
@@ -5722,13 +5757,13 @@ fn generate_bridge(
     }
 
     // Flood fill the area between the bridge path nodes (uses cache)
-    let bridge_area: Vec<(i32, i32)> = flood_fill_cache.get_or_compute(element, floodfill_timeout);
+    let bridge_area = flood_fill_cache.get_or_compute(element, floodfill_timeout);
 
     // Use the same level bridge deck height for filled areas
     let floor_y = bridge_deck_ground_y + bridge_y_offset;
 
     // Place floor blocks
-    for (x, z) in bridge_area {
+    for &(x, z) in bridge_area.iter() {
         editor.set_block_absolute(floor_block, x, floor_y, z, None, None);
     }
 }

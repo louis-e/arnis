@@ -1,6 +1,7 @@
 {
   "create_world": "ワールドを作成",
   "no_world_selected": "ワールドが作成されていません",
+  "no_world_generated_yet": "ワールドはまだ生成されていません",
   "start_generation": "生成開始",
   "custom_selection_confirmed": "カスタム選択を確認しました！",
   "error_coordinates_out_of_range": "エラー: 座標が範囲外か順序が正しくありません（緯度を経度より先に指定してください）。",
@@ -41,8 +42,15 @@
   "roof": "屋根生成",
   "fillground": "地面を埋める",
   "land_cover": "土地被覆",
-  "disable_height_limit": "高さ制限を無効にする",
+  "disable_height_limit": "建築高さを拡張",
   "bedrock_auto_generated": "Bedrock ワールドは自動生成されます",
   "save_path": "保存先",
-  "rotation_angle": "回転角度"
+  "rotation_angle": "回転角度",
+  "settings_section_generation": "生成",
+  "settings_section_world": "ワールド",
+  "settings_section_map": "マップと入力",
+  "settings_section_application": "アプリケーション",
+  "clear_tile_cache": "タイルキャッシュをクリア",
+  "clear_tile_cache_button": "クリア",
+  "anonymous_crash_reports": "匿名クラッシュレポート"
 }

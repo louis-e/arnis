@@ -34,18 +34,20 @@ async function setBboxSelectionInfo(bboxSelectionElement, localizationKey, color
 // Initialize elements and start the demo progress
 window.addEventListener("DOMContentLoaded", async () => {
   registerMessageEvent();
-  window.createWorld = createWorld;
   window.startGeneration = startGeneration;
   setupProgressListener();
   await initSavePath();
   initSettings();
   initTelemetryConsent();
+  initClearCacheButton();
+  initTooltips();
   handleBboxInput();
   const localization = await getLocalization();
   await applyLocalization(localization);
   updateFormatToggleUI(selectedWorldFormat);
   initFooter();
-  await checkForUpdates();
+  initEasterEggs();
+  checkForUpdates();
 });
 
 // Expose language functions to window for use by language-selector.js
@@ -97,9 +99,8 @@ async function localizeElement(json, elementObject, localizedStringKey) {
 
 async function applyLocalization(localization) {
   const localizationElements = {
-    "span[id='choose_world']": "create_world",
-    "#selected-world": "no_world_selected",
-    "#start-button": "start_generation",
+    "#start-button > span[data-localize='start_generation']": "start_generation",
+    "#world-name-label[data-placeholder]": "no_world_generated_yet",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
@@ -116,9 +117,16 @@ async function applyLocalization(localization) {
     "span[data-localize='fillground']": "fillground",
     "span[data-localize='land_cover']": "land_cover",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
+    "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
+    "div[data-localize='settings_section_generation']": "settings_section_generation",
+    "div[data-localize='settings_section_world']": "settings_section_world",
+    "div[data-localize='settings_section_map']": "settings_section_map",
+    "div[data-localize='settings_section_application']": "settings_section_application",
+    "span[data-localize='clear_tile_cache']": "clear_tile_cache",
+    "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -246,12 +254,21 @@ function setupProgressListener() {
       if (message.startsWith("Error!")) {
         progressInfo.style.color = "#fa7878";
         generationButtonEnabled = true;
+        setWorldNameLabel("");
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
       } else {
         progressInfo.style.color = "#ececec";
       }
+    }
+  });
+
+  // Listen for the finalized world name (Java adds the localized area suffix
+  // during generation; Bedrock derives the name from the area up-front).
+  window.__TAURI__.event.listen("world-name-update", (event) => {
+    if (typeof event.payload === 'string') {
+      setWorldNameLabel(event.payload);
     }
   });
 
@@ -268,6 +285,33 @@ function setupProgressListener() {
       await invoke("gui_show_in_folder", { path: filePath });
     } catch (error) {
       console.error("Failed to show file in folder:", error);
+    }
+  });
+}
+
+// Easter eggs
+function showEasterEggAnimal() {
+  const img = document.getElementById('secret-parrot');
+  img.src = './images/parrot.gif';
+  img.style.display = 'inline';
+}
+
+function initEasterEggs() {
+  // 1 in 50 chance at startup
+  if (Math.random() < 1 / 50) {
+    showEasterEggAnimal();
+  }
+
+  // 5 rapid clicks on progress bar
+  const progressBar = document.querySelector('.progress-bar-container');
+  let clicks = [];
+  progressBar.addEventListener('click', () => {
+    const now = Date.now();
+    clicks.push(now);
+    clicks = clicks.filter(t => now - t < 1500);
+    if (clicks.length >= 5) {
+      showEasterEggAnimal();
+      clicks = [];
     }
   });
 }
@@ -386,13 +430,8 @@ function initSettings() {
     const localization = await fetchLanguage(selectedLanguage);
     await applyLocalization(localization);
 
-    // Restore correct #selected-world text after localization overwrites it
+    // Restore correct format toggle state after localization
     updateFormatToggleUI(selectedWorldFormat);
-    // If a world was already created, show its name
-    if (worldPath) {
-      const lastSegment = worldPath.split(/[\\/]/).pop();
-      document.getElementById('selected-world').textContent = lastSegment;
-    }
   });
 
   // Tile theme selector
@@ -482,53 +521,23 @@ function setWorldFormat(format) {
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
-  const chooseWorldBtn = document.getElementById('choose-world-btn');
-  const selectedWorldText = document.getElementById('selected-world');
-  
+
   const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
+
+  // Toggle now supported on both formats (Java datapack + Bedrock BP).
+  if (heightLimitToggle) {
+    heightLimitToggle.disabled = false;
+    heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
+  }
 
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
-    // Enable Create World button for Java
-    if (chooseWorldBtn) {
-      chooseWorldBtn.disabled = false;
-      chooseWorldBtn.style.opacity = '1';
-      chooseWorldBtn.style.cursor = 'pointer';
-    }
-    // Re-enable height limit toggle for Java
-    if (heightLimitToggle) {
-      heightLimitToggle.disabled = false;
-      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
-    }
-    // Show appropriate text based on whether a world was already created
-    if (selectedWorldText && !worldPath) {
-      const noWorldText = window.localization?.no_world_selected || 'No world created';
-      selectedWorldText.textContent = noWorldText;
-      selectedWorldText.style.color = '#fecc44';
-    }
   } else {
     javaBtn.classList.remove('format-active');
     bedrockBtn.classList.add('format-active');
-    // Disable Create World button for Bedrock
-    if (chooseWorldBtn) {
-      chooseWorldBtn.disabled = true;
-      chooseWorldBtn.style.opacity = '0.5';
-      chooseWorldBtn.style.cursor = 'not-allowed';
-    }
-    // Disable height limit toggle for Bedrock (not supported)
-    if (heightLimitToggle) {
-      heightLimitToggle.checked = false;
-      heightLimitToggle.disabled = true;
-      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
-    }
-    // Clear world selection and show Bedrock info message
+    // Clear world path for bedrock (auto-generated)
     worldPath = "";
-    if (selectedWorldText) {
-      const bedrockText = window.localization?.bedrock_auto_generated || 'Bedrock world is auto-generated';
-      selectedWorldText.textContent = bedrockText;
-      selectedWorldText.style.color = '#fecc44';
-    }
   }
 }
 
@@ -576,6 +585,187 @@ function initTelemetryConsent() {
     const v = localStorage.getItem(key);
     return v === null ? null : v === 'true';
   };
+}
+
+// Wires the "Clear Tile Cache" button in the Application settings panel
+// to the Rust-side `gui_clear_tile_caches` command. User feedback is a
+// brief background flash (green on success, red on partial failure) —
+// keeps the row visually consistent with the other checkbox/slider
+// rows, no extra status label. The button stays disabled while the
+// call is in flight so repeated clicks can't fire multiple concurrent
+// wipes (Rust is idempotent, but the UI would look confused).
+function initClearCacheButton() {
+  const button = document.getElementById('clear-cache-button');
+  if (!button) {
+    return;
+  }
+
+  // How long the success/error flash stays applied before reverting to
+  // the default outline. Long enough to register as confirmation, short
+  // enough that a user can click again quickly if they want.
+  const FLASH_MS = 1500;
+  let flashTimer = null;
+
+  const flash = (cls) => {
+    button.classList.remove('is-success', 'is-error');
+    button.classList.add(cls);
+    if (flashTimer) {
+      clearTimeout(flashTimer);
+    }
+    flashTimer = setTimeout(() => {
+      button.classList.remove('is-success', 'is-error');
+      flashTimer = null;
+    }, FLASH_MS);
+  };
+
+  button.addEventListener('click', async () => {
+    if (button.disabled) {
+      return;
+    }
+    button.disabled = true;
+    // Pre-emptively drop any lingering flash class from a previous run
+    // so "clearing…" state isn't tinted green/red left over from before.
+    button.classList.remove('is-success', 'is-error');
+    try {
+      await invoke('gui_clear_tile_caches');
+      flash('is-success');
+    } catch (error) {
+      // The Rust side returns Err(String) for partial failures (files
+      // still locked). The user sees the red flash; the full text goes
+      // to the browser console for debugging, not the UI.
+      console.warn('Clear tile cache failed:', error);
+      flash('is-error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+// Single shared tooltip element appended to <body>, so it escapes the
+// `.settings-scrollable` container's `overflow: hidden` clip and can
+// extend past the top / sides of the panel. Previously the tooltip
+// lived as a `::after` pseudo-element on each `.tooltip-icon`, which
+// meant long text or icons near an edge got cut off by the scroll
+// container. This global element is positioned via
+// `getBoundingClientRect` on hover and auto-flips above ↔ below when
+// close to the viewport edge.
+function initTooltips() {
+  const tooltip = document.createElement('div');
+  tooltip.className = 'global-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.setAttribute('aria-hidden', 'true');
+  const arrow = document.createElement('div');
+  arrow.className = 'global-tooltip-arrow';
+  tooltip.appendChild(arrow);
+  const body = document.createElement('div');
+  body.className = 'global-tooltip-body';
+  tooltip.appendChild(body);
+  document.body.appendChild(tooltip);
+
+  const VIEWPORT_MARGIN = 8; // px gap between tooltip and viewport edge
+  const ICON_GAP = 8; // px gap between tooltip and icon
+
+  let currentIcon = null;
+
+  const position = () => {
+    if (!currentIcon) return;
+    const iconRect = currentIcon.getBoundingClientRect();
+    // Measure after text is set; reset to allow natural width.
+    const ttRect = tooltip.getBoundingClientRect();
+
+    // Default: centered above the icon. Flip below when there isn't
+    // enough room above (e.g. icon near the top of the settings panel,
+    // which is the "cut off at the top" case the user reported).
+    const spaceAbove = iconRect.top;
+    const flipBelow = spaceAbove < ttRect.height + ICON_GAP + VIEWPORT_MARGIN;
+    const top = flipBelow
+      ? iconRect.bottom + ICON_GAP
+      : iconRect.top - ttRect.height - ICON_GAP;
+
+    // Horizontal: center on the icon, then clamp into the viewport so
+    // tooltips near the right edge don't overflow into hidden space.
+    const desiredLeft = iconRect.left + iconRect.width / 2 - ttRect.width / 2;
+    const maxLeft = window.innerWidth - ttRect.width - VIEWPORT_MARGIN;
+    const left = Math.max(VIEWPORT_MARGIN, Math.min(desiredLeft, maxLeft));
+
+    tooltip.style.top = top + 'px';
+    tooltip.style.left = left + 'px';
+
+    // Point the arrow back at the icon's center, regardless of the
+    // horizontal clamp above, and flip it to the opposite edge when the
+    // tooltip opens below the icon.
+    const iconCenter = iconRect.left + iconRect.width / 2;
+    const arrowLeft = Math.max(8, Math.min(ttRect.width - 8, iconCenter - left));
+    arrow.style.left = arrowLeft + 'px';
+    tooltip.classList.toggle('flipped', flipBelow);
+  };
+
+  const show = (icon) => {
+    const text = icon.getAttribute('data-tooltip');
+    if (!text) return;
+    currentIcon = icon;
+    body.textContent = text;
+    // Position BEFORE making visible. The tooltip stays `visibility:
+    // hidden` (layout-active, paint-inactive) so `getBoundingClientRect`
+    // returns the real dimensions, but the user never sees a 0,0 flash
+    // between insertion and the first position-frame.
+    position();
+    tooltip.classList.add('is-visible');
+    tooltip.setAttribute('aria-hidden', 'false');
+  };
+
+  const hide = () => {
+    currentIcon = null;
+    tooltip.classList.remove('is-visible', 'flipped');
+    tooltip.setAttribute('aria-hidden', 'true');
+  };
+
+  const bind = (icon) => {
+    // Make `<span class="tooltip-icon">` focusable via Tab so keyboard
+    // users can reveal the tooltip. Spans are not focusable by default,
+    // so the focus/blur listeners below are dead without this. Done in
+    // JS rather than HTML so every icon picks it up automatically and
+    // we don't have to keep the 14 call sites in sync. `role="button"`
+    // is a reasonable hint for screen readers that this thing is
+    // interactive even though it doesn't do anything on click.
+    if (icon.tabIndex < 0) {
+      icon.tabIndex = 0;
+    }
+    if (!icon.hasAttribute('role')) {
+      icon.setAttribute('role', 'button');
+    }
+    if (!icon.hasAttribute('aria-label')) {
+      const text = icon.getAttribute('data-tooltip');
+      if (text) {
+        icon.setAttribute('aria-label', text);
+      }
+    }
+    icon.addEventListener('mouseenter', () => show(icon));
+    icon.addEventListener('mouseleave', hide);
+    icon.addEventListener('focus', () => show(icon));
+    icon.addEventListener('blur', hide);
+    // Escape closes the tooltip while it's focused.
+    icon.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hide();
+      }
+    });
+  };
+
+  document.querySelectorAll('.tooltip-icon').forEach(bind);
+
+  // Reposition on viewport resize / scroll (including inside the
+  // settings-scrollable container). Also hide on scroll inside the
+  // settings panel, because the icon may have scrolled off-screen
+  // and a stale tooltip hovering over the wrong row is worse than
+  // hiding eagerly.
+  window.addEventListener('resize', () => {
+    if (currentIcon) position();
+  });
+  const scrollable = document.querySelector('.settings-scrollable');
+  if (scrollable) {
+    scrollable.addEventListener('scroll', hide, { passive: true });
+  }
 }
 
 /// Save path management
@@ -856,30 +1046,21 @@ function displayBboxInfoText(bboxText) {
 
 let worldPath = "";
 
-async function createWorld() {
-  // Don't create if format is Bedrock (button should be disabled)
-  if (selectedWorldFormat === 'bedrock') return;
-
-  // Don't create if save path hasn't been initialized
-  if (!savePath) {
-    console.warn("Cannot create world: save path not set");
-    return;
+function setWorldNameLabel(text) {
+  const label = document.getElementById('world-name-label');
+  if (!label) return;
+  if (text) {
+    label.removeAttribute('data-placeholder');
+    label.textContent = text;
+  } else {
+    label.setAttribute('data-placeholder', 'true');
+    localizeElement(window.localization, { element: label }, 'no_world_generated_yet');
   }
+}
 
-  try {
-    const worldName = await invoke('gui_create_world', { savePath: savePath });
-    if (worldName) {
-      worldPath = worldName;
-      const lastSegment = worldName.split(/[\\/]/).pop();
-      document.getElementById('selected-world').textContent = lastSegment;
-      document.getElementById('selected-world').style.color = "#fecc44";
-
-      // Notify that world changed (reset preview)
-      notifyWorldChanged();
-    }
-  } catch (error) {
-    handleWorldSelectionError(error);
-  }
+function basenameFromPath(p) {
+  if (!p) return "";
+  return p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "";
 }
 
 /**
@@ -895,10 +1076,11 @@ function handleWorldSelectionError(errorCode) {
   };
 
   const errorKey = errorKeys[errorCode] || "unknown_error";
-  const selectedWorld = document.getElementById('selected-world');
-  localizeElement(window.localization, { element: selectedWorld }, errorKey);
-  selectedWorld.style.color = "#fa7878";
+  const progressInfo = document.getElementById('progress-info');
+  localizeElement(window.localization, { element: progressInfo }, errorKey);
+  progressInfo.style.color = "#fa7878";
   worldPath = "";
+  setWorldNameLabel("");
   console.error(errorCode);
 }
 
@@ -920,12 +1102,22 @@ async function startGeneration() {
       return;
     }
 
-    // Only require world creation for Java format (Bedrock generates a new .mcworld file)
-    if (selectedWorldFormat === 'java' && (!worldPath || worldPath === "")) {
-      const selectedWorld = document.getElementById('selected-world');
-      localizeElement(window.localization, { element: selectedWorld }, "create_world_first");
-      selectedWorld.style.color = "#fa7878";
-      return;
+    // Auto-create world for Java format
+    if (selectedWorldFormat === 'java') {
+      if (!savePath) {
+        console.warn("Cannot create world: save path not set");
+        return;
+      }
+      try {
+        const worldName = await invoke('gui_create_world', { savePath: savePath });
+        if (worldName) {
+          worldPath = worldName;
+          setWorldNameLabel(basenameFromPath(worldName));
+        }
+      } catch (error) {
+        handleWorldSelectionError(error);
+        return;
+      }
     }
 
     // Clear any existing world preview since we're generating a new one

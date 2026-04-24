@@ -429,23 +429,6 @@ impl WorldToModify {
     }
 
     #[inline]
-    pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
-        let chunk_x: i32 = x >> 4;
-        let chunk_z: i32 = z >> 4;
-        let region_x: i32 = chunk_x >> 5;
-        let region_z: i32 = chunk_z >> 5;
-
-        let region: &mut RegionToModify = self.get_or_create_region(region_x, region_z);
-        let chunk: &mut ChunkToModify = region.get_or_create_chunk(chunk_x & 31, chunk_z & 31);
-        chunk.set_block(
-            (x & 15).try_into().unwrap(),
-            y,
-            (z & 15).try_into().unwrap(),
-            block,
-        );
-    }
-
-    #[inline]
     pub fn set_block_with_properties(
         &mut self,
         x: i32,

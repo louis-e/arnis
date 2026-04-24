@@ -48,7 +48,11 @@ jobs:
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
           echo "peak_memory=${peak_mb}" >> $GITHUB_OUTPUT
-          gen_time=$(grep -oP '(?<=generation_time=)\d+' benchmark_log.txt || echo "")
+          gen_time_ms=$(grep -oP '(?<=generation_time_ms=)\d+' benchmark_log.txt || echo "")
+          gen_time=""
+          if [ -n "$gen_time_ms" ]; then
+            gen_time=$(( (gen_time_ms + 500) / 1000 ))
+          fi
           echo "gen_time=${gen_time}" >> $GITHUB_OUTPUT
 
       - name: End timer and calculate duration
@@ -68,7 +72,11 @@ jobs:
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
           gen_time=${{ steps.benchmark.outputs.gen_time }}
 
-          baseline_time=20
+          # Calibrated after the multi-source elevation pipeline landed (PR #939),
+          # the road-flatten perf fix (PR #965), and the grid-precision shrink.
+          # Update this value whenever main-branch generation changes materially
+          # so the verdict thresholds below stay meaningful.
+          baseline_time=27
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 

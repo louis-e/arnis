@@ -74,7 +74,7 @@ Arnis has been recognized in various academic and press publications after gaini
 Free to use press assets, including screenshots and logos, can be found [here](https://drive.google.com/file/d/1T1IsZSyT8oa6qAO_40hVF5KR8eEVCJjo/view?usp=sharing).
 
 ## :copyright: License Information
-Copyright (c) 2022-2025 Louis Erbkamm (louis-e)
+Copyright (c) 2022-2026 Louis Erbkamm (louis-e)
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.

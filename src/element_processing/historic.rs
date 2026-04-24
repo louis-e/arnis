@@ -228,8 +228,7 @@ pub fn generate_pyramid(
     }
 
     // Get the footprint via flood fill
-    let footprint: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let footprint = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
     if footprint.is_empty() {
         return;
     }
@@ -279,7 +278,7 @@ pub fn generate_pyramid(
         let y = base_y + 1 + layer;
         let mut placed = false;
 
-        for &(x, z) in &footprint {
+        for &(x, z) in footprint.iter() {
             let dx = (x as f64 - center_x).abs();
             let dz = (z as f64 - center_z).abs();
 
