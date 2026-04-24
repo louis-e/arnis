@@ -137,10 +137,14 @@ fn get_nearest_block_matching(
 ) -> Option<(i32, i32)> {
     for dist in (2..=max_radius).step_by(2) {
         let candidates = [
-            (x, z - dist), (x, z + dist),
-            (x - dist, z), (x + dist, z),
-            (x - dist, z - dist), (x + dist, z + dist),
-            (x - dist, z + dist), (x + dist, z - dist),
+            (x, z - dist),
+            (x, z + dist),
+            (x - dist, z),
+            (x + dist, z),
+            (x - dist, z - dist),
+            (x + dist, z + dist),
+            (x - dist, z + dist),
+            (x + dist, z - dist),
         ];
         for (cx, cz) in candidates {
             if predicate(road_mask.contains(cx, cz)) {
@@ -151,10 +155,20 @@ fn get_nearest_block_matching(
     None
 }
 
-pub fn get_nearest_road_block(x: i32, z: i32, max_radius: i32, road_mask: &RoadMaskBitmap) -> Option<(i32, i32)> {
+pub fn get_nearest_road_block(
+    x: i32,
+    z: i32,
+    max_radius: i32,
+    road_mask: &RoadMaskBitmap,
+) -> Option<(i32, i32)> {
     get_nearest_block_matching(x, z, max_radius, road_mask, |on_road| on_road)
 }
 
-pub fn get_nearest_non_road_block(x: i32, z: i32, max_radius: i32, road_mask: &RoadMaskBitmap) -> Option<(i32, i32)> {
+pub fn get_nearest_non_road_block(
+    x: i32,
+    z: i32,
+    max_radius: i32,
+    road_mask: &RoadMaskBitmap,
+) -> Option<(i32, i32)> {
     get_nearest_block_matching(x, z, max_radius, road_mask, |on_road| !on_road)
 }

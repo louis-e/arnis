@@ -175,7 +175,7 @@ pub fn generate_world_with_options(
                         args,
                         &highway_connectivity,
                         &flood_fill_cache,
-                        &road_mask
+                        &road_mask,
                     );
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(
