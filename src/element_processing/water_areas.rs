@@ -427,7 +427,14 @@ fn scanline_fill_water(
 
         for (start, end) in fill_spans {
             for x in start..=end {
-                editor.set_block(WATER, x, 0, z, None, None);
+                let water_y = editor.get_water_level(x, z);
+                let ground_y = editor.get_ground_level(x, z);
+                // Only place water where terrain is at or below the water
+                // surface — skip hillside blocks where the polygon extends
+                // above the actual waterline.
+                if ground_y <= water_y {
+                    editor.set_block_absolute(WATER, x, water_y, z, None, None);
+                }
             }
         }
     }

@@ -103,7 +103,7 @@ pub fn generate_amenities(
                 let roof_block: Block = STONE_BLOCK_SLAB;
 
                 // Use pre-computed flood fill from cache
-                let floor_area: Vec<(i32, i32)> =
+                let floor_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 if floor_area.is_empty() {
@@ -198,7 +198,7 @@ pub fn generate_amenities(
                 let roof_block: Block = STONE_BRICK_SLAB;
 
                 // Use pre-computed flood fill from cache
-                let roof_area: Vec<(i32, i32)> =
+                let roof_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 // Place fences and roof slabs at each corner node directly
@@ -219,6 +219,56 @@ pub fn generate_amenities(
             }
             "fountain" => {
                 generate_fountain(editor, element, args, flood_fill_cache);
+            }
+            "drinking_water" => {
+                if let Some(pt) = first_node {
+                    editor.set_block(COBBLESTONE_WALL, pt.x, 1, pt.z, None, None);
+
+                    let absolute_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    let lever_props = HashMap::from([
+                        ("facing".to_string(), Value::String("west".to_string())),
+                        ("powered".to_string(), Value::String("true".to_string())),
+                    ]);
+                    editor.set_block_with_properties_absolute(
+                        BlockWithProperties {
+                            block: LEVER,
+                            properties: Some(Value::Compound(lever_props)),
+                        },
+                        pt.x - 1,
+                        absolute_y + 1,
+                        pt.z,
+                        None,
+                        None,
+                    );
+
+                    let spout_props =
+                        HashMap::from([("west".to_string(), Value::String("low".to_string()))]);
+                    editor.set_block_with_properties_absolute(
+                        BlockWithProperties {
+                            block: COBBLESTONE_WALL,
+                            properties: Some(Value::Compound(spout_props)),
+                        },
+                        pt.x,
+                        absolute_y + 1,
+                        pt.z,
+                        None,
+                        None,
+                    );
+
+                    let cauldron_props =
+                        HashMap::from([("level".to_string(), Value::String("3".to_string()))]);
+                    editor.set_block_with_properties_absolute(
+                        BlockWithProperties {
+                            block: WATER_CAULDRON,
+                            properties: Some(Value::Compound(cauldron_props)),
+                        },
+                        pt.x - 1,
+                        absolute_y,
+                        pt.z,
+                        None,
+                        None,
+                    );
+                }
             }
             "parking" => {
                 // Process parking areas
@@ -248,10 +298,10 @@ pub fn generate_amenities(
                 }
 
                 // Flood-fill the interior area for parking
-                let flood_area: Vec<(i32, i32)> =
+                let flood_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
-                for (x, z) in flood_area {
+                for &(x, z) in flood_area.iter() {
                     editor.set_block(
                         block_type,
                         x,
@@ -394,8 +444,7 @@ fn generate_fountain(
     }
 
     // ── Way fountain (polygon) ─────────────────────────────────────
-    let floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
+    let floor_area = flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
     if floor_area.is_empty() {
         return;
@@ -442,7 +491,7 @@ fn generate_fountain(
     }
 
     // Fill interior with water at y=1 (and a stone floor at y=0)
-    for &(x, z) in &floor_area {
+    for &(x, z) in floor_area.iter() {
         if !edge_set.contains(&(x, z)) {
             editor.set_block(SMOOTH_STONE, x, 0, z, None, None);
             editor.set_block(WATER, x, 1, z, None, None);

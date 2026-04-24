@@ -29,6 +29,7 @@ use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
+use fnv::FnvHashMap;
 use serde::Serialize;
 use std::collections::{hash_map::Entry, HashMap};
 use std::fs::File;
@@ -119,12 +120,24 @@ pub struct WorldEditor<'a> {
     llbbox: LLBBox,
     ground: Option<Arc<Ground>>,
     format: WorldFormat,
+    /// Per-cell overrides for the effective "ground surface" Y returned by
+    /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
+    /// cross-section register their chosen Y here so that the later
+    /// `ground_generation` pass builds the surface at the road's level —
+    /// producing a natural-looking embankment on the low side and a cut on
+    /// the high side rather than a floating strip with cliffs at the edges.
+    ///
+    /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
+    /// path (called per-block during placement), so the hash cost matters.
+    road_surface_overrides: FnvHashMap<(i32, i32), i32>,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
     #[cfg(feature = "bedrock")]
     bedrock_level_name: Option<String>,
     /// Optional spawn point for Bedrock worlds (x, z coordinates)
     #[cfg(feature = "bedrock")]
     bedrock_spawn_point: Option<(i32, i32)>,
+    #[cfg(feature = "bedrock")]
+    bedrock_extend_height: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -140,10 +153,13 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format: WorldFormat::JavaAnvil,
+            road_surface_overrides: FnvHashMap::default(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name: None,
             #[cfg(feature = "bedrock")]
             bedrock_spawn_point: None,
+            #[cfg(feature = "bedrock")]
+            bedrock_extend_height: false,
         }
     }
 
@@ -162,6 +178,7 @@ impl<'a> WorldEditor<'a> {
         #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_spawn_point: Option<
             (i32, i32),
         >,
+        #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_extend_height: bool,
     ) -> Self {
         Self {
             world_dir,
@@ -170,10 +187,13 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format,
+            road_surface_overrides: FnvHashMap::default(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name,
             #[cfg(feature = "bedrock")]
             bedrock_spawn_point,
+            #[cfg(feature = "bedrock")]
+            bedrock_extend_height,
         }
     }
 
@@ -196,19 +216,27 @@ impl<'a> WorldEditor<'a> {
     /// Calculate the absolute Y position from a ground-relative offset
     #[inline(always)]
     pub fn get_absolute_y(&self, x: i32, y_offset: i32, z: i32) -> i32 {
-        if let Some(ground) = &self.ground {
-            ground.level(XZPoint::new(
-                x - self.xzbbox.min_x(),
-                z - self.xzbbox.min_z(),
-            )) + y_offset
-        } else {
-            y_offset // If no ground reference, use y_offset as absolute Y
-        }
+        self.get_ground_level(x, z) + y_offset
     }
 
-    /// Get the ground level at a specific world coordinate (without any offset)
+    /// Get the effective ground level at a world coordinate.
+    ///
+    /// Checks the road-surface override map first so that a later
+    /// `ground_generation` pass will build terrain matching the road's
+    /// flattened cross-section. Falls back to `Ground::level` otherwise.
+    ///
+    /// The `is_empty` guard matters: this function is called per-block
+    /// during element processing, so every element placed before highways
+    /// run (most elements in small bboxes, all non-road elements before
+    /// priority-ordering kicks highways to the front) would otherwise pay
+    /// a hash + bucket-probe per call even though the map is empty.
     #[inline(always)]
     pub fn get_ground_level(&self, x: i32, z: i32) -> i32 {
+        if !self.road_surface_overrides.is_empty() {
+            if let Some(&y) = self.road_surface_overrides.get(&(x, z)) {
+                return y;
+            }
+        }
         if let Some(ground) = &self.ground {
             ground.level(XZPoint::new(
                 x - self.xzbbox.min_x(),
@@ -216,6 +244,35 @@ impl<'a> WorldEditor<'a> {
             ))
         } else {
             0 // Default ground level if no terrain data
+        }
+    }
+
+    /// Register a flattened ground Y for a road cell. See
+    /// `road_surface_overrides` for the full rationale; in short: wide roads
+    /// choose a single Y per cross-section so all lateral blocks sit flat,
+    /// and the override lets the later ground pass fill below / cut above to
+    /// match, yielding natural embankments/cuts instead of floating strips.
+    ///
+    /// Last writer wins — acceptable because road placements for the same
+    /// cell come from overlapping stamps of adjacent centerline points whose
+    /// target Ys differ by at most ~1 block.
+    #[inline]
+    pub fn register_road_surface_y(&mut self, x: i32, z: i32, y: i32) {
+        self.road_surface_overrides.insert((x, z), y);
+    }
+
+    /// Get the water-appropriate Y level at a world coordinate.
+    /// On steep terrain, snaps to the local minimum to compensate for
+    /// spatial misalignment between water data and the elevation DEM.
+    #[inline(always)]
+    pub fn get_water_level(&self, x: i32, z: i32) -> i32 {
+        if let Some(ground) = &self.ground {
+            ground.water_level(XZPoint::new(
+                x - self.xzbbox.min_x(),
+                z - self.xzbbox.min_z(),
+            ))
+        } else {
+            0
         }
     }
 
@@ -734,34 +791,22 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
     ) {
-        // Check if coordinates are within bounds
+        // Short-circuit for out-of-bbox writes before we pay for a
+        // ground-level lookup (bilinear interpolation of the elevation
+        // grid). The downstream `set_block_with_properties_absolute`
+        // does the same check, but only *after* we would have done the
+        // elevation work.
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
-
-        // Calculate the absolute Y coordinate based on ground level
-        let absolute_y = self.get_absolute_y(x, y, z);
-
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            // Check against whitelist and blacklist
-            if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-            } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-            } else {
-                false
-            }
-        } else {
-            true
-        };
-
-        if should_insert {
-            self.world.set_block(x, absolute_y, z, block);
-        }
+        self.set_block_absolute(
+            block,
+            x,
+            self.get_absolute_y(x, y, z),
+            z,
+            override_whitelist,
+            override_blacklist,
+        );
     }
 
     /// Sets a block of the specified type at the given coordinates with absolute Y value.
@@ -775,31 +820,17 @@ impl<'a> WorldEditor<'a> {
         override_whitelist: Option<&[Block]>,
         override_blacklist: Option<&[Block]>,
     ) {
-        // Check if coordinates are within bounds
-        if !self.xzbbox.contains(&XZPoint::new(x, z)) {
-            return;
-        }
-
-        let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
-            // Check against whitelist and blacklist
-            if let Some(whitelist) = override_whitelist {
-                whitelist
-                    .iter()
-                    .any(|whitelisted_block: &Block| whitelisted_block.id() == existing_block.id())
-            } else if let Some(blacklist) = override_blacklist {
-                !blacklist
-                    .iter()
-                    .any(|blacklisted_block: &Block| blacklisted_block.id() == existing_block.id())
-            } else {
-                false
-            }
-        } else {
-            true
-        };
-
-        if should_insert {
-            self.world.set_block(x, absolute_y, z, block);
-        }
+        self.set_block_with_properties_absolute(
+            BlockWithProperties {
+                block,
+                properties: None,
+            },
+            x,
+            absolute_y,
+            z,
+            override_whitelist,
+            override_blacklist,
+        )
     }
 
     /// Sets a block with properties at the given coordinates with absolute Y value.
@@ -867,6 +898,41 @@ impl<'a> WorldEditor<'a> {
                         block,
                         x,
                         y_offset,
+                        z,
+                        override_whitelist,
+                        override_blacklist,
+                    );
+                }
+            }
+        }
+    }
+
+    /// Fill a rectangular volume with a block using absolute Y coordinates.
+    #[inline]
+    #[allow(clippy::too_many_arguments)]
+    pub fn fill_blocks_absolute(
+        &mut self,
+        block: Block,
+        x1: i32,
+        y1: i32,
+        z1: i32,
+        x2: i32,
+        y2: i32,
+        z2: i32,
+        override_whitelist: Option<&[Block]>,
+        override_blacklist: Option<&[Block]>,
+    ) {
+        let (min_x, max_x) = if x1 < x2 { (x1, x2) } else { (x2, x1) };
+        let (min_y, max_y) = if y1 < y2 { (y1, y2) } else { (y2, y1) };
+        let (min_z, max_z) = if z1 < z2 { (z1, z2) } else { (z2, z1) };
+
+        for x in min_x..=max_x {
+            for abs_y in min_y..=max_y {
+                for z in min_z..=max_z {
+                    self.set_block_absolute(
+                        block,
+                        x,
+                        abs_y,
                         z,
                         override_whitelist,
                         override_blacklist,
@@ -1059,6 +1125,7 @@ impl<'a> WorldEditor<'a> {
             level_name,
             self.bedrock_spawn_point,
             self.ground.clone(),
+            self.bedrock_extend_height,
         )
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }

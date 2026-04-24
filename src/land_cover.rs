@@ -13,6 +13,7 @@
 use crate::telemetry::{send_log, LogLevel};
 use crate::{coordinate_system::geographic::LLBBox, progress::emit_gui_progress_update};
 use flate2::read::DeflateDecoder;
+use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -62,10 +63,67 @@ pub struct LandCoverData {
     /// Distance from each water cell to nearest shore, indexed as [z][x].
     /// 0 = non-water, 1 = shore water, 2+ = progressively deeper water.
     pub water_distance: Vec<Vec<u8>>,
+    /// Pre-smoothed water-ness field in [0, 1] — a Gaussian-blurred version
+    /// of the binary `grid == LC_WATER` mask. Sampled via `ground.water_blend()`
+    /// and compared against a hard 0.5 threshold inside `ground_generation`
+    /// (water classification path) so the shoreline follows the smoothed
+    /// contour's 0.5 isoline instead of the raw ESA 10 m rectangular grid
+    /// edge.
+    ///
+    /// Stored as `f32` on purpose — the grid can be tens of millions of cells
+    /// on large bboxes, and the values are bounded to `[0, 1]` and only ever
+    /// compared against a 0.5 threshold, so f32's ~7 decimal digits are
+    /// overkill. Halving the storage saves ~46 MB peak on a Munich-sized
+    /// area.
+    pub water_blend_grid: Vec<Vec<f32>>,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
     pub height: usize,
+}
+
+impl LandCoverData {
+    /// Recompute `water_blend_grid` from the current classification grid.
+    /// Call this after any mutation to `grid` (reclassification in
+    /// `apply_land_cover_repair`, or grid rotation in the rotator).
+    pub(crate) fn refresh_water_blend_grid(&mut self) {
+        self.water_blend_grid = compute_water_blend_smooth(&self.grid, self.width, self.height);
+    }
+}
+
+/// Build a smooth `[0, 1]` water-ness field from the binary `LC_WATER` mask
+/// in the classification grid, by applying a Gaussian blur.
+///
+/// σ = 3 cells is a compromise:
+/// - 1-to-1 grid-to-world mapping (small/medium bbox on a high-res provider):
+///   gives a ~3 block softening band — enough to break the ESA 10 m grid
+///   rectangular steps without visibly eroding the shoreline.
+/// - Coarser grid-to-world (large bbox, capped at 4096): each cell already
+///   represents many blocks, so a 3-cell blur represents many blocks of
+///   softening — appropriate for the coarser effective resolution.
+fn compute_water_blend_smooth(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<f32>> {
+    const SIGMA_CELLS: f64 = 3.0;
+
+    if width == 0 || height == 0 {
+        return Vec::new();
+    }
+    let binary: Vec<Vec<f64>> = grid
+        .iter()
+        .take(height)
+        .map(|row| {
+            row.iter()
+                .take(width)
+                .map(|&c| if c == LC_WATER { 1.0 } else { 0.0 })
+                .collect()
+        })
+        .collect();
+    // Gaussian blur runs in f64 for numerical stability, then we drop down to
+    // f32 for storage — values land in [0, 1] and are only ever compared to a
+    // 0.5 threshold, so precision beyond f32 is wasted.
+    crate::elevation::postprocess::gaussian_blur_grid(&binary, SIGMA_CELLS)
+        .into_iter()
+        .map(|row| row.into_iter().map(|v| v as f32).collect())
+        .collect()
 }
 
 /// Metadata parsed from a COG (Cloud-Optimized GeoTIFF) IFD.
@@ -91,7 +149,7 @@ pub fn fetch_land_cover_data(
     grid_height: usize,
 ) -> Option<LandCoverData> {
     println!("Fetching land cover data (ESA WorldCover 2021)...");
-    emit_gui_progress_update(17.0, "Fetching land cover...");
+    emit_gui_progress_update(18.0, "Fetching land cover...");
 
     let cache_dir = get_cache_dir();
     if !cache_dir.exists() {
@@ -132,8 +190,6 @@ pub fn fetch_land_cover_data(
             Ok(()) => {}
             Err(e) => {
                 eprintln!("Warning: Failed to read ESA tile {tile_url}: {e}");
-                #[cfg(feature = "gui")]
-                send_log(LogLevel::Warning, "Failed to fetch some land cover data");
             }
         }
     }
@@ -142,22 +198,37 @@ pub fn fetch_land_cover_data(
     let has_data = grid.iter().any(|row| row.iter().any(|&v| v != 0));
     if !has_data {
         eprintln!("Warning: No land cover data received for this area");
+        #[cfg(feature = "gui")]
+        send_log(
+            LogLevel::Warning,
+            "ESA WorldCover returned no data for the requested bbox (generation proceeding without land cover).",
+        );
         return None;
     }
 
     // Fill gaps (0 values surrounded by valid data) with nearest neighbor
     fill_gaps(&mut grid, grid_width, grid_height);
 
-    // Dither class boundaries to reduce the blocky appearance of 10m resolution data.
-    dither_boundaries(&mut grid, grid_width, grid_height);
+    // Smooth class boundaries via Gaussian-weighted local voting. Replaces
+    // the rectangular axis-aligned 10 m ESA steps with clean smooth contours
+    // for every class (including water shorelines).
+    smooth_class_boundaries(&mut grid, grid_width, grid_height);
 
     // Compute distance from each water cell to nearest shore via multi-source BFS.
     // Used for shoreline blending (land cells adjacent to water get sand surface).
     let water_distance = compute_water_distance(&grid, grid_width, grid_height);
 
+    // Pre-smooth the water mask so `ground.water_blend()` returns continuous
+    // values around the shoreline even when grid-to-world mapping is 1-to-1
+    // (otherwise bilinear sampling of a binary grid at integer block
+    // positions just returns the cell's binary value and the renderer's
+    // noise-threshold organic-edge pass never fires).
+    let water_blend_grid = compute_water_blend_smooth(&grid, grid_width, grid_height);
+
     Some(LandCoverData {
         grid,
         water_distance,
+        water_blend_grid,
         width: grid_width,
         height: grid_height,
     })
@@ -171,6 +242,13 @@ fn get_cache_dir() -> PathBuf {
     } else {
         PathBuf::from(format!("./{LAND_COVER_CACHE_DIR}"))
     }
+}
+
+/// Clear every cached ESA WorldCover tile. Wrapper around the generic
+/// [`crate::elevation::cache::clear_cache_dir`] so the GUI cache-clean
+/// command only has to call one entry point per cache root.
+pub fn clear_land_cover_cache() -> crate::elevation::cache::CacheClearStats {
+    crate::elevation::cache::clear_cache_dir(&get_cache_dir())
 }
 
 // ─── ESA tile URL computation ─────────────────────────────────────────────
@@ -840,7 +918,11 @@ fn fill_gaps(grid: &mut [Vec<u8>], width: usize, height: usize) {
 /// - 2+ = water cell N blocks from nearest shore
 ///
 /// Capped at 15 to limit BFS depth for very large oceans.
-fn compute_water_distance(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<Vec<u8>> {
+pub(crate) fn compute_water_distance(
+    grid: &[Vec<u8>],
+    width: usize,
+    height: usize,
+) -> Vec<Vec<u8>> {
     let mut distance = vec![vec![0u8; width]; height];
     let mut queue = VecDeque::new();
 
@@ -890,63 +972,151 @@ fn compute_water_distance(grid: &[Vec<u8>], width: usize, height: usize) -> Vec<
     distance
 }
 
-// ─── Boundary dithering ───────────────────────────────────────────────────
+// ─── Boundary smoothing ───────────────────────────────────────────────────
 
-/// Dithers the boundaries between land cover classes to reduce blockiness.
+/// Smooths class boundaries via Gaussian-weighted local voting.
 ///
-/// ESA WorldCover data has 10m resolution, which can produce visible rectangular
-/// class boundaries in the Minecraft world. This function softens those edges by
-/// randomly assigning a neighbor's class to cells that sit on a boundary.
+/// ESA WorldCover is 10 m resolution. At Minecraft block resolution this
+/// translates to rectangular, axis-aligned class edges with 10-block steps
+/// — visible as a staircase coastline and tile-grid-looking class regions.
 ///
-/// The dithering uses a deterministic coordinate-based hash so results are
-/// reproducible. Only cells adjacent to a different class are affected;
-/// interior cells stay untouched.
-fn dither_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
+/// For every cell that sits on a class boundary (any 4-connected neighbor
+/// has a different class), we tally a Gaussian-weighted vote over the cell's
+/// neighborhood: each nearby cell contributes to its own class's tally with
+/// a weight that falls off as a Gaussian. The cell is reassigned to the
+/// class with the highest total vote.
+///
+/// Effect:
+/// - Interior cells (surrounded by same class) are untouched — flood-fills
+///   of a single class stay intact.
+/// - Straight boundaries stay straight (the vote is symmetric along the
+///   edge) but convex corners get rounded off and concave corners get
+///   filled, producing clean smooth contours instead of axis-aligned steps.
+/// - A class's overall footprint is preserved — the same number of votes
+///   for class C are cast on either side of a boundary, so the smoothed
+///   contour follows the underlying ESA boundary rather than shifting it.
+///
+/// Tradeoff: 1–2-cell-wide strips (narrow rivers, hedgerows at ESA 10 m
+/// resolution) can get absorbed into the surrounding class because the
+/// vote neighborhood is dominated by the surroundings. For water this is
+/// usually fine because OSM waterways render rivers as a separate
+/// overlay; for other classes it cleans up what's often classifier noise
+/// at the 10 m grain.
+fn smooth_class_boundaries(grid: &mut [Vec<u8>], width: usize, height: usize) {
+    const SIGMA_CELLS: f64 = 2.0;
+    let radius = (SIGMA_CELLS * 3.0).ceil() as i32;
+    let kernel_size = (radius * 2 + 1) as usize;
+
+    // Precompute the 2D Gaussian kernel as a flat vec.
+    let mut kernel = vec![0.0f64; kernel_size * kernel_size];
+    let center = radius as f64;
+    let two_sigma_sq = 2.0 * SIGMA_CELLS * SIGMA_CELLS;
+    for ky in 0..kernel_size {
+        for kx in 0..kernel_size {
+            let dy = ky as f64 - center;
+            let dx = kx as f64 - center;
+            kernel[ky * kernel_size + kx] = (-(dx * dx + dy * dy) / two_sigma_sq).exp();
+        }
+    }
+
+    // Snapshot once so all cells vote against the pre-mutation grid.
     let snapshot: Vec<Vec<u8>> = grid.to_vec();
 
-    for z in 0..height {
+    // Parallelise over rows. Each row reads from `snapshot` (shared
+    // read-only) and writes only to its own row of `grid`, so there's no
+    // data dependency between rows. On a 4096² grid this typically
+    // amounts to 0.8M–2.4M boundary cells each doing ~169 kernel samples
+    // — clearly worth the rayon dispatch.
+    grid.par_iter_mut().enumerate().for_each(|(y, row)| {
+        // Per-row scratch buffers reused across every boundary cell on
+        // this row. `votes` is 2 KB on the stack; zero-filling it anew
+        // per cell dominated runtime on large grids (1-2 M boundary
+        // cells × 2 KB zero-fill per cell). We now clear only the class
+        // slots we actually touched (`seen`) between cells — typically
+        // 2-5 writes instead of 256.
+        let mut votes = [0.0f64; 256];
+        let mut seen: [u8; 16] = [0; 16];
+        let mut seen_len = 0usize;
+
         for x in 0..width {
-            let center = snapshot[z][x];
-            if center == 0 {
+            let center_class = snapshot[y][x];
+            if center_class == 0 {
                 continue;
             }
 
-            // Check if this cell is on a class boundary (any neighbor differs)
-            let mut neighbor_class = 0u8;
+            // Skip unless this cell is on a class boundary. Everything inside
+            // a flood-fill of one class has identical votes across the cell
+            // and all its neighbors, so it would win itself — expensive no-op.
             let mut is_boundary = false;
-            let offsets: [(i64, i64); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
-            for (dx, dz) in offsets {
-                let nx = x as i64 + dx;
-                let nz = z as i64 + dz;
-                if nx >= 0 && nx < width as i64 && nz >= 0 && nz < height as i64 {
-                    let nc = snapshot[nz as usize][nx as usize];
-                    if nc != 0 && nc != center {
-                        is_boundary = true;
-                        neighbor_class = nc;
-                        break;
-                    }
+            for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = x as i32 + dx;
+                let nz = y as i32 + dz;
+                if nx < 0 || nz < 0 || nx >= width as i32 || nz >= height as i32 {
+                    continue;
+                }
+                let nc = snapshot[nz as usize][nx as usize];
+                if nc != 0 && nc != center_class {
+                    is_boundary = true;
+                    break;
                 }
             }
-
             if !is_boundary {
                 continue;
             }
 
-            // Never dither water boundaries - water/land edges must stay crisp
-            // to prevent the shoreline from shifting inland
-            if center == LC_WATER || neighbor_class == LC_WATER {
-                continue;
+            // Reset only the slots touched by the previous boundary cell
+            // on this row. `seen` maxes at 16 classes — ESA has ~11 —
+            // so this is a handful of writes, not a 256-entry memset.
+            for i in 0..seen_len {
+                votes[seen[i] as usize] = 0.0;
+            }
+            seen_len = 0;
+
+            for ky in 0..kernel_size {
+                let nz = y as i32 + ky as i32 - radius;
+                if nz < 0 || nz >= height as i32 {
+                    continue;
+                }
+                let kernel_row = ky * kernel_size;
+                let src_row = &snapshot[nz as usize];
+                for kx in 0..kernel_size {
+                    let nx = x as i32 + kx as i32 - radius;
+                    if nx < 0 || nx >= width as i32 {
+                        continue;
+                    }
+                    let nc = src_row[nx as usize];
+                    if nc == 0 {
+                        continue;
+                    }
+                    let prev = votes[nc as usize];
+                    votes[nc as usize] = prev + kernel[kernel_row + kx];
+                    // Track the class code on first contribution only.
+                    // `seen` maxes at 16 classes — ESA has ~11 defined —
+                    // so we never overflow in practice.
+                    if prev == 0.0 && seen_len < seen.len() {
+                        seen[seen_len] = nc;
+                        seen_len += 1;
+                    }
+                }
             }
 
-            // Deterministic hash from coordinates for reproducible dithering
-            let hash = coord_hash(x as i32, z as i32);
-
-            // ~40% chance to adopt the neighbor's class at a boundary cell
-            if hash % 5 < 2 {
-                grid[z][x] = neighbor_class;
+            // Find the max over only the class codes actually seen in
+            // the neighbourhood (typically 2-5 at a class boundary)
+            // rather than scanning all 256 entries.
+            let mut best_idx = 0u8;
+            let mut best_val = 0.0f64;
+            for &cls in &seen[..seen_len] {
+                let v = votes[cls as usize];
+                if v > best_val {
+                    best_idx = cls;
+                    best_val = v;
+                }
+            }
+            if best_val > 0.0 {
+                row[x] = best_idx;
             }
         }
-    }
+    });
 }
 
 /// Simple deterministic hash from coordinates (for dithering and block variety).

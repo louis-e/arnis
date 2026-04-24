@@ -9,6 +9,7 @@ use fnv::FnvHashMap;
 use image::{Rgb, RgbImage};
 use once_cell::sync::Lazy;
 use rayon::prelude::*;
+use std::cmp::Reverse;
 use std::fs::File;
 use std::path::Path;
 use std::sync::Mutex;
@@ -275,7 +276,7 @@ fn get_sorted_sections<'a>(sections: &[&'a Value]) -> Vec<(i8, &'a Value)> {
         })
         .collect();
 
-    sorted.sort_by(|a, b| b.0.cmp(&a.0));
+    sorted.sort_by_key(|b| Reverse(b.0));
     sorted
 }
 

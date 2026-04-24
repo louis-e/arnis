@@ -1,6 +1,7 @@
 {
   "create_world": "Создать мир",
   "no_world_selected": "Мир не создан",
+  "no_world_generated_yet": "Мир ещё не сгенерирован",
   "start_generation": "Начать генерацию",
   "custom_selection_confirmed": "Пользовательский выбор подтвержден!",
   "error_coordinates_out_of_range": "Ошибка: Координаты находятся вне зоны действия или указаны в неправильном порядке (сначала широта, затем долгота)",
@@ -41,8 +42,15 @@
   "roof": "Генерация Крыши",
   "fillground": "Заполнить Землю",
   "land_cover": "Земельный покров",
-  "disable_height_limit": "Отключить ограничение высоты",
+  "disable_height_limit": "Расширить высоту строительства",
   "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",
   "save_path": "Путь сохранения",
-  "rotation_angle": "Угол Поворота"
+  "rotation_angle": "Угол Поворота",
+  "settings_section_generation": "Генерация",
+  "settings_section_world": "Мир",
+  "settings_section_map": "Карта и ввод",
+  "settings_section_application": "Приложение",
+  "clear_tile_cache": "Очистить кэш тайлов",
+  "clear_tile_cache_button": "Очистить",
+  "anonymous_crash_reports": "Анонимные отчёты о сбоях"
 }

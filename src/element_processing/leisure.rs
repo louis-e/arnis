@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
@@ -21,26 +22,13 @@ pub fn generate_leisure(
         let mut current_leisure: Vec<(i32, i32)> = vec![];
 
         // Determine block type based on leisure type
-        let block_type: Block = match leisure_type.as_str() {
+        let mut block_type: Block = match leisure_type.as_str() {
             "park" | "nature_reserve" | "garden" | "disc_golf_course" | "golf_course" => {
                 GRASS_BLOCK
             }
             "schoolyard" => BLACK_CONCRETE,
             "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
-                if let Some(surface) = element.tags.get("surface") {
-                    match surface.as_str() {
-                        "clay" => TERRACOTTA,
-                        "sand" => SAND,
-                        "tartan" => RED_TERRACOTTA,
-                        "grass" => GRASS_BLOCK,
-                        "dirt" | "ground" | "earth" => DIRT,
-                        "mulch" => PODZOL,
-                        "pebblestone" | "cobblestone" | "unhewn_cobblestone" => COBBLESTONE,
-                        _ => GREEN_STAINED_HARDENED_CLAY,
-                    }
-                } else {
-                    GREEN_STAINED_HARDENED_CLAY
-                }
+                GREEN_STAINED_HARDENED_CLAY
             }
             "swimming_pool" | "swimming_area" => WATER, //Swimming area: Area in a larger body of water for swimming
             "bathing_place" => SMOOTH_SANDSTONE,        // Could be sand or concrete
@@ -49,6 +37,14 @@ pub fn generate_leisure(
             "ice_rink" => PACKED_ICE, // TODO: Ice for Ice Rink, needs building defined
             _ => GRASS_BLOCK,
         };
+        // Explicit surface=* overrides the category default. Leave
+        // `block_type` untouched for unknown surface values so existing
+        // behaviour is preserved.
+        if let Some(surface) = element.tags.get("surface") {
+            if let Some(blocks) = get_blocks_for_surface(surface) {
+                block_type = blocks[0];
+            }
+        }
 
         // Process leisure area nodes
         for node in &element.nodes {
@@ -84,13 +80,12 @@ pub fn generate_leisure(
 
         // Flood-fill the interior of the leisure area using cache
         if corner_addup != (0, 0, 0) {
-            let filled_area: Vec<(i32, i32)> =
-                flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+            let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
             // Use deterministic RNG seeded by element ID for consistent results across region boundaries
             let mut rng = element_rng(element.id);
 
-            for (x, z) in filled_area {
+            for &(x, z) in filled_area.iter() {
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens

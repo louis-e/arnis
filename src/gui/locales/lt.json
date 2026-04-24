@@ -1,6 +1,7 @@
 {
   "create_world": "Sukurti pasaulį",
   "no_world_selected": "Pasaulis nesukurtas",
+  "no_world_generated_yet": "Pasaulis dar nesugeneruotas",
   "start_generation": "Pradėti generaciją",
   "custom_selection_confirmed": "Rėmo pasirinkimas patvirtintas!",
   "error_coordinates_out_of_range": "Klaida: Koordinatės yra už ribų arba neteisingai išdėstytos (plat turi būti prieš ilg).",
@@ -41,8 +42,15 @@
   "roof": "Stogo generavimas",
   "fillground": "Užpildyti pagrindą",
   "land_cover": "Žemės danga",
-  "disable_height_limit": "Išjungti aukščio ribą",
+  "disable_height_limit": "Praplėsti statybos aukštį",
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
   "save_path": "Išsaugojimo kelias",
-  "rotation_angle": "Pasukimo Kampas"
+  "rotation_angle": "Pasukimo Kampas",
+  "settings_section_generation": "Generavimas",
+  "settings_section_world": "Pasaulis",
+  "settings_section_map": "Žemėlapis ir įvestis",
+  "settings_section_application": "Programa",
+  "clear_tile_cache": "Išvalyti plytelių talpyklą",
+  "clear_tile_cache_button": "Išvalyti",
+  "anonymous_crash_reports": "Anoniminės avarijų ataskaitos"
 }

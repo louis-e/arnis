@@ -1,6 +1,7 @@
 {
   "create_world": "Izveidot pasauli",
   "no_world_selected": "Pasaule nav izveidota",
+  "no_world_generated_yet": "Pasaule vēl nav ģenerēta",
   "start_generation": "Sākt ģenerēšanu",
   "custom_selection_confirmed": "Pielāgota izvēle apstiprināta!",
   "error_coordinates_out_of_range": "Kļūda: koordinātas ir ārpus darbības zonas vai norādītas nepareizā secībā (vispirms platums, tad garums)",
@@ -41,8 +42,15 @@
   "roof": "Jumta ģenerēšana",
   "fillground": "Aizpildīt zemi",
   "land_cover": "Zemes segums",
-  "disable_height_limit": "Atspējot augstuma ierobežojumu",
+  "disable_height_limit": "Paplašināt būvniecības augstumu",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "save_path": "Saglabāšanas ceļš",
-  "rotation_angle": "Rotācijas Leņķis"
+  "rotation_angle": "Rotācijas Leņķis",
+  "settings_section_generation": "Ģenerēšana",
+  "settings_section_world": "Pasaule",
+  "settings_section_map": "Karte un ievade",
+  "settings_section_application": "Lietotne",
+  "clear_tile_cache": "Notīrīt flīžu kešatmiņu",
+  "clear_tile_cache_button": "Notīrīt",
+  "anonymous_crash_reports": "Anonīmi avāriju ziņojumi"
 }
