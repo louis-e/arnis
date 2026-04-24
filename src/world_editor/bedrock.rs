@@ -404,8 +404,8 @@ impl BedrockWriter {
             daylight_cycle: 0,
         };
 
-        let nbt_bytes =
-            nbtx::to_le_bytes(&level_dat).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+        let nbt_bytes = nbtx::to_le_bytes(&level_dat)
+            .map_err(|e| BedrockSaveError::Nbt(format!("level.dat: {e}")))?;
 
         // Write with header
         let mut file = File::create(self.output_dir.join("level.dat"))?;
@@ -550,8 +550,8 @@ impl BedrockWriter {
         // a TAG_List header, which Bedrock cannot parse.
         let mut data: Vec<u8> = Vec::new();
         for compound in &deduped {
-            let bytes =
-                nbtx::to_le_bytes(compound).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+            let bytes = nbtx::to_le_bytes(compound)
+                .map_err(|e| BedrockSaveError::Nbt(format!("block-entity/entity compound: {e}")))?;
             data.extend_from_slice(&bytes);
         }
 
@@ -643,8 +643,9 @@ impl BedrockWriter {
                     .map(|(k, v)| (k.clone(), BedrockNbtValue::from(v)))
                     .collect(),
             };
-            let nbt_bytes =
-                nbtx::to_le_bytes(&state).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+            let nbt_bytes = nbtx::to_le_bytes(&state).map_err(|e| {
+                BedrockSaveError::Nbt(format!("block palette state ({}): {e}", state.name))
+            })?;
             buffer.write_all(&nbt_bytes)?;
         }
 

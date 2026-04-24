@@ -15,6 +15,16 @@ use std::io::{self, BufReader, Cursor, Write};
 use std::process::Command;
 use std::time::Duration;
 
+/// Extract the host portion of a URL for telemetry
+fn url_host(url: &str) -> String {
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    after_scheme
+        .split(['/', '?'])
+        .next()
+        .unwrap_or(after_scheme)
+        .to_string()
+}
+
 /// Function to download data using reqwest
 fn download_with_reqwest(
     url: &str,
@@ -64,13 +74,9 @@ fn download_with_reqwest(
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else {
-                #[cfg(feature = "gui")]
-                send_log(
-                    LogLevel::Error,
-                    &format!("Request error in download_with_reqwest: {e}"),
-                );
-                eprintln!("{}", format!("Error! {e:.52}").red().bold());
-                Err(format!("{e:.52}").into())
+                let short: String = e.to_string().chars().take(52).collect();
+                eprintln!("{}", format!("Error! {short}").red().bold());
+                Err(short.into())
             }
         }
     }
@@ -236,6 +242,7 @@ pub fn fetch_data_from_overpass(
 
         let total = request_plan.len();
         let mut last_error: Option<Box<dyn std::error::Error>> = None;
+        let mut attempted_hosts: Vec<String> = Vec::new();
         let response: String = 'server_loop: {
             for (i, (url, kind)) in request_plan.iter().enumerate() {
                 let timeout_secs = if url.contains("private.coffee") {
@@ -257,6 +264,7 @@ pub fn fetch_data_from_overpass(
                         if download_method != "requests" {
                             eprintln!("Request failed: {error}");
                         }
+                        attempted_hosts.push(url_host(url));
                         last_error = Some(error);
 
                         if i + 1 < total {
@@ -271,6 +279,22 @@ pub fn fetch_data_from_overpass(
                 }
             }
             // All servers exhausted
+            #[cfg(feature = "gui")]
+            {
+                let err_summary = last_error
+                    .as_ref()
+                    .map(|e| e.to_string().chars().take(120).collect::<String>())
+                    .unwrap_or_else(|| "unknown".to_string());
+                send_log(
+                    LogLevel::Error,
+                    &format!(
+                        "Overpass fetch failed on all {} providers ({}); last error: {}",
+                        attempted_hosts.len(),
+                        attempted_hosts.join(", "),
+                        err_summary,
+                    ),
+                );
+            }
             return Err(last_error.unwrap_or_else(|| "All servers failed".into()));
         };
 
