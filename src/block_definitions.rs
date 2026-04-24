@@ -114,7 +114,7 @@ impl Block {
             13 => "cobblestone",
             14 => "polished_blackstone_bricks",
             15 => "cracked_stone_bricks",
-            16 => "crimson_planks",
+            16 => "lever",
             17 => "cut_sandstone",
             18 => "cyan_concrete",
             19 => "dark_oak_planks",
@@ -239,8 +239,10 @@ impl Block {
             148 => "red_wall_banner",
             149 => "green_wall_banner",
             150 => "mossy_stone_bricks",
-            151 => "water_cauldron",
-            152 => "lever",
+            151 => "deepslate",
+            152 => "tuff",
+            153 => "cobbled_deepslate",
+            154 => "water_cauldron",
             155 => "chest",
             156 => "red_carpet",
             157 => "anvil",
@@ -344,6 +346,8 @@ impl Block {
             255 => "light_gray_wall_banner",
             _ => panic!("Invalid id"),
         }
+        // Note: If you want to add more blocks, please find unused ID
+        // slots below 255 so we don't need to update to u16 or higher.
     }
 
     pub fn properties(&self) -> Option<Value> {
@@ -489,6 +493,13 @@ impl Block {
             138 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+
+            // water_cauldron defaults to full (level=3)
+            154 => Some(Value::Compound({
+                let mut map: HashMap<String, Value> = HashMap::new();
+                map.insert("level".to_string(), Value::String("3".to_string()));
                 map
             })),
 
@@ -767,6 +778,7 @@ pub const COBBLESTONE_WALL: Block = Block::new(12);
 pub const COBBLESTONE: Block = Block::new(13);
 pub const POLISHED_BLACKSTONE_BRICKS: Block = Block::new(14);
 pub const CRACKED_STONE_BRICKS: Block = Block::new(15);
+pub const LEVER: Block = Block::new(16);
 
 pub const CYAN_CONCRETE: Block = Block::new(18);
 pub const DARK_OAK_PLANKS: Block = Block::new(19);
@@ -898,8 +910,10 @@ pub const BLACK_WALL_BANNER: Block = Block::new(147);
 pub const RED_WALL_BANNER: Block = Block::new(148);
 pub const GREEN_WALL_BANNER: Block = Block::new(149);
 pub const MOSSY_STONE_BRICKS: Block = Block::new(150);
-pub const WATER_CAULDRON: Block = Block::new(151);
-pub const LEVER: Block = Block::new(152);
+pub const DEEPSLATE: Block = Block::new(151);
+pub const TUFF: Block = Block::new(152);
+pub const COBBLED_DEEPSLATE: Block = Block::new(153);
+pub const WATER_CAULDRON: Block = Block::new(154);
 pub const CHEST: Block = Block::new(155);
 pub const RED_CARPET: Block = Block::new(156);
 pub const ANVIL: Block = Block::new(157);
