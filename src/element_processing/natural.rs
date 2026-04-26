@@ -99,7 +99,7 @@ pub fn generate_natural(
                         _ => SAND,
                     }
                 }
-                "water" | "reef" => WATER,
+                "water" | "reef" | "bay" => WATER,
                 "bare_rock" => STONE,
                 "blockfield" => COBBLESTONE,
                 "glacier" => PACKED_ICE,
