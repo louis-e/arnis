@@ -3,18 +3,56 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::surfaces::get_blocks_for_surface;
-use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::Rng;
+
+pub fn accumulate_leisure(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    let Some(tag) = element.tags.get("leisure") else { return; };
+
+    let filled = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let area = filled.len() as f64;
+    let tag_static: &'static str = Box::leak(tag.clone().into_boxed_str());
+
+    for &(x, z) in filled.iter() {
+        editor.set_area_if_smaller(x, z, area, element.id, tag_static);
+    }
+}
+
+pub fn accumulate_leisure_from_relation(
+    editor: &mut WorldEditor,
+    rel: &ProcessedRelation,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    if !rel.tags.contains_key("leisure") {
+        return;
+    }
+
+    for member in &rel.members {
+        if member.role == ProcessedMemberRole::Outer {
+            let way = ProcessedWay {
+                id: member.way.id,
+                nodes: member.way.nodes.clone(),
+                tags: rel.tags.clone(),
+            };
+            accumulate_leisure(editor, &way, args, flood_fill_cache);
+        }
+    }
+}
 
 pub fn generate_leisure(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
-    building_footprints: &BuildingFootprintBitmap,
+    _building_footprints: &BuildingFootprintBitmap,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
@@ -86,6 +124,15 @@ pub fn generate_leisure(
             let mut rng = element_rng(element.id);
 
             for &(x, z) in filled_area.iter() {
+                // Only the element that has the smallest area for (x,z) is allowed to render here
+                if let Some(cell) = editor.area_map.get(&(x, z)) {
+                    if cell.element_id != element.id {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens
@@ -114,10 +161,6 @@ pub fn generate_leisure(
                         90..105 => {
                             // Oak leaves
                             editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                        }
-                        105..120 => {
-                            // Tree
-                            Tree::create(editor, (x, 1, z), Some(building_footprints));
                         }
                         _ => {}
                     }
