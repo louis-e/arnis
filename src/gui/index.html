@@ -140,11 +140,11 @@
         <!-- Section: World -->
         <div class="settings-section-header" data-localize="settings_section_world">World</div>
 
-        <!-- Disable Height Limit Toggle -->
+        <!-- Extend Build Height Toggle -->
         <div class="settings-row">
           <label for="disable-height-limit-toggle">
-            <span data-localize="disable_height_limit">Disable Height Limit</span>
-            <span class="tooltip-icon" data-tooltip="Disable the vanilla Y=319 build height cap. Terrain will use realistic 1:1 scaling without compression. Requires a Minecraft data pack that increases the world height.">?</span>
+            <span data-localize="disable_height_limit">Extend build height</span>
+            <span class="tooltip-icon" data-tooltip="Bundles a pack that raises the build height for 1:1 terrain. Java 1.21.4+ / Bedrock 1.21.40+ (experimental, no Realms)">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="disable-height-limit-toggle" name="disable-height-limit-toggle">
@@ -256,11 +256,22 @@
         <!-- Telemetry Consent Toggle -->
         <div class="settings-row">
           <label for="telemetry-toggle" style="white-space: nowrap;">
-            <span>Anonymous Crash Reports</span>
+            <span data-localize="anonymous_crash_reports">Anonymous Crash Reports</span>
             <span class="tooltip-icon" data-tooltip="Send anonymous crash data to help improve Arnis">?</span>
           </label>
           <div class="settings-control">
             <input type="checkbox" id="telemetry-toggle" name="telemetry-toggle">
+          </div>
+        </div>
+
+        <!-- Tile Cache Cleaner -->
+        <div class="settings-row">
+          <label for="clear-cache-button">
+            <span data-localize="clear_tile_cache">Clear Tile Cache</span>
+            <span class="tooltip-icon" data-tooltip="Delete every cached elevation and land-cover tile. Frees disk space; next generation re-downloads from source.">?</span>
+          </label>
+          <div class="settings-control">
+            <button type="button" id="clear-cache-button" class="clear-cache-button" data-localize="clear_tile_cache_button">Clear</button>
           </div>
         </div>
 

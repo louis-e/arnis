@@ -47,6 +47,7 @@ pub fn generate_world_with_options(
         options.format,
         options.level_name.clone(),
         options.spawn_point,
+        args.disable_height_limit,
     );
     let ground = Arc::new(ground);
 
@@ -80,7 +81,6 @@ pub fn generate_world_with_options(
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
-    // TODO Use this data to create overhanging traffic signals.
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
     // Process all elements (no longer need to partition boundaries)
@@ -94,6 +94,9 @@ pub fn generate_world_with_options(
     let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
     let mut current_progress_prcs: f64 = 25.0;
     let mut last_emitted_progress: f64 = current_progress_prcs;
+    let desired_updates: u64 = 500;
+    let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
+    let mut element_counter: u64 = 0;
 
     // Pre-scan: detect building relation outlines that should be suppressed.
     // Only applies to type=building relations (NOT type=multipolygon).
@@ -124,7 +127,10 @@ pub fn generate_world_with_options(
 
     // Process all elements
     for element in elements.into_iter() {
-        process_pb.inc(1);
+        element_counter += 1;
+        if element_counter.is_multiple_of(pb_batch_size) {
+            process_pb.inc(pb_batch_size);
+        }
         current_progress_prcs += progress_increment_prcs;
         if (current_progress_prcs - last_emitted_progress).abs() > 0.25 {
             emit_gui_progress_update(current_progress_prcs, "");
@@ -138,6 +144,11 @@ pub fn generate_world_with_options(
                 element.kind()
             ));
         } else {
+            // Clear on every non-debug iteration so any transient warning
+            // message set by downstream element processing (missing nodes,
+            // etc.) doesn't stick for the rest of the run. The cost is
+            // trivial — indicatif's set_message is just a mutex + string
+            // compare (~20 ns), ~40 ms over a full world.
             process_pb.set_message("");
         }
 
@@ -164,6 +175,7 @@ pub fn generate_world_with_options(
                         args,
                         &highway_connectivity,
                         &flood_fill_cache,
+                        &road_mask,
                     );
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(
@@ -259,6 +271,7 @@ pub fn generate_world_with_options(
                         args,
                         &highway_connectivity,
                         &flood_fill_cache,
+                        &road_mask,
                     );
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
@@ -330,6 +343,7 @@ pub fn generate_world_with_options(
         // Element is dropped here, freeing its memory immediately
     }
 
+    process_pb.inc(element_counter % pb_batch_size);
     process_pb.finish();
 
     // Drop remaining caches
@@ -358,8 +372,8 @@ pub fn generate_world_with_options(
     }
 
     if let Some(start) = generation_start {
-        let gen_secs = start.elapsed().as_secs();
-        eprintln!("[BENCHMARK] generation_time={gen_secs}");
+        let gen_ms = start.elapsed().as_millis();
+        eprintln!("[BENCHMARK] generation_time_ms={gen_ms}");
     }
 
     emit_gui_progress_update(99.0, "Finalizing world...");

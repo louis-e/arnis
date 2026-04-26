@@ -15,12 +15,12 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, CARROTS, CLAY, COARSE_DIRT, COBBLESTONE,
-    CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DIRT, DIRT_PATH, FARMLAND, GRASS,
-    GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE, LIGHT_GRAY_CONCRETE, MUD,
-    OAK_LEAVES, PACKED_ICE, POTATOES, RED_FLOWER, SAND, SANDSTONE, SMOOTH_STONE, SNOW_BLOCK, STONE,
-    STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER,
-    YELLOW_FLOWER,
+    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, BRICK, CARROTS, CLAY, COARSE_DIRT,
+    COBBLED_DEEPSLATE, COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE,
+    DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER,
+    HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND,
+    SANDSTONE, SMOOTH_STONE, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER,
+    WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::tree;
@@ -33,6 +33,78 @@ use crate::world_editor::MIN_Y;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
+
+/// Per-chunk cache of ground Y values.
+///
+/// Each Minecraft-chunk worth of surface/vegetation/depth logic fires
+/// roughly 20-plus `get_ground_level` lookups per cell (own column + 8
+/// water-column neighbours + 8 depth-fill neighbours + a handful of
+/// slope/surface checks). At a typical city bbox that's ~10⁸ calls,
+/// each touching the road-override map, an elevation-grid bilinear, and
+/// a few f32→f64 casts. Precomputing one Y per cell up front — via a
+/// flat 256-entry stack array aligned to the chunk's 16×16 footprint —
+/// turns the 20-plus per-cell calls into stack array reads for
+/// everything inside the chunk; neighbours that escape the chunk
+/// boundary fall back to `editor.get_ground_level`. The cache is
+/// populated once per chunk, read many times, then dropped.
+struct ChunkGroundCache {
+    /// Row-major `16*lz + lx` where `lx = x - base_x`, `lz = z - base_z`.
+    /// Positions outside `[min_x..=max_x, min_z..=max_z]` are never read.
+    grid: [i32; 256],
+    base_x: i32,
+    base_z: i32,
+    min_x: i32,
+    max_x: i32,
+    min_z: i32,
+    max_z: i32,
+}
+
+impl ChunkGroundCache {
+    #[inline]
+    fn populate(
+        editor: &WorldEditor,
+        chunk_x: i32,
+        chunk_z: i32,
+        min_x: i32,
+        max_x: i32,
+        min_z: i32,
+        max_z: i32,
+    ) -> Self {
+        let base_x = chunk_x << 4;
+        let base_z = chunk_z << 4;
+        let mut grid = [0i32; 256];
+        for x in min_x..=max_x {
+            for z in min_z..=max_z {
+                let lx = (x - base_x) as usize;
+                let lz = (z - base_z) as usize;
+                grid[lz * 16 + lx] = editor.get_ground_level(x, z);
+            }
+        }
+        ChunkGroundCache {
+            grid,
+            base_x,
+            base_z,
+            min_x,
+            max_x,
+            min_z,
+            max_z,
+        }
+    }
+
+    /// Get the ground Y at `(nx, nz)`. Cached for cells inside this chunk's
+    /// populated range; falls through to `editor.get_ground_level` for
+    /// neighbour reads that cross a chunk boundary.
+    #[inline]
+    fn get(&self, editor: &WorldEditor, nx: i32, nz: i32) -> i32 {
+        if nx >= self.min_x && nx <= self.max_x && nz >= self.min_z && nz <= self.max_z {
+            let lx = (nx - self.base_x) as usize;
+            let lz = (nz - self.base_z) as usize;
+            self.grid[lz * 16 + lx]
+        } else {
+            editor.get_ground_level(nx, nz)
+        }
+    }
+}
 
 /// Generate the ground layer for the entire bounding box.
 ///
@@ -87,6 +159,23 @@ pub fn generate_ground_layer(
             let chunk_min_z = (chunk_z << 4).max(xzbbox.min_z());
             let chunk_max_z = ((chunk_z << 4) + 15).min(xzbbox.max_z());
 
+            // Precompute a per-chunk ground-Y cache so subsequent lookups
+            // (main column + water-column + depth-fill neighbours, ~20+ per
+            // cell) hit a stack array instead of re-running the bilinear
+            // elevation interpolation. Only populated when terrain is on —
+            // the flat-ground path never calls `editor.get_ground_level`.
+            let chunk_ground_cache = terrain_enabled.then(|| {
+                ChunkGroundCache::populate(
+                    editor,
+                    chunk_x,
+                    chunk_z,
+                    chunk_min_x,
+                    chunk_max_x,
+                    chunk_min_z,
+                    chunk_max_z,
+                )
+            });
+
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
                     // Skip blocks outside the rotated original bounding box
@@ -98,25 +187,139 @@ pub fn generate_ground_layer(
                         continue;
                     }
 
-                    // Get ground level, when terrain is enabled, look it up once per block
-                    // When disabled, use constant ground_level (no function call overhead)
-                    let ground_y = if terrain_enabled {
-                        editor.get_ground_level(x, z)
+                    // Get ground level. When terrain is enabled, pull from the
+                    // per-chunk cache (one populated lookup, no bilinear); when
+                    // disabled, use the constant ground_level.
+                    let ground_y = if let Some(ref cache) = chunk_ground_cache {
+                        cache.get(editor, x, z)
                     } else {
                         args.ground_level
                     };
 
                     let coord = XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z());
 
-                    // Add default dirt and grass layer if there isn't a stone layer already
-                    if !editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None) {
-                        // Handle ESA water with variable depth as a special case
-                        let is_esa_water =
-                            has_land_cover && ground.cover_class(coord) == land_cover::LC_WATER;
+                    // Compute slope once for this column (used for surface selection and depth)
+                    let slope = if terrain_enabled {
+                        ground.slope(coord)
+                    } else {
+                        0
+                    };
 
-                        if is_esa_water {
-                            // Single block of water at ground level
-                            editor.set_block_if_absent_absolute(WATER, x, ground_y, z);
+                    // On steep terrain, override any existing OSM surface block
+                    // (e.g., a quarry's stone, a park's grass) with slope-appropriate
+                    // rock material. Steep cliffs should always look like rock.
+                    //
+                    // Threshold must match the first "rock" tier below (`slope > 4`).
+                    // At `slope == 4`, the material cascade falls through to land-
+                    // cover selection (grass / farmland / etc.), so force-replacing
+                    // at that slope would wipe e.g. a `landuse=quarry` STONE surface
+                    // with GRASS_BLOCK for no good reason — it's only a 27° hiking
+                    // slope, not a cliff.
+                    let steep_override = terrain_enabled && slope > 4;
+                    let mut did_underfill = false;
+
+                    // Determine surface and under-block material for this column.
+                    // steep_override means we always compute & place the right blocks,
+                    // even if OSM already placed something here.
+                    let has_existing_stone =
+                        editor.check_for_block_absolute(x, ground_y, z, Some(&[STONE]), None);
+
+                    if steep_override || !has_existing_stone {
+                        // Handle ESA water with variable depth as a special case.
+                        // Use bilinear interpolation of the water grid to produce
+                        // organic shorelines instead of rectangular grid-cell edges.
+                        //
+                        // water_distance > 0 acts as a floor: cells the grid already
+                        // classifies as water are ALWAYS treated as water.  The blend
+                        // can only EXTEND water into land (organic fringe), never
+                        // retract it — so OSM rivers that overlap ESA water pixels
+                        // are never overwritten with grass.
+                        let water_blend = if has_land_cover {
+                            ground.water_blend(coord)
+                        } else {
+                            0.0
+                        };
+                        let grid_is_water = has_land_cover && ground.water_distance(coord) > 0;
+                        // Probe a column for water at its *own* ground level.
+                        // Previously this closed over the outer-cell ground_y,
+                        // so probing a neighbour column whose terrain sits at
+                        // a different elevation (common on any sloped terrain)
+                        // scanned the wrong Y range and silently missed water
+                        // that OSM had placed at the neighbour's own ground
+                        // level. Per-probe get_ground_level is a cheap
+                        // bilinear lookup and fixes the false negatives in
+                        // the osm_gap detection below.
+                        let has_water_in_column = |wx: i32, wz: i32| {
+                            // Pull from the chunk cache so the 9-neighbour
+                            // fan-out around each cell doesn't trigger nine
+                            // bilinear interpolations per cell. In flat-ground
+                            // mode every column has the same constant Y, so
+                            // we skip the `editor.get_ground_level` fallback
+                            // (road overrides in flat mode always resolve to
+                            // the same `args.ground_level` anyway).
+                            let gy = match chunk_ground_cache {
+                                Some(ref cache) => cache.get(editor, wx, wz),
+                                None => args.ground_level,
+                            };
+                            for dy in 0..=2 {
+                                if editor.check_for_block_absolute(
+                                    wx,
+                                    gy + dy,
+                                    wz,
+                                    Some(&[WATER]),
+                                    None,
+                                ) {
+                                    return true;
+                                }
+                            }
+                            false
+                        };
+                        let placed_water = has_water_in_column(x, z);
+                        let osm_gap = if placed_water {
+                            false
+                        } else {
+                            let water_n = has_water_in_column(x, z - 1);
+                            let water_s = has_water_in_column(x, z + 1);
+                            let water_w = has_water_in_column(x - 1, z);
+                            let water_e = has_water_in_column(x + 1, z);
+                            let water_ne = has_water_in_column(x + 1, z - 1);
+                            let water_nw = has_water_in_column(x - 1, z - 1);
+                            let water_se = has_water_in_column(x + 1, z + 1);
+                            let water_sw = has_water_in_column(x - 1, z + 1);
+
+                            // Fill single-cell gaps when water spans opposite neighbors.
+                            (water_n && water_s)
+                                || (water_e && water_w)
+                                || (water_ne && water_sw)
+                                || (water_nw && water_se)
+                        };
+                        // Water classification: hard threshold on the
+                        // Gaussian-smoothed water_blend_grid. Combined with
+                        // the grid-level smoothing in `smooth_class_boundaries`
+                        // this produces a clean curved shoreline contour —
+                        // the 0.5 isoline of the smoothed water mask —
+                        // instead of either the raw ESA 10 m rectangle grid
+                        // or a stochastic noise-dithered transition.
+                        let is_esa_water =
+                            grid_is_water || placed_water || osm_gap || water_blend > 0.5;
+
+                        let mut water_y = 0;
+                        let mut place_esa_water = false;
+                        if is_esa_water && !steep_override {
+                            // Snap water to local minimum on steep terrain to compensate
+                            // for ESA/DEM spatial misalignment in canyons
+                            let wy = ground.water_level(coord);
+                            // Skip columns that sit above the water surface to avoid
+                            // buried water pockets inside slopes.
+                            if ground_y <= wy {
+                                water_y = wy;
+                                place_esa_water = true;
+                            }
+                        }
+
+                        if place_esa_water {
+                            // Single block of water at snapped level
+                            editor.set_block_if_absent_absolute(WATER, x, water_y, z);
 
                             // Floor: sand/gravel/clay + sandstone below
                             let h = land_cover::coord_hash(x, z);
@@ -125,46 +328,96 @@ pub fn generate_ground_layer(
                                 1 => CLAY,
                                 _ => SAND,
                             };
-                            if ground_y - 1 > MIN_Y {
-                                editor.set_block_if_absent_absolute(
-                                    floor_block,
-                                    x,
-                                    ground_y - 1,
-                                    z,
-                                );
+                            if water_y - 1 > MIN_Y {
+                                editor.set_block_if_absent_absolute(floor_block, x, water_y - 1, z);
                             }
-                            if ground_y - 2 > MIN_Y {
-                                editor.set_block_if_absent_absolute(SANDSTONE, x, ground_y - 2, z);
+                            if water_y - 2 > MIN_Y {
+                                editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
                             }
                         } else {
                             // Determine surface and sub-surface blocks based on available data
                             let (surface_block, under_block) = if has_land_cover {
                                 // ESA WorldCover + slope-based material selection
                                 let cover = ground.cover_class(coord);
-                                let slope = if terrain_enabled {
-                                    ground.slope(coord)
-                                } else {
-                                    0
-                                };
 
-                                // Steep terrain overrides land cover classification
-                                if slope > 6 {
-                                    (STONE, STONE)
+                                // Steep terrain overrides land cover classification.
+                                //
+                                // slope is max-min of 4 cardinal neighbours sampled
+                                // STEP=4 away, so `slope = 8 · tan(incline)`. Thresholds:
+                                //
+                                //   slope > 8  → ≥ 45° : sheer cliff face
+                                //   slope > 6  → ≥ 37° : very steep rocky face
+                                //   slope > 4  → ≥ 27° : steep slope with scree
+                                //   slope ≤ 4  → < 27° : falls through to land cover
+                                //                        (alpine meadow, forest, etc.)
+                                //
+                                // We don't force rock materials onto 21–27° slopes
+                                // any more — that's a normal hiking incline where
+                                // grass and trees belong.
+                                if slope > 8 {
+                                    // Sheer cliff: each column is 100% one material
+                                    // so the downward under-fill matches the surface,
+                                    // producing vertical stripes of cobbled/deepslate.
+                                    let h = land_cover::coord_hash(x, z);
+                                    if h.is_multiple_of(2) {
+                                        (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
+                                    } else {
+                                        (DEEPSLATE, DEEPSLATE)
+                                    }
+                                } else if slope > 6 {
+                                    // Very steep rock face: stone-dominant with
+                                    // weathered cobblestone chunks and occasional
+                                    // andesite banding. Deepslate stays below-surface
+                                    // only — it would read as "cliff" if exposed here.
+                                    let h = land_cover::coord_hash(x, z) % 20;
+                                    if h < 12 {
+                                        (STONE, DEEPSLATE) // 60%
+                                    } else if h < 17 {
+                                        (COBBLESTONE, DEEPSLATE) // 25%
+                                    } else {
+                                        (ANDESITE, DEEPSLATE) // 15%
+                                    }
                                 } else if slope > 4 {
-                                    (ANDESITE, STONE)
-                                } else if slope > 3 {
-                                    (GRAVEL, STONE)
+                                    // Steep slope with natural scree: rocky mix where
+                                    // the gravel is a minority patch (not the whole
+                                    // surface) so it looks like real scree rather
+                                    // than a grey slope.
+                                    let h = land_cover::coord_hash(x, z) % 12;
+                                    match h {
+                                        0..=3 => (ANDESITE, STONE),    // 33%
+                                        4..=5 => (TUFF, STONE),        // 17%
+                                        6..=7 => (STONE, STONE),       // 17%
+                                        8..=9 => (COBBLESTONE, STONE), // 17%
+                                        _ => (GRAVEL, STONE),          // 17% scree
+                                    }
                                 } else {
                                     // Select surface block based on ESA land cover class
                                     match cover {
                                         land_cover::LC_TREE_COVER => (GRASS_BLOCK, DIRT),
                                         land_cover::LC_SHRUBLAND => {
-                                            // Primarily grass with some coarse dirt patches
+                                            // Primarily grass with coarse-dirt patches.
+                                            // Uses value noise (bilinear + smoothstep)
+                                            // at ~5-block resolution so patch contours
+                                            // are organic blobs, not axis-aligned
+                                            // rectangles that an integer-division zone
+                                            // hash would produce. A finer per-block
+                                            // hash adds occasional grass peek-through
+                                            // inside each blob so they don't look
+                                            // stamped.
+                                            let noise = value_noise_01(x, z, 5);
                                             let h = land_cover::coord_hash(x, z);
-                                            if h.is_multiple_of(5) {
-                                                (COARSE_DIRT, DIRT) // 20% coarse dirt
+                                            // Threshold 0.4 yields roughly 20 % dirt
+                                            // coverage (value noise from uniform
+                                            // samples concentrates around 0.5, so 0.4
+                                            // catches a band below that).
+                                            if noise < 0.4 {
+                                                if h.is_multiple_of(5) {
+                                                    (GRASS_BLOCK, DIRT) // grass peek-through
+                                                } else {
+                                                    (COARSE_DIRT, DIRT) // dirt patch interior
+                                                }
                                             } else {
-                                                (GRASS_BLOCK, DIRT) // 80% grass
+                                                (GRASS_BLOCK, DIRT)
                                             }
                                         }
                                         land_cover::LC_GRASSLAND => (GRASS_BLOCK, DIRT),
@@ -181,39 +434,54 @@ pub fn generate_ground_layer(
                                                 (COBBLESTONE, STONE)
                                             }
                                         }
-                                        land_cover::LC_BARE => {
+                                        land_cover::LC_BARE | land_cover::LC_SNOW_ICE => {
                                             // Skip isolated bare pixels (surrounded by non-bare)
                                             // to avoid random single-block patches
                                             let neighbors_bare =
                                                 [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
                                                     .iter()
                                                     .filter(|(dx, dz)| {
-                                                        ground.cover_class(XZPoint::new(
+                                                        let cc = ground.cover_class(XZPoint::new(
                                                             x + dx - xzbbox.min_x(),
                                                             z + dz - xzbbox.min_z(),
-                                                        )) == land_cover::LC_BARE
+                                                        ));
+                                                        cc == land_cover::LC_BARE
+                                                            || cc == land_cover::LC_SNOW_ICE
                                                     })
                                                     .count();
                                             if neighbors_bare == 0 {
                                                 // Isolated pixel - blend with surroundings
                                                 (GRASS_BLOCK, DIRT)
                                             } else {
-                                                // Bare/sparse: coarse dirt, gravel, stone mix
+                                                // Bare/sparse terrain: soil patches
+                                                // interspersed with varied rock. Value
+                                                // noise at ~6-block resolution groups
+                                                // coarse dirt into organic earth
+                                                // patches (rather than scattering it
+                                                // as single pixels whose warm brown
+                                                // stands out against grey rock), then
+                                                // a finer per-block hash picks the
+                                                // specific block within each zone.
+                                                let noise = value_noise_01(x, z, 6);
                                                 let h = land_cover::coord_hash(x, z);
-                                                match h % 10 {
-                                                    0..=3 => (COARSE_DIRT, DIRT), // 40% coarse dirt
-                                                    4..=5 => (GRAVEL, STONE),     // 20% gravel
-                                                    6..=7 => (STONE, STONE),      // 20% stone
-                                                    _ => (ANDESITE, STONE),       // 20% andesite
+                                                // Threshold 0.45 → roughly 30 % dirt
+                                                // coverage given the bell-shaped
+                                                // distribution of bilinear-interpolated
+                                                // uniform samples.
+                                                if noise < 0.45 {
+                                                    match h % 10 {
+                                                        0..=7 => (COARSE_DIRT, DIRT), // 80% inside dirt patch
+                                                        _ => (STONE, STONE), // 20% stone poking through
+                                                    }
+                                                } else {
+                                                    match h % 12 {
+                                                        0..=3 => (STONE, STONE),       // 33%
+                                                        4..=5 => (ANDESITE, STONE),    // 17%
+                                                        6..=7 => (COBBLESTONE, STONE), // 17%
+                                                        8..=9 => (GRAVEL, STONE),      // 17% scree
+                                                        _ => (ANDESITE, STONE), // 17% more andesite
+                                                    }
                                                 }
-                                            }
-                                        }
-                                        land_cover::LC_SNOW_ICE => {
-                                            let h = land_cover::coord_hash(x, z) % 10;
-                                            if h < 7 {
-                                                (SNOW_BLOCK, DIRT)
-                                            } else {
-                                                (PACKED_ICE, PACKED_ICE)
                                             }
                                         }
                                         // LC_WATER handled above with variable depth
@@ -223,14 +491,35 @@ pub fn generate_ground_layer(
                                     }
                                 }
                             } else if terrain_enabled {
-                                // No land cover data but terrain is enabled: apply slope-based materials
-                                let slope = ground.slope(coord);
-                                if slope > 6 {
-                                    (STONE, STONE)
+                                // No land cover data: same slope-based cascade
+                                // as the has_land_cover path, falling through
+                                // to plain grass for the ≤4 slopes (no ESA
+                                // class to pick instead).
+                                if slope > 8 {
+                                    let h = land_cover::coord_hash(x, z);
+                                    if h.is_multiple_of(2) {
+                                        (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
+                                    } else {
+                                        (DEEPSLATE, DEEPSLATE)
+                                    }
+                                } else if slope > 6 {
+                                    let h = land_cover::coord_hash(x, z) % 20;
+                                    if h < 12 {
+                                        (STONE, DEEPSLATE)
+                                    } else if h < 17 {
+                                        (COBBLESTONE, DEEPSLATE)
+                                    } else {
+                                        (ANDESITE, DEEPSLATE)
+                                    }
                                 } else if slope > 4 {
-                                    (ANDESITE, STONE)
-                                } else if slope > 3 {
-                                    (GRAVEL, STONE)
+                                    let h = land_cover::coord_hash(x, z) % 12;
+                                    match h {
+                                        0..=3 => (ANDESITE, STONE),
+                                        4..=5 => (TUFF, STONE),
+                                        6..=7 => (STONE, STONE),
+                                        8..=9 => (COBBLESTONE, STONE),
+                                        _ => (GRAVEL, STONE),
+                                    }
                                 } else {
                                     (GRASS_BLOCK, DIRT)
                                 }
@@ -238,21 +527,40 @@ pub fn generate_ground_layer(
                                 (GRASS_BLOCK, DIRT)
                             };
 
-                            // Shoreline blending: land blocks adjacent to water get
-                            // sand surface for a natural beach/shore transition.
-                            // Check both ESA water classification AND placed water
-                            // blocks (from OSM) to bridge any gap between the two.
-                            let (surface_block, under_block) = if surface_block != WATER {
+                            // Shoreline blending: land blocks near water get sand
+                            // surface for a natural beach/shore transition.
+                            // Uses water_blend gradient for ESA water (scales with
+                            // grid resolution) plus neighbor check for OSM water.
+                            // Skip on steep terrain — canyon walls should stay rock.
+                            let (surface_block, under_block) = if surface_block != WATER
+                                && slope <= 3
+                            {
+                                // Transition-zone blocks that noise decided are "not
+                                // water" get sand via water_blend > 0.01 (at least one
+                                // surrounding grid cell is water).  For blocks fully
+                                // outside the blend zone, fall back to neighbor check.
                                 let near_esa_water = has_land_cover
-                                    && ground.water_distance(coord) == 0
-                                    && [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)].iter().any(
-                                        |(dx, dz)| {
+                                    && !is_esa_water
+                                    && (water_blend > 0.01
+                                        || [
+                                            (-1i32, 0i32),
+                                            (1, 0),
+                                            (0, -1),
+                                            (0, 1),
+                                            (-1, -1),
+                                            (-1, 1),
+                                            (1, -1),
+                                            (1, 1),
+                                        ]
+                                        .iter()
+                                        .any(|(dx, dz)| {
                                             ground.cover_class(XZPoint::new(
                                                 x + dx - xzbbox.min_x(),
                                                 z + dz - xzbbox.min_z(),
                                             )) == land_cover::LC_WATER
-                                        },
-                                    );
+                                        }));
+
+                                // Also check placed water blocks (OSM rivers, etc.)
                                 let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
                                     .iter()
                                     .any(|(dx, dz)| {
@@ -273,7 +581,38 @@ pub fn generate_ground_layer(
                                 (surface_block, under_block)
                             };
 
-                            editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
+                            if steep_override {
+                                // Force-replace existing OSM blocks on steep terrain
+                                // Use blacklist to avoid replacing water/bedrock and
+                                // common hard surfaces (roads/buildings). WHITE_CONCRETE
+                                // protects lane-centre stripes and zebra crossings —
+                                // without it, every dashed line on a hillside street
+                                // gets buried under andesite/stone bricks by the
+                                // slope-tier rock selector above.
+                                editor.set_block_absolute(
+                                    surface_block,
+                                    x,
+                                    ground_y,
+                                    z,
+                                    None,
+                                    Some(&[
+                                        WATER,
+                                        BEDROCK,
+                                        GRAY_CONCRETE_POWDER,
+                                        CYAN_TERRACOTTA,
+                                        GRAY_CONCRETE,
+                                        LIGHT_GRAY_CONCRETE,
+                                        WHITE_CONCRETE,
+                                        DIRT_PATH,
+                                        STONE_BRICKS,
+                                        BRICK,
+                                        OAK_PLANKS,
+                                        BLACK_CONCRETE,
+                                    ]),
+                                );
+                            } else {
+                                editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
+                            }
 
                             // Don't place dirt/under blocks below water surfaces.
                             // OSM water (rivers, lakes) is placed during element processing;
@@ -286,18 +625,48 @@ pub fn generate_ground_layer(
                                 None,
                             );
                             if !surface_is_water {
-                                editor.set_block_if_absent_absolute(
-                                    under_block,
-                                    x,
-                                    ground_y - 1,
-                                    z,
-                                );
-                                editor.set_block_if_absent_absolute(
-                                    under_block,
-                                    x,
-                                    ground_y - 2,
-                                    z,
-                                );
+                                // Fill under-blocks deep enough to seal any visible
+                                // gap on cliff faces. Check all 8 neighbors (cardinal
+                                // + diagonal) and fill down to the lowest neighbor's
+                                // ground level so no void is ever visible.
+                                let depth = if let Some(ref cache) = chunk_ground_cache {
+                                    let mut min_neighbor_y = ground_y;
+                                    for &(dx, dz) in &[
+                                        (-1i32, 0i32),
+                                        (1, 0),
+                                        (0, -1),
+                                        (0, 1),
+                                        (-1, -1),
+                                        (-1, 1),
+                                        (1, -1),
+                                        (1, 1),
+                                    ] {
+                                        let ny = cache.get(editor, x + dx, z + dz);
+                                        if ny < min_neighbor_y {
+                                            min_neighbor_y = ny;
+                                        }
+                                    }
+                                    // Fill from ground_y-1 down toward the lowest
+                                    // neighbor, capped to avoid excessive work on
+                                    // extreme elevation changes (same cap as the
+                                    // universal depth fill below).
+                                    (ground_y - min_neighbor_y + 1).clamp(2, 64)
+                                } else {
+                                    2
+                                };
+                                let y_max = ground_y - 1;
+                                if y_max > MIN_Y {
+                                    let y_min = (ground_y - depth).max(MIN_Y + 1);
+                                    editor.fill_column_absolute(
+                                        under_block,
+                                        x,
+                                        z,
+                                        y_min,
+                                        y_max,
+                                        true,
+                                    );
+                                }
+                                did_underfill = true;
                             } else {
                                 // Under OSM water: find bottom of water column,
                                 // place sand/gravel/clay floor + sandstone below.
@@ -354,11 +723,6 @@ pub fn generate_ground_layer(
                                 );
                             if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
                                 let cover = ground.cover_class(coord);
-                                let slope = if terrain_enabled {
-                                    ground.slope(coord)
-                                } else {
-                                    0
-                                };
                                 let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
 
                                 match cover {
@@ -471,39 +835,27 @@ pub fn generate_ground_layer(
                                         }
                                     }
                                     land_cover::LC_CROPLAND
-                                        // Only place crops if the ground is actually farmland
                                         if editor.check_for_block_absolute(
                                             x,
                                             ground_y,
                                             z,
                                             Some(&[FARMLAND]),
                                             None,
-                                        ) => {
-                                            if x % 9 == 0 && z % 9 == 0 {
+                                        ) =>
+                                    {
+                                        if x % 9 == 0 && z % 9 == 0 {
+                                            editor.set_block_absolute(
+                                                WATER,
+                                                x,
+                                                ground_y,
+                                                z,
+                                                Some(&[FARMLAND]),
+                                                None,
+                                            );
+                                        } else if rng.random_range(0..76) == 0 {
+                                            if rng.random_range(1..=10) <= 4 {
                                                 editor.set_block_absolute(
-                                                    WATER,
-                                                    x,
-                                                    ground_y,
-                                                    z,
-                                                    Some(&[FARMLAND]),
-                                                    None,
-                                                );
-                                            } else if rng.random_range(0..76) == 0 {
-                                                if rng.random_range(1..=10) <= 4 {
-                                                    editor.set_block_absolute(
-                                                        HAY_BALE,
-                                                        x,
-                                                        ground_y + 1,
-                                                        z,
-                                                        None,
-                                                        None,
-                                                    );
-                                                }
-                                            } else {
-                                                let crop = [WHEAT, CARROTS, POTATOES]
-                                                    [rng.random_range(0..3)];
-                                                editor.set_block_absolute(
-                                                    crop,
+                                                    HAY_BALE,
                                                     x,
                                                     ground_y + 1,
                                                     z,
@@ -511,7 +863,19 @@ pub fn generate_ground_layer(
                                                     None,
                                                 );
                                             }
+                                        } else {
+                                            let crop =
+                                                [WHEAT, CARROTS, POTATOES][rng.random_range(0..3)];
+                                            editor.set_block_absolute(
+                                                crop,
+                                                x,
+                                                ground_y + 1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
                                         }
+                                    }
                                     land_cover::LC_WETLAND | land_cover::LC_MANGROVES
                                         if ground_is_natural =>
                                     {
@@ -554,9 +918,50 @@ pub fn generate_ground_layer(
                                             );
                                         }
                                     }
-                                    land_cover::LC_BARE if ground_is_natural
-                                        // Sparse dead bushes
-                                        && rng.random_range(0..100) == 0 => {
+                                    land_cover::LC_BARE if ground_is_natural => {
+                                        // Coarse-dirt patches (from the bare-terrain soil
+                                        // blobs above) get a light scatter of weeds: a bit
+                                        // of grass with rare fallen-leaf clumps and dead
+                                        // bushes. Kept sparse on purpose so the terrain
+                                        // still reads as bare/arid rather than shrubland.
+                                        // Other bare surfaces (stone/gravel scree) keep
+                                        // only the original occasional dead bush.
+                                        let on_coarse_dirt = editor.check_for_block_absolute(
+                                            x,
+                                            ground_y,
+                                            z,
+                                            Some(&[COARSE_DIRT]),
+                                            None,
+                                        );
+                                        if on_coarse_dirt {
+                                            match rng.random_range(0..100) {
+                                                0..=5 => editor.set_block_absolute(
+                                                    GRASS,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                ),
+                                                6..=8 => editor.set_block_absolute(
+                                                    OAK_LEAVES,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                ),
+                                                9 => editor.set_block_absolute(
+                                                    DEAD_BUSH,
+                                                    x,
+                                                    ground_y + 1,
+                                                    z,
+                                                    None,
+                                                    None,
+                                                ),
+                                                _ => {}
+                                            }
+                                        } else if rng.random_range(0..100) == 0 {
                                             editor.set_block_absolute(
                                                 DEAD_BUSH,
                                                 x,
@@ -566,10 +971,46 @@ pub fn generate_ground_layer(
                                                 None,
                                             );
                                         }
+                                    }
                                     _ => {}
                                 }
                             }
                         } // end else (non-water)
+                    }
+
+                    // Depth fill: ensure ALL columns have under-blocks deep enough
+                    // to seal cliff faces. This runs unconditionally (even for columns
+                    // skipped above because OSM already placed a surface block) so that
+                    // quarries, landuse areas, and other OSM elements on slopes don't
+                    // leave visible gaps. Uses set_block_if_absent so it won't overwrite
+                    // material-specific under-blocks already placed above.
+                    if let Some(ref cache) = chunk_ground_cache {
+                        if !editor.check_for_block_absolute(x, ground_y, z, Some(&[WATER]), None)
+                            && !did_underfill
+                        {
+                            let mut min_neighbor_y = ground_y;
+                            for &(dx, dz) in &[
+                                (-1i32, 0i32),
+                                (1, 0),
+                                (0, -1),
+                                (0, 1),
+                                (-1, -1),
+                                (-1, 1),
+                                (1, -1),
+                                (1, 1),
+                            ] {
+                                let ny = cache.get(editor, x + dx, z + dz);
+                                if ny < min_neighbor_y {
+                                    min_neighbor_y = ny;
+                                }
+                            }
+                            let depth = (ground_y - min_neighbor_y + 1).clamp(2, 64);
+                            let y_max = ground_y - 1;
+                            let y_min = (ground_y - depth).max(MIN_Y + 1);
+                            if y_min <= y_max {
+                                editor.fill_column_absolute(STONE, x, z, y_min, y_max, true);
+                            }
+                        }
                     }
 
                     // Post-processing: remove stray vegetation from road surfaces.
@@ -679,4 +1120,43 @@ pub fn generate_ground_layer(
     ground_pb.finish();
 
     Ok(())
+}
+
+/// Smooth scalar noise in `[0, 1]` at approximately `scale`-block resolution.
+///
+/// Used for organic surface-material patches (coarse-dirt vs rock, etc.).
+/// Works by sampling the deterministic coord_hash at the four corners of
+/// a `scale × scale` lattice cell containing `(x, z)`, then bilinearly
+/// interpolating with a cubic Hermite smoothstep so the boundaries between
+/// high- and low-noise regions curve rather than snap along axis-aligned
+/// lattice edges. Compared to `coord_hash(x / scale, z / scale)` (which
+/// produces the rectangular patches seen in the first iteration of the
+/// patch code) the output has organic blob-shaped contours.
+///
+/// Cost: 4 hash calls + a few f64 ops per block — still well under 100 ns,
+/// negligible over the whole ground pass.
+fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
+    let s = scale.max(1);
+    // Integer lattice cell containing (x, z). div_euclid gives floor
+    // division for negative coordinates too, so patches tile uniformly
+    // across the origin.
+    let x0 = x.div_euclid(s) * s;
+    let z0 = z.div_euclid(s) * s;
+    let x1 = x0 + s;
+    let z1 = z0 + s;
+    // Fractional position inside the cell.
+    let tx = (x - x0) as f64 / s as f64;
+    let tz = (z - z0) as f64 / s as f64;
+    // Cubic Hermite smoothstep: derivative = 0 at both ends, so neighbouring
+    // cells join smoothly instead of with a visible slope change.
+    let fx = tx * tx * (3.0 - 2.0 * tx);
+    let fz = tz * tz * (3.0 - 2.0 * tz);
+    let sample = |x: i32, z: i32| (land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
+    let v00 = sample(x0, z0);
+    let v10 = sample(x1, z0);
+    let v01 = sample(x0, z1);
+    let v11 = sample(x1, z1);
+    let a = v00 * (1.0 - fx) + v10 * fx;
+    let b = v01 * (1.0 - fx) + v11 * fx;
+    a * (1.0 - fz) + b * fz
 }

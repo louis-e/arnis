@@ -42,12 +42,15 @@
   "roof": "Generowanie dachu",
   "fillground": "Wypełnij podłoże",
   "land_cover": "Pokrycie terenu",
-  "disable_height_limit": "Wyłącz limit wysokości",
+  "disable_height_limit": "Rozszerz wysokość budowania",
   "bedrock_auto_generated": "Świat Bedrock jest generowany automatycznie",
   "save_path": "Ścieżka zapisu",
   "rotation_angle": "Kąt Obrotu",
   "settings_section_generation": "Generowanie",
   "settings_section_world": "Świat",
   "settings_section_map": "Mapa i dane",
-  "settings_section_application": "Aplikacja"
+  "settings_section_application": "Aplikacja",
+  "clear_tile_cache": "Wyczyść pamięć kafelków",
+  "clear_tile_cache_button": "Wyczyść",
+  "anonymous_crash_reports": "Anonimowe raporty o awariach"
 }

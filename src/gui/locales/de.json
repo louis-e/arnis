@@ -42,12 +42,15 @@
   "roof": "Dach Generierung",
   "fillground": "Boden füllen",
   "land_cover": "Landbedeckung",
-  "disable_height_limit": "Höhenlimit deaktivieren",
+  "disable_height_limit": "Bauhöhe erweitern",
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",
   "save_path": "Speicherpfad",
   "rotation_angle": "Rotationswinkel",
   "settings_section_generation": "Generierung",
   "settings_section_world": "Welt",
   "settings_section_map": "Karte & Eingabe",
-  "settings_section_application": "Anwendung"
+  "settings_section_application": "Anwendung",
+  "clear_tile_cache": "Tile-Cache leeren",
+  "clear_tile_cache_button": "Leeren",
+  "anonymous_crash_reports": "Anonyme Absturzberichte"
 }

@@ -42,12 +42,15 @@
   "roof": "Geração do telhado",
   "fillground": "Preencher solo",
   "land_cover": "Cobertura do solo",
-  "disable_height_limit": "Desativar limite de altura",
+  "disable_height_limit": "Ampliar altura de construção",
   "bedrock_auto_generated": "O mundo de bedrock é gerado automaticamente",
   "save_path": "Caminho de salvamento",
   "rotation_angle": "Ângulo de Rotação",
   "settings_section_generation": "Geração",
   "settings_section_world": "Mundo",
   "settings_section_map": "Mapa e entrada",
-  "settings_section_application": "Aplicação"
+  "settings_section_application": "Aplicação",
+  "clear_tile_cache": "Limpar cache de tiles",
+  "clear_tile_cache_button": "Limpar",
+  "anonymous_crash_reports": "Relatórios anônimos de falhas"
 }

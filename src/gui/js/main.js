@@ -39,6 +39,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   await initSavePath();
   initSettings();
   initTelemetryConsent();
+  initClearCacheButton();
+  initTooltips();
   handleBboxInput();
   const localization = await getLocalization();
   await applyLocalization(localization);
@@ -115,6 +117,7 @@ async function applyLocalization(localization) {
     "span[data-localize='fillground']": "fillground",
     "span[data-localize='land_cover']": "land_cover",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
+    "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
@@ -122,6 +125,8 @@ async function applyLocalization(localization) {
     "div[data-localize='settings_section_world']": "settings_section_world",
     "div[data-localize='settings_section_map']": "settings_section_map",
     "div[data-localize='settings_section_application']": "settings_section_application",
+    "span[data-localize='clear_tile_cache']": "clear_tile_cache",
+    "button[data-localize='clear_tile_cache_button']": "clear_tile_cache_button",
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
@@ -519,23 +524,18 @@ function updateFormatToggleUI(format) {
 
   const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
 
+  // Toggle now supported on both formats (Java datapack + Bedrock BP).
+  if (heightLimitToggle) {
+    heightLimitToggle.disabled = false;
+    heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
+  }
+
   if (format === 'java') {
     javaBtn.classList.add('format-active');
     bedrockBtn.classList.remove('format-active');
-    // Re-enable height limit toggle for Java
-    if (heightLimitToggle) {
-      heightLimitToggle.disabled = false;
-      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
-    }
   } else {
     javaBtn.classList.remove('format-active');
     bedrockBtn.classList.add('format-active');
-    // Disable height limit toggle for Bedrock (not supported)
-    if (heightLimitToggle) {
-      heightLimitToggle.checked = false;
-      heightLimitToggle.disabled = true;
-      heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '0.5';
-    }
     // Clear world path for bedrock (auto-generated)
     worldPath = "";
   }
@@ -585,6 +585,187 @@ function initTelemetryConsent() {
     const v = localStorage.getItem(key);
     return v === null ? null : v === 'true';
   };
+}
+
+// Wires the "Clear Tile Cache" button in the Application settings panel
+// to the Rust-side `gui_clear_tile_caches` command. User feedback is a
+// brief background flash (green on success, red on partial failure) —
+// keeps the row visually consistent with the other checkbox/slider
+// rows, no extra status label. The button stays disabled while the
+// call is in flight so repeated clicks can't fire multiple concurrent
+// wipes (Rust is idempotent, but the UI would look confused).
+function initClearCacheButton() {
+  const button = document.getElementById('clear-cache-button');
+  if (!button) {
+    return;
+  }
+
+  // How long the success/error flash stays applied before reverting to
+  // the default outline. Long enough to register as confirmation, short
+  // enough that a user can click again quickly if they want.
+  const FLASH_MS = 1500;
+  let flashTimer = null;
+
+  const flash = (cls) => {
+    button.classList.remove('is-success', 'is-error');
+    button.classList.add(cls);
+    if (flashTimer) {
+      clearTimeout(flashTimer);
+    }
+    flashTimer = setTimeout(() => {
+      button.classList.remove('is-success', 'is-error');
+      flashTimer = null;
+    }, FLASH_MS);
+  };
+
+  button.addEventListener('click', async () => {
+    if (button.disabled) {
+      return;
+    }
+    button.disabled = true;
+    // Pre-emptively drop any lingering flash class from a previous run
+    // so "clearing…" state isn't tinted green/red left over from before.
+    button.classList.remove('is-success', 'is-error');
+    try {
+      await invoke('gui_clear_tile_caches');
+      flash('is-success');
+    } catch (error) {
+      // The Rust side returns Err(String) for partial failures (files
+      // still locked). The user sees the red flash; the full text goes
+      // to the browser console for debugging, not the UI.
+      console.warn('Clear tile cache failed:', error);
+      flash('is-error');
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+// Single shared tooltip element appended to <body>, so it escapes the
+// `.settings-scrollable` container's `overflow: hidden` clip and can
+// extend past the top / sides of the panel. Previously the tooltip
+// lived as a `::after` pseudo-element on each `.tooltip-icon`, which
+// meant long text or icons near an edge got cut off by the scroll
+// container. This global element is positioned via
+// `getBoundingClientRect` on hover and auto-flips above ↔ below when
+// close to the viewport edge.
+function initTooltips() {
+  const tooltip = document.createElement('div');
+  tooltip.className = 'global-tooltip';
+  tooltip.setAttribute('role', 'tooltip');
+  tooltip.setAttribute('aria-hidden', 'true');
+  const arrow = document.createElement('div');
+  arrow.className = 'global-tooltip-arrow';
+  tooltip.appendChild(arrow);
+  const body = document.createElement('div');
+  body.className = 'global-tooltip-body';
+  tooltip.appendChild(body);
+  document.body.appendChild(tooltip);
+
+  const VIEWPORT_MARGIN = 8; // px gap between tooltip and viewport edge
+  const ICON_GAP = 8; // px gap between tooltip and icon
+
+  let currentIcon = null;
+
+  const position = () => {
+    if (!currentIcon) return;
+    const iconRect = currentIcon.getBoundingClientRect();
+    // Measure after text is set; reset to allow natural width.
+    const ttRect = tooltip.getBoundingClientRect();
+
+    // Default: centered above the icon. Flip below when there isn't
+    // enough room above (e.g. icon near the top of the settings panel,
+    // which is the "cut off at the top" case the user reported).
+    const spaceAbove = iconRect.top;
+    const flipBelow = spaceAbove < ttRect.height + ICON_GAP + VIEWPORT_MARGIN;
+    const top = flipBelow
+      ? iconRect.bottom + ICON_GAP
+      : iconRect.top - ttRect.height - ICON_GAP;
+
+    // Horizontal: center on the icon, then clamp into the viewport so
+    // tooltips near the right edge don't overflow into hidden space.
+    const desiredLeft = iconRect.left + iconRect.width / 2 - ttRect.width / 2;
+    const maxLeft = window.innerWidth - ttRect.width - VIEWPORT_MARGIN;
+    const left = Math.max(VIEWPORT_MARGIN, Math.min(desiredLeft, maxLeft));
+
+    tooltip.style.top = top + 'px';
+    tooltip.style.left = left + 'px';
+
+    // Point the arrow back at the icon's center, regardless of the
+    // horizontal clamp above, and flip it to the opposite edge when the
+    // tooltip opens below the icon.
+    const iconCenter = iconRect.left + iconRect.width / 2;
+    const arrowLeft = Math.max(8, Math.min(ttRect.width - 8, iconCenter - left));
+    arrow.style.left = arrowLeft + 'px';
+    tooltip.classList.toggle('flipped', flipBelow);
+  };
+
+  const show = (icon) => {
+    const text = icon.getAttribute('data-tooltip');
+    if (!text) return;
+    currentIcon = icon;
+    body.textContent = text;
+    // Position BEFORE making visible. The tooltip stays `visibility:
+    // hidden` (layout-active, paint-inactive) so `getBoundingClientRect`
+    // returns the real dimensions, but the user never sees a 0,0 flash
+    // between insertion and the first position-frame.
+    position();
+    tooltip.classList.add('is-visible');
+    tooltip.setAttribute('aria-hidden', 'false');
+  };
+
+  const hide = () => {
+    currentIcon = null;
+    tooltip.classList.remove('is-visible', 'flipped');
+    tooltip.setAttribute('aria-hidden', 'true');
+  };
+
+  const bind = (icon) => {
+    // Make `<span class="tooltip-icon">` focusable via Tab so keyboard
+    // users can reveal the tooltip. Spans are not focusable by default,
+    // so the focus/blur listeners below are dead without this. Done in
+    // JS rather than HTML so every icon picks it up automatically and
+    // we don't have to keep the 14 call sites in sync. `role="button"`
+    // is a reasonable hint for screen readers that this thing is
+    // interactive even though it doesn't do anything on click.
+    if (icon.tabIndex < 0) {
+      icon.tabIndex = 0;
+    }
+    if (!icon.hasAttribute('role')) {
+      icon.setAttribute('role', 'button');
+    }
+    if (!icon.hasAttribute('aria-label')) {
+      const text = icon.getAttribute('data-tooltip');
+      if (text) {
+        icon.setAttribute('aria-label', text);
+      }
+    }
+    icon.addEventListener('mouseenter', () => show(icon));
+    icon.addEventListener('mouseleave', hide);
+    icon.addEventListener('focus', () => show(icon));
+    icon.addEventListener('blur', hide);
+    // Escape closes the tooltip while it's focused.
+    icon.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        hide();
+      }
+    });
+  };
+
+  document.querySelectorAll('.tooltip-icon').forEach(bind);
+
+  // Reposition on viewport resize / scroll (including inside the
+  // settings-scrollable container). Also hide on scroll inside the
+  // settings panel, because the icon may have scrolled off-screen
+  // and a stale tooltip hovering over the wrong row is worse than
+  // hiding eagerly.
+  window.addEventListener('resize', () => {
+    if (currentIcon) position();
+  });
+  const scrollable = document.querySelector('.settings-scrollable');
+  if (scrollable) {
+    scrollable.addEventListener('scroll', hide, { passive: true });
+  }
 }
 
 /// Save path management

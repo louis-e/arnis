@@ -42,12 +42,15 @@
   "roof": "Génération de toit",
   "fillground": "Remplir le sol",
   "land_cover": "Couverture du sol",
-  "disable_height_limit": "Désactiver la limite de hauteur",
+  "disable_height_limit": "Étendre la hauteur de construction",
   "bedrock_auto_generated": "Le monde Bedrock est généré automatiquement",
   "save_path": "Chemin de sauvegarde",
   "rotation_angle": "Angle de Rotation",
   "settings_section_generation": "Génération",
   "settings_section_world": "Monde",
   "settings_section_map": "Carte et saisie",
-  "settings_section_application": "Application"
+  "settings_section_application": "Application",
+  "clear_tile_cache": "Vider le cache de tuiles",
+  "clear_tile_cache_button": "Vider",
+  "anonymous_crash_reports": "Rapports d'erreurs anonymes"
 }

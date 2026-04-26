@@ -42,12 +42,15 @@
   "roof": "Stogo generavimas",
   "fillground": "Užpildyti pagrindą",
   "land_cover": "Žemės danga",
-  "disable_height_limit": "Išjungti aukščio ribą",
+  "disable_height_limit": "Praplėsti statybos aukštį",
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
   "save_path": "Išsaugojimo kelias",
   "rotation_angle": "Pasukimo Kampas",
   "settings_section_generation": "Generavimas",
   "settings_section_world": "Pasaulis",
   "settings_section_map": "Žemėlapis ir įvestis",
-  "settings_section_application": "Programa"
+  "settings_section_application": "Programa",
+  "clear_tile_cache": "Išvalyti plytelių talpyklą",
+  "clear_tile_cache_button": "Išvalyti",
+  "anonymous_crash_reports": "Anoniminės avarijų ataskaitos"
 }

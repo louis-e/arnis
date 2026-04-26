@@ -150,6 +150,7 @@ pub fn run_gui() {
             gui_start_generation,
             gui_get_version,
             gui_check_for_updates,
+            gui_clear_tile_caches,
             gui_get_world_map_data,
             gui_show_in_folder
         ])
@@ -615,6 +616,51 @@ fn gui_check_for_updates() -> Result<bool, String> {
     }
 }
 
+/// Wipe both the elevation-tile and ESA-land-cover on-disk caches, so
+/// subsequent generations re-download from the upstream providers. This
+/// is what the "Clean tile cache" button in the GUI's Application
+/// settings panel calls into.
+///
+/// Returns a single human-readable status line on success (the JS side
+/// surfaces it as a toast-style notification), and an `Err` only when
+/// one or more files couldn't be deleted — that case is rare (usually
+/// a file still locked by a live generation run) but worth making
+/// visible so the user knows the wipe was partial.
+///
+/// Both cache roots themselves are left on disk; only their *contents*
+/// are removed, so the next elevation/land-cover fetch doesn't have to
+/// recreate the directory tree.
+#[tauri::command]
+fn gui_clear_tile_caches() -> Result<String, String> {
+    use crate::elevation::cache::clear_all_cached_tiles;
+    use crate::land_cover::clear_land_cover_cache;
+
+    let combined = clear_all_cached_tiles().combined(clear_land_cover_cache());
+    let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
+
+    if combined.errors > 0 {
+        return Err(format!(
+            "Cleared {} cached file{} ({:.1} MB), but {} file{} could not be removed",
+            combined.files_deleted,
+            if combined.files_deleted == 1 { "" } else { "s" },
+            megabytes,
+            combined.errors,
+            if combined.errors == 1 { "" } else { "s" },
+        ));
+    }
+
+    if combined.files_deleted == 0 {
+        return Ok("Tile cache was already empty".to_string());
+    }
+
+    Ok(format!(
+        "Cleared {} cached file{} ({:.1} MB freed)",
+        combined.files_deleted,
+        if combined.files_deleted == 1 { "" } else { "s" },
+        megabytes,
+    ))
+}
+
 /// Returns the world map image data as base64 and geo bounds for overlay display.
 /// Returns None if the map image or metadata doesn't exist.
 #[tauri::command]
@@ -804,6 +850,11 @@ fn gui_start_generation(
 
             set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
                 .map_err(|e| format!("Failed to set spawn point: {e}"))?;
+
+            if disable_height_limit {
+                crate::world_utils::install_tall_datapack(std::path::Path::new(&selected_world))
+                    .map_err(|e| format!("Failed to install tall-world datapack: {e}"))?;
+            }
 
             Ok(())
         })();

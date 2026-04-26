@@ -128,6 +128,7 @@ pub struct BedrockWriter {
     level_name: String,
     spawn_point: Option<(i32, i32)>,
     ground: Option<Arc<Ground>>,
+    extend_build_height: bool,
 }
 
 impl BedrockWriter {
@@ -137,6 +138,7 @@ impl BedrockWriter {
         level_name: String,
         spawn_point: Option<(i32, i32)>,
         ground: Option<Arc<Ground>>,
+        extend_build_height: bool,
     ) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
@@ -151,6 +153,7 @@ impl BedrockWriter {
             level_name,
             spawn_point,
             ground,
+            extend_build_height,
         }
     }
 
@@ -232,8 +235,17 @@ impl BedrockWriter {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        // Version array for Bedrock 1.21.x compatibility
-        let version_array = vec![1, 21, 0, 0, 0];
+        // Extended worlds require 1.21.40+ for Custom Biomes / dimension_bounds.
+        // Only the user-facing version markers are bumped; network_version and
+        // inventory_version stay at 1.21.0 because they're used for multiplayer
+        // protocol and inventory storage format, neither of which changes with
+        // the dimension_bounds feature. Bedrock tolerates this mix — what it
+        // gates on is last_opened_with_version and minimum_compatible_client_version.
+        let version_array: Vec<i32> = if self.extend_build_height {
+            vec![1, 21, 40, 0, 0]
+        } else {
+            vec![1, 21, 0, 0, 0]
+        };
 
         // Build complete level.dat NBT structure
         let level_dat = BedrockLevelDat {
@@ -364,8 +376,14 @@ impl BedrockWriter {
             show_days_played: false,
             locator_bar: true,
             tnt_explosion_drop_decay: true,
-            saved_with_toggled_experiments: false,
-            experiments_ever_used: false,
+            // dimension_bounds is gated behind the Custom Biomes experiment;
+            // without these three flags the bundled BP is silently ignored
+            // and blocks above Y=319 disappear on first load.
+            saved_with_toggled_experiments: self.extend_build_height,
+            experiments_ever_used: self.extend_build_height,
+            experiments: BedrockExperiments {
+                data_driven_biomes: self.extend_build_height,
+            },
 
             // Editor
             editor_world_type: 0,
@@ -386,8 +404,8 @@ impl BedrockWriter {
             daylight_cycle: 0,
         };
 
-        let nbt_bytes =
-            nbtx::to_le_bytes(&level_dat).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+        let nbt_bytes = nbtx::to_le_bytes(&level_dat)
+            .map_err(|e| BedrockSaveError::Nbt(format!("level.dat: {e}")))?;
 
         // Write with header
         let mut file = File::create(self.output_dir.join("level.dat"))?;
@@ -532,8 +550,8 @@ impl BedrockWriter {
         // a TAG_List header, which Bedrock cannot parse.
         let mut data: Vec<u8> = Vec::new();
         for compound in &deduped {
-            let bytes =
-                nbtx::to_le_bytes(compound).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+            let bytes = nbtx::to_le_bytes(compound)
+                .map_err(|e| BedrockSaveError::Nbt(format!("block-entity/entity compound: {e}")))?;
             data.extend_from_slice(&bytes);
         }
 
@@ -625,8 +643,9 @@ impl BedrockWriter {
                     .map(|(k, v)| (k.clone(), BedrockNbtValue::from(v)))
                     .collect(),
             };
-            let nbt_bytes =
-                nbtx::to_le_bytes(&state).map_err(|e| BedrockSaveError::Nbt(e.to_string()))?;
+            let nbt_bytes = nbtx::to_le_bytes(&state).map_err(|e| {
+                BedrockSaveError::Nbt(format!("block palette state ({}): {e}", state.name))
+            })?;
             buffer.write_all(&nbt_bytes)?;
         }
 
@@ -739,6 +758,33 @@ impl BedrockWriter {
         const WORLD_ICON: &[u8] = include_bytes!("../../assets/minecraft/world_icon.jpeg");
         writer.start_file("world_icon.jpeg", options)?;
         writer.write_all(WORLD_ICON)?;
+
+        if self.extend_build_height {
+            const BP_MANIFEST: &[u8] =
+                include_bytes!("../../assets/minecraft/bp_tall/manifest.json");
+            const BP_OVERWORLD: &[u8] =
+                include_bytes!("../../assets/minecraft/bp_tall/dimensions/overworld.json");
+            // Must match header.uuid in bp_tall/manifest.json.
+            const BP_HEADER_UUID: &str = "a7f3b2e0-8c4d-4e92-9b1a-3d7f5c8e4a61";
+
+            writer.add_directory("behavior_packs/", options)?;
+            writer.add_directory("behavior_packs/arnis_tall/", options)?;
+            writer.add_directory("behavior_packs/arnis_tall/dimensions/", options)?;
+
+            writer.start_file("behavior_packs/arnis_tall/manifest.json", options)?;
+            writer.write_all(BP_MANIFEST)?;
+
+            writer.start_file(
+                "behavior_packs/arnis_tall/dimensions/overworld.json",
+                options,
+            )?;
+            writer.write_all(BP_OVERWORLD)?;
+
+            writer.start_file("world_behavior_packs.json", options)?;
+            let world_bp_json =
+                format!(r#"[{{"pack_id":"{}","version":[1,0,0]}}]"#, BP_HEADER_UUID);
+            writer.write_all(world_bp_json.as_bytes())?;
+        }
 
         // Add db directory and its contents
         let db_path = self.output_dir.join("db");
@@ -1124,6 +1170,11 @@ struct BedrockLevelDat {
     saved_with_toggled_experiments: bool,
     #[serde(rename = "experiments_ever_used")]
     experiments_ever_used: bool,
+    /// Always emitted with all-false contents on standard worlds.
+    /// nbtx can't skip optional fields, and an all-false compound
+    /// is a no-op to Bedrock.
+    #[serde(rename = "experiments")]
+    experiments: BedrockExperiments,
 
     // Editor
     #[serde(rename = "editorWorldType")]
@@ -1150,6 +1201,14 @@ struct BedrockLevelDat {
     // Daylight cycle
     #[serde(rename = "daylightCycle")]
     daylight_cycle: i32,
+}
+
+/// Bedrock experimental-features NBT toggles. Must pair with
+/// `experiments_ever_used` + `saved_with_toggled_experiments` on the root.
+#[derive(Serialize)]
+struct BedrockExperiments {
+    /// Gates data-driven worldgen, incl. `minecraft:dimension_bounds`.
+    data_driven_biomes: bool,
 }
 
 #[cfg(test)]
@@ -1224,9 +1283,15 @@ mod tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
         let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
 
-        BedrockWriter::new(output_dir.clone(), "test-world".to_string(), None, None)
-            .write_world(&world, &xzbbox, &llbbox)
-            .expect("write_world");
+        BedrockWriter::new(
+            output_dir.clone(),
+            "test-world".to_string(),
+            None,
+            None,
+            false,
+        )
+        .write_world(&world, &xzbbox, &llbbox)
+        .expect("write_world");
 
         // The temp directory should be cleaned up, but mcworld should exist
         let mcworld_path = output_dir.with_extension("mcworld");
@@ -1270,6 +1335,7 @@ mod tests {
             "spawn-test".to_string(),
             Some((42, 84)),
             None,
+            false,
         )
         .write_world(&world, &xzbbox, &llbbox)
         .expect("write_world");
@@ -1277,5 +1343,75 @@ mod tests {
         // Verify the mcworld was created
         let mcworld_path = output_dir.with_extension("mcworld");
         assert!(mcworld_path.exists(), "mcworld file should exist");
+    }
+
+    #[test]
+    fn writes_mcworld_with_tall_behavior_pack_when_extended() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let output_dir = temp_dir.path().join("bedrock_world_tall");
+
+        let world = WorldToModify::default();
+        let xzbbox = XZBBox::rect_from_xz_lengths(15.0, 15.0).unwrap();
+        let llbbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
+
+        BedrockWriter::new(
+            output_dir.clone(),
+            "tall-world".to_string(),
+            None,
+            None,
+            true,
+        )
+        .write_world(&world, &xzbbox, &llbbox)
+        .expect("write_world");
+
+        let mcworld_path = output_dir.with_extension("mcworld");
+        let file = fs::File::open(&mcworld_path).expect("mcworld archive exists");
+        let mut archive = ZipArchive::new(file).expect("zip readable");
+
+        let mut entries: Vec<String> = Vec::new();
+        for i in 0..archive.len() {
+            if let Ok(f) = archive.by_index(i) {
+                entries.push(f.name().to_string());
+            }
+        }
+
+        assert!(
+            entries.contains(&"world_behavior_packs.json".to_string()),
+            "missing world_behavior_packs.json: {entries:?}"
+        );
+        assert!(
+            entries.contains(&"behavior_packs/arnis_tall/manifest.json".to_string()),
+            "missing BP manifest: {entries:?}"
+        );
+        assert!(
+            entries.contains(&"behavior_packs/arnis_tall/dimensions/overworld.json".to_string()),
+            "missing BP overworld.json: {entries:?}"
+        );
+
+        // Pack won't load if header.uuid and pack_id drift apart.
+        let manifest_bytes = {
+            let mut f = archive
+                .by_name("behavior_packs/arnis_tall/manifest.json")
+                .expect("open manifest");
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut f, &mut buf).expect("read manifest");
+            buf
+        };
+        let world_bp_bytes = {
+            let mut f = archive
+                .by_name("world_behavior_packs.json")
+                .expect("open world_behavior_packs.json");
+            let mut buf = Vec::new();
+            std::io::Read::read_to_end(&mut f, &mut buf).expect("read world_bp");
+            buf
+        };
+        let manifest: Value = serde_json::from_slice(&manifest_bytes).expect("manifest JSON");
+        let world_bp: Value = serde_json::from_slice(&world_bp_bytes).expect("world_bp JSON");
+        let header_uuid = manifest["header"]["uuid"].as_str().expect("header.uuid");
+        let listed_uuid = world_bp[0]["pack_id"].as_str().expect("pack_id");
+        assert_eq!(
+            header_uuid, listed_uuid,
+            "BP header UUID must match world_behavior_packs.json pack_id"
+        );
     }
 }

@@ -42,12 +42,15 @@
   "roof": "屋根生成",
   "fillground": "地面を埋める",
   "land_cover": "土地被覆",
-  "disable_height_limit": "高さ制限を無効にする",
+  "disable_height_limit": "建築高さを拡張",
   "bedrock_auto_generated": "Bedrock ワールドは自動生成されます",
   "save_path": "保存先",
   "rotation_angle": "回転角度",
   "settings_section_generation": "生成",
   "settings_section_world": "ワールド",
   "settings_section_map": "マップと入力",
-  "settings_section_application": "アプリケーション"
+  "settings_section_application": "アプリケーション",
+  "clear_tile_cache": "タイルキャッシュをクリア",
+  "clear_tile_cache_button": "クリア",
+  "anonymous_crash_reports": "匿名クラッシュレポート"
 }

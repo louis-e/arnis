@@ -42,12 +42,15 @@
   "roof": "Generiranje strehe",
   "fillground": "Zapolni tla",
   "land_cover": "Pokritost tal",
-  "disable_height_limit": "Onemogoči omejitev višine",
+  "disable_height_limit": "Razširi višino gradnje",
   "bedrock_auto_generated": "Bedrock svet je samodejno ustvarjen",
   "save_path": "Pot shranjevanja",
   "rotation_angle": "Kot zasuka",
   "settings_section_generation": "Generiranje",
   "settings_section_world": "Svet",
   "settings_section_map": "Zemljevid in vnos",
-  "settings_section_application": "Aplikacija"
+  "settings_section_application": "Aplikacija",
+  "clear_tile_cache": "Počisti predpomnilnik ploščic",
+  "clear_tile_cache_button": "Počisti",
+  "anonymous_crash_reports": "Anonimna poročila o napakah"
 }

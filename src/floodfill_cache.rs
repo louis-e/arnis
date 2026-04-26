@@ -9,7 +9,24 @@ use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
 use fnv::FnvHashMap;
 use rayon::prelude::*;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+
+/// Shared, reference-counted flood fill result.
+///
+/// Using `Arc<Vec<...>>` lets handlers grab a cached result without deep-copying
+/// the coordinate list — a single refcount bump instead of a `Vec::clone` that
+/// would memcpy 8 bytes per cell (large forests/farmland easily hit 100k+ cells).
+pub type FloodFillResult = Arc<Vec<(i32, i32)>>;
+
+/// Returns a reference to a process-wide shared empty flood-fill result.
+///
+/// Used as the sentinel for Node/Relation elements that don't produce a flood
+/// fill, so we don't allocate a fresh empty `Arc<Vec<_>>` on every call.
+fn empty_flood_fill_result() -> &'static FloodFillResult {
+    static EMPTY: OnceLock<FloodFillResult> = OnceLock::new();
+    EMPTY.get_or_init(|| Arc::new(Vec::new()))
+}
 
 /// A memory-efficient bitmap for storing coordinates.
 ///
@@ -245,8 +262,9 @@ pub type RoadMaskBitmap = CoordinateBitmap;
 
 /// A cache of pre-computed flood fill results, keyed by element ID.
 pub struct FloodFillCache {
-    /// Cached results: element_id -> filled coordinates
-    way_cache: FnvHashMap<u64, Vec<(i32, i32)>>,
+    /// Cached results: element_id -> filled coordinates (shared via Arc so handler
+    /// fetches are O(1) refcount bumps instead of deep clones).
+    way_cache: FnvHashMap<u64, FloodFillResult>,
 }
 
 impl FloodFillCache {
@@ -287,10 +305,17 @@ impl FloodFillCache {
             })
             .collect();
 
-        // Build the cache
+        // Build the cache. Empty flood-fill results (degenerate rings or
+        // flood-fill timeouts) reuse the process-wide empty sentinel so a
+        // noisy input doesn't spawn many distinct empty allocations.
         let mut cache = Self::new();
         for (id, filled) in way_results {
-            cache.way_cache.insert(id, filled);
+            let entry = if filled.is_empty() {
+                Arc::clone(empty_flood_fill_result())
+            } else {
+                Arc::new(filled)
+            };
+            cache.way_cache.insert(id, entry);
         }
 
         cache
@@ -306,28 +331,36 @@ impl FloodFillCache {
         &self,
         way: &ProcessedWay,
         timeout: Option<&Duration>,
-    ) -> Vec<(i32, i32)> {
+    ) -> FloodFillResult {
         if let Some(cached) = self.way_cache.get(&way.id) {
-            // Clone is intentional: each result is typically accessed once during
-            // sequential processing, so the cost is acceptable vs Arc complexity
-            cached.clone()
+            // Cheap refcount bump — the underlying Vec is shared between the
+            // cache and the caller.
+            Arc::clone(cached)
         } else {
-            // Fallback: compute on demand for synthetic/combined ways from relations
+            // Fallback: compute on demand for synthetic/combined ways from relations.
+            // These are rare (only relations with tag-inherited members), so the
+            // extra Arc allocation here is fine. Empty results still go through
+            // the shared sentinel to stay consistent with the cached path.
             let polygon_coords: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
-            flood_fill_area(&polygon_coords, timeout)
+            let filled = flood_fill_area(&polygon_coords, timeout);
+            if filled.is_empty() {
+                Arc::clone(empty_flood_fill_result())
+            } else {
+                Arc::new(filled)
+            }
         }
     }
 
     /// Gets cached flood fill result for a ProcessedElement (Way only).
-    /// For Nodes/Relations, returns empty vec.
+    /// For Nodes/Relations, returns a process-wide shared empty vec (no alloc).
     pub fn get_or_compute_element(
         &self,
         element: &ProcessedElement,
         timeout: Option<&Duration>,
-    ) -> Vec<(i32, i32)> {
+    ) -> FloodFillResult {
         match element {
             ProcessedElement::Way(way) => self.get_or_compute(way, timeout),
-            _ => Vec::new(),
+            _ => Arc::clone(empty_flood_fill_result()),
         }
     }
 
@@ -384,7 +417,7 @@ impl FloodFillCache {
                         || way.tags.contains_key("building:part") =>
                 {
                     if let Some(cached) = self.way_cache.get(&way.id) {
-                        for &(x, z) in cached {
+                        for &(x, z) in cached.iter() {
                             footprints.set(x, z);
                         }
                     }
@@ -399,7 +432,7 @@ impl FloodFillCache {
                             // Inner members represent courtyards/holes where trees can spawn.
                             if member.role == ProcessedMemberRole::Outer {
                                 if let Some(cached) = self.way_cache.get(&member.way.id) {
-                                    for &(x, z) in cached {
+                                    for &(x, z) in cached.iter() {
                                         footprints.set(x, z);
                                     }
                                 }

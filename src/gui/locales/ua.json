@@ -42,12 +42,15 @@
   "roof": "Генерація даху",
   "fillground": "Заповнити землю",
   "land_cover": "Земельне покриття",
-  "disable_height_limit": "Вимкнути обмеження висоти",
+  "disable_height_limit": "Розширити висоту будівництва",
   "bedrock_auto_generated": "Bedrock світ генерується автоматично",
   "save_path": "Шлях збереження",
   "rotation_angle": "Кут Обертання",
   "settings_section_generation": "Генерація",
   "settings_section_world": "Світ",
   "settings_section_map": "Карта та введення",
-  "settings_section_application": "Застосунок"
+  "settings_section_application": "Застосунок",
+  "clear_tile_cache": "Очистити кеш плиток",
+  "clear_tile_cache_button": "Очистити",
+  "anonymous_crash_reports": "Анонімні звіти про збої"
 }

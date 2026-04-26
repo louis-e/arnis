@@ -3,6 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
+use crate::element_processing::get_nearest_road_block;
 use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
@@ -12,34 +13,6 @@ use rand::{
     Rng,
 };
 use std::collections::{HashMap, HashSet};
-
-/// Looks outward from (x, z) in each of the four cardinal directions,
-/// up to max_radius blocks away, and returns the (x, z) position of
-/// the nearest road node found.
-///
-/// Returns None if no road node exists within range.
-/// Callers can use the returned position to derive a facing direction,
-/// compute a distance, or do anything else they need.
-fn get_nearest_road_block(
-    x: i32,
-    z: i32,
-    max_radius: i32,
-    road_mask: &RoadMaskBitmap,
-) -> Option<(i32, i32)> {
-    // Begins at 2 and skips to 4, 6, 8, etc.
-    for dist in (2..=max_radius).step_by(2) {
-        // Cross pattern: North, South, West, East
-        let candidates = [(x, z - dist), (x, z + dist), (x - dist, z), (x + dist, z)];
-
-        for (cx, cz) in candidates {
-            if road_mask.contains(cx, cz) {
-                return Some((cx, cz));
-            }
-        }
-    }
-
-    None
-}
 
 pub fn generate_amenities(
     editor: &mut WorldEditor,
@@ -127,7 +100,7 @@ pub fn generate_amenities(
                 let roof_block: Block = STONE_BLOCK_SLAB;
 
                 // Use pre-computed flood fill from cache
-                let floor_area: Vec<(i32, i32)> =
+                let floor_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 if floor_area.is_empty() {
@@ -222,7 +195,7 @@ pub fn generate_amenities(
                 let roof_block: Block = STONE_BRICK_SLAB;
 
                 // Use pre-computed flood fill from cache
-                let roof_area: Vec<(i32, i32)> =
+                let roof_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
                 // Place fences and roof slabs at each corner node directly
@@ -243,6 +216,56 @@ pub fn generate_amenities(
             }
             "fountain" => {
                 generate_fountain(editor, element, args, flood_fill_cache);
+            }
+            "drinking_water" => {
+                if let Some(pt) = first_node {
+                    editor.set_block(COBBLESTONE_WALL, pt.x, 1, pt.z, None, None);
+
+                    let absolute_y = editor.get_absolute_y(pt.x, 1, pt.z);
+                    let lever_props = HashMap::from([
+                        ("facing".to_string(), Value::String("west".to_string())),
+                        ("powered".to_string(), Value::String("true".to_string())),
+                    ]);
+                    editor.set_block_with_properties_absolute(
+                        BlockWithProperties {
+                            block: LEVER,
+                            properties: Some(Value::Compound(lever_props)),
+                        },
+                        pt.x - 1,
+                        absolute_y + 1,
+                        pt.z,
+                        None,
+                        None,
+                    );
+
+                    let spout_props =
+                        HashMap::from([("west".to_string(), Value::String("low".to_string()))]);
+                    editor.set_block_with_properties_absolute(
+                        BlockWithProperties {
+                            block: COBBLESTONE_WALL,
+                            properties: Some(Value::Compound(spout_props)),
+                        },
+                        pt.x,
+                        absolute_y + 1,
+                        pt.z,
+                        None,
+                        None,
+                    );
+
+                    let cauldron_props =
+                        HashMap::from([("level".to_string(), Value::String("3".to_string()))]);
+                    editor.set_block_with_properties_absolute(
+                        BlockWithProperties {
+                            block: WATER_CAULDRON,
+                            properties: Some(Value::Compound(cauldron_props)),
+                        },
+                        pt.x - 1,
+                        absolute_y,
+                        pt.z,
+                        None,
+                        None,
+                    );
+                }
             }
             "parking" => {
                 // Process parking areas
@@ -272,10 +295,10 @@ pub fn generate_amenities(
                 }
 
                 // Flood-fill the interior area for parking
-                let flood_area: Vec<(i32, i32)> =
+                let flood_area =
                     flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
-                for (x, z) in flood_area {
+                for &(x, z) in flood_area.iter() {
                     editor.set_block(
                         block_type,
                         x,
@@ -418,8 +441,7 @@ fn generate_fountain(
     }
 
     // ── Way fountain (polygon) ─────────────────────────────────────
-    let floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
+    let floor_area = flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
 
     if floor_area.is_empty() {
         return;
@@ -466,7 +488,7 @@ fn generate_fountain(
     }
 
     // Fill interior with water at y=1 (and a stone floor at y=0)
-    for &(x, z) in &floor_area {
+    for &(x, z) in floor_area.iter() {
         if !edge_set.contains(&(x, z)) {
             editor.set_block(SMOOTH_STONE, x, 0, z, None, None);
             editor.set_block(WATER, x, 1, z, None, None);

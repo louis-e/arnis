@@ -42,12 +42,15 @@
   "roof": "توليد السقف",
   "fillground": "ملء الأرض",
   "land_cover": "تصنيف الأرض",
-  "disable_height_limit": "تعطيل حد الارتفاع",
+  "disable_height_limit": "توسيع ارتفاع البناء",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "save_path": "مسار الحفظ",
   "rotation_angle": "زاوية الدوران",
   "settings_section_generation": "التوليد",
   "settings_section_world": "العالم",
   "settings_section_map": "الخريطة والإدخال",
-  "settings_section_application": "التطبيق"
+  "settings_section_application": "التطبيق",
+  "clear_tile_cache": "مسح ذاكرة البلاطات",
+  "clear_tile_cache_button": "مسح",
+  "anonymous_crash_reports": "تقارير الأعطال المجهولة"
 }
