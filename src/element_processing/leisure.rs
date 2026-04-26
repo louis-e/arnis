@@ -32,7 +32,6 @@ pub fn generate_leisure(
             }
             "swimming_pool" | "swimming_area" => WATER, // Swimming area: Area in a larger body of water for swimming
             "marina" => WATER,                          // A sort of parking lot for small watercraft
-            "bay" => WATER,                             // An area of sea that "digs" into the land, often surrounded by beaches or cliffs
             "bathing_place" => SMOOTH_SANDSTONE,        // Could be sand or concrete
             "outdoor_seating" => SMOOTH_STONE,          // Usually stone or stone bricks
             "water_park" | "slipway" => LIGHT_GRAY_CONCRETE, // Water park area, not the pool. Usually is concrete
