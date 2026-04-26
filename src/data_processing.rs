@@ -125,6 +125,33 @@ pub fn generate_world_with_options(
         outlines
     };
 
+    // Check for smallest landuse areas per (x,z)
+    for element in &elements {
+        match element {
+            ProcessedElement::Way(way) => {
+                if way.tags.contains_key("landuse") {
+                    landuse::accumulate_landuse(
+                        &mut editor,
+                        way,
+                        args,
+                        &flood_fill_cache,
+                    );
+                }
+            }
+            ProcessedElement::Relation(rel) => {
+                if rel.tags.contains_key("landuse") {
+                    landuse::accumulate_landuse_from_relation(
+                        &mut editor,
+                        rel,
+                        args,
+                        &flood_fill_cache,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     // Process all elements
     for element in elements.into_iter() {
         element_counter += 1;

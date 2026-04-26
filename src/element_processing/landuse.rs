@@ -5,9 +5,69 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
-use crate::world_editor::WorldEditor;
+use crate::world_editor::{WorldEditor, LanduseCell};
 use rand::prelude::IndexedRandom;
 use rand::Rng;
+
+pub fn accumulate_landuse(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    let binding = String::new();
+    let landuse_tag = element.tags.get("landuse").unwrap_or(&binding);
+    if landuse_tag.is_empty() {
+        return;
+    }
+
+    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let area = floor_area.len() as f64;
+
+    for &(x, z) in floor_area.iter() {
+        let key = (x, z);
+        if let Some(existing) = editor.landuse_map.get(&key) {
+            if existing.area <= area {
+                continue;
+            }
+        }
+        editor.landuse_map.insert(
+            key,
+            LanduseCell {
+                area,
+                element_id: element.id,
+            },
+        );
+    }
+}
+
+pub fn accumulate_landuse_from_relation(
+    editor: &mut WorldEditor,
+    rel: &ProcessedRelation,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    if !rel.tags.contains_key("landuse") {
+        return;
+    }
+
+    for member in &rel.members {
+        if member.role == ProcessedMemberRole::Outer {
+            let way_with_rel_tags = ProcessedWay {
+                id: member.way.id,
+                nodes: member.way.nodes.clone(),
+                tags: rel.tags.clone(),
+            };
+            accumulate_landuse(
+                editor,
+                &way_with_rel_tags,
+                args,
+                flood_fill_cache,
+            );
+        }
+    }
+}
+
 
 pub fn generate_landuse(
     editor: &mut WorldEditor,
@@ -80,6 +140,16 @@ pub fn generate_landuse(
     };
 
     for &(x, z) in floor_area.iter() {
+        // Only the element that has the smallest area for (x,z) is allowed to render here
+        if let Some(cell) = editor.landuse_map.get(&(x, z)) {
+            if cell.element_id != element.id {
+                continue;
+            }
+        } else {
+            // For this coordinate there was no landuse element at all
+            continue;
+        }
+
         // Apply per-block randomness for certain landuse types
         let actual_block = if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone

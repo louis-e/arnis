@@ -109,6 +109,11 @@ pub(crate) struct WorldMetadata {
     pub max_geo_lon: f64,
 }
 
+pub struct LanduseCell {
+    pub area: f64,
+    pub element_id: u64,
+}
+
 /// The main world editor struct for placing blocks and saving worlds.
 ///
 /// The lifetime `'a` is tied to the `XZBBox` reference, which defines
@@ -138,6 +143,7 @@ pub struct WorldEditor<'a> {
     bedrock_spawn_point: Option<(i32, i32)>,
     #[cfg(feature = "bedrock")]
     bedrock_extend_height: bool,
+    pub landuse_map: HashMap<(i32, i32), LanduseCell>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -160,6 +166,7 @@ impl<'a> WorldEditor<'a> {
             bedrock_spawn_point: None,
             #[cfg(feature = "bedrock")]
             bedrock_extend_height: false,
+            landuse_map: HashMap::new(),
         }
     }
 
@@ -194,6 +201,7 @@ impl<'a> WorldEditor<'a> {
             bedrock_spawn_point,
             #[cfg(feature = "bedrock")]
             bedrock_extend_height,
+            landuse_map: HashMap::new(),
         }
     }
 

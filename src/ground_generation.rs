@@ -1029,6 +1029,8 @@ pub fn generate_ground_layer(
                             LIGHT_GRAY_CONCRETE,
                             WHITE_CONCRETE,
                             DIRT_PATH,
+                            SAND,
+                            DIRT,
                         ]),
                         None,
                     ) && editor.check_for_block_absolute(

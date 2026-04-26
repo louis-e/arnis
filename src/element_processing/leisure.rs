@@ -3,7 +3,6 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::surfaces::get_blocks_for_surface;
-use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -14,7 +13,7 @@ pub fn generate_leisure(
     element: &ProcessedWay,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
-    building_footprints: &BuildingFootprintBitmap,
+    _building_footprints: &BuildingFootprintBitmap,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
@@ -114,10 +113,6 @@ pub fn generate_leisure(
                         90..105 => {
                             // Oak leaves
                             editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                        }
-                        105..120 => {
-                            // Tree
-                            Tree::create(editor, (x, 1, z), Some(building_footprints));
                         }
                         _ => {}
                     }
