@@ -109,9 +109,10 @@ pub(crate) struct WorldMetadata {
     pub max_geo_lon: f64,
 }
 
-pub struct LanduseCell {
+pub struct AreaCell {
     pub area: f64,
     pub element_id: u64,
+    pub tag: &'static str,
 }
 
 /// The main world editor struct for placing blocks and saving worlds.
@@ -135,6 +136,8 @@ pub struct WorldEditor<'a> {
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    /// Area map to persist area sizes
+    pub area_map: HashMap<(i32, i32), AreaCell>,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
     #[cfg(feature = "bedrock")]
     bedrock_level_name: Option<String>,
@@ -143,7 +146,6 @@ pub struct WorldEditor<'a> {
     bedrock_spawn_point: Option<(i32, i32)>,
     #[cfg(feature = "bedrock")]
     bedrock_extend_height: bool,
-    pub landuse_map: HashMap<(i32, i32), LanduseCell>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -160,13 +162,13 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
+            area_map: HashMap::new(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name: None,
             #[cfg(feature = "bedrock")]
             bedrock_spawn_point: None,
             #[cfg(feature = "bedrock")]
             bedrock_extend_height: false,
-            landuse_map: HashMap::new(),
         }
     }
 
@@ -195,14 +197,32 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
+            area_map: HashMap::new(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name,
             #[cfg(feature = "bedrock")]
             bedrock_spawn_point,
             #[cfg(feature = "bedrock")]
             bedrock_extend_height,
-            landuse_map: HashMap::new(),
         }
+    }
+
+    /// Sets the area into the area_map if it has the smallest size
+    pub fn set_area_if_smaller(
+        &mut self,
+        x: i32,
+        z: i32,
+        area: f64,
+        element_id: u64,
+        tag: &'static str,
+    ) {
+        let key = (x, z);
+        if let Some(existing) = self.area_map.get(&key) {
+            if existing.area <= area {
+                return;
+            }
+        }
+        self.area_map.insert(key, AreaCell { area, element_id, tag });
     }
 
     /// Sets the ground reference for elevation-based block placement

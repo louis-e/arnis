@@ -5,7 +5,7 @@ use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
-use crate::world_editor::{WorldEditor, LanduseCell};
+use crate::world_editor::WorldEditor;
 use rand::prelude::IndexedRandom;
 use rand::Rng;
 
@@ -15,29 +15,14 @@ pub fn accumulate_landuse(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
 ) {
-    let binding = String::new();
-    let landuse_tag = element.tags.get("landuse").unwrap_or(&binding);
-    if landuse_tag.is_empty() {
-        return;
-    }
+    let Some(tag) = element.tags.get("landuse") else { return; };
 
-    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
-    let area = floor_area.len() as f64;
+    let filled = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let area = filled.len() as f64;
+    let tag_static: &'static str = Box::leak(tag.clone().into_boxed_str());
 
-    for &(x, z) in floor_area.iter() {
-        let key = (x, z);
-        if let Some(existing) = editor.landuse_map.get(&key) {
-            if existing.area <= area {
-                continue;
-            }
-        }
-        editor.landuse_map.insert(
-            key,
-            LanduseCell {
-                area,
-                element_id: element.id,
-            },
-        );
+    for &(x, z) in filled.iter() {
+        editor.set_area_if_smaller(x, z, area, element.id, tag_static);
     }
 }
 
@@ -53,21 +38,15 @@ pub fn accumulate_landuse_from_relation(
 
     for member in &rel.members {
         if member.role == ProcessedMemberRole::Outer {
-            let way_with_rel_tags = ProcessedWay {
+            let way = ProcessedWay {
                 id: member.way.id,
                 nodes: member.way.nodes.clone(),
                 tags: rel.tags.clone(),
             };
-            accumulate_landuse(
-                editor,
-                &way_with_rel_tags,
-                args,
-                flood_fill_cache,
-            );
+            accumulate_landuse(editor, &way, args, flood_fill_cache);
         }
     }
 }
-
 
 pub fn generate_landuse(
     editor: &mut WorldEditor,
@@ -141,12 +120,11 @@ pub fn generate_landuse(
 
     for &(x, z) in floor_area.iter() {
         // Only the element that has the smallest area for (x,z) is allowed to render here
-        if let Some(cell) = editor.landuse_map.get(&(x, z)) {
+        if let Some(cell) = editor.area_map.get(&(x, z)) {
             if cell.element_id != element.id {
                 continue;
             }
         } else {
-            // For this coordinate there was no landuse element at all
             continue;
         }
 

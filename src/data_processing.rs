@@ -130,22 +130,16 @@ pub fn generate_world_with_options(
         match element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("landuse") {
-                    landuse::accumulate_landuse(
-                        &mut editor,
-                        way,
-                        args,
-                        &flood_fill_cache,
-                    );
+                    landuse::accumulate_landuse(&mut editor, way, args, &flood_fill_cache);
+                } else if way.tags.contains_key("leisure") {
+                    leisure::accumulate_leisure(&mut editor, way, args, &flood_fill_cache);
                 }
             }
             ProcessedElement::Relation(rel) => {
                 if rel.tags.contains_key("landuse") {
-                    landuse::accumulate_landuse_from_relation(
-                        &mut editor,
-                        rel,
-                        args,
-                        &flood_fill_cache,
-                    );
+                    landuse::accumulate_landuse_from_relation(&mut editor, rel, args, &flood_fill_cache);
+                } else if rel.tags.contains_key("leisure") {
+                    leisure::accumulate_leisure_from_relation(&mut editor, rel, args, &flood_fill_cache);
                 }
             }
             _ => {}
