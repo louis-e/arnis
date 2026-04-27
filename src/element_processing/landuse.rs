@@ -4,7 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
-use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
+use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay, ProcessedNode};
 use crate::world_editor::WorldEditor;
 use rand::prelude::IndexedRandom;
 use rand::Rng;
@@ -36,15 +36,27 @@ pub fn accumulate_landuse_from_relation(
         return;
     }
 
+    // Collect outer ways as node list
+    let mut outers: Vec<Vec<ProcessedNode>> = Vec::new();
+
     for member in &rel.members {
         if member.role == ProcessedMemberRole::Outer {
-            let way = ProcessedWay {
-                id: member.way.id,
-                nodes: member.way.nodes.clone(),
-                tags: rel.tags.clone(),
-            };
-            accumulate_landuse(editor, &way, args, flood_fill_cache);
+            outers.push(member.way.nodes.clone());
         }
+    }
+
+    // Merge outer ways to polygon
+    super::merge_way_segments(&mut outers);
+
+    // Fill every merged ring as one way
+    for ring in outers {
+        let way = ProcessedWay {
+            id: rel.id,
+            nodes: ring,
+            tags: rel.tags.clone(),
+        };
+
+        accumulate_landuse(editor, &way, args, flood_fill_cache);
     }
 }
 
