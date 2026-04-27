@@ -4,60 +4,9 @@ use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
-use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay, ProcessedNode};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
-
-pub fn accumulate_natural(
-    editor: &mut WorldEditor,
-    element: &ProcessedWay,
-    args: &Args,
-    flood_fill_cache: &FloodFillCache,
-) {
-    let Some(tag) = element.tags.get("natural") else { return; };
-
-    let filled = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
-    let area = filled.len() as f64;
-    let tag_static: &'static str = Box::leak(tag.clone().into_boxed_str());
-
-    for &(x, z) in filled.iter() {
-        editor.set_area_if_smaller(x, z, area, element.id, tag_static);
-    }
-}
-
-pub fn accumulate_natural_from_relation(
-    editor: &mut WorldEditor,
-    rel: &ProcessedRelation,
-    args: &Args,
-    flood_fill_cache: &FloodFillCache,
-) {
-    if !rel.tags.contains_key("natural") {
-        return;
-    }
-
-    // Collect outer ways as node list
-    let mut outers: Vec<Vec<ProcessedNode>> = Vec::new();
-
-    for member in &rel.members {
-        if member.role == ProcessedMemberRole::Outer {
-            outers.push(member.way.nodes.clone());
-        }
-    }
-
-    // Merge outer ways to polygon
-    super::merge_way_segments(&mut outers);
-
-    // Fill every merged ring as one way
-    for ring in outers {
-        let way = ProcessedWay {
-            id: rel.id,
-            nodes: ring,
-            tags: rel.tags.clone(),
-        };
-
-        accumulate_natural(editor, &way, args, flood_fill_cache);
-    }
-}
 
 pub fn generate_natural(
     editor: &mut WorldEditor,

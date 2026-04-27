@@ -6,7 +6,7 @@ use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
 use crate::ground_generation;
 use crate::map_renderer;
-use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
+use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay, ProcessedRelation};
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -25,6 +25,63 @@ pub struct GenerationOptions {
     pub level_name: Option<String>,
     pub spawn_point: Option<(i32, i32)>,
 }
+
+const SMALLEST_AREA_TAGS: &[&str] = &["landuse", "leisure", "natural"];
+
+fn accumulate_smallest_area(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    tag_key: &str,
+    flood_fill_cache: &FloodFillCache,
+    args: &Args,
+) {
+    let Some(tag_value) = way.tags.get(&tag_key.to_string()) else { return; };
+
+    let filled = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
+    let area = filled.len() as f64;
+
+    let tag_static: &'static str = Box::leak(tag_value.clone().into_boxed_str());
+
+    for &(x, z) in filled.iter() {
+        editor.set_area_if_smaller(x, z, area, way.id, tag_static);
+    }
+}
+
+fn accumulate_smallest_area_from_relation(
+    editor: &mut WorldEditor,
+    rel: &ProcessedRelation,
+    tag_key: &str,
+    flood_fill_cache: &FloodFillCache,
+    args: &Args,
+) {
+    if !rel.tags.contains_key(&tag_key.to_string()) {
+        return;
+    }
+
+    // Collect outer ways as node list
+    let mut outers: Vec<Vec<ProcessedNode>> = Vec::new();
+
+    for member in &rel.members {
+        if member.role == ProcessedMemberRole::Outer {
+            outers.push(member.way.nodes.clone());
+        }
+    }
+
+    // Merge outer ways to polygon
+    merge_way_segments(&mut outers);
+
+    // Fill every merged ring as one way
+    for ring in outers {
+        let way = ProcessedWay {
+            id: rel.id,
+            nodes: ring,
+            tags: rel.tags.clone(),
+        };
+
+        accumulate_smallest_area(editor, &way, tag_key, flood_fill_cache, args);
+    }
+}
+
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
 pub fn generate_world_with_options(
@@ -125,25 +182,33 @@ pub fn generate_world_with_options(
         outlines
     };
 
-    // Check for smallest landuse areas per (x,z)
+    // Check for smallest areas per (x,z)
     for element in &elements {
         match element {
             ProcessedElement::Way(way) => {
-                if way.tags.contains_key("landuse") {
-                    landuse::accumulate_landuse(&mut editor, way, args, &flood_fill_cache);
-                } else if way.tags.contains_key("leisure") {
-                    leisure::accumulate_leisure(&mut editor, way, args, &flood_fill_cache);
-                } else if way.tags.contains_key("natural") {
-                    natural::accumulate_natural(&mut editor, way, args, &flood_fill_cache);
+                for tag_key in SMALLEST_AREA_TAGS {
+                    if way.tags.contains_key(&tag_key.to_string()) {
+                        accumulate_smallest_area(
+                            &mut editor,
+                            way,
+                            tag_key,
+                            &flood_fill_cache,
+                            args,
+                        );
+                    }
                 }
             }
             ProcessedElement::Relation(rel) => {
-                if rel.tags.contains_key("landuse") {
-                    landuse::accumulate_landuse_from_relation(&mut editor, rel, args, &flood_fill_cache);
-                } else if rel.tags.contains_key("leisure") {
-                    leisure::accumulate_leisure_from_relation(&mut editor, rel, args, &flood_fill_cache);
-                } else if rel.tags.contains_key("natural") {
-                    natural::accumulate_natural_from_relation(&mut editor, rel, args, &flood_fill_cache);
+                for tag_key in SMALLEST_AREA_TAGS {
+                    if rel.tags.contains_key(&tag_key.to_string()) {
+                        accumulate_smallest_area_from_relation(
+                            &mut editor,
+                            rel,
+                            tag_key,
+                            &flood_fill_cache,
+                            args,
+                        );
+                    }
                 }
             }
             _ => {}
