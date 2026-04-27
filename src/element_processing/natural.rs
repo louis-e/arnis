@@ -8,6 +8,45 @@ use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedRelation
 use crate::world_editor::WorldEditor;
 use rand::{prelude::IndexedRandom, Rng};
 
+pub fn accumulate_natural(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    let Some(tag) = element.tags.get("natural") else { return; };
+
+    let filled = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let area = filled.len() as f64;
+    let tag_static: &'static str = Box::leak(tag.clone().into_boxed_str());
+
+    for &(x, z) in filled.iter() {
+        editor.set_area_if_smaller(x, z, area, element.id, tag_static);
+    }
+}
+
+pub fn accumulate_natural_from_relation(
+    editor: &mut WorldEditor,
+    rel: &ProcessedRelation,
+    args: &Args,
+    flood_fill_cache: &FloodFillCache,
+) {
+    if !rel.tags.contains_key("natural") {
+        return;
+    }
+
+    for member in &rel.members {
+        if member.role == ProcessedMemberRole::Outer {
+            let way = ProcessedWay {
+                id: member.way.id,
+                nodes: member.way.nodes.clone(),
+                tags: rel.tags.clone(),
+            };
+            accumulate_natural(editor, &way, args, flood_fill_cache);
+        }
+    }
+}
+
 pub fn generate_natural(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -214,6 +253,15 @@ pub fn generate_natural(
                 ];
 
                 for &(x, z) in filled_area.iter() {
+                    // Only the element that has the smallest area for (x,z) is allowed to render here
+                    if let Some(cell) = editor.area_map.get(&(x, z)) {
+                        if cell.element_id != way.id {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+
                     // Don't overwrite road/path blocks with natural ground
                     if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
                         let b = if rock_variation {
