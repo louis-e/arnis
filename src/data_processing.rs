@@ -28,7 +28,13 @@ pub struct GenerationOptions {
     pub spawn_point: Option<(i32, i32)>,
 }
 
-const SMALLEST_AREA_TAGS: &[&str] = &["landuse", "leisure", "natural"];
+static SMALLEST_AREA_TAGS: once_cell::sync::Lazy<Vec<String>> = once_cell::sync::Lazy::new(|| {
+    vec![
+        "landuse".to_string(),
+        "leisure".to_string(),
+        "natural".to_string(),
+    ]
+});
 
 fn accumulate_smallest_area(
     editor: &mut WorldEditor,
@@ -37,7 +43,7 @@ fn accumulate_smallest_area(
     flood_fill_cache: &FloodFillCache,
     args: &Args,
 ) {
-    let Some(tag_value) = way.tags.get(&tag_key.to_string()) else {
+    let Some(tag_value) = way.tags.get(tag_key) else {
         return;
     };
 
@@ -58,7 +64,7 @@ fn accumulate_smallest_area_from_relation(
     flood_fill_cache: &FloodFillCache,
     args: &Args,
 ) {
-    if !rel.tags.contains_key(&tag_key.to_string()) {
+    if !rel.tags.contains_key(tag_key) {
         return;
     }
 
@@ -188,8 +194,8 @@ pub fn generate_world_with_options(
     for element in &elements {
         match element {
             ProcessedElement::Way(way) => {
-                for tag_key in SMALLEST_AREA_TAGS {
-                    if way.tags.contains_key(&tag_key.to_string()) {
+                for tag_key in SMALLEST_AREA_TAGS.iter() {
+                    if way.tags.contains_key(tag_key) {
                         accumulate_smallest_area(
                             &mut editor,
                             way,
@@ -201,8 +207,8 @@ pub fn generate_world_with_options(
                 }
             }
             ProcessedElement::Relation(rel) => {
-                for tag_key in SMALLEST_AREA_TAGS {
-                    if rel.tags.contains_key(&tag_key.to_string()) {
+                for tag_key in SMALLEST_AREA_TAGS.iter() {
+                    if rel.tags.contains_key(tag_key) {
                         accumulate_smallest_area_from_relation(
                             &mut editor,
                             rel,
