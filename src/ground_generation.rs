@@ -734,8 +734,9 @@ pub fn generate_ground_layer(
                                             if let Some(cell) = editor.area_map.get(&(x, z)) {
                                                 // Check the tag and don't create a random tree if it matches
                                                 match cell.tag {
-                                                    "park" | "garden" | "playground" | "recreation_ground" |
-                                                    "pitch" | "golf_course" | "dog_park" => {
+                                                    "park" | "garden" | "playground"
+                                                    | "recreation_ground" | "pitch"
+                                                    | "golf_course" | "dog_park" => {
                                                         continue;
                                                     }
                                                     _ => {}

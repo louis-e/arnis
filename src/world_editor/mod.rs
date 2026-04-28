@@ -222,7 +222,14 @@ impl<'a> WorldEditor<'a> {
                 return;
             }
         }
-        self.area_map.insert(key, AreaCell { area, element_id, tag });
+        self.area_map.insert(
+            key,
+            AreaCell {
+                area,
+                element_id,
+                tag,
+            },
+        );
     }
 
     /// Sets the ground reference for elevation-based block placement

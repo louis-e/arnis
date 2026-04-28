@@ -6,7 +6,9 @@ use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
 use crate::ground_generation;
 use crate::map_renderer;
-use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedWay, ProcessedRelation};
+use crate::osm_parser::{
+    ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
+};
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -35,7 +37,9 @@ fn accumulate_smallest_area(
     flood_fill_cache: &FloodFillCache,
     args: &Args,
 ) {
-    let Some(tag_value) = way.tags.get(&tag_key.to_string()) else { return; };
+    let Some(tag_value) = way.tags.get(&tag_key.to_string()) else {
+        return;
+    };
 
     let filled = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
     let area = filled.len() as f64;
@@ -81,8 +85,6 @@ fn accumulate_smallest_area_from_relation(
         accumulate_smallest_area(editor, &way, tag_key, flood_fill_cache, args);
     }
 }
-
-
 /// Generate world with explicit format options (used by GUI for Bedrock support)
 pub fn generate_world_with_options(
     elements: Vec<ProcessedElement>,
