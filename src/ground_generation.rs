@@ -729,8 +729,19 @@ pub fn generate_ground_layer(
                                     land_cover::LC_TREE_COVER
                                         if slope <= 4 && ground_allows_trees =>
                                     {
-                                        let choice = rng.random_range(0..30);
+                                        let choice = rng.random_range(0..80);
                                         if choice == 0 {
+                                            if let Some(cell) = editor.area_map.get(&(x, z)) {
+                                                // Check the tag and don't create a random tree if it matches
+                                                match cell.tag {
+                                                    "park" | "garden" | "playground"
+                                                    | "recreation_ground" | "pitch"
+                                                    | "golf_course" | "dog_park" => {
+                                                        continue;
+                                                    }
+                                                    _ => {}
+                                                }
+                                            }
                                             tree::Tree::create(
                                                 editor,
                                                 (x, 1, z),
@@ -738,7 +749,7 @@ pub fn generate_ground_layer(
                                             );
                                         } else if ground_is_natural {
                                             // Undergrowth only on natural surfaces
-                                            if choice == 1 {
+                                            if choice <= 3 {
                                                 let flower = [
                                                     RED_FLOWER,
                                                     BLUE_FLOWER,
@@ -753,7 +764,7 @@ pub fn generate_ground_layer(
                                                     None,
                                                     None,
                                                 );
-                                            } else if choice <= 13 {
+                                            } else if choice <= 30 {
                                                 editor.set_block_absolute(
                                                     GRASS,
                                                     x,
@@ -1029,6 +1040,8 @@ pub fn generate_ground_layer(
                             LIGHT_GRAY_CONCRETE,
                             WHITE_CONCRETE,
                             DIRT_PATH,
+                            SAND,
+                            DIRT,
                         ]),
                         None,
                     ) && editor.check_for_block_absolute(
