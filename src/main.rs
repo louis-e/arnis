@@ -158,7 +158,7 @@ fn run_cli() {
         (world_path, None)
     };
 
-    let (parsed_elements, xzbbox, ground) = prepare_data(&args);
+    let (parsed_elements, xzbbox, ground) = prepare_data(&args).unwrap();
 
     let spawn_point: (i32, i32) = get_spawn_point(
         args.spawn_lat,

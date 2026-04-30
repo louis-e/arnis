@@ -401,6 +401,9 @@ const PRIORITY_ORDER: [&str; 6] = [
 
 // Function to determine the priority of each element
 pub fn get_priority(element: &ProcessedElement) -> usize {
+    if element.tags().contains_key("landuse") {
+        return PRIORITY_ORDER.len() + 1;
+    }
     // Check each tag against the priority order
     for (i, &tag) in PRIORITY_ORDER.iter().enumerate() {
         if element.tags().contains_key(tag) {

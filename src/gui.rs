@@ -1,12 +1,9 @@
 use crate::args::Args;
 use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
-use crate::map_transformation;
-use crate::osm_parser;
-use crate::overture;
 use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
-use crate::retrieve_data::get_spawn_point;
+use crate::retrieve_data::{get_spawn_point, prepare_data};
 use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
 use crate::world_editor::WorldFormat;
@@ -994,132 +991,48 @@ fn gui_start_generation(
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
-            if skip_osm_objects {
-                // Generate ground data (terrain) for terrain-only mode
-                let ground = ground::generate_ground_data(&args);
-
-                // Create empty parsed_elements and xzbbox for terrain-only mode
-                let parsed_elements = Vec::new();
+            let (parsed_elements, xzbbox, ground) = if skip_osm_objects {
                 let (_coord_transformer, xzbbox) =
                     CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
-
-                let _ = data_processing::generate_world_with_options(
-                    parsed_elements,
-                    &xzbbox,
-                    args.bbox,
-                    Arc::new(ground),
-                    &args,
-                    generation_options.clone(),
-                );
-                if let Some(g) = cleanup_guard.as_mut() {
-                    g.disarm();
+                (Vec::new(), xzbbox, ground::generate_ground_data(&args))
+            } else {
+                match prepare_data(&args) {
+                    Ok((elems, bbox, ground)) => (elems, bbox, ground),
+                    Err(e) => {
+                        emit_gui_error(&e);
+                        return Err(e);
+                    }
                 }
-                // Explicitly release session lock before showing Done message
-                // so Minecraft can open the world immediately
-                drop(_session_lock);
-                emit_gui_progress_update(100.0, "Done! World generation completed.");
-                println!("{}", "Done! World generation completed.".green().bold());
+            };
 
-                // Start map preview generation silently in background (Java only)
-                if world_format == WorldFormat::JavaAnvil {
-                    let preview_info = data_processing::MapPreviewInfo::new(
-                        generation_options.path.clone(),
-                        &xzbbox,
-                    );
-                    data_processing::start_map_preview_generation(preview_info);
-                }
-
-                return Ok(());
+            if let Err(e) = data_processing::generate_world_with_options(
+                parsed_elements,
+                &xzbbox,
+                args.bbox,
+                Arc::new(ground),
+                &args,
+                generation_options.clone(),
+            ) {
+                emit_gui_error(&e);
+                return Err(e);
             }
-
-            // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
-            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
-                Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox) =
-                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
-
-                    // Fetch supplementary building data from Overture Maps
-                    {
-                        let overture_elements =
-                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
-                        if !overture_elements.is_empty() {
-                            let unique_overture = overture::deduplicate_against_osm(
-                                overture_elements,
-                                &parsed_elements,
-                            );
-                            parsed_elements.extend(unique_overture);
-                        }
-                    }
-
-                    parsed_elements.sort_by(|el1, el2| {
-                        let (el1_priority, el2_priority) =
-                            (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
-                        match (
-                            el1.tags().contains_key("landuse"),
-                            el2.tags().contains_key("landuse"),
-                        ) {
-                            (true, false) => std::cmp::Ordering::Greater,
-                            (false, true) => std::cmp::Ordering::Less,
-                            _ => el1_priority.cmp(&el2_priority),
-                        }
-                    });
-
-                    let mut ground = ground::generate_ground_data(&args);
-
-                    // Transform map (parsed_elements). Operations are defined in a json file
-                    map_transformation::transform_map(
-                        &mut parsed_elements,
-                        &mut xzbbox,
-                        &mut ground,
-                    );
-
-                    // Apply rotation if specified
-                    if rotation_angle.abs() > f64::EPSILON {
-                        map_transformation::rotate::rotate_world(
-                            rotation_angle.clamp(-90.0, 90.0),
-                            &mut parsed_elements,
-                            &mut xzbbox,
-                            &mut ground,
-                        )
-                        .map_err(|e| format!("Rotation failed: {e}"))?;
-                    }
-
-                    let _ = data_processing::generate_world_with_options(
-                        parsed_elements,
-                        &xzbbox,
-                        args.bbox,
-                        Arc::new(ground),
-                        &args,
-                        generation_options.clone(),
-                    );
-                    if let Some(g) = cleanup_guard.as_mut() {
-                        g.disarm();
-                    }
-                    // Explicitly release session lock before showing Done message
-                    // so Minecraft can open the world immediately
-                    drop(_session_lock);
-                    emit_gui_progress_update(100.0, "Done! World generation completed.");
-                    println!("{}", "Done! World generation completed.".green().bold());
-
-                    // Start map preview generation silently in background (Java only)
-                    if world_format == WorldFormat::JavaAnvil {
-                        let preview_info = data_processing::MapPreviewInfo::new(
-                            generation_options.path.clone(),
-                            &xzbbox,
-                        );
-                        data_processing::start_map_preview_generation(preview_info);
-                    }
-
-                    Ok(())
-                }
-                Err(e) => {
-                    emit_gui_error(&e.to_string());
-                    // cleanup_guard removes the new world, and SessionLock releases
-                    // its file handle first via reverse drop order.
-                    Err(e.to_string())
-                }
+            if let Some(g) = cleanup_guard.as_mut() {
+                g.disarm();
             }
+            // Explicitly release session lock before showing Done message
+            // so Minecraft can open the world immediately
+            drop(_session_lock);
+            emit_gui_progress_update(100.0, "Done! World generation completed.");
+            println!("{}", "Done! World generation completed.".green().bold());
+
+            // Start map preview generation silently in background (Java only)
+            if world_format == WorldFormat::JavaAnvil {
+                let preview_info =
+                    data_processing::MapPreviewInfo::new(generation_options.path.clone(), &xzbbox);
+                data_processing::start_map_preview_generation(preview_info);
+            }
+            Ok(())
         })
         .await
         {

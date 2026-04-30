@@ -392,7 +392,7 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
     Ok(None)
 }
 
-pub fn prepare_data(args: &Args) -> (Vec<ProcessedElement>, XZBBox, Ground) {
+pub fn prepare_data(args: &Args) -> Result<(Vec<ProcessedElement>, XZBBox, Ground), String> {
     // Fetch data
     let raw_data = match &args.file {
         Some(file) => fetch_data_from_file(file),
@@ -403,7 +403,7 @@ pub fn prepare_data(args: &Args) -> (Vec<ProcessedElement>, XZBBox, Ground) {
             args.save_json_file.as_deref(),
         ),
     }
-    .expect("Failed to fetch data");
+    .or(Err("Failed to fetch data"))?;
 
     let mut ground = ground::generate_ground_data(args);
 
@@ -431,8 +431,7 @@ pub fn prepare_data(args: &Args) -> (Vec<ProcessedElement>, XZBBox, Ground) {
         }
     }
 
-    parsed_elements
-        .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
+    parsed_elements.sort_by_key(osm_parser::get_priority);
 
     // Write the parsed OSM data to a file for inspection
     if args.debug {
@@ -447,7 +446,7 @@ pub fn prepare_data(args: &Args) -> (Vec<ProcessedElement>, XZBBox, Ground) {
                 element.kind(),
                 element.tags(),
             )
-            .expect("Failed to write to output file");
+            .or(Err("Failed to write to output file"))?;
         }
     }
 
@@ -456,18 +455,16 @@ pub fn prepare_data(args: &Args) -> (Vec<ProcessedElement>, XZBBox, Ground) {
 
     // Apply rotation if specified
     if args.rotation.abs() > f64::EPSILON {
-        if let Err(e) = map_transformation::rotate::rotate_world(
+        map_transformation::rotate::rotate_world(
             args.rotation,
             &mut parsed_elements,
             &mut xzbbox,
             &mut ground,
-        ) {
-            eprintln!("{} Rotation failed: {}", "Error:".red().bold(), e);
-            std::process::exit(1);
-        }
+        )
+        .map_err(|e| format!("{} Rotation failed: {}", "Error:".red().bold(), e))?
     }
 
-    (parsed_elements, xzbbox, ground)
+    Ok((parsed_elements, xzbbox, ground))
 }
 
 pub fn get_spawn_point(
