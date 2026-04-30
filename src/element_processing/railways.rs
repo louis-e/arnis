@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 
 /// Number of blocks per OSM layer level (matches highway elevation step).
 const LAYER_HEIGHT_STEP: i32 = 6;

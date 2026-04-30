@@ -1,8 +1,8 @@
 use crate::clipping::clip_way_to_bbox;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::coordinate_system::geographic::{LLBBox, LLPoint};
+use arnis_math::coordinate_system::transformation::CoordTransformer;
 use colored::Colorize;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -401,6 +401,9 @@ const PRIORITY_ORDER: [&str; 6] = [
 
 // Function to determine the priority of each element
 pub fn get_priority(element: &ProcessedElement) -> usize {
+    if element.tags().contains_key("landuse") {
+        return PRIORITY_ORDER.len() + 1;
+    }
     // Check each tag against the priority order
     for (i, &tag) in PRIORITY_ORDER.iter().enumerate() {
         if element.tags().contains_key(tag) {

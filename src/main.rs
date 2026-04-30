@@ -4,16 +4,12 @@ mod args;
 #[cfg(feature = "bedrock")]
 mod bedrock_block_map;
 mod block_definitions;
-mod bresenham;
 mod clipping;
 mod colors;
-mod coordinate_system;
 mod data_processing;
-mod deterministic_rng;
 mod element_processing;
 mod elevation;
 mod elevation_data;
-mod floodfill;
 mod floodfill_cache;
 mod ground;
 mod ground_generation;
@@ -36,8 +32,9 @@ mod world_utils;
 use args::Args;
 use clap::Parser;
 use colored::*;
+use std::env;
 use std::path::PathBuf;
-use std::{env, fs, io::Write};
+use std::sync::Arc;
 
 #[cfg(feature = "gui")]
 mod gui;
@@ -53,6 +50,9 @@ mod progress {
         false
     }
 }
+use crate::data_processing::GenerationOptions;
+use crate::retrieve_data::{get_spawn_point, prepare_data};
+use arnis_math::coordinate_system::cartesian::XZPoint;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
@@ -158,138 +158,31 @@ fn run_cli() {
         (world_path, None)
     };
 
-    // Fetch data
-    let raw_data = match &args.file {
-        Some(file) => retrieve_data::fetch_data_from_file(file),
-        None => retrieve_data::fetch_data_from_overpass(
-            args.bbox,
-            args.debug,
-            args.downloader.as_str(),
-            args.save_json_file.as_deref(),
-        ),
-    }
-    .expect("Failed to fetch data");
+    let (parsed_elements, xzbbox, ground) = prepare_data(&args).unwrap();
 
-    let mut ground = ground::generate_ground_data(&args);
-
-    // Parse raw data
-    let (mut parsed_elements, mut xzbbox) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
-
-    // Fetch supplementary building data from Overture Maps
-    {
-        println!("{} Fetching Overture Maps data...", "  [+]".bold());
-        let overture_elements =
-            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
-        if !overture_elements.is_empty() {
-            let before_count = parsed_elements.len();
-            let unique_overture =
-                overture::deduplicate_against_osm(overture_elements, &parsed_elements);
-            parsed_elements.extend(unique_overture);
-            let added = parsed_elements.len() - before_count;
-            println!(
-                "  Added {} buildings from Overture Maps",
-                added.to_string().bright_white().bold()
-            );
-        } else {
-            println!("  No additional buildings from Overture Maps for this area");
-        }
-    }
-
-    parsed_elements
-        .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
-
-    // Write the parsed OSM data to a file for inspection
-    if args.debug {
-        let mut buf = std::io::BufWriter::new(
-            fs::File::create("parsed_osm_data.txt").expect("Failed to create output file"),
-        );
-        for element in &parsed_elements {
-            writeln!(
-                buf,
-                "Element ID: {}, Type: {}, Tags: {:?}",
-                element.id(),
-                element.kind(),
-                element.tags(),
-            )
-            .expect("Failed to write to output file");
-        }
-    }
-
-    // Transform map (parsed_elements). Operations are defined in a json file
-    map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
-
-    // Apply rotation if specified
-    if args.rotation.abs() > f64::EPSILON {
-        if let Err(e) = map_transformation::rotate::rotate_world(
-            args.rotation,
-            &mut parsed_elements,
-            &mut xzbbox,
-            &mut ground,
-        ) {
-            eprintln!("{} Rotation failed: {}", "Error:".red().bold(), e);
-            std::process::exit(1);
-        }
-    }
-
-    // Convert spawn lat/lng to Minecraft XZ coordinates if provided
-    let spawn_point: Option<(i32, i32)> = match (args.spawn_lat, args.spawn_lng) {
-        (Some(lat), Some(lng)) => {
-            use coordinate_system::geographic::LLPoint;
-            use coordinate_system::transformation::CoordTransformer;
-
-            let llpoint = LLPoint::new(lat, lng).unwrap_or_else(|e| {
-                eprintln!("{} Invalid spawn coordinates: {}", "Error:".red().bold(), e);
-                std::process::exit(1);
-            });
-
-            let (transformer, pre_rot_bbox) =
-                CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale).unwrap_or_else(|e| {
-                    eprintln!(
-                        "{} Failed to convert spawn point: {}",
-                        "Error:".red().bold(),
-                        e
-                    );
-                    std::process::exit(1);
-                });
-
-            let xzpoint = transformer.transform_point(llpoint);
-            let (sx, sz) = map_transformation::rotate::rotate_xz_point(
-                xzpoint.x,
-                xzpoint.z,
-                args.rotation,
-                &pre_rot_bbox,
-            );
-
-            Some((sx, sz))
-        }
-        _ => None,
-    };
-
-    // Derive terrain-aware spawn Y while `ground` is still in scope (it gets
-    // moved into `generate_world_with_options` below). Used only for Java's
-    // post-generation `set_spawn_in_level_dat` call — Bedrock derives spawn Y
-    // independently inside `BedrockWriter::write_level_dat`.
-    let spawn_y_for_java = spawn_point.map(|(sx, sz)| {
-        use coordinate_system::cartesian::XZPoint;
-        let rel = XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z());
-        ground.level(rel) + 3
-    });
+    let spawn_point: (i32, i32) = get_spawn_point(
+        args.spawn_lat,
+        args.spawn_lng,
+        &args.bbox,
+        args.scale,
+        args.rotation,
+    );
 
     // Build generation options
-    let generation_options = data_processing::GenerationOptions {
+    let generation_options = GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
         spawn_point,
     };
 
+    let ground = Arc::new(ground);
     // Generate world
     match data_processing::generate_world_with_options(
         parsed_elements,
-        xzbbox,
+        &xzbbox,
         args.bbox,
-        ground,
+        ground.clone(),
         &args,
         generation_options,
     ) {
@@ -304,19 +197,25 @@ fn run_cli() {
 
             // For Java Edition, update spawn point in level.dat if provided
             if !args.bedrock {
-                if let (Some((spawn_x, spawn_z)), Some(spawn_y)) = (spawn_point, spawn_y_for_java) {
-                    if let Err(e) = world_utils::set_spawn_in_level_dat(
-                        &generation_path,
-                        spawn_x,
-                        spawn_y,
-                        spawn_z,
-                    ) {
-                        eprintln!(
-                            "{} Failed to set spawn point in level.dat: {}",
-                            "Warning:".yellow().bold(),
-                            e
-                        );
-                    }
+                // Derive terrain-aware spawn Y while `ground` is still in scope (it gets
+                // moved into `generate_world_with_options` below). Used only for Java's
+                // post-generation `set_spawn_in_level_dat` call — Bedrock derives spawn Y
+                // independently inside `BedrockWriter::write_level_dat`.
+                let spawn_y = ground.level(XZPoint::new(
+                    spawn_point.0 - xzbbox.min_x(),
+                    spawn_point.1 - xzbbox.min_z(),
+                )) + 3;
+                if let Err(e) = world_utils::set_spawn_in_level_dat(
+                    &generation_path,
+                    spawn_point.0,
+                    spawn_y,
+                    spawn_point.1,
+                ) {
+                    eprintln!(
+                        "{} Failed to set spawn point in level.dat: {}",
+                        "Warning:".yellow().bold(),
+                        e
+                    );
                 }
             }
         }

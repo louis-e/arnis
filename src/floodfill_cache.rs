@@ -4,9 +4,9 @@
 //! before the main element processing loop, then retrieve cached results during
 //! sequential processing.
 
-use crate::coordinate_system::cartesian::XZBBox;
-use crate::floodfill::flood_fill_area;
 use crate::osm_parser::{ProcessedElement, ProcessedMemberRole, ProcessedWay};
+use arnis_math::coordinate_system::cartesian::XZBBox;
+use arnis_math::floodfill::flood_fill_area;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::sync::{Arc, OnceLock};

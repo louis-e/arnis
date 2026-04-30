@@ -1,9 +1,9 @@
 use super::Operator;
-use crate::coordinate_system::cartesian::{XZBBox, XZBBoxRect, XZPoint};
 use crate::elevation::MAX_ELEVATION_GRID_DIM;
 use crate::ground::{Ground, RotationMask};
 use crate::land_cover::LC_WATER;
 use crate::osm_parser::ProcessedElement;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZBBoxRect, XZPoint};
 use serde::Deserialize;
 use std::sync::Arc;
 

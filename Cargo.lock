@@ -199,6 +199,7 @@ dependencies = [
 name = "arnis"
 version = "2.7.0"
 dependencies = [
+ "arnis-math",
  "base64 0.22.1",
  "bedrockrs_level",
  "bedrockrs_shared",
@@ -212,17 +213,13 @@ dependencies = [
  "flate2",
  "fnv",
  "fs2",
- "geo",
  "image 0.25.10",
  "indicatif",
- "itertools 0.14.0",
- "jsonwebtoken 10.3.0",
  "log",
  "nbtx",
  "once_cell",
  "parquet",
  "rand 0.9.4",
- "rand_chacha 0.9.0",
  "rayon",
  "reqwest",
  "rfd",
@@ -240,6 +237,17 @@ dependencies = [
  "vek",
  "windows 0.62.2",
  "zip",
+]
+
+[[package]]
+name = "arnis-math"
+version = "0.1.0"
+dependencies = [
+ "geo",
+ "itertools 0.14.0",
+ "rand 0.9.4",
+ "rand_chacha 0.9.0",
+ "serde",
 ]
 
 [[package]]
@@ -587,7 +595,7 @@ dependencies = [
  "base64 0.22.1",
  "bedrockrs_macros",
  "byteorder",
- "jsonwebtoken 9.3.1",
+ "jsonwebtoken",
  "nbtx",
  "paste",
  "seq-macro",
@@ -3091,22 +3099,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonwebtoken"
-version = "10.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
-dependencies = [
- "base64 0.22.1",
- "getrandom 0.2.17",
- "js-sys",
- "pem",
- "serde",
- "serde_json",
- "signature",
- "simple_asn1",
-]
-
-[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5468,15 +5460,6 @@ checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
 dependencies = [
  "errno 0.3.14",
  "libc",
-]
-
-[[package]]
-name = "signature"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
-dependencies = [
- "rand_core 0.6.4",
 ]
 
 [[package]]

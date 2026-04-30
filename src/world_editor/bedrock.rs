@@ -8,10 +8,10 @@ use super::WorldMetadata;
 use crate::bedrock_block_map::{
     to_bedrock_block_with_properties, BedrockBlock, BedrockBlockStateValue,
 };
-use crate::coordinate_system::cartesian::XZBBox;
-use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 use bedrockrs_level::level::db_interface::key_level::KeyTypeTag;
 use bedrockrs_level::level::db_interface::rusty::mcpe_options;
@@ -225,7 +225,7 @@ impl BedrockWriter {
                 // Ground elevation data expects coordinates relative to the XZ bbox origin
                 let rel_x = spawn_x - xzbbox.min_x();
                 let rel_z = spawn_z - xzbbox.min_z();
-                let coord = crate::coordinate_system::cartesian::XZPoint::new(rel_x, rel_z);
+                let coord = XZPoint::new(rel_x, rel_z);
                 ground.level(coord) + 3 // Add 3 blocks above ground for safety
             })
             .unwrap_or(64);

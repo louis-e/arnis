@@ -1,17 +1,15 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
-use crate::map_transformation;
-use crate::osm_parser;
-use crate::overture;
 use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
+use crate::retrieve_data::{get_spawn_point, prepare_data};
 use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
 use crate::world_editor::WorldFormat;
+use arnis_math::coordinate_system::cartesian::XZPoint;
+use arnis_math::coordinate_system::geographic::LLBBox;
+use arnis_math::coordinate_system::transformation::CoordTransformer;
 use colored::Colorize;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
@@ -20,6 +18,8 @@ use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
+use std::sync::Arc;
 use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
@@ -385,12 +385,6 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
     world_path
 }
 
-/// Calculates the default spawn point at X=1, Z=1 relative to the world origin.
-/// This is used when no spawn point is explicitly selected by the user.
-fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
-    (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
-}
-
 /// Sets the player spawn point in level.dat using Minecraft XZ coordinates.
 /// The Y coordinate is set to a temporary value (150) and will be updated
 /// after terrain generation by `update_player_spawn_y_after_generation`.
@@ -486,7 +480,7 @@ pub fn update_player_spawn_y_after_generation(
     scale: f64,
     ground: &Ground,
 ) -> Result<(), String> {
-    use crate::coordinate_system::transformation::CoordTransformer;
+    use arnis_math::coordinate_system::transformation::CoordTransformer;
 
     // Read the current level.dat file to get existing spawn coordinates
     let level_path = PathBuf::from(world_path).join("level.dat");
@@ -827,25 +821,17 @@ fn gui_start_generation(
             let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale)
                 .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
-            let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
-                let llpoint = LLPoint::new(coords.0, coords.1)
-                    .map_err(|e| format!("Failed to parse spawn point: {e}"))?;
-
-                if llbbox.contains(&llpoint) {
-                    let xzpoint = transformer.transform_point(llpoint);
-                    (xzpoint.x, xzpoint.z)
-                } else {
-                    calculate_default_spawn(&xzbbox)
-                }
+            let (lat, lon) = if let Some(coords) = spawn_point {
+                (Some(coords.0), Some(coords.1))
             } else {
-                calculate_default_spawn(&xzbbox)
+                (None, None)
             };
-
-            let (spawn_x, spawn_z) = map_transformation::rotate::rotate_xz_point(
-                spawn_x,
-                spawn_z,
+            let (spawn_x, spawn_z) = get_spawn_point(
+                lat,
+                lon,
+                &llbbox,
+                world_scale,
                 rotation_angle.clamp(-90.0, 90.0),
-                &xzbbox,
             );
 
             set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
@@ -959,39 +945,6 @@ fn gui_start_generation(
                 }
             };
 
-            // Calculate MC spawn coordinates from lat/lng if spawn point was provided
-            // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
-            let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
-                CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
-            {
-                let (sx, sz) = if let Some((lat, lng)) = spawn_point {
-                    if let Ok(llpoint) = LLPoint::new(lat, lng) {
-                        let xzpoint = transformer.transform_point(llpoint);
-                        (xzpoint.x, xzpoint.z)
-                    } else {
-                        calculate_default_spawn(&pre_rot_bbox)
-                    }
-                } else {
-                    calculate_default_spawn(&pre_rot_bbox)
-                };
-                Some(map_transformation::rotate::rotate_xz_point(
-                    sx,
-                    sz,
-                    rotation_angle.clamp(-90.0, 90.0),
-                    &pre_rot_bbox,
-                ))
-            } else {
-                None
-            };
-
-            // Create generation options
-            let generation_options = GenerationOptions {
-                path: generation_path.clone(),
-                format: world_format,
-                level_name,
-                spawn_point: mc_spawn_point,
-            };
-
             // Create an Args instance with the chosen bounding box
             // Note: path is used for Java-specific features like spawn point update
             let args: Args = Args {
@@ -1021,133 +974,65 @@ fn gui_start_generation(
                 benchmark: false,
             };
 
-            // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
-            if skip_osm_objects {
-                // Generate ground data (terrain) for terrain-only mode
-                let ground = ground::generate_ground_data(&args);
+            let spawn_point = get_spawn_point(
+                args.spawn_lat,
+                args.spawn_lng,
+                &args.bbox,
+                args.scale,
+                args.rotation,
+            );
 
-                // Create empty parsed_elements and xzbbox for terrain-only mode
-                let parsed_elements = Vec::new();
+            // Create generation options
+            let generation_options = GenerationOptions {
+                path: generation_path.clone(),
+                format: world_format,
+                level_name,
+                spawn_point,
+            };
+
+            // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
+            let (parsed_elements, xzbbox, ground) = if skip_osm_objects {
                 let (_coord_transformer, xzbbox) =
                     CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
-
-                let _ = data_processing::generate_world_with_options(
-                    parsed_elements,
-                    xzbbox.clone(),
-                    args.bbox,
-                    ground,
-                    &args,
-                    generation_options.clone(),
-                );
-                if let Some(g) = cleanup_guard.as_mut() {
-                    g.disarm();
+                (Vec::new(), xzbbox, ground::generate_ground_data(&args))
+            } else {
+                match prepare_data(&args) {
+                    Ok((elems, bbox, ground)) => (elems, bbox, ground),
+                    Err(e) => {
+                        emit_gui_error(&e);
+                        return Err(e);
+                    }
                 }
-                // Explicitly release session lock before showing Done message
-                // so Minecraft can open the world immediately
-                drop(_session_lock);
-                emit_gui_progress_update(100.0, "Done! World generation completed.");
-                println!("{}", "Done! World generation completed.".green().bold());
+            };
 
-                // Start map preview generation silently in background (Java only)
-                if world_format == WorldFormat::JavaAnvil {
-                    let preview_info = data_processing::MapPreviewInfo::new(
-                        generation_options.path.clone(),
-                        &xzbbox,
-                    );
-                    data_processing::start_map_preview_generation(preview_info);
-                }
-
-                return Ok(());
+            if let Err(e) = data_processing::generate_world_with_options(
+                parsed_elements,
+                &xzbbox,
+                args.bbox,
+                Arc::new(ground),
+                &args,
+                generation_options.clone(),
+            ) {
+                emit_gui_error(&e);
+                return Err(e);
             }
-
-            // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
-            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
-                Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox) =
-                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
-
-                    // Fetch supplementary building data from Overture Maps
-                    {
-                        let overture_elements =
-                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
-                        if !overture_elements.is_empty() {
-                            let unique_overture = overture::deduplicate_against_osm(
-                                overture_elements,
-                                &parsed_elements,
-                            );
-                            parsed_elements.extend(unique_overture);
-                        }
-                    }
-
-                    parsed_elements.sort_by(|el1, el2| {
-                        let (el1_priority, el2_priority) =
-                            (osm_parser::get_priority(el1), osm_parser::get_priority(el2));
-                        match (
-                            el1.tags().contains_key("landuse"),
-                            el2.tags().contains_key("landuse"),
-                        ) {
-                            (true, false) => std::cmp::Ordering::Greater,
-                            (false, true) => std::cmp::Ordering::Less,
-                            _ => el1_priority.cmp(&el2_priority),
-                        }
-                    });
-
-                    let mut ground = ground::generate_ground_data(&args);
-
-                    // Transform map (parsed_elements). Operations are defined in a json file
-                    map_transformation::transform_map(
-                        &mut parsed_elements,
-                        &mut xzbbox,
-                        &mut ground,
-                    );
-
-                    // Apply rotation if specified
-                    if rotation_angle.abs() > f64::EPSILON {
-                        map_transformation::rotate::rotate_world(
-                            rotation_angle.clamp(-90.0, 90.0),
-                            &mut parsed_elements,
-                            &mut xzbbox,
-                            &mut ground,
-                        )
-                        .map_err(|e| format!("Rotation failed: {e}"))?;
-                    }
-
-                    let _ = data_processing::generate_world_with_options(
-                        parsed_elements,
-                        xzbbox.clone(),
-                        args.bbox,
-                        ground,
-                        &args,
-                        generation_options.clone(),
-                    );
-                    if let Some(g) = cleanup_guard.as_mut() {
-                        g.disarm();
-                    }
-                    // Explicitly release session lock before showing Done message
-                    // so Minecraft can open the world immediately
-                    drop(_session_lock);
-                    emit_gui_progress_update(100.0, "Done! World generation completed.");
-                    println!("{}", "Done! World generation completed.".green().bold());
-
-                    // Start map preview generation silently in background (Java only)
-                    if world_format == WorldFormat::JavaAnvil {
-                        let preview_info = data_processing::MapPreviewInfo::new(
-                            generation_options.path.clone(),
-                            &xzbbox,
-                        );
-                        data_processing::start_map_preview_generation(preview_info);
-                    }
-
-                    Ok(())
-                }
-                Err(e) => {
-                    emit_gui_error(&e.to_string());
-                    // cleanup_guard removes the new world, and SessionLock releases
-                    // its file handle first via reverse drop order.
-                    Err(e.to_string())
-                }
+            if let Some(g) = cleanup_guard.as_mut() {
+                g.disarm();
             }
+            // Explicitly release session lock before showing Done message
+            // so Minecraft can open the world immediately
+            drop(_session_lock);
+            emit_gui_progress_update(100.0, "Done! World generation completed.");
+            println!("{}", "Done! World generation completed.".green().bold());
+
+            // Start map preview generation silently in background (Java only)
+            if world_format == WorldFormat::JavaAnvil {
+                let preview_info =
+                    data_processing::MapPreviewInfo::new(generation_options.path.clone(), &xzbbox);
+                data_processing::start_map_preview_generation(preview_info);
+            }
+            Ok(())
         })
         .await
         {

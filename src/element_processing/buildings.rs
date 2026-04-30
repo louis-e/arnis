@@ -1,15 +1,15 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::clipping::clip_way_to_bbox;
 use crate::colors::color_text_to_rgb_tuple;
-use crate::coordinate_system::cartesian::XZPoint;
-use crate::deterministic_rng::{coord_rng, element_rng};
 use crate::element_processing::historic;
 use crate::element_processing::subprocessor::buildings_interior::generate_building_interior;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::deterministic_rng::{coord_rng, element_rng};
 use fastnbt::Value;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
@@ -5504,7 +5504,7 @@ pub fn generate_building_from_relation(
     relation: &ProcessedRelation,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
-    xzbbox: &crate::coordinate_system::cartesian::XZBBox,
+    xzbbox: &XZBBox,
     building_passages: &CoordinateBitmap,
 ) {
     // Skip underground buildings/building parts

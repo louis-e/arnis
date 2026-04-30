@@ -1,6 +1,7 @@
-use crate::coordinate_system::geographic::LLBBox;
+use arnis_math::coordinate_system::geographic::{LLBBox, LLPoint};
 use clap::{ArgAction, Parser};
 use std::path::PathBuf;
+use std::str::FromStr;
 use std::time::Duration;
 
 /// Command-line arguments parser
@@ -136,7 +137,6 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
         }
         (Some(lat), Some(lng)) => {
             // Validate coordinates are valid lat/lng (rejects NaN, inf, out-of-range)
-            use crate::coordinate_system::geographic::LLPoint;
             let llpoint =
                 LLPoint::new(lat, lng).map_err(|e| format!("Invalid spawn coordinates: {e}"))?;
 

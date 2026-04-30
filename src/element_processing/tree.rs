@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
-use crate::deterministic_rng::coord_rng;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::world_editor::WorldEditor;
+use arnis_math::deterministic_rng::coord_rng;
 use rand::Rng;
 
 type Coord = (i32, i32, i32);

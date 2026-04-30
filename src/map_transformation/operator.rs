@@ -1,8 +1,8 @@
 use super::rotate::rotator_from_json;
 use super::translate::translator_from_json;
-use crate::coordinate_system::cartesian::XZBBox;
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
+use arnis_math::coordinate_system::cartesian::XZBBox;
 
 /// An Operator does transformation on the map, modifying Vec<ProcessedElement> and XZBBox
 pub trait Operator {
@@ -56,8 +56,8 @@ pub fn operator_vec_from_json(list: &serde_json::Value) -> Result<Vec<Box<dyn Op
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coordinate_system::cartesian::{XZPoint, XZVector};
     use crate::map_transformation::translate;
+    use arnis_math::coordinate_system::cartesian::{XZPoint, XZVector};
     use std::fs;
 
     // this ensures json can be correctly read into the specific operator struct

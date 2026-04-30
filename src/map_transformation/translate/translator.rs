@@ -2,8 +2,8 @@
 use super::startend_translator::StartEndTranslator;
 use super::vector_translator::VectorTranslator;
 use super::Operator;
-use crate::coordinate_system::cartesian::{XZBBox, XZVector};
 use crate::osm_parser::ProcessedElement;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZVector};
 
 /// Create a translate operator (translator) from json
 pub fn translator_from_json(config: &serde_json::Value) -> Result<Box<dyn Operator>, String> {
@@ -65,8 +65,8 @@ pub fn translate_by_vector(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coordinate_system::cartesian::XZVector;
     use crate::test_utilities::generate_default_example;
+    use arnis_math::coordinate_system::cartesian::XZVector;
 
     // this ensures translate_by_vector function is correct
     #[test]

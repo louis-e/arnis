@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::osm_parser::ProcessedWay;
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 
 // TODO FIX - This handles ways with bridge=yes tag (e.g., highway bridges)
 #[allow(dead_code)]

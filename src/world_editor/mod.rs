@@ -23,10 +23,10 @@ pub use common::MIN_Y;
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
 use crate::block_definitions::*;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::progress::emit_gui_progress_update;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::coordinate_system::geographic::LLBBox;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
 use fnv::FnvHashMap;
