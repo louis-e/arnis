@@ -1,6 +1,6 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::coordinate_system::cartesian::XZPoint;
+use crate::coordinate_system::geographic::LLBBox;
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
@@ -21,7 +21,9 @@ use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::{env, fs, io::Write};
+use std::sync::Arc;
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
+use crate::retrieve_data::get_spawn_point;
 
 /// Manages the session.lock file for a Minecraft world directory
 struct SessionLock {
@@ -383,12 +385,6 @@ fn add_localized_world_name(world_path: PathBuf, bbox: &LLBBox) -> PathBuf {
 
     // Return the original path since we didn't change the directory name
     world_path
-}
-
-/// Calculates the default spawn point at X=1, Z=1 relative to the world origin.
-/// This is used when no spawn point is explicitly selected by the user.
-fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
-    (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
 }
 
 /// Sets the player spawn point in level.dat using Minecraft XZ coordinates.
@@ -827,26 +823,12 @@ fn gui_start_generation(
             let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale)
                 .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
-            let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
-                let llpoint = LLPoint::new(coords.0, coords.1)
-                    .map_err(|e| format!("Failed to parse spawn point: {e}"))?;
-
-                if llbbox.contains(&llpoint) {
-                    let xzpoint = transformer.transform_point(llpoint);
-                    (xzpoint.x, xzpoint.z)
-                } else {
-                    calculate_default_spawn(&xzbbox)
-                }
+            let (lat, lon) = if let Some(coords) = spawn_point {
+                (Some(coords.0), Some(coords.1))
             } else {
-                calculate_default_spawn(&xzbbox)
+                (None, None)
             };
-
-            let (spawn_x, spawn_z) = map_transformation::rotate::rotate_xz_point(
-                spawn_x,
-                spawn_z,
-                rotation_angle.clamp(-90.0, 90.0),
-                &xzbbox,
-            );
+            let (spawn_x, spawn_z) = get_spawn_point(lat, lon, &llbbox, world_scale, rotation_angle.clamp(-90.0, 90.0));
 
             set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
                 .map_err(|e| format!("Failed to set spawn point: {e}"))?;
@@ -959,39 +941,6 @@ fn gui_start_generation(
                 }
             };
 
-            // Calculate MC spawn coordinates from lat/lng if spawn point was provided
-            // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
-            let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
-                CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
-            {
-                let (sx, sz) = if let Some((lat, lng)) = spawn_point {
-                    if let Ok(llpoint) = LLPoint::new(lat, lng) {
-                        let xzpoint = transformer.transform_point(llpoint);
-                        (xzpoint.x, xzpoint.z)
-                    } else {
-                        calculate_default_spawn(&pre_rot_bbox)
-                    }
-                } else {
-                    calculate_default_spawn(&pre_rot_bbox)
-                };
-                Some(map_transformation::rotate::rotate_xz_point(
-                    sx,
-                    sz,
-                    rotation_angle.clamp(-90.0, 90.0),
-                    &pre_rot_bbox,
-                ))
-            } else {
-                None
-            };
-
-            // Create generation options
-            let generation_options = GenerationOptions {
-                path: generation_path.clone(),
-                format: world_format,
-                level_name,
-                spawn_point: mc_spawn_point,
-            };
-
             // Create an Args instance with the chosen bounding box
             // Note: path is used for Java-specific features like spawn point update
             let args: Args = Args {
@@ -1021,6 +970,16 @@ fn gui_start_generation(
                 benchmark: false,
             };
 
+            let spawn_point = get_spawn_point(args.spawn_lat, args.spawn_lng, &args.bbox, args.scale, args.rotation);
+
+            // Create generation options
+            let generation_options = GenerationOptions {
+                path: generation_path.clone(),
+                format: world_format,
+                level_name,
+                spawn_point
+            };
+
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
             if skip_osm_objects {
                 // Generate ground data (terrain) for terrain-only mode
@@ -1034,9 +993,9 @@ fn gui_start_generation(
 
                 let _ = data_processing::generate_world_with_options(
                     parsed_elements,
-                    xzbbox.clone(),
+                    &xzbbox,
                     args.bbox,
-                    ground,
+                    Arc::new(ground),
                     &args,
                     generation_options.clone(),
                 );
@@ -1115,9 +1074,9 @@ fn gui_start_generation(
 
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,
-                        xzbbox.clone(),
+                        &xzbbox,
                         args.bbox,
-                        ground,
+                        Arc::new(ground),
                         &args,
                         generation_options.clone(),
                     );

@@ -1,8 +1,13 @@
-use crate::coordinate_system::geographic::LLBBox;
-use crate::osm_parser::OsmData;
+use crate::args::Args;
+use crate::coordinate_system::cartesian::XZBBox;
+use crate::coordinate_system::geographic::{LLBBox, LLPoint};
+use crate::coordinate_system::transformation::CoordTransformer;
+use crate::ground::Ground;
+use crate::osm_parser::{OsmData, ProcessedElement};
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
+use crate::{ground, map_transformation, osm_parser, overture};
 use colored::Colorize;
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -385,4 +390,120 @@ pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std
     }
 
     Ok(None)
+}
+
+pub fn prepare_data(args: &Args) -> (Vec<ProcessedElement>, XZBBox, Ground) {
+    // Fetch data
+    let raw_data = match &args.file {
+        Some(file) => fetch_data_from_file(file),
+        None => fetch_data_from_overpass(
+            args.bbox,
+            args.debug,
+            args.downloader.as_str(),
+            args.save_json_file.as_deref(),
+        ),
+    }
+    .expect("Failed to fetch data");
+
+    let mut ground = ground::generate_ground_data(args);
+
+    // Parse raw data
+    let (mut parsed_elements, mut xzbbox) =
+        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+
+    // Fetch supplementary building data from Overture Maps
+    {
+        println!("{} Fetching Overture Maps data...", "  [+]".bold());
+        let overture_elements =
+            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+        if !overture_elements.is_empty() {
+            let before_count = parsed_elements.len();
+            let unique_overture =
+                overture::deduplicate_against_osm(overture_elements, &parsed_elements);
+            parsed_elements.extend(unique_overture);
+            let added = parsed_elements.len() - before_count;
+            println!(
+                "  Added {} buildings from Overture Maps",
+                added.to_string().bright_white().bold()
+            );
+        } else {
+            println!("  No additional buildings from Overture Maps for this area");
+        }
+    }
+
+    parsed_elements
+        .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
+
+    // Write the parsed OSM data to a file for inspection
+    if args.debug {
+        let mut buf = io::BufWriter::new(
+            File::create("parsed_osm_data.txt").expect("Failed to create output file"),
+        );
+        for element in &parsed_elements {
+            writeln!(
+                buf,
+                "Element ID: {}, Type: {}, Tags: {:?}",
+                element.id(),
+                element.kind(),
+                element.tags(),
+            )
+            .expect("Failed to write to output file");
+        }
+    }
+
+    // Transform map (parsed_elements). Operations are defined in a json file
+    map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
+
+    // Apply rotation if specified
+    if args.rotation.abs() > f64::EPSILON {
+        if let Err(e) = map_transformation::rotate::rotate_world(
+            args.rotation,
+            &mut parsed_elements,
+            &mut xzbbox,
+            &mut ground,
+        ) {
+            eprintln!("{} Rotation failed: {}", "Error:".red().bold(), e);
+            std::process::exit(1);
+        }
+    }
+
+    (parsed_elements, xzbbox, ground)
+}
+
+pub fn get_spawn_point(lat: Option<f64>, lon: Option<f64>, bbox: &LLBBox, scale: f64, rotation: f64) -> (i32, i32) {
+    let (transformer, pre_rot_bbox) =
+        CoordTransformer::llbbox_to_xzbbox(bbox, scale)
+            .unwrap_or_else(|e| {
+                eprintln!(
+                    "{} Failed to convert spawn point: {}",
+                    "Error:".red().bold(),
+                    e
+                );
+                std::process::exit(1);
+            });
+    match (lat, lon) {
+        (Some(lat), Some(lng)) => {
+
+            let (x, z) = if let Ok(llpoint) = LLPoint::new(lat, lng) {
+                let xzpoint = transformer.transform_point(llpoint);
+                (xzpoint.x, xzpoint.z)
+            } else {
+                calculate_default_spawn(&pre_rot_bbox)
+            };
+
+            map_transformation::rotate::rotate_xz_point(
+                x,
+                z,
+                rotation,
+                &pre_rot_bbox,
+            )
+        },
+        _ => calculate_default_spawn(&pre_rot_bbox),
+    }
+}
+
+/// Calculates the default spawn point at X=1, Z=1 relative to the world origin.
+/// This is used when no spawn point is explicitly selected by the user.
+pub fn calculate_default_spawn(xzbbox: &XZBBox) -> (i32, i32) {
+    (xzbbox.min_x() + 1, xzbbox.min_z() + 1)
 }

@@ -23,15 +23,15 @@ pub struct GenerationOptions {
     pub path: PathBuf,
     pub format: WorldFormat,
     pub level_name: Option<String>,
-    pub spawn_point: Option<(i32, i32)>,
+    pub spawn_point: (i32, i32),
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
 pub fn generate_world_with_options(
     elements: Vec<ProcessedElement>,
-    xzbbox: XZBBox,
+    xzbbox: &XZBBox,
     llbbox: LLBBox,
-    ground: Ground,
+    ground: Arc<Ground>,
     args: &Args,
     options: GenerationOptions,
 ) -> Result<PathBuf, String> {
@@ -42,14 +42,13 @@ pub fn generate_world_with_options(
     // Create editor with appropriate format
     let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
         options.path,
-        &xzbbox,
+        xzbbox,
         llbbox,
         options.format,
         options.level_name.clone(),
-        options.spawn_point,
+        Some(options.spawn_point),
         args.disable_height_limit,
     );
-    let ground = Arc::new(ground);
 
     println!("{} Processing data...", "[4/7]".bold());
 
@@ -70,18 +69,18 @@ pub fn generate_world_with_options(
 
     // Collect building footprints to prevent trees from spawning inside buildings
     // Uses a memory-efficient bitmap (~1 bit per coordinate) instead of a HashSet (~24 bytes per coordinate)
-    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, &xzbbox);
+    let building_footprints = flood_fill_cache.collect_building_footprints(&elements, xzbbox);
 
     // Collect coordinates covered by tunnel=building_passage highways so that
     // building generation can cut ground-level openings through walls and floors.
     let building_passages =
-        highways::collect_building_passage_coords(&elements, &xzbbox, args.scale);
+        highways::collect_building_passage_coords(&elements, xzbbox, args.scale);
 
     // Pre-build a bitmap of every (x, z) block coordinate covered by a rendered
     // road or path surface. Uses the same Bresenham + block_range geometry as
     // generate_highways_internal, so the bitmap is a 1:1 match of what gets placed.
     // Amenity processors use this for O(1) nearest-road-block lookups.
-    let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
+    let road_mask = highways::collect_road_surface_coords(&elements, xzbbox, args.scale);
 
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
@@ -214,7 +213,7 @@ pub fn generate_world_with_options(
                 } else if let Some(val) = way.tags.get("waterway") {
                     if val == "dock" {
                         // docks count as water areas
-                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox);
+                        water_areas::generate_water_area_from_way(&mut editor, way, xzbbox);
                     } else {
                         waterways::generate_waterways(&mut editor, way);
                     }
@@ -297,7 +296,7 @@ pub fn generate_world_with_options(
                         rel,
                         args,
                         &flood_fill_cache,
-                        &xzbbox,
+                        xzbbox,
                         &building_passages,
                     );
                 } else if rel.tags.contains_key("water")
@@ -307,7 +306,7 @@ pub fn generate_world_with_options(
                         .map(|val| val == "water" || val == "bay")
                         .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
+                    water_areas::generate_water_areas_from_relation(&mut editor, rel, xzbbox);
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(
                         &mut editor,
@@ -356,7 +355,7 @@ pub fn generate_world_with_options(
         &mut editor,
         ground.as_ref(),
         args,
-        &xzbbox,
+        xzbbox,
         &building_footprints,
     )?;
 
