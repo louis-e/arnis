@@ -1,7 +1,4 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::XZPoint;
-use crate::coordinate_system::geographic::LLBBox;
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_transformation;
@@ -9,9 +6,13 @@ use crate::osm_parser;
 use crate::overture;
 use crate::progress::{self, emit_gui_progress_update};
 use crate::retrieve_data;
+use crate::retrieve_data::get_spawn_point;
 use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
 use crate::world_editor::WorldFormat;
+use arnis_math::coordinate_system::cartesian::XZPoint;
+use arnis_math::coordinate_system::geographic::LLBBox;
+use arnis_math::coordinate_system::transformation::CoordTransformer;
 use colored::Colorize;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
@@ -20,10 +21,10 @@ use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::{env, fs, io::Write};
+use std::str::FromStr;
 use std::sync::Arc;
+use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
-use crate::retrieve_data::get_spawn_point;
 
 /// Manages the session.lock file for a Minecraft world directory
 struct SessionLock {
@@ -482,7 +483,7 @@ pub fn update_player_spawn_y_after_generation(
     scale: f64,
     ground: &Ground,
 ) -> Result<(), String> {
-    use crate::coordinate_system::transformation::CoordTransformer;
+    use arnis_math::coordinate_system::transformation::CoordTransformer;
 
     // Read the current level.dat file to get existing spawn coordinates
     let level_path = PathBuf::from(world_path).join("level.dat");
@@ -828,7 +829,13 @@ fn gui_start_generation(
             } else {
                 (None, None)
             };
-            let (spawn_x, spawn_z) = get_spawn_point(lat, lon, &llbbox, world_scale, rotation_angle.clamp(-90.0, 90.0));
+            let (spawn_x, spawn_z) = get_spawn_point(
+                lat,
+                lon,
+                &llbbox,
+                world_scale,
+                rotation_angle.clamp(-90.0, 90.0),
+            );
 
             set_player_spawn_in_level_dat(&selected_world, spawn_x, spawn_z)
                 .map_err(|e| format!("Failed to set spawn point: {e}"))?;
@@ -970,14 +977,20 @@ fn gui_start_generation(
                 benchmark: false,
             };
 
-            let spawn_point = get_spawn_point(args.spawn_lat, args.spawn_lng, &args.bbox, args.scale, args.rotation);
+            let spawn_point = get_spawn_point(
+                args.spawn_lat,
+                args.spawn_lng,
+                &args.bbox,
+                args.scale,
+                args.rotation,
+            );
 
             // Create generation options
             let generation_options = GenerationOptions {
                 path: generation_path.clone(),
                 format: world_format,
                 level_name,
-                spawn_point
+                spawn_point,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

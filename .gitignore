@@ -6,7 +6,7 @@
 /.direnv
 
 # Build artifacts
-/target
+**/target
 **/*.rs.bk
 
 # IDE/editor files

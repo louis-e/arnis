@@ -18,9 +18,9 @@
 //! - [`is_valid_payload`] and `resample_nearest` — internals used by
 //!   the two above.
 
-use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 /// Japan GSI Elevation Tiles — Japan.
 /// Resolution: 5m (DEM5A/B/C), 10m fallback.

@@ -4,16 +4,12 @@ mod args;
 #[cfg(feature = "bedrock")]
 mod bedrock_block_map;
 mod block_definitions;
-mod bresenham;
 mod clipping;
 mod colors;
-mod coordinate_system;
 mod data_processing;
-mod deterministic_rng;
 mod element_processing;
 mod elevation;
 mod elevation_data;
-mod floodfill;
 mod floodfill_cache;
 mod ground;
 mod ground_generation;
@@ -36,8 +32,8 @@ mod world_utils;
 use args::Args;
 use clap::Parser;
 use colored::*;
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[cfg(feature = "gui")]
@@ -54,11 +50,11 @@ mod progress {
         false
     }
 }
-use crate::coordinate_system::cartesian::XZPoint;
+use crate::data_processing::GenerationOptions;
 use crate::retrieve_data::{get_spawn_point, prepare_data};
+use arnis_math::coordinate_system::cartesian::XZPoint;
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
-use crate::data_processing::GenerationOptions;
 
 fn run_cli() {
     // Configure thread pool with 90% CPU cap to keep system responsive
@@ -164,14 +160,20 @@ fn run_cli() {
 
     let (parsed_elements, xzbbox, ground) = prepare_data(&args);
 
-    let spawn_point: (i32, i32) = get_spawn_point(args.spawn_lat, args.spawn_lng, &args.bbox, args.scale, args.rotation);
+    let spawn_point: (i32, i32) = get_spawn_point(
+        args.spawn_lat,
+        args.spawn_lng,
+        &args.bbox,
+        args.scale,
+        args.rotation,
+    );
 
     // Build generation options
     let generation_options = GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
-        spawn_point
+        spawn_point,
     };
 
     let ground = Arc::new(ground);
@@ -199,7 +201,10 @@ fn run_cli() {
                 // moved into `generate_world_with_options` below). Used only for Java's
                 // post-generation `set_spawn_in_level_dat` call — Bedrock derives spawn Y
                 // independently inside `BedrockWriter::write_level_dat`.
-                let spawn_y = ground.level(XZPoint::new(spawn_point.0 - xzbbox.min_x(), spawn_point.1 - xzbbox.min_z())) + 3;
+                let spawn_y = ground.level(XZPoint::new(
+                    spawn_point.0 - xzbbox.min_x(),
+                    spawn_point.1 - xzbbox.min_z(),
+                )) + 3;
                 if let Err(e) = world_utils::set_spawn_in_level_dat(
                     &generation_path,
                     spawn_point.0,

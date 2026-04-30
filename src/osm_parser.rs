@@ -1,8 +1,8 @@
 use crate::clipping::clip_way_to_bbox;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::coordinate_system::geographic::{LLBBox, LLPoint};
+use arnis_math::coordinate_system::transformation::CoordTransformer;
 use colored::Colorize;
 use serde::Deserialize;
 use std::collections::HashMap;

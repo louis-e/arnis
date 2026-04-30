@@ -6,9 +6,9 @@
 //! - `power=line` - Power lines connecting towers/poles
 
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 
 /// Generate power infrastructure from way elements (power lines)
 pub fn generate_power(editor: &mut WorldEditor, element: &ProcessedElement) {

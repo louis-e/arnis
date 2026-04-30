@@ -1,6 +1,4 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::XZBBox;
-use crate::coordinate_system::geographic::LLBBox;
 use crate::element_processing::*;
 use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
@@ -11,6 +9,8 @@ use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_sho
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::world_editor::{WorldEditor, WorldFormat};
+use arnis_math::coordinate_system::cartesian::XZBBox;
+use arnis_math::coordinate_system::geographic::LLBBox;
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashSet;

@@ -2,8 +2,8 @@
 //
 // Provides bbox clipping for polygons, polylines, and water rings.
 
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::osm_parser::ProcessedNode;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
 use std::collections::HashMap;
 
 /// Clips a way to the bounding box using Sutherland-Hodgman for polygons or

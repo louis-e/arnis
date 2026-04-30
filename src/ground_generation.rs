@@ -22,7 +22,6 @@ use crate::block_definitions::{
     SANDSTONE, SMOOTH_STONE, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER,
     WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::tree;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::ground::Ground;
@@ -30,6 +29,7 @@ use crate::land_cover;
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::WorldEditor;
 use crate::world_editor::MIN_Y;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rand::Rng;
@@ -723,7 +723,7 @@ pub fn generate_ground_layer(
                                 );
                             if has_land_cover && !editor.block_exists_absolute(x, ground_y + 1, z) {
                                 let cover = ground.cover_class(coord);
-                                let mut rng = crate::deterministic_rng::coord_rng(x, z, 0);
+                                let mut rng = arnis_math::deterministic_rng::coord_rng(x, z, 0);
 
                                 match cover {
                                     land_cover::LC_TREE_COVER

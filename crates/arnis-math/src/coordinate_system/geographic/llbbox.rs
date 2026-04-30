@@ -1,4 +1,5 @@
 use super::llpoint::LLPoint;
+use std::str::FromStr;
 
 /// A checked Bounding Box.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -29,20 +30,6 @@ impl LLBBox {
         Ok(Self { min, max })
     }
 
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        let [min_lat, min_lng, max_lat, max_lng]: [f64; 4] = s
-            .split([',', ' '])
-            .map(|e| e.parse().unwrap())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-
-        // So, the GUI does Lat/Lng and no GDAL (comma-sep values), which is the exact opposite of
-        // what bboxfinder.com does. :facepalm: (bboxfinder is wrong here: Lat comes first!)
-        // DO NOT MODIFY THIS! It's correct. The CLI/GUI is passing you the numbers incorrectly.
-        Self::new(min_lat, min_lng, max_lat, max_lng)
-    }
-
     pub fn min(&self) -> LLPoint {
         self.min
     }
@@ -56,6 +43,21 @@ impl LLBBox {
             && llpoint.lat() <= self.max().lat()
             && llpoint.lng() >= self.min().lng()
             && llpoint.lng() <= self.max().lng()
+    }
+}
+
+impl FromStr for LLBBox {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let [min_lat, min_lng, max_lat, max_lng]: [f64; 4] = s
+            .split([',', ' '])
+            .map(|e| e.parse().unwrap())
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+
+        Self::new(min_lat, min_lng, max_lat, max_lng)
     }
 }
 

@@ -1,7 +1,5 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::surfaces::{
     get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
@@ -9,6 +7,8 @@ use crate::element_processing::surfaces::{
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
 use std::collections::HashMap;
 
 /// Upper bound on `block_range` used by wide-road width flattening. The

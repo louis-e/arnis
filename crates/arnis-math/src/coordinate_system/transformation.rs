@@ -118,10 +118,13 @@ pub fn lat_lon_to_minecraft_coords(
     (x, z)
 }
 
+pub fn get_llbbox_arnis() -> LLBBox {
+    LLBBox::new(54.627053, 9.927928, 54.634902, 9.937563).unwrap()
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::test_utilities::get_llbbox_arnis;
 
     fn test_llxztransform_one_scale_one_factor(
         scale: f64,

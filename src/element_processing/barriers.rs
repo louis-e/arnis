@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 
 pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
     // Default values

@@ -5,10 +5,10 @@
 
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::deterministic_rng::element_rng;
 use crate::floodfill_cache::FloodFillCache;
 use crate::osm_parser::{ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::deterministic_rng::element_rng;
 use rand::Rng;
 
 /// Generate historic structures from node elements

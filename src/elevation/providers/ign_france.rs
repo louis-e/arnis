@@ -31,8 +31,8 @@
 //! module contributes the WMS URL template, the coverage list (metro
 //! France + overseas territories) and the `ElevationProvider` impl.
 
-use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 use super::fixed_tile::{
     fetch_fixed_tile_grid, FixedTileProvider, Resolution as ResolutionTrait, TileKey, TILE_PIXELS,

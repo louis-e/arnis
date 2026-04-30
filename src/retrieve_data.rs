@@ -1,13 +1,13 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::XZBBox;
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::ground::Ground;
 use crate::osm_parser::{OsmData, ProcessedElement};
 use crate::progress::{emit_gui_error, emit_gui_progress_update, is_running_with_gui};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::{ground, map_transformation, osm_parser, overture};
+use arnis_math::coordinate_system::cartesian::XZBBox;
+use arnis_math::coordinate_system::geographic::{LLBBox, LLPoint};
+use arnis_math::coordinate_system::transformation::CoordTransformer;
 use colored::Colorize;
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -470,20 +470,24 @@ pub fn prepare_data(args: &Args) -> (Vec<ProcessedElement>, XZBBox, Ground) {
     (parsed_elements, xzbbox, ground)
 }
 
-pub fn get_spawn_point(lat: Option<f64>, lon: Option<f64>, bbox: &LLBBox, scale: f64, rotation: f64) -> (i32, i32) {
-    let (transformer, pre_rot_bbox) =
-        CoordTransformer::llbbox_to_xzbbox(bbox, scale)
-            .unwrap_or_else(|e| {
-                eprintln!(
-                    "{} Failed to convert spawn point: {}",
-                    "Error:".red().bold(),
-                    e
-                );
-                std::process::exit(1);
-            });
+pub fn get_spawn_point(
+    lat: Option<f64>,
+    lon: Option<f64>,
+    bbox: &LLBBox,
+    scale: f64,
+    rotation: f64,
+) -> (i32, i32) {
+    let (transformer, pre_rot_bbox) = CoordTransformer::llbbox_to_xzbbox(bbox, scale)
+        .unwrap_or_else(|e| {
+            eprintln!(
+                "{} Failed to convert spawn point: {}",
+                "Error:".red().bold(),
+                e
+            );
+            std::process::exit(1);
+        });
     match (lat, lon) {
         (Some(lat), Some(lng)) => {
-
             let (x, z) = if let Ok(llpoint) = LLPoint::new(lat, lng) {
                 let xzpoint = transformer.transform_point(llpoint);
                 (xzpoint.x, xzpoint.z)
@@ -491,13 +495,8 @@ pub fn get_spawn_point(lat: Option<f64>, lon: Option<f64>, bbox: &LLBBox, scale:
                 calculate_default_spawn(&pre_rot_bbox)
             };
 
-            map_transformation::rotate::rotate_xz_point(
-                x,
-                z,
-                rotation,
-                &pre_rot_bbox,
-            )
-        },
+            map_transformation::rotate::rotate_xz_point(x, z, rotation, &pre_rot_bbox)
+        }
         _ => calculate_default_spawn(&pre_rot_bbox),
     }
 }

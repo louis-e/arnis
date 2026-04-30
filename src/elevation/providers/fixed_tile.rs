@@ -52,9 +52,9 @@
 //! concurrency thread pool, decoding the per-tile TIFFs, and bilinear-
 //! sampling into the caller's output grid.
 
-use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
+use arnis_math::coordinate_system::geographic::LLBBox;
 use fnv::FnvHashMap;
 use rayon::prelude::*;
 use std::fmt::Debug;

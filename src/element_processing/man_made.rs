@@ -1,8 +1,8 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 
 pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, _args: &Args) {
     // Skip if 'layer' or 'level' is negative in the tags

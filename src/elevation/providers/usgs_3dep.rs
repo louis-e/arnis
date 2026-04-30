@@ -18,8 +18,8 @@
 //! - USGS coverage bboxes (CONUS, AK, HI, PR/USVI, Guam),
 //! - the `ElevationProvider` impl wiring.
 
-use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 use super::fixed_tile::{
     fetch_fixed_tile_grid, FixedTileProvider, Resolution as ResolutionTrait, TileKey, TILE_PIXELS,

@@ -1,0 +1,12 @@
+[package]
+name = "arnis-math"
+version = "0.1.0"
+edition = "2021"
+description = "Math utilities for Arnis"
+
+[dependencies]
+geo = "0.32.0"
+itertools = "0.14.0"
+rand = { version = "0.9.3", features = ["std", "std_rng"] }
+rand_chacha = "0.9"
+serde = { version = "1.0", features = ["derive"] }
