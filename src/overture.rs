@@ -80,7 +80,7 @@ struct OvertureBuilding {
 ///
 /// Buildings whose primary source is "OpenStreetMap" are excluded to avoid
 /// duplicates with the existing OSM data pipeline.
-pub fn fetch_overture_buildings(bbox: &LLBBox, scale: f64, debug: bool, tile_invariant_rendering: bool) -> Vec<ProcessedElement> {
+pub fn fetch_overture_buildings(bbox: &LLBBox, scale: f64, debug: bool, tile_invariant_rendering: Option<u64>) -> Vec<ProcessedElement> {
     match fetch_overture_buildings_inner(bbox, scale, debug, tile_invariant_rendering) {
         Ok(elements) => elements,
         Err(e) => {
@@ -185,7 +185,7 @@ fn fetch_overture_buildings_inner(
     bbox: &LLBBox,
     scale: f64,
     debug: bool,
-    tile_invariant_rendering: bool,
+    tile_invariant_rendering: Option<u64>,
 ) -> Result<Vec<ProcessedElement>, Box<dyn std::error::Error>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
@@ -1021,7 +1021,7 @@ fn building_to_processed_way(
     building: &OvertureBuilding,
     coord_transformer: &CoordTransformer,
     bbox: &LLBBox,
-    tile_invariant_rendering: bool,
+    tile_invariant_rendering: Option<u64>,
 ) -> Option<ProcessedWay> {
     let base_id = gers_id_to_u64(&building.id);
 
@@ -1184,7 +1184,7 @@ fn building_to_processed_way(
     // Source tracking
     tags.insert("source".to_string(), "overture_maps".to_string());
 
-    let (unclipped_bounds, unclipped_polygon_area) = if tile_invariant_rendering {
+    let (unclipped_bounds, unclipped_polygon_area) = if tile_invariant_rendering.is_some() {
         (crate::osm_parser::compute_node_bounds(&nodes),
          crate::osm_parser::compute_polygon_area(&nodes))
     } else {

@@ -283,7 +283,7 @@ pub fn parse_osm_data(
     debug: bool,
     master_origin_lat: Option<f64>,
     master_origin_lng: Option<f64>,
-    tile_invariant_rendering: bool,
+    tile_invariant_rendering: Option<u64>,
 ) -> (Vec<ProcessedElement>, XZBBox) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
@@ -358,7 +358,7 @@ pub fn parse_osm_data(
         // where its bbox cuts. Gated on `--tile-invariant-rendering`. When
         // off, both fields stay None and building decisions fall through to
         // the upstream clipped-nodes path (byte-identical to v2.7.0).
-        let (unclipped_bounds, unclipped_polygon_area) = if tile_invariant_rendering {
+        let (unclipped_bounds, unclipped_polygon_area) = if tile_invariant_rendering.is_some() {
             (compute_node_bounds(&nodes), compute_polygon_area(&nodes))
         } else {
             (None, None)

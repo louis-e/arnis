@@ -1102,7 +1102,7 @@ fn gui_start_generation(
                 benchmark: false,
                 overpass_url: Vec::new(),
                 road_detail: "max".to_string(),
-                tile_invariant_rendering: false,
+                tile_invariant_rendering: None,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

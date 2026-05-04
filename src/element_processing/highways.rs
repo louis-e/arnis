@@ -257,19 +257,6 @@ fn road_detail_skip(highway_type: &str,
     }
 }
 
-/// Cap OSM `lanes` tag for low-detail rendering. At scale < 1 m/block,
-/// 4-6 lane boulevards collapse to indistinguishable wide asphalt strips
-/// → no extra legibility, just more block overdraw + lane-divider checker
-/// noise across a wider area. `compact` clamps to 2 lanes (still draws
-/// as multi-lane road, dividers fit 4-block-wide stripe instead of 12).
-/// `max` passes through untouched.
-#[inline]
-fn lanes_for_detail(lanes: i32, detail: &str) -> i32 {
-    match detail {
-        "compact" => lanes.min(2),
-        _ => lanes,
-    }
-}
 
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
@@ -759,19 +746,6 @@ fn generate_highways_internal(
             if element.tags().get("lane_markings").map(|s| s.as_str()) == Some("no") {
                 lanes = 1;
             }
-            // Lane compression at low scale: clamp 4-6 lane boulevards
-            // to 2 lanes in compact/minimal modes. Same vehicle road
-            // is still a road, just narrower → fewer dividers, less
-            // overdraw at intersections, more legible at scale<1.
-            lanes = lanes_for_detail(lanes, &args.road_detail);
-            // Width follows lanes: in compact/minimal we additionally
-            // cap block_range so the asphalt strip itself shrinks.
-            // Scale 1: 2-lane road = ~3-block-wide strip per side.
-            if matches!(args.road_detail.as_str(), "compact" | "minimal")
-               && block_range > 3
-            {
-                block_range = 3;
-            }
 
             if scale_factor < 1.0 {
                 block_range = ((block_range as f64) * scale_factor).floor() as i32;
@@ -884,19 +858,8 @@ fn generate_highways_internal(
 
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
-                    // Default upstream pattern: equal-length dash + gap,
-                    // both ~5 m. At scale=0.5 this becomes 3 blocks +
-                    // 3 blocks (≈ checker). Compact mode swaps to a
-                    // sparse-dot pattern (1-block dot every 5 blocks)
-                    // so the centerline reads as a dotted line instead
-                    // of a striped checker.
-                    let (dash_length, gap_length): (i32, i32) =
-                        if args.road_detail == "compact" {
-                            (1, ((10.0 * scale_factor).ceil() as i32).max(4))
-                        } else {
-                            ((5.0 * scale_factor).ceil() as i32,
-                             (5.0 * scale_factor).ceil() as i32)
-                        };
+                    let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
+                    let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
 
                     // Segment-constants for multi-lane divider placement.
                     // Computed once here instead of at every bresenham point:
@@ -907,11 +870,6 @@ fn generate_highways_internal(
                     //
                     // Lane dividers (centre dashed stripe) render fine
                     // even at coarse block resolution because they run
-                    // Lane dividers: dashed white centreline on multi-
-                    // lane roads. Drawn in BOTH max and compact, but
-                    // with different dash/gap patterns (initialized
-                    // above) so compact reads as sparse dots instead
-                    // of a striped checker at scale<1.
                     let lane_divider_geom = if lanes >= 2 {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;

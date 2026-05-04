@@ -808,6 +808,9 @@ impl BuildingStyle {
     /// * `has_multiple_floors` - Whether building has more than 6 height units
     /// * `footprint_size` - The building's floor area in blocks
     /// * `rng` - Deterministic RNG seeded by element ID
+    /// * `tile_invariant_seed` - Project-wide seed XOR'd into every salted
+    ///   stream so re-renders with the same seed produce identical block
+    ///   choices for any OSM element. 0 = no global mixing (backward compat).
     #[allow(clippy::too_many_arguments, clippy::unnecessary_lazy_evaluations)]
     pub fn resolve(
         preset: &BuildingStylePreset,
@@ -817,6 +820,7 @@ impl BuildingStyle {
         has_multiple_floors: bool,
         footprint_size: usize,
         _rng: &mut impl Rng,
+        tile_invariant_seed: u64,
     ) -> Self {
         // Each independent decision below uses its OWN deterministic stream
         // seeded from element.id + a fixed salt, so a tile-variant gate
@@ -824,15 +828,16 @@ impl BuildingStyle {
         // changing one branch (e.g. category) shifts the shared rng state
         // and every later choice picks a different block — producing the
         // building-block seam at canonical tile boundaries.
-        use crate::deterministic_rng::element_rng_salted;
-        let mut rng_wall = element_rng_salted(element.id, 1);
-        let mut rng_floor = element_rng_salted(element.id, 2);
-        let mut rng_window = element_rng_salted(element.id, 3);
-        let mut rng_accent = element_rng_salted(element.id, 4);
-        let mut rng_vert_win = element_rng_salted(element.id, 5);
-        let mut rng_accent_roof = element_rng_salted(element.id, 6);
-        let mut rng_accent_lines = element_rng_salted(element.id, 7);
-        let mut rng_vert_accent = element_rng_salted(element.id, 8);
+        use crate::deterministic_rng::element_rng_salted_with_global as ergsg;
+        let g = tile_invariant_seed;
+        let mut rng_wall = ergsg(element.id, 1, g);
+        let mut rng_floor = ergsg(element.id, 2, g);
+        let mut rng_window = ergsg(element.id, 3, g);
+        let mut rng_accent = ergsg(element.id, 4, g);
+        let mut rng_vert_win = ergsg(element.id, 5, g);
+        let mut rng_accent_roof = ergsg(element.id, 6, g);
+        let mut rng_accent_lines = ergsg(element.id, 7, g);
+        let mut rng_vert_accent = ergsg(element.id, 8, g);
 
         // === Block Palette ===
 
@@ -927,7 +932,7 @@ impl BuildingStyle {
             (rt, should_generate)
         } else if qualifies_for_auto_gabled_roof(building_type) {
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
-            let mut rng_gabled = element_rng_salted(element.id, 9);
+            let mut rng_gabled = ergsg(element.id, 9, g);
             if footprint_size <= MAX_FOOTPRINT_FOR_GABLED && rng_gabled.random_bool(0.9) {
                 (RoofType::Gabled, true)
             } else {
@@ -981,7 +986,7 @@ impl BuildingStyle {
             let suitable_roof = matches!(roof_type, RoofType::Gabled | RoofType::Hipped);
             let suitable_size = (30..=400).contains(&footprint_size);
 
-            let mut rng_chimney = element_rng_salted(element.id, 10);
+            let mut rng_chimney = ergsg(element.id, 10, g);
             is_residential && suitable_roof && suitable_size && rng_chimney.random_bool(0.55)
         });
 
@@ -1271,9 +1276,12 @@ fn determine_wall_block(
     category: BuildingCategory,
     rng: &mut impl Rng,
 ) -> Block {
-    // Historic castles have their own special treatment
+    // Historic castles have their own special treatment.
+    // Use the seeded variant so a castle straddling tile boundaries
+    // picks the same block in every tile (deterministic via the rng
+    // already seeded from element_id + salt by the caller).
     if element.tags.get("historic") == Some(&"castle".to_string()) {
-        return get_castle_wall_block(rng);
+        return get_castle_wall_block_seeded(rng);
     }
 
     // GlassySkyscraper walls must stay glass.
@@ -1295,7 +1303,7 @@ fn determine_wall_block(
             .or_else(|| element.tags.get("colour"));
         if let Some(building_colour) = colour {
             if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
-                return get_building_wall_block_for_color(rgb, rng);
+                return get_building_wall_block_for_color_seeded(rgb, rng);
             }
         }
     }
@@ -1386,7 +1394,7 @@ fn get_wall_block_for_category(category: BuildingCategory, rng: &mut impl Rng) -
             ];
             GLASSY_WALL_OPTIONS[rng.random_range(0..GLASSY_WALL_OPTIONS.len())]
         }
-        BuildingCategory::Default => get_fallback_building_block(rng),
+        BuildingCategory::Default => get_fallback_building_block_seeded(rng),
     }
 }
 
@@ -4149,6 +4157,7 @@ pub fn generate_buildings(
         has_multiple_floors,
         cached_footprint_size,
         &mut rng,
+        args.tile_invariant_rendering.unwrap_or(0),
     );
 
     let condition = BuildingCondition::from_tags(&element.tags);
@@ -6903,7 +6912,7 @@ pub fn generate_building_from_relation(
                         let synthetic_id = (1u64 << 63) | (relation.id << 16) | ring_slot;
                         HolePolygon {
                             way: {
-                                let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering {
+                                let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering.is_some() {
                                     (crate::osm_parser::compute_node_bounds(&ring),
                                      crate::osm_parser::compute_polygon_area(&ring))
                                 } else {
@@ -6933,7 +6942,7 @@ pub fn generate_building_from_relation(
         // fill cache and the deterministic RNG seeded by element ID.
         for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
             let synthetic_id = (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
-            let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering {
+            let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering.is_some() {
                 (crate::osm_parser::compute_node_bounds(&ring),
                  crate::osm_parser::compute_polygon_area(&ring))
             } else {

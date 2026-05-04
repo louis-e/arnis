@@ -109,22 +109,30 @@ pub struct Args {
     #[arg(long, allow_hyphen_values = true)]
     pub elevation_max: Option<f64>,
 
-    /// Tile-invariant building rendering. When on, building decisions
-    /// (skyscraper/footprint/diagonality/start-Y) read pre-clip bounds
-    /// from `ProcessedWay.unclipped_bounds` rather than the bbox-clipped
-    /// node list. Combined with PR 1 + PR 2, makes a building that
-    /// straddles two adjacent tiles render with identical block choices
-    /// in both. Required by external schedulers (e.g. Meld) that
-    /// generate adjacent bboxes into one Minecraft world.
+    /// Tile-invariant building rendering with optional numeric seed.
+    /// When set, building decisions (skyscraper/footprint/diagonality/
+    /// start-Y) read pre-clip bounds from `ProcessedWay.unclipped_bounds`
+    /// rather than the bbox-clipped node list, AND every salted RNG
+    /// stream mixes the supplied seed into its derivation. Combined
+    /// with PR 1 + PR 2, makes a building that straddles two adjacent
+    /// tiles render with identical block choices in both. Required by
+    /// external schedulers (e.g. Meld) that generate adjacent bboxes
+    /// into one Minecraft world.
     ///
-    /// Off (default): upstream behaviour — clipped nodes drive every
-    /// decision, single-tile output byte-identical to v2.7.0.
-    /// On: pre-clip metrics carry through. RNG-side salting is always
-    /// on regardless of this flag (one stream per decision so unrelated
-    /// branch divergence cannot shift downstream block choices); the
-    /// flag controls only the unclipped-bounds reads.
-    #[arg(long, default_value_t = false)]
-    pub tile_invariant_rendering: bool,
+    /// Forms accepted:
+    ///   --tile-invariant-rendering         (treated as seed=1)
+    ///   --tile-invariant-rendering 1
+    ///   --tile-invariant-rendering 42
+    ///
+    /// Off (omitted): upstream behaviour — clipped nodes drive every
+    /// decision; salted RNG seeded from element_id + salt only.
+    /// On (Some(N)): pre-clip metrics carry through AND every salted
+    /// stream is seeded as `element_id ^ salt^32 ^ N^16`, so two runs
+    /// passing the same N produce byte-identical building palette.
+    #[arg(long = "tile-invariant-rendering",
+          num_args = 0..=1, default_missing_value = "1",
+          value_parser = clap::value_parser!(u64))]
+    pub tile_invariant_rendering: Option<u64>,
 
     /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031;
     /// Bedrock 1.21.40+: Y=-512..512). Both are experimental.
