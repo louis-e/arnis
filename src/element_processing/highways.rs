@@ -225,8 +225,7 @@ fn road_detail_skip(highway_type: &str,
                     tags: &HashMap<String, String>,
                     detail: &str) -> bool {
     match detail {
-        "none" => true,
-        "compact" | "minimal" => {
+        "compact" => {
             // Pedestrian-grade + low-traffic highway types collapse
             // visually at low scale and add overdraw at intersections
             // without giving the road network extra legibility.
@@ -254,20 +253,20 @@ fn road_detail_skip(highway_type: &str,
             }
             false
         }
-        _ => false,
+        _ => false,   // "max" never skips
     }
 }
 
 /// Cap OSM `lanes` tag for low-detail rendering. At scale < 1 m/block,
 /// 4-6 lane boulevards collapse to indistinguishable wide asphalt strips
 /// → no extra legibility, just more block overdraw + lane-divider checker
-/// noise across a wider area. `compact` and `minimal` clamp to 2 lanes
-/// (still draws as multi-lane road, dividers fit 4-block-wide stripe
-/// instead of 12). `max` and `none` pass through untouched.
+/// noise across a wider area. `compact` clamps to 2 lanes (still draws
+/// as multi-lane road, dividers fit 4-block-wide stripe instead of 12).
+/// `max` passes through untouched.
 #[inline]
 fn lanes_for_detail(lanes: i32, detail: &str) -> i32 {
     match detail {
-        "compact" | "minimal" => lanes.min(2),
+        "compact" => lanes.min(2),
         _ => lanes,
     }
 }
@@ -885,8 +884,19 @@ fn generate_highways_internal(
 
                     // Variables to manage dashed line pattern
                     let mut stripe_length: i32 = 0;
-                    let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
-                    let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
+                    // Default upstream pattern: equal-length dash + gap,
+                    // both ~5 m. At scale=0.5 this becomes 3 blocks +
+                    // 3 blocks (≈ checker). Compact mode swaps to a
+                    // sparse-dot pattern (1-block dot every 5 blocks)
+                    // so the centerline reads as a dotted line instead
+                    // of a striped checker.
+                    let (dash_length, gap_length): (i32, i32) =
+                        if args.road_detail == "compact" {
+                            (1, ((10.0 * scale_factor).ceil() as i32).max(4))
+                        } else {
+                            ((5.0 * scale_factor).ceil() as i32,
+                             (5.0 * scale_factor).ceil() as i32)
+                        };
 
                     // Segment-constants for multi-lane divider placement.
                     // Computed once here instead of at every bresenham point:
@@ -897,13 +907,12 @@ fn generate_highways_internal(
                     //
                     // Lane dividers (centre dashed stripe) render fine
                     // even at coarse block resolution because they run
-                    // Lane dividers: dashed white centreline on multi-lane
-                    // roads. At scale<0.7 (1 block ≥ 1.5 m) the dash
-                    // pattern collapses — every 2 blocks gets a stripe
-                    // instead of every 4 m → reads as checker noise on
-                    // the asphalt. Skip in `compact` mode entirely;
-                    // keep in `max`. `none` never reaches here.
-                    let lane_divider_geom = if lanes >= 2 && args.road_detail == "max" {
+                    // Lane dividers: dashed white centreline on multi-
+                    // lane roads. Drawn in BOTH max and compact, but
+                    // with different dash/gap patterns (initialized
+                    // above) so compact reads as sparse dots instead
+                    // of a striped checker at scale<1.
+                    let lane_divider_geom = if lanes >= 2 {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;
                         let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();

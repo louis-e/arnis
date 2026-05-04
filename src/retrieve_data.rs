@@ -165,9 +165,8 @@ pub fn fetch_data_from_overpass(
     //               at low scale where they collapse to checker patterns
     //   "none"    → omit the highway clause entirely (terrain-only worlds)
     let highway_clause: &str = match road_detail {
-        "none"             => "",
-        "compact" | "minimal" => r#"nwr["highway"]["highway"!~"^(footway|path|cycleway|steps|corridor|pedestrian|platform|bus_stop|service|track)$"];"#,
-        _                  => r#"nwr["highway"];"#,
+        "compact" => r#"nwr["highway"]["highway"!~"^(footway|path|cycleway|steps|corridor|pedestrian|platform|bus_stop|service|track)$"];"#,
+        _         => r#"nwr["highway"];"#,
     };
     let query: String = format!(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
