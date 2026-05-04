@@ -127,11 +127,21 @@ pub fn fetch_data_from_overpass(
     debug: bool,
     download_method: &str,
     save_file: Option<&str>,
+    override_urls: &[String],
+    road_detail: &str,
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
     println!("{} Fetching data...", "[1/7]".bold());
     emit_gui_progress_update(1.0, "Fetching data...");
 
-    // List of Overpass API servers
+    // List of Overpass API servers. When `override_urls` is non-empty
+    // the caller has supplied an explicit pool (typically a self-hosted
+    // local mirror) — use ONLY those, in the supplied order, and skip
+    // the random-probe + arnis-api detour. Lets batch generators
+    // bypass public rate limits without touching the public mirror
+    // pool when the local instance is healthy.
+    let owned_overrides: Vec<String> = override_urls.to_vec();
+    let using_override = !owned_overrides.is_empty();
+
     let arnis_api_server = "https://api.arnismc.com/overpass/api/interpreter";
     let api_servers: Vec<&str> = vec![
         "https://overpass-api.de/api/interpreter",
@@ -147,12 +157,24 @@ pub fn fetch_data_from_overpass(
     // Ocean/coastal elements are excluded because ESA WorldCover satellite data
     // handles ocean detection more reliably at 10m resolution (LC_WATER class).
     // Inland water (lakes, rivers, ponds) is still fetched from OSM.
+    //
+    // Highway clause is gated by `road_detail`:
+    //   "max"     → fetch every highway (default; current behaviour)
+    //   "compact" → drop pedestrian-grade types so ~50% smaller payload
+    //               and no foot/path/cycleway/crossing block-rendering noise
+    //               at low scale where they collapse to checker patterns
+    //   "none"    → omit the highway clause entirely (terrain-only worlds)
+    let highway_clause: &str = match road_detail {
+        "none"    => "",
+        "compact" => r#"nwr["highway"]["highway"!~"^(footway|path|cycleway|steps|corridor|pedestrian|platform|bus_stop)$"];"#,
+        _         => r#"nwr["highway"];"#,
+    };
     let query: String = format!(
         r#"[out:json][timeout:360][bbox:{},{},{},{}];
     (
         nwr["building"];
         nwr["building:part"];
-        nwr["highway"];
+        {highway_clause}
         nwr["landuse"]["landuse"!="salt_pond"];
         nwr["natural"]["natural"!="coastline"]["natural"!="bay"]["natural"!="strait"];
         nwr["leisure"];
@@ -205,35 +227,48 @@ pub fn fetch_data_from_overpass(
 
         let mut rng = rand::rng();
         let mut request_plan: Vec<(&str, ServerKind)> = Vec::new();
-        let mut probed_server: Option<&str> = None;
 
-        if rng.random_bool(0.25) {
-            let probe_idx = rng.random_range(0..api_servers.len());
-            let probe_server = api_servers[probe_idx];
-            request_plan.push((probe_server, ServerKind::Primary));
-            probed_server = Some(probe_server);
+        if using_override {
+            // Honor caller-supplied URL list verbatim, in priority order.
+            // Treat all entries as Primary so the 3-second retry interval
+            // is used (Fallback delay 5s is meant for slow public mirrors).
+            for url in owned_overrides.iter() {
+                request_plan.push((url.as_str(), ServerKind::Primary));
+            }
+            println!(
+                "Using {} override Overpass endpoint(s); public mirror pool skipped.",
+                owned_overrides.len()
+            );
+        } else {
+            let mut probed_server: Option<&str> = None;
+            if rng.random_bool(0.25) {
+                let probe_idx = rng.random_range(0..api_servers.len());
+                let probe_server = api_servers[probe_idx];
+                request_plan.push((probe_server, ServerKind::Primary));
+                probed_server = Some(probe_server);
+            }
+
+            request_plan.push((arnis_api_server, ServerKind::Primary));
+
+            let mut shuffled_primary_servers = api_servers.clone();
+            shuffled_primary_servers.shuffle(&mut rng);
+            if let Some(probed_server) = probed_server {
+                shuffled_primary_servers.retain(|&url| url != probed_server);
+            }
+            request_plan.extend(
+                shuffled_primary_servers
+                    .into_iter()
+                    .map(|url| (url, ServerKind::Primary)),
+            );
+
+            let mut shuffled_fallback_servers = fallback_api_servers.clone();
+            shuffled_fallback_servers.shuffle(&mut rng);
+            request_plan.extend(
+                shuffled_fallback_servers
+                    .into_iter()
+                    .map(|url| (url, ServerKind::Fallback)),
+            );
         }
-
-        request_plan.push((arnis_api_server, ServerKind::Primary));
-
-        let mut shuffled_primary_servers = api_servers.clone();
-        shuffled_primary_servers.shuffle(&mut rng);
-        if let Some(probed_server) = probed_server {
-            shuffled_primary_servers.retain(|&url| url != probed_server);
-        }
-        request_plan.extend(
-            shuffled_primary_servers
-                .into_iter()
-                .map(|url| (url, ServerKind::Primary)),
-        );
-
-        let mut shuffled_fallback_servers = fallback_api_servers.clone();
-        shuffled_fallback_servers.shuffle(&mut rng);
-        request_plan.extend(
-            shuffled_fallback_servers
-                .into_iter()
-                .map(|url| (url, ServerKind::Fallback)),
-        );
 
         let first_fallback_index = request_plan
             .iter()

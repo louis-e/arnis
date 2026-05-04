@@ -204,6 +204,53 @@ fn is_pedestrian_way(element: &ProcessedElement) -> bool {
     matches!(tags.get("footway").map(|s| s.as_str()), Some(v) if v != "no")
 }
 
+/// Decide whether to skip this OSM highway element under the active
+/// `--road-detail` setting.
+///
+///   "max"     → never skip (current full-detail behaviour).
+///   "compact" → skip pedestrian-grade highways
+///               (footway / path / cycleway / steps / corridor /
+///                pedestrian / platform / bus_stop), skip crossing
+///               markers, skip footway=crossing zebra ways.
+///   "none"    → skip every highway element (terrain-only worlds).
+///
+/// Compact mode targets low-scale renders (1 block ≥ 1.5 m) where
+/// pedestrian features compress onto the same blocks as vehicle roads
+/// and produce dotted-checker visual noise at intersections.
+fn road_detail_skip(highway_type: &str,
+                    tags: &HashMap<String, String>,
+                    detail: &str) -> bool {
+    match detail {
+        "none" => true,
+        "compact" => {
+            // Pedestrian-grade highway types collapse visually at low
+            // scale and add overdraw at intersections without giving
+            // the road network extra legibility.
+            if matches!(highway_type,
+                "footway" | "path" | "cycleway" | "steps"
+                | "corridor" | "pedestrian" | "platform" | "bus_stop")
+            {
+                return true;
+            }
+            // Crossing markers (zebra, traffic-signal nodes, etc.) sit
+            // on top of vehicle lanes and produce checker patterns at
+            // sub-meter block resolution.
+            if highway_type == "crossing" {
+                return true;
+            }
+            if tags.get("crossing").is_some() {
+                return true;
+            }
+            if matches!(tags.get("footway").map(|s| s.as_str()),
+                        Some("crossing")) {
+                return true;
+            }
+            false
+        }
+        _ => false,
+    }
+}
+
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
@@ -299,6 +346,13 @@ fn generate_highways_internal(
     let layer_boost = layer_value_effective * LAYER_HEIGHT_STEP;
 
     if let Some(highway_type) = element.tags().get("highway") {
+        // Phase: --road-detail gate. Drop pedestrian-grade highways +
+        // crossings entirely when running in `compact` (low-scale) or
+        // `none` mode to prevent block-resolution collapse on roads.
+        // `max` mode (default) never skips.
+        if road_detail_skip(highway_type, element.tags(), &args.road_detail) {
+            return;
+        }
         if highway_type == "street_lamp" {
             // Handle street lamps
             if let ProcessedElement::Node(first_node) = element {
@@ -732,6 +786,13 @@ fn generate_highways_internal(
                     // vector math is identical across the whole segment.
                     // `None` means there are no inner dividers to draw (either
                     // a single-lane road or a degenerate zero-length segment).
+                    //
+                    // Lane dividers (centre dashed stripe) render fine
+                    // even at coarse block resolution because they run
+                    // along the road centreline, not stacked across
+                    // perpendicular blocks like crossings/sidewalks.
+                    // Keep them in `compact` and `max`. `none` won't
+                    // reach here because the whole element is skipped.
                     let lane_divider_geom = if lanes >= 2 {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;

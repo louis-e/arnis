@@ -253,7 +253,7 @@ fn fetch_overture_buildings_inner(
     }
 
     // Convert to ProcessedElements and clip to xzbbox (matching OSM clipping)
-    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(bbox, scale)?;
+    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(bbox, scale, None, None)?;
 
     let elements: Vec<ProcessedElement> = all_buildings
         .into_iter()
@@ -1182,10 +1182,14 @@ fn building_to_processed_way(
     // Source tracking
     tags.insert("source".to_string(), "overture_maps".to_string());
 
+    let unclipped_bounds = crate::osm_parser::compute_node_bounds(&nodes);
+    let unclipped_polygon_area = crate::osm_parser::compute_polygon_area(&nodes);
     Some(ProcessedWay {
         id: base_id,
         nodes,
         tags,
+        unclipped_bounds,
+        unclipped_polygon_area,
     })
 }
 

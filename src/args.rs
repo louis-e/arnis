@@ -83,6 +83,24 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
 
+    /// Master origin latitude for global coordinates (optional)
+    #[arg(long, allow_hyphen_values = true)]
+    pub master_origin_lat: Option<f64>,
+
+    /// Master origin longitude for global coordinates (optional)
+    #[arg(long, allow_hyphen_values = true)]
+    pub master_origin_lng: Option<f64>,
+
+    /// Global elevation minimum in metres for cross-tile Y normalisation (optional).
+    /// When set alongside --elevation-max, all tiles map this real-world elevation to
+    /// ground_level, eliminating height seams at cell boundaries.
+    #[arg(long, allow_hyphen_values = true)]
+    pub elevation_min: Option<f64>,
+
+    /// Global elevation maximum in metres for cross-tile Y normalisation (optional).
+    #[arg(long, allow_hyphen_values = true)]
+    pub elevation_max: Option<f64>,
+
     /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031;
     /// Bedrock 1.21.40+: Y=-512..512). Both are experimental.
     #[arg(long, default_value_t = false)]
@@ -91,6 +109,40 @@ pub struct Args {
     /// Print generation-only timing to stderr (excludes data fetching)
     #[arg(long, hide = true)]
     pub benchmark: bool,
+
+    /// Override the Overpass API endpoint(s) used to fetch OSM data.
+    /// Comma-separated list, in priority order. When set, this list is
+    /// used INSTEAD of the public Overpass mirror pool — useful for
+    /// pointing Arnis at a self-hosted Overpass instance to bypass
+    /// public rate limits during large batch generation.
+    ///
+    /// Example: --overpass-url http://localhost:12345/api/interpreter
+    /// Example: --overpass-url http://lan-host:12345/api/interpreter,https://overpass-api.de/api/interpreter
+    ///
+    /// Upstream-friendly improvement: this is purely additive — when
+    /// the flag is omitted, Arnis behaves exactly as before. Safe to
+    /// upstream for users running batch jobs against private mirrors.
+    #[arg(long = "overpass-url", value_delimiter = ',')]
+    pub overpass_url: Vec<String>,
+
+    /// Road rendering detail level. Controls which OSM highway features
+    /// are fetched + drawn. Use `compact` at low scale (block resolution
+    /// < 1 m) where footways/crosswalks/lane-dividers stack on the same
+    /// few blocks and produce noisy checker patterns at intersections.
+    ///
+    ///   max     (default) — render every highway, footway, cycleway,
+    ///                       crossing, and lane-divider stripe.
+    ///   compact         — drop footway/path/cycleway/steps/corridor/
+    ///                       pedestrian/platform/bus_stop, drop crossing
+    ///                       markers, drop lane dividers. Vehicle-grade
+    ///                       roads only. Also trims Overpass payload.
+    ///   none            — skip every highway. Terrain-only worlds.
+    ///
+    /// Upstream-friendly: defaults to `max` so omitting the flag preserves
+    /// existing behaviour. Safe to upstream.
+    #[arg(long = "road-detail", default_value = "max",
+          value_parser = ["max", "compact", "none"])]
+    pub road_detail: String,
 }
 
 /// Validates CLI arguments after parsing.

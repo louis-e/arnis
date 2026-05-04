@@ -420,6 +420,8 @@ pub fn generate_landuse_from_relation(
                     id: member.way.id,
                     nodes: member.way.nodes.clone(),
                     tags: rel.tags.clone(),
+                    unclipped_bounds: member.way.unclipped_bounds,
+                    unclipped_polygon_area: member.way.unclipped_polygon_area,
                 };
                 generate_landuse(
                     editor,

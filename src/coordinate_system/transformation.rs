@@ -9,7 +9,12 @@ pub struct CoordTransformer {
     scale_factor_z: f64,
     min_lat: f64,
     min_lng: f64,
+    scale: f64,
+    master_origin_lat: Option<f64>,
+    master_origin_lng: Option<f64>,
 }
+
+const METERS_PER_DEG_LAT: f64 = 111_320.0;
 
 impl CoordTransformer {
     pub fn scale_factor_x(&self) -> f64 {
@@ -23,11 +28,36 @@ impl CoordTransformer {
     pub fn llbbox_to_xzbbox(
         llbbox: &LLBBox,
         scale: f64,
+        master_origin_lat: Option<f64>,
+        master_origin_lng: Option<f64>,
     ) -> Result<(CoordTransformer, XZBBox), String> {
         let err_header = "Construct LLBBox to XZBBox transformation failed".to_string();
 
         if scale <= 0.0 {
             return Err(format!("{}: scale <= 0.0", &err_header));
+        }
+
+        let transformer = Self {
+            len_lat: llbbox.max().lat() - llbbox.min().lat(),
+            len_lng: llbbox.max().lng() - llbbox.min().lng(),
+            scale_factor_x: 0.0,
+            scale_factor_z: 0.0,
+            min_lat: llbbox.min().lat(),
+            min_lng: llbbox.min().lng(),
+            scale,
+            master_origin_lat,
+            master_origin_lng,
+        };
+
+        if master_origin_lat.is_some() && master_origin_lng.is_some() {
+            // Use NW and SE corners for min and max XZ because +Z is South
+            let nw = transformer.transform_point(LLPoint::new(llbbox.max().lat(), llbbox.min().lng()).unwrap());
+            let se = transformer.transform_point(LLPoint::new(llbbox.min().lat(), llbbox.max().lng()).unwrap());
+            
+            let absolute_xzbbox = crate::coordinate_system::cartesian::XZBBox::from_points(nw, se)
+                .map_err(|e| format!("{}:\n{}", &err_header, e))?;
+
+            return Ok((transformer, absolute_xzbbox));
         }
 
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());
@@ -37,20 +67,26 @@ impl CoordTransformer {
         let xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
             .map_err(|e| format!("{}:\n{}", &err_header, e))?;
 
-        Ok((
-            Self {
-                len_lat: llbbox.max().lat() - llbbox.min().lat(),
-                len_lng: llbbox.max().lng() - llbbox.min().lng(),
-                scale_factor_x,
-                scale_factor_z,
-                min_lat: llbbox.min().lat(),
-                min_lng: llbbox.min().lng(),
-            },
-            xzbbox,
-        ))
+        let mut t = transformer;
+        t.scale_factor_x = scale_factor_x;
+        t.scale_factor_z = scale_factor_z;
+
+        Ok((t, xzbbox))
     }
 
     pub fn transform_point(&self, llpoint: LLPoint) -> XZPoint {
+        if let (Some(origin_lat), Some(origin_lng)) = (self.master_origin_lat, self.master_origin_lng) {
+            let avg_lat = (llpoint.lat() + origin_lat) / 2.0;
+            let mpd_lon = METERS_PER_DEG_LAT * avg_lat.to_radians().cos();
+            
+            let dx_m = (llpoint.lng() - origin_lng) * mpd_lon;
+            let dz_m = (origin_lat - llpoint.lat()) * METERS_PER_DEG_LAT;
+            
+            let x = (dx_m * self.scale).floor() as i32;
+            let z = (dz_m * self.scale).floor() as i32;
+            return XZPoint::new(x, z);
+        }
+
         // Calculate the relative position within the bounding box
         let rel_x: f64 = (llpoint.lng() - self.min_lng) / self.len_lng;
         let rel_z: f64 = 1.0 - (llpoint.lat() - self.min_lat) / self.len_lat;
@@ -134,7 +170,7 @@ mod test {
             llbbox.min().lng() + (llbbox.max().lng() - llbbox.min().lng()) * test_lngfactor,
         )
         .unwrap();
-        let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale).unwrap();
+        let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, None, None).unwrap();
 
         // legacy xzbbox creation
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());
@@ -175,10 +211,10 @@ mod test {
     #[test]
     pub fn test_invalid_construct() {
         let llbbox = get_llbbox_arnis();
-        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, 0.0);
+        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, 0.0, None, None);
         assert!(obj.is_err());
 
-        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, -1.2);
+        let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, -1.2, None, None);
         assert!(obj.is_err());
     }
 }

@@ -355,19 +355,30 @@ impl BuildingCategory {
 
     /// Checks if a tall building has skyscraper proportions:
     /// building height >= 40 blocks AND height >= 2× the longest side of its bounding box.
+    ///
+    /// Uses `element.unclipped_bounds` (full pre-clip extent) when available so
+    /// the same building gets the same answer in every tile that touches it.
+    /// Without this, a building straddling a tile bbox is shrunk to the inside
+    /// segment in `nodes`, which can flip its longest_side and switch its
+    /// category — producing visible block-state seams across canonical
+    /// boundaries even though the OSM ID is identical.
     fn has_skyscraper_proportions(element: &ProcessedWay, building_height: i32) -> bool {
         if building_height < 40 {
             return false;
         }
 
-        if element.nodes.len() < 3 {
-            return false;
-        }
-
-        let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
-        let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
-        let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
-        let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+        let (min_x, max_x, min_z, max_z) = if let Some(b) = element.unclipped_bounds {
+            b
+        } else {
+            if element.nodes.len() < 3 {
+                return false;
+            }
+            let min_x = element.nodes.iter().map(|n| n.x).min().unwrap_or(0);
+            let max_x = element.nodes.iter().map(|n| n.x).max().unwrap_or(0);
+            let min_z = element.nodes.iter().map(|n| n.z).min().unwrap_or(0);
+            let max_z = element.nodes.iter().map(|n| n.z).max().unwrap_or(0);
+            (min_x, max_x, min_z, max_z)
+        };
 
         let longest_side = (max_x - min_x).max(max_z - min_z).max(1);
         building_height as f64 / longest_side as f64 >= 2.0
@@ -757,14 +768,30 @@ impl BuildingStyle {
         category: BuildingCategory,
         has_multiple_floors: bool,
         footprint_size: usize,
-        rng: &mut impl Rng,
+        _rng: &mut impl Rng,
     ) -> Self {
+        // Each independent decision below uses its OWN deterministic stream
+        // seeded from element.id + a fixed salt, so a tile-variant gate
+        // upstream can never disturb a downstream choice. Without this,
+        // changing one branch (e.g. category) shifts the shared rng state
+        // and every later choice picks a different block — producing the
+        // building-block seam at canonical tile boundaries.
+        use crate::deterministic_rng::element_rng_salted;
+        let mut rng_wall = element_rng_salted(element.id, 1);
+        let mut rng_floor = element_rng_salted(element.id, 2);
+        let mut rng_window = element_rng_salted(element.id, 3);
+        let mut rng_accent = element_rng_salted(element.id, 4);
+        let mut rng_vert_win = element_rng_salted(element.id, 5);
+        let mut rng_accent_roof = element_rng_salted(element.id, 6);
+        let mut rng_accent_lines = element_rng_salted(element.id, 7);
+        let mut rng_vert_accent = element_rng_salted(element.id, 8);
+
         // === Block Palette ===
 
         // Wall block: from tags, preset, or category palette
         let wall_block = preset
             .wall_block
-            .unwrap_or_else(|| determine_wall_block(element, category, rng));
+            .unwrap_or_else(|| determine_wall_block(element, category, &mut rng_wall));
 
         // Floor block: from preset or random
         // For glassy/modern skyscrapers, use dark cap materials for the flat roof
@@ -775,16 +802,17 @@ impl BuildingStyle {
             ) {
                 const SKYSCRAPER_ROOF_CAP_OPTIONS: [Block; 3] =
                     [POLISHED_ANDESITE, BLACKSTONE, NETHER_BRICK];
-                SKYSCRAPER_ROOF_CAP_OPTIONS[rng.random_range(0..SKYSCRAPER_ROOF_CAP_OPTIONS.len())]
+                SKYSCRAPER_ROOF_CAP_OPTIONS
+                    [rng_floor.random_range(0..SKYSCRAPER_ROOF_CAP_OPTIONS.len())]
             } else {
-                get_floor_block_with_rng(rng)
+                get_floor_block_with_rng(&mut rng_floor)
             }
         });
 
         // Window block: from preset or random based on building type
-        let window_block = preset
-            .window_block
-            .unwrap_or_else(|| get_window_block_for_building_type_with_rng(building_type, rng));
+        let window_block = preset.window_block.unwrap_or_else(|| {
+            get_window_block_for_building_type_with_rng(building_type, &mut rng_window)
+        });
 
         // Accent block: from preset or random
         // For glassy skyscrapers, use white stained glass or blackstone
@@ -792,7 +820,7 @@ impl BuildingStyle {
         let accent_block = preset.accent_block.unwrap_or_else(|| {
             if category == BuildingCategory::GlassySkyscraper {
                 const GLASSY_ACCENT_OPTIONS: [Block; 2] = [WHITE_STAINED_GLASS, BLACKSTONE];
-                GLASSY_ACCENT_OPTIONS[rng.random_range(0..GLASSY_ACCENT_OPTIONS.len())]
+                GLASSY_ACCENT_OPTIONS[rng_accent.random_range(0..GLASSY_ACCENT_OPTIONS.len())]
             } else if category == BuildingCategory::ModernSkyscraper {
                 const MODERN_ACCENT_OPTIONS: [Block; 5] = [
                     POLISHED_ANDESITE,
@@ -801,9 +829,9 @@ impl BuildingStyle {
                     NETHER_BRICK,
                     STONE_BRICKS,
                 ];
-                MODERN_ACCENT_OPTIONS[rng.random_range(0..MODERN_ACCENT_OPTIONS.len())]
+                MODERN_ACCENT_OPTIONS[rng_accent.random_range(0..MODERN_ACCENT_OPTIONS.len())]
             } else {
-                ACCENT_BLOCK_OPTIONS[rng.random_range(0..ACCENT_BLOCK_OPTIONS.len())]
+                ACCENT_BLOCK_OPTIONS[rng_accent.random_range(0..ACCENT_BLOCK_OPTIONS.len())]
             }
         });
 
@@ -811,7 +839,7 @@ impl BuildingStyle {
 
         let use_vertical_windows = preset
             .use_vertical_windows
-            .unwrap_or_else(|| rng.random_bool(0.7));
+            .unwrap_or_else(|| rng_vert_win.random_bool(0.7));
 
         // Horizontal windows: full-width bands, used by modern skyscrapers
         let use_horizontal_windows = preset
@@ -822,7 +850,7 @@ impl BuildingStyle {
 
         let use_accent_roof_line = preset
             .use_accent_roof_line
-            .unwrap_or_else(|| rng.random_bool(0.25));
+            .unwrap_or_else(|| rng_accent_roof.random_bool(0.25));
 
         // Accent lines only for multi-floor buildings
         // Glassy skyscrapers get 60% chance, Modern skyscrapers always have them
@@ -830,16 +858,16 @@ impl BuildingStyle {
             if category == BuildingCategory::ModernSkyscraper {
                 true // Stone bands always present on modern skyscrapers
             } else if category == BuildingCategory::GlassySkyscraper {
-                rng.random_bool(0.6)
+                rng_accent_lines.random_bool(0.6)
             } else {
-                has_multiple_floors && rng.random_bool(0.2)
+                has_multiple_floors && rng_accent_lines.random_bool(0.2)
             }
         });
 
         // Vertical accent: only if no accent lines and multi-floor
-        let use_vertical_accent = preset
-            .use_vertical_accent
-            .unwrap_or_else(|| has_multiple_floors && !use_accent_lines && rng.random_bool(0.1));
+        let use_vertical_accent = preset.use_vertical_accent.unwrap_or_else(|| {
+            has_multiple_floors && !use_accent_lines && rng_vert_accent.random_bool(0.1)
+        });
 
         // === Roof ===
 
@@ -856,7 +884,8 @@ impl BuildingStyle {
         } else if qualifies_for_auto_gabled_roof(building_type) {
             // Auto-generate gabled roof for residential buildings
             const MAX_FOOTPRINT_FOR_GABLED: usize = 800;
-            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED && rng.random_bool(0.9) {
+            let mut rng_gabled = element_rng_salted(element.id, 9);
+            if footprint_size <= MAX_FOOTPRINT_FOR_GABLED && rng_gabled.random_bool(0.9) {
                 (RoofType::Gabled, true)
             } else {
                 (RoofType::Flat, false)
@@ -872,7 +901,16 @@ impl BuildingStyle {
         // If the mapper explicitly tagged a roof shape, always respect it.
         let has_explicit_roof_shape = element.tags.contains_key("roof:shape");
         const DIAGONAL_THRESHOLD: f64 = 0.35;
-        let diagonality = compute_building_diagonality(&element.nodes);
+        // Tile-invariant diagonality: prefer the unclipped polygon area /
+        // unclipped bbox area ratio so a building straddling a tile bbox
+        // doesn't flip its roof shape across the seam.
+        let diagonality = match (element.unclipped_polygon_area, element.unclipped_bounds) {
+            (Some(area), Some((min_x, max_x, min_z, max_z))) => {
+                let bbox_area = ((max_x - min_x + 1) as f64) * ((max_z - min_z + 1) as f64);
+                if bbox_area > 0.0 { (area / bbox_area).min(1.0) } else { 1.0 }
+            }
+            _ => compute_building_diagonality(&element.nodes),
+        };
         let roof_type = if !has_explicit_roof_shape
             && matches!(roof_type, RoofType::Gabled | RoofType::Hipped)
             && diagonality < DIAGONAL_THRESHOLD
@@ -900,7 +938,8 @@ impl BuildingStyle {
             let suitable_roof = matches!(roof_type, RoofType::Gabled | RoofType::Hipped);
             let suitable_size = (30..=400).contains(&footprint_size);
 
-            is_residential && suitable_roof && suitable_size && rng.random_bool(0.55)
+            let mut rng_chimney = element_rng_salted(element.id, 10);
+            is_residential && suitable_roof && suitable_size && rng_chimney.random_bool(0.55)
         });
 
         // Roof block: specific material for roofs
@@ -1094,19 +1133,35 @@ fn calculate_start_y_offset(
     min_level_offset: i32,
 ) -> i32 {
     if args.terrain {
-        let building_points: Vec<XZPoint> = element
-            .nodes
-            .iter()
-            .map(|n| {
-                XZPoint::new(
-                    n.x - editor.get_min_coords().0,
-                    n.z - editor.get_min_coords().1,
-                )
-            })
-            .collect();
+        // Goal: tile A and tile B that both touch this building must agree on
+        // the same building base Y. The clipped `element.nodes` differ across
+        // tiles, so reducing over them yields different `max_ground_level`
+        // values and the wall ends up 1 block apart at the seam.
+        //
+        // When unclipped bounds are known, sample ONLY at the four unclipped
+        // bbox corners — those four global (x,z) points are identical in
+        // every tile that touches the building, so the .max() reduction is
+        // tile-invariant. Fall back to clipped nodes only when bounds aren't
+        // populated (synthetic ways missing it).
+        let (off_x, off_z) = editor.get_min_coords();
+        let sample_points: Vec<XZPoint> =
+            if let Some((min_x, max_x, min_z, max_z)) = element.unclipped_bounds {
+                vec![
+                    XZPoint::new(min_x - off_x, min_z - off_z),
+                    XZPoint::new(max_x - off_x, min_z - off_z),
+                    XZPoint::new(min_x - off_x, max_z - off_z),
+                    XZPoint::new(max_x - off_x, max_z - off_z),
+                ]
+            } else {
+                element
+                    .nodes
+                    .iter()
+                    .map(|n| XZPoint::new(n.x - off_x, n.z - off_z))
+                    .collect()
+            };
 
         let mut max_ground_level = args.ground_level;
-        for point in &building_points {
+        for point in &sample_points {
             if let Some(ground) = editor.get_ground() {
                 let level = ground.level(*point);
                 max_ground_level = max_ground_level.max(level);
@@ -3536,10 +3591,26 @@ pub fn generate_buildings(
         }
     }
 
-    let cached_footprint_size = cached_floor_area.len();
-    if cached_footprint_size == 0 {
+    let clipped_footprint_size = cached_floor_area.len();
+    if clipped_footprint_size == 0 {
         return;
     }
+
+    // For style-resolution we want a tile-invariant size signal: a building
+    // that straddles a tile bbox would otherwise see different
+    // `cached_floor_area.len()` in each tile, switch RNG branches in
+    // `BuildingStyle::resolve`, and end up with different wall blocks across
+    // the seam. Use the unclipped bounding box area when available so every
+    // tile classifies the same building identically.
+    let cached_footprint_size = if let Some((min_x, max_x, min_z, max_z)) = element.unclipped_bounds
+    {
+        let dx = (max_x - min_x).max(0) as usize;
+        let dz = (max_z - min_z).max(0) as usize;
+        let bbox_area = dx.saturating_mul(dz);
+        bbox_area.max(clipped_footprint_size)
+    } else {
+        clipped_footprint_size
+    };
 
     // Calculate start Y offset
     let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
@@ -5655,10 +5726,16 @@ pub fn generate_building_from_relation(
                         let ring_slot = 0x8000u64 | (ring_idx as u64 & 0x7FFF);
                         let synthetic_id = (1u64 << 63) | (relation.id << 16) | ring_slot;
                         HolePolygon {
-                            way: ProcessedWay {
-                                id: synthetic_id,
-                                tags: HashMap::new(),
-                                nodes: ring,
+                            way: {
+                                let unclipped_bounds = crate::osm_parser::compute_node_bounds(&ring);
+                                let unclipped_polygon_area = crate::osm_parser::compute_polygon_area(&ring);
+                                ProcessedWay {
+                                    id: synthetic_id,
+                                    tags: HashMap::new(),
+                                    nodes: ring,
+                                    unclipped_bounds,
+                                    unclipped_polygon_area,
+                                }
                             },
                             add_walls: true,
                         }
@@ -5676,10 +5753,14 @@ pub fn generate_building_from_relation(
         // fill cache and the deterministic RNG seeded by element ID.
         for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
             let synthetic_id = (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
+            let unclipped_bounds = crate::osm_parser::compute_node_bounds(&ring);
+            let unclipped_polygon_area = crate::osm_parser::compute_polygon_area(&ring);
             let merged_way = ProcessedWay {
                 id: synthetic_id,
                 tags: relation.tags.clone(),
                 nodes: ring,
+                unclipped_bounds,
+                unclipped_polygon_area,
             };
             generate_buildings(
                 editor,
