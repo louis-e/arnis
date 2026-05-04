@@ -176,6 +176,8 @@ fn run_cli() {
             args.debug,
             args.downloader.as_str(),
             args.save_json_file.as_deref(),
+            &args.overpass_url,
+            &args.road_detail,
         ),
     }
     .expect("Failed to fetch data");
@@ -183,8 +185,8 @@ fn run_cli() {
     let mut ground = ground::generate_ground_data(&args);
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox, outline_suppression) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+    let (mut parsed_elements, mut xzbbox) =
+        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng);
 
     // Fetch supplementary building data from Overture Maps
     {
@@ -264,7 +266,7 @@ fn run_cli() {
             });
 
             let (transformer, pre_rot_bbox) =
-                CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale).unwrap_or_else(|e| {
+                CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale, args.master_origin_lat, args.master_origin_lng).unwrap_or_else(|e| {
                     eprintln!(
                         "{} Failed to convert spawn point: {}",
                         "Error:".red().bold(),

@@ -108,7 +108,8 @@ pub fn fetch_elevation_data(
     disable_height_limit: bool,
     extended_max_y: i32,
     land_cover: Option<&mut LandCoverData>,
-    aws_only: bool,
+    elevation_min: Option<f64>,
+    elevation_max: Option<f64>,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
@@ -225,6 +226,8 @@ pub fn fetch_elevation_data(
         ground_level,
         disable_height_limit,
         extended_max_y,
+        elevation_min,
+        elevation_max,
     );
 
     // Log min/max block heights

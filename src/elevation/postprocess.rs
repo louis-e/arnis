@@ -1166,25 +1166,38 @@ pub fn scale_to_minecraft(
     ground_level: i32,
     disable_height_limit: bool,
     extended_max_y: i32,
+    elevation_min_override: Option<f64>,
+    elevation_max_override: Option<f64>,
 ) -> Vec<Vec<f64>> {
-    // Derive min/max
-    let (min_height, max_height) = blurred_heights
-        .par_iter()
-        .map(|row| {
-            let mut lo = f64::MAX;
-            let mut hi = f64::MIN;
-            for &h in row {
-                if h.is_finite() {
-                    lo = lo.min(h);
-                    hi = hi.max(h);
-                }
-            }
+    // When global overrides are provided (from --elevation-min/--elevation-max),
+    // use them directly so all tiles share the same Y reference frame.
+    // Otherwise derive min/max from this tile's data (original per-tile behaviour).
+    let (min_height, max_height) = match (elevation_min_override, elevation_max_override) {
+        (Some(lo), Some(hi)) => {
+            eprintln!(
+                "Elevation lock: using global range {:.1}m – {:.1}m",
+                lo, hi
+            );
             (lo, hi)
-        })
-        .reduce(
-            || (f64::MAX, f64::MIN),
-            |(lo1, hi1), (lo2, hi2)| (lo1.min(lo2), hi1.max(hi2)),
-        );
+        }
+        _ => blurred_heights
+            .par_iter()
+            .map(|row| {
+                let mut lo = f64::MAX;
+                let mut hi = f64::MIN;
+                for &h in row {
+                    if h.is_finite() {
+                        lo = lo.min(h);
+                        hi = hi.max(h);
+                    }
+                }
+                (lo, hi)
+            })
+            .reduce(
+                || (f64::MAX, f64::MIN),
+                |(lo1, hi1), (lo2, hi2)| (lo1.min(lo2), hi1.max(hi2)),
+            ),
+    };
 
     let (min_height, _max_height, height_range) =
         if !min_height.is_finite() || !max_height.is_finite() || min_height >= max_height {

@@ -165,6 +165,17 @@ pub struct ProcessedWay {
     pub id: u64,
     pub nodes: Vec<ProcessedNode>,
     pub tags: HashMap<String, String>,
+    /// Pre-clip bounding box (min_x, max_x, min_z, max_z) computed from the
+    /// full unclipped way. When the way straddles a tile bbox, `nodes`
+    /// contains only the inside segment — but tile-invariant decisions (e.g.
+    /// building skyscraper proportions) need the original extent so adjacent
+    /// tiles render the same building identically. `None` when the source-
+    /// builder didn't populate it (back-compat for non-OSM builders).
+    pub unclipped_bounds: Option<(i32, i32, i32, i32)>,
+    /// Pre-clip polygon area (shoelace, in cells²). Building diagonality and
+    /// any other shape-aware decisions must use this rather than re-deriving
+    /// from `nodes`, which contain only the in-bbox segment after clipping.
+    pub unclipped_polygon_area: Option<f64>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -185,6 +196,41 @@ pub struct ProcessedRelation {
     pub id: u64,
     pub tags: HashMap<String, String>,
     pub members: Vec<ProcessedMember>,
+}
+
+/// Returns (min_x, max_x, min_z, max_z) for a slice of unclipped nodes,
+/// or `None` if empty. Used to populate `ProcessedWay::unclipped_bounds`
+/// before bbox clipping so tile-invariant decisions can use full extent.
+pub fn compute_node_bounds(nodes: &[ProcessedNode]) -> Option<(i32, i32, i32, i32)> {
+    let first = nodes.first()?;
+    let mut min_x = first.x;
+    let mut max_x = first.x;
+    let mut min_z = first.z;
+    let mut max_z = first.z;
+    for n in nodes.iter().skip(1) {
+        if n.x < min_x { min_x = n.x; }
+        if n.x > max_x { max_x = n.x; }
+        if n.z < min_z { min_z = n.z; }
+        if n.z > max_z { max_z = n.z; }
+    }
+    Some((min_x, max_x, min_z, max_z))
+}
+
+/// Shoelace polygon area (in cells²) over the unclipped node ring.
+/// Returns `None` when fewer than 3 nodes are present. Used together with
+/// `compute_node_bounds` so building roof-type / diagonality decisions are
+/// computed from the full pre-clip shape and remain identical across tiles.
+pub fn compute_polygon_area(nodes: &[ProcessedNode]) -> Option<f64> {
+    if nodes.len() < 3 {
+        return None;
+    }
+    let mut area = 0i64;
+    for i in 0..nodes.len() {
+        let j = (i + 1) % nodes.len();
+        area += (nodes[i].x as i64) * (nodes[j].z as i64);
+        area -= (nodes[j].x as i64) * (nodes[i].z as i64);
+    }
+    Some((area.abs() as f64) / 2.0)
 }
 
 #[derive(Debug, Clone)]
@@ -235,7 +281,9 @@ pub fn parse_osm_data(
     bbox: LLBBox,
     scale: f64,
     debug: bool,
-) -> (Vec<ProcessedElement>, XZBBox, OutlineSuppression) {
+    master_origin_lat: Option<f64>,
+    master_origin_lng: Option<f64>,
+) -> (Vec<ProcessedElement>, XZBBox) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
     emit_gui_progress_update(5.0, "Parsing data...");
@@ -243,7 +291,7 @@ pub fn parse_osm_data(
     // Deserialize the JSON data into the OSMData structure
     let data = SplitOsmData::from_raw_osm_data(osm_data);
 
-    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
+    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale, master_origin_lat, master_origin_lng)
         .unwrap_or_else(|e| {
             eprintln!("Error in defining coordinate transformation:\n{e}");
             panic!();
@@ -303,11 +351,20 @@ pub fn parse_osm_data(
         // Clip the way to bbox to reduce node count dramatically
         let tags = filter_tags(element.tags.unwrap_or_default());
 
+        // Capture pre-clip bounds + polygon area so tile-invariant decisions
+        // (building category / skyscraper proportions / roof diagonality) get
+        // the same answer in every tile that touches the way, regardless of
+        // where its bbox cuts.
+        let unclipped_bounds = compute_node_bounds(&nodes);
+        let unclipped_polygon_area = compute_polygon_area(&nodes);
+
         // Store unclipped way for relation assembly (clipping happens after ring merging)
         let way = Arc::new(ProcessedWay {
             id: element.id,
             tags,
             nodes,
+            unclipped_bounds,
+            unclipped_polygon_area,
         });
         ways_map.insert(element.id, Arc::clone(&way));
 
@@ -323,6 +380,8 @@ pub fn parse_osm_data(
             id: element.id,
             tags: way.tags.clone(),
             nodes: clipped_nodes,
+            unclipped_bounds,
+            unclipped_polygon_area,
         };
 
         processed_elements.push(ProcessedElement::Way(processed));
@@ -403,10 +462,14 @@ pub fn parse_osm_data(
                     if clipped_nodes.is_empty() {
                         return None;
                     }
+                    let unclipped_bounds = way.unclipped_bounds;
+                    let unclipped_polygon_area = way.unclipped_polygon_area;
                     Arc::new(ProcessedWay {
                         id: way.id,
                         tags: way.tags.clone(),
                         nodes: clipped_nodes,
+                        unclipped_bounds,
+                        unclipped_polygon_area,
                     })
                 };
 

@@ -576,7 +576,7 @@ pub fn update_player_spawn_y_after_generation(
         // Parse coordinates for terrain lookup
         let llbbox = LLBBox::from_str(&bbox_text)
             .map_err(|e| format!("Failed to parse bounding box for spawn point:\n{e}"))?;
-        let (_, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale)
+        let (_, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, None, None)
             .map_err(|e| format!("Failed to build transformation:\n{e}"))?;
 
         // Calculate relative coordinates for ground system
@@ -869,7 +869,7 @@ fn gui_start_generation(
             let llbbox = LLBBox::from_str(&bbox_text)
                 .map_err(|e| format!("Failed to parse bounding box: {e}"))?;
 
-            let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale)
+            let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale, None, None)
                 .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
             let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
@@ -1034,7 +1034,7 @@ fn gui_start_generation(
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
             // Otherwise, default to X=1, Z=1 (relative to xzbbox min coordinates)
             let mc_spawn_point: Option<(i32, i32)> = if let Ok((transformer, pre_rot_bbox)) =
-                CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale)
+                CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale, None, None)
             {
                 let (sx, sz) = if let Some((lat, lng)) = spawn_point {
                     if let Ok(llpoint) = LLPoint::new(lat, lng) {
@@ -1092,10 +1092,16 @@ fn gui_start_generation(
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
                 spawn_lng: None,
+                master_origin_lat: None,
+                master_origin_lng: None,
+                elevation_min: None,
+                elevation_max: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
                 disable_height_limit,
                 aws_only_elevation,
                 benchmark: false,
+                overpass_url: Vec::new(),
+                road_detail: "max".to_string(),
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -1106,7 +1112,7 @@ fn gui_start_generation(
                 // Create empty parsed_elements and xzbbox for terrain-only mode
                 let parsed_elements = Vec::new();
                 let (_coord_transformer, xzbbox) =
-                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale, None, None)
                         .map_err(|e| format!("Failed to create coordinate transformer: {}", e))?;
 
                 let _ = data_processing::generate_world_with_options(
@@ -1140,10 +1146,10 @@ fn gui_start_generation(
             }
 
             // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
-            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
+            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None, &[], "max") {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox, outline_suppression) =
-                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+                    let (mut parsed_elements, mut xzbbox) =
+                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng);
 
                     // Fetch supplementary building data from Overture Maps
                     {

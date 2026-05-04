@@ -7,7 +7,7 @@ use crate::retrieve_data;
 // this is copied from main.rs
 pub fn generate_example(llbbox: LLBBox) -> (XZBBox, Vec<ProcessedElement>) {
     // Fetch data
-    let raw_data = retrieve_data::fetch_data_from_overpass(llbbox, false, "requests", None)
+    let raw_data = retrieve_data::fetch_data_from_overpass(llbbox, false, "requests", None, &[], "max")
         .expect("Failed to fetch data");
 
     // Parse raw data

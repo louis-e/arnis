@@ -10,6 +10,10 @@ pub enum XZBBox {
 }
 
 impl XZBBox {
+    pub fn from_points(min: XZPoint, max: XZPoint) -> Result<Self, String> {
+        Ok(Self::Rect(XZBBoxRect::new(min, max)?))
+    }
+
     /// Construct rectangle shape bbox from the x and z lengths of the world, originated at (0, 0)
     pub fn rect_from_xz_lengths(length_x: f64, length_z: f64) -> Result<Self, String> {
         let lenx_ge_0 = length_x >= 0.0;
