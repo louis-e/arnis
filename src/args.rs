@@ -172,21 +172,31 @@ pub struct Args {
     ///                       Arnis does: all types, crossings, full
     ///                       multi-lane width, dense dashed lane
     ///                       dividers. Single-tile output byte-identical
-    ///                       to v2.7.0.
+    ///                       to v2.7.0. Use this if `clean` produces
+    ///                       visuals you don't like — full revert.
+    ///   clean             — visual-cleanup pass for scale ≥ 0.7. Caps
+    ///                       lane dividers to {1, 2} (single centre
+    ///                       stripe for `lanes ≤ 4`, twin centre stripes
+    ///                       for `lanes ≥ 5` to read as a divided
+    ///                       highway). Suppresses dividers on
+    ///                       service/parking_aisle ways. Same highway
+    ///                       coverage as `max`. Junction overdraw and
+    ///                       crowded boulevards become legible without
+    ///                       changing road geometry.
     ///   compact         — vehicle-grade highways only (motorway/
     ///                       primary/secondary/tertiary/residential/
     ///                       unclassified/living_street). Lanes capped
-    ///                       at 2. Crossings + pedestrian/cycleway
-    ///                       types dropped. Lane dividers drawn but
-    ///                       sparser (1-block dots, 5-block gaps)
-    ///                       to read clean at scale 0.5. Trims
-    ///                       Overpass payload.
+    ///                       at 1 (single centre stripe). Crossings +
+    ///                       pedestrian/cycleway types dropped. Dash
+    ///                       period floored to 4-on / 4-off so dashes
+    ///                       stay legible at scale 0.5. Trims Overpass
+    ///                       payload.
     ///
     /// Upstream-friendly: when omitted, behaviour identical to upstream
-    /// (max). Multi-tile schedulers (Meld) pick `compact` at low scale
-    /// automatically.
+    /// (max). Multi-tile schedulers (Meld) auto-select `compact` at
+    /// scale<0.7 and `clean` at scale≥0.7.
     #[arg(long = "road-detail", default_value = "max",
-          value_parser = ["max", "compact"])]
+          value_parser = ["max", "clean", "compact"])]
     pub road_detail: String,
 }
 

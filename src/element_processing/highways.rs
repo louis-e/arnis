@@ -884,18 +884,49 @@ fn generate_highways_internal(
                     // Lane dividers (centre dashed stripe) render fine
                     // even at coarse block resolution because they run
                     //
-                    // Compact mode caps the divider count to 1 (single
-                    // centre stripe) regardless of OSM `lanes`. At scale
-                    // < 0.7 the effective road width compresses to ~3-4
-                    // blocks; trying to fit `lanes - 1` parallel dashed
-                    // stripes inside that band collapses into a solid
-                    // white checker. Single centre stripe stays readable.
-                    // Max mode keeps upstream's `lanes - 1` dividers.
-                    let effective_lanes: i32 = if args.road_detail == "compact" {
-                        lanes.min(2)
-                    } else {
-                        lanes
+                    // Compact mode (scale < 0.7): cap divider count to 1
+                    // (single centre stripe) regardless of OSM `lanes`.
+                    // The effective road width compresses to ~3-4 blocks
+                    // at low scale; fitting `lanes - 1` parallel dashed
+                    // stripes inside that band collapses into a white
+                    // checker. Single centre stripe stays readable.
+                    //
+                    // Clean mode (scale ≥ 0.7): cap divider count to {1, 2}.
+                    // - `lanes ≤ 4` → 1 centre stripe (was 1-3)
+                    // - `lanes ≥ 5` → 2 stripes 1 block apart down centre
+                    //                  (was 4+; reads as divided highway,
+                    //                   like a real-world solid double
+                    //                   centerline)
+                    // - parking_aisle (`service=parking_aisle`) → 0 stripes
+                    //                  (parking lots become clean asphalt)
+                    //
+                    // Max mode: upstream `lanes - 1` divider count.
+                    let is_parking_aisle = matches!(
+                        element.tags().get("service").map(|s| s.as_str()),
+                        Some("parking_aisle")
+                    );
+                    let effective_lanes: i32 = match args.road_detail.as_str() {
+                        "compact" => lanes.min(2),
+                        "clean" => {
+                            if is_parking_aisle || highway_type == "service" {
+                                1 // service ways: zero dividers
+                            } else if lanes >= 5 {
+                                3 // 2 dividers
+                            } else {
+                                2 // 1 divider (centre)
+                            }
+                        }
+                        _ => lanes, // "max" — upstream
                     };
+                    // Twin-centre-stripe geometry for clean mode on wide roads.
+                    // When two stripes both ride within 1 block of centre,
+                    // they read as a "divided road" marker rather than as
+                    // two evenly-spread lane dividers. Apply only in clean
+                    // mode for `lanes ≥ 5`.
+                    let twin_centre_stripe = args.road_detail == "clean"
+                        && lanes >= 5
+                        && !is_parking_aisle
+                        && highway_type != "service";
                     let lane_divider_geom = if effective_lanes >= 2 {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;
@@ -1311,7 +1342,17 @@ fn generate_highways_internal(
                                 for l in 1..effective_lanes {
                                     // Signed perpendicular offset of this
                                     // divider from the centerline.
-                                    let perp_dist = l as f32 * lane_width - half_width;
+                                    //
+                                    // Clean-mode twin-centre stripe: place
+                                    // the two stripes ±0.5 block from centre
+                                    // (1-block visual gap). Reads as
+                                    // "divided highway" without occupying
+                                    // multiple lane widths.
+                                    let perp_dist = if twin_centre_stripe {
+                                        if l == 1 { -0.5 } else { 0.5 }
+                                    } else {
+                                        l as f32 * lane_width - half_width
+                                    };
                                     let stripe_x = (*x as f32 + perp_x * perp_dist).round() as i32;
                                     let stripe_z = (*z as f32 + perp_z * perp_dist).round() as i32;
 
