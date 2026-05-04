@@ -226,13 +226,12 @@ fn road_detail_skip(highway_type: &str,
                     detail: &str) -> bool {
     match detail {
         "none" => true,
-        "compact" => {
+        "compact" | "minimal" => {
             // Pedestrian-grade + low-traffic highway types collapse
             // visually at low scale and add overdraw at intersections
             // without giving the road network extra legibility.
-            // `service` (driveways, parking aisles) joins the skip list
-            // because at scale<0.7 it's indistinguishable from
-            // residential and clutters intersections.
+            // `service` (driveways, parking aisles) + `track`
+            // (agricultural roads) join the skip list at this resolution.
             if matches!(highway_type,
                 "footway" | "path" | "cycleway" | "steps"
                 | "corridor" | "pedestrian" | "platform" | "bus_stop"
@@ -256,6 +255,20 @@ fn road_detail_skip(highway_type: &str,
             false
         }
         _ => false,
+    }
+}
+
+/// Cap OSM `lanes` tag for low-detail rendering. At scale < 1 m/block,
+/// 4-6 lane boulevards collapse to indistinguishable wide asphalt strips
+/// → no extra legibility, just more block overdraw + lane-divider checker
+/// noise across a wider area. `compact` and `minimal` clamp to 2 lanes
+/// (still draws as multi-lane road, dividers fit 4-block-wide stripe
+/// instead of 12). `max` and `none` pass through untouched.
+#[inline]
+fn lanes_for_detail(lanes: i32, detail: &str) -> i32 {
+    match detail {
+        "compact" | "minimal" => lanes.min(2),
+        _ => lanes,
     }
 }
 
@@ -746,6 +759,19 @@ fn generate_highways_internal(
                 .clamp(0, MAX_LANES);
             if element.tags().get("lane_markings").map(|s| s.as_str()) == Some("no") {
                 lanes = 1;
+            }
+            // Lane compression at low scale: clamp 4-6 lane boulevards
+            // to 2 lanes in compact/minimal modes. Same vehicle road
+            // is still a road, just narrower → fewer dividers, less
+            // overdraw at intersections, more legible at scale<1.
+            lanes = lanes_for_detail(lanes, &args.road_detail);
+            // Width follows lanes: in compact/minimal we additionally
+            // cap block_range so the asphalt strip itself shrinks.
+            // Scale 1: 2-lane road = ~3-block-wide strip per side.
+            if matches!(args.road_detail.as_str(), "compact" | "minimal")
+               && block_range > 3
+            {
+                block_range = 3;
             }
 
             if scale_factor < 1.0 {

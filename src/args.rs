@@ -155,23 +155,32 @@ pub struct Args {
     #[arg(long = "overpass-url", value_delimiter = ',')]
     pub overpass_url: Vec<String>,
 
-    /// Road rendering detail level. Controls which OSM highway features
-    /// are fetched + drawn. Use `compact` at low scale (block resolution
-    /// < 1 m) where footways/crosswalks/lane-dividers stack on the same
-    /// few blocks and produce noisy checker patterns at intersections.
+    /// Road rendering detail level. Controls how OSM highway features
+    /// are simplified at low scale (block resolution > 1 m) where
+    /// footways/crosswalks/lane-dividers/multi-lane widths stack onto
+    /// the same blocks and produce checker noise at intersections.
     ///
-    ///   max     (default) — render every highway, footway, cycleway,
-    ///                       crossing, and lane-divider stripe.
-    ///   compact         — drop footway/path/cycleway/steps/corridor/
-    ///                       pedestrian/platform/bus_stop, drop crossing
-    ///                       markers, drop lane dividers. Vehicle-grade
-    ///                       roads only. Also trims Overpass payload.
-    ///   none            — skip every highway. Terrain-only worlds.
+    ///   max     (default) — render every highway exactly as upstream
+    ///                       Arnis does: all types, all crossings, lane
+    ///                       dividers, full multi-lane width. Single-tile
+    ///                       output byte-identical to v2.7.0.
+    ///   compact         — vehicle-grade highways (motorway/primary/
+    ///                       secondary/tertiary/residential/unclassified
+    ///                       /living_street). Lane dividers drawn but
+    ///                       width capped at 2 lanes. Crossings dropped.
+    ///                       Pedestrian types dropped. Also trims
+    ///                       Overpass payload.
+    ///   minimal         — vehicle-grade highways only, plain asphalt.
+    ///                       NO lane dividers, NO crossings, NO surface
+    ///                       markings. Width capped at 2 lanes. Cleanest
+    ///                       low-scale render.
+    ///   none            — no highway rendering. Terrain-only worlds.
     ///
-    /// Upstream-friendly: defaults to `max` so omitting the flag preserves
-    /// existing behaviour. Safe to upstream.
+    /// Upstream-friendly: when omitted, behaviour identical to upstream
+    /// (max). Multi-tile schedulers (Meld) pick `compact` or `minimal`
+    /// at low scale automatically.
     #[arg(long = "road-detail", default_value = "max",
-          value_parser = ["max", "compact", "none"])]
+          value_parser = ["max", "compact", "minimal", "none"])]
     pub road_detail: String,
 }
 
