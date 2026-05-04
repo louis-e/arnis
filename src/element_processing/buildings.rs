@@ -5727,8 +5727,12 @@ pub fn generate_building_from_relation(
                         let synthetic_id = (1u64 << 63) | (relation.id << 16) | ring_slot;
                         HolePolygon {
                             way: {
-                                let unclipped_bounds = crate::osm_parser::compute_node_bounds(&ring);
-                                let unclipped_polygon_area = crate::osm_parser::compute_polygon_area(&ring);
+                                let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering {
+                                    (crate::osm_parser::compute_node_bounds(&ring),
+                                     crate::osm_parser::compute_polygon_area(&ring))
+                                } else {
+                                    (None, None)
+                                };
                                 ProcessedWay {
                                     id: synthetic_id,
                                     tags: HashMap::new(),
@@ -5753,8 +5757,12 @@ pub fn generate_building_from_relation(
         // fill cache and the deterministic RNG seeded by element ID.
         for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
             let synthetic_id = (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
-            let unclipped_bounds = crate::osm_parser::compute_node_bounds(&ring);
-            let unclipped_polygon_area = crate::osm_parser::compute_polygon_area(&ring);
+            let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering {
+                (crate::osm_parser::compute_node_bounds(&ring),
+                 crate::osm_parser::compute_polygon_area(&ring))
+            } else {
+                (None, None)
+            };
             let merged_way = ProcessedWay {
                 id: synthetic_id,
                 tags: relation.tags.clone(),

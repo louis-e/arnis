@@ -80,8 +80,8 @@ struct OvertureBuilding {
 ///
 /// Buildings whose primary source is "OpenStreetMap" are excluded to avoid
 /// duplicates with the existing OSM data pipeline.
-pub fn fetch_overture_buildings(bbox: &LLBBox, scale: f64, debug: bool) -> Vec<ProcessedElement> {
-    match fetch_overture_buildings_inner(bbox, scale, debug) {
+pub fn fetch_overture_buildings(bbox: &LLBBox, scale: f64, debug: bool, tile_invariant_rendering: bool) -> Vec<ProcessedElement> {
+    match fetch_overture_buildings_inner(bbox, scale, debug, tile_invariant_rendering) {
         Ok(elements) => elements,
         Err(e) => {
             eprintln!(
@@ -185,6 +185,7 @@ fn fetch_overture_buildings_inner(
     bbox: &LLBBox,
     scale: f64,
     debug: bool,
+    tile_invariant_rendering: bool,
 ) -> Result<Vec<ProcessedElement>, Box<dyn std::error::Error>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
@@ -259,7 +260,7 @@ fn fetch_overture_buildings_inner(
         .into_iter()
         .take(MAX_OVERTURE_BUILDINGS)
         .filter_map(|building| {
-            let mut way = building_to_processed_way(&building, &coord_transformer, bbox)?;
+            let mut way = building_to_processed_way(&building, &coord_transformer, bbox, tile_invariant_rendering)?;
             let clipped = clip_way_to_bbox(&way.nodes, &xzbbox);
             if clipped.len() < 3 {
                 return None;
@@ -1020,6 +1021,7 @@ fn building_to_processed_way(
     building: &OvertureBuilding,
     coord_transformer: &CoordTransformer,
     bbox: &LLBBox,
+    tile_invariant_rendering: bool,
 ) -> Option<ProcessedWay> {
     let base_id = gers_id_to_u64(&building.id);
 
@@ -1182,8 +1184,12 @@ fn building_to_processed_way(
     // Source tracking
     tags.insert("source".to_string(), "overture_maps".to_string());
 
-    let unclipped_bounds = crate::osm_parser::compute_node_bounds(&nodes);
-    let unclipped_polygon_area = crate::osm_parser::compute_polygon_area(&nodes);
+    let (unclipped_bounds, unclipped_polygon_area) = if tile_invariant_rendering {
+        (crate::osm_parser::compute_node_bounds(&nodes),
+         crate::osm_parser::compute_polygon_area(&nodes))
+    } else {
+        (None, None)
+    };
     Some(ProcessedWay {
         id: base_id,
         nodes,

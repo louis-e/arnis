@@ -18,12 +18,16 @@ delta.
 | `--master-origin-lng <f64>` | `Option<f64>` | unset | PR 1 | Same, longitude. Both must be set for the offset to apply. |
 | `--elevation-min <f64>` | `Option<f64>` | unset | PR 2 | Force the global elevation floor (m) used by `scale_to_minecraft`. Stops Y seams between adjacent tiles. |
 | `--elevation-max <f64>` | `Option<f64>` | unset | PR 2 | Same, ceiling. Both must be set for the lock to engage. |
+| `--tile-invariant-rendering` | `bool` | `false` | PR 3 | Carry pre-clip bounds + polygon area on `ProcessedWay` so a building straddling two tiles renders identically in both. Off by default → upstream-style clipped-node decisions. |
 | `--overpass-url <url[,url2,...]>` | `Vec<String>` | empty | PR 4 | Override the Overpass mirror pool. For self-hosted instances or LAN mirrors. |
 | `--road-detail max\|compact\|none` | `String` | `max` | PR 5 | Skip pedestrian-grade highways + crossings + lane dividers at low scale. Trims the Overpass payload too. |
 
-PR 3 (tile-invariant building rendering) is structural — no new
-flag, behaviour change opt-in via the same code path that fires for
-multi-tile users (see PR 3 below).
+PR 3's salted-RNG-per-decision change is always on regardless of the
+flag — it's a correctness property even for single-tile users (stops
+upstream changes from cascading shifts across unrelated building
+decisions) and toggling it requires duplicating ~150 lines around
+an `if` branch we'd rather not maintain. The flag controls only the
+unclipped-bounds reads.
 
 ---
 
@@ -150,11 +154,11 @@ runs unchanged.
 
 ---
 
-## PR 3 — Tile-Invariant Building Rendering
+## PR 3 — `--tile-invariant-rendering`
 
 ### What
 
-No new flag. Three structural changes:
+One opt-in CLI flag (default `false`). Three structural changes:
 
 1. **Pre-clip bounds + polygon area** carried on every `ProcessedWay`
    so building decisions don't read the bbox-clipped node list.
@@ -182,20 +186,47 @@ upstream changes don't cascade.
 
 ### Intended use
 
-Automatic. No CLI knob. Multi-tile schedulers and single-tile users
-both get identical building rendering across runs.
+Multi-tile schedulers (Meld) pass `--tile-invariant-rendering`
+whenever they're generating a tile that's part of a shared world.
+Single-tile users omit it and get upstream-style clipped-node
+decisions.
+
+The Meld scheduler emits the flag automatically when `origin.set`
+is true (i.e. multi-tile mode). User can disable via
+`settings.tile_invariant_rendering = false` if they want
+byte-identical-to-upstream output for the unclipped-bounds reads.
+
+### Example
+
+```bash
+# Single-tile, upstream behaviour (no flag):
+arnis --bbox 44.43,26.10,44.44,26.11 --output-dir /tmp/single
+
+# Multi-tile, identical building rendering across cells:
+ORIGIN="--master-origin-lat 44.43 --master-origin-lng 26.10"
+arnis --bbox 44.43,26.10,44.44,26.11 --output-dir /tmp/world $ORIGIN --tile-invariant-rendering
+arnis --bbox 44.43,26.11,44.44,26.12 --output-dir /tmp/world $ORIGIN --tile-invariant-rendering
+# Building straddling lon=26.11 renders with same blocks in both cells.
+```
 
 ### Backward compatibility
 
-`unclipped_bounds` and `unclipped_polygon_area` are `Option`. Manual
-`ProcessedWay` constructors can pass `None` and the code falls back
-to clipped-nodes path.
-
-Salted RNG produces **different block sequences** vs upstream
-shared-stream path. Single-tile renders see different (still
-deterministic) palettes than upstream. If upstream maintainers want
-byte-for-byte preservation, gate behind a `--tile-invariant-rendering`
-flag in review.
+- Default `false` → unclipped-bounds reads disabled → upstream
+  v2.7.0-identical decisions for skyscraper / footprint /
+  diagonality / start-Y.
+- `unclipped_bounds` and `unclipped_polygon_area` are `Option`.
+  When flag off, parse_data() + synthetic-ring constructors set
+  both to `None`. The 4 decision sites already fall back to
+  clipped-nodes via existing `if let Some(...)` branches.
+- **Salted RNG (10 streams) stays on regardless of flag.** Toggling
+  it would require duplicating ~150 lines of `BuildingStyle::resolve()`
+  around an `if` branch we'd rather not maintain. Salted RNG
+  produces **different block sequences** vs upstream's shared-stream
+  path; single-tile renders see different (still deterministic)
+  palettes than upstream v2.7.0 even with the flag off. If upstream
+  maintainers want byte-for-byte v2.7.0 preservation including RNG,
+  the salted path could move behind a separate `--tile-invariant-rng`
+  sub-flag in review. Happy to split.
 
 ### Source files touched
 
