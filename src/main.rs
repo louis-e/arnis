@@ -186,13 +186,13 @@ fn run_cli() {
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng);
+        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng, args.tile_invariant_rendering);
 
     // Fetch supplementary building data from Overture Maps
     {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
         let overture_elements =
-            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug, args.tile_invariant_rendering);
         if !overture_elements.is_empty() {
             let before_count = parsed_elements.len();
             let unique_overture =

@@ -1102,6 +1102,7 @@ fn gui_start_generation(
                 benchmark: false,
                 overpass_url: Vec::new(),
                 road_detail: "max".to_string(),
+                tile_invariant_rendering: false,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -1149,12 +1150,12 @@ fn gui_start_generation(
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None, &[], "max") {
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox) =
-                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng);
+                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng, args.tile_invariant_rendering);
 
                     // Fetch supplementary building data from Overture Maps
                     {
                         let overture_elements =
-                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug, args.tile_invariant_rendering);
                         if !overture_elements.is_empty() {
                             let unique_overture = overture::deduplicate_against_osm(
                                 overture_elements,

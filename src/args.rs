@@ -109,6 +109,23 @@ pub struct Args {
     #[arg(long, allow_hyphen_values = true)]
     pub elevation_max: Option<f64>,
 
+    /// Tile-invariant building rendering. When on, building decisions
+    /// (skyscraper/footprint/diagonality/start-Y) read pre-clip bounds
+    /// from `ProcessedWay.unclipped_bounds` rather than the bbox-clipped
+    /// node list. Combined with PR 1 + PR 2, makes a building that
+    /// straddles two adjacent tiles render with identical block choices
+    /// in both. Required by external schedulers (e.g. Meld) that
+    /// generate adjacent bboxes into one Minecraft world.
+    ///
+    /// Off (default): upstream behaviour — clipped nodes drive every
+    /// decision, single-tile output byte-identical to v2.7.0.
+    /// On: pre-clip metrics carry through. RNG-side salting is always
+    /// on regardless of this flag (one stream per decision so unrelated
+    /// branch divergence cannot shift downstream block choices); the
+    /// flag controls only the unclipped-bounds reads.
+    #[arg(long, default_value_t = false)]
+    pub tile_invariant_rendering: bool,
+
     /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031;
     /// Bedrock 1.21.40+: Y=-512..512). Both are experimental.
     #[arg(long, default_value_t = false)]
