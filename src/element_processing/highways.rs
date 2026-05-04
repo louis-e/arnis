@@ -227,12 +227,16 @@ fn road_detail_skip(highway_type: &str,
     match detail {
         "none" => true,
         "compact" => {
-            // Pedestrian-grade highway types collapse visually at low
-            // scale and add overdraw at intersections without giving
-            // the road network extra legibility.
+            // Pedestrian-grade + low-traffic highway types collapse
+            // visually at low scale and add overdraw at intersections
+            // without giving the road network extra legibility.
+            // `service` (driveways, parking aisles) joins the skip list
+            // because at scale<0.7 it's indistinguishable from
+            // residential and clutters intersections.
             if matches!(highway_type,
                 "footway" | "path" | "cycleway" | "steps"
-                | "corridor" | "pedestrian" | "platform" | "bus_stop")
+                | "corridor" | "pedestrian" | "platform" | "bus_stop"
+                | "service" | "track")
             {
                 return true;
             }
@@ -867,11 +871,13 @@ fn generate_highways_internal(
                     //
                     // Lane dividers (centre dashed stripe) render fine
                     // even at coarse block resolution because they run
-                    // along the road centreline, not stacked across
-                    // perpendicular blocks like crossings/sidewalks.
-                    // Keep them in `compact` and `max`. `none` won't
-                    // reach here because the whole element is skipped.
-                    let lane_divider_geom = if lanes >= 2 {
+                    // Lane dividers: dashed white centreline on multi-lane
+                    // roads. At scale<0.7 (1 block ≥ 1.5 m) the dash
+                    // pattern collapses — every 2 blocks gets a stripe
+                    // instead of every 4 m → reads as checker noise on
+                    // the asphalt. Skip in `compact` mode entirely;
+                    // keep in `max`. `none` never reaches here.
+                    let lane_divider_geom = if lanes >= 2 && args.road_detail == "max" {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;
                         let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();
