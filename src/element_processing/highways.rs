@@ -905,11 +905,26 @@ fn generate_highways_internal(
                         element.tags().get("service").map(|s| s.as_str()),
                         Some("parking_aisle")
                     );
+                    // Pedestrian-grade highway types (footway / path / sidewalk
+                    // tagged as highway / cycleway / etc.) get zero lane
+                    // dividers in clean mode — they're walkways, not roads.
+                    // Without this gate, footways tagged as `highway=*` would
+                    // render with a centre stripe down the cobblestone, which
+                    // looks wrong in-game.
+                    let is_pedestrian_grade = matches!(
+                        highway_type.as_str(),
+                        "footway" | "path" | "cycleway" | "steps"
+                            | "corridor" | "pedestrian" | "platform"
+                            | "bus_stop" | "track"
+                    );
                     let effective_lanes: i32 = match args.road_detail.as_str() {
                         "compact" => lanes.min(2),
                         "clean" => {
-                            if is_parking_aisle || highway_type == "service" {
-                                1 // service ways: zero dividers
+                            if is_parking_aisle
+                                || highway_type.as_str() == "service"
+                                || is_pedestrian_grade
+                            {
+                                1 // service / pedestrian ways: zero dividers
                             } else if lanes >= 5 {
                                 3 // 2 dividers
                             } else {
@@ -926,7 +941,8 @@ fn generate_highways_internal(
                     let twin_centre_stripe = args.road_detail == "clean"
                         && lanes >= 5
                         && !is_parking_aisle
-                        && highway_type != "service";
+                        && !is_pedestrian_grade
+                        && highway_type.as_str() != "service";
                     let lane_divider_geom = if effective_lanes >= 2 {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;
@@ -1095,10 +1111,16 @@ fn generate_highways_internal(
                                 // naturally against the road mix than the
                                 // footway's single grey.
                                 if is_zebra_crossing {
+                                    // 2-block-wide stripe / 2-block-wide gap.
+                                    // The previous 1/1 pattern collapsed into
+                                    // a solid white bar from anything but
+                                    // ground level, defeating the "this is a
+                                    // crossing" visual cue. 2/2 reads as
+                                    // distinct white bars at any view height.
                                     let on_stripe = if dir_horizontal {
-                                        set_x % 2 < 1
+                                        (set_x.rem_euclid(4)) < 2
                                     } else {
-                                        set_z % 2 < 1
+                                        (set_z.rem_euclid(4)) < 2
                                     };
                                     if on_stripe {
                                         // White bar. Whitelist the mix we
