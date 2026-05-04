@@ -283,7 +283,7 @@ pub fn generate_amenities(
                                 bx,
                                 0,
                                 bz,
-                                Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]),
+                                Some(&[BLACK_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA, WHITE_CONCRETE]),
                                 None,
                             );
                         }
@@ -306,6 +306,7 @@ pub fn generate_amenities(
                             GRAY_CONCRETE_POWDER,
                             CYAN_TERRACOTTA,
                             GRAY_CONCRETE,
+                            WHITE_CONCRETE,
                         ]),
                         None,
                     );
@@ -338,6 +339,7 @@ pub fn generate_amenities(
                                         GRAY_CONCRETE_POWDER,
                                         CYAN_TERRACOTTA,
                                         GRAY_CONCRETE,
+                                        WHITE_CONCRETE,
                                     ]),
                                     None,
                                 );
@@ -353,6 +355,7 @@ pub fn generate_amenities(
                                         GRAY_CONCRETE_POWDER,
                                         CYAN_TERRACOTTA,
                                         GRAY_CONCRETE,
+                                        WHITE_CONCRETE,
                                     ]),
                                     None,
                                 );
@@ -377,7 +380,7 @@ pub fn generate_amenities(
                             // from the GRAY_CONCRETE parking spaces. User
                             // wants the visual contrast back: parking lots
                             // read as gridded with dark driving aisles.
-                            editor.set_block(BLACK_CONCRETE, x, 0, z, Some(&[GRAY_CONCRETE]), None);
+                            editor.set_block(BLACK_CONCRETE, x, 0, z, Some(&[GRAY_CONCRETE, WHITE_CONCRETE, GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA]), None);
                         }
 
                         // Add light posts at parking space outline corners

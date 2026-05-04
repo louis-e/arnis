@@ -191,19 +191,15 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     GRAY_CONCRETE_POWDER,
     CYAN_TERRACOTTA,
     WHITE_CONCRETE,
-    // Parking-lot surfaces. The road surface writer uses this slice
-    // as a BLACKLIST — any cell whose existing block matches is left
-    // untouched. Adding parking blocks here means a `highway=service`
-    // way that crosses a parking polygon will not overwrite the
-    // parking floor (GRAY_CONCRETE) or its driving-lane stripes
-    // (BLACK_CONCRETE) or its space markers (LIGHT_GRAY_CONCRETE)
-    // with road asphalt. Without this, the road first paints asphalt
-    // on top of the parking, then the lane-divider step paints WHITE
-    // on the asphalt — producing the visible "white road stripes
-    // through parking spots" bug.
-    GRAY_CONCRETE,
-    LIGHT_GRAY_CONCRETE,
 ];
+// Parking-on-road overlap is handled differently: amenities render AFTER
+// highways (`data_processing.rs:172` then `:197`), so parking is the
+// final writer. Parking's own whitelist now includes `WHITE_CONCRETE`,
+// so when road dividers paint white on top of road asphalt and then
+// parking flood-fills the area, parking re-paints over WHITE too —
+// erasing the "lane stripes through parking spots" without needing
+// to blacklist GRAY_CONCRETE here (which would also block roads from
+// overwriting footway-laid GRAY_CONCRETE at sidewalk/road junctions).
 
 /// True when the way should render as a pedestrian walkway
 /// rather than asphalt.
@@ -1172,28 +1168,22 @@ fn generate_highways_internal(
                                         }
                                     } else {
                                         // Non-bar cell: asphalt mix.
-                                        //
-                                        // Whitelist on the existing asphalt
-                                        // mix only, so the zebra stays
-                                        // confined to road surface and never
-                                        // paints over cobble / stone-brick
-                                        // sidewalks at the road edge. Without
-                                        // this, the zebra's bg cells
-                                        // unconditionally overwrote whatever
-                                        // was below — including pavement
-                                        // adjacent to the road — making the
-                                        // crossing bleed past the curb.
+                                        // No whitelist — the zebra's footway
+                                        // way may render before the
+                                        // intersecting road has painted
+                                        // asphalt at this cell, so requiring
+                                        // existing asphalt would make the
+                                        // crossing invisible. Edge-bleed onto
+                                        // adjacent cobble is constrained by
+                                        // the footway way's own bbox; well-
+                                        // tagged crossings stay narrow.
                                         let bg = semirandom_surface(set_x, set_z, DEFAULT_ROAD_MIX);
                                         if use_absolute_y {
                                             editor.set_block_absolute(
-                                                bg, set_x, cell_y, set_z,
-                                                Some(DEFAULT_ROAD_MIX), None,
+                                                bg, set_x, cell_y, set_z, None, None,
                                             );
                                         } else {
-                                            editor.set_block(
-                                                bg, set_x, cell_y, set_z,
-                                                Some(DEFAULT_ROAD_MIX), None,
-                                            );
+                                            editor.set_block(bg, set_x, cell_y, set_z, None, None);
                                         }
                                     }
                                 } else {
