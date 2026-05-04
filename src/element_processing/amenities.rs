@@ -4,7 +4,6 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::get_nearest_road_block;
-use crate::element_processing::surfaces::semirandom_surface;
 use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
@@ -374,18 +373,11 @@ pub fn generate_amenities(
                                 None,
                             );
                         } else if local_z > space_length && local_z < space_length + lane_width {
-                            // Driving lane — use the same asphalt mix as
-                            // roads (gray concrete powder + cyan terracotta,
-                            // semirandomly distributed per cell). Solid
-                            // BLACK_CONCRETE here read as black stripes
-                            // alternating with gray parking spaces, looked
-                            // wrong from above. The asphalt mix matches the
-                            // roads that connect to the parking entrance.
-                            let asphalt = semirandom_surface(
-                                x, z,
-                                &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA],
-                            );
-                            editor.set_block(asphalt, x, 0, z, Some(&[GRAY_CONCRETE, BLACK_CONCRETE]), None);
+                            // Driving lane — solid BLACK_CONCRETE, distinct
+                            // from the GRAY_CONCRETE parking spaces. User
+                            // wants the visual contrast back: parking lots
+                            // read as gridded with dark driving aisles.
+                            editor.set_block(BLACK_CONCRETE, x, 0, z, Some(&[GRAY_CONCRETE]), None);
                         }
 
                         // Add light posts at parking space outline corners

@@ -191,6 +191,18 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     GRAY_CONCRETE_POWDER,
     CYAN_TERRACOTTA,
     WHITE_CONCRETE,
+    // Parking-lot surfaces. The road surface writer uses this slice
+    // as a BLACKLIST — any cell whose existing block matches is left
+    // untouched. Adding parking blocks here means a `highway=service`
+    // way that crosses a parking polygon will not overwrite the
+    // parking floor (GRAY_CONCRETE) or its driving-lane stripes
+    // (BLACK_CONCRETE) or its space markers (LIGHT_GRAY_CONCRETE)
+    // with road asphalt. Without this, the road first paints asphalt
+    // on top of the parking, then the lane-divider step paints WHITE
+    // on the asphalt — producing the visible "white road stripes
+    // through parking spots" bug.
+    GRAY_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
 ];
 
 /// True when the way should render as a pedestrian walkway
@@ -943,12 +955,25 @@ fn generate_highways_internal(
                         && !is_parking_aisle
                         && !is_pedestrian_grade
                         && highway_type.as_str() != "service";
-                    let lane_divider_geom = if effective_lanes >= 2 {
+                    // Width gate: roads narrower than 4 blocks total don't
+                    // get a centre stripe in clean / compact mode. A 3-block
+                    // road has only 1 cell on either side of centre, so a
+                    // dashed centre stripe leaves no asphalt visible
+                    // adjacent to it — looks like a single-block-wide
+                    // dashed path, not a road. Small turn lanes / service
+                    // streets / one-way alleys all hit this cap.
+                    // Max mode preserves upstream behaviour (no width gate).
+                    let road_width_total = 2 * block_range + 1;
+                    let width_gate_pass = match args.road_detail.as_str() {
+                        "max" => true,
+                        _ => road_width_total >= 4,
+                    };
+                    let lane_divider_geom = if effective_lanes >= 2 && width_gate_pass {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;
                         let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();
                         if seg_len > 0.0 {
-                            let road_width_blocks = (2 * block_range + 1) as f32;
+                            let road_width_blocks = road_width_total as f32;
                             Some((
                                 -dz_seg / seg_len,                          // perp_x
                                 dx_seg / seg_len,                           // perp_z
@@ -1147,13 +1172,28 @@ fn generate_highways_internal(
                                         }
                                     } else {
                                         // Non-bar cell: asphalt mix.
+                                        //
+                                        // Whitelist on the existing asphalt
+                                        // mix only, so the zebra stays
+                                        // confined to road surface and never
+                                        // paints over cobble / stone-brick
+                                        // sidewalks at the road edge. Without
+                                        // this, the zebra's bg cells
+                                        // unconditionally overwrote whatever
+                                        // was below — including pavement
+                                        // adjacent to the road — making the
+                                        // crossing bleed past the curb.
                                         let bg = semirandom_surface(set_x, set_z, DEFAULT_ROAD_MIX);
                                         if use_absolute_y {
                                             editor.set_block_absolute(
-                                                bg, set_x, cell_y, set_z, None, None,
+                                                bg, set_x, cell_y, set_z,
+                                                Some(DEFAULT_ROAD_MIX), None,
                                             );
                                         } else {
-                                            editor.set_block(bg, set_x, cell_y, set_z, None, None);
+                                            editor.set_block(
+                                                bg, set_x, cell_y, set_z,
+                                                Some(DEFAULT_ROAD_MIX), None,
+                                            );
                                         }
                                     }
                                 } else {
