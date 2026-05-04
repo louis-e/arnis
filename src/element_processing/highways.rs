@@ -856,10 +856,23 @@ fn generate_highways_internal(
                     // `ground_generation` fills terrain all the way up to
                     // the deck and bridges become giant embankments.
 
-                    // Variables to manage dashed line pattern
+                    // Variables to manage dashed line pattern.
+                    //
+                    // Upstream: dash = gap = (5 * scale).ceil(). At
+                    // scale 0.5 this collapses to 3/3, which on a wide
+                    // boulevard with multiple parallel dividers reads
+                    // as a checker pattern instead of clean dashes.
+                    // Compact mode floors both to >=4 so dashes stay
+                    // legible at low scale while max mode preserves
+                    // upstream behaviour byte-for-byte.
                     let mut stripe_length: i32 = 0;
-                    let dash_length: i32 = (5.0 * scale_factor).ceil() as i32;
-                    let gap_length: i32 = (5.0 * scale_factor).ceil() as i32;
+                    let base_dash: i32 = (5.0 * scale_factor).ceil() as i32;
+                    let (dash_length, gap_length): (i32, i32) =
+                        if args.road_detail == "compact" {
+                            (base_dash.max(4), base_dash.max(4))
+                        } else {
+                            (base_dash, base_dash)
+                        };
 
                     // Segment-constants for multi-lane divider placement.
                     // Computed once here instead of at every bresenham point:
@@ -870,17 +883,30 @@ fn generate_highways_internal(
                     //
                     // Lane dividers (centre dashed stripe) render fine
                     // even at coarse block resolution because they run
-                    let lane_divider_geom = if lanes >= 2 {
+                    //
+                    // Compact mode caps the divider count to 1 (single
+                    // centre stripe) regardless of OSM `lanes`. At scale
+                    // < 0.7 the effective road width compresses to ~3-4
+                    // blocks; trying to fit `lanes - 1` parallel dashed
+                    // stripes inside that band collapses into a solid
+                    // white checker. Single centre stripe stays readable.
+                    // Max mode keeps upstream's `lanes - 1` dividers.
+                    let effective_lanes: i32 = if args.road_detail == "compact" {
+                        lanes.min(2)
+                    } else {
+                        lanes
+                    };
+                    let lane_divider_geom = if effective_lanes >= 2 {
                         let dx_seg = (x2 - x1) as f32;
                         let dz_seg = (z2 - z1) as f32;
                         let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();
                         if seg_len > 0.0 {
                             let road_width_blocks = (2 * block_range + 1) as f32;
                             Some((
-                                -dz_seg / seg_len,                // perp_x
-                                dx_seg / seg_len,                 // perp_z
-                                road_width_blocks / lanes as f32, // lane_width
-                                road_width_blocks / 2.0,          // half_width
+                                -dz_seg / seg_len,                          // perp_x
+                                dx_seg / seg_len,                           // perp_z
+                                road_width_blocks / effective_lanes as f32, // lane_width
+                                road_width_blocks / 2.0,                    // half_width
                             ))
                         } else {
                             None
@@ -1282,7 +1308,7 @@ fn generate_highways_internal(
                         // flat cross-section is preserved).
                         if let Some((perp_x, perp_z, lane_width, half_width)) = lane_divider_geom {
                             if stripe_length < dash_length {
-                                for l in 1..lanes {
+                                for l in 1..effective_lanes {
                                     // Signed perpendicular offset of this
                                     // divider from the centerline.
                                     let perp_dist = l as f32 * lane_width - half_width;
