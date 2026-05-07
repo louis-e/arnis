@@ -239,12 +239,13 @@ fn generate_rail_bridge(
         return;
     }
 
-    // Sample terrain at every centerline cell, not just OSM nodes, so a hill mid-span
-    // still clears the deck.
+    // Sample terrain at every centerline cell, not just OSM nodes, so a hill mid-span still clears the deck.
+    let mut terrain_ys: Vec<i32> = Vec::with_capacity(all_points.len());
     let mut max_y = i32::MIN;
     let mut min_y = i32::MAX;
     for &(bx, bz) in &all_points {
         let y = editor.get_ground_level(bx, bz);
+        terrain_ys.push(y);
         max_y = max_y.max(y);
         min_y = min_y.min(y);
     }
@@ -258,25 +259,36 @@ fn generate_rail_bridge(
 
     let total = all_points.len();
     let last_idx = total - 1;
+
+    let start_xz = all_points[0];
+    let end_xz = all_points[last_idx];
+    let start_ground = terrain_ys[0];
+    let end_ground = terrain_ys[last_idx];
+    // Shared endpoints stay at deck Y to avoid a mid-bridge dip between adjacent segments.
+    let start_internal = internal_endpoints.contains(&start_xz);
+    let end_internal = internal_endpoints.contains(&end_xz);
+
+    // Ensure ramp_length >= max ramping height delta + 1 so per-cell linear delta stays <= 1 (rail step limit).
+    let mut needed = 0usize;
+    if !start_internal {
+        needed = needed.max((deck_y - start_ground).max(0) as usize);
+    }
+    if !end_internal {
+        needed = needed.max((deck_y - end_ground).max(0) as usize);
+    }
+    let needed = needed + 1;
+
     let raw_ramp = (total as f32 * RAIL_BRIDGE_RAMP_FRACTION) as usize;
     let cap = (total / 2).max(1);
     let ramp_length = raw_ramp
         .clamp(RAIL_BRIDGE_RAMP_MIN, RAIL_BRIDGE_RAMP_MAX)
+        .max(needed)
         .min(cap);
-
-    let start_xz = (way.nodes[0].x, way.nodes[0].z);
-    let end_node = &way.nodes[way.nodes.len() - 1];
-    let end_xz = (end_node.x, end_node.z);
-    let start_ground = editor.get_ground_level(start_xz.0, start_xz.1);
-    let end_ground = editor.get_ground_level(end_xz.0, end_xz.1);
-    // Shared endpoints stay at deck Y to avoid a mid-bridge dip between adjacent segments.
-    let start_internal = internal_endpoints.contains(&start_xz);
-    let end_internal = internal_endpoints.contains(&end_xz);
     let denom = ramp_length.saturating_sub(1).max(1) as f32;
 
     let bridge_ys: Vec<i32> = (0..total)
         .map(|tds| {
-            if !start_internal && tds < ramp_length && deck_y > start_ground {
+            let linear_y = if !start_internal && tds < ramp_length && deck_y > start_ground {
                 let t = (tds as f32 / denom).min(1.0);
                 let span = (deck_y - start_ground) as f32;
                 (start_ground as f32 + span * t).round() as i32
@@ -290,7 +302,9 @@ fn generate_rail_bridge(
                 (end_ground as f32 + span * t).round() as i32
             } else {
                 deck_y
-            }
+            };
+            // Clamp to local terrain so a mid-ramp hillside doesn't bury the deck/foundation.
+            linear_y.max(terrain_ys[tds])
         })
         .collect();
 
@@ -313,7 +327,7 @@ fn generate_rail_bridge(
         editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
 
         if (bx + bz).rem_euclid(RAIL_BRIDGE_PILLAR_INTERVAL) == 0 {
-            let ground_y = editor.get_ground_level(bx, bz);
+            let ground_y = terrain_ys[i];
             let pillar_top = y - 2;
             if pillar_top > ground_y {
                 for py in (ground_y + 1)..=pillar_top {
