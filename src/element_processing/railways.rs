@@ -158,14 +158,17 @@ pub fn collect_rail_bridge_internal_endpoints(
 }
 
 fn generate_at_grade_rail(editor: &mut WorldEditor, element: &ProcessedWay) {
+    // Cumulative cell index across segments so sleeper spacing stays consistent at OSM-node joins.
+    let mut tds: usize = 0;
     for i in 1..element.nodes.len() {
         let prev_node = element.nodes[i - 1].xz();
         let cur_node = element.nodes[i].xz();
 
         let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
         let smoothed_points = smooth_diagonal_rails(&points);
+        let skip_first = if i > 1 { 1 } else { 0 };
 
-        for j in 0..smoothed_points.len() {
+        for j in skip_first..smoothed_points.len() {
             let (bx, _, bz) = smoothed_points[j];
 
             let prev_ground = if j > 0 {
@@ -215,9 +218,10 @@ fn generate_at_grade_rail(editor: &mut WorldEditor, element: &ProcessedWay) {
 
             editor.set_block(rail_block, bx, 1, bz, None, None);
 
-            if bx % 4 == 0 {
+            if tds.is_multiple_of(4) {
                 editor.set_block(OAK_LOG, bx, 0, bz, None, None);
             }
+            tds += 1;
         }
     }
 }
