@@ -12,7 +12,7 @@ const RAIL_BRIDGE_DIP_THRESHOLD: i32 = 4;
 const RAIL_BRIDGE_RAMP_MIN: usize = 8;
 const RAIL_BRIDGE_RAMP_MAX: usize = 30;
 const RAIL_BRIDGE_RAMP_FRACTION: f32 = 0.25;
-const RAIL_BRIDGE_PILLAR_INTERVAL: i32 = 8;
+const RAIL_BRIDGE_PILLAR_INTERVAL: usize = 8;
 
 pub type RailBridgeInternalEndpoints = HashSet<(i32, i32)>;
 
@@ -110,13 +110,19 @@ fn renders_as_rail_bridge(way: &ProcessedWay) -> bool {
     if way.nodes.len() < 2 || !is_rail_bridge(way) {
         return false;
     }
-    let is_subway = railway_type == "subway"
-        || way.tags.get("subway").map(|v| v == "yes").unwrap_or(false);
+    let is_subway =
+        railway_type == "subway" || way.tags.get("subway").map(|v| v == "yes").unwrap_or(false);
     if is_subway {
         return false;
     }
-    if ["proposed", "abandoned", "construction", "razed", "turntable"]
-        .contains(&railway_type.as_str())
+    if [
+        "proposed",
+        "abandoned",
+        "construction",
+        "razed",
+        "turntable",
+    ]
+    .contains(&railway_type.as_str())
     {
         return false;
     }
@@ -268,7 +274,8 @@ fn generate_rail_bridge(
     let start_internal = internal_endpoints.contains(&start_xz);
     let end_internal = internal_endpoints.contains(&end_xz);
 
-    // Ensure ramp_length >= max ramping height delta + 1 so per-cell linear delta stays <= 1 (rail step limit).
+    // Ramp length sized so per-cell linear delta stays <= 1 (rail step limit). No horizontal cap:
+    // when needed > total/2 the start/end ramps overlap and min(start, end) below produces a pyramid.
     let mut needed = 0usize;
     if !start_internal {
         needed = needed.max((deck_y - start_ground).max(0) as usize);
@@ -279,30 +286,31 @@ fn generate_rail_bridge(
     let needed = needed + 1;
 
     let raw_ramp = (total as f32 * RAIL_BRIDGE_RAMP_FRACTION) as usize;
-    let cap = (total / 2).max(1);
     let ramp_length = raw_ramp
         .clamp(RAIL_BRIDGE_RAMP_MIN, RAIL_BRIDGE_RAMP_MAX)
-        .max(needed)
-        .min(cap);
+        .max(needed);
     let denom = ramp_length.saturating_sub(1).max(1) as f32;
 
     let bridge_ys: Vec<i32> = (0..total)
         .map(|tds| {
-            let linear_y = if !start_internal && tds < ramp_length && deck_y > start_ground {
+            // Two rising ramps from each endpoint, capped at deck_y. min combines them: trapezoid
+            // for long bridges (both ramps reach deck_y mid-span), pyramid for short ones.
+            let start_ramp_y = if start_internal {
+                deck_y
+            } else {
                 let t = (tds as f32 / denom).min(1.0);
                 let span = (deck_y - start_ground) as f32;
                 (start_ground as f32 + span * t).round() as i32
-            } else if !end_internal
-                && last_idx.saturating_sub(tds) < ramp_length
-                && deck_y > end_ground
-            {
+            };
+            let end_ramp_y = if end_internal {
+                deck_y
+            } else {
                 let dist_from_end = last_idx.saturating_sub(tds);
                 let t = (dist_from_end as f32 / denom).min(1.0);
                 let span = (deck_y - end_ground) as f32;
                 (end_ground as f32 + span * t).round() as i32
-            } else {
-                deck_y
             };
+            let linear_y = start_ramp_y.min(end_ramp_y);
             // Clamp to local terrain so a mid-ramp hillside doesn't bury the deck/foundation.
             linear_y.max(terrain_ys[tds])
         })
@@ -320,13 +328,13 @@ fn generate_rail_bridge(
         let next_y = if i + 1 < total { bridge_ys[i + 1] } else { y };
         let rail_block = determine_rail_with_slope((bx, bz), prev_xz, next_xz, prev_y, y, next_y);
 
-        // Foundation slab, gravel bed (sleeper every 4 blocks), rail on top.
+        // Foundation slab, gravel bed (sleeper every 4 cells along the centerline), rail on top.
         editor.set_block_absolute(STONE_BRICKS, bx, y - 1, bz, None, None);
-        let bed_block = if bx % 4 == 0 { OAK_LOG } else { GRAVEL };
+        let bed_block = if i % 4 == 0 { OAK_LOG } else { GRAVEL };
         editor.set_block_absolute(bed_block, bx, y, bz, None, None);
         editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
 
-        if (bx + bz).rem_euclid(RAIL_BRIDGE_PILLAR_INTERVAL) == 0 {
+        if i % RAIL_BRIDGE_PILLAR_INTERVAL == 0 {
             let ground_y = terrain_ys[i];
             let pillar_top = y - 2;
             if pillar_top > ground_y {
