@@ -102,7 +102,31 @@ fn is_rail_bridge(way: &ProcessedWay) -> bool {
         .is_some_and(|v| v != "no")
 }
 
-/// Endpoints shared by 2+ rail-bridge ways — used to suppress per-way ramps mid-bridge.
+// Mirrors generate_railways' dispatch so the internal-endpoint set only counts rendered bridges.
+fn renders_as_rail_bridge(way: &ProcessedWay) -> bool {
+    let Some(railway_type) = way.tags.get("railway") else {
+        return false;
+    };
+    if way.nodes.len() < 2 || !is_rail_bridge(way) {
+        return false;
+    }
+    let is_subway = railway_type == "subway"
+        || way.tags.get("subway").map(|v| v == "yes").unwrap_or(false);
+    if is_subway {
+        return false;
+    }
+    if ["proposed", "abandoned", "construction", "razed", "turntable"]
+        .contains(&railway_type.as_str())
+    {
+        return false;
+    }
+    if way.tags.get("tunnel").map(|v| v.as_str()) == Some("yes") {
+        return false;
+    }
+    true
+}
+
+/// Endpoints shared by 2+ rendered rail-bridge ways — used to suppress per-way ramps mid-bridge.
 pub fn collect_rail_bridge_internal_endpoints(
     elements: &[ProcessedElement],
 ) -> RailBridgeInternalEndpoints {
@@ -111,7 +135,7 @@ pub fn collect_rail_bridge_internal_endpoints(
         let ProcessedElement::Way(w) = elem else {
             continue;
         };
-        if !w.tags.contains_key("railway") || w.nodes.len() < 2 || !is_rail_bridge(w) {
+        if !renders_as_rail_bridge(w) {
             continue;
         }
         let s = &w.nodes[0];
@@ -201,21 +225,6 @@ fn generate_rail_bridge(
         return;
     }
 
-    let mut max_y = i32::MIN;
-    let mut min_y = i32::MAX;
-    for node in &way.nodes {
-        let y = editor.get_ground_level(node.x, node.z);
-        max_y = max_y.max(y);
-        min_y = min_y.min(y);
-    }
-    let dip = max_y - min_y;
-    // Flat span: lift by clearance so the structure is visible. Canyon span: deck at terrain_max.
-    let deck_y = if dip < RAIL_BRIDGE_DIP_THRESHOLD {
-        max_y + RAIL_BRIDGE_FLAT_CLEARANCE
-    } else {
-        max_y
-    };
-
     let mut all_points: Vec<(i32, i32)> = Vec::new();
     for window in way.nodes.windows(2) {
         let bp = bresenham_line(window[0].x, 0, window[0].z, window[1].x, 0, window[1].z);
@@ -229,6 +238,23 @@ fn generate_rail_bridge(
     if all_points.is_empty() {
         return;
     }
+
+    // Sample terrain at every centerline cell, not just OSM nodes, so a hill mid-span
+    // still clears the deck.
+    let mut max_y = i32::MIN;
+    let mut min_y = i32::MAX;
+    for &(bx, bz) in &all_points {
+        let y = editor.get_ground_level(bx, bz);
+        max_y = max_y.max(y);
+        min_y = min_y.min(y);
+    }
+    let dip = max_y - min_y;
+    // Flat span: lift by clearance so the structure is visible. Canyon span: deck at terrain_max.
+    let deck_y = if dip < RAIL_BRIDGE_DIP_THRESHOLD {
+        max_y + RAIL_BRIDGE_FLAT_CLEARANCE
+    } else {
+        max_y
+    };
 
     let total = all_points.len();
     let last_idx = total - 1;
