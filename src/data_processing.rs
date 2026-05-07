@@ -87,6 +87,9 @@ pub fn generate_world_with_options(
     let bridge_surface =
         bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
 
+    let rail_bridge_internal_endpoints =
+        railways::collect_rail_bridge_internal_endpoints(&elements);
+
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
@@ -225,7 +228,12 @@ pub fn generate_world_with_options(
                         waterways::generate_waterways(&mut editor, way);
                     }
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way, &mut subway_points);
+                    railways::generate_railways(
+                        &mut editor,
+                        way,
+                        &mut subway_points,
+                        &rail_bridge_internal_endpoints,
+                    );
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
