@@ -271,7 +271,7 @@ pub fn parse_osm_data(
 
             let processed: ProcessedNode = ProcessedNode {
                 id: element.id,
-                tags: filter_tags(element.tags.clone().unwrap_or_default()),
+                tags: filter_tags(element.tags.unwrap_or_default()),
                 x: xzpoint.x,
                 z: xzpoint.z,
             };
@@ -298,7 +298,7 @@ pub fn parse_osm_data(
         }
 
         // Clip the way to bbox to reduce node count dramatically
-        let tags = filter_tags(element.tags.clone().unwrap_or_default());
+        let tags = filter_tags(element.tags.unwrap_or_default());
 
         // Store unclipped way for relation assembly (clipping happens after ring merging)
         let way = Arc::new(ProcessedWay {
