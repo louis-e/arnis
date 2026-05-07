@@ -247,19 +247,13 @@ impl BridgeStructureMap {
                 }
             }
 
-            // Effective layer for this structure: max of members; default 1 if any member has bridge tag and no layer.
+            // Max explicit layer; unlabelled members contribute 0 so a pure-unlabelled group stays at terrain.
             let mut max_layer = 0;
-            let mut had_unlabelled = false;
             for &idx in group_indices {
                 let way = bridge_ways[idx];
-                let raw = way.tags.get("layer").and_then(|v| v.parse::<i32>().ok());
-                match raw {
-                    Some(l) => max_layer = max_layer.max(l.max(0)),
-                    None => had_unlabelled = true,
+                if let Some(l) = way.tags.get("layer").and_then(|v| v.parse::<i32>().ok()) {
+                    max_layer = max_layer.max(l.max(0));
                 }
-            }
-            if max_layer == 0 && had_unlabelled {
-                max_layer = 1;
             }
 
             // Sample terrain Ys: every endpoint plus a small set of midpoints across the group.
