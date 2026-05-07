@@ -2,6 +2,7 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::element_processing::bridges::{BridgeStructureMap, BridgeSurfaceMap};
 use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::surfaces::{
     get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
@@ -207,10 +208,45 @@ fn is_pedestrian_way(element: &ProcessedElement) -> bool {
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
 
-/// Minimum terrain dip (in blocks) below max endpoint elevation to classify a bridge as valley-spanning
-const VALLEY_BRIDGE_THRESHOLD: i32 = 7;
+// 4-connected stair fill from `prev` (exclusive) to `curr` (inclusive).
+fn stair_fill_cells(prev: (i32, i32), curr: (i32, i32)) -> Vec<(i32, i32)> {
+    let mut cells = Vec::with_capacity(2);
+    let (mut x, mut z) = prev;
+    while x != curr.0 || z != curr.1 {
+        if x != curr.0 {
+            x += (curr.0 - x).signum();
+            cells.push((x, z));
+        }
+        if z != curr.1 {
+            z += (curr.1 - z).signum();
+            cells.push((x, z));
+        }
+    }
+    if cells.is_empty() {
+        cells.push(curr);
+    }
+    cells
+}
+
+// Absolute base Y for a node feature; deck Y on a bridge, else terrain + layer_boost.
+// `bridge_radius`: 0 = exact (lamps, bus stops, on-road signal head), >0 = nearby (off-road
+// signal pole/bars where the anchor sits next to the deck rather than on it).
+#[inline]
+fn node_feature_base_y(
+    editor: &WorldEditor,
+    bridge_surface: &BridgeSurfaceMap,
+    x: i32,
+    z: i32,
+    layer_boost: i32,
+    bridge_radius: i32,
+) -> i32 {
+    bridge_surface
+        .nearby_deck_y(x, z, bridge_radius)
+        .unwrap_or_else(|| editor.get_absolute_y(x, layer_boost, z))
+}
 
 /// Generates highways with elevation support based on layer tags and connectivity analysis
+#[allow(clippy::too_many_arguments)]
 pub fn generate_highways(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -218,6 +254,8 @@ pub fn generate_highways(
     highway_connectivity: &HighwayConnectivityMap,
     flood_fill_cache: &FloodFillCache,
     road_mask: &RoadMaskBitmap,
+    bridge_structures: &BridgeStructureMap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     generate_highways_internal(
         editor,
@@ -226,6 +264,8 @@ pub fn generate_highways(
         highway_connectivity,
         flood_fill_cache,
         road_mask,
+        bridge_structures,
+        bridge_surface,
     );
 }
 
@@ -270,6 +310,7 @@ pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayC
 }
 
 /// Internal function that generates highways with connectivity context for elevation handling
+#[allow(clippy::too_many_arguments)]
 fn generate_highways_internal(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -277,6 +318,8 @@ fn generate_highways_internal(
     highway_connectivity: &HashMap<(i32, i32), Vec<i32>>, // Maps node coordinates to list of layers that connect to this node
     flood_fill_cache: &FloodFillCache,
     road_mask: &RoadMaskBitmap,
+    bridge_structures: &BridgeStructureMap,
+    bridge_surface: &BridgeSurfaceMap,
 ) {
     // Shared `indoor=yes` / layer parsing for the whole function. Indoor
     // highways must never produce elevated geometry (they sit inside
@@ -300,15 +343,15 @@ fn generate_highways_internal(
 
     if let Some(highway_type) = element.tags().get("highway") {
         if highway_type == "street_lamp" {
-            // Handle street lamps
             if let ProcessedElement::Node(first_node) = element {
                 let x: i32 = first_node.x;
                 let z: i32 = first_node.z;
-                editor.set_block(COBBLESTONE_WALL, x, layer_boost + 1, z, None, None);
+                let base = node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
+                editor.set_block_absolute(COBBLESTONE_WALL, x, base + 1, z, None, None);
                 for dy in 2..=4 {
-                    editor.set_block(OAK_FENCE, x, layer_boost + dy, z, None, None);
+                    editor.set_block_absolute(OAK_FENCE, x, base + dy, z, None, None);
                 }
-                editor.set_block(GLOWSTONE, x, layer_boost + 5, z, None, None);
+                editor.set_block_absolute(GLOWSTONE, x, base + 5, z, None, None);
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -317,6 +360,8 @@ fn generate_highways_internal(
                     if let ProcessedElement::Node(node) = element {
                         let x = node.x;
                         let z = node.z;
+                        let head_base =
+                            node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
 
                         // Try to build a hanging signal if it's on a road
                         let anchor = road_mask
@@ -326,26 +371,69 @@ fn generate_highways_internal(
 
                         match anchor {
                             Some((ax, az)) => {
-                                // Hanging signal: pole at roadside anchor, bars strung across
-                                editor.set_block(
+                                let pole_base = node_feature_base_y(
+                                    editor,
+                                    bridge_surface,
+                                    ax,
+                                    az,
+                                    layer_boost,
+                                    4,
+                                );
+                                editor.set_block_absolute(
                                     COBBLESTONE_WALL,
                                     ax,
-                                    layer_boost + 1,
+                                    pole_base + 1,
                                     az,
                                     None,
                                     None,
                                 );
-                                editor.set_block(IRON_BARS, ax, layer_boost + 2, az, None, None);
-                                editor.set_block(IRON_BARS, ax, layer_boost + 3, az, None, None);
-                                editor.set_block(IRON_BARS, ax, layer_boost + 4, az, None, None);
-                                editor.set_block(IRON_BARS, ax, layer_boost + 5, az, None, None);
+                                editor.set_block_absolute(
+                                    IRON_BARS,
+                                    ax,
+                                    pole_base + 2,
+                                    az,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block_absolute(
+                                    IRON_BARS,
+                                    ax,
+                                    pole_base + 3,
+                                    az,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block_absolute(
+                                    IRON_BARS,
+                                    ax,
+                                    pole_base + 4,
+                                    az,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block_absolute(
+                                    IRON_BARS,
+                                    ax,
+                                    pole_base + 5,
+                                    az,
+                                    None,
+                                    None,
+                                );
 
-                                let y = editor.get_absolute_y(x, layer_boost + 5, z);
-                                for (lx, _, lz) in bresenham_line(x, y, z, ax, y, az) {
-                                    editor.set_block(
+                                let bar_y_a = head_base + 6;
+                                for (lx, _, lz) in bresenham_line(x, bar_y_a, z, ax, bar_y_a, az) {
+                                    let bar_base = node_feature_base_y(
+                                        editor,
+                                        bridge_surface,
+                                        lx,
+                                        lz,
+                                        layer_boost,
+                                        4,
+                                    );
+                                    editor.set_block_absolute(
                                         IRON_BARS,
                                         lx,
-                                        layer_boost + 6,
+                                        bar_base + 6,
                                         lz,
                                         None,
                                         None,
@@ -353,27 +441,36 @@ fn generate_highways_internal(
                                 }
                             }
                             None => {
-                                // Standalone pole (off-road or no anchor found)
-                                editor.set_block(
+                                editor.set_block_absolute(
                                     COBBLESTONE_WALL,
                                     x,
-                                    layer_boost + 1,
+                                    head_base + 1,
                                     z,
                                     None,
                                     None,
                                 );
-                                editor.set_block(IRON_BARS, x, layer_boost + 2, z, None, None);
-                                editor.set_block(IRON_BARS, x, layer_boost + 3, z, None, None);
+                                editor.set_block_absolute(
+                                    IRON_BARS,
+                                    x,
+                                    head_base + 2,
+                                    z,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block_absolute(
+                                    IRON_BARS,
+                                    x,
+                                    head_base + 3,
+                                    z,
+                                    None,
+                                    None,
+                                );
                             }
                         }
 
-                        // Signal head (shared for both cases)
-                        editor.set_block(BLACK_WOOL, x, layer_boost + 4, z, None, None);
-                        editor.set_block(BLACK_WOOL, x, layer_boost + 5, z, None, None);
+                        editor.set_block_absolute(BLACK_WOOL, x, head_base + 4, z, None, None);
+                        editor.set_block_absolute(BLACK_WOOL, x, head_base + 5, z, None, None);
 
-                        // Banner placement logic. Patterns expressed as
-                        // (java_color, java_pattern_id) pairs so both Java
-                        // and Bedrock writers can use them.
                         const BANNER_PATTERNS: &[(&str, &str)] = &[
                             ("red", "minecraft:triangle_top"),
                             ("lime", "minecraft:triangle_bottom"),
@@ -382,7 +479,7 @@ fn generate_highways_internal(
                             ("black", "minecraft:border"),
                         ];
 
-                        let abs_y = editor.get_absolute_y(x, layer_boost + 5, z);
+                        let banner_y = head_base + 5;
                         let banner_offsets: [(i32, i32, &str); 4] = [
                             (0, -1, "north"),
                             (0, 1, "south"),
@@ -393,7 +490,7 @@ fn generate_highways_internal(
                             editor.place_wall_banner(
                                 LIGHT_GRAY_WALL_BANNER,
                                 x + dx,
-                                abs_y,
+                                banner_y,
                                 z + dz,
                                 facing,
                                 "light_gray",
@@ -404,16 +501,18 @@ fn generate_highways_internal(
                 }
             }
         } else if highway_type == "bus_stop" {
-            // Handle bus stops
             if let ProcessedElement::Node(node) = element {
                 let x = node.x;
                 let z = node.z;
+                let base = node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
                 for dy in 1..=3 {
-                    editor.set_block(COBBLESTONE_WALL, x, layer_boost + dy, z, None, None);
+                    editor.set_block_absolute(COBBLESTONE_WALL, x, base + dy, z, None, None);
                 }
 
-                editor.set_block(WHITE_WOOL, x, layer_boost + 4, z, None, None);
-                editor.set_block(WHITE_WOOL, x + 1, layer_boost + 4, z, None, None);
+                editor.set_block_absolute(WHITE_WOOL, x, base + 4, z, None, None);
+                let neighbor_base =
+                    node_feature_base_y(editor, bridge_surface, x + 1, z, layer_boost, 1);
+                editor.set_block_absolute(WHITE_WOOL, x + 1, neighbor_base + 4, z, None, None);
             }
         } else if element
             .tags()
@@ -445,14 +544,6 @@ fn generate_highways_internal(
             // resolve the lanes tag. Keeps the same visual default.
             let mut default_lanes: i32 = 1;
             let scale_factor = args.scale;
-
-            // Check if this is a bridge - bridges need special elevation handling
-            // to span across valleys instead of following terrain.
-            // Accept any bridge tag value except "no" (e.g., "yes", "viaduct",
-            // "aqueduct", ...). Indoor highways are never treated as bridges
-            // (indoor corridors should not generate elevated decks or support
-            // pillars).
-            let is_bridge = !is_indoor && element.tags().get("bridge").is_some_and(|v| v != "no");
 
             // Reuse the function-level layer resolution (already normalised
             // to 0 for indoor/negative).
@@ -524,6 +615,11 @@ fn generate_highways_internal(
             let ProcessedElement::Way(way) = element else {
                 return;
             };
+
+            let bridge_member = bridge_structures.lookup_member(way.id);
+            let bridge_ramp = bridge_structures.lookup_ramp(way.id);
+            let is_bridge_member = bridge_member.is_some();
+            let is_bridge_ramp = bridge_ramp.is_some();
 
             // Optional surface override via the OSM `surface=*` tag. Applies to
             // all road types; for single-block surfaces like concrete or sand
@@ -600,79 +696,40 @@ fn generate_highways_internal(
                 highway_connectivity,
             );
 
-            // Calculate total way length for slope distribution (needed before valley bridge check)
             let total_way_length = calculate_way_length(way);
 
-            // For bridges: detect if this spans a valley by checking terrain profile
-            // A valley bridge has terrain that dips significantly below the endpoints
-            // Skip valley detection entirely if terrain is disabled (no valleys in flat terrain)
-            // Skip very short bridges (< 25 blocks) as they're unlikely to span significant valleys
-            let terrain_enabled = editor
-                .get_ground()
-                .map(|g| g.elevation_enabled)
-                .unwrap_or(false);
+            // Unique bresenham points; sum of max per segment + 1 (no shared-endpoint double count).
+            let total_bresenham_length: usize = way
+                .nodes
+                .windows(2)
+                .map(|pair| {
+                    let dx = (pair[1].x - pair[0].x).unsigned_abs() as usize;
+                    let dz = (pair[1].z - pair[0].z).unsigned_abs() as usize;
+                    dx.max(dz)
+                })
+                .sum::<usize>()
+                + 1;
+            let bridge_internal_ramp_length: usize = {
+                let raw = (total_bresenham_length as f32 * 0.35).clamp(15.0, 50.0) as usize;
+                let cap = (total_bresenham_length / 2).max(1);
+                raw.clamp(1, cap)
+            };
 
-            let (is_valley_bridge, bridge_deck_y) =
-                if is_bridge && terrain_enabled && way.nodes.len() >= 2 && total_way_length >= 25 {
-                    let start_node = &way.nodes[0];
-                    let end_node = &way.nodes[way.nodes.len() - 1];
-                    let start_y = editor.get_ground_level(start_node.x, start_node.z);
-                    let end_y = editor.get_ground_level(end_node.x, end_node.z);
-                    let max_endpoint_y = start_y.max(end_y);
+            let is_short_isolated_elevated = !is_bridge_member
+                && !is_bridge_ramp
+                && needs_start_slope
+                && needs_end_slope
+                && layer_value > 0
+                && total_way_length <= 35;
 
-                    // Sample terrain at middle nodes only (excluding endpoints we already have)
-                    // This avoids redundant get_ground_level() calls
-                    let middle_nodes = &way.nodes[1..way.nodes.len().saturating_sub(1)];
-                    let sampled_min = if middle_nodes.is_empty() {
-                        // No middle nodes, just use endpoints
-                        start_y.min(end_y)
-                    } else {
-                        // Sample up to 3 middle points (5 total with endpoints) for performance
-                        // Valleys are wide terrain features, so sparse sampling is sufficient
-                        let sample_count = middle_nodes.len().min(3);
-                        let step = if sample_count > 1 {
-                            (middle_nodes.len() - 1) / (sample_count - 1)
-                        } else {
-                            1
-                        };
-
-                        middle_nodes
-                            .iter()
-                            .step_by(step.max(1))
-                            .map(|node| editor.get_ground_level(node.x, node.z))
-                            .min()
-                            .unwrap_or(max_endpoint_y)
-                    };
-
-                    // Include endpoint elevations in the minimum calculation
-                    let min_terrain_y = sampled_min.min(start_y).min(end_y);
-
-                    // If ANY sampled point along the bridge is significantly lower than the max endpoint,
-                    // treat as valley bridge
-                    let is_valley = min_terrain_y < max_endpoint_y - VALLEY_BRIDGE_THRESHOLD;
-
-                    if is_valley {
-                        (true, max_endpoint_y)
-                    } else {
-                        (false, 0)
-                    }
-                } else {
-                    (false, 0)
-                };
-
-            // Check if this is a short isolated elevated segment (layer > 0), if so, treat as ground level
-            let is_short_isolated_elevated =
-                needs_start_slope && needs_end_slope && layer_value > 0 && total_way_length <= 35;
-
-            // Override elevation and slopes for short isolated segments
             let (effective_elevation, effective_start_slope, effective_end_slope) =
-                if is_short_isolated_elevated {
-                    (0, false, false) // Treat as ground level
+                if is_bridge_member || is_bridge_ramp || is_short_isolated_elevated {
+                    (0, false, false)
                 } else {
                     (base_elevation, needs_start_slope, needs_end_slope)
                 };
 
-            let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize; // 35% of way length, max 50 blocks, min 15 blocks
+            let slope_length = (total_way_length as f32 * 0.35).clamp(15.0, 50.0) as usize;
 
             // Check if this is a marked zebra crossing (only depends on tags, compute once)
             let is_zebra_crossing = highway_type == "footway"
@@ -686,6 +743,13 @@ fn generate_highways_internal(
             // Iterate over nodes to create the highway
             let mut segment_index = 0;
             let total_segments = way.nodes.len() - 1;
+            // Cumulative bresenham distance across all segments; drives bridge ramp interp.
+            let mut cumulative_distance_from_start: usize = 0;
+            // Previous bridge cell Y for steep-step gap fill.
+            let mut previous_bridge_y: Option<i32> = None;
+            // Previous rail cell per side; used to orthogonally connect diagonal steps.
+            let mut previous_rail_left: Option<(i32, i32)> = None;
+            let mut previous_rail_right: Option<(i32, i32)> = None;
 
             for node in &way.nodes {
                 if let Some(prev) = previous_node {
@@ -712,7 +776,7 @@ fn generate_highways_internal(
                     // per-call behaviour; everything else gets the
                     // perpendicular median via
                     // `perpendicular_median_ground_y`.
-                    let flatten_width = !is_valley_bridge && block_range >= 1;
+                    let flatten_width = !is_bridge_member && !is_bridge_ramp && block_range >= 1;
                     // Whether the road cross-section also registers an
                     // effective-ground override is decided per bresenham
                     // point below — `offset` varies inside a segment (slope
@@ -751,13 +815,42 @@ fn generate_highways_internal(
                         None
                     };
 
-                    for (point_index, (x, _, z)) in bresenham_points.iter().enumerate() {
-                        // Centerline-invariant Y offset for this point
-                        // (slope ramps at layer transitions, valley bridge
-                        // flat deck, etc.). Same for every cell in this
-                        // cross-section — only the *ground reference* we
-                        // add it to changes per cell, below.
-                        let offset = if is_valley_bridge {
+                    // Unit perpendicular for this segment, used by bridge rail placement.
+                    let bridge_rail_perp: Option<(f32, f32)> = if is_bridge_member || is_bridge_ramp
+                    {
+                        let dx_seg = (x2 - x1) as f32;
+                        let dz_seg = (z2 - z1) as f32;
+                        let seg_len = (dx_seg * dx_seg + dz_seg * dz_seg).sqrt();
+                        if seg_len > 0.0 {
+                            Some((-dz_seg / seg_len, dx_seg / seg_len))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+
+                    // Bridges/ramps drive their Y from cumulative tds, so skip the duplicate
+                    // shared endpoint on later segments. Non-bridge slope offsets keep the
+                    // legacy calculate_point_elevation indexing, which expects every point.
+                    let skip_first = if (is_bridge_member || is_bridge_ramp) && segment_index > 0 {
+                        1
+                    } else {
+                        0
+                    };
+                    for (point_index, (x, _, z)) in
+                        bresenham_points.iter().enumerate().skip(skip_first)
+                    {
+                        let tds = cumulative_distance_from_start + point_index;
+                        let bridge_y_here = bridge_member
+                            .map(|info| {
+                                info.y_at(tds, total_bresenham_length, bridge_internal_ramp_length)
+                            })
+                            .or_else(|| {
+                                bridge_ramp.map(|info| info.y_at(tds, total_bresenham_length))
+                            });
+
+                        let offset = if is_bridge_member || is_bridge_ramp {
                             0
                         } else {
                             calculate_point_elevation(
@@ -772,25 +865,9 @@ fn generate_highways_internal(
                             )
                         };
 
-                        // Register override only when the road sits at its
-                        // natural ground level at this point. See the
-                        // segment-level comment above.
                         let register_ground_override = flatten_width && offset == 0;
 
-                        // Per-cell target Y computation. Wide roads use a
-                        // 1×(2b+1) perpendicular median sampled at the
-                        // cell's *own* along-length coordinate: every cell
-                        // in one lateral cross-section therefore gets the
-                        // identical Y (width level — no sideways pitch on
-                        // a slope) while adjacent cross-sections along
-                        // the road's length see the terrain vary naturally.
-                        //
-                        // Closures can't wrap this because we need mutable
-                        // borrows of `editor` (for `set_block_*`) right
-                        // after the shared borrow used to read ground
-                        // levels; inlining below keeps each borrow scoped
-                        // to a single statement.
-                        let use_absolute_y = is_valley_bridge || flatten_width;
+                        let use_absolute_y = is_bridge_member || is_bridge_ramp || flatten_width;
 
                         // Precompute per-axial-offset perpendicular medians
                         // once for this centerline. Every cell in the stamp
@@ -810,6 +887,37 @@ fn generate_highways_internal(
                                 &mut row_medians,
                             );
                         }
+
+                        // Backfill steep ramp steps where deck+foundation alone leaves an air band.
+                        if let Some(by) = bridge_y_here {
+                            if let Some(prev_y) = previous_bridge_y {
+                                let (fill_lo, fill_hi) = if by >= prev_y + 3 {
+                                    (prev_y + 1, by - 2)
+                                } else if by <= prev_y - 3 {
+                                    (by + 1, prev_y - 2)
+                                } else {
+                                    (0, -1)
+                                };
+                                if fill_lo <= fill_hi {
+                                    for fill_y in fill_lo..=fill_hi {
+                                        for fdx in -block_range..=block_range {
+                                            for fdz in -block_range..=block_range {
+                                                editor.set_block_absolute(
+                                                    STONE_BRICKS,
+                                                    *x + fdx,
+                                                    fill_y,
+                                                    *z + fdz,
+                                                    None,
+                                                    Some(ROAD_PROTECTED_SURFACES),
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            previous_bridge_y = Some(by);
+                        }
+
                         // Draw the road surface for the entire width
                         for dx in -block_range..=block_range {
                             for dz in -block_range..=block_range {
@@ -822,8 +930,8 @@ fn generate_highways_internal(
                                 // same along-length coord share one Y
                                 // (flat cross-section) and register the
                                 // same effective-ground override.
-                                let cell_y = if is_valley_bridge {
-                                    bridge_deck_y
+                                let cell_y = if let Some(by) = bridge_y_here {
+                                    by
                                 } else if flatten_width {
                                     let axial = if dir_horizontal { dx } else { dz };
                                     row_medians[(axial + block_range) as usize] + offset
@@ -920,7 +1028,8 @@ fn generate_highways_internal(
                                 // (Regular wide roads now flow through `use_absolute_y == true`
                                 // too, but they aren't floating decks; they get embankments
                                 // from the registered ground-surface override instead.)
-                                let is_elevated_deck = is_valley_bridge || effective_elevation > 0;
+                                let is_elevated_deck =
+                                    is_bridge_member || is_bridge_ramp || effective_elevation > 0;
                                 if is_elevated_deck && cell_y > 0 {
                                     // Add 1 layer of stone bricks underneath the highway surface
                                     if use_absolute_y {
@@ -968,6 +1077,59 @@ fn generate_highways_internal(
                             }
                         }
 
+                        // Side railings; stair_fill_cells keeps the rail 4-connected on diagonals.
+                        if let (Some(by), Some((perp_x, perp_z))) =
+                            (bridge_y_here, bridge_rail_perp)
+                        {
+                            // L1-projected stamp extent + 1, so the rail never lands on the deck.
+                            let rail_dist =
+                                block_range as f32 * (perp_x.abs() + perp_z.abs()) + 1.0;
+                            for (sign, prev_state) in [
+                                (1.0_f32, &mut previous_rail_left),
+                                (-1.0_f32, &mut previous_rail_right),
+                            ] {
+                                let cx = *x as f32 + perp_x * rail_dist * sign;
+                                let cz = *z as f32 + perp_z * rail_dist * sign;
+                                let rail_cell = (cx.round() as i32, cz.round() as i32);
+                                let cells_to_fill: Vec<(i32, i32)> = match *prev_state {
+                                    Some(prev) => stair_fill_cells(prev, rail_cell),
+                                    None => vec![rail_cell],
+                                };
+                                for (rx, rz) in cells_to_fill {
+                                    if bridge_surface.contains(rx, rz) {
+                                        continue;
+                                    }
+                                    editor.set_block_absolute(
+                                        LIGHT_GRAY_CONCRETE,
+                                        rx,
+                                        by,
+                                        rz,
+                                        None,
+                                        Some(ROAD_PROTECTED_SURFACES),
+                                    );
+                                    if by > 0 {
+                                        editor.set_block_absolute(
+                                            STONE_BRICKS,
+                                            rx,
+                                            by - 1,
+                                            rz,
+                                            None,
+                                            None,
+                                        );
+                                    }
+                                    editor.set_block_absolute(
+                                        BRICK_WALL,
+                                        rx,
+                                        by + 1,
+                                        rz,
+                                        None,
+                                        None,
+                                    );
+                                }
+                                *prev_state = Some(rail_cell);
+                            }
+                        }
+
                         // Draw inner-lane dividers as dashed white lines.
                         // For `lanes == 2` this reproduces the previous
                         // single-centerline stripe; higher `lanes` values
@@ -993,8 +1155,8 @@ fn generate_highways_internal(
                                     // rounded (stripe_x, stripe_z) could
                                     // land 1 cell outside the stamp on
                                     // diagonals.
-                                    let stripe_y = if is_valley_bridge {
-                                        bridge_deck_y
+                                    let stripe_y = if let Some(by) = bridge_y_here {
+                                        by
                                     } else if flatten_width {
                                         let axial = if dir_horizontal {
                                             stripe_x - *x
@@ -1048,6 +1210,7 @@ fn generate_highways_internal(
                     }
 
                     segment_index += 1;
+                    cumulative_distance_from_start += segment_length - 1;
                 }
                 previous_node = Some((node.x, node.z));
             }
@@ -1221,14 +1384,17 @@ fn add_highway_support_pillar_absolute(
 }
 
 /// Generates a siding using stone brick slabs
-pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
+pub fn generate_siding(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    bridge_surface: &BridgeSurfaceMap,
+) {
     let mut previous_node: Option<XZPoint> = None;
     let siding_block: Block = STONE_BRICK_SLAB;
 
     for node in &element.nodes {
         let current_node = node.xz();
 
-        // Draw the siding using Bresenham's line algorithm between nodes
         if let Some(prev_node) = previous_node {
             let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(
                 prev_node.x,
@@ -1240,17 +1406,17 @@ pub fn generate_siding(editor: &mut WorldEditor, element: &ProcessedWay) {
             );
 
             for (bx, _, bz) in bresenham_points {
-                if !editor.check_for_block(
-                    bx,
-                    0,
-                    bz,
-                    Some(&[
-                        BLACK_CONCRETE,
-                        GRAY_CONCRETE_POWDER,
-                        CYAN_TERRACOTTA,
-                        WHITE_CONCRETE,
-                    ]),
-                ) {
+                if let Some(deck_y) = bridge_surface.deck_y_at(bx, bz) {
+                    if !editor.check_for_block_absolute(
+                        bx,
+                        deck_y,
+                        bz,
+                        Some(ROAD_PROTECTED_SURFACES),
+                        None,
+                    ) {
+                        editor.set_block_absolute(siding_block, bx, deck_y + 1, bz, None, None);
+                    }
+                } else if !editor.check_for_block(bx, 0, bz, Some(ROAD_PROTECTED_SURFACES)) {
                     editor.set_block(siding_block, bx, 1, bz, None, None);
                 }
             }

@@ -43,6 +43,7 @@
   "fillground": "Täytä maa",
   "land_cover": "Maanpeite",
   "disable_height_limit": "Laajenna rakennuskorkeutta",
+  "aws_only_elevation": "Vanha maasto",
   "bedrock_auto_generated": "Bedrock-maailma luodaan automaattisesti",
   "save_path": "Tallennuspolku",
   "rotation_angle": "Kiertokulma",

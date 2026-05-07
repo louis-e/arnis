@@ -43,6 +43,7 @@
   "fillground": "ملء الأرض",
   "land_cover": "تصنيف الأرض",
   "disable_height_limit": "توسيع ارتفاع البناء",
+  "aws_only_elevation": "تضاريس قديمة",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "save_path": "مسار الحفظ",
   "rotation_angle": "زاوية الدوران",

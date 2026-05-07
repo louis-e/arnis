@@ -15,6 +15,7 @@ const MAX_Y: i32 = 2031;
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Chunk structure for Java Edition NBT format
 #[derive(Serialize, Deserialize)]
@@ -169,8 +170,8 @@ impl ExactSizeIterator for BlockStorageIter<'_> {}
 /// A section being modified (16x16x16 blocks)
 pub(crate) struct SectionToModify {
     pub storage: BlockStorage,
-    /// Store properties for blocks that have them, indexed by the same index as blocks array
-    pub properties: FnvHashMap<usize, Value>,
+    /// Per-cell NBT properties; Arc-shared so identical compounds reuse one allocation.
+    pub properties: FnvHashMap<usize, Arc<Value>>,
 }
 
 impl SectionToModify {
@@ -260,7 +261,7 @@ impl SectionToModify {
 
         // Build unique block combinations and lookup table
         for (i, block) in self.storage.iter().enumerate() {
-            let properties = self.properties.get(&i).cloned();
+            let properties = self.properties.get(&i).map(|p| (**p).clone());
 
             // Create a key for the lookup (block + properties hash)
             let props_key = properties.as_ref().map(|p| format!("{p:?}"));
@@ -283,7 +284,7 @@ impl SectionToModify {
         let mut cur_idx = 0;
 
         for (i, block) in self.storage.iter().enumerate() {
-            let properties = self.properties.get(&i).cloned();
+            let properties = self.properties.get(&i).map(|p| (**p).clone());
             let props_key = properties.as_ref().map(|p| format!("{p:?}"));
             let lookup_key = (block, props_key);
             let p = palette_lookup[&lookup_key] as i64;

@@ -43,6 +43,7 @@
   "fillground": "Aizpildīt zemi",
   "land_cover": "Zemes segums",
   "disable_height_limit": "Paplašināt būvniecības augstumu",
+  "aws_only_elevation": "Mantotais reljefs",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "save_path": "Saglabāšanas ceļš",
   "rotation_angle": "Rotācijas Leņķis",

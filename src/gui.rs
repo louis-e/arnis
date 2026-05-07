@@ -801,6 +801,7 @@ fn gui_start_generation(
     fillground_enabled: bool,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
     disable_height_limit: bool,
+    aws_only_elevation: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
@@ -1018,6 +1019,7 @@ fn gui_start_generation(
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
                 disable_height_limit,
+                aws_only_elevation,
                 benchmark: false,
             };
 

@@ -43,6 +43,7 @@
   "fillground": "Fill Ground",
   "land_cover": "Land Cover",
   "disable_height_limit": "Extend build height",
+  "aws_only_elevation": "Legacy terrain",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "save_path": "Save Path",
   "rotation_angle": "Rotation Angle",

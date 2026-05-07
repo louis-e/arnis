@@ -43,6 +43,7 @@
   "fillground": "Wypełnij podłoże",
   "land_cover": "Pokrycie terenu",
   "disable_height_limit": "Rozszerz wysokość budowania",
+  "aws_only_elevation": "Klasyczny teren",
   "bedrock_auto_generated": "Świat Bedrock jest generowany automatycznie",
   "save_path": "Ścieżka zapisu",
   "rotation_angle": "Kąt Obrotu",

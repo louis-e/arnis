@@ -43,6 +43,7 @@
   "fillground": "Fyll mark",
   "land_cover": "Marktäcke",
   "disable_height_limit": "Utöka byggnadshöjd",
+  "aws_only_elevation": "Äldre terräng",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "save_path": "Sökväg",
   "rotation_angle": "Rotationsvinkel",

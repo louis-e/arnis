@@ -43,6 +43,7 @@
   "fillground": "Talaj feltöltése",
   "land_cover": "Felszínborítás",
   "disable_height_limit": "Építési magasság kiterjesztése",
+  "aws_only_elevation": "Régi domborzat",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal",
   "rotation_angle": "Forgatási Szög",

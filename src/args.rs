@@ -88,6 +88,11 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub disable_height_limit: bool,
 
+    /// Skip the regional high-resolution elevation providers  and only use
+    /// AWS Terrain Tiles for faster generation.
+    #[arg(long, default_value_t = false)]
+    pub aws_only_elevation: bool,
+
     /// Print generation-only timing to stderr (excludes data fetching)
     #[arg(long, hide = true)]
     pub benchmark: bool,

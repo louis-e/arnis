@@ -117,6 +117,7 @@ async function applyLocalization(localization) {
     "span[data-localize='fillground']": "fillground",
     "span[data-localize='land_cover']": "land_cover",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
+    "span[data-localize='aws_only_elevation']": "aws_only_elevation",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
@@ -1145,6 +1146,7 @@ async function startGeneration() {
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var land_cover = document.getElementById("land-cover-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
+    var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -1172,6 +1174,7 @@ async function startGeneration() {
         fillgroundEnabled: fill_ground,
         landCoverEnabled: land_cover,
         disableHeightLimit: disable_height_limit,
+        awsOnlyElevation: aws_only_elevation,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,

@@ -108,11 +108,14 @@ pub fn fetch_elevation_data(
     disable_height_limit: bool,
     extended_max_y: i32,
     land_cover: Option<&mut LandCoverData>,
+    aws_only: bool,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
-    // Select the best provider for this region
-    let provider = select_provider(bbox);
+    // Select the best provider for this region. When `aws_only` is set the
+    // user opted out of the regional high-res providers in favor of a faster
+    // run, so we skip straight to AWS Terrain Tiles.
+    let provider = select_provider(bbox, aws_only);
     let provider_name = provider.name();
     let is_fallback = provider_name == "aws";
 

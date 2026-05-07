@@ -309,35 +309,45 @@ pub fn fetch_data_from_overpass(
         let data: OsmData = OsmData::deserialize(&mut deserializer)?;
 
         if data.is_empty() {
+            // Distinguish a real server error (memory/runtime) from a benign
+            // "this bbox has no mapped objects" response. The former still
+            // aborts; the latter is allowed because Arnis can generate
+            // nature/terrain on its own from elevation + land-cover data,
+            // and unmapped natural areas are common on OSM.
             if let Some(remark) = data.remark.as_deref() {
-                // Check if the remark mentions memory or other runtime errors
                 if remark.contains("runtime error") && remark.contains("out of memory") {
                     eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
                     emit_gui_error("Try using a smaller area.");
+
+                    if debug {
+                        println!("Additional debug information: {data:?}");
+                    }
+
+                    if !is_running_with_gui() {
+                        std::process::exit(1);
+                    } else {
+                        return Err("Data fetch failed".into());
+                    }
                 } else {
-                    // Handle other Overpass API errors if present in the remark field
-                    eprintln!("{}", format!("Error! API returned: {remark}").red().bold());
-                    emit_gui_error(&format!("API returned: {remark}"));
+                    // Non-fatal upstream remark (e.g. timeout that still returned an empty body).
+                    eprintln!(
+                        "{}",
+                        format!("Warning: API returned: {remark}. Continuing without OSM data.")
+                            .yellow()
+                            .bold()
+                    );
                 }
             } else {
-                // General case for when there are no elements and no specific remark
                 eprintln!(
                     "{}",
-                    "Error! API returned no data. Please try again!"
-                        .red()
+                    "Warning: OSM API returned no data for this area. Continuing with terrain/nature only."
+                        .yellow()
                         .bold()
                 );
-                emit_gui_error("API returned no data. Please try again!");
             }
 
             if debug {
                 println!("Additional debug information: {data:?}");
-            }
-
-            if !is_running_with_gui() {
-                std::process::exit(1);
-            } else {
-                return Err("Data fetch failed".into());
             }
         }
 

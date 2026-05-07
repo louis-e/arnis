@@ -681,7 +681,7 @@ impl BedrockWriter {
                     let block = section.get_block_at_index(internal_idx);
 
                     // Get stored properties for this block position (if any)
-                    let properties = section.properties.get(&internal_idx);
+                    let properties = section.properties.get(&internal_idx).map(|p| p.as_ref());
 
                     // Convert to Bedrock format, preserving properties
                     let bedrock_block = to_bedrock_block_with_properties(block, properties);

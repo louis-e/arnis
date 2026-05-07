@@ -289,11 +289,10 @@ pub fn generate_building_interior(
     building_height: i32,
     wall_block: Block,
     floor_levels: &[i32],
-    args: &crate::args::Args,
-    element: &crate::osm_parser::ProcessedWay,
     abs_terrain_offset: i32,
     is_abandoned_building: bool,
     building_passages: &CoordinateBitmap,
+    has_sloped_roof: bool,
 ) {
     // Skip interior generation for very small buildings
     let width = max_x - min_x + 1;
@@ -324,15 +323,11 @@ pub fn generate_building_interior(
             // For intermediate floors, extend walls up to just below the next floor
             floor_levels[floor_index + 1] - 1
         } else {
-            // Last floor ceiling depends on roof generation
-            if args.roof
-                && element.tags.contains_key("roof:shape")
-                && element.tags.get("roof:shape").unwrap() != "flat"
-            {
-                // When roof generation is enabled with non-flat roofs, stop at building height (no extra ceiling)
+            // Sloped roofs occupy the volume above the wall; flat/no-roof
+            // buildings need an extra ceiling course.
+            if has_sloped_roof {
                 start_y_offset + building_height
             } else {
-                // When roof generation is disabled or flat roof, extend to building top + 1 (includes ceiling)
                 start_y_offset + building_height + 1
             }
         };

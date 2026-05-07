@@ -43,6 +43,7 @@
   "fillground": "Boden füllen",
   "land_cover": "Landbedeckung",
   "disable_height_limit": "Bauhöhe erweitern",
+  "aws_only_elevation": "Klassisches Terrain",
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",
   "save_path": "Speicherpfad",
   "rotation_angle": "Rotationswinkel",
