@@ -280,11 +280,8 @@ pub fn parse_osm_data(
 
             // Only add tagged nodes to processed_elements if they're within or near the bbox
             // This significantly improves performance by filtering out distant nodes
-            if !element.tags.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
-                // Node has tags, check if it's in the bbox (with some margin)
-                if xzbbox.contains(&xzpoint) {
-                    processed_elements.push(ProcessedElement::Node(processed));
-                }
+            if !processed.tags.is_empty() && xzbbox.contains(&xzpoint) {
+                processed_elements.push(ProcessedElement::Node(processed));
             }
         }
     }
