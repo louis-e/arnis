@@ -131,6 +131,8 @@ fn run_cli() {
             args.ground_level,
             true, // fetch land cover for terrain texture painting
             args.disable_height_limit,
+            512,
+            false
         );
 
         // Fetch OSM data for road network — used to paint asphalt texture on roads.

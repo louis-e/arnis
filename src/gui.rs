@@ -935,6 +935,7 @@ fn gui_start_generation(
                     spawn_lng: None,
                     rotation: 0.0,
                     disable_height_limit: false,
+                    aws_only_elevation: false,
                     benchmark: false,
                     fnv_esm: true,
                     fnv_water_level: None,
