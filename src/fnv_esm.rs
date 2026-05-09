@@ -503,9 +503,9 @@ fn sample_heights(
 
     // ── Sample padded grid ──────────────────────────────────────────────────
     let mut grid = [[0i32; PSIZE]; PSIZE];
-      #[allow(clippy::needless_range_loop)]
-      for pr in 0..PSIZE {
-         for pc in 0..PSIZE {
+    #[allow(clippy::needless_range_loop)]
+    for pr in 0..PSIZE {
+        for pc in 0..PSIZE {
             // Map padded indices back to arnis world coordinates.
             // pr=SMOOTH_PAD corresponds to grid row 0 (south edge, large arnis z).
             let x = cell_col * BLOCKS_PER_CELL + pc as i32 - SMOOTH_PAD as i32;
