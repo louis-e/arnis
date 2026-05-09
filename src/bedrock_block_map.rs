@@ -220,6 +220,15 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             ],
         ),
 
+        // Cherry leaves with persistence (1.20+)
+        "cherry_leaves" => BedrockBlock::with_states(
+            "cherry_leaves",
+            vec![
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+                ("update_bit", BedrockBlockStateValue::Bool(false)),
+            ],
+        ),
+
         // Stone slab (bottom half by default)
         "stone_slab" => BedrockBlock::with_states(
             "stone_block_slab",

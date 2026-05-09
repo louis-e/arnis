@@ -83,10 +83,8 @@ pub struct Args {
     #[arg(long, default_value_t = 0.0, allow_hyphen_values = true)]
     pub rotation: f64,
 
-    /// Disable the Minecraft build height limit (Y=319).
-    /// When enabled, terrain will use realistic 1:1 scaling without compression,
-    /// even if it exceeds the vanilla height limit.
-    /// Requires a Minecraft data pack that increases the world height.
+    /// Extend build height via a bundled pack (Java 1.21.4+: Y=-2032..2031;
+    /// Bedrock 1.21.40+: Y=-512..512). Both are experimental.
     #[arg(long, default_value_t = false)]
     pub disable_height_limit: bool,
 
@@ -100,6 +98,11 @@ pub struct Args {
     /// Omit to generate terrain without water.
     #[arg(long, allow_hyphen_values = true)]
     pub fnv_water_level: Option<f32>,
+    /// Skip the regional high-resolution elevation providers  and only use
+    /// AWS Terrain Tiles for faster generation.
+    #[arg(long, default_value_t = false)]
+    pub aws_only_elevation: bool,
+
     /// Print generation-only timing to stderr (excludes data fetching)
     #[arg(long, hide = true)]
     pub benchmark: bool,

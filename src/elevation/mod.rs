@@ -19,8 +19,14 @@ use selector::select_provider;
 /// Holds processed elevation data and metadata
 #[derive(Clone)]
 pub struct ElevationData {
-    /// Height values in Minecraft Y coordinates (as f64, rounded to i32 at final block placement)
-    pub(crate) heights: Vec<Vec<f64>>,
+    /// Height values in Minecraft Y coordinates.
+    ///
+    /// Stored as `f32` on purpose: heights are already rounded to integer
+    /// block Ys at placement time, so the full f64 precision was wasted on a
+    /// grid that can easily hit 10+ million cells on a city-sized bbox
+    /// (≈80 MB at f64, halved at f32). Postprocess still runs in f64 for
+    /// numerical stability; the downcast happens once at construction.
+    pub(crate) heights: Vec<Vec<f32>>,
     /// Width of the elevation grid (may be smaller than world width due to capping)
     pub(crate) width: usize,
     /// Height of the elevation grid (may be smaller than world height due to capping)
@@ -100,12 +106,16 @@ pub fn fetch_elevation_data(
     scale: f64,
     ground_level: i32,
     disable_height_limit: bool,
+    extended_max_y: i32,
     land_cover: Option<&mut LandCoverData>,
+    aws_only: bool,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
-    // Select the best provider for this region
-    let provider = select_provider(bbox);
+    // Select the best provider for this region. When `aws_only` is set the
+    // user opted out of the regional high-res providers in favor of a faster
+    // run, so we skip straight to AWS Terrain Tiles.
+    let provider = select_provider(bbox, aws_only);
     let provider_name = provider.name();
     let is_fallback = provider_name == "aws";
 
@@ -209,7 +219,13 @@ pub fn fetch_elevation_data(
         );
     }
 
-    let mc_heights = scale_to_minecraft(&height_grid, scale, ground_level, disable_height_limit);
+    let mc_heights = scale_to_minecraft(
+        &height_grid,
+        scale,
+        ground_level,
+        disable_height_limit,
+        extended_max_y,
+    );
 
     // Log min/max block heights
     let mut min_block_height = f64::MAX;
@@ -223,8 +239,17 @@ pub fn fetch_elevation_data(
         }
     }
 
+    // Downcast the f64 postprocess output to the f32 storage format. One-time
+    // cost paid here so the large grid sits at half the memory for the rest
+    // of the generation run. NaN/infinity preservation is a requirement —
+    // downstream `is_finite` checks rely on non-finite sentinels surviving.
+    let mc_heights_f32: Vec<Vec<f32>> = mc_heights
+        .into_iter()
+        .map(|row| row.into_iter().map(|v| v as f32).collect())
+        .collect();
+
     Ok(ElevationData {
-        heights: mc_heights,
+        heights: mc_heights_f32,
         width: grid_width,
         height: grid_height,
         world_width,

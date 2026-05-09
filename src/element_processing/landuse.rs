@@ -54,8 +54,7 @@ pub fn generate_landuse(
     };
 
     // Get the area of the landuse element using cache
-    let floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
     let trees_ok_to_generate: Vec<TreeType> = {
         let mut trees: Vec<TreeType> = vec![];
@@ -80,7 +79,7 @@ pub fn generate_landuse(
         trees
     };
 
-    for (x, z) in floor_area {
+    for &(x, z) in floor_area.iter() {
         // Apply per-block randomness for certain landuse types
         let actual_block = if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone
@@ -340,6 +339,22 @@ pub fn generate_landuse(
                     }
                 }
             }
+            "vineyard" | "brownfield" | "landfill"
+                if editor.check_for_block(x, 0, z, Some(&[COARSE_DIRT])) =>
+            {
+                // Sparse weeds/regrowth on coarse-dirt surfaces: vineyard rows
+                // grow some grass between vines, and brownfield/landfill are
+                // abandoned land that nature is slowly reclaiming. Kept rare so
+                // the ground still reads as dry/disturbed rather than meadow.
+                // (Skipped for landfill spoil heaps — those are GRAVEL, not
+                // COARSE_DIRT, and the guard above filters them out.)
+                match rng.random_range(0..150) {
+                    0..=3 => editor.set_block(OAK_LEAVES, x, 1, z, None, None),
+                    4 => editor.set_block(DEAD_BUSH, x, 1, z, None, None),
+                    5..=15 => editor.set_block(GRASS, x, 1, z, None, None),
+                    _ => {}
+                }
+            }
             "quarry" => {
                 // Add stone layer under it
                 editor.set_block(STONE, x, -1, z, Some(&[STONE]), None);
@@ -438,11 +453,10 @@ pub fn generate_place(
     };
 
     // Get the area using flood fill cache
-    let floor_area: Vec<(i32, i32)> =
-        flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+    let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
     // Place ground blocks
-    for (x, z) in floor_area {
+    for &(x, z) in floor_area.iter() {
         editor.set_block(block_type, x, 0, z, None, None);
     }
 }

@@ -60,7 +60,11 @@ impl ElevationProvider for AwsTerrain {
         }
 
         let client = reqwest::blocking::Client::builder()
-            .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!(
+                "Arnis/",
+                env!("CARGO_PKG_VERSION"),
+                " (+https://github.com/louis-e/arnis)"
+            ))
             .build()?;
 
         let num_tiles = tiles.len();

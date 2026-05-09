@@ -206,14 +206,115 @@ pub fn create_new_world(base_path: &Path) -> Result<String, String> {
     Ok(new_world_path.display().to_string())
 }
 
+/// Name of the bundled Java datapack that extends the Overworld build height.
+pub const TALL_DATAPACK_NAME: &str = "arnis_tall";
+
+/// Install the bundled tall-world datapack into a Java world and register it
+/// in `level.dat`'s `Data.DataPacks.Enabled` so it auto-activates on first
+/// load. Pack assets target Minecraft 1.21.4 (matching the bundled level.dat
+/// template) — older clients will refuse to load the world.
+pub fn install_tall_datapack(world_path: &Path) -> Result<(), String> {
+    const PACK_MCMETA: &[u8] = include_bytes!("../assets/minecraft/datapack_tall/pack.mcmeta");
+    const OVERWORLD_JSON: &[u8] = include_bytes!(
+        "../assets/minecraft/datapack_tall/data/minecraft/dimension_type/overworld.json"
+    );
+
+    let dp_root = world_path.join("datapacks").join(TALL_DATAPACK_NAME);
+    let dim_dir = dp_root
+        .join("data")
+        .join("minecraft")
+        .join("dimension_type");
+    fs::create_dir_all(&dim_dir)
+        .map_err(|e| format!("Failed to create datapack directories: {e}"))?;
+
+    fs::write(dp_root.join("pack.mcmeta"), PACK_MCMETA)
+        .map_err(|e| format!("Failed to write pack.mcmeta: {e}"))?;
+    fs::write(dim_dir.join("overworld.json"), OVERWORLD_JSON)
+        .map_err(|e| format!("Failed to write overworld.json: {e}"))?;
+
+    register_tall_datapack_in_level_dat(world_path)?;
+
+    Ok(())
+}
+
+/// Appends the pack entry if missing. Expected to run on a fresh level.dat
+/// template whose Enabled list starts with `["vanilla"]`, so the appended
+/// entry naturally lands after vanilla and our dimension_type override wins.
+fn register_tall_datapack_in_level_dat(world_path: &Path) -> Result<(), String> {
+    let level_path = world_path.join("level.dat");
+    if !level_path.exists() {
+        return Err(format!("level.dat not found at {level_path:?}"));
+    }
+
+    let raw = fs::read(&level_path).map_err(|e| format!("Failed to read level.dat: {e}"))?;
+    let mut decoder = GzDecoder::new(raw.as_slice());
+    let mut decompressed = Vec::new();
+    decoder
+        .read_to_end(&mut decompressed)
+        .map_err(|e| format!("Failed to decompress level.dat: {e}"))?;
+
+    let mut root: Value = fastnbt::from_bytes(&decompressed)
+        .map_err(|e| format!("Failed to parse level.dat NBT: {e}"))?;
+
+    let entry = format!("file/{TALL_DATAPACK_NAME}");
+
+    {
+        let data = match root {
+            Value::Compound(ref mut r) => match r.get_mut("Data") {
+                Some(Value::Compound(ref mut d)) => d,
+                _ => return Err("level.dat missing Data compound".to_string()),
+            },
+            _ => return Err("level.dat root is not a compound".to_string()),
+        };
+
+        let data_packs = data
+            .entry("DataPacks".to_string())
+            .or_insert_with(|| Value::Compound(Default::default()));
+        let Value::Compound(ref mut dp) = data_packs else {
+            return Err("level.dat Data.DataPacks is not a compound".to_string());
+        };
+
+        let enabled = dp
+            .entry("Enabled".to_string())
+            .or_insert_with(|| Value::List(Vec::new()));
+        let Value::List(ref mut list) = enabled else {
+            return Err("level.dat Data.DataPacks.Enabled is not a list".to_string());
+        };
+
+        let already_enabled = list
+            .iter()
+            .any(|v| matches!(v, Value::String(s) if s == &entry));
+        if !already_enabled {
+            list.push(Value::String(entry));
+        }
+    }
+
+    let serialized =
+        fastnbt::to_bytes(&root).map_err(|e| format!("Failed to serialize level.dat: {e}"))?;
+    let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    encoder
+        .write_all(&serialized)
+        .map_err(|e| format!("Failed to compress level.dat: {e}"))?;
+    let compressed = encoder
+        .finish()
+        .map_err(|e| format!("Failed to finalize level.dat compression: {e}"))?;
+    fs::write(&level_path, compressed).map_err(|e| format!("Failed to write level.dat: {e}"))?;
+
+    Ok(())
+}
+
 /// Sets the player spawn point in an existing Java Edition level.dat file.
 ///
 /// Updates both the world spawn point (SpawnX/SpawnY/SpawnZ) and the player
-/// position if a Player compound exists. The Y coordinate is set to 150 as a
-/// safe default above terrain; Minecraft will adjust it on first load.
-pub fn set_spawn_in_level_dat(world_path: &Path, spawn_x: i32, spawn_z: i32) -> Result<(), String> {
-    let spawn_y = 150;
-
+/// position if a Player compound exists. Callers derive `spawn_y` from the
+/// generated terrain so the player spawns above ground even in extended-height
+/// worlds where terrain may reach Y≈2000.
+pub fn set_spawn_in_level_dat(
+    world_path: &Path,
+    spawn_x: i32,
+    spawn_y: i32,
+    spawn_z: i32,
+) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     if !level_path.exists() {
         return Err(format!("level.dat not found at {level_path:?}"));

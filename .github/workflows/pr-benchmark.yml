@@ -48,7 +48,11 @@ jobs:
           peak_kb=$(cat peak_mem_kb.txt)
           peak_mb=$((peak_kb / 1024))
           echo "peak_memory=${peak_mb}" >> $GITHUB_OUTPUT
-          gen_time=$(grep -oP '(?<=generation_time=)\d+' benchmark_log.txt || echo "")
+          gen_time_ms=$(grep -oP '(?<=generation_time_ms=)\d+' benchmark_log.txt || echo "")
+          gen_time=""
+          if [ -n "$gen_time_ms" ]; then
+            gen_time=$(( (gen_time_ms + 500) / 1000 ))
+          fi
           echo "gen_time=${gen_time}" >> $GITHUB_OUTPUT
 
       - name: End timer and calculate duration
@@ -68,7 +72,11 @@ jobs:
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
           gen_time=${{ steps.benchmark.outputs.gen_time }}
 
-          baseline_time=20
+          # Calibrated after the multi-source elevation pipeline landed (PR #939),
+          # the road-flatten perf fix (PR #965), and the grid-precision shrink.
+          # Update this value whenever main-branch generation changes materially
+          # so the verdict thresholds below stay meaningful.
+          baseline_time=27
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
 
@@ -91,11 +99,29 @@ jobs:
           fi
 
           baseline_mem=935
+          mem_diff=$((peak_mem - baseline_mem))
+          mem_abs_diff=${mem_diff#-}
           mem_annotation=""
-          if [ "$peak_mem" -gt 2000 ]; then
-            mem_diff=$((peak_mem - baseline_mem))
+          if [ "$mem_abs_diff" -gt 30 ]; then
             mem_percent=$((mem_diff * 100 / baseline_mem))
-            mem_annotation=" (↗ ${mem_percent}% more)"
+            mem_abs_percent=${mem_percent#-}
+            if [ "$mem_diff" -gt 0 ]; then
+              mem_annotation=" (↗ ${mem_abs_percent}% more)"
+            else
+              mem_annotation=" (↘ ${mem_abs_percent}% less)"
+            fi
+          fi
+
+          if [ "$mem_diff" -lt -100 ]; then
+            mem_verdict="✅ This PR **drastically reduces peak memory**."
+          elif [ "$mem_diff" -lt -30 ]; then
+            mem_verdict="🌱 This PR **reduces peak memory**."
+          elif [ "$mem_abs_diff" -le 30 ]; then
+            mem_verdict="🟢 Peak memory is unchanged."
+          elif [ "$mem_diff" -le 200 ]; then
+            mem_verdict="⚠️ This PR **increases peak memory**."
+          else
+            mem_verdict="🚨 This PR **drastically increases peak memory**."
           fi
 
           benchmark_time=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
@@ -108,11 +134,12 @@ jobs:
             fi
             echo "🧠 Peak memory usage: **${peak_mem} MB**${mem_annotation}"
             echo ""
-            echo "📈 Compared against baseline: **${baseline_time}s**"
-            echo "🧮 Delta: **${diff}s**"
+            echo "📈 Compared against baseline: **${baseline_time}s** time, **${baseline_mem} MB** memory"
+            echo "🧮 Delta: **${diff}s** time, **${mem_diff} MB** memory"
             echo "🔢 Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
             echo ""
             echo "${verdict}"
+            echo "${mem_verdict}"
             echo ""
             echo "📅 **Last benchmark:** ${benchmark_time}"
             echo ""

@@ -1,9 +1,16 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
 
-pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
+const BRIDGE_BARRIER_NEARBY_RADIUS: i32 = 2;
+
+pub fn generate_barriers(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    bridge_surface: &BridgeSurfaceMap,
+) {
     // Default values
     let mut barrier_material: Block = COBBLESTONE_WALL;
     let mut barrier_height: i32 = 2;
@@ -97,24 +104,57 @@ pub fn generate_barriers(editor: &mut WorldEditor, element: &ProcessedElement) {
             let bresenham_points: Vec<(i32, i32, i32)> = bresenham_line(x1, 0, z1, x2, 0, z2);
 
             for (bx, _, bz) in bresenham_points {
-                // Build the barrier wall to the specified height
-                for y in 1..=wall_height {
-                    editor.set_block(barrier_material, bx, y, bz, None, None);
-                }
-
-                // Add an optional top to the barrier if the height is more than 1
-                if wall_height > 1 {
-                    editor.set_block(STONE_BRICK_SLAB, bx, wall_height + 1, bz, None, None);
+                let deck = bridge_surface.nearby_deck_y(bx, bz, BRIDGE_BARRIER_NEARBY_RADIUS);
+                match deck {
+                    Some(deck_y) => {
+                        for y in 1..=wall_height {
+                            editor.set_block_absolute(
+                                barrier_material,
+                                bx,
+                                deck_y + y,
+                                bz,
+                                None,
+                                None,
+                            );
+                        }
+                        if wall_height > 1 {
+                            editor.set_block_absolute(
+                                STONE_BRICK_SLAB,
+                                bx,
+                                deck_y + wall_height + 1,
+                                bz,
+                                None,
+                                None,
+                            );
+                        }
+                    }
+                    None => {
+                        for y in 1..=wall_height {
+                            editor.set_block(barrier_material, bx, y, bz, None, None);
+                        }
+                        if wall_height > 1 {
+                            editor.set_block(STONE_BRICK_SLAB, bx, wall_height + 1, bz, None, None);
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode) {
+pub fn generate_barrier_nodes(
+    editor: &mut WorldEditor<'_>,
+    node: &ProcessedNode,
+    bridge_surface: &BridgeSurfaceMap,
+) {
+    let deck = bridge_surface.nearby_deck_y(node.x, node.z, BRIDGE_BARRIER_NEARBY_RADIUS);
+    let place = |editor: &mut WorldEditor<'_>, block: Block, dy: i32| match deck {
+        Some(deck_y) => editor.set_block_absolute(block, node.x, deck_y + dy, node.z, None, None),
+        None => editor.set_block(block, node.x, dy, node.z, None, None),
+    };
     match node.tags.get("barrier").map(|s| s.as_str()) {
         Some("bollard") => {
-            editor.set_block(COBBLESTONE_WALL, node.x, 1, node.z, None, None);
+            place(editor, COBBLESTONE_WALL, 1);
         }
         Some("stile" | "gate" | "swing_gate" | "lift_gate") => {
             /*editor.set_block(
@@ -161,10 +201,10 @@ pub fn generate_barrier_nodes(editor: &mut WorldEditor<'_>, node: &ProcessedNode
             );*/
         }
         Some("block") => {
-            editor.set_block(STONE, node.x, 1, node.z, None, None);
+            place(editor, STONE, 1);
         }
         Some("entrance") => {
-            editor.set_block(AIR, node.x, 1, node.z, None, None);
+            place(editor, AIR, 1);
         }
         None => {}
         _ => {}

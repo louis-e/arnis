@@ -1,15 +1,17 @@
 pub type RGBTuple = (u8, u8, u8);
 
 pub fn color_text_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
-    if let Some(rgb) = full_hex_color_to_rgb_tuple(text) {
+    let trimmed = text.trim();
+
+    if let Some(rgb) = full_hex_color_to_rgb_tuple(trimmed) {
         return Some(rgb);
     }
 
-    if let Some(rgb) = short_hex_color_to_rgb_tuple(text) {
+    if let Some(rgb) = short_hex_color_to_rgb_tuple(trimmed) {
         return Some(rgb);
     }
 
-    if let Some(rgb) = color_name_to_rgb_tuple(text) {
+    if let Some(rgb) = color_name_to_rgb_tuple(trimmed) {
         return Some(rgb);
     }
 
@@ -48,26 +50,47 @@ fn short_hex_color_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
 // https://wiki.openstreetmap.org/wiki/Key:colour
 // https://wiki.openstreetmap.org/wiki/Key:roof:colour
 fn color_name_to_rgb_tuple(text: &str) -> Option<RGBTuple> {
-    Some(match text {
+    let normalized: String = text
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+
+    Some(match normalized.as_str() {
         "aqua" | "cyan" => (0, 255, 255),
         "beige" => (187, 173, 142),
         "black" => (0, 0, 0),
         "blue" => (0, 0, 255),
         "brown" => (128, 64, 0),
-        // darkgrey
+        "darkgray" | "darkgrey" => (96, 96, 96),
+        "darkbrown" => (90, 50, 20),
+        "darkred" => (139, 0, 0),
+        "dimgray" | "dimgrey" => (105, 105, 105),
+        "firebrick" => (178, 34, 34),
         "fuchsia" | "magenta" => (255, 0, 255),
+        "gold" => (255, 215, 0),
         "gray" | "grey" => (128, 128, 128),
         "green" => (0, 128, 0),
-        // lightgrey
+        "ivory" => (255, 255, 240),
+        "khaki" => (240, 230, 140),
+        "lightblue" => (173, 216, 230),
+        "lightgray" | "lightgrey" => (211, 211, 211),
+        "lightgreen" => (144, 238, 144),
+        "lightyellow" => (255, 255, 224),
         "lime" => (0, 255, 0),
+        "limestone" => (246, 240, 208),
         "maroon" => (128, 0, 0),
         "navy" => (0, 0, 128),
         "olive" => (128, 128, 0),
         "orange" => (255, 128, 0),
+        "pink" => (255, 192, 203),
         "purple" => (128, 0, 128),
         "red" => (255, 0, 0),
+        "salmon" => (250, 128, 114),
+        "sandstone" => (215, 188, 138),
         "silver" => (192, 192, 192),
-        "teal" => (0, 128, 0),
+        "tan" => (210, 180, 140),
+        "teal" => (0, 128, 128),
         "white" => (255, 255, 255),
         "yellow" => (255, 255, 0),
         _ => {

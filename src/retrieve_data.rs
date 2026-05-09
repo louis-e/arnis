@@ -75,6 +75,16 @@ fn save_osm_cache(bbox: LLBBox, json: &str) {
     let _ = std::fs::write(&path, json);
 }
 
+/// Extract the host portion of a URL for telemetry
+fn url_host(url: &str) -> String {
+    let after_scheme = url.split("://").nth(1).unwrap_or(url);
+    after_scheme
+        .split(['/', '?'])
+        .next()
+        .unwrap_or(after_scheme)
+        .to_string()
+}
+
 /// Function to download data using reqwest
 fn download_with_reqwest(
     url: &str,
@@ -83,7 +93,11 @@ fn download_with_reqwest(
 ) -> Result<String, Box<dyn std::error::Error>> {
     let client: Client = ClientBuilder::new()
         .timeout(Duration::from_secs(timeout_secs))
-        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "Arnis/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/louis-e/arnis)"
+        ))
         .build()?;
 
     let response: Result<reqwest::blocking::Response, reqwest::Error> =
@@ -120,13 +134,9 @@ fn download_with_reqwest(
                 eprintln!("{}", format!("Error! {msg}").red().bold());
                 Err(msg.into())
             } else {
-                #[cfg(feature = "gui")]
-                send_log(
-                    LogLevel::Error,
-                    &format!("Request error in download_with_reqwest: {e}"),
-                );
-                eprintln!("{}", format!("Error! {e:.52}").red().bold());
-                Err(format!("{e:.52}").into())
+                let short: String = e.to_string().chars().take(52).collect();
+                eprintln!("{}", format!("Error! {short}").red().bold());
+                Err(short.into())
             }
         }
     }
@@ -311,6 +321,7 @@ pub fn fetch_data_from_overpass(
 
         let total = request_plan.len();
         let mut last_error: Option<Box<dyn std::error::Error>> = None;
+        let mut attempted_hosts: Vec<String> = Vec::new();
         let response: String = 'server_loop: {
             for (i, (url, kind)) in request_plan.iter().enumerate() {
                 let timeout_secs = if url.contains("private.coffee") {
@@ -332,6 +343,7 @@ pub fn fetch_data_from_overpass(
                         if download_method != "requests" {
                             eprintln!("Request failed: {error}");
                         }
+                        attempted_hosts.push(url_host(url));
                         last_error = Some(error);
 
                         if i + 1 < total {
@@ -346,6 +358,22 @@ pub fn fetch_data_from_overpass(
                 }
             }
             // All servers exhausted
+            #[cfg(feature = "gui")]
+            {
+                let err_summary = last_error
+                    .as_ref()
+                    .map(|e| e.to_string().chars().take(120).collect::<String>())
+                    .unwrap_or_else(|| "unknown".to_string());
+                send_log(
+                    LogLevel::Error,
+                    &format!(
+                        "Overpass fetch failed on all {} providers ({}); last error: {}",
+                        attempted_hosts.len(),
+                        attempted_hosts.join(", "),
+                        err_summary,
+                    ),
+                );
+            }
             return Err(last_error.unwrap_or_else(|| "All servers failed".into()));
         };
 
@@ -363,35 +391,45 @@ pub fn fetch_data_from_overpass(
         let data: OsmData = OsmData::deserialize(&mut deserializer)?;
 
         if data.is_empty() {
+            // Distinguish a real server error (memory/runtime) from a benign
+            // "this bbox has no mapped objects" response. The former still
+            // aborts; the latter is allowed because Arnis can generate
+            // nature/terrain on its own from elevation + land-cover data,
+            // and unmapped natural areas are common on OSM.
             if let Some(remark) = data.remark.as_deref() {
-                // Check if the remark mentions memory or other runtime errors
                 if remark.contains("runtime error") && remark.contains("out of memory") {
                     eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
                     emit_gui_error("Try using a smaller area.");
+
+                    if debug {
+                        println!("Additional debug information: {data:?}");
+                    }
+
+                    if !is_running_with_gui() {
+                        std::process::exit(1);
+                    } else {
+                        return Err("Data fetch failed".into());
+                    }
                 } else {
-                    // Handle other Overpass API errors if present in the remark field
-                    eprintln!("{}", format!("Error! API returned: {remark}").red().bold());
-                    emit_gui_error(&format!("API returned: {remark}"));
+                    // Non-fatal upstream remark (e.g. timeout that still returned an empty body).
+                    eprintln!(
+                        "{}",
+                        format!("Warning: API returned: {remark}. Continuing without OSM data.")
+                            .yellow()
+                            .bold()
+                    );
                 }
             } else {
-                // General case for when there are no elements and no specific remark
                 eprintln!(
                     "{}",
-                    "Error! API returned no data. Please try again!"
-                        .red()
+                    "Warning: OSM API returned no data for this area. Continuing with terrain/nature only."
+                        .yellow()
                         .bold()
                 );
-                emit_gui_error("API returned no data. Please try again!");
             }
 
             if debug {
                 println!("Additional debug information: {data:?}");
-            }
-
-            if !is_running_with_gui() {
-                std::process::exit(1);
-            } else {
-                return Err("Data fetch failed".into());
             }
         }
 
@@ -405,7 +443,11 @@ pub fn fetch_data_from_overpass(
 pub fn fetch_area_name(lat: f64, lon: f64) -> Result<Option<String>, Box<dyn std::error::Error>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(20))
-        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "Arnis/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/louis-e/arnis)"
+        ))
         .build()?;
 
     let url = format!("https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat={lat}&lon={lon}&addressdetails=1");

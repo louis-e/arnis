@@ -188,7 +188,11 @@ fn fetch_overture_buildings_inner(
 ) -> Result<Vec<ProcessedElement>, Box<dyn std::error::Error>> {
     let client = Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
-        .user_agent(concat!("arnis/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!(
+            "Arnis/",
+            env!("CARGO_PKG_VERSION"),
+            " (+https://github.com/louis-e/arnis)"
+        ))
         .build()?;
 
     emit_gui_progress_update(14.5, "Fetching Overture Maps data...");

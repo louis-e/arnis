@@ -110,6 +110,34 @@ const ACACIA_LEAVES_FILL: [(Coord, Coord); 5] = [
     ((0, 8, 0), (0, 9, 0)),
 ];
 
+/// Cherry: medium trunk with a wide, rounded canopy of pink blossoms.
+const CHERRY_LEAVES_FILL: [(Coord, Coord); 5] = [
+    ((-1, 4, 0), (-1, 9, 0)),
+    ((1, 4, 0), (1, 9, 0)),
+    ((0, 4, -1), (0, 9, -1)),
+    ((0, 4, 1), (0, 9, 1)),
+    ((0, 9, 0), (0, 10, 0)),
+];
+
+/// Tall oak: extra-tall trunk with a smaller crown sitting near the top.
+const TALL_OAK_LEAVES_FILL: [(Coord, Coord); 5] = [
+    ((-1, 8, 0), (-1, 12, 0)),
+    ((1, 8, 0), (1, 12, 0)),
+    ((0, 8, -1), (0, 12, -1)),
+    ((0, 8, 1), (0, 12, 1)),
+    ((0, 12, 0), (0, 13, 0)),
+];
+
+/// Pine: very tall narrow conifer using spruce blocks.
+const PINE_LEAVES_FILL: [(Coord, Coord); 6] = [
+    ((-1, 5, 0), (-1, 12, 0)),
+    ((0, 5, -1), (0, 12, -1)),
+    ((1, 5, 0), (1, 12, 0)),
+    ((0, 5, -1), (0, 12, -1)),
+    ((0, 5, 1), (0, 12, 1)),
+    ((0, 13, 0), (0, 13, 0)),
+];
+
 //////////////////////////////////////////////////
 
 /// Maximum horizontal canopy radius used by the predefined tree patterns.
@@ -134,6 +162,9 @@ pub enum TreeType {
     DarkOak,
     Jungle,
     Acacia,
+    Cherry,
+    TallOak,
+    Pine,
 }
 
 // TODO what should be moved in, and what should be referenced?
@@ -183,13 +214,16 @@ impl Tree<'_> {
         // The element_id of 0 is used as a salt for tree-specific randomness
         let mut rng = coord_rng(x, z, 0);
 
-        let tree_type = match rng.random_range(1..=10) {
+        let tree_type = match rng.random_range(1..=13) {
             1..=3 => TreeType::Oak,
             4..=5 => TreeType::Spruce,
             6..=7 => TreeType::Birch,
             8 => TreeType::DarkOak,
             9 => TreeType::Jungle,
             10 => TreeType::Acacia,
+            11 => TreeType::Cherry,
+            12 => TreeType::TallOak,
+            13 => TreeType::Pine,
             _ => unreachable!(),
         };
 
@@ -392,6 +426,34 @@ impl Tree<'_> {
                     (5..=7).rev().collect(),
                     (6..=7).rev().collect(),
                 ],
+            },
+
+            TreeType::Cherry => Self {
+                log_block: CHERRY_LOG,
+                log_height: 7,
+                leaves_block: CHERRY_LEAVES,
+                leaves_fill: &CHERRY_LEAVES_FILL,
+                round_ranges: [
+                    (4..=9).rev().collect(),
+                    (5..=8).rev().collect(),
+                    (6..=7).rev().collect(),
+                ],
+            },
+
+            TreeType::TallOak => Self {
+                log_block: OAK_LOG,
+                log_height: 11,
+                leaves_block: OAK_LEAVES,
+                leaves_fill: &TALL_OAK_LEAVES_FILL,
+                round_ranges: [(8..=12).rev().collect(), (9..=11).rev().collect(), vec![10]],
+            },
+
+            TreeType::Pine => Self {
+                log_block: SPRUCE_LOG,
+                log_height: 12,
+                leaves_block: SPRUCE_LEAVES,
+                leaves_fill: &PINE_LEAVES_FILL,
+                round_ranges: [vec![11, 9, 7, 5], vec![8, 5], vec![]],
             },
         } // match
     } // fn get_tree

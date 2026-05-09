@@ -631,49 +631,74 @@ button:hover {
   background-color: rgba(254, 204, 68, 0.5);
 }
 
-/* Arnis-styled tooltip box */
-.tooltip-icon::after {
-  content: attr(data-tooltip);
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 8px);
-  transform: translateX(-50%);
+/* Arnis-styled tooltip box.
+   The tooltip element is a single `<div class="global-tooltip">`
+   appended to `<body>` by `initTooltips()` in main.js, NOT a
+   `::after` on each icon. That lets it escape the
+   `.settings-scrollable` container's overflow clip, so tooltips on
+   icons near the panel's top or right edge extend past the panel
+   rather than being cut off. JS positions the box via
+   `getBoundingClientRect` on hover and flips it above/below the
+   icon based on available viewport space. */
+.global-tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
+  max-width: 240px;
+  padding: 6px 14px;
   background-color: #2a2a2a;
   color: #fecc44;
-  padding: 6px 14px;
+  border: 1px solid #fecc44;
   border-radius: 6px;
   font-size: 12px;
   font-weight: normal;
-  white-space: nowrap;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  text-align: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  border: 1px solid #fecc44;
   opacity: 0;
   visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
-  z-index: 1000;
+  transition: opacity 0.15s ease, visibility 0.15s ease;
+  /* Must exceed `.modal`'s z-index (20001). The tooltip element is a
+     body-level sibling of the settings modal, so without this the
+     modal overlay paints on top and the tooltip stays invisible even
+     though it's correctly positioned. */
+  z-index: 30000;
   pointer-events: none;
 }
 
-/* Tooltip arrow */
-.tooltip-icon::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: calc(100% + 2px);
-  transform: translateX(-50%);
-  border: 6px solid transparent;
-  border-top-color: #fecc44;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.2s ease, visibility 0.2s ease;
-  z-index: 1001;
-  pointer-events: none;
-}
-
-.tooltip-icon:hover::after,
-.tooltip-icon:hover::before {
+.global-tooltip.is-visible {
   opacity: 1;
   visibility: visible;
+}
+
+/* Arrow. Positioned via JS (`left` per icon center), flipped to the
+   opposite edge when the tooltip opens below the icon. */
+.global-tooltip-arrow {
+  position: absolute;
+  width: 0;
+  height: 0;
+  border: 6px solid transparent;
+  /* Default: arrow on the bottom edge, pointing down toward an icon
+     that sits below the tooltip. */
+  bottom: -12px;
+  border-top-color: #fecc44;
+  transform: translateX(-50%);
+}
+
+.global-tooltip.flipped .global-tooltip-arrow {
+  /* When flipped below the icon, arrow points up at the icon from the
+     top edge of the tooltip. */
+  bottom: auto;
+  top: -12px;
+  border-top-color: transparent;
+  border-bottom-color: #fecc44;
+}
+
+.global-tooltip-body {
+  position: relative;
 }
 
 .settings-control {
@@ -750,6 +775,53 @@ button:hover {
   width: 14px;
   height: 14px;
   fill: #fecc44;
+}
+
+/* Clear-cache button: compact golden-outline button that sits in the
+   settings row's standard right-aligned `.settings-control` slot, no
+   extra wrapper element. Success/error feedback is expressed by a
+   brief class-driven background flash rather than a separate status
+   label — keeps the row visually consistent with the checkbox and
+   slider rows next to it. */
+.clear-cache-button {
+  background: none;
+  border: 1px solid #fecc44;
+  border-radius: 4px;
+  color: #fecc44;
+  padding: 2px 14px;
+  margin: 0;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 0.85em;
+  /* Include `color` in the transition so the success flash fades both
+     the background and foreground back to default together, instead of
+     one property snapping. */
+  transition: background 0.4s ease, color 0.4s ease,
+              border-color 0.4s ease, opacity 0.2s ease;
+}
+
+.clear-cache-button:hover:not(:disabled):not(.is-success):not(.is-error) {
+  background: rgba(254, 204, 68, 0.15);
+}
+
+.clear-cache-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Green flash on success — background + text reinforce the confirmation
+   without touching layout. The button stays the same size so the row
+   doesn't reflow between idle / confirming states. */
+.clear-cache-button.is-success {
+  background: rgba(76, 175, 80, 0.85);
+  color: #ffffff;
+  border-color: #4caf50;
+}
+
+.clear-cache-button.is-error {
+  background: rgba(207, 102, 121, 0.85);
+  color: #ffffff;
+  border-color: #cf6679;
 }
 
 .license-button-row {

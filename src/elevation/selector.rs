@@ -1,7 +1,10 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
-use crate::elevation::providers::regional::*;
+use crate::elevation::providers::ign_france::IgnFrance;
+use crate::elevation::providers::ign_spain::IgnSpain;
+use crate::elevation::providers::regional::JapanGsi;
+use crate::elevation::providers::usgs_3dep::Usgs3dep;
 
 /// Check if two EPSG:4326 bounding boxes overlap.
 pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
@@ -15,7 +18,17 @@ pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
 ///
 /// Iterates providers ordered by resolution (finest first), returns the first
 /// whose coverage overlaps the user's bbox. Falls back to AWS Terrain Tiles.
-pub fn select_provider(bbox: &LLBBox) -> Box<dyn ElevationProvider> {
+///
+/// When `force_aws` is true the regional providers are skipped entirely and
+/// AWS Terrain Tiles is used regardless of coverage. Surfaced as the
+/// `--aws-only-elevation` CLI flag / "Fast elevation (AWS only)" GUI toggle
+/// for users who'd rather have a faster pipeline at the cost of detail.
+pub fn select_provider(bbox: &LLBBox, force_aws: bool) -> Box<dyn ElevationProvider> {
+    if force_aws {
+        println!("Using AWS Terrain Tiles only (high-res providers disabled, ~30m resolution)");
+        return Box::new(AwsTerrain);
+    }
+
     let candidates: Vec<Box<dyn ElevationProvider>> = build_provider_list();
 
     for provider in candidates {
@@ -75,7 +88,15 @@ mod tests {
     fn test_select_provider_fallback() {
         // Bbox outside all regional coverage should fall back to AWS
         let bbox = LLBBox::new(-33.86, 151.20, -33.85, 151.22).unwrap();
-        let provider = select_provider(&bbox);
+        let provider = select_provider(&bbox, false);
+        assert_eq!(provider.name(), "aws");
+    }
+
+    #[test]
+    fn test_select_provider_force_aws() {
+        // Even bboxes inside regional coverage must come back as AWS when forced
+        let bbox = LLBBox::new(40.0, -100.0, 40.01, -99.99).unwrap();
+        let provider = select_provider(&bbox, true);
         assert_eq!(provider.name(), "aws");
     }
 }
