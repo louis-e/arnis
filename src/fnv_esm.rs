@@ -858,8 +858,15 @@ fn build_cell_record(
     cell_x: i32,
     cell_y: i32,
     water_height_game: Option<f32>,
+    edid: Option<&str>,
 ) -> Vec<u8> {
     let mut data = Vec::new();
+    // EDID must be the first subrecord if present; enables `coc <edid>` console command.
+    if let Some(id) = edid {
+        let mut edid_bytes = id.as_bytes().to_vec();
+        edid_bytes.push(0); // null terminator
+        data.extend(subrecord(b"EDID", &edid_bytes));
+    }
     // DATA flag 0x02 = HasWater — required for FNV to render water in this exterior cell.
     let cell_flags: u8 = if water_height_game.is_some() { 0x02 } else { 0x00 };
     data.extend(subrecord(b"DATA", &[cell_flags]));
@@ -1840,30 +1847,38 @@ pub fn generate_fnv_esm(
         commercial_count: u32,
     }
 
+    // Reserve one FormID for the single COC teleport marker in cell (0,0).
+    let coc_fid = next_fid;
+    next_fid += 1;
+
     let mut cells: Vec<CellInfo> = Vec::with_capacity(num_cols * num_rows);
-    if !terrain_only {
-        print!("  Placing objects");
-        for row in 0..num_rows {
-            for col in 0..num_cols {
-                print!(".");
-                io::stdout().flush().unwrap();
-                let cell_x = col as i32 - x_offset;
-                // Arnis Z increases southward; FNV Y increases northward.
-                let cell_y = (num_rows - 1 - row) as i32 - y_offset;
-                let cell_fid = next_fid;
-                let land_fid = next_fid + 1;
-                next_fid += 2;
+    if terrain_only {
+        println!("  Skipping object placement (terrain only)");
+    }
+    print!("  Building cells");
+    for row in 0..num_rows {
+        for col in 0..num_cols {
+            print!(".");
+            io::stdout().flush().unwrap();
+            let cell_x = col as i32 - x_offset;
+            // Arnis Z increases southward; FNV Y increases northward.
+            let cell_y = (num_rows - 1 - row) as i32 - y_offset;
+            let cell_fid = next_fid;
+            let land_fid = next_fid + 1;
+            next_fid += 2;
 
-                let heights =
-                    sample_heights(ground, col as i32, row as i32, global_min, effective_scale);
-                let (vhgt_offset, deltas) = encode_vhgt(&heights);
-                let vnml = compute_vnml(&heights);
-                let quads = compute_quad_textures(ground, col, row, &heights, default_texture, road_grid.as_ref());
+            let heights =
+                sample_heights(ground, col as i32, row as i32, global_min, effective_scale);
+            let (vhgt_offset, deltas) = encode_vhgt(&heights);
+            let vnml = compute_vnml(&heights);
+            let quads = compute_quad_textures(ground, col, row, &heights, default_texture, road_grid.as_ref());
 
+            let (house_refs, house_count, commercial_refs, commercial_count,
+                 lamp_refs, lamp_count, tree_refs, tree_count,
+                 rock_refs, rock_count, shrub_refs, shrub_count) = if !terrain_only {
                 // Shared occupancy grid for this cell.  Buildings are placed first so
                 // they take priority; vegetation fills in the remaining space.
                 let mut occ = OccupancyGrid::new(col as i32, row as i32);
-
                 let (house_refs, house_count) = place_house_refs(
                     roads,
                     road_grid.as_ref(),
@@ -1880,7 +1895,6 @@ pub fn generate_fnv_esm(
                     &mut next_fid,
                     &mut occ,
                 );
-
                 let (commercial_refs, commercial_count) = place_commercial_refs(
                     roads,
                     road_grid.as_ref(),
@@ -1897,7 +1911,6 @@ pub fn generate_fnv_esm(
                     &mut next_fid,
                     &mut occ,
                 );
-
                 let (lamp_refs, lamp_count) = place_lamp_refs(
                     roads,
                     road_half_width,
@@ -1913,7 +1926,6 @@ pub fn generate_fnv_esm(
                     &mut next_fid,
                     &mut occ,
                 );
-
                 let (tree_refs, tree_count) = place_tree_refs(
                     ground,
                     col as i32,
@@ -1926,7 +1938,6 @@ pub fn generate_fnv_esm(
                     &mut next_fid,
                     &mut occ,
                 );
-
                 let (rock_refs, rock_count) = place_rock_refs(
                     ground,
                     col as i32,
@@ -1939,7 +1950,6 @@ pub fn generate_fnv_esm(
                     &mut next_fid,
                     &mut occ,
                 );
-
                 let (shrub_refs, shrub_count) = place_shrub_refs(
                     ground,
                     col as i32,
@@ -1952,36 +1962,39 @@ pub fn generate_fnv_esm(
                     &mut next_fid,
                     &mut occ,
                 );
+                (house_refs, house_count, commercial_refs, commercial_count,
+                 lamp_refs, lamp_count, tree_refs, tree_count,
+                 rock_refs, rock_count, shrub_refs, shrub_count)
+            } else {
+                (Vec::new(), 0, Vec::new(), 0, Vec::new(), 0, Vec::new(), 0, Vec::new(), 0, Vec::new(), 0)
+            };
 
-                cells.push(CellInfo {
-                    cell_x,
-                    cell_y,
-                    cell_fid,
-                    land_fid,
-                    vhgt_offset,
-                    deltas,
-                    vnml,
-                    water_height_game: effective_water_level,
-                    quads,
-                    tree_refs,
-                    tree_count,
-                    rock_refs,
-                    rock_count,
-                    shrub_refs,
-                    shrub_count,
-                    lamp_refs,
-                    lamp_count,
-                    house_refs,
-                    house_count,
-                    commercial_refs,
-                    commercial_count,
-                });
-            }
+            cells.push(CellInfo {
+                cell_x,
+                cell_y,
+                cell_fid,
+                land_fid,
+                vhgt_offset,
+                deltas,
+                vnml,
+                water_height_game: effective_water_level,
+                quads,
+                tree_refs,
+                tree_count,
+                rock_refs,
+                rock_count,
+                shrub_refs,
+                shrub_count,
+                lamp_refs,
+                lamp_count,
+                house_refs,
+                house_count,
+                commercial_refs,
+                commercial_count,
+            });
         }
-        println!("Done!");
-    } else {
-        println!("Skipping object placement");
     }
+    println!("Done!");
 
     // Group cells into exterior blocks (div_euclid 8) and subblocks (div_euclid 2).
 
@@ -2011,11 +2024,17 @@ pub fn generate_fnv_esm(
             for &idx in cell_indices {
                 let cell = &cells[idx];
 
+                let coc_edid = if cell.cell_x == 0 && cell.cell_y == 0 {
+                    Some("arnisWorldspace")
+                } else {
+                    None
+                };
                 let cell_rec = build_cell_record(
                     cell.cell_fid,
                     cell.cell_x,
                     cell.cell_y,
                     cell.water_height_game,
+                    coc_edid,
                 );
                 let land_rec = build_land_record(
                     cell.land_fid,
@@ -2037,6 +2056,14 @@ pub fn generate_fnv_esm(
                 temp_children_content.extend_from_slice(&cell.lamp_refs);
                 temp_children_content.extend_from_slice(&cell.house_refs);
                 temp_children_content.extend_from_slice(&cell.commercial_refs);
+                // Single COC teleport marker in cell (0,0) — present in all modes.
+                if cell.cell_x == 0 && cell.cell_y == 0 {
+                    let arnis_x = x_offset * BLOCKS_PER_CELL;
+                    let arnis_z = (num_rows as i32 - 1 - y_offset) * BLOCKS_PER_CELL;
+                    let raw_h = ground.level(XZPoint::new(arnis_x, arnis_z));
+                    let coc_z = ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+                    temp_children_content.extend(build_tree_refr(coc_fid, 0x0000_0032, 1.0, 1.0, coc_z, 0.0));
+                }
 
                 let mut tmp_grup = Vec::new();
                 push_grup(&mut tmp_grup, cell_label, 9, &temp_children_content);
@@ -2082,7 +2109,7 @@ pub fn generate_fnv_esm(
     // reflect our content size.
     let mut tes4 = SAMPLEESM_BYTES[..SAMPLEESM_TES4_LEN].to_vec();
 
-    let total_refrs: u32 = cells.iter().map(|c| c.tree_count + c.rock_count + c.shrub_count + c.lamp_count + c.house_count + c.commercial_count).sum();
+    let total_refrs: u32 = cells.iter().map(|c| c.tree_count + c.rock_count + c.shrub_count + c.lamp_count + c.house_count + c.commercial_count).sum::<u32>() + 1; // +1 for COC marker in cell (0,0)
     let num_records = 1u32 + cells.len() as u32 * 2 + total_refrs; // WRLD + CELL + LAND + REFRs
     tes4[TES4_NUM_RECORDS_OFFSET..TES4_NUM_RECORDS_OFFSET + 4]
         .copy_from_slice(&num_records.to_le_bytes());
