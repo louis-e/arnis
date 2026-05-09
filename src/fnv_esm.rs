@@ -503,8 +503,9 @@ fn sample_heights(
 
     // ── Sample padded grid ──────────────────────────────────────────────────
     let mut grid = [[0i32; PSIZE]; PSIZE];
-    for pr in 0..PSIZE {
-        for pc in 0..PSIZE {
+      #[allow(clippy::needless_range_loop)]
+      for pr in 0..PSIZE {
+         for pc in 0..PSIZE {
             // Map padded indices back to arnis world coordinates.
             // pr=SMOOTH_PAD corresponds to grid row 0 (south edge, large arnis z).
             let x = cell_col * BLOCKS_PER_CELL + pc as i32 - SMOOTH_PAD as i32;
@@ -736,7 +737,7 @@ fn compute_quad_textures(
                 let ax = cell_col as i32 * BLOCKS_PER_CELL + land_col as i32;
                 let az = cell_row as i32 * BLOCKS_PER_CELL + (VERTS - 1 - land_row) as i32;
 
-                let tex = if road_grid.map_or(false, |rg| rg.is_road(ax, az)) {
+                let tex = if road_grid.is_some_and(|rg| rg.is_road(ax, az)) {
                     TEXTURE_ASPHALT
                 } else if slope_at(heights, land_row, land_col) >= SLOPE_ROCKY {
                     TEXTURE_DIRT
@@ -1014,11 +1015,13 @@ fn build_tree_refr(form_id: u32, base_fid: u32, x: f32, y: f32, z: f32, rot_z: f
 /// intervals. At each grid point, samples the land-cover class and places:
 ///   - LC_TREE_COVER → Cedar or Aspen (random 50/50, ~60% density)
 ///   - LC_BARE       → Joshua Tree or Palm (random 50/50, ~20% density)
+///
 /// A deterministic per-coordinate RNG decides placement and adds positional/
 /// rotational jitter.
 ///
 /// Returns the concatenated REFR byte data and the number of records written.
 /// `next_fid` is advanced by the returned count.
+#[allow(clippy::too_many_arguments)]
 fn place_tree_refs(
     ground: &Ground,
     cell_col: i32,
@@ -1086,7 +1089,7 @@ fn place_tree_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                    if water_height_game.is_none_or(|wl| game_z >= wl)
                         && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_TREE)
                     {
                         refs.extend(build_tree_refr(
@@ -1113,6 +1116,7 @@ fn place_tree_refs(
 /// `LC_SHRUBLAND` at a reduced density (rocky outcrops among brush).
 /// Rock type is chosen by weighted RNG — smaller variants are more common.
 /// All four variants look fine from any angle, so rotation is fully random.
+#[allow(clippy::too_many_arguments)]
 fn place_rock_refs(
     ground: &Ground,
     cell_col: i32,
@@ -1174,7 +1178,7 @@ fn place_rock_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                    if water_height_game.is_none_or(|wl| game_z >= wl)
                         && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_ROCK)
                     {
                         refs.extend(build_tree_refr(
@@ -1199,6 +1203,7 @@ fn place_rock_refs(
 ///
 /// Dense in `LC_SHRUBLAND`, sparser in `LC_GRASSLAND`.  Rotation is fully
 /// random — the asset looks fine from any angle.
+#[allow(clippy::too_many_arguments)]
 fn place_shrub_refs(
     ground: &Ground,
     cell_col: i32,
@@ -1250,7 +1255,7 @@ fn place_shrub_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                    if water_height_game.is_none_or(|wl| game_z >= wl)
                         && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_SHRUB)
                     {
                         refs.extend(build_tree_refr(
@@ -1290,6 +1295,7 @@ fn place_shrub_refs(
 ///   toward_fnv = (side × sdz/len,  side × sdx/len)   [arnis Z → FNV −Y]
 ///   House1 (default front = −X): rot_z = atan2(−toward_y, −toward_x)
 ///   House2/3 (default front = −Y): rot_z = atan2( toward_x, −toward_y)
+#[allow(clippy::too_many_arguments)]
 fn place_house_refs(
     roads: &[(u8, Vec<(i32, i32)>)],
     road_grid: Option<&RoadGrid>,
@@ -1365,7 +1371,7 @@ fn place_house_refs(
                     }
 
                     // Skip positions on a road surface.
-                    if road_grid.map_or(false, |rg| rg.is_road(px, pz)) {
+                    if road_grid.is_some_and(|rg| rg.is_road(px, pz)) {
                         continue;
                     }
 
@@ -1376,7 +1382,7 @@ fn place_house_refs(
                     }
 
                     // Scale-dependent density thinning.
-                    let mut rng = coord_rng(px, pz, 0x484F555345_000000u64);
+                    let mut rng = coord_rng(px, pz, 0x484F_5553_4500_0000_u64);
                     if !rng.random_bool(keep_prob) {
                         continue;
                     }
@@ -1408,7 +1414,7 @@ fn place_house_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                    if water_height_game.is_none_or(|wl| game_z >= wl)
                         && occ.is_clear(px, pz, OCC_RADIUS_BUILDING)
                     {
                         refs.extend(build_tree_refr(
@@ -1434,6 +1440,7 @@ fn place_house_refs(
 /// Rotation per model default-front axis:
 ///   COMM_2STORY / COMM_4STORY (entry −Y): rot_z = atan2( toward_x, −toward_y)
 ///   COMM_1STORY               (entry +Y): rot_z = atan2(−toward_x,  toward_y)
+#[allow(clippy::too_many_arguments)]
 fn place_commercial_refs(
     roads: &[(u8, Vec<(i32, i32)>)],
     road_grid: Option<&RoadGrid>,
@@ -1506,7 +1513,7 @@ fn place_commercial_refs(
                         continue;
                     }
 
-                    if road_grid.map_or(false, |rg| rg.is_road(px, pz)) {
+                    if road_grid.is_some_and(|rg| rg.is_road(px, pz)) {
                         continue;
                     }
 
@@ -1549,7 +1556,7 @@ fn place_commercial_refs(
                     let game_z =
                         ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-                    if water_height_game.map_or(true, |wl| game_z >= wl)
+                    if water_height_game.is_none_or(|wl| game_z >= wl)
                         && occ.is_clear(px, pz, OCC_RADIUS_BUILDING)
                     {
                         refs.extend(build_tree_refr(
@@ -1579,6 +1586,7 @@ fn place_commercial_refs(
 /// centreline by `road_half_width + 2` blocks (just outside the road edge).
 /// Posts falling outside this cell's arnis bounds are skipped, so each cell
 /// independently produces only its own posts without coordination overhead.
+#[allow(clippy::too_many_arguments)]
 fn place_lamp_refs(
     roads: &[(u8, Vec<(i32, i32)>)],
     road_half_width: i32,
@@ -1633,7 +1641,7 @@ fn place_lamp_refs(
         let raw_h = ground.level(XZPoint::new(px, pz));
         let game_z = ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
-        if water_height_game.map_or(true, |wl| game_z >= wl) {
+        if water_height_game.is_none_or(|wl| game_z >= wl) {
             refs.extend(build_tree_refr(
                 *next_fid,
                 LAMP_POST_FID,
@@ -1717,6 +1725,7 @@ pub fn is_dir_writeable(test_dir: &Path) -> bool {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn generate_fnv_esm(
     ground: &Ground,
     bbox: &LLBBox,
@@ -2098,6 +2107,7 @@ pub fn generate_fnv_esm(
 
     // Group cells into exterior blocks (div_euclid 8) and subblocks (div_euclid 2).
 
+    #[allow(clippy::type_complexity)]
     let mut blocks: BTreeMap<(i32, i32), BTreeMap<(i32, i32), Vec<usize>>> = BTreeMap::new();
     for (idx, cell) in cells.iter().enumerate() {
         let bx = cell.cell_x.div_euclid(8);
