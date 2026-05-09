@@ -116,8 +116,8 @@ fn run_cli() {
     if args.fnv_esm {
         use coordinate_system::transformation::CoordTransformer;
 
-        let (_transformer, xzbbox) =
-            CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale).unwrap_or_else(|e| {
+        let (_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+            .unwrap_or_else(|e| {
                 eprintln!("{} {}", "Error:".red().bold(), e);
                 std::process::exit(1);
             });
@@ -132,7 +132,7 @@ fn run_cli() {
             true, // fetch land cover for terrain texture painting
             args.disable_height_limit,
             512,
-            false
+            false,
         );
 
         // Fetch OSM data for road network — used to paint asphalt texture on roads.
@@ -191,7 +191,7 @@ fn run_cli() {
             args.fnv_water_level,
             args.scale,
             &road_polylines,
-            false
+            false,
         ) {
             eprintln!("{} {}", "Error:".red().bold(), e);
             std::process::exit(1);

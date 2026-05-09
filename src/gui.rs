@@ -885,30 +885,33 @@ fn gui_start_generation(
                     }
                 };
 
-                let output_dir = if world_path.as_os_str().is_empty() && fnv_esm::is_dir_writeable(&world_path) {
+                let output_dir = if world_path.as_os_str().is_empty()
+                    && fnv_esm::is_dir_writeable(&world_path)
+                {
                     // Output dir is empty, try using  default "Data" folder.
                     if PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR).is_dir() {
                         PathBuf::from(fnv_esm::DEFAULT_OUTPUT_DIR)
-                    }
-                    else {
+                    } else {
                         // Data folder does not exist, use current directory
                         std::env::current_exe()
-                        .ok()
-                        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
-                        .unwrap_or_else(|| std::path::PathBuf::from("."))
+                            .ok()
+                            .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                            .unwrap_or_else(|| std::path::PathBuf::from("."))
                     }
                 } else {
                     world_path.clone()
                 };
 
-                eprintln!("[FNV] selected_world={:?}  output_dir={:?}", world_path, output_dir);
+                eprintln!(
+                    "[FNV] selected_world={:?}  output_dir={:?}",
+                    world_path, output_dir
+                );
 
                 let (_transformer, xzbbox) =
                     match CoordTransformer::llbbox_to_xzbbox(&bbox, world_scale) {
                         Ok(result) => result,
                         Err(e) => {
-                            let error_msg =
-                                format!("Failed to create coordinate transformer: {e}");
+                            let error_msg = format!("Failed to create coordinate transformer: {e}");
                             eprintln!("{error_msg}");
                             progress::emit_gui_error(&error_msg);
                             return Err(error_msg);
@@ -946,39 +949,39 @@ fn gui_start_generation(
                 // Fetch OSM road network for asphalt texture painting.
                 // Failure is non-fatal; roads are simply omitted.
                 emit_gui_progress_update(10.0, "Fetching road data...");
-                let road_polylines: Vec<(u8, Vec<(i32, i32)>)> = match retrieve_data::fetch_data_from_overpass(
-                    bbox,
-                    false,
-                    "requests",
-                    None,
-                ) {
-                    Ok(raw_data) => {
-                        let (elements, _) =
-                            crate::osm_parser::parse_osm_data(raw_data, bbox, world_scale, false);
-                        elements
-                            .iter()
-                            .filter_map(|e| {
-                                if let crate::osm_parser::ProcessedElement::Way(way) = e {
-                                    if let Some(highway) = way.tags.get("highway") {
-                                        let priority = crate::fnv_esm::fnv_road_type(highway);
-                                        if priority > 0 {
-                                            let pts: Vec<(i32, i32)> =
-                                                way.nodes.iter().map(|n| (n.x, n.z)).collect();
-                                            if pts.len() >= 2 {
-                                                return Some((priority, pts));
+                let road_polylines: Vec<(u8, Vec<(i32, i32)>)> =
+                    match retrieve_data::fetch_data_from_overpass(bbox, false, "requests", None) {
+                        Ok(raw_data) => {
+                            let (elements, _) = crate::osm_parser::parse_osm_data(
+                                raw_data,
+                                bbox,
+                                world_scale,
+                                false,
+                            );
+                            elements
+                                .iter()
+                                .filter_map(|e| {
+                                    if let crate::osm_parser::ProcessedElement::Way(way) = e {
+                                        if let Some(highway) = way.tags.get("highway") {
+                                            let priority = crate::fnv_esm::fnv_road_type(highway);
+                                            if priority > 0 {
+                                                let pts: Vec<(i32, i32)> =
+                                                    way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                                                if pts.len() >= 2 {
+                                                    return Some((priority, pts));
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                None
-                            })
-                            .collect()
-                    }
-                    Err(e) => {
-                        println!("Road data unavailable ({}); roads will not be painted.", e);
-                        Vec::new()
-                    }
-                };
+                                    None
+                                })
+                                .collect()
+                        }
+                        Err(e) => {
+                            println!("Road data unavailable ({}); roads will not be painted.", e);
+                            Vec::new()
+                        }
+                    };
 
                 return match crate::fnv_esm::generate_fnv_esm(
                     &ground,
@@ -988,7 +991,7 @@ fn gui_start_generation(
                     None,
                     world_scale,
                     &road_polylines,
-                    skip_osm_objects
+                    skip_osm_objects,
                 ) {
                     Ok(_) => {
                         let msg = format!("Done! Saved to: {}", output_dir.display());

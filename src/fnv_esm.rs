@@ -7,9 +7,9 @@ use crate::land_cover;
 use colored::Colorize;
 use rand::Rng;
 use std::collections::BTreeMap;
+use std::fs;
 use std::io;
 use std::io::Write;
-use std::fs;
 use std::path::Path;
 
 /// Returns a non-zero priority for driveable highway types that should have
@@ -28,7 +28,8 @@ const BLOCKS_PER_CELL: i32 = 32;
 const VERTS: usize = 33;
 const HEIGHT_MARGIN: i32 = 16;
 const FNV_FORM_VERSION: u16 = 15;
-pub const DEFAULT_OUTPUT_DIR: &str = "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Fallout New Vegas\\Data";
+pub const DEFAULT_OUTPUT_DIR: &str =
+    "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Fallout New Vegas\\Data";
 
 // ---------------------------------------------------------------------------
 // Terrain smoothing
@@ -163,9 +164,9 @@ const TREE_GRID_SPACING: i32 = 8;
 
 // Rock variants — sizes are approximate model extents.
 const ROCK_SMALL_CLUSTER_FID: u32 = 0x00119885; // ~2 m diameter cluster
-const ROCK_TALL_FID: u32 = 0x00119882;           // ~2 m wide × 4 m tall
-const ROCK_MEDIUM_FID: u32 = 0x00119887;         // ~4 m × 8 m
-const ROCK_LARGE_FID: u32 = 0x00119888;          // ~8 m × 16 m
+const ROCK_TALL_FID: u32 = 0x00119882; // ~2 m wide × 4 m tall
+const ROCK_MEDIUM_FID: u32 = 0x00119887; // ~4 m × 8 m
+const ROCK_LARGE_FID: u32 = 0x00119888; // ~8 m × 16 m
 
 /// Grid spacing for rock placement.  Coarser than trees to avoid wall-of-rocks effect.
 const ROCK_GRID_SPACING: i32 = 10;
@@ -305,9 +306,13 @@ fn build_road_grid(
         .enumerate()
         .flat_map(|(i, (_, pl))| {
             let mut ep = Vec::new();
-            if let Some(&(x, z)) = pl.first() { ep.push((x, z, i)); }
+            if let Some(&(x, z)) = pl.first() {
+                ep.push((x, z, i));
+            }
             if pl.len() > 1 {
-                if let Some(&(x, z)) = pl.last() { ep.push((x, z, i)); }
+                if let Some(&(x, z)) = pl.last() {
+                    ep.push((x, z, i));
+                }
             }
             ep
         })
@@ -392,10 +397,10 @@ impl OccupancyGrid {
 /// Exclusion radius (arnis blocks) for each object category.
 /// A placed object claims a square of side `2*radius+1` centred on its position.
 const OCC_RADIUS_BUILDING: i32 = 5; // houses (~5.8 blocks/side) and commercial
-const OCC_RADIUS_TREE: i32 = 3;     // forest / desert trees
-const OCC_RADIUS_SHRUB: i32 = 2;    // junipers
-const OCC_RADIUS_ROCK: i32 = 2;     // rock clusters
-const OCC_RADIUS_LAMP: i32 = 1;     // lamp posts (tiny footprint)
+const OCC_RADIUS_TREE: i32 = 3; // forest / desert trees
+const OCC_RADIUS_SHRUB: i32 = 2; // junipers
+const OCC_RADIUS_ROCK: i32 = 2; // rock clusters
+const OCC_RADIUS_LAMP: i32 = 1; // lamp posts (tiny footprint)
 
 // --- binary helpers ---
 
@@ -503,9 +508,7 @@ fn sample_heights(
             // Map padded indices back to arnis world coordinates.
             // pr=SMOOTH_PAD corresponds to grid row 0 (south edge, large arnis z).
             let x = cell_col * BLOCKS_PER_CELL + pc as i32 - SMOOTH_PAD as i32;
-            let z = cell_row * BLOCKS_PER_CELL
-                + VERTS as i32 - 1
-                - (pr as i32 - SMOOTH_PAD as i32);
+            let z = cell_row * BLOCKS_PER_CELL + VERTS as i32 - 1 - (pr as i32 - SMOOTH_PAD as i32);
             let raw_h = ground.level(XZPoint::new(x, z));
             grid[pr][pc] = (raw_h - global_min) * scale + HEIGHT_MARGIN;
         }
@@ -613,9 +616,8 @@ fn compute_vnml(heights: &[[i32; VERTS]; VERTS]) -> Vec<u8> {
             let nz = SPACING;
             let len = (nx * nx + ny * ny + nz * nz).sqrt();
 
-            let pack = |v: f32| -> u8 {
-                ((v / len * 127.0).round().clamp(-127.0, 127.0) as i8) as u8
-            };
+            let pack =
+                |v: f32| -> u8 { ((v / len * 127.0).round().clamp(-127.0, 127.0) as i8) as u8 };
             vnml.push(pack(nx)); // east
             vnml.push(pack(ny)); // north
             vnml.push(pack(nz)); // up
@@ -633,7 +635,10 @@ fn texture_for_cover(lc: u8) -> u32 {
         land_cover::LC_SNOW_ICE => TEXTURE_SNOW,
         land_cover::LC_BUILT_UP => TEXTURE_ASPHALT,
         land_cover::LC_BARE => TEXTURE_SAND,
-        land_cover::LC_CROPLAND | land_cover::LC_GRASSLAND | land_cover::LC_SHRUBLAND | land_cover::LC_TREE_COVER => TEXTURE_GRASS,
+        land_cover::LC_CROPLAND
+        | land_cover::LC_GRASSLAND
+        | land_cover::LC_SHRUBLAND
+        | land_cover::LC_TREE_COVER => TEXTURE_GRASS,
         _ => TEXTURE_DIRT,
         // _ => TEXTURE_GRASS,
     }
@@ -774,7 +779,9 @@ fn compute_quad_textures(
         })
         .collect();
 
-    quads.try_into().unwrap_or_else(|_| unreachable!("always 4 quadrants"))
+    quads
+        .try_into()
+        .unwrap_or_else(|_| unreachable!("always 4 quadrants"))
 }
 
 // --- record builders ---
@@ -868,7 +875,11 @@ fn build_cell_record(
         data.extend(subrecord(b"EDID", &edid_bytes));
     }
     // DATA flag 0x02 = HasWater — required for FNV to render water in this exterior cell.
-    let cell_flags: u8 = if water_height_game.is_some() { 0x02 } else { 0x00 };
+    let cell_flags: u8 = if water_height_game.is_some() {
+        0x02
+    } else {
+        0x00
+    };
     data.extend(subrecord(b"DATA", &[cell_flags]));
 
     let mut xclc = Vec::new();
@@ -1034,8 +1045,8 @@ fn place_tree_refs(
             let lc = ground.cover_class(XZPoint::new(arnis_x, arnis_z));
             let place_prob = match lc {
                 land_cover::LC_TREE_COVER => 0.6,
-                land_cover::LC_BARE       => 0.2,
-                _                         => 0.0,
+                land_cover::LC_BARE => 0.2,
+                _ => 0.0,
             };
             if place_prob > 0.0 {
                 let mut rng = coord_rng(arnis_x, arnis_z, 0x54524545_00000000);
@@ -1043,10 +1054,18 @@ fn place_tree_refs(
                 if rng.random_bool(place_prob) {
                     let tree_fid = match lc {
                         land_cover::LC_TREE_COVER => {
-                            if rng.random_bool(0.5) { CEDAR_FID } else { ASPEN_FID }
+                            if rng.random_bool(0.5) {
+                                CEDAR_FID
+                            } else {
+                                ASPEN_FID
+                            }
                         }
                         _ => {
-                            if rng.random_bool(0.5) { JOSHUA_TREE_FID } else { PALM_TREE_FID }
+                            if rng.random_bool(0.5) {
+                                JOSHUA_TREE_FID
+                            } else {
+                                PALM_TREE_FID
+                            }
                         }
                     };
 
@@ -1070,7 +1089,9 @@ fn place_tree_refs(
                     if water_height_game.map_or(true, |wl| game_z >= wl)
                         && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_TREE)
                     {
-                        refs.extend(build_tree_refr(*next_fid, tree_fid, game_x, game_y, game_z, rot_z));
+                        refs.extend(build_tree_refr(
+                            *next_fid, tree_fid, game_x, game_y, game_z, rot_z,
+                        ));
                         *next_fid += 1;
                         count += 1;
                         occ.mark(arnis_x, arnis_z, OCC_RADIUS_TREE);
@@ -1132,7 +1153,7 @@ fn place_rock_refs(
                         0..=3 => ROCK_SMALL_CLUSTER_FID,
                         4..=6 => ROCK_TALL_FID,
                         7..=8 => ROCK_MEDIUM_FID,
-                        _     => ROCK_LARGE_FID,
+                        _ => ROCK_LARGE_FID,
                     };
 
                     // Small jitter so rocks don't sit on a perfect grid.
@@ -1156,7 +1177,9 @@ fn place_rock_refs(
                     if water_height_game.map_or(true, |wl| game_z >= wl)
                         && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_ROCK)
                     {
-                        refs.extend(build_tree_refr(*next_fid, rock_fid, game_x, game_y, game_z, rot_z));
+                        refs.extend(build_tree_refr(
+                            *next_fid, rock_fid, game_x, game_y, game_z, rot_z,
+                        ));
                         *next_fid += 1;
                         count += 1;
                         occ.mark(arnis_x, arnis_z, OCC_RADIUS_ROCK);
@@ -1230,7 +1253,14 @@ fn place_shrub_refs(
                     if water_height_game.map_or(true, |wl| game_z >= wl)
                         && occ.is_clear(arnis_x, arnis_z, OCC_RADIUS_SHRUB)
                     {
-                        refs.extend(build_tree_refr(*next_fid, JUNIPER_FID, game_x, game_y, game_z, rot_z));
+                        refs.extend(build_tree_refr(
+                            *next_fid,
+                            JUNIPER_FID,
+                            game_x,
+                            game_y,
+                            game_z,
+                            rot_z,
+                        ));
                         *next_fid += 1;
                         count += 1;
                         occ.mark(arnis_x, arnis_z, OCC_RADIUS_SHRUB);
@@ -1326,8 +1356,10 @@ fn place_house_refs(
                     let px = (cx + side * perp_x * setback).round() as i32;
                     let pz = (cz + side * perp_z * setback).round() as i32;
 
-                    if px < cell_min_ax || px >= cell_max_ax
-                        || pz < cell_min_az || pz >= cell_max_az
+                    if px < cell_min_ax
+                        || px >= cell_max_ax
+                        || pz < cell_min_az
+                        || pz >= cell_max_az
                     {
                         continue;
                     }
@@ -1368,10 +1400,9 @@ fn place_house_refs(
                     let local_col = px - cell_min_ax;
                     let local_row_fnv = BLOCKS_PER_CELL - 1 - (pz - cell_min_az);
 
-                    let game_x = cell_x as f32 * CELL_GAME_UNITS
-                        + local_col as f32 * 128.0 + 64.0;
-                    let game_y = cell_y as f32 * CELL_GAME_UNITS
-                        + local_row_fnv as f32 * 128.0 + 64.0;
+                    let game_x = cell_x as f32 * CELL_GAME_UNITS + local_col as f32 * 128.0 + 64.0;
+                    let game_y =
+                        cell_y as f32 * CELL_GAME_UNITS + local_row_fnv as f32 * 128.0 + 64.0;
 
                     let raw_h = ground.level(XZPoint::new(px, pz));
                     let game_z =
@@ -1467,8 +1498,10 @@ fn place_commercial_refs(
                     let px = (cx + side * perp_x * setback).round() as i32;
                     let pz = (cz + side * perp_z * setback).round() as i32;
 
-                    if px < cell_min_ax || px >= cell_max_ax
-                        || pz < cell_min_az || pz >= cell_max_az
+                    if px < cell_min_ax
+                        || px >= cell_max_ax
+                        || pz < cell_min_az
+                        || pz >= cell_max_az
                     {
                         continue;
                     }
@@ -1508,10 +1541,9 @@ fn place_commercial_refs(
                     let local_col = px - cell_min_ax;
                     let local_row_fnv = BLOCKS_PER_CELL - 1 - (pz - cell_min_az);
 
-                    let game_x = cell_x as f32 * CELL_GAME_UNITS
-                        + local_col as f32 * 128.0 + 64.0;
-                    let game_y = cell_y as f32 * CELL_GAME_UNITS
-                        + local_row_fnv as f32 * 128.0 + 64.0;
+                    let game_x = cell_x as f32 * CELL_GAME_UNITS + local_col as f32 * 128.0 + 64.0;
+                    let game_y =
+                        cell_y as f32 * CELL_GAME_UNITS + local_row_fnv as f32 * 128.0 + 64.0;
 
                     let raw_h = ground.level(XZPoint::new(px, pz));
                     let game_z =
@@ -1521,7 +1553,12 @@ fn place_commercial_refs(
                         && occ.is_clear(px, pz, OCC_RADIUS_BUILDING)
                     {
                         refs.extend(build_tree_refr(
-                            *next_fid, building_fid, game_x, game_y, game_z, rot_z,
+                            *next_fid,
+                            building_fid,
+                            game_x,
+                            game_y,
+                            game_z,
+                            rot_z,
                         ));
                         *next_fid += 1;
                         count += 1;
@@ -1587,17 +1624,24 @@ fn place_lamp_refs(
         }
 
         // Convert arnis (x, z) to FNV local row (0 = south, increases northward).
-        let local_col     = px - cell_min_ax;
+        let local_col = px - cell_min_ax;
         let local_row_fnv = BLOCKS_PER_CELL - 1 - (pz - cell_min_az);
 
         let game_x = cell_x as f32 * CELL_GAME_UNITS + local_col as f32 * 128.0 + 64.0;
         let game_y = cell_y as f32 * CELL_GAME_UNITS + local_row_fnv as f32 * 128.0 + 64.0;
 
-        let raw_h  = ground.level(XZPoint::new(px, pz));
+        let raw_h = ground.level(XZPoint::new(px, pz));
         let game_z = ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
 
         if water_height_game.map_or(true, |wl| game_z >= wl) {
-            refs.extend(build_tree_refr(*next_fid, LAMP_POST_FID, game_x, game_y, game_z, 0.0));
+            refs.extend(build_tree_refr(
+                *next_fid,
+                LAMP_POST_FID,
+                game_x,
+                game_y,
+                game_z,
+                0.0,
+            ));
             *next_fid += 1;
             count += 1;
         }
@@ -1629,7 +1673,8 @@ fn place_lamp_refs(
 
                 // Scale-dependent thinning — skip this pair of posts based on
                 // a deterministic RNG seeded from the centreline position.
-                let mut rng = coord_rng(cx.round() as i32, cz.round() as i32, 0x4C414D50_00000000u64);
+                let mut rng =
+                    coord_rng(cx.round() as i32, cz.round() as i32, 0x4C414D50_00000000u64);
                 if !rng.random_bool(keep_prob) {
                     continue;
                 }
@@ -1775,7 +1820,11 @@ pub fn generate_fnv_esm(
         max_grad,
         effective_scale,
         effective_water_level
-            .map(|h| format!("{:.0} game-units{}", h, if water_level.is_none() { " (auto)" } else { "" }))
+            .map(|h| format!(
+                "{:.0} game-units{}",
+                h,
+                if water_level.is_none() { " (auto)" } else { "" }
+            ))
             .unwrap_or_else(|| "none".to_string())
     );
 
@@ -1784,7 +1833,9 @@ pub fn generate_fnv_esm(
     // pick TEXTURE_SNOW for polar regions rather than falling back to dirt.
     let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
     let default_texture: u32 = if !ground.has_land_cover() && center_lat.abs() > 60.0 {
-        println!("  Land cover unavailable (outside ESA WorldCover range); defaulting to snow texture");
+        println!(
+            "  Land cover unavailable (outside ESA WorldCover range); defaulting to snow texture"
+        );
         TEXTURE_SNOW
     } else {
         TEXTURE_DIRT
@@ -1793,7 +1844,9 @@ pub fn generate_fnv_esm(
     // Build road raster — paint asphalt texture onto road-covered terrain blocks.
     // Skip if the world scale is too small for roads to span even a single block.
     let road_half_width = road_half_width_blocks(world_scale);
-    let road_grid: Option<RoadGrid> = if !roads.is_empty() /*&& road_half_width >= 1*/ {
+    let road_grid: Option<RoadGrid> = if !roads.is_empty()
+    /*&& road_half_width >= 1*/
+    {
         println!(
             "  Building road grid ({} road segments, half-width {} blocks)...",
             roads.len(),
@@ -1801,7 +1854,12 @@ pub fn generate_fnv_esm(
         );
         let road_grid_w = num_cols as i32 * BLOCKS_PER_CELL;
         let road_grid_h = num_rows as i32 * BLOCKS_PER_CELL;
-        Some(build_road_grid(roads, road_grid_w, road_grid_h, road_half_width))
+        Some(build_road_grid(
+            roads,
+            road_grid_w,
+            road_grid_h,
+            road_half_width,
+        ))
     } else {
         if !roads.is_empty() {
             println!(
@@ -1871,11 +1929,29 @@ pub fn generate_fnv_esm(
                 sample_heights(ground, col as i32, row as i32, global_min, effective_scale);
             let (vhgt_offset, deltas) = encode_vhgt(&heights);
             let vnml = compute_vnml(&heights);
-            let quads = compute_quad_textures(ground, col, row, &heights, default_texture, road_grid.as_ref());
+            let quads = compute_quad_textures(
+                ground,
+                col,
+                row,
+                &heights,
+                default_texture,
+                road_grid.as_ref(),
+            );
 
-            let (house_refs, house_count, commercial_refs, commercial_count,
-                 lamp_refs, lamp_count, tree_refs, tree_count,
-                 rock_refs, rock_count, shrub_refs, shrub_count) = if !terrain_only {
+            let (
+                house_refs,
+                house_count,
+                commercial_refs,
+                commercial_count,
+                lamp_refs,
+                lamp_count,
+                tree_refs,
+                tree_count,
+                rock_refs,
+                rock_count,
+                shrub_refs,
+                shrub_count,
+            ) = if !terrain_only {
                 // Shared occupancy grid for this cell.  Buildings are placed first so
                 // they take priority; vegetation fills in the remaining space.
                 let mut occ = OccupancyGrid::new(col as i32, row as i32);
@@ -1962,11 +2038,35 @@ pub fn generate_fnv_esm(
                     &mut next_fid,
                     &mut occ,
                 );
-                (house_refs, house_count, commercial_refs, commercial_count,
-                 lamp_refs, lamp_count, tree_refs, tree_count,
-                 rock_refs, rock_count, shrub_refs, shrub_count)
+                (
+                    house_refs,
+                    house_count,
+                    commercial_refs,
+                    commercial_count,
+                    lamp_refs,
+                    lamp_count,
+                    tree_refs,
+                    tree_count,
+                    rock_refs,
+                    rock_count,
+                    shrub_refs,
+                    shrub_count,
+                )
             } else {
-                (Vec::new(), 0, Vec::new(), 0, Vec::new(), 0, Vec::new(), 0, Vec::new(), 0, Vec::new(), 0)
+                (
+                    Vec::new(),
+                    0,
+                    Vec::new(),
+                    0,
+                    Vec::new(),
+                    0,
+                    Vec::new(),
+                    0,
+                    Vec::new(),
+                    0,
+                    Vec::new(),
+                    0,
+                )
             };
 
             cells.push(CellInfo {
@@ -2061,8 +2161,16 @@ pub fn generate_fnv_esm(
                     let arnis_x = x_offset * BLOCKS_PER_CELL;
                     let arnis_z = (num_rows as i32 - 1 - y_offset) * BLOCKS_PER_CELL;
                     let raw_h = ground.level(XZPoint::new(arnis_x, arnis_z));
-                    let coc_z = ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
-                    temp_children_content.extend(build_tree_refr(coc_fid, 0x0000_0032, 1.0, 1.0, coc_z, 0.0));
+                    let coc_z =
+                        ((raw_h - global_min) * effective_scale + HEIGHT_MARGIN) as f32 * 8.0;
+                    temp_children_content.extend(build_tree_refr(
+                        coc_fid,
+                        0x0000_0032,
+                        1.0,
+                        1.0,
+                        coc_z,
+                        0.0,
+                    ));
                 }
 
                 let mut tmp_grup = Vec::new();
@@ -2090,13 +2198,24 @@ pub fn generate_fnv_esm(
     let max_cell_x = num_cols as i32 - 1 - x_offset;
     let min_cell_y = -y_offset;
     let max_cell_y = num_rows as i32 - 1 - y_offset;
-    let wrld_rec = build_wrld_record(min_cell_x, max_cell_x, min_cell_y, max_cell_y, effective_water_level);
+    let wrld_rec = build_wrld_record(
+        min_cell_x,
+        max_cell_x,
+        min_cell_y,
+        max_cell_y,
+        effective_water_level,
+    );
 
     // World-children GRUP (type 1, label = WRLD FormID bytes).
     let mut wc_label = [0u8; 4];
     wc_label.copy_from_slice(&TESTESM_WRLD_FID.to_le_bytes());
     let mut world_children_grup = Vec::new();
-    push_grup(&mut world_children_grup, wc_label, 1, &world_children_content);
+    push_grup(
+        &mut world_children_grup,
+        wc_label,
+        1,
+        &world_children_content,
+    );
 
     // Top-level WRLD GRUP (type 0, label = b"WRLD").
     let mut wrld_grup_content = Vec::new();
@@ -2109,7 +2228,18 @@ pub fn generate_fnv_esm(
     // reflect our content size.
     let mut tes4 = SAMPLEESM_BYTES[..SAMPLEESM_TES4_LEN].to_vec();
 
-    let total_refrs: u32 = cells.iter().map(|c| c.tree_count + c.rock_count + c.shrub_count + c.lamp_count + c.house_count + c.commercial_count).sum::<u32>() + 1; // +1 for COC marker in cell (0,0)
+    let total_refrs: u32 = cells
+        .iter()
+        .map(|c| {
+            c.tree_count
+                + c.rock_count
+                + c.shrub_count
+                + c.lamp_count
+                + c.house_count
+                + c.commercial_count
+        })
+        .sum::<u32>()
+        + 1; // +1 for COC marker in cell (0,0)
     let num_records = 1u32 + cells.len() as u32 * 2 + total_refrs; // WRLD + CELL + LAND + REFRs
     tes4[TES4_NUM_RECORDS_OFFSET..TES4_NUM_RECORDS_OFFSET + 4]
         .copy_from_slice(&num_records.to_le_bytes());
@@ -2123,7 +2253,7 @@ pub fn generate_fnv_esm(
     file_bytes.extend_from_slice(&tes4);
     file_bytes.extend_from_slice(&wrld_grup);
 
-    let resolved_dir = if output_dir.is_dir() && is_dir_writeable(output_dir){
+    let resolved_dir = if output_dir.is_dir() && is_dir_writeable(output_dir) {
         output_dir.to_path_buf()
     } else {
         println!(
@@ -2136,8 +2266,7 @@ pub fn generate_fnv_esm(
     };
 
     let out_path = resolved_dir.join("arnis_worldspace.esm");
-    fs::write(&out_path, &file_bytes)
-        .map_err(|e| format!("Failed to write ESM file: {}", e))?;
+    fs::write(&out_path, &file_bytes).map_err(|e| format!("Failed to write ESM file: {}", e))?;
 
     println!(
         "{} FNV worldspace ESM saved to: {}",
