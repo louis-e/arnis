@@ -1,4 +1,7 @@
 use crate::bresenham::bresenham_line;
+use crate::element_processing::bridge_styles::{
+    resolve_bridge_style_with_outline, BridgeOutlineIndex, BridgeStyle,
+};
 use crate::element_processing::highways::highway_block_range;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -18,6 +21,10 @@ pub struct BridgeMemberInfo {
     // Some(terrain_y) = ramp from that terrain up to deck_y at this endpoint.
     pub start_internal_ramp: Option<i32>,
     pub end_internal_ramp: Option<i32>,
+    pub style: BridgeStyle,
+    // True when the endpoint is not shared with another member of the group.
+    pub start_is_group_boundary: bool,
+    pub end_is_group_boundary: bool,
 }
 
 impl BridgeMemberInfo {
@@ -87,7 +94,11 @@ impl BridgeStructureMap {
         self.ramps.get(&way_id)
     }
 
-    pub fn build(elements: &[ProcessedElement], editor: &WorldEditor) -> Self {
+    pub fn build(
+        elements: &[ProcessedElement],
+        editor: &WorldEditor,
+        outlines: &BridgeOutlineIndex,
+    ) -> Self {
         let mut bridge_ways: Vec<&ProcessedWay> = Vec::new();
         let mut other_highway_ways: Vec<&ProcessedWay> = Vec::new();
         for elem in elements {
@@ -274,12 +285,22 @@ impl BridgeStructureMap {
                 .iter()
                 .map(|&i| way_length_blocks(bridge_ways[i]))
                 .sum();
-            let clearance =
+            // Style first so arches can force flat-terrain clearance for the curve to show.
+            let group_style = majority_style(group_indices, &bridge_ways, outlines);
+
+            let mut clearance =
                 if dip < FLAT_TERRAIN_DIP_THRESHOLD && total_length >= SHORT_BRIDGE_LENGTH_BLOCKS {
                     max_layer * LAYER_HEIGHT_STEP
                 } else {
                     0
                 };
+            if group_style == BridgeStyle::Arch
+                && dip < FLAT_TERRAIN_DIP_THRESHOLD
+                && total_length >= SHORT_BRIDGE_LENGTH_BLOCKS
+            {
+                // Min vertical room for the arch curve plus spandrel to read.
+                clearance = clearance.max(8);
+            }
             let deck_y = terrain_max + clearance;
 
             let mut boundary_with_external_ramp: HashMap<(i32, i32), bool> = HashMap::new();
@@ -349,12 +370,18 @@ impl BridgeStructureMap {
                     &boundary_with_external_ramp,
                     editor,
                 );
+                let start_is_group_boundary =
+                    endpoint_counts.get(&start_xz).copied().unwrap_or(0) <= 1;
+                let end_is_group_boundary = endpoint_counts.get(&end_xz).copied().unwrap_or(0) <= 1;
                 members.insert(
                     way.id,
                     BridgeMemberInfo {
                         deck_y,
                         start_internal_ramp,
                         end_internal_ramp,
+                        style: group_style,
+                        start_is_group_boundary,
+                        end_is_group_boundary,
                     },
                 );
             }
@@ -362,6 +389,29 @@ impl BridgeStructureMap {
 
         Self { members, ramps }
     }
+}
+
+fn majority_style(
+    group_indices: &[usize],
+    bridge_ways: &[&ProcessedWay],
+    outlines: &BridgeOutlineIndex,
+) -> BridgeStyle {
+    let mut counts: HashMap<BridgeStyle, usize> = HashMap::new();
+    for &idx in group_indices {
+        let s = resolve_bridge_style_with_outline(bridge_ways[idx], outlines);
+        *counts.entry(s).or_default() += 1;
+    }
+    let mut best = BridgeStyle::Beam;
+    let mut best_count = 0;
+    for (&s, &c) in &counts {
+        let prefer_non_beam =
+            c == best_count && best == BridgeStyle::Beam && s != BridgeStyle::Beam;
+        if c > best_count || prefer_non_beam {
+            best = s;
+            best_count = c;
+        }
+    }
+    best
 }
 
 fn decide_internal_ramp(

@@ -83,7 +83,10 @@ pub fn generate_world_with_options(
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
-    let bridge_structures = bridges::BridgeStructureMap::build(&elements, &editor);
+    let bridge_outlines =
+        crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
+    let bridge_structures =
+        bridges::BridgeStructureMap::build(&elements, &editor, &bridge_outlines);
     let bridge_surface =
         bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
 
@@ -233,6 +236,7 @@ pub fn generate_world_with_options(
                         way,
                         &mut subway_points,
                         &rail_bridge_internal_endpoints,
+                        &bridge_outlines,
                     );
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);

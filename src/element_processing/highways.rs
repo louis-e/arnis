@@ -2,6 +2,9 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::element_processing::bridge_styles::{
+    decorate_bridge_above_deck, place_bridge_support_below_deck, BridgePathSample, BridgeStyle,
+};
 use crate::element_processing::bridges::{BridgeStructureMap, BridgeSurfaceMap};
 use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::surfaces::{
@@ -620,6 +623,15 @@ fn generate_highways_internal(
             let bridge_ramp = bridge_structures.lookup_ramp(way.id);
             let is_bridge_member = bridge_member.is_some();
             let is_bridge_ramp = bridge_ramp.is_some();
+            let bridge_style = bridge_member.map(|m| m.style).unwrap_or(BridgeStyle::Beam);
+            let bridge_start_is_boundary = bridge_member
+                .map(|m| m.start_is_group_boundary)
+                .unwrap_or(true);
+            let bridge_end_is_boundary = bridge_member
+                .map(|m| m.end_is_group_boundary)
+                .unwrap_or(true);
+            let bridge_foundation_block = bridge_style.foundation_block();
+            let bridge_rail_block_choice = bridge_style.rail_block();
 
             // Optional surface override via the OSM `surface=*` tag. Applies to
             // all road types; for single-block surfaces like concrete or sand
@@ -747,6 +759,8 @@ fn generate_highways_internal(
             let mut cumulative_distance_from_start: usize = 0;
             // Previous bridge cell Y for steep-step gap fill.
             let mut previous_bridge_y: Option<i32> = None;
+            // Centerline samples captured for above-deck decoration after the segment loop.
+            let mut bridge_path: Vec<BridgePathSample> = Vec::new();
             // Previous rail cell per side; used to orthogonally connect diagonal steps.
             let mut previous_rail_left: Option<(i32, i32)> = None;
             let mut previous_rail_right: Option<(i32, i32)> = None;
@@ -886,6 +900,15 @@ fn generate_highways_internal(
                                 dir_horizontal,
                                 &mut row_medians,
                             );
+                        }
+
+                        // Centerline ground used for arch underside; sampled once per cell.
+                        let centerline_ground_y = editor.get_ground_level(*x, *z);
+
+                        if is_bridge_member {
+                            if let (Some(by), Some(perp)) = (bridge_y_here, bridge_rail_perp) {
+                                bridge_path.push((*x, by, *z, perp));
+                            }
                         }
 
                         // Backfill steep ramp steps where deck+foundation alone leaves an air band.
@@ -1031,10 +1054,15 @@ fn generate_highways_internal(
                                 let is_elevated_deck =
                                     is_bridge_member || is_bridge_ramp || effective_elevation > 0;
                                 if is_elevated_deck && cell_y > 0 {
-                                    // Add 1 layer of stone bricks underneath the highway surface
+                                    // Foundation: stone bricks for everything except wooden boardwalks.
+                                    let foundation = if is_bridge_member {
+                                        bridge_foundation_block
+                                    } else {
+                                        STONE_BRICKS
+                                    };
                                     if use_absolute_y {
                                         editor.set_block_absolute(
-                                            STONE_BRICKS,
+                                            foundation,
                                             set_x,
                                             cell_y - 1,
                                             set_z,
@@ -1043,7 +1071,7 @@ fn generate_highways_internal(
                                         );
                                     } else {
                                         editor.set_block(
-                                            STONE_BRICKS,
+                                            foundation,
                                             set_x,
                                             cell_y - 1,
                                             set_z,
@@ -1052,7 +1080,26 @@ fn generate_highways_internal(
                                         );
                                     }
 
-                                    if use_absolute_y {
+                                    if is_bridge_member {
+                                        let interval = bridge_style.pillar_interval() as i32;
+                                        let is_center = dx == 0 && dz == 0;
+                                        let is_pillar = is_center
+                                            && interval > 0
+                                            && (set_x + set_z).rem_euclid(interval) == 0;
+                                        place_bridge_support_below_deck(
+                                            editor,
+                                            bridge_style,
+                                            set_x,
+                                            cell_y,
+                                            set_z,
+                                            centerline_ground_y,
+                                            tds,
+                                            total_bresenham_length,
+                                            use_absolute_y,
+                                            is_center,
+                                            is_pillar,
+                                        );
+                                    } else if use_absolute_y {
                                         add_highway_support_pillar_absolute(
                                             editor,
                                             set_x,
@@ -1095,36 +1142,58 @@ fn generate_highways_internal(
                                     Some(prev) => stair_fill_cells(prev, rail_cell),
                                     None => vec![rail_cell],
                                 };
-                                for (rx, rz) in cells_to_fill {
-                                    if bridge_surface.contains(rx, rz) {
-                                        continue;
-                                    }
-                                    editor.set_block_absolute(
-                                        LIGHT_GRAY_CONCRETE,
-                                        rx,
-                                        by,
-                                        rz,
-                                        None,
-                                        Some(ROAD_PROTECTED_SURFACES),
-                                    );
-                                    if by > 0 {
+                                // Styles like boardwalk skip the side railing entirely.
+                                let skip_side_railing =
+                                    is_bridge_member && !bridge_style.has_side_railing();
+                                if !skip_side_railing {
+                                    for (rx, rz) in cells_to_fill {
+                                        if bridge_surface.contains(rx, rz) {
+                                            continue;
+                                        }
+                                        let rail_block = if is_bridge_member {
+                                            bridge_rail_block_choice
+                                        } else {
+                                            LIGHT_GRAY_CONCRETE
+                                        };
                                         editor.set_block_absolute(
-                                            STONE_BRICKS,
+                                            rail_block,
                                             rx,
-                                            by - 1,
+                                            by,
                                             rz,
                                             None,
-                                            None,
+                                            Some(ROAD_PROTECTED_SURFACES),
                                         );
+                                        let rail_foundation = if is_bridge_member {
+                                            bridge_style.rail_foundation_block()
+                                        } else {
+                                            STONE_BRICKS
+                                        };
+                                        if by > 0 {
+                                            editor.set_block_absolute(
+                                                rail_foundation,
+                                                rx,
+                                                by - 1,
+                                                rz,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                        let parapet = if is_bridge_member {
+                                            bridge_style.parapet_block()
+                                        } else {
+                                            Some(BRICK_WALL)
+                                        };
+                                        if let Some(p) = parapet {
+                                            editor.set_block_absolute(
+                                                p,
+                                                rx,
+                                                by + 1,
+                                                rz,
+                                                None,
+                                                None,
+                                            );
+                                        }
                                     }
-                                    editor.set_block_absolute(
-                                        BRICK_WALL,
-                                        rx,
-                                        by + 1,
-                                        rz,
-                                        None,
-                                        None,
-                                    );
                                 }
                                 *prev_state = Some(rail_cell);
                             }
@@ -1213,6 +1282,17 @@ fn generate_highways_internal(
                     cumulative_distance_from_start += segment_length - 1;
                 }
                 previous_node = Some((node.x, node.z));
+            }
+
+            if is_bridge_member {
+                decorate_bridge_above_deck(
+                    editor,
+                    bridge_style,
+                    &bridge_path,
+                    block_range,
+                    bridge_start_is_boundary,
+                    bridge_end_is_boundary,
+                );
             }
         }
     }
