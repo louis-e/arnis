@@ -401,12 +401,22 @@ fn majority_style(
         let s = resolve_bridge_style_with_outline(bridge_ways[idx], outlines);
         *counts.entry(s).or_default() += 1;
     }
+    // Fixed iteration order keeps world generation deterministic on ties.
+    // Non-Beam styles come first so they win ties over Beam.
+    const PRIORITY: [BridgeStyle; 7] = [
+        BridgeStyle::Suspension,
+        BridgeStyle::CableStayed,
+        BridgeStyle::Arch,
+        BridgeStyle::Truss,
+        BridgeStyle::Covered,
+        BridgeStyle::Boardwalk,
+        BridgeStyle::Beam,
+    ];
     let mut best = BridgeStyle::Beam;
     let mut best_count = 0;
-    for (&s, &c) in &counts {
-        let prefer_non_beam =
-            c == best_count && best == BridgeStyle::Beam && s != BridgeStyle::Beam;
-        if c > best_count || prefer_non_beam {
+    for s in PRIORITY {
+        let c = counts.get(&s).copied().unwrap_or(0);
+        if c > best_count {
             best = s;
             best_count = c;
         }

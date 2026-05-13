@@ -902,8 +902,12 @@ fn generate_highways_internal(
                             );
                         }
 
-                        // Centerline ground used for arch underside; sampled once per cell.
-                        let centerline_ground_y = editor.get_ground_level(*x, *z);
+                        // Sample centerline ground only when a bridge can consume it.
+                        let centerline_ground_y = if is_bridge_member {
+                            editor.get_ground_level(*x, *z)
+                        } else {
+                            0
+                        };
 
                         if is_bridge_member {
                             if let (Some(by), Some(perp)) = (bridge_y_here, bridge_rail_perp) {
@@ -1081,11 +1085,18 @@ fn generate_highways_internal(
                                     }
 
                                     if is_bridge_member {
-                                        let interval = bridge_style.pillar_interval() as i32;
+                                        let interval = bridge_style.pillar_interval();
                                         let is_center = dx == 0 && dz == 0;
+                                        // Beam keeps the legacy (x+z) rule; other styles use
+                                        // path-index so spacing stays consistent on diagonals.
                                         let is_pillar = is_center
                                             && interval > 0
-                                            && (set_x + set_z).rem_euclid(interval) == 0;
+                                            && match bridge_style {
+                                                BridgeStyle::Beam => {
+                                                    (set_x + set_z).rem_euclid(interval as i32) == 0
+                                                }
+                                                _ => tds.is_multiple_of(interval),
+                                            };
                                         place_bridge_support_below_deck(
                                             editor,
                                             bridge_style,
