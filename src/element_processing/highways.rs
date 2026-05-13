@@ -902,12 +902,13 @@ fn generate_highways_internal(
                             );
                         }
 
-                        // Sample centerline ground only when a bridge can consume it.
-                        let centerline_ground_y = if is_bridge_member {
-                            editor.get_ground_level(*x, *z)
-                        } else {
-                            0
-                        };
+                        // Only Arch actually reads this; other styles re-sample inside place_pillar.
+                        let centerline_ground_y =
+                            if is_bridge_member && matches!(bridge_style, BridgeStyle::Arch) {
+                                editor.get_ground_level(*x, *z)
+                            } else {
+                                0
+                            };
 
                         if is_bridge_member {
                             if let (Some(by), Some(perp)) = (bridge_y_here, bridge_rail_perp) {

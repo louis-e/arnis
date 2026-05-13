@@ -152,14 +152,8 @@ impl BridgeOutlineIndex {
             if !point_in_polygon(cx, cz, &entry.nodes) {
                 continue;
             }
-            let mut tags: HashMap<String, String> = HashMap::new();
-            if let Some(s) = &entry.structure {
-                tags.insert("bridge:structure".to_string(), s.clone());
-            }
-            if let Some(b) = &entry.bridge {
-                tags.insert("bridge".to_string(), b.clone());
-            }
-            let style = resolve_bridge_style(&tags);
+            let style =
+                resolve_bridge_style_from_pair(entry.structure.as_deref(), entry.bridge.as_deref());
             if style != BridgeStyle::Beam {
                 return Some(style);
             }
@@ -217,7 +211,14 @@ fn point_in_polygon(x: i32, z: i32, poly: &[(i32, i32)]) -> bool {
 }
 
 pub fn resolve_bridge_style(tags: &HashMap<String, String>) -> BridgeStyle {
-    if let Some(s) = tags.get("bridge:structure").map(String::as_str) {
+    resolve_bridge_style_from_pair(
+        tags.get("bridge:structure").map(String::as_str),
+        tags.get("bridge").map(String::as_str),
+    )
+}
+
+fn resolve_bridge_style_from_pair(structure: Option<&str>, bridge: Option<&str>) -> BridgeStyle {
+    if let Some(s) = structure {
         match s {
             "arch" => return BridgeStyle::Arch,
             "truss" => return BridgeStyle::Truss,
@@ -227,7 +228,7 @@ pub fn resolve_bridge_style(tags: &HashMap<String, String>) -> BridgeStyle {
             _ => {}
         }
     }
-    if let Some(b) = tags.get("bridge").map(String::as_str) {
+    if let Some(b) = bridge {
         match b {
             "viaduct" => return BridgeStyle::Arch,
             "covered" => return BridgeStyle::Covered,
