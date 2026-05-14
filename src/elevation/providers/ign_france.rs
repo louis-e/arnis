@@ -15,17 +15,12 @@
 //! # Upstream specifics
 //!
 //! - WMS 1.3.0 endpoint at `data.geopf.fr/wms-r/wms`.
-//! - Layer: `ELEVATION.ELEVATIONGRIDCOVERAGE`.
-//! - Requests use `CRS=EPSG:3857` so the tile bbox fed to the server
-//!   matches our fixed Mercator grid 1-to-1 (no reprojection drift
-//!   across the seam).
-//! - Response format: GeoTIFF, float32.
-//! - Resolution ladder mirrors USGS's (1 / 3 / 10 / 30 m per px) so
-//!   the level-selection logic is shared and the user-scale mapping
-//!   is uniform across providers. IGN's native products include 1 m
-//!   (metropolitan FR), 5 m (overseas), and 25 m — the WMS service
-//!   upsamples/downsamples on request, so we just pick the resolution
-//!   that matches the output cell size.
+//! - Layer: `ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES` (RGE ALTI MNT).
+//!   The non-HIGHRES sibling is BD ALTI v1 capped at WMTS z11
+//!   (~25–46 m/px) — using it produced plateau bands in the response.
+//! - `CRS=EPSG:3857`, GeoTIFF float32 response.
+//! - Resolution ladder (1 / 3 / 10 / 30 m per px) mirrors USGS's for
+//!   shared level-selection logic.
 //!
 //! All the tile-grid mechanics live in [`super::fixed_tile`]; this
 //! module contributes the WMS URL template, the coverage list (metro
@@ -88,7 +83,8 @@ pub struct IgnFrance;
 impl FixedTileProvider for IgnFrance {
     type Level = Resolution;
 
-    const CACHE_NAME: &'static str = "ign_france";
+    // Renamed from "ign_france" to invalidate the legacy BD ALTI cache.
+    const CACHE_NAME: &'static str = "ign_france_hires";
 
     fn resolution_levels(&self) -> &'static [Self::Level] {
         LEVELS
@@ -101,7 +97,7 @@ impl FixedTileProvider for IgnFrance {
         format!(
             "https://data.geopf.fr/wms-r/wms\
              ?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0\
-             &LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE\
+             &LAYERS=ELEVATION.ELEVATIONGRIDCOVERAGE.HIGHRES\
              &STYLES=\
              &CRS=EPSG:3857\
              &BBOX={:.6},{:.6},{:.6},{:.6}\
@@ -119,7 +115,8 @@ impl FixedTileProvider for IgnFrance {
 
 impl ElevationProvider for IgnFrance {
     fn name(&self) -> &'static str {
-        Self::CACHE_NAME
+        // Stable user-facing id; diverges from CACHE_NAME on purpose.
+        "ign_france"
     }
 
     fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
