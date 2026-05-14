@@ -9,7 +9,7 @@ use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
-use crate::world_editor::{WorldEditor};
+use crate::world_editor::WorldEditor;
 use rand::Rng;
 
 pub fn generate_leisure(
@@ -109,7 +109,7 @@ pub fn generate_leisure(
                     }
 
                     editor.set_block_absolute(block_type, bx, start_y_abs, bz, None, None);
-                    editor.register_road_surface_y(bx, bz, start_y_abs);
+                    editor.register_surface_y(bx, bz, start_y_abs);
                 }
 
                 corner_addup.0 += node.x;
@@ -138,7 +138,7 @@ pub fn generate_leisure(
                 }
 
                 editor.set_block_absolute(block_type, x, start_y_abs, z, None, None);
-                editor.register_road_surface_y(x, z, start_y_abs);
+                editor.register_surface_y(x, z, start_y_abs);
 
                 if matches!(leisure_type.as_str(), "park" | "garden" | "nature_reserve")
                     && block_type == GRASS_BLOCK
@@ -155,16 +155,34 @@ pub fn generate_leisure(
                                 22..30 => FERN,
                                 _ => unreachable!(),
                             };
-                            editor.set_block_absolute(plant_choice, x, start_y_abs + 1, z, None, None);
+                            editor.set_block_absolute(
+                                plant_choice,
+                                x,
+                                start_y_abs + 1,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                         30..90 => {
                             editor.set_block_absolute(GRASS, x, start_y_abs + 1, z, None, None);
                         }
                         90..105 => {
-                            editor.set_block_absolute(OAK_LEAVES, x, start_y_abs + 1, z, None, None);
+                            editor.set_block_absolute(
+                                OAK_LEAVES,
+                                x,
+                                start_y_abs + 1,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                         105..120 => {
-                            Tree::create(editor, (x, start_y_abs + 1, z), Some(building_footprints));
+                            Tree::create(
+                                editor,
+                                (x, start_y_abs + 1, z),
+                                Some(building_footprints),
+                            );
                         }
                         _ => {}
                     }
@@ -178,31 +196,115 @@ pub fn generate_leisure(
                         0..10 => {
                             // Swing set
                             for y_off in 1..=3 {
-                                editor.set_block_absolute(OAK_FENCE, x - 1, start_y_abs + y_off, z, None, None);
-                                editor.set_block_absolute(OAK_FENCE, x + 1, start_y_abs + y_off, z, None, None);
+                                editor.set_block_absolute(
+                                    OAK_FENCE,
+                                    x - 1,
+                                    start_y_abs + y_off,
+                                    z,
+                                    None,
+                                    None,
+                                );
+                                editor.set_block_absolute(
+                                    OAK_FENCE,
+                                    x + 1,
+                                    start_y_abs + y_off,
+                                    z,
+                                    None,
+                                    None,
+                                );
                             }
-                            editor.set_block_absolute(OAK_PLANKS, x - 1, start_y_abs + 4, z, None, None);
+                            editor.set_block_absolute(
+                                OAK_PLANKS,
+                                x - 1,
+                                start_y_abs + 4,
+                                z,
+                                None,
+                                None,
+                            );
                             editor.set_block_absolute(OAK_SLAB, x, start_y_abs + 4, z, None, None);
-                            editor.set_block_absolute(OAK_PLANKS, x + 1, start_y_abs + 4, z, None, None);
-                            editor.set_block_absolute(STONE_BLOCK_SLAB, x, start_y_abs + 2, z, None, None);
+                            editor.set_block_absolute(
+                                OAK_PLANKS,
+                                x + 1,
+                                start_y_abs + 4,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block_absolute(
+                                STONE_BLOCK_SLAB,
+                                x,
+                                start_y_abs + 2,
+                                z,
+                                None,
+                                None,
+                            );
                         }
                         10..20 => {
                             // Slide
                             editor.set_block_absolute(OAK_SLAB, x, start_y_abs + 1, z, None, None);
-                            editor.set_block_absolute(OAK_SLAB, x + 1, start_y_abs + 2, z, None, None);
-                            editor.set_block_absolute(OAK_SLAB, x + 2, start_y_abs + 3, z, None, None);
+                            editor.set_block_absolute(
+                                OAK_SLAB,
+                                x + 1,
+                                start_y_abs + 2,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block_absolute(
+                                OAK_SLAB,
+                                x + 2,
+                                start_y_abs + 3,
+                                z,
+                                None,
+                                None,
+                            );
 
-                            editor.set_block_absolute(OAK_PLANKS, x + 2, start_y_abs + 2, z, None, None);
-                            editor.set_block_absolute(OAK_PLANKS, x + 2, start_y_abs + 1, z, None, None);
+                            editor.set_block_absolute(
+                                OAK_PLANKS,
+                                x + 2,
+                                start_y_abs + 2,
+                                z,
+                                None,
+                                None,
+                            );
+                            editor.set_block_absolute(
+                                OAK_PLANKS,
+                                x + 2,
+                                start_y_abs + 1,
+                                z,
+                                None,
+                                None,
+                            );
 
-                            editor.set_block_absolute(LADDER, x + 2, start_y_abs + 2, z - 1, None, None);
-                            editor.set_block_absolute(LADDER, x + 2, start_y_abs + 1, z - 1, None, None);
+                            editor.set_block_absolute(
+                                LADDER,
+                                x + 2,
+                                start_y_abs + 2,
+                                z - 1,
+                                None,
+                                None,
+                            );
+                            editor.set_block_absolute(
+                                LADDER,
+                                x + 2,
+                                start_y_abs + 1,
+                                z - 1,
+                                None,
+                                None,
+                            );
                         }
                         20..30 => {
                             // Sandpit
                             for dx in -3..=3 {
                                 for dz in -3..=3 {
-                                    editor.set_block_absolute(SAND, x + dx, start_y_abs, z + dz, None, None);
+                                    editor.set_block_absolute(
+                                        SAND,
+                                        x + dx,
+                                        start_y_abs,
+                                        z + dz,
+                                        None,
+                                        None,
+                                    );
                                 }
                             }
                         }

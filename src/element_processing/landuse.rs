@@ -33,7 +33,10 @@ pub fn generate_landuse(
         // gardens, parks, and green spaces. ESA WorldCover handles built-up classification
         // at 10m satellite resolution, which is far more precise.
         "residential" | "commercial" => {
-            if let Some(surface) = ["landcover", "surface"].iter().find_map(|k| element.tags.get(*k)) {
+            if let Some(surface) = ["landcover", "surface"]
+                .iter()
+                .find_map(|k| element.tags.get(*k))
+            {
                 if let Some(material) = get_block_for_material(surface, &mut rng) {
                     material
                 } else {
@@ -42,7 +45,7 @@ pub fn generate_landuse(
             } else {
                 return;
             }
-        },
+        }
         "education" => POLISHED_ANDESITE,
         "religious" => POLISHED_ANDESITE,
         "industrial" => STONE,       // Randomized per-block below
