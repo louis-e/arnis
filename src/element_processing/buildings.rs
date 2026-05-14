@@ -6411,22 +6411,27 @@ fn generate_pyramidal_roof(
         &roof_heights,
         config,
         |x, z, h| {
-            let north_h = roof_heights
-                .get(&(x, z - 1))
-                .copied()
-                .unwrap_or(config.base_height);
-            let south_h = roof_heights
-                .get(&(x, z + 1))
-                .copied()
-                .unwrap_or(config.base_height);
-            let west_h = roof_heights
-                .get(&(x - 1, z))
-                .copied()
-                .unwrap_or(config.base_height);
-            let east_h = roof_heights
-                .get(&(x + 1, z))
-                .copied()
-                .unwrap_or(config.base_height);
+            let north_h = if footprint.contains(&(x, z - 1)) {
+                roof_heights[&(x, z - 1)]
+            } else {
+                h - 1
+            };
+            let south_h = if footprint.contains(&(x, z + 1)) {
+                roof_heights[&(x, z + 1)]
+            } else {
+                h - 1
+            };
+            let west_h = if footprint.contains(&(x - 1, z)) {
+                roof_heights[&(x - 1, z)]
+            } else {
+                h - 1
+            };
+            let east_h = if footprint.contains(&(x + 1, z)) {
+                roof_heights[&(x + 1, z)]
+            } else {
+                h - 1
+            };
+
             let lower_n = north_h < h;
             let lower_s = south_h < h;
             let lower_w = west_h < h;
@@ -6465,6 +6470,7 @@ fn generate_pyramidal_roof(
                 }
             }
 
+            // Обычный скат в сторону понижения
             if lower_n {
                 create_stair_with_properties(
                     stair_block_material,
