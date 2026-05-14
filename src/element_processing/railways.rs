@@ -1,5 +1,9 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::element_processing::bridge_styles::{
+    decorate_bridge_above_deck, place_bridge_support_below_deck, resolve_bridge_style_with_outline,
+    BridgeOutlineIndex, BridgePathSample, BridgeStyle,
+};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::{HashMap, HashSet};
@@ -12,7 +16,6 @@ const RAIL_BRIDGE_DIP_THRESHOLD: i32 = 4;
 const RAIL_BRIDGE_RAMP_MIN: usize = 8;
 const RAIL_BRIDGE_RAMP_MAX: usize = 30;
 const RAIL_BRIDGE_RAMP_FRACTION: f32 = 0.25;
-const RAIL_BRIDGE_PILLAR_INTERVAL: usize = 8;
 
 pub type RailBridgeInternalEndpoints = HashSet<(i32, i32)>;
 
@@ -51,6 +54,7 @@ pub fn generate_railways(
     element: &ProcessedWay,
     subway_points: &mut Vec<(i32, i32)>,
     rail_bridge_internal_endpoints: &RailBridgeInternalEndpoints,
+    bridge_outlines: &BridgeOutlineIndex,
 ) {
     let Some(railway_type) = element.tags.get("railway") else {
         return;
@@ -86,7 +90,12 @@ pub fn generate_railways(
     }
 
     if is_rail_bridge(element) {
-        generate_rail_bridge(editor, element, rail_bridge_internal_endpoints);
+        generate_rail_bridge(
+            editor,
+            element,
+            rail_bridge_internal_endpoints,
+            bridge_outlines,
+        );
     } else {
         generate_at_grade_rail(editor, element);
     }
@@ -230,10 +239,13 @@ fn generate_rail_bridge(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
     internal_endpoints: &RailBridgeInternalEndpoints,
+    bridge_outlines: &BridgeOutlineIndex,
 ) {
     if way.nodes.len() < 2 {
         return;
     }
+
+    let style = resolve_bridge_style_with_outline(way, bridge_outlines);
 
     let mut all_points: Vec<(i32, i32)> = Vec::new();
     for window in way.nodes.windows(2) {
@@ -260,9 +272,15 @@ fn generate_rail_bridge(
         min_y = min_y.min(y);
     }
     let dip = max_y - min_y;
+    // Arch needs vertical room for its curve on flat terrain.
+    let flat_clearance = if style == BridgeStyle::Arch {
+        RAIL_BRIDGE_FLAT_CLEARANCE.max(8)
+    } else {
+        RAIL_BRIDGE_FLAT_CLEARANCE
+    };
     // Flat span: lift by clearance so the structure is visible. Canyon span: deck at terrain_max.
     let deck_y = if dip < RAIL_BRIDGE_DIP_THRESHOLD {
-        max_y + RAIL_BRIDGE_FLAT_CLEARANCE
+        max_y + flat_clearance
     } else {
         max_y
     };
@@ -320,6 +338,9 @@ fn generate_rail_bridge(
         })
         .collect();
 
+    let foundation_block = style.foundation_block();
+    let mut bridge_path: Vec<BridgePathSample> = Vec::with_capacity(total);
+
     for (i, &(bx, bz)) in all_points.iter().enumerate() {
         let y = bridge_ys[i];
         let prev_xz = if i > 0 { Some(all_points[i - 1]) } else { None };
@@ -332,22 +353,47 @@ fn generate_rail_bridge(
         let next_y = if i + 1 < total { bridge_ys[i + 1] } else { y };
         let rail_block = determine_rail_with_slope((bx, bz), prev_xz, next_xz, prev_y, y, next_y);
 
-        // Foundation slab, gravel bed (sleeper every 4 cells along the centerline), rail on top.
-        editor.set_block_absolute(STONE_BRICKS, bx, y - 1, bz, None, None);
+        editor.set_block_absolute(foundation_block, bx, y - 1, bz, None, None);
         let bed_block = if i % 4 == 0 { OAK_LOG } else { GRAVEL };
         editor.set_block_absolute(bed_block, bx, y, bz, None, None);
         editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
 
-        if i % RAIL_BRIDGE_PILLAR_INTERVAL == 0 {
-            let ground_y = terrain_ys[i];
-            let pillar_top = y - 2;
-            if pillar_top > ground_y {
-                for py in (ground_y + 1)..=pillar_top {
-                    editor.set_block_absolute(STONE_BRICKS, bx, py, bz, None, None);
-                }
-            }
-        }
+        // Smooth perpendicular from neighbouring centerline points.
+        let p_prev = prev_xz.unwrap_or((bx, bz));
+        let p_next = next_xz.unwrap_or((bx, bz));
+        let dxp = (p_next.0 - p_prev.0) as f32;
+        let dzp = (p_next.1 - p_prev.1) as f32;
+        let mag = (dxp * dxp + dzp * dzp).sqrt().max(1e-6);
+        let perp = (-dzp / mag, dxp / mag);
+        bridge_path.push((bx, y, bz, perp));
+
+        let pillar_interval = style.pillar_interval().max(1);
+        let is_pillar = i % pillar_interval == 0;
+        place_bridge_support_below_deck(
+            editor,
+            style,
+            bx,
+            y,
+            bz,
+            terrain_ys[i],
+            i,
+            total,
+            true,
+            true,
+            is_pillar,
+        );
     }
+
+    let start_is_boundary = !internal_endpoints.contains(&all_points[0]);
+    let end_is_boundary = !internal_endpoints.contains(&all_points[last_idx]);
+    decorate_bridge_above_deck(
+        editor,
+        style,
+        &bridge_path,
+        0,
+        start_is_boundary,
+        end_is_boundary,
+    );
 }
 
 /// Choose between a flat or ascending rail block based on the ground-level
