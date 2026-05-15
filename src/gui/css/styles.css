@@ -483,6 +483,132 @@ button:hover {
   }
 }
 
+/* Update / release-notes modal */
+.update-modal-content {
+  width: 600px;
+  max-width: calc(100vw - 40px);
+}
+
+.update-modal-body {
+  font-size: 0.9em;
+  line-height: 1.45;
+  padding: 12px 14px;
+  border: 1px solid #5b5b5b;
+  border-radius: 6px;
+  background-color: #5f5f5f;
+  margin-top: 4px;
+}
+
+.update-modal-body img {
+  /* Release banner / inline screenshots: scale to container without distortion */
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  display: block;
+  margin: 8px auto;
+}
+
+.update-modal-body h1,
+.update-modal-body h2,
+.update-modal-body h3 {
+  margin: 14px 0 6px 0;
+  line-height: 1.25;
+}
+
+.update-modal-body h1 { font-size: 1.25em; }
+.update-modal-body h2 { font-size: 1.12em; }
+.update-modal-body h3 { font-size: 1.02em; }
+
+.update-modal-body p {
+  margin: 6px 0;
+}
+
+.update-modal-body ul,
+.update-modal-body ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.update-modal-body li {
+  margin: 2px 0;
+}
+
+.update-modal-body a {
+  color: #fecc44;
+  text-decoration: none;
+}
+
+.update-modal-body a:hover {
+  text-decoration: underline;
+}
+
+.update-modal-body code {
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: ui-monospace, "Cascadia Code", Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+.update-modal-body pre {
+  background-color: rgba(0, 0, 0, 0.25);
+  padding: 8px 10px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+
+.update-modal-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.update-modal-body hr {
+  border: none;
+  border-top: 1px solid #797979;
+  margin: 12px 0;
+}
+
+.update-modal-body blockquote {
+  border-left: 3px solid #fecc44;
+  margin: 8px 0;
+  padding: 2px 10px;
+  color: #d8d8d8;
+}
+
+.update-modal-download-note {
+  flex-shrink: 0;
+  margin-top: 12px;
+  font-size: 0.8em;
+  line-height: 1.4;
+  opacity: 0.8;
+  text-align: center;
+}
+
+.update-modal-actions {
+  flex-shrink: 0;
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}
+
+.update-modal-actions button {
+  padding: 8px 16px;
+  font-weight: 600;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.update-modal-actions .btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+#update-download-button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 #terrain-toggle {
   accent-color: #fecc44;
 }
@@ -842,18 +968,21 @@ button:hover {
   margin-bottom: -10px;
 }
 
+.github-link,
 .buymeacoffee-link,
 .discord-link {
   display: inline-block;
   transition: transform 0.3s ease, opacity 0.3s ease;
 }
 
+.github-link:hover,
 .buymeacoffee-link:hover,
 .discord-link:hover {
   transform: scale(1.05);
   opacity: 0.8;
 }
 
+.github-logo,
 .buymeacoffee-logo,
 .discord-logo {
   height: 35px;

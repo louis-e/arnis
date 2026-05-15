@@ -149,7 +149,8 @@ pub fn run_gui() {
             gui_pick_save_directory,
             gui_start_generation,
             gui_get_version,
-            gui_check_for_updates,
+            gui_get_update_info,
+            gui_get_platform,
             gui_clear_tile_caches,
             gui_get_world_map_data,
             gui_show_in_folder
@@ -608,11 +609,23 @@ fn gui_get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Latest release info from the GitHub Releases API + a comparison to the running version.
 #[tauri::command]
-fn gui_check_for_updates() -> Result<bool, String> {
-    match version_check::check_for_updates() {
-        Ok(is_newer) => Ok(is_newer),
-        Err(e) => Err(format!("Error checking for updates: {e}")),
+fn gui_get_update_info() -> Result<version_check::UpdateInfo, String> {
+    version_check::check_for_updates().map_err(|e| format!("Update check failed: {e}"))
+}
+
+/// Compile-time target platform: "windows" / "macos" / "linux" / "unknown".
+#[tauri::command]
+fn gui_get_platform() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
     }
 }
 

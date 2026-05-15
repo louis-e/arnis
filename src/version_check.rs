@@ -1,18 +1,44 @@
 use colored::Colorize;
 use reqwest::blocking::Client;
-use reqwest::{Error as ReqwestError, StatusCode};
 use semver::Version;
+use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::time::Duration;
 
-/// URL to the remote Cargo.toml file to check for the latest version
-const REMOTE_CARGO_TOML_URL: &str =
-    "https://raw.githubusercontent.com/louis-e/arnis/main/Cargo.toml";
+const LATEST_RELEASE_API_URL: &str = "https://api.github.com/repos/louis-e/arnis/releases/latest";
 
-/// Fetches the latest version from the remote Cargo.toml file and compares it with the local version.
-/// Returns `true` if a newer version is available, `false` otherwise.
-pub fn check_for_updates() -> Result<bool, Box<dyn Error>> {
-    let client: Client = Client::builder()
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseAsset {
+    pub name: String,
+    pub browser_download_url: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReleaseInfo {
+    pub tag_name: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub body: String,
+    pub html_url: String,
+    #[serde(default)]
+    pub published_at: String,
+    #[serde(default)]
+    pub assets: Vec<ReleaseAsset>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    pub is_newer: bool,
+    pub local_version: String,
+    pub remote_version: String,
+    pub release: ReleaseInfo,
+}
+
+fn build_client() -> reqwest::Result<Client> {
+    Client::builder()
         .user_agent(concat!(
             "Arnis/",
             env!("CARGO_PKG_VERSION"),
@@ -20,70 +46,58 @@ pub fn check_for_updates() -> Result<bool, Box<dyn Error>> {
         ))
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(10))
-        .build()?;
+        .build()
+}
 
-    // Fetch the remote Cargo.toml file
-    let response: Result<reqwest::blocking::Response, ReqwestError> =
-        client.get(REMOTE_CARGO_TOML_URL).send();
+pub fn fetch_latest_release() -> Result<ReleaseInfo, Box<dyn Error>> {
+    let client = build_client()?;
+    let res = client
+        .get(LATEST_RELEASE_API_URL)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()?;
 
-    match response {
-        Ok(res) => {
-            // If the response status is not 200 OK, handle it as an HTTP error
-            if !res.status().is_success() {
-                handle_http_error(res.status());
-                return Ok(false);
-            }
+    if !res.status().is_success() {
+        return Err(format!(
+            "GitHub API returned HTTP {}: {}",
+            res.status().as_u16(),
+            res.status().canonical_reason().unwrap_or("Unknown error")
+        )
+        .into());
+    }
 
-            let response_text: String = res.text()?;
-            // Extract the version from the remote Cargo.toml
-            let remote_version: Version = extract_version_from_cargo_toml(&response_text)?;
-            let local_version: Version = Version::parse(env!("CARGO_PKG_VERSION"))?;
+    Ok(res.json()?)
+}
 
-            // Compare versions
-            if remote_version > local_version {
+pub fn check_for_updates() -> Result<UpdateInfo, Box<dyn Error>> {
+    let release = fetch_latest_release()?;
+    let remote_str = release
+        .tag_name
+        .strip_prefix('v')
+        .unwrap_or(&release.tag_name);
+    let remote_version = Version::parse(remote_str)?;
+    let local_version = Version::parse(env!("CARGO_PKG_VERSION"))?;
+
+    Ok(UpdateInfo {
+        is_newer: remote_version > local_version,
+        local_version: local_version.to_string(),
+        remote_version: remote_version.to_string(),
+        release,
+    })
+}
+
+/// Fire-and-forget CLI update check; prints a one-line notice on a background thread.
+pub fn check_for_updates_async() {
+    std::thread::spawn(|| {
+        if let Ok(info) = check_for_updates() {
+            if info.is_newer {
                 println!(
                     "{} {} -> {}",
                     "A new version is available:".yellow().bold(),
-                    local_version,
-                    remote_version
+                    info.local_version,
+                    info.remote_version
                 );
-                return Ok(true); // Newer version is available
             }
-
-            Ok(false) // Local version is up-to-date
         }
-        Err(err) => {
-            handle_request_error(err);
-            Ok(false) // Treat request failures as no new version available
-        }
-    }
-}
-
-/// Extracts the version from the contents of a Cargo.toml file.
-fn extract_version_from_cargo_toml(cargo_toml_contents: &str) -> Result<Version, Box<dyn Error>> {
-    for line in cargo_toml_contents.lines() {
-        if line.starts_with("version") {
-            let version_str: &str = line.split('=').nth(1).unwrap().trim().trim_matches('"');
-            return Ok(Version::parse(version_str)?);
-        }
-    }
-    Err("Failed to find version in Cargo.toml".into())
-}
-
-/// Handles HTTP errors by printing the status code and a user-friendly message.
-fn handle_http_error(status: StatusCode) {
-    eprintln!(
-        "Failed to fetch remote Cargo.toml: HTTP error {}: {}",
-        status.as_u16(),
-        status.canonical_reason().unwrap_or("Unknown error")
-    );
-}
-
-/// Handles the error for HTTP requests more gracefully, including printing HTTP status codes when applicable.
-fn handle_request_error(err: ReqwestError) {
-    if err.is_timeout() {
-        eprintln!("Request timed out. Please check your network connection.");
-    } else if let Some(status) = err.status() {
-        handle_http_error(status);
-    }
+    });
 }
