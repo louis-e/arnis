@@ -102,21 +102,22 @@ export function renderMarkdown(src) {
 
   src = escapeHTML(src);
 
-  // Markdown images must run before links: their patterns overlap.
+  // Capture groups here are already HTML-escaped (escapeHTML ran upstream);
+  // re-escaping would turn `&amp;` into `&amp;amp;` and break URLs containing `&`.
   src = src.replace(
     /!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^"]*)&quot;)?\)/g,
     (_, alt, url, title) => {
       if (!isSafeUrl(url)) return alt;
-      const t = title ? ` title="${escapeAttr(title)}"` : "";
-      return `<img src="${escapeAttr(url)}" alt="${escapeAttr(alt)}"${t}>`;
+      const t = title ? ` title="${title}"` : "";
+      return `<img src="${url}" alt="${alt}"${t}>`;
     }
   );
   src = src.replace(
     /\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;([^"]*)&quot;)?\)/g,
     (_, text, url, title) => {
       if (!isSafeUrl(url)) return text;
-      const t = title ? ` title="${escapeAttr(title)}"` : "";
-      return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer"${t}>${text}</a>`;
+      const t = title ? ` title="${title}"` : "";
+      return `<a href="${url}" target="_blank" rel="noopener noreferrer"${t}>${text}</a>`;
     }
   );
   src = src.replace(/\*\*([^\*\n][^\*\n]*?)\*\*/g, "<strong>$1</strong>");

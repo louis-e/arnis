@@ -21,6 +21,7 @@
   "update_download": "Download",
   "loading": "Loading...",
   "version_info": "Version Info",
+  "update_fetch_failed": "Could not fetch the latest release information. Please check your internet connection or visit GitHub directly.",
   "minecraft_directory_not_found": "Minecraft directory not found",
   "world_in_use": "The selected world is currently in use",
   "failed_to_create_world": "Failed to create new world",

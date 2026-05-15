@@ -225,12 +225,20 @@ async function checkForUpdates() {
 
     const footer = document.querySelector(".footer");
     const updateMessage = document.createElement("span");
+    updateMessage.setAttribute("role", "button");
+    updateMessage.setAttribute("tabindex", "0");
     updateMessage.style.color = "#fecc44";
     updateMessage.style.marginTop = "-5px";
     updateMessage.style.fontSize = "0.95em";
     updateMessage.style.display = "block";
     updateMessage.style.cursor = "pointer";
     updateMessage.addEventListener("click", () => openUpdateModal());
+    updateMessage.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openUpdateModal();
+      }
+    });
     localizeElement(window.localization, { element: updateMessage }, "new_version_available");
     footer.style.marginTop = "10px";
     footer.appendChild(updateMessage);
@@ -260,9 +268,10 @@ function openUpdateModal(opts = {}) {
 
   const info = latestReleaseInfo;
   if (!info || !info.release) {
-    bodyEl.innerHTML = `<p>${escapeHTMLLite(
-      "Could not fetch the latest release information. Please check your internet connection or visit GitHub directly."
-    )}</p>`;
+    const fallbackMsg =
+      (window.localization && window.localization.update_fetch_failed) ||
+      "Could not fetch the latest release information. Please check your internet connection or visit GitHub directly.";
+    bodyEl.innerHTML = `<p>${escapeHTMLLite(fallbackMsg)}</p>`;
     if (downloadBtn) downloadBtn.disabled = true;
     showModal(modal);
     return;
