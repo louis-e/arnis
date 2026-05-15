@@ -221,7 +221,9 @@ impl Ground {
 
         let max_val = east.max(west).max(north).max(south);
         let min_val = east.min(west).min(north).min(south);
-        max_val - min_val
+        // Saturate: pathological CLI input (e.g. very negative ground_level)
+        // can push max - min past i32::MAX.
+        max_val.saturating_sub(min_val)
     }
 
     /// Returns the ground level at the given coordinates
