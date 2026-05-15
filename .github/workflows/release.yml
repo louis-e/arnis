@@ -159,7 +159,7 @@ jobs:
         path: ./builds/macos
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           builds/windows/arnis-windows.exe
