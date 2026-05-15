@@ -17,15 +17,23 @@ pub struct ReleaseAsset {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseInfo {
     pub tag_name: String,
-    #[serde(default)]
+    // GitHub returns name/body/published_at as null (not just missing) for some releases.
+    #[serde(default, deserialize_with = "null_to_empty")]
     pub name: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_empty")]
     pub body: String,
     pub html_url: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_to_empty")]
     pub published_at: String,
     #[serde(default)]
     pub assets: Vec<ReleaseAsset>,
+}
+
+fn null_to_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 #[derive(Debug, Clone, Serialize)]
