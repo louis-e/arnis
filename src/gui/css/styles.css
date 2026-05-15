@@ -497,6 +497,9 @@ button:hover {
   border-radius: 6px;
   background-color: #5f5f5f;
   margin-top: 4px;
+  text-align: justify;
+  text-justify: inter-word;
+  hyphens: auto;
 }
 
 .update-modal-body img {
@@ -952,11 +955,13 @@ button:hover {
 
 .license-button-row {
   justify-content: center;
+  gap: 8px;
   margin-top: 5px;
 }
 
 .license-button {
-  width: 80% !important;
+  flex: 1;
+  max-width: 50%;
 }
 
 /* Buy Me a Coffee and Discord styling */

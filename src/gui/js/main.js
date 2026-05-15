@@ -132,6 +132,7 @@ async function applyLocalization(localization) {
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
+    "button[data-localize='version_info']": "version_info",
     "h2[data-localize='update_modal_title']": "update_modal_title",
     "div[data-localize='update_modal_download_note']": "update_modal_download_note",
     "button[data-localize='update_view_on_github']": "update_view_on_github",
@@ -191,12 +192,21 @@ let currentPlatform = "unknown";
 
 const SEEN_VERSION_KEY = "arnis-update-seen-version";
 
+// Only forward http(s)/mailto URLs to the OS handler; reject javascript:/data:/file:/etc.
+function isSafeExternalUrl(url) {
+  return typeof url === "string" && /^(?:https?|mailto):/i.test(url);
+}
+
 async function openExternal(url) {
+  if (!isSafeExternalUrl(url)) {
+    console.warn("Refusing to open URL with disallowed scheme:", url);
+    return;
+  }
   try {
     if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
       await window.__TAURI__.shell.open(url);
     } else {
-      window.open(url, "_blank", "noopener");
+      window.open(url, "_blank", "noopener,noreferrer");
     }
   } catch (err) {
     console.error("Failed to open URL:", url, err);
@@ -235,12 +245,18 @@ async function checkForUpdates() {
   }
 }
 
-function openUpdateModal() {
+function openUpdateModal(opts = {}) {
+  const showDownload = opts.showDownload !== false;
   const modal = document.getElementById("update-modal");
   if (!modal) return;
   const titleEl = document.getElementById("update-modal-title");
   const bodyEl = document.getElementById("update-modal-body");
   const downloadBtn = document.getElementById("update-download-button");
+  const downloadNote = document.getElementById("update-modal-download-note");
+
+  // Hide download button + the "opens in your browser" note in version-info mode.
+  if (downloadBtn) downloadBtn.style.display = showDownload ? "" : "none";
+  if (downloadNote) downloadNote.style.display = showDownload ? "" : "none";
 
   const info = latestReleaseInfo;
   if (!info || !info.release) {
@@ -255,7 +271,6 @@ function openUpdateModal() {
 
   titleEl.textContent = (rel.name && rel.name.trim()) || rel.tag_name || "Latest release";
   bodyEl.innerHTML = renderMarkdown(rel.body || "");
-  // Route external links through the system browser instead of the WebView.
   bodyEl.querySelectorAll("a[href]").forEach((a) => {
     const href = a.getAttribute("href");
     if (!href) return;
@@ -265,7 +280,7 @@ function openUpdateModal() {
     });
   });
 
-  if (downloadBtn) {
+  if (downloadBtn && showDownload) {
     const asset = pickAssetForPlatform(rel.assets || [], currentPlatform);
     downloadBtn.disabled = false;
     downloadBtn.textContent =
@@ -273,12 +288,23 @@ function openUpdateModal() {
     downloadBtn.dataset.downloadUrl = asset ? asset.browser_download_url : rel.html_url;
   }
 
-  // Mark this version as "seen" so we don't auto-open it again on next startup.
-  if (info.isNewer) {
+  // "Seen" gate only applies to auto-open of a newer release, not manual version-info clicks.
+  if (info.isNewer && showDownload) {
     try { localStorage.setItem(SEEN_VERSION_KEY, info.remoteVersion); } catch (_) {}
   }
 
   showModal(modal);
+}
+
+async function openVersionInfoModal() {
+  if (!latestReleaseInfo) {
+    try {
+      latestReleaseInfo = await invoke("gui_get_update_info");
+    } catch (e) {
+      console.error("Failed to fetch release info:", e);
+    }
+  }
+  openUpdateModal({ showDownload: false });
 }
 
 function closeUpdateModal() {
@@ -316,6 +342,7 @@ function escapeHTMLLite(s) {
 }
 
 window.openUpdateModal = openUpdateModal;
+window.openVersionInfoModal = openVersionInfoModal;
 window.closeUpdateModal = closeUpdateModal;
 window.openUpdateInBrowser = openUpdateInBrowser;
 window.downloadLatestRelease = downloadLatestRelease;

@@ -14,7 +14,6 @@
   "ground_level": "Földszint",
   "customization_settings": "Testreszabási lehetőségek",
   "footer_text": "© {year} Arnis v{version} by louis-e",
-  "new_version_available": "Egy új verzió elérhető kattints ide hogy letöltsd",
   "minecraft_directory_not_found": "Minecraft mappa nem található",
   "world_in_use": "A kiválasztott világ már használatban van",
   "failed_to_create_world": "Nem sikerült új világot létrehozni",

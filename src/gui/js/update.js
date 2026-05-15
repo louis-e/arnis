@@ -11,6 +11,11 @@ function escapeHTML(s) {
 
 const escapeAttr = escapeHTML;
 
+// Markdown link/image URLs must use http(s); other schemes are dropped at render time.
+function isSafeUrl(url) {
+  return /^https?:\/\//i.test(url);
+}
+
 function sanitizeImgTag(attrsStr) {
   const out = {};
   const attrPattern = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/g;
@@ -101,6 +106,7 @@ export function renderMarkdown(src) {
   src = src.replace(
     /!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;([^"]*)&quot;)?\)/g,
     (_, alt, url, title) => {
+      if (!isSafeUrl(url)) return alt;
       const t = title ? ` title="${escapeAttr(title)}"` : "";
       return `<img src="${escapeAttr(url)}" alt="${escapeAttr(alt)}"${t}>`;
     }
@@ -108,8 +114,9 @@ export function renderMarkdown(src) {
   src = src.replace(
     /\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;([^"]*)&quot;)?\)/g,
     (_, text, url, title) => {
+      if (!isSafeUrl(url)) return text;
       const t = title ? ` title="${escapeAttr(title)}"` : "";
-      return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener"${t}>${text}</a>`;
+      return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer"${t}>${text}</a>`;
     }
   );
   src = src.replace(/\*\*([^\*\n][^\*\n]*?)\*\*/g, "<strong>$1</strong>");

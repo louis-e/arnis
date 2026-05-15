@@ -14,7 +14,6 @@
   "ground_level": "Niveau du sol",
   "customization_settings": "Paramètres de personnalisation",
   "footer_text": "© {year} Arnis v{version} par louis-e",
-  "new_version_available": "Une nouvelle version est disponible ! Cliquez ici pour la télécharger.",
   "minecraft_directory_not_found": "Répertoire Minecraft introuvable",
   "world_in_use": "Le monde sélectionné est en cours d'utilisation",
   "failed_to_create_world": "Échec de la création du nouveau monde",

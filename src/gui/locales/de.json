@@ -14,7 +14,6 @@
   "ground_level": "Bodenhöhe",
   "customization_settings": "Einstellungen",
   "footer_text": "© {year} Arnis v{version} von louis-e",
-  "new_version_available": "Eine neue Version ist verfügbar! Klicke hier, um sie herunterzuladen.",
   "minecraft_directory_not_found": "Minecraft Verzeichnis nicht gefunden",
   "world_in_use": "Die ausgewählte Welt ist gerade in Benutzung",
   "failed_to_create_world": "Neue Welt konnte nicht erstellt werden",
