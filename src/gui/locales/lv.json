@@ -14,7 +14,7 @@
   "ground_level": "Zemes līmenis",
   "customization_settings": "Personalizācijas iestatījumi",
   "footer_text": "© {year} Arnis v{version} no louis-e",
-  "new_version_available": "Pieejama jauna versija! Noklikšķiniet šeit, lai lejupielādētu",
+  "new_version_available": "Pieejama jauna versija! Noklikšķiniet šeit, lai redzētu jaunumus.",
   "minecraft_directory_not_found": "Minecraft direktorijs nav atrasts",
   "world_in_use": "Izvēlētā pasaule jau tiek izmantota",
   "failed_to_create_world": "Neizdevās izveidot jaunu pasauli",

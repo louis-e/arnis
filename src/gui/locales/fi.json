@@ -14,7 +14,7 @@
   "ground_level": "Maataso",
   "customization_settings": "Kustomisaatio-asetukset",
   "footer_text": "© {year} Arnis v{version} tekijänä louis-e",
-  "new_version_available": "Uusi versio on saatavilla! Paina tästä ladataksesi sen.",
+  "new_version_available": "Uusi versio on saatavilla! Paina tästä nähdäksesi uutuudet.",
   "minecraft_directory_not_found": "Minecraft-hakemistoa ei löytynyt",
   "world_in_use": "Valittu maailma käytössä.",
   "failed_to_create_world": "Uuden maailman luonti epäonnistui",

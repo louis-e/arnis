@@ -14,7 +14,7 @@
   "ground_level": "지면 레벨",
   "customization_settings": "사용자 지정 설정",
   "footer_text": "© {year} Arnis v{version} by louis-e",
-  "new_version_available": "새로운 버전이 있습니다! 여기를 클릭하여 다운로드하세요.",
+  "new_version_available": "새로운 버전이 있습니다! 새로운 변경 사항을 보려면 여기를 클릭하세요.",
   "minecraft_directory_not_found": "마인크래프트 디렉토리가 발견되지 않았습니다",
   "world_in_use": "선택한 세계가 현재 사용 중입니다",
   "failed_to_create_world": "새 세계 생성에 실패했습니다",

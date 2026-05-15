@@ -1,5 +1,6 @@
 import { licenseText } from './license.js';
 import { fetchLanguage, invalidJSON } from './language.js';
+import { renderMarkdown, pickAssetForPlatform } from './update.js';
 
 let invoke;
 if (window.__TAURI__) {
@@ -131,6 +132,11 @@ async function applyLocalization(localization) {
     ".footer-link": "footer_text",
     "button[data-localize='license_and_credits']": "license_and_credits",
     "h2[data-localize='license_and_credits']": "license_and_credits",
+    "button[data-localize='version_info']": "version_info",
+    "h2[data-localize='update_modal_title']": "update_modal_title",
+    "div[data-localize='update_modal_download_note']": "update_modal_download_note",
+    "button[data-localize='update_view_on_github']": "update_view_on_github",
+    "button[data-localize='update_download']": "update_download",
 
     // Placeholder strings
     "input[id='bbox-coords']": "placeholder_bbox",
@@ -181,29 +187,174 @@ async function initFooter() {
   }
 }
 
-// Function to check for updates and display a notification if available
+let latestReleaseInfo = null;
+let currentPlatform = "unknown";
+
+const SEEN_VERSION_KEY = "arnis-update-seen-version";
+
+// Only forward http(s)/mailto URLs to the OS handler; reject javascript:/data:/file:/etc.
+function isSafeExternalUrl(url) {
+  return typeof url === "string" && /^(?:https?|mailto):/i.test(url);
+}
+
+async function openExternal(url) {
+  if (!isSafeExternalUrl(url)) {
+    console.warn("Refusing to open URL with disallowed scheme:", url);
+    return;
+  }
+  try {
+    if (window.__TAURI__ && window.__TAURI__.shell && window.__TAURI__.shell.open) {
+      await window.__TAURI__.shell.open(url);
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  } catch (err) {
+    console.error("Failed to open URL:", url, err);
+  }
+}
+
 async function checkForUpdates() {
   try {
-    const isUpdateAvailable = await invoke('gui_check_for_updates');
-    if (isUpdateAvailable) {
-      const footer = document.querySelector(".footer");
-      const updateMessage = document.createElement("a");
-      updateMessage.href = "https://github.com/louis-e/arnis/releases";
-      updateMessage.target = "_blank";
-      updateMessage.style.color = "#fecc44";
-      updateMessage.style.marginTop = "-5px";
-      updateMessage.style.fontSize = "0.95em";
-      updateMessage.style.display = "block";
-      updateMessage.style.textDecoration = "none";
+    const [info, platform] = await Promise.all([
+      invoke("gui_get_update_info"),
+      invoke("gui_get_platform"),
+    ]);
+    latestReleaseInfo = info;
+    currentPlatform = platform || "unknown";
+    if (!info || !info.isNewer) return;
 
-      localizeElement(window.localization, { element: updateMessage }, "new_version_available");
-      footer.style.marginTop = "10px";
-      footer.appendChild(updateMessage);
+    const footer = document.querySelector(".footer");
+    const updateMessage = document.createElement("span");
+    updateMessage.setAttribute("role", "button");
+    updateMessage.setAttribute("tabindex", "0");
+    updateMessage.style.color = "#fecc44";
+    updateMessage.style.marginTop = "-5px";
+    updateMessage.style.fontSize = "0.95em";
+    updateMessage.style.display = "block";
+    updateMessage.style.cursor = "pointer";
+    updateMessage.addEventListener("click", () => openUpdateModal());
+    updateMessage.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openUpdateModal();
+      }
+    });
+    localizeElement(window.localization, { element: updateMessage }, "new_version_available");
+    footer.style.marginTop = "10px";
+    footer.appendChild(updateMessage);
+
+    // Auto-open once per new remote version; "seen" key records the last auto-shown version.
+    const seen = localStorage.getItem(SEEN_VERSION_KEY);
+    if (seen !== info.remoteVersion) {
+      openUpdateModal();
     }
   } catch (error) {
     console.error("Failed to check for updates: ", error);
   }
 }
+
+function openUpdateModal(opts = {}) {
+  const showDownload = opts.showDownload !== false;
+  const modal = document.getElementById("update-modal");
+  if (!modal) return;
+  const titleEl = document.getElementById("update-modal-title");
+  const bodyEl = document.getElementById("update-modal-body");
+  const downloadBtn = document.getElementById("update-download-button");
+  const downloadNote = document.getElementById("update-modal-download-note");
+
+  // Hide download button + the "opens in your browser" note in version-info mode.
+  if (downloadBtn) downloadBtn.style.display = showDownload ? "" : "none";
+  if (downloadNote) downloadNote.style.display = showDownload ? "" : "none";
+
+  const info = latestReleaseInfo;
+  if (!info || !info.release) {
+    const fallbackMsg =
+      (window.localization && window.localization.update_fetch_failed) ||
+      "Could not fetch the latest release information. Please check your internet connection or visit GitHub directly.";
+    bodyEl.innerHTML = `<p>${escapeHTMLLite(fallbackMsg)}</p>`;
+    if (downloadBtn) downloadBtn.disabled = true;
+    showModal(modal);
+    return;
+  }
+  const rel = info.release;
+
+  titleEl.textContent = (rel.name && rel.name.trim()) || rel.tag_name || "Latest release";
+  bodyEl.innerHTML = renderMarkdown(rel.body || "");
+  bodyEl.querySelectorAll("a[href]").forEach((a) => {
+    const href = a.getAttribute("href");
+    if (!href) return;
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openExternal(href);
+    });
+  });
+
+  if (downloadBtn && showDownload) {
+    const asset = pickAssetForPlatform(rel.assets || [], currentPlatform);
+    downloadBtn.disabled = false;
+    downloadBtn.textContent =
+      (window.localization && window.localization.update_download) || "Download";
+    downloadBtn.dataset.downloadUrl = asset ? asset.browser_download_url : rel.html_url;
+  }
+
+  // "Seen" gate only applies to auto-open of a newer release, not manual version-info clicks.
+  if (info.isNewer && showDownload) {
+    try { localStorage.setItem(SEEN_VERSION_KEY, info.remoteVersion); } catch (_) {}
+  }
+
+  showModal(modal);
+}
+
+async function openVersionInfoModal() {
+  if (!latestReleaseInfo) {
+    try {
+      latestReleaseInfo = await invoke("gui_get_update_info");
+    } catch (e) {
+      console.error("Failed to fetch release info:", e);
+    }
+  }
+  openUpdateModal({ showDownload: false });
+}
+
+function closeUpdateModal() {
+  const modal = document.getElementById("update-modal");
+  if (modal) modal.style.display = "none";
+}
+
+function showModal(modal) {
+  modal.style.display = "flex";
+  modal.style.justifyContent = "center";
+  modal.style.alignItems = "center";
+}
+
+function openUpdateInBrowser() {
+  const url =
+    (latestReleaseInfo && latestReleaseInfo.release && latestReleaseInfo.release.html_url) ||
+    "https://github.com/louis-e/arnis/releases";
+  openExternal(url);
+}
+
+function downloadLatestRelease() {
+  const btn = document.getElementById("update-download-button");
+  const url = btn && btn.dataset.downloadUrl;
+  if (!url) return;
+  openExternal(url);
+}
+
+function escapeHTMLLite(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+window.openUpdateModal = openUpdateModal;
+window.openVersionInfoModal = openVersionInfoModal;
+window.closeUpdateModal = closeUpdateModal;
+window.openUpdateInBrowser = openUpdateInBrowser;
+window.downloadLatestRelease = downloadLatestRelease;
 
 // Function to register the event listener for bbox updates from iframe
 function registerMessageEvent() {
@@ -345,6 +496,11 @@ function initSettings() {
       const licenseModal = document.getElementById("license-modal");
       if (licenseModal && licenseModal.style.display === "flex") {
         closeLicense();
+      }
+
+      const updateModal = document.getElementById("update-modal");
+      if (updateModal && updateModal.style.display === "flex") {
+        closeUpdateModal();
       }
     }
   });

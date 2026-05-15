@@ -84,14 +84,8 @@ fn run_cli() {
         repository.bright_white().bold()
     );
 
-    // Check for updates
-    if let Err(e) = version_check::check_for_updates() {
-        eprintln!(
-            "{}: {}",
-            "Error checking for version updates".red().bold(),
-            e
-        );
-    }
+    // Fire-and-forget update check; prints a one-line notice on a background thread.
+    version_check::check_for_updates_async();
 
     // Parse input arguments
     let args: Args = Args::parse();

@@ -14,7 +14,7 @@
   "ground_level": "Nivo tal",
   "customization_settings": "Nastavitve prilagajanja",
   "footer_text": "© {year} Arnis v{version} avtor louis-e",
-  "new_version_available": "Na voljo je nova različica! Kliknite tukaj za prenos.",
+  "new_version_available": "Na voljo je nova različica! Kliknite tukaj za novosti.",
   "minecraft_directory_not_found": "Mapa Minecrafta ni bila najdena",
   "world_in_use": "Izbrani svet je trenutno v uporabi",
   "failed_to_create_world": "Ustvarjanje novega sveta je spodletelo",
