@@ -67,10 +67,6 @@ jobs:
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
           gen_time=${{ steps.benchmark.outputs.gen_time }}
 
-          # Calibrated after the multi-source elevation pipeline landed (PR #939),
-          # the road-flatten perf fix (PR #965), and the grid-precision shrink.
-          # Update this value whenever main-branch generation changes materially
-          # so the verdict thresholds below stay meaningful.
           baseline_time=27
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
@@ -93,7 +89,7 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          baseline_mem=935
+          baseline_mem=900
           mem_diff=$((peak_mem - baseline_mem))
           mem_abs_diff=${mem_diff#-}
           mem_annotation=""

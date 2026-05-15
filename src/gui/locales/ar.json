@@ -14,6 +14,7 @@
   "ground_level": "مستوى الأرض",
   "customization_settings": "إعدادات التخصيص",
   "footer_text": "© {year} Arnis v{version} من louis-e",
+  "new_version_available": "هناك نسخة جديدة متاحة! انقر هنا لمعرفة الجديد.",
   "minecraft_directory_not_found": "لم يتم العثور على مجلد ماين كرافت",
   "world_in_use": "العالم المحدد قيد الاستخدام حاليًا",
   "failed_to_create_world": "حدث خطأ عند محاولة إنشاء عالم جديد",

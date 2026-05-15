@@ -14,6 +14,7 @@
   "ground_level": "Уровень земли",
   "customization_settings": "Настройки персонализации",
   "footer_text": "© {year} Arnis v{version} от louis-e",
+  "new_version_available": "Доступна новая версия! Нажмите здесь, чтобы увидеть, что нового.",
   "minecraft_directory_not_found": "Каталог Minecraft не найден",
   "world_in_use": "Выбранный мир уже используется",
   "failed_to_create_world": "Не удалось создать новый мир",
