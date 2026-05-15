@@ -1,13 +1,21 @@
-name: Set up Arnis Linux build environment
-description: Install Rust toolchain, optionally install GTK/WebKit GUI libs, restore cargo cache. Caller must check out the repo first.
+name: Set up Arnis build environment
+description: Install Rust toolchain, optionally install GTK/WebKit GUI libs (Linux only), restore cargo cache. Caller must check out the repo first.
 
 inputs:
   rust-components:
     description: Extra rustup components (e.g. "clippy,rustfmt")
     required: false
     default: ""
+  rust-targets:
+    description: Extra rustup targets (e.g. "x86_64-pc-windows-msvc")
+    required: false
+    default: ""
   gui-deps:
-    description: Install GTK/WebKit system libs needed by the gui feature
+    description: Install GTK/WebKit system libs needed by the gui feature (Linux only)
+    required: false
+    default: "true"
+  cache:
+    description: Restore the Swatinem/rust-cache for cargo registry + target
     required: false
     default: "true"
 
@@ -18,9 +26,10 @@ runs:
       with:
         toolchain: stable
         components: ${{ inputs.rust-components }}
+        targets: ${{ inputs.rust-targets }}
 
     - name: Install Linux GUI dependencies
-      if: inputs.gui-deps == 'true'
+      if: runner.os == 'Linux' && inputs.gui-deps == 'true'
       shell: bash
       run: |
         sudo apt update
@@ -31,4 +40,5 @@ runs:
         sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
         echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
 
-    - uses: Swatinem/rust-cache@v2
+    - if: inputs.cache == 'true'
+      uses: Swatinem/rust-cache@v2
