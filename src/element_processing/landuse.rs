@@ -80,6 +80,15 @@ pub fn generate_landuse(
     };
 
     for &(x, z) in floor_area.iter() {
+        // Only the element that has the smallest area for (x,z) is allowed to render here
+        if let Some(cell) = editor.area_map.get(&(x, z)) {
+            if cell.element_id != element.id {
+                continue;
+            }
+        } else {
+            continue;
+        }
+
         // Apply per-block randomness for certain landuse types
         let actual_block = if landuse_tag == "industrial" {
             // Industrial: primarily stone, with some stone bricks and smooth stone

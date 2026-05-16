@@ -3,7 +3,6 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::surfaces::get_blocks_for_surface;
-use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
@@ -14,7 +13,7 @@ pub fn generate_leisure(
     element: &ProcessedWay,
     args: &Args,
     flood_fill_cache: &FloodFillCache,
-    building_footprints: &BuildingFootprintBitmap,
+    _building_footprints: &BuildingFootprintBitmap,
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
@@ -86,6 +85,15 @@ pub fn generate_leisure(
             let mut rng = element_rng(element.id);
 
             for &(x, z) in filled_area.iter() {
+                // Only the element that has the smallest area for (x,z) is allowed to render here
+                if let Some(cell) = editor.area_map.get(&(x, z)) {
+                    if cell.element_id != element.id {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+
                 editor.set_block(block_type, x, 0, z, Some(&[GRASS_BLOCK]), None);
 
                 // Add decorative elements for parks and gardens
@@ -114,10 +122,6 @@ pub fn generate_leisure(
                         90..105 => {
                             // Oak leaves
                             editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                        }
-                        105..120 => {
-                            // Tree
-                            Tree::create(editor, (x, 1, z), Some(building_footprints));
                         }
                         _ => {}
                     }

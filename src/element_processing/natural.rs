@@ -214,6 +214,15 @@ pub fn generate_natural(
                 ];
 
                 for &(x, z) in filled_area.iter() {
+                    // Only the element that has the smallest area for (x,z) is allowed to render here
+                    if let Some(cell) = editor.area_map.get(&(x, z)) {
+                        if cell.element_id != way.id {
+                            continue;
+                        }
+                    } else {
+                        continue;
+                    }
+
                     // Don't overwrite road/path blocks with natural ground
                     if !editor.check_for_block(x, 0, z, Some(protected_blocks)) {
                         let b = if rock_variation {
