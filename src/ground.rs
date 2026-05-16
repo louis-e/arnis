@@ -1,8 +1,12 @@
 use crate::args::Args;
-use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
+use crate::coordinate_system::{
+    cartesian::{XZBBox, XZPoint},
+    geographic::LLBBox,
+};
 use crate::elevation::compute_grid_dims;
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
+use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -118,6 +122,46 @@ impl Ground {
     #[inline(always)]
     pub fn has_land_cover(&self) -> bool {
         self.land_cover.is_some()
+    }
+
+    /// Force LC_WATER for every cell inside an OSM water polygon or waterway.
+    pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
+        let Some(lc) = self.land_cover.as_mut() else {
+            return;
+        };
+        let Some(data) = self.elevation_data.as_ref() else {
+            return;
+        };
+        crate::land_cover_osm_water_override::apply_osm_water_override(
+            lc,
+            data.world_width,
+            data.world_height,
+            elements,
+            xzbbox,
+        );
+    }
+
+    /// Reclassify cells under OSM-tagged bridges to the surrounding class.
+    pub fn apply_bridge_land_cover_repair(
+        &mut self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        scale: f64,
+    ) {
+        let Some(lc) = self.land_cover.as_mut() else {
+            return;
+        };
+        let Some(data) = self.elevation_data.as_ref() else {
+            return;
+        };
+        crate::land_cover_bridge_repair::apply_bridge_land_cover_repair(
+            lc,
+            data.world_width,
+            data.world_height,
+            elements,
+            xzbbox,
+            scale,
+        );
     }
 
     /// Returns the ESA WorldCover land cover class at the given coordinates.
@@ -399,6 +443,44 @@ impl Ground {
             && orig_z <= mask.orig_max_z as f64 + EPSILON
     }
 
+    pub fn save_land_cover_debug_image(&self, filename: &str) {
+        let Some(ref lc) = self.land_cover else {
+            return;
+        };
+        if lc.height == 0 || lc.width == 0 {
+            return;
+        }
+        let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> =
+            RgbImage::new(lc.width as u32, lc.height as u32);
+        for (y, row) in lc.grid.iter().enumerate() {
+            for (x, &class) in row.iter().enumerate() {
+                let color = match class {
+                    land_cover::LC_TREE_COVER => Rgb([0x00, 0x6e, 0x00]),
+                    land_cover::LC_SHRUBLAND => Rgb([0xff, 0xbb, 0x22]),
+                    land_cover::LC_GRASSLAND => Rgb([0xff, 0xff, 0x4c]),
+                    land_cover::LC_CROPLAND => Rgb([0xf0, 0x96, 0xff]),
+                    land_cover::LC_BUILT_UP => Rgb([0xfa, 0x00, 0x00]),
+                    land_cover::LC_BARE => Rgb([0xb4, 0xb4, 0xb4]),
+                    land_cover::LC_SNOW_ICE => Rgb([0xf0, 0xf0, 0xf0]),
+                    land_cover::LC_WATER => Rgb([0x00, 0x64, 0xc8]),
+                    land_cover::LC_WETLAND => Rgb([0x00, 0x96, 0xa0]),
+                    land_cover::LC_MANGROVES => Rgb([0x00, 0xcf, 0x75]),
+                    land_cover::LC_MOSS => Rgb([0xfa, 0xe6, 0xa0]),
+                    _ => Rgb([0x00, 0x00, 0x00]),
+                };
+                img.put_pixel(x as u32, y as u32, color);
+            }
+        }
+        let filename: String = if !filename.ends_with(".png") {
+            format!("{filename}.png")
+        } else {
+            filename.to_string()
+        };
+        if let Err(e) = img.save(&filename) {
+            eprintln!("Failed to save land cover debug image: {e}");
+        }
+    }
+
     fn save_debug_image(&self, filename: &str) {
         let heights = &self
             .elevation_data
@@ -470,6 +552,7 @@ pub fn generate_ground_data(args: &Args) -> Ground {
         );
         if args.debug {
             ground.save_debug_image("elevation_debug");
+            ground.save_land_cover_debug_image("landcover_debug");
         }
         return ground;
     }

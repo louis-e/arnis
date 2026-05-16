@@ -1110,6 +1110,10 @@ fn gui_start_generation(
 
                     let mut ground = ground::generate_ground_data(&args);
 
+                    // OSM water override first, then bridge repair.
+                    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
+
                     // Transform map (parsed_elements). Operations are defined in a json file
                     map_transformation::transform_map(
                         &mut parsed_elements,
