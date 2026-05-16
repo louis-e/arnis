@@ -533,8 +533,8 @@ fn sample_heights(
         for pr in 1..PSIZE - 1 {
             for pc in 1..PSIZE - 1 {
                 let h = prev[pr][pc];
-                let avg = (prev[pr - 1][pc] + prev[pr + 1][pc]
-                    + prev[pr][pc - 1] + prev[pr][pc + 1]) / 4;
+                let avg =
+                    (prev[pr - 1][pc] + prev[pr + 1][pc] + prev[pr][pc - 1] + prev[pr][pc + 1]) / 4;
                 grid[pr][pc] = h + ((avg - h) as f32 * PRE_BLUR_STRENGTH).round() as i32;
             }
         }
