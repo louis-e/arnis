@@ -47,16 +47,26 @@ pub const DEFAULT_OUTPUT_DIR: &str =
 // ---------------------------------------------------------------------------
 
 /// Extra vertex rows/columns sampled outside each cell edge.
-/// Must be ≥ SMOOTH_ITERS so that every inner vertex's smoothed value depends
-/// only on raw ground.level() samples, guaranteeing inter-cell consistency.
-const SMOOTH_PAD: usize = 7;
+/// Must be ≥ PRE_BLUR_ITERS + SMOOTH_ITERS so that every inner vertex's
+/// smoothed value depends only on raw ground.level() samples, guaranteeing
+/// inter-cell consistency.
+const SMOOTH_PAD: usize = 12;
 
-/// Number of smoothing passes.
+/// Unconditional box-blur passes applied before gradient-limited smoothing.
+/// These merge clusters of small adjacent steps into a single gradual slope
+/// without requiring any individual step to exceed the gradient threshold.
+const PRE_BLUR_ITERS: usize = 4;
+
+/// Blend fraction toward the 4-neighbour average per pre-blur pass.
+/// 0.25 is gentle enough not to flatten genuine hills over a few passes.
+const PRE_BLUR_STRENGTH: f32 = 0.25;
+
+/// Number of gradient-limited smoothing passes.
 const SMOOTH_ITERS: usize = 6;
 
 /// VHGT gradient (units per vertex) below which no smoothing is applied.
-/// ~10 units ≈ atan(80/128) ≈ 32° slope — gentle hills are left unchanged.
-const SMOOTH_THRESHOLD: i32 = 10;
+/// ~6 units ≈ gentle staircase — lowered from 10 to catch smaller individual jumps.
+const SMOOTH_THRESHOLD: i32 = 6;
 
 /// VHGT gradient above which the maximum blend is applied.
 /// ~32 units ≈ atan(256/128) ≈ 63° — near-vertical cliffs get full treatment.
@@ -512,6 +522,21 @@ fn sample_heights(
             let z = cell_row * BLOCKS_PER_CELL + VERTS as i32 - 1 - (pr as i32 - SMOOTH_PAD as i32);
             let raw_h = ground.level(XZPoint::new(x, z));
             grid[pr][pc] = (raw_h - global_min) * scale + HEIGHT_MARGIN;
+        }
+    }
+
+    // ── Pre-blur: merge grouped step-jumps into gradual slopes ─────────────
+    // Unconditional low-strength box blur converts clusters of small steps
+    // (which individually fall below SMOOTH_THRESHOLD) into continuous ramps.
+    for _ in 0..PRE_BLUR_ITERS {
+        let prev = grid;
+        for pr in 1..PSIZE - 1 {
+            for pc in 1..PSIZE - 1 {
+                let h = prev[pr][pc];
+                let avg = (prev[pr - 1][pc] + prev[pr + 1][pc]
+                    + prev[pr][pc - 1] + prev[pr][pc + 1]) / 4;
+                grid[pr][pc] = h + ((avg - h) as f32 * PRE_BLUR_STRENGTH).round() as i32;
+            }
         }
     }
 
