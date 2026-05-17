@@ -173,6 +173,8 @@ pub fn apply_bridge_land_cover_repair(
     }
 
     let mut water_changed = false;
+    let mut mutated = 0usize;
+    let mut to_water = 0usize;
     for &b_idx in &bridge_indices {
         let Some(&new_class) = assigned.get(&b_idx) else {
             continue;
@@ -185,22 +187,18 @@ pub fn apply_bridge_land_cover_repair(
             continue;
         }
         land_cover.grid[z][x] = new_class;
+        mutated += 1;
+        if new_class == LC_WATER {
+            to_water += 1;
+        }
         if (old_class == LC_WATER) != (new_class == LC_WATER) {
             water_changed = true;
         }
     }
 
-    let to_water = bridge_indices
-        .iter()
-        .filter(|&&b| {
-            let bi = b as usize;
-            assigned.contains_key(&b) && land_cover.grid[bi / width][bi % width] == LC_WATER
-        })
-        .count();
     eprintln!(
         "Bridge LC repair: {} cells reclassified ({} to water)",
-        bridge_indices.len(),
-        to_water,
+        mutated, to_water,
     );
 
     if water_changed {
