@@ -18,6 +18,9 @@ export const licenseText = `
 <br><br>
 
 <b>Stadia Maps:</b><br> © <a href="https://www.stadiamaps.com/" style="color: inherit;" target="_blank">Stadia Maps</a> © <a href="https://openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a> © OpenStreetMap contributors
+<br><br>
+
+<b>OpenFreeMap:</b><br> Vector tiles © <a href="https://openfreemap.org" style="color: inherit;" target="_blank">OpenFreeMap</a>, "Liberty" style © <a href="https://www.openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a>, map data © OpenStreetMap contributors
 <p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
 
 <b>AWS Terrain Tiles:</b><br>
