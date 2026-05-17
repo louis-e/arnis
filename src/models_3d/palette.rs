@@ -108,6 +108,20 @@ pub fn closest_block(color: RGBTuple) -> Block {
         .unwrap_or(STONE_BRICKS)
 }
 
+/// Top-K perceptually-closest palette blocks to the input color, sorted by
+/// ascending Oklab distance. Used to build a small palette pool that picks a
+/// voxel from blocks of similar but not identical hue (BRICK / RED_TERRACOTTA
+/// / RED_WOOL for a "red" element), so voxelized models read as textured
+/// rather than flat.
+pub fn closest_blocks(color: RGBTuple, k: usize) -> Vec<Block> {
+    let mut scored: Vec<(f32, Block)> = PALETTE
+        .iter()
+        .map(|(c, b)| (oklab_distance(&color, c), *b))
+        .collect();
+    scored.sort_by(|a, b| a.0.total_cmp(&b.0));
+    scored.into_iter().take(k.max(1)).map(|(_, b)| b).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -144,5 +158,28 @@ mod tests {
             "iron-brown should not map to a white block — got {}",
             block.id()
         );
+    }
+
+    #[test]
+    fn closest_blocks_returns_k_red_variants_for_red_input() {
+        let blocks = closest_blocks((150, 40, 40), 4);
+        assert_eq!(blocks.len(), 4);
+        let acceptable_reds = [
+            RED_CONCRETE,
+            RED_WOOL,
+            RED_TERRACOTTA,
+            BRICK,
+            RED_NETHER_BRICKS,
+            NETHER_BRICK,
+            TERRACOTTA,
+            ORANGE_TERRACOTTA,
+        ];
+        for b in &blocks {
+            assert!(
+                acceptable_reds.iter().any(|r| r.id() == b.id()),
+                "got non-red block id {} in palette",
+                b.id()
+            );
+        }
     }
 }

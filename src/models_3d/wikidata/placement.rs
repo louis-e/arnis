@@ -3,7 +3,7 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::colors::{color_text_to_rgb_tuple, RGBTuple};
-use crate::models_3d::palette::closest_block;
+use crate::models_3d::palette::closest_blocks;
 use crate::models_3d::voxelize::{voxelize_uniform_triangles, WorldTransform};
 use crate::models_3d::wikidata::client::fetch_stl;
 use crate::models_3d::wikidata::index::lookup;
@@ -13,6 +13,11 @@ use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
+
+/// Number of perceptually-close blocks to pull when the OSM element has an
+/// explicit color or material tag. Larger = more texture, but eventually
+/// includes off-hue blocks.
+const COLOR_PALETTE_K: usize = 5;
 
 /// Reject Wikidata models whose final bbox diagonal exceeds this — guards
 /// against "Penang island.stl"-class entries and scale-heuristic misfires.
@@ -27,7 +32,11 @@ struct Placement {
     anchor_z: i32,
     footprint: Bbox,
     world_yaw_degrees: f64,
-    block: Block,
+    /// Pool of perceptually-similar Minecraft blocks. The voxelizer picks one
+    /// per voxel deterministically from this list to give visible texture
+    /// variation, mirroring how the standard building generator picks from
+    /// per-category wall palettes.
+    palette: Vec<Block>,
     /// OSM-resolved target height in meters; `None` falls back to bbox-XZ scaling.
     osm_height_m: Option<f64>,
     /// OSM-resolved target XZ extent in meters; `None` falls back to height-only scaling.
@@ -113,7 +122,7 @@ pub fn prescan(
             .unwrap_or(0.0);
         let world_yaw_degrees = osm_yaw + world_rotation;
 
-        let block = resolve_block(element);
+        let palette = resolve_palette(element);
 
         suppressed.insert(element.id());
         if let Some(b) = raw_footprint {
@@ -126,7 +135,7 @@ pub fn prescan(
             anchor_z,
             footprint,
             world_yaw_degrees,
-            block,
+            palette,
             osm_height_m,
             osm_xz_extent_m,
         });
@@ -288,7 +297,7 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
             })
             .collect();
 
-        let mut voxels = voxelize_uniform_triangles(fitted, transform, placement.block);
+        let mut voxels = voxelize_uniform_triangles(fitted, transform, STONE_BRICKS);
 
         if let Some(min_voxel_y) = voxels.iter().map(|(p, _)| p[1]).min() {
             let dy = ground_y - min_voxel_y;
@@ -297,6 +306,11 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
                     pos[1] += dy;
                 }
             }
+        }
+
+        let seed = qid_seed(&placement.qid);
+        for ([x, y, z], block) in voxels.iter_mut() {
+            *block = pick_voxel_block(&placement.palette, seed, [*x, *y, *z]);
         }
 
         for ([x, y, z], block) in &voxels {
@@ -320,10 +334,90 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
     );
 }
 
-/// Returns a single Block representing the OSM element's dominant material/color.
-/// Priority: `building:colour` / `colour` / hex → `building:material` mapping →
-/// structure-type heuristic → STONE_BRICKS.
-fn resolve_block(element: &ProcessedElement) -> Block {
+// Per-category block pools, modeled after `buildings::*_WALL_OPTIONS`. These
+// give voxelized landmarks the same textured-stone look the standard building
+// generator produces for tagged towers, castles, churches, etc.
+const TOWER_PALETTE: &[Block] = &[
+    STONE_BRICKS,
+    COBBLESTONE,
+    CRACKED_STONE_BRICKS,
+    POLISHED_ANDESITE,
+    ANDESITE,
+    DEEPSLATE_BRICKS,
+    SMOOTH_STONE,
+    CHISELED_STONE_BRICKS,
+];
+
+const HISTORIC_PALETTE: &[Block] = &[
+    STONE_BRICKS,
+    CRACKED_STONE_BRICKS,
+    CHISELED_STONE_BRICKS,
+    COBBLESTONE,
+    POLISHED_BLACKSTONE_BRICKS,
+    MOSSY_STONE_BRICKS,
+    MOSSY_COBBLESTONE,
+    COBBLED_DEEPSLATE,
+    ANDESITE,
+    DEEPSLATE_BRICKS,
+];
+
+const RELIGIOUS_PALETTE: &[Block] = &[
+    STONE_BRICKS,
+    CHISELED_STONE_BRICKS,
+    QUARTZ_BLOCK,
+    WHITE_CONCRETE,
+    SANDSTONE,
+    SMOOTH_SANDSTONE,
+    POLISHED_DIORITE,
+    END_STONE_BRICKS,
+];
+
+const STATUE_PALETTE: &[Block] = &[
+    STONE,
+    SMOOTH_STONE,
+    ANDESITE,
+    POLISHED_ANDESITE,
+    DIORITE,
+    POLISHED_DIORITE,
+];
+
+const RESIDENTIAL_PALETTE: &[Block] = &[
+    BRICK,
+    STONE_BRICKS,
+    OAK_PLANKS,
+    MUD_BRICKS,
+    SANDSTONE,
+    TERRACOTTA,
+    BROWN_TERRACOTTA,
+];
+
+const INDUSTRIAL_PALETTE: &[Block] = &[
+    GRAY_CONCRETE,
+    LIGHT_GRAY_CONCRETE,
+    STONE,
+    SMOOTH_STONE,
+    POLISHED_ANDESITE,
+    DEEPSLATE_BRICKS,
+];
+
+const LIGHTHOUSE_PALETTE: &[Block] = &[
+    WHITE_CONCRETE,
+    QUARTZ_BLOCK,
+    SMOOTH_QUARTZ,
+    POLISHED_DIORITE,
+];
+
+const DEFAULT_PALETTE: &[Block] = &[
+    STONE_BRICKS,
+    ANDESITE,
+    POLISHED_ANDESITE,
+    COBBLESTONE,
+    SMOOTH_STONE,
+];
+
+/// Resolves the per-voxel palette pool: explicit color/material tags win, then
+/// structure-type category, then a generic stone fallback.
+fn resolve_palette(element: &ProcessedElement) -> Vec<Block> {
     let tags = element.tags();
     if let Some(c) = tags
         .get("building:colour")
@@ -331,15 +425,15 @@ fn resolve_block(element: &ProcessedElement) -> Block {
         .or_else(|| tags.get("color"))
     {
         if let Some(rgb) = color_text_to_rgb_tuple(c) {
-            return closest_block(rgb);
+            return closest_blocks(rgb, COLOR_PALETTE_K);
         }
     }
     if let Some(m) = tags.get("building:material") {
         if let Some(rgb) = material_to_rgb(m) {
-            return closest_block(rgb);
+            return closest_blocks(rgb, COLOR_PALETTE_K);
         }
     }
-    structure_type_default(tags)
+    structure_type_palette(tags).to_vec()
 }
 
 fn material_to_rgb(material: &str) -> Option<RGBTuple> {
@@ -359,46 +453,71 @@ fn material_to_rgb(material: &str) -> Option<RGBTuple> {
     }
 }
 
-fn structure_type_default(tags: &std::collections::HashMap<String, String>) -> Block {
+fn structure_type_palette(tags: &std::collections::HashMap<String, String>) -> &'static [Block] {
     if let Some(v) = tags.get("man_made") {
         match v.as_str() {
-            "tower" | "obelisk" | "chimney" => return STONE,
-            "lighthouse" => return WHITE_CONCRETE,
-            "monument" => return SMOOTH_STONE,
+            "tower" | "obelisk" | "chimney" => return TOWER_PALETTE,
+            "lighthouse" => return LIGHTHOUSE_PALETTE,
+            "monument" => return STATUE_PALETTE,
             _ => {}
         }
     }
     if let Some(v) = tags.get("historic") {
         match v.as_str() {
-            "castle" | "fort" | "ruins" | "city_gate" => return COBBLESTONE,
-            "memorial" | "monument" => return SMOOTH_STONE,
-            "archaeological_site" => return MOSSY_COBBLESTONE,
+            "castle" | "fort" | "ruins" | "city_gate" => return HISTORIC_PALETTE,
+            "memorial" | "monument" => return STATUE_PALETTE,
+            "archaeological_site" => return HISTORIC_PALETTE,
             _ => {}
         }
     }
     if let Some(v) = tags.get("amenity") {
         match v.as_str() {
-            "place_of_worship" => return SANDSTONE,
-            "fountain" => return WHITE_CONCRETE,
+            "place_of_worship" => return RELIGIOUS_PALETTE,
+            "fountain" => return LIGHTHOUSE_PALETTE,
             _ => {}
         }
     }
     if let Some(v) = tags.get("tourism") {
         if v == "artwork" {
-            return SMOOTH_STONE;
+            return STATUE_PALETTE;
         }
     }
     if let Some(v) = tags.get("building") {
         match v.as_str() {
-            "industrial" | "warehouse" => return GRAY_CONCRETE,
-            "house" | "detached" | "residential" | "apartments" | "terrace" => return BRICK,
-            "church" | "cathedral" | "mosque" | "temple" | "synagogue" | "chapel" | "religious" => {
-                return SANDSTONE
+            "industrial" | "warehouse" => return INDUSTRIAL_PALETTE,
+            "house" | "detached" | "residential" | "apartments" | "terrace" => {
+                return RESIDENTIAL_PALETTE
             }
+            "church" | "cathedral" | "mosque" | "temple" | "synagogue" | "chapel" | "religious" => {
+                return RELIGIOUS_PALETTE
+            }
+            "tower" | "clock_tower" => return TOWER_PALETTE,
             _ => {}
         }
     }
-    STONE_BRICKS
+    DEFAULT_PALETTE
+}
+
+/// Deterministic per-voxel pick from a palette. Same QID + same voxel position
+/// always yields the same block, so re-runs are bit-identical.
+fn pick_voxel_block(palette: &[Block], seed: u64, pos: [i32; 3]) -> Block {
+    if palette.is_empty() {
+        return STONE_BRICKS;
+    }
+    let mut h = seed;
+    h = h.wrapping_mul(0x100000001b3).wrapping_add(pos[0] as u64);
+    h = h.wrapping_mul(0x100000001b3).wrapping_add(pos[1] as u64);
+    h = h.wrapping_mul(0x100000001b3).wrapping_add(pos[2] as u64);
+    palette[(h as usize) % palette.len()]
+}
+
+fn qid_seed(qid: &str) -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in qid.as_bytes() {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
 }
 
 /// Resolved fit between an STL's raw geometry and OSM's expected dimensions.
@@ -626,23 +745,66 @@ mod tests {
         assert_eq!(material_to_rgb("nonsense"), None);
     }
 
+    fn block_ids(palette: &[Block]) -> Vec<u8> {
+        palette.iter().map(|b| b.id()).collect()
+    }
+
     #[test]
-    fn structure_type_defaults() {
+    fn structure_palette_dispatches_to_category() {
         use std::collections::HashMap as M;
         let mut t = M::new();
         t.insert("man_made".to_string(), "tower".to_string());
-        assert_eq!(structure_type_default(&t).id(), STONE.id());
+        assert_eq!(
+            block_ids(structure_type_palette(&t)),
+            block_ids(TOWER_PALETTE)
+        );
 
         t.clear();
         t.insert("historic".to_string(), "castle".to_string());
-        assert_eq!(structure_type_default(&t).id(), COBBLESTONE.id());
+        assert_eq!(
+            block_ids(structure_type_palette(&t)),
+            block_ids(HISTORIC_PALETTE)
+        );
 
         t.clear();
         t.insert("building".to_string(), "industrial".to_string());
-        assert_eq!(structure_type_default(&t).id(), GRAY_CONCRETE.id());
+        assert_eq!(
+            block_ids(structure_type_palette(&t)),
+            block_ids(INDUSTRIAL_PALETTE)
+        );
 
         t.clear();
-        assert_eq!(structure_type_default(&t).id(), STONE_BRICKS.id());
+        t.insert("amenity".to_string(), "place_of_worship".to_string());
+        assert_eq!(
+            block_ids(structure_type_palette(&t)),
+            block_ids(RELIGIOUS_PALETTE)
+        );
+
+        t.clear();
+        assert_eq!(
+            block_ids(structure_type_palette(&t)),
+            block_ids(DEFAULT_PALETTE)
+        );
+    }
+
+    #[test]
+    fn pick_voxel_block_deterministic_and_varies() {
+        let palette = TOWER_PALETTE;
+        let seed = qid_seed("Q41225");
+        // Same input → same block
+        let b0 = pick_voxel_block(palette, seed, [0, 0, 0]);
+        let b0_again = pick_voxel_block(palette, seed, [0, 0, 0]);
+        assert_eq!(b0.id(), b0_again.id());
+        // Across many voxel positions we expect to see more than one block
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..50 {
+            seen.insert(pick_voxel_block(palette, seed, [i, 0, 0]).id());
+        }
+        assert!(
+            seen.len() > 1,
+            "expected texture variation, only saw {} distinct block",
+            seen.len()
+        );
     }
 
     fn placement(h: Option<f64>, xz: Option<f64>) -> Placement {
@@ -658,7 +820,7 @@ mod tests {
                 max_z: 1,
             },
             world_yaw_degrees: 0.0,
-            block: STONE_BRICKS,
+            palette: vec![STONE_BRICKS],
             osm_height_m: h,
             osm_xz_extent_m: xz,
         }
