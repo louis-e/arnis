@@ -1,8 +1,8 @@
 //! 3D Model Repository (3DMR): fetch + voxelize + place glTF models for `3dmr=<id>` elements.
 
 mod client;
-mod palette;
+pub(crate) mod palette;
 mod placement;
-mod voxelize;
+pub(crate) mod voxelize;
 
 pub use placement::{place_three_dmr_models, prescan};

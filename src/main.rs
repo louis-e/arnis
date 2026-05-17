@@ -33,6 +33,7 @@ mod telemetry;
 mod test_utilities;
 mod three_dmr;
 mod version_check;
+mod wikidata;
 mod world_editor;
 mod world_utils;
 

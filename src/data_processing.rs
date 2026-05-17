@@ -135,7 +135,7 @@ pub fn generate_world_with_options(
         outlines
     };
 
-    // Pre-scan 3DMR-tagged elements; their IDs are suppressed in the loop below.
+    // Pre-scan 3DMR-tagged elements first; 3DMR wins over Wikidata on conflict.
     let three_dmr_prescan = if args.three_dmr {
         Some(crate::three_dmr::prescan(&elements, args.rotation))
     } else {
@@ -147,10 +147,28 @@ pub fn generate_world_with_options(
         .map(|p| &p.suppressed_ids)
         .unwrap_or(&empty_suppressed);
 
+    // Wikidata pre-scan runs after 3DMR's, skipping any element 3DMR already claimed.
+    let wikidata_prescan = if args.three_dmr {
+        Some(crate::wikidata::prescan(
+            &elements,
+            three_dmr_suppressed,
+            args.rotation,
+            args.scale,
+        ))
+    } else {
+        None
+    };
+    let wikidata_suppressed: &HashSet<u64> = wikidata_prescan
+        .as_ref()
+        .map(|p| &p.suppressed_ids)
+        .unwrap_or(&empty_suppressed);
+
     // Process all elements
     for element in elements.into_iter() {
         element_counter += 1;
-        if three_dmr_suppressed.contains(&element.id()) {
+        if three_dmr_suppressed.contains(&element.id())
+            || wikidata_suppressed.contains(&element.id())
+        {
             continue;
         }
         if element_counter.is_multiple_of(pb_batch_size) {
@@ -403,6 +421,11 @@ pub fn generate_world_with_options(
     if let Some(prescan) = three_dmr_prescan.as_ref() {
         if prescan.placement_count() > 0 {
             crate::three_dmr::place_three_dmr_models(&mut editor, args, prescan);
+        }
+    }
+    if let Some(prescan) = wikidata_prescan.as_ref() {
+        if prescan.placement_count() > 0 {
+            crate::wikidata::place_wikidata_models(&mut editor, args, prescan);
         }
     }
 

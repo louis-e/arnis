@@ -205,6 +205,35 @@ pub fn voxelize_glb(
     Ok(out)
 }
 
+/// Voxelizes a stream of model-space triangles under `transform`, painting
+/// every occupied voxel as `block`. Used by the STL path which has no
+/// per-triangle material data.
+pub fn voxelize_uniform_triangles<I>(
+    triangles: I,
+    transform: WorldTransform,
+    block: Block,
+) -> Vec<([i32; 3], Block)>
+where
+    I: IntoIterator<Item = [[f32; 3]; 3]>,
+{
+    let mut voxelizer: DdaVoxelizer<()> = DdaVoxelizer::new();
+    let shader = |_: Option<&()>, _: [i32; 3], _: [f32; 3]| {};
+    for tri in triangles {
+        let wa = transform.apply(tri[0]);
+        let wb = transform.apply(tri[1]);
+        let wc = transform.apply(tri[2]);
+        if !triangle_finite(&wa, &wb, &wc) {
+            continue;
+        }
+        voxelizer.add_triangle(&[wa, wb, wc], &shader);
+    }
+    voxelizer
+        .finalize()
+        .into_keys()
+        .map(|pos| (pos, block))
+        .collect()
+}
+
 /// Mean RGB (0..1) across non-transparent pixels of a decoded glTF image.
 fn image_average_color(img: &gltf::image::Data) -> Option<[f32; 3]> {
     use gltf::image::Format;
