@@ -35,8 +35,6 @@ Thumbs.db
 /terrain-tile-cache
 /arnis-tile-cache
 
-# Local upstream clones (kept around for reference; not part of this repo)
-/Tellus/
 /gen/
 /build/
 *.rmeta
