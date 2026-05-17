@@ -42,6 +42,7 @@
   "roof": "Dach Generierung",
   "fillground": "Boden füllen",
   "land_cover": "Landbedeckung",
+  "three_dmr": "Detaillierte Wahrzeichen",
   "disable_height_limit": "Bauhöhe erweitern",
   "aws_only_elevation": "Klassisches Terrain",
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",

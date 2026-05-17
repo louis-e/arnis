@@ -42,6 +42,7 @@
   "roof": "Генерация Крыши",
   "fillground": "Заполнить Землю",
   "land_cover": "Земельный покров",
+  "three_dmr": "Детальные достопримечательности",
   "disable_height_limit": "Расширить высоту строительства",
   "aws_only_elevation": "Устаревший рельеф",
   "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",

@@ -42,6 +42,7 @@
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
   "land_cover": "Marktäcke",
+  "three_dmr": "Detaljerade landmärken",
   "disable_height_limit": "Utöka byggnadshöjd",
   "aws_only_elevation": "Äldre terräng",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
