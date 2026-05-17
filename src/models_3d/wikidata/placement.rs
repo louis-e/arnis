@@ -509,15 +509,22 @@ fn structure_type_palette(tags: &std::collections::HashMap<String, String>) -> &
 }
 
 /// Deterministic per-voxel pick from a palette. Same QID + same voxel position
-/// always yields the same block, so re-runs are bit-identical.
+/// always yields the same block, so re-runs are bit-identical. The hash is a
+/// splitmix64-style avalanche per axis so the low bits used by `% palette.len()`
+/// have no structural correlation between adjacent voxels (otherwise small
+/// palettes produce a visible diagonal/striped pattern instead of random
+/// texture).
 fn pick_voxel_block(palette: &[Block], seed: u64, pos: [i32; 3]) -> Block {
     if palette.is_empty() {
         return STONE_BRICKS;
     }
     let mut h = seed;
-    h = h.wrapping_mul(0x100000001b3).wrapping_add(pos[0] as u64);
-    h = h.wrapping_mul(0x100000001b3).wrapping_add(pos[1] as u64);
-    h = h.wrapping_mul(0x100000001b3).wrapping_add(pos[2] as u64);
+    for c in pos {
+        h ^= c as i64 as u64;
+        h = (h ^ (h >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+        h = (h ^ (h >> 27)).wrapping_mul(0x94d049bb133111eb);
+        h ^= h >> 31;
+    }
     palette[(h as usize) % palette.len()]
 }
 
@@ -813,22 +820,36 @@ mod tests {
     }
 
     #[test]
-    fn pick_voxel_block_deterministic_and_varies() {
+    fn pick_voxel_block_deterministic_and_well_distributed() {
         let palette = TOWER_PALETTE;
         let seed = qid_seed("Q41225");
-        // Same input → same block
+        // Same input → same block.
         let b0 = pick_voxel_block(palette, seed, [0, 0, 0]);
         let b0_again = pick_voxel_block(palette, seed, [0, 0, 0]);
         assert_eq!(b0.id(), b0_again.id());
-        // Across many voxel positions we expect to see more than one block
-        let mut seen = std::collections::HashSet::new();
-        for i in 0..50 {
-            seen.insert(pick_voxel_block(palette, seed, [i, 0, 0]).id());
+
+        // Sample a 10×10×10 cube; expect every palette block to appear at
+        // least once and the distribution to be reasonably balanced (no
+        // block hogs >40% of samples — patterning would push one above that).
+        let mut counts = std::collections::HashMap::new();
+        for x in 0..10 {
+            for y in 0..10 {
+                for z in 0..10 {
+                    let b = pick_voxel_block(palette, seed, [x, y, z]);
+                    *counts.entry(b.id()).or_insert(0usize) += 1;
+                }
+            }
         }
+        assert_eq!(
+            counts.len(),
+            palette.len(),
+            "every palette block should appear: {counts:?}"
+        );
+        let total: usize = counts.values().sum();
+        let max = *counts.values().max().unwrap();
         assert!(
-            seen.len() > 1,
-            "expected texture variation, only saw {} distinct block",
-            seen.len()
+            (max as f32 / total as f32) < 0.40,
+            "block distribution skewed (max {max}/{total}): {counts:?}"
         );
     }
 
