@@ -230,7 +230,7 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
             continue;
         };
 
-        let Some(model_scale) = derive_scale(&bmin, &bmax, placement) else {
+        let Some(fit) = derive_fit(&bmin, &bmax, placement) else {
             eprintln!(
                 "{} Wikidata model {} (OSM {}): could not derive scale, skipping",
                 "Warning:".yellow().bold(),
@@ -240,15 +240,24 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
             continue;
         };
 
-        let scaled_diag_m =
-            ((bmax[0] - bmin[0]).powi(2) + (bmax[2] - bmin[2]).powi(2)).sqrt() * model_scale;
-        if !(MIN_BBOX_DIAGONAL_M..=MAX_BBOX_DIAGONAL_M).contains(&scaled_diag_m) {
+        // After-fit world-space extents — sanity-check on the OSM-implied size
+        // rather than the raw STL, so towers (small XZ × large Y) aren't rejected.
+        let final_extents = {
+            let raw = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
+            [
+                raw[fit.axes[0].0] * fit.scale[0],
+                raw[fit.axes[1].0] * fit.scale[1],
+                raw[fit.axes[2].0] * fit.scale[2],
+            ]
+        };
+        let max_extent = final_extents.iter().fold(0f32, |acc, e| acc.max(e.abs()));
+        if !(MIN_BBOX_DIAGONAL_M..=MAX_BBOX_DIAGONAL_M).contains(&max_extent) {
             eprintln!(
-                "{} Wikidata model {} (OSM {}): scaled bbox-diagonal {:.1}m outside [{:.0}, {:.0}], skipping",
+                "{} Wikidata model {} (OSM {}): scaled max extent {:.1}m outside [{:.0}, {:.0}], skipping",
                 "Warning:".yellow().bold(),
                 placement.qid,
                 placement.osm_id,
-                scaled_diag_m,
+                max_extent,
                 MIN_BBOX_DIAGONAL_M,
                 MAX_BBOX_DIAGONAL_M
             );
@@ -259,7 +268,7 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
 
         let transform = WorldTransform::new(
             0.0,
-            model_scale as f64,
+            1.0,
             [0.0, 0.0, 0.0],
             args.scale,
             placement.world_yaw_degrees,
@@ -268,8 +277,18 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
             placement.anchor_z as f32,
         );
 
-        let mut voxels =
-            voxelize_uniform_triangles(triangles.iter().copied(), transform, placement.block);
+        let fitted: Vec<[[f32; 3]; 3]> = triangles
+            .iter()
+            .map(|tri| {
+                [
+                    apply_fit(tri[0], &fit),
+                    apply_fit(tri[1], &fit),
+                    apply_fit(tri[2], &fit),
+                ]
+            })
+            .collect();
+
+        let mut voxels = voxelize_uniform_triangles(fitted, transform, placement.block);
 
         if let Some(min_voxel_y) = voxels.iter().map(|(p, _)| p[1]).min() {
             let dy = ground_y - min_voxel_y;
@@ -382,50 +401,103 @@ fn structure_type_default(tags: &std::collections::HashMap<String, String>) -> B
     STONE_BRICKS
 }
 
-/// Returns the model→world scale that best satisfies OSM's dimensions.
-/// Uses Y (height) and/or XZ (footprint) constraints, sanity-checking that
-/// the two agree when both exist.
-fn derive_scale(bmin: &[f32; 3], bmax: &[f32; 3], p: &Placement) -> Option<f32> {
-    let model_y = (bmax[1] - bmin[1]) as f64;
-    let model_xz = ((bmax[0] - bmin[0]).max(bmax[2] - bmin[2])) as f64;
+/// Resolved fit between an STL's raw geometry and OSM's expected dimensions.
+/// `axes` permutes (and optionally negates) model axes to world axes — world Y
+/// becomes the up axis of the rendered structure. `scale` is per-world-axis
+/// in meters per model-unit, applied after the axis remap.
+///
+/// Example: for a Z-up STL of a 200-unit-tall tower whose OSM element says
+/// height=96m, footprint=12m, this produces axes that swap Z→Y and scales
+/// such that the rendered model is 12m wide × 96m tall × 12m deep.
+#[derive(Clone, Copy, Debug)]
+struct ModelFit {
+    axes: [(usize, f32); 3],
+    scale: [f32; 3],
+}
 
-    let by_height = p.osm_height_m.and_then(|h| {
-        if model_y > 1e-3 {
-            Some(h / model_y)
-        } else {
-            None
-        }
-    });
-    let by_xz = p.osm_xz_extent_m.and_then(|x| {
-        if model_xz > 1e-3 {
-            Some(x / model_xz)
-        } else {
-            None
-        }
-    });
-
-    let scale = match (by_height, by_xz) {
-        (Some(h), Some(xz)) => {
-            let ratio = h.max(xz) / h.min(xz);
-            if ratio > 2.0 {
-                eprintln!(
-                    "{} Wikidata {}: OSM height vs footprint disagree by {ratio:.1}× — using XZ",
-                    "Note:".yellow().bold(),
-                    p.qid
-                );
-                xz
-            } else {
-                (h + xz) / 2.0
+/// Picks which model-space axis corresponds to "up" by combining the model's
+/// own geometry with the OSM tagging. Tall OSM landmarks (height ≫ footprint)
+/// align with the model's longest extent; otherwise default to Y-up.
+fn pick_up_axis(extents: &[f32; 3], osm_height: Option<f64>, osm_xz: Option<f64>) -> usize {
+    let osm_aspect = match (osm_height, osm_xz) {
+        (Some(h), Some(xz)) if xz > 1e-6 => h / xz,
+        _ => 1.0,
+    };
+    if osm_aspect > 1.5 {
+        let mut max_idx = 0usize;
+        let mut max_val = extents[0];
+        for (i, &e) in extents.iter().enumerate().skip(1) {
+            if e > max_val {
+                max_val = e;
+                max_idx = i;
             }
         }
-        (Some(h), None) => h,
-        (None, Some(xz)) => xz,
-        (None, None) => return None,
-    };
-    if !scale.is_finite() || scale <= 0.0 {
+        max_idx
+    } else {
+        1
+    }
+}
+
+/// Derives the full model fit (orientation + per-axis scale) that places the
+/// STL inside OSM's expected footprint and height. Non-uniform scaling lets
+/// thin towers and wide buildings both end up the right size even when the
+/// raw STL aspect ratio doesn't match reality.
+fn derive_fit(bmin: &[f32; 3], bmax: &[f32; 3], p: &Placement) -> Option<ModelFit> {
+    let extents = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
+    if extents.iter().all(|&e| e < 1e-3) {
         return None;
     }
-    Some(scale as f32)
+
+    let up = pick_up_axis(&extents, p.osm_height_m, p.osm_xz_extent_m);
+
+    let axes: [(usize, f32); 3] = match up {
+        0 => [(1, -1.0), (0, 1.0), (2, 1.0)],
+        1 => [(0, 1.0), (1, 1.0), (2, 1.0)],
+        2 => [(0, 1.0), (2, 1.0), (1, -1.0)],
+        _ => unreachable!(),
+    };
+
+    let world_extents = [extents[axes[0].0], extents[axes[1].0], extents[axes[2].0]];
+
+    let scale_y = match p.osm_height_m {
+        Some(h) if world_extents[1] > 1e-3 => Some(h as f32 / world_extents[1]),
+        _ => None,
+    };
+    let scale_xz = match p.osm_xz_extent_m {
+        Some(xz) => {
+            let max_xz = world_extents[0].max(world_extents[2]);
+            if max_xz > 1e-3 {
+                Some(xz as f32 / max_xz)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+
+    let (sx, sy, sz) = match (scale_xz, scale_y) {
+        (Some(xz), Some(y)) => (xz, y, xz),
+        (Some(xz), None) => (xz, xz, xz),
+        (None, Some(y)) => (y, y, y),
+        (None, None) => return None,
+    };
+    if [sx, sy, sz].iter().any(|s| !s.is_finite() || *s <= 0.0) {
+        return None;
+    }
+    Some(ModelFit {
+        axes,
+        scale: [sx, sy, sz],
+    })
+}
+
+#[inline]
+fn apply_fit(v: [f32; 3], fit: &ModelFit) -> [f32; 3] {
+    let mut out = [0f32; 3];
+    for (axis, slot) in out.iter_mut().enumerate() {
+        let (src, sign) = fit.axes[axis];
+        *slot = v[src] * sign * fit.scale[axis];
+    }
+    out
 }
 
 fn anchor_xz(element: &ProcessedElement) -> Option<(i32, i32)> {
@@ -573,11 +645,8 @@ mod tests {
         assert_eq!(structure_type_default(&t).id(), STONE_BRICKS.id());
     }
 
-    #[test]
-    fn derive_scale_height_and_xz_agree() {
-        let bmin = [0.0f32, 0.0, 0.0];
-        let bmax = [10.0f32, 100.0, 10.0];
-        let p = Placement {
+    fn placement(h: Option<f64>, xz: Option<f64>) -> Placement {
+        Placement {
             osm_id: 1,
             qid: "Q1".into(),
             anchor_x: 0,
@@ -590,57 +659,76 @@ mod tests {
             },
             world_yaw_degrees: 0.0,
             block: STONE_BRICKS,
-            osm_height_m: Some(50.0),
-            osm_xz_extent_m: Some(5.0),
-        };
-        let s = derive_scale(&bmin, &bmax, &p).unwrap();
-        assert!((s - 0.5).abs() < 1e-3, "got {s}");
+            osm_height_m: h,
+            osm_xz_extent_m: xz,
+        }
     }
 
     #[test]
-    fn derive_scale_height_only() {
-        let bmin = [0.0f32, 0.0, 0.0];
-        let bmax = [10.0f32, 50.0, 10.0];
-        let p = Placement {
-            osm_id: 1,
-            qid: "Q1".into(),
-            anchor_x: 0,
-            anchor_z: 0,
-            footprint: Bbox {
-                min_x: 0,
-                max_x: 1,
-                min_z: 0,
-                max_z: 1,
-            },
-            world_yaw_degrees: 0.0,
-            block: STONE_BRICKS,
-            osm_height_m: Some(100.0),
-            osm_xz_extent_m: None,
-        };
-        let s = derive_scale(&bmin, &bmax, &p).unwrap();
-        assert!((s - 2.0).abs() < 1e-3);
+    fn derive_fit_yup_tower_renders_at_osm_dimensions() {
+        // Y-up STL: 10 wide × 100 tall × 10 deep. OSM says 96m tall × 12m footprint.
+        let fit = derive_fit(
+            &[0.0, 0.0, 0.0],
+            &[10.0, 100.0, 10.0],
+            &placement(Some(96.0), Some(12.0)),
+        )
+        .unwrap();
+        assert_eq!(fit.axes[1].0, 1, "Y stays Y for Y-up tower");
+        // Per-axis scale: Y to fit 96m on 100, XZ to fit 12m on 10.
+        assert!((fit.scale[1] - 0.96).abs() < 1e-3);
+        assert!((fit.scale[0] - 1.2).abs() < 1e-3);
+        assert!((fit.scale[2] - 1.2).abs() < 1e-3);
     }
 
     #[test]
-    fn derive_scale_returns_none_when_no_constraints() {
-        let bmin = [0.0f32, 0.0, 0.0];
-        let bmax = [10.0f32, 100.0, 10.0];
-        let p = Placement {
-            osm_id: 1,
-            qid: "Q1".into(),
-            anchor_x: 0,
-            anchor_z: 0,
-            footprint: Bbox {
-                min_x: 0,
-                max_x: 1,
-                min_z: 0,
-                max_z: 1,
-            },
-            world_yaw_degrees: 0.0,
-            block: STONE_BRICKS,
-            osm_height_m: None,
-            osm_xz_extent_m: None,
+    fn derive_fit_zup_tower_swaps_axes() {
+        // Z-up STL: 10 × 10 × 100 (tower along Z). OSM says 96m tall × 12m footprint.
+        let fit = derive_fit(
+            &[0.0, 0.0, 0.0],
+            &[10.0, 10.0, 100.0],
+            &placement(Some(96.0), Some(12.0)),
+        )
+        .unwrap();
+        // Up axis is the longest: index 2 (Z). Z gets remapped onto world Y.
+        assert_eq!(fit.axes[1].0, 2, "Z became world Y");
+        // World-Y extent in model space is 100, scale should bring it to 96m.
+        assert!((fit.scale[1] - 0.96).abs() < 1e-3);
+        // World-X/Z extents come from model X/Y (both 10), scale to 12m.
+        assert!((fit.scale[0] - 1.2).abs() < 1e-3);
+        assert!((fit.scale[2] - 1.2).abs() < 1e-3);
+    }
+
+    #[test]
+    fn derive_fit_wide_building_keeps_yup() {
+        // Stocky building: 50 × 20 × 50 in STL. OSM 10m tall × 30m wide → no clear tall axis.
+        let fit = derive_fit(
+            &[0.0, 0.0, 0.0],
+            &[50.0, 20.0, 50.0],
+            &placement(Some(10.0), Some(30.0)),
+        )
+        .unwrap();
+        assert_eq!(fit.axes[1].0, 1, "no aspect-driven swap for wide buildings");
+        assert!((fit.scale[1] - 0.5).abs() < 1e-3);
+        assert!((fit.scale[0] - 0.6).abs() < 1e-3);
+    }
+
+    #[test]
+    fn derive_fit_returns_none_when_no_constraints() {
+        let p = placement(None, None);
+        assert!(derive_fit(&[0.0, 0.0, 0.0], &[10.0, 10.0, 10.0], &p).is_none());
+    }
+
+    #[test]
+    fn apply_fit_zup_to_yup_preserves_handedness() {
+        let fit = ModelFit {
+            axes: [(0, 1.0), (2, 1.0), (1, -1.0)],
+            scale: [1.0, 1.0, 1.0],
         };
-        assert!(derive_scale(&bmin, &bmax, &p).is_none());
+        // (1, 0, 0) stays (1, 0, 0)
+        assert_eq!(apply_fit([1.0, 0.0, 0.0], &fit), [1.0, 0.0, 0.0]);
+        // STL +Z (height) becomes world +Y
+        assert_eq!(apply_fit([0.0, 0.0, 5.0], &fit), [0.0, 5.0, 0.0]);
+        // STL +Y becomes world -Z (handedness preserved)
+        assert_eq!(apply_fit([0.0, 3.0, 0.0], &fit), [0.0, 0.0, -3.0]);
     }
 }
