@@ -24,7 +24,7 @@ const COLOR_PALETTE_K: usize = 5;
 /// (184 m) pass freely; the horizontal cap rejects horizontally-massive
 /// models like "Penang island.stl" or wide cultural sites that would dwarf
 /// their OSM bbox.
-const MAX_XZ_EXTENT_M: f32 = 300.0;
+const MAX_XZ_EXTENT_M: f32 = 225.0;
 const MAX_Y_EXTENT_M: f32 = 600.0;
 const MIN_EXTENT_M: f32 = 2.0;
 
@@ -551,42 +551,33 @@ struct ModelFit {
     scale: [f32; 3],
 }
 
-/// Picks which model-space axis corresponds to "up" by combining the model's
-/// own geometry with the OSM tagging.
-/// - Tall landmarks (height ≫ footprint): up = the model's longest extent.
-/// - Wide/flat structures (footprint ≫ height): up = the model's shortest extent.
-/// - Otherwise: default to Y-up.
+/// Picks which model-space axis corresponds to "up" from the model's geometry
+/// alone. We look at the three extents and find the "odd one out":
+/// - If one extent is clearly the largest (>10% above the median), it's up
+///   (tower/arch convention — Big Ben, Arc de Triomphe, Space Needle).
+/// - If one extent is clearly the smallest (<85% of the median), it's up
+///   (wide/flat convention — Acropolis temple plateau).
+/// - Otherwise the model is roughly cubic: default to Y-up.
 ///
-/// The "wide" case catches Z-up models of horizontal landmarks like the
-/// Acropolis temple, where the model's smallest dimension is the height.
-fn pick_up_axis(extents: &[f32; 3], osm_height: Option<f64>, osm_xz: Option<f64>) -> usize {
-    let osm_aspect = match (osm_height, osm_xz) {
-        (Some(h), Some(xz)) if xz > 1e-6 => h / xz,
-        _ => 1.0,
-    };
-    if osm_aspect > 1.5 {
-        let mut max_idx = 0usize;
-        let mut max_val = extents[0];
-        for (i, &e) in extents.iter().enumerate().skip(1) {
-            if e > max_val {
-                max_val = e;
-                max_idx = i;
-            }
-        }
-        max_idx
-    } else if osm_aspect < 0.7 {
-        let mut min_idx = 0usize;
-        let mut min_val = extents[0];
-        for (i, &e) in extents.iter().enumerate().skip(1) {
-            if e < min_val {
-                min_val = e;
-                min_idx = i;
-            }
-        }
-        min_idx
-    } else {
-        1
+/// Robust against OSM-aspect borderline cases (Arc de Triomphe is aspect ~1.1
+/// which the previous OSM-driven heuristic put in the dead zone).
+fn pick_up_axis(extents: &[f32; 3]) -> usize {
+    let mut sorted: [(usize, f32); 3] = [(0, extents[0]), (1, extents[1]), (2, extents[2])];
+    sorted.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let (min_idx, min_val) = sorted[0];
+    let (_, med_val) = sorted[1];
+    let (max_idx, max_val) = sorted[2];
+
+    if med_val <= 1e-3 {
+        return 1;
     }
+    if max_val / med_val > 1.10 {
+        return max_idx;
+    }
+    if min_val / med_val < 0.85 {
+        return min_idx;
+    }
+    1
 }
 
 /// Derives the full model fit (orientation + per-axis scale) that places the
@@ -599,7 +590,7 @@ fn derive_fit(bmin: &[f32; 3], bmax: &[f32; 3], p: &Placement) -> Option<ModelFi
         return None;
     }
 
-    let up = pick_up_axis(&extents, p.osm_height_m, p.osm_xz_extent_m);
+    let up = pick_up_axis(&extents);
 
     let axes: [(usize, f32); 3] = match up {
         0 => [(1, -1.0), (0, 1.0), (2, 1.0)],
@@ -924,7 +915,7 @@ mod tests {
 
     #[test]
     fn derive_fit_square_aspect_keeps_yup() {
-        // 1:1 aspect (10m × 10m × 10m OSM): no aspect-driven swap, stay Y-up.
+        // Truly cubic STL (20×20×20) — no axis is clearly longest/shortest.
         let fit = derive_fit(
             &[0.0, 0.0, 0.0],
             &[20.0, 20.0, 20.0],
@@ -932,6 +923,24 @@ mod tests {
         )
         .unwrap();
         assert_eq!(fit.axes[1].0, 1);
+    }
+
+    #[test]
+    fn derive_fit_arc_de_triomphe_zup() {
+        // Microsoft Z-up STL of the Arc de Triomphe: ~45 wide × 22 deep × 50 tall.
+        // OSM aspect ≈ 1.1 (just barely tall). The old OSM-driven heuristic
+        // landed in the dead zone and defaulted to Y-up, laying the arch on
+        // its side. Geometric heuristic now picks Z (the longest at 50) as up.
+        let fit = derive_fit(
+            &[0.0, 0.0, 0.0],
+            &[45.0, 22.0, 50.0],
+            &placement(Some(50.0), Some(45.0)),
+        )
+        .unwrap();
+        assert_eq!(
+            fit.axes[1].0, 2,
+            "longest axis (Z, 50) should become world Y"
+        );
     }
 
     #[test]
