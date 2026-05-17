@@ -10,7 +10,7 @@ use std::time::Duration;
 const API_BASE: &str = "https://3dmr.eu/api";
 const CACHE_SUBDIR: &str = "arnis/3dmr";
 const MAX_GLB_BYTES: u64 = 64 * 1024 * 1024;
-const REQUEST_TIMEOUT_SECS: u64 = 60;
+const REQUEST_TIMEOUT_SECS: u64 = 20;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ModelInfo {
@@ -85,33 +85,6 @@ fn read_capped(mut resp: reqwest::blocking::Response, cap: u64) -> Result<Vec<u8
     Ok(buf)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_license_as_integer() {
-        let json =
-            r#"{"id": 1, "title": "x", "author": "a", "lat": null, "lon": null, "license": 0}"#;
-        let info: ModelInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(info.license.as_deref(), Some("0"));
-    }
-
-    #[test]
-    fn parses_license_as_string() {
-        let json = r#"{"id": 1, "license": "CC-BY-SA"}"#;
-        let info: ModelInfo = serde_json::from_str(json).unwrap();
-        assert_eq!(info.license.as_deref(), Some("CC-BY-SA"));
-    }
-
-    #[test]
-    fn parses_missing_license() {
-        let json = r#"{"id": 1}"#;
-        let info: ModelInfo = serde_json::from_str(json).unwrap();
-        assert!(info.license.is_none());
-    }
-}
-
 /// Fetches the latest revision metadata for a model id, with on-disk cache.
 pub fn fetch_info(id: u64) -> Result<ModelInfo, String> {
     let dir = cache_root();
@@ -162,4 +135,31 @@ pub fn fetch_glb(id: u64) -> Result<Vec<u8>, String> {
     let _ = fs::write(&glb_path, &bytes);
 
     Ok(bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_license_as_integer() {
+        let json =
+            r#"{"id": 1, "title": "x", "author": "a", "lat": null, "lon": null, "license": 0}"#;
+        let info: ModelInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.license.as_deref(), Some("0"));
+    }
+
+    #[test]
+    fn parses_license_as_string() {
+        let json = r#"{"id": 1, "license": "CC-BY-SA"}"#;
+        let info: ModelInfo = serde_json::from_str(json).unwrap();
+        assert_eq!(info.license.as_deref(), Some("CC-BY-SA"));
+    }
+
+    #[test]
+    fn parses_missing_license() {
+        let json = r#"{"id": 1}"#;
+        let info: ModelInfo = serde_json::from_str(json).unwrap();
+        assert!(info.license.is_none());
+    }
 }
