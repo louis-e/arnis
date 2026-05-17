@@ -172,6 +172,7 @@ pub fn fetch_data_from_overpass(
         nwr["advertising"];
         nwr["man_made"];
         nwr["aeroway"];
+        nwr["3dmr"];
         way["place"]["place"!~"^(ocean|sea|bay|strait|sound|fjord)$"];
         way;
     )->.relsinbbox;

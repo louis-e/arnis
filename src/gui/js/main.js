@@ -117,6 +117,7 @@ async function applyLocalization(localization) {
     "span[data-localize='roof']": "roof",
     "span[data-localize='fillground']": "fillground",
     "span[data-localize='land_cover']": "land_cover",
+    "span[data-localize='three_dmr']": "three_dmr",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
@@ -1301,6 +1302,7 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var land_cover = document.getElementById("land-cover-toggle").checked;
+    var three_dmr = document.getElementById("three-dmr-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
@@ -1329,6 +1331,7 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         landCoverEnabled: land_cover,
+        threeDmrEnabled: three_dmr,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
         isNewWorld: true,

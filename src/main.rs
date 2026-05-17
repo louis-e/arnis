@@ -31,6 +31,7 @@ mod retrieve_data;
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
+mod three_dmr;
 mod version_check;
 mod world_editor;
 mod world_utils;
