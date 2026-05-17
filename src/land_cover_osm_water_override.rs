@@ -1,6 +1,6 @@
 //! Force LC_WATER inside OSM water polygons and waterways so OSM defines
 //! the shoreline, overriding ESA's noisy 10 m classification.
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZBBox;
@@ -9,8 +9,22 @@ use crate::osm_parser::{
     ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
 };
 
+const ELEVATION_TOLERANCE_BLOCKS: f32 = 1.5;
+// Min area for a non-water component to count as a real land mass.
+const PROTECTED_LAND_AREA_M2: f64 = 4000.0;
+const MIN_PROTECTED_LAND_CELLS: usize = 100;
+// Aspect ratio above which a component is treated as bridge-like (not protected).
+const LINEAR_ASPECT_RATIO: f64 = 3.0;
+
+struct WaterContext {
+    nearest_y: Vec<Vec<f32>>,
+    protected_mask: Vec<u64>,
+    width: usize,
+}
+
 pub fn apply_osm_water_override(
     land_cover: &mut LandCoverData,
+    heights: &[Vec<f32>],
     world_width: usize,
     world_height: usize,
     elements: &[ProcessedElement],
@@ -28,6 +42,15 @@ pub fn apply_osm_water_override(
     let max_x = xzbbox.max_x();
     let max_z = xzbbox.max_z();
 
+    let context = build_water_context(
+        &land_cover.grid,
+        heights,
+        width,
+        height,
+        scale_to_grid_x,
+        scale_to_grid_z,
+    );
+
     let mut changed: usize = 0;
     for elem in elements {
         match elem {
@@ -38,6 +61,8 @@ pub fn apply_osm_water_override(
                         &mut land_cover.grid,
                         &[outer.as_slice()],
                         &[],
+                        heights,
+                        context.as_ref(),
                         min_x,
                         min_z,
                         max_x,
@@ -54,6 +79,8 @@ pub fn apply_osm_water_override(
                         &mut land_cover.grid,
                         &way.nodes,
                         half_width,
+                        heights,
+                        context.as_ref(),
                         min_x,
                         min_z,
                         max_x,
@@ -92,6 +119,8 @@ pub fn apply_osm_water_override(
                     &mut land_cover.grid,
                     &outers_refs,
                     &inners_refs,
+                    heights,
+                    context.as_ref(),
                     min_x,
                     min_z,
                     max_x,
@@ -160,6 +189,8 @@ fn fill_polygon_scanline(
     grid: &mut [Vec<u8>],
     outers: &[&[(i32, i32)]],
     inners: &[&[(i32, i32)]],
+    heights: &[Vec<f32>],
+    context: Option<&WaterContext>,
     min_x_world: i32,
     min_z_world: i32,
     max_x_world: i32,
@@ -258,6 +289,9 @@ fn fill_polygon_scanline(
                         continue;
                     }
                 }
+                if !passes_water_guard(heights, context, gx, gz) {
+                    continue;
+                }
                 if row[gx] != LC_WATER {
                     row[gx] = LC_WATER;
                     count += 1;
@@ -303,6 +337,8 @@ fn rasterize_line(
     grid: &mut [Vec<u8>],
     nodes: &[ProcessedNode],
     half_width: i32,
+    heights: &[Vec<f32>],
+    context: Option<&WaterContext>,
     min_x_world: i32,
     min_z_world: i32,
     max_x_world: i32,
@@ -351,6 +387,9 @@ fn rasterize_line(
                     }
                     let gx_u = gx as usize;
                     let gz_u = gz as usize;
+                    if !passes_water_guard(heights, context, gx_u, gz_u) {
+                        continue;
+                    }
                     if grid[gz_u][gx_u] != LC_WATER {
                         grid[gz_u][gx_u] = LC_WATER;
                         count += 1;
@@ -360,4 +399,222 @@ fn rasterize_line(
         }
     }
     count
+}
+
+// Returns None when there are no ESA water cells, disabling the guard.
+fn build_water_context(
+    grid: &[Vec<u8>],
+    heights: &[Vec<f32>],
+    width: usize,
+    height: usize,
+    scale_to_grid_x: f64,
+    scale_to_grid_z: f64,
+) -> Option<WaterContext> {
+    if width < 2 || height < 2 {
+        return None;
+    }
+    if heights.len() < height || heights.first().map_or(0, |r| r.len()) < width {
+        return None;
+    }
+    if grid.len() < height || grid.first().map_or(0, |r| r.len()) < width {
+        return None;
+    }
+    let has_seeds = grid
+        .iter()
+        .take(height)
+        .any(|row| row.iter().take(width).any(|&c| c == LC_WATER));
+    if !has_seeds {
+        return None;
+    }
+
+    let cells_per_meter_sq = scale_to_grid_x * scale_to_grid_z;
+    let raw = (PROTECTED_LAND_AREA_M2 * cells_per_meter_sq).round() as usize;
+    let small_threshold_cells = raw.max(MIN_PROTECTED_LAND_CELLS);
+
+    let protected_mask = build_protected_land_bitset(
+        grid,
+        width,
+        height,
+        small_threshold_cells,
+        LINEAR_ASPECT_RATIO,
+    );
+    let nearest_y = compute_nearest_water_y(grid, heights, width, height);
+
+    Some(WaterContext {
+        nearest_y,
+        protected_mask,
+        width,
+    })
+}
+
+// Marks cells in 4-connected non-water components that are large AND compact.
+fn build_protected_land_bitset(
+    grid: &[Vec<u8>],
+    width: usize,
+    height: usize,
+    small_threshold_cells: usize,
+    linear_aspect_ratio: f64,
+) -> Vec<u64> {
+    let n = width * height;
+    let mut visited: Vec<u64> = vec![0; n.div_ceil(64)];
+    let mut protected: Vec<u64> = vec![0; n.div_ceil(64)];
+    let mut stack: Vec<u32> = Vec::new();
+    let mut component_cells: Vec<u32> = Vec::new();
+    let width_i32 = width as i32;
+    let height_i32 = height as i32;
+
+    for start_z in 0..height {
+        for start_x in 0..width {
+            if grid[start_z][start_x] == LC_WATER {
+                continue;
+            }
+            let start_idx = start_z * width + start_x;
+            if get_bit(&visited, start_idx) {
+                continue;
+            }
+
+            component_cells.clear();
+            stack.clear();
+            stack.push(start_idx as u32);
+            set_bit(&mut visited, start_idx);
+
+            let mut min_x = start_x;
+            let mut max_x = start_x;
+            let mut min_z = start_z;
+            let mut max_z = start_z;
+
+            while let Some(curr) = stack.pop() {
+                let curr_u = curr as usize;
+                let cx = (curr_u % width) as i32;
+                let cz = (curr_u / width) as i32;
+                component_cells.push(curr);
+                let cxu = cx as usize;
+                let czu = cz as usize;
+                if cxu < min_x {
+                    min_x = cxu;
+                }
+                if cxu > max_x {
+                    max_x = cxu;
+                }
+                if czu < min_z {
+                    min_z = czu;
+                }
+                if czu > max_z {
+                    max_z = czu;
+                }
+                for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let nx = cx + dx;
+                    let nz = cz + dz;
+                    if nx < 0 || nz < 0 || nx >= width_i32 || nz >= height_i32 {
+                        continue;
+                    }
+                    let nxu = nx as usize;
+                    let nzu = nz as usize;
+                    if grid[nzu][nxu] == LC_WATER {
+                        continue;
+                    }
+                    let n_idx = nzu * width + nxu;
+                    if get_bit(&visited, n_idx) {
+                        continue;
+                    }
+                    set_bit(&mut visited, n_idx);
+                    stack.push(n_idx as u32);
+                }
+            }
+
+            let bbox_w = max_x - min_x + 1;
+            let bbox_h = max_z - min_z + 1;
+            let long_axis = bbox_w.max(bbox_h);
+            let short_axis = bbox_w.min(bbox_h).max(1);
+            let aspect = long_axis as f64 / short_axis as f64;
+            let is_compact = aspect <= linear_aspect_ratio;
+            let is_large = component_cells.len() >= small_threshold_cells;
+
+            if is_large && is_compact {
+                for &c in &component_cells {
+                    set_bit(&mut protected, c as usize);
+                }
+            }
+        }
+    }
+
+    protected
+}
+
+// Multi-source BFS: each cell gets the terrain Y of its nearest LC_WATER seed.
+fn compute_nearest_water_y(
+    grid: &[Vec<u8>],
+    heights: &[Vec<f32>],
+    width: usize,
+    height: usize,
+) -> Vec<Vec<f32>> {
+    let mut result: Vec<Vec<f32>> = vec![vec![f32::NAN; width]; height];
+    let mut queue: VecDeque<(u32, u32)> = VecDeque::new();
+    for z in 0..height {
+        let row = &grid[z];
+        let h_row = &heights[z];
+        for x in 0..width {
+            if row[x] == LC_WATER {
+                let h = h_row[x];
+                if h.is_finite() {
+                    result[z][x] = h;
+                    queue.push_back((x as u32, z as u32));
+                }
+            }
+        }
+    }
+    if queue.is_empty() {
+        return result;
+    }
+    let width_i32 = width as i32;
+    let height_i32 = height as i32;
+    while let Some((x, z)) = queue.pop_front() {
+        let cell_y = result[z as usize][x as usize];
+        for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = x as i32 + dx;
+            let nz = z as i32 + dz;
+            if nx < 0 || nz < 0 || nx >= width_i32 || nz >= height_i32 {
+                continue;
+            }
+            let nxu = nx as usize;
+            let nzu = nz as usize;
+            if result[nzu][nxu].is_nan() {
+                result[nzu][nxu] = cell_y;
+                queue.push_back((nx as u32, nz as u32));
+            }
+        }
+    }
+    result
+}
+
+#[inline]
+fn passes_water_guard(
+    heights: &[Vec<f32>],
+    context: Option<&WaterContext>,
+    gx: usize,
+    gz: usize,
+) -> bool {
+    let Some(c) = context else {
+        return true;
+    };
+    let idx = gz * c.width + gx;
+    if get_bit(&c.protected_mask, idx) {
+        return false;
+    }
+    let cell_y = heights[gz][gx];
+    let water_y = c.nearest_y[gz][gx];
+    if !cell_y.is_finite() || !water_y.is_finite() {
+        return true;
+    }
+    cell_y <= water_y + ELEVATION_TOLERANCE_BLOCKS
+}
+
+#[inline(always)]
+fn get_bit(mask: &[u64], idx: usize) -> bool {
+    (mask[idx >> 6] >> (idx & 63)) & 1 != 0
+}
+
+#[inline(always)]
+fn set_bit(mask: &mut [u64], idx: usize) {
+    mask[idx >> 6] |= 1u64 << (idx & 63);
 }

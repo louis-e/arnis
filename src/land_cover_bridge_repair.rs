@@ -13,8 +13,7 @@ use crate::osm_parser::{ProcessedElement, ProcessedWay};
 const MAX_BFS_RINGS: usize = 64;
 const DEFAULT_RAIL_HALF_WIDTH: i32 = 1;
 const DEFAULT_GENERIC_HALF_WIDTH: i32 = 1;
-// Margin past `highway_block_range` so the stamp covers the full ESA bridge
-// shadow (deck + parapets), not just the OSM lane centreline.
+// Margin past highway_block_range to cover deck + parapets, not just the lane centreline.
 const BRIDGE_STAMP_MARGIN_CELLS: i32 = 8;
 const NEIGHBOURS: [(i32, i32); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
 
@@ -95,8 +94,7 @@ pub fn apply_bridge_land_cover_repair(
 
     let mut assigned: HashMap<u32, u8> = HashMap::with_capacity(bridge_indices.len());
     let mut current: VecDeque<(u32, u8)> = VecDeque::new();
-    // Pass 1: seed water-adjacent bridge cells first so water propagates
-    // ahead of any other class through the BFS queue.
+    // Pass 1: seed water-adjacent bridge cells first so water propagates first.
     for &b_idx in &bridge_indices {
         let bi = b_idx as usize;
         let x = (bi % width) as i32;
@@ -267,8 +265,7 @@ fn stamp_square(
         let zu = z as usize;
         let row_start = zu * width;
         for x in lo_x..=hi_x {
-            // Only stamp built-up cells so genuine water/forest cells caught
-            // by the stamp margin keep their class.
+            // Only stamp built-up cells; the margin must not clobber real water/forest.
             if grid[zu][x as usize] != LC_BUILT_UP {
                 continue;
             }

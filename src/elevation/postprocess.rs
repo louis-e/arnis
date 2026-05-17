@@ -198,8 +198,7 @@ pub fn apply_land_cover_repair(
         land_cover.refresh_water_blend_grid();
     }
 
-    // Smooth must run before the pull — otherwise the Gaussian blends pulled
-    // cells back up toward surrounding city built-up.
+    // Smooth before pull; otherwise the Gaussian raises pulled cells back up.
     smooth_built_up_gaussian(
         heights,
         &land_cover.grid,
@@ -723,9 +722,7 @@ fn reclassify_non_surface_water_cells(
     n
 }
 
-/// Linearly pull every land cell within `max_distance` of a water-surface
-/// cell toward that surface, except cells sitting more than
-/// `MAX_PULL_DROP_M` above local water (preserved as real cliffs).
+// Linearly pull land cells within max_distance toward the local water surface; skip > MAX_PULL_DROP_M above water (real cliffs).
 fn pull_coastal_land_toward_water(
     heights: &mut [Vec<f64>],
     is_water_surface: &[Vec<bool>],

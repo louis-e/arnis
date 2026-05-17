@@ -134,6 +134,7 @@ impl Ground {
         };
         crate::land_cover_osm_water_override::apply_osm_water_override(
             lc,
+            &data.heights,
             data.world_width,
             data.world_height,
             elements,
