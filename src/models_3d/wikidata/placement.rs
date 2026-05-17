@@ -3,12 +3,12 @@
 use crate::args::Args;
 use crate::block_definitions::*;
 use crate::colors::{color_text_to_rgb_tuple, RGBTuple};
+use crate::models_3d::palette::closest_block;
+use crate::models_3d::voxelize::{voxelize_uniform_triangles, WorldTransform};
+use crate::models_3d::wikidata::client::fetch_stl;
+use crate::models_3d::wikidata::index::lookup;
+use crate::models_3d::wikidata::stl::{bbox, parse_triangles};
 use crate::osm_parser::ProcessedElement;
-use crate::three_dmr::palette::closest_block;
-use crate::three_dmr::voxelize::{voxelize_uniform_triangles, WorldTransform};
-use crate::wikidata::client::fetch_stl;
-use crate::wikidata::index::lookup;
-use crate::wikidata::stl::{bbox, parse_triangles};
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use rayon::prelude::*;

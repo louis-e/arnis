@@ -641,6 +641,11 @@ function initSettings() {
     licenseModal.style.justifyContent = "center";
     licenseModal.style.alignItems = "center";
 
+    const threeDmrBlock =
+      `<p><b>3D Model Repository (3DMR):</b></p>` +
+      `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu/model/&lt;id&gt;</a> for any model used.</p>`;
+    licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
+
     try {
       const rows = await invoke("gui_get_3d_model_attributions");
       if (Array.isArray(rows) && rows.length > 0) {
@@ -1319,7 +1324,7 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var land_cover = document.getElementById("land-cover-toggle").checked;
-    var three_dmr = document.getElementById("three-dmr-toggle").checked;
+    var use_3d_models = document.getElementById("models-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
@@ -1348,7 +1353,7 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         landCoverEnabled: land_cover,
-        threeDmrEnabled: three_dmr,
+        use3dModelsEnabled: use_3d_models,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
         isNewWorld: true,

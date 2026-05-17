@@ -136,8 +136,11 @@ pub fn generate_world_with_options(
     };
 
     // Pre-scan 3DMR-tagged elements first; 3DMR wins over Wikidata on conflict.
-    let three_dmr_prescan = if args.three_dmr {
-        Some(crate::three_dmr::prescan(&elements, args.rotation))
+    let three_dmr_prescan = if args.use_3d_models {
+        Some(crate::models_3d::three_dmr::prescan(
+            &elements,
+            args.rotation,
+        ))
     } else {
         None
     };
@@ -148,8 +151,8 @@ pub fn generate_world_with_options(
         .unwrap_or(&empty_suppressed);
 
     // Wikidata pre-scan runs after 3DMR's, skipping any element 3DMR already claimed.
-    let wikidata_prescan = if args.three_dmr {
-        Some(crate::wikidata::prescan(
+    let wikidata_prescan = if args.use_3d_models {
+        Some(crate::models_3d::wikidata::prescan(
             &elements,
             three_dmr_suppressed,
             args.rotation,
@@ -420,12 +423,12 @@ pub fn generate_world_with_options(
     // Run after ground generation so anchor Y reflects the final terrain.
     if let Some(prescan) = three_dmr_prescan.as_ref() {
         if prescan.placement_count() > 0 {
-            crate::three_dmr::place_three_dmr_models(&mut editor, args, prescan);
+            crate::models_3d::three_dmr::place_three_dmr_models(&mut editor, args, prescan);
         }
     }
     if let Some(prescan) = wikidata_prescan.as_ref() {
         if prescan.placement_count() > 0 {
-            crate::wikidata::place_wikidata_models(&mut editor, args, prescan);
+            crate::models_3d::wikidata::place_wikidata_models(&mut editor, args, prescan);
         }
     }
 

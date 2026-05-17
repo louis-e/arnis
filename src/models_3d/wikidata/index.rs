@@ -9,7 +9,7 @@ use once_cell::sync::Lazy;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-const RAW: &str = include_str!("../../assets/wikidata_3d_models.json");
+const RAW: &str = include_str!("../../../assets/wikidata_3d_models.json");
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct IndexEntry {

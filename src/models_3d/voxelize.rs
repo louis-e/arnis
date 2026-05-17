@@ -1,7 +1,7 @@
 //! glTF (.glb) → triangles → voxels via dda-voxelize.
 
 use crate::block_definitions::{Block, STONE_BRICKS};
-use crate::three_dmr::palette::closest_block;
+use crate::models_3d::palette::closest_block;
 use dda_voxelize::DdaVoxelizer;
 
 /// Composed vertex transform: intrinsic glTF/3DMR step, then world placement step.

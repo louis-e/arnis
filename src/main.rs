@@ -22,6 +22,7 @@ mod land_cover_bridge_repair;
 mod land_cover_osm_water_override;
 mod map_renderer;
 mod map_transformation;
+mod models_3d;
 mod osm_parser;
 mod overture;
 #[cfg(feature = "gui")]
@@ -31,9 +32,7 @@ mod retrieve_data;
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
-mod three_dmr;
 mod version_check;
-mod wikidata;
 mod world_editor;
 mod world_utils;
 

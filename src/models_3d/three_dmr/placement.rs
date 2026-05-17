@@ -1,9 +1,9 @@
 //! 3DMR pre-scan, suppression set, and end-to-end placement orchestration.
 
 use crate::args::Args;
+use crate::models_3d::three_dmr::client::{fetch_glb, fetch_info, ModelInfo};
+use crate::models_3d::voxelize::{voxelize_glb, WorldTransform};
 use crate::osm_parser::ProcessedElement;
-use crate::three_dmr::client::{fetch_glb, fetch_info, ModelInfo};
-use crate::three_dmr::voxelize::{voxelize_glb, WorldTransform};
 use crate::world_editor::WorldEditor;
 use colored::Colorize;
 use rayon::prelude::*;

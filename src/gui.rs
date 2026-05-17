@@ -229,7 +229,7 @@ struct AttributionRow {
 
 #[tauri::command]
 fn gui_get_3d_model_attributions() -> Vec<AttributionRow> {
-    crate::wikidata::PERMISSIVE_ATTRIBUTIONS
+    crate::models_3d::wikidata::PERMISSIVE_ATTRIBUTIONS
         .iter()
         .map(|e| AttributionRow {
             label: e.label.clone(),
@@ -840,7 +840,7 @@ fn gui_start_generation(
     roof_enabled: bool,
     fillground_enabled: bool,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
-    three_dmr_enabled: bool,
+    use_3d_models_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
     is_new_world: bool,
@@ -1054,7 +1054,7 @@ fn gui_start_generation(
                 roof: roof_enabled,
                 fillground: fillground_enabled,
                 land_cover: land_cover_enabled,
-                three_dmr: three_dmr_enabled,
+                use_3d_models: use_3d_models_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,

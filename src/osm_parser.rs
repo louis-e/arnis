@@ -17,7 +17,6 @@ const IGNORED_TAGS: &[&str] = &[
     "todo",
     "TODO",
     "wikipedia",
-    "wikidata",
     "wikimedia_commons",
     "import_uuid",
     "import",
