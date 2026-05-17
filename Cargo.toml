@@ -26,6 +26,7 @@ bytes = "1"
 byteorder = { version = "1.5", optional = true }
 clap = { version = "4.6.0", features = ["derive", "env"] }
 colored = "3.0.0"
+dda-voxelize = { git = "https://github.com/MIERUNE/dda-voxelize-rs", rev = "1e0844a873262f13b19a709e188a3df22a6fbf97" }
 dirs = "6.0.0"
 fastanvil = "0.32.0"
 fastnbt = "2.6.0"
@@ -33,6 +34,7 @@ flate2 = "1.1"
 fnv = "1.0.7"
 fs2 = "0.4"
 geo = "0.33.1"
+gltf = { version = "1", default-features = false, features = ["import", "names", "utils", "KHR_materials_unlit"] }
 image = "0.25"
 indicatif = "0.18.4"
 itertools = "0.14.0"

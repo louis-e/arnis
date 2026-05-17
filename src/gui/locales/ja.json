@@ -42,6 +42,7 @@
   "roof": "屋根生成",
   "fillground": "地面を埋める",
   "land_cover": "土地被覆",
+  "three_dmr": "3Dモデルを使用",
   "disable_height_limit": "建築高さを拡張",
   "aws_only_elevation": "従来の地形",
   "bedrock_auto_generated": "Bedrock ワールドは自動生成されます",

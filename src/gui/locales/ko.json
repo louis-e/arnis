@@ -42,6 +42,7 @@
   "roof": "지붕 생성",
   "fillground": "지면 채우기",
   "land_cover": "토지 피복",
+  "three_dmr": "3D 모델 사용",
   "disable_height_limit": "건축 높이 확장",
   "aws_only_elevation": "기존 지형",
   "bedrock_auto_generated": "Bedrock 월드는 자동 생성됩니다",

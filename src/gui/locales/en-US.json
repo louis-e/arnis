@@ -49,6 +49,7 @@
   "roof": "Roof Generation",
   "fillground": "Fill Ground",
   "land_cover": "Land Cover",
+  "three_dmr": "Use 3D Models",
   "disable_height_limit": "Extend build height",
   "aws_only_elevation": "Legacy terrain",
   "bedrock_auto_generated": "Bedrock world is auto-generated",

@@ -42,6 +42,7 @@
   "roof": "Generación de Tejado",
   "fillground": "Rellenar Suelo",
   "land_cover": "Cobertura del suelo",
+  "three_dmr": "Usar modelos 3D",
   "disable_height_limit": "Ampliar altura de construcción",
   "aws_only_elevation": "Terreno clásico",
   "bedrock_auto_generated": "El mundo Bedrock se genera automáticamente",

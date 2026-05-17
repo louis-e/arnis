@@ -42,6 +42,7 @@
   "roof": "Jumta ģenerēšana",
   "fillground": "Aizpildīt zemi",
   "land_cover": "Zemes segums",
+  "three_dmr": "Lietot 3D modeļus",
   "disable_height_limit": "Paplašināt būvniecības augstumu",
   "aws_only_elevation": "Mantotais reljefs",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",

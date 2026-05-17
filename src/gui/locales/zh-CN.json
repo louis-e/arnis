@@ -42,6 +42,7 @@
   "roof": "屋顶生成",
   "fillground": "填充地面",
   "land_cover": "土地覆盖",
+  "three_dmr": "使用3D模型",
   "disable_height_limit": "扩展建造高度",
   "aws_only_elevation": "旧版地形",
   "bedrock_auto_generated": "Bedrock 世界自动生成",

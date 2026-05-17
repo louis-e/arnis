@@ -135,9 +135,24 @@ pub fn generate_world_with_options(
         outlines
     };
 
+    // Pre-scan 3DMR-tagged elements; their IDs are suppressed in the loop below.
+    let three_dmr_prescan = if args.three_dmr {
+        Some(crate::three_dmr::prescan(&elements, args.rotation))
+    } else {
+        None
+    };
+    let empty_suppressed: HashSet<u64> = HashSet::new();
+    let three_dmr_suppressed: &HashSet<u64> = three_dmr_prescan
+        .as_ref()
+        .map(|p| &p.suppressed_ids)
+        .unwrap_or(&empty_suppressed);
+
     // Process all elements
     for element in elements.into_iter() {
         element_counter += 1;
+        if three_dmr_suppressed.contains(&element.id()) {
+            continue;
+        }
         if element_counter.is_multiple_of(pb_batch_size) {
             process_pb.inc(pb_batch_size);
         }
@@ -382,6 +397,13 @@ pub fn generate_world_with_options(
     // This must happen after ground generation so AIR blocks are not overwritten.
     if !subway_points.is_empty() {
         railways::carve_subway_interior(&mut editor, &subway_points);
+    }
+
+    // Run after ground generation so anchor Y reflects the final terrain.
+    if let Some(prescan) = three_dmr_prescan.as_ref() {
+        if prescan.placement_count() > 0 {
+            crate::three_dmr::place_three_dmr_models(&mut editor, args, prescan);
+        }
     }
 
     // Save world

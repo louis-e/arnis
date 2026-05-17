@@ -31,8 +31,10 @@ Thumbs.db
 /export.json
 /parsed_osm_data.txt
 /elevation_debug.png
+/landcover_debug*.png
 /terrain-tile-cache
 /arnis-tile-cache
+
 /gen/
 /build/
 *.rmeta
