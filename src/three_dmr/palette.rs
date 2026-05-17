@@ -1,136 +1,103 @@
-//! Color → Block palette built at first use from `sorted_colors.txt`, matched via Oklab.
+//! Color → Block palette, matched via Oklab. Block colors curated from in-game texture samples.
 
 use crate::block_definitions::*;
 use crate::colors::{oklab_distance, RGBTuple};
-use once_cell::sync::Lazy;
 
-const SORTED_COLORS: &str = include_str!("../../sorted_colors.txt");
-
-/// Texture-name → Block. Names match `sorted_colors.txt` exactly.
-static NAME_TO_BLOCK: &[(&str, Block)] = &[
-    // Whites / off-whites
-    ("white_concrete", WHITE_CONCRETE),
-    ("white_terracotta", WHITE_TERRACOTTA),
-    ("white_wool", WHITE_WOOL),
-    ("quartz_block_side", QUARTZ_BLOCK),
-    ("quartz_bricks", QUARTZ_BRICKS),
-    ("snow", SNOW_BLOCK),
-    ("iron_block", IRON_BLOCK),
+#[rustfmt::skip]
+static PALETTE: &[(RGBTuple, Block)] = &[
+    // Whites / off-whites / quartz
+    ((207, 213, 214), WHITE_CONCRETE),
+    ((210, 178, 161), WHITE_TERRACOTTA),
+    ((234, 236, 237), WHITE_WOOL),
+    ((236, 230, 223), QUARTZ_BLOCK),
+    ((235, 229, 222), QUARTZ_BRICKS),
+    ((249, 254, 254), SNOW_BLOCK),
+    ((220, 220, 220), IRON_BLOCK),
     // Light grey
-    ("light_gray_concrete", LIGHT_GRAY_CONCRETE),
-    ("light_gray_terracotta", LIGHT_GRAY_TERRACOTTA),
-    ("diorite", DIORITE),
-    ("polished_diorite", POLISHED_DIORITE),
-    ("polished_andesite", POLISHED_ANDESITE),
-    ("smooth_stone", SMOOTH_STONE),
-    ("stone_bricks", STONE_BRICKS),
-    ("chiseled_stone_bricks", CHISELED_STONE_BRICKS),
-    ("cracked_stone_bricks", CRACKED_STONE_BRICKS),
-    ("stone", STONE),
-    ("cobblestone", COBBLESTONE),
-    ("andesite", ANDESITE),
+    ((125, 125, 115), LIGHT_GRAY_CONCRETE),
+    ((135, 107, 98),  LIGHT_GRAY_TERRACOTTA),
+    ((189, 188, 189), DIORITE),
+    ((193, 193, 195), POLISHED_DIORITE),
+    ((132, 135, 134), POLISHED_ANDESITE),
+    ((159, 159, 159), SMOOTH_STONE),
+    ((122, 122, 122), STONE_BRICKS),
+    ((120, 119, 120), CHISELED_STONE_BRICKS),
+    ((118, 118, 118), CRACKED_STONE_BRICKS),
+    ((126, 126, 126), STONE),
+    ((128, 127, 128), COBBLESTONE),
+    ((136, 136, 137), ANDESITE),
     // Medium grey
-    ("gray_concrete", GRAY_CONCRETE),
-    ("gray_terracotta", GRAY_TERRACOTTA),
+    ((55,  58,  62),  GRAY_CONCRETE),
+    ((58,  42,  36),  GRAY_TERRACOTTA),
     // Dark grey / black
-    ("deepslate", DEEPSLATE),
-    ("deepslate_bricks", DEEPSLATE_BRICKS),
-    ("polished_deepslate", POLISHED_DEEPSLATE),
-    ("cobbled_deepslate", COBBLED_DEEPSLATE),
-    ("blackstone", BLACKSTONE),
-    ("polished_blackstone", POLISHED_BLACKSTONE),
-    ("polished_blackstone_bricks", POLISHED_BLACKSTONE_BRICKS),
-    ("black_concrete", BLACK_CONCRETE),
-    ("black_terracotta", BLACK_TERRACOTTA),
-    ("black_wool", BLACK_WOOL),
-    ("netherite_block", NETHERITE_BLOCK),
+    ((80,  80,  83),  DEEPSLATE),
+    ((71,  71,  71),  DEEPSLATE_BRICKS),
+    ((72,  73,  73),  POLISHED_DEEPSLATE),
+    ((77,  77,  81),  COBBLED_DEEPSLATE),
+    ((42,  36,  41),  BLACKSTONE),
+    ((53,  49,  57),  POLISHED_BLACKSTONE),
+    ((48,  43,  50),  POLISHED_BLACKSTONE_BRICKS),
+    ((8,   10,  15),  BLACK_CONCRETE),
+    ((37,  23,  16),  BLACK_TERRACOTTA),
+    ((21,  21,  26),  BLACK_WOOL),
+    ((67,  61,  64),  NETHERITE_BLOCK),
     // Browns / earth
-    ("brown_concrete", BROWN_CONCRETE),
-    ("brown_terracotta", BROWN_TERRACOTTA),
-    ("mud_bricks", MUD_BRICKS),
-    ("dirt", DIRT),
-    ("coarse_dirt", COARSE_DIRT),
-    ("oak_planks", OAK_PLANKS),
-    ("oak_log", OAK_LOG),
-    ("spruce_planks", SPRUCE_PLANKS),
-    ("spruce_log", SPRUCE_LOG),
-    ("dark_oak_planks", DARK_OAK_PLANKS),
-    ("dark_oak_log", DARK_OAK_LOG),
-    ("granite", GRANITE),
-    ("polished_granite", POLISHED_GRANITE),
+    ((96,  60,  32),  BROWN_CONCRETE),
+    ((77,  51,  36),  BROWN_TERRACOTTA),
+    ((137, 104, 79),  MUD_BRICKS),
+    ((134, 96,  67),  DIRT),
+    ((119, 86,  59),  COARSE_DIRT),
+    ((162, 131, 79),  OAK_PLANKS),
+    ((109, 85,  51),  OAK_LOG),
+    ((115, 85,  49),  SPRUCE_PLANKS),
+    ((59,  38,  17),  SPRUCE_LOG),
+    ((67,  43,  20),  DARK_OAK_PLANKS),
+    ((60,  47,  26),  DARK_OAK_LOG),
+    ((149, 103, 86),  GRANITE),
+    ((154, 107, 89),  POLISHED_GRANITE),
     // Sandstone / yellow-tan
-    ("sandstone", SANDSTONE),
-    ("smooth_sandstone_top", SMOOTH_SANDSTONE),
-    ("end_stone_bricks", END_STONE_BRICKS),
-    ("hay_block_side", HAY_BALE),
+    ((216, 203, 156), SANDSTONE),
+    ((224, 214, 170), SMOOTH_SANDSTONE),
+    ((218, 224, 162), END_STONE_BRICKS),
+    ((166, 136, 38),  HAY_BALE),
     // Reds
-    ("bricks", BRICK),
-    ("red_terracotta", RED_TERRACOTTA),
-    ("red_wool", RED_WOOL),
-    ("red_concrete", RED_CONCRETE),
-    ("red_nether_bricks", RED_NETHER_BRICKS),
-    ("nether_bricks", NETHER_BRICK),
-    ("terracotta", TERRACOTTA),
-    // Orange / amber (covers the iron-orange Eiffel Tower hue too)
-    ("orange_terracotta", ORANGE_TERRACOTTA),
-    ("orange_wool", ORANGE_WOOL),
-    ("copper_block", WAXED_COPPER_BLOCK),
-    ("exposed_copper", WAXED_EXPOSED_COPPER),
+    ((151, 98,  83),  BRICK),
+    ((143, 61,  47),  RED_TERRACOTTA),
+    ((161, 39,  35),  RED_WOOL),
+    ((142, 33,  33),  RED_CONCRETE),
+    ((70,  7,   9),   RED_NETHER_BRICKS),
+    ((44,  22,  26),  NETHER_BRICK),
+    ((152, 94,  68),  TERRACOTTA),
+    // Orange / copper
+    ((162, 84,  38),  ORANGE_TERRACOTTA),
+    ((241, 118, 20),  ORANGE_WOOL),
+    ((192, 108, 80),  WAXED_COPPER_BLOCK),
+    ((161, 126, 104), WAXED_EXPOSED_COPPER),
     // Yellows
-    ("yellow_concrete", YELLOW_CONCRETE),
-    ("yellow_terracotta", YELLOW_TERRACOTTA),
-    ("yellow_wool", YELLOW_WOOL),
-    ("gold_block", GOLD_BLOCK),
+    ((241, 175, 21),  YELLOW_CONCRETE),
+    ((186, 133, 35),  YELLOW_TERRACOTTA),
+    ((249, 198, 40),  YELLOW_WOOL),
+    ((246, 208, 62),  GOLD_BLOCK),
     // Greens
-    ("green_concrete", GREEN_CONCRETE),
-    ("green_wool", GREEN_WOOL),
-    ("lime_concrete", LIME_CONCRETE),
-    ("moss_block", MOSS_BLOCK),
-    ("mossy_cobblestone", MOSSY_COBBLESTONE),
-    ("oxidized_copper", WAXED_OXIDIZED_COPPER),
+    ((73,  91,  36),  GREEN_CONCRETE),
+    ((85,  110, 28),  GREEN_WOOL),
+    ((94,  169, 24),  LIME_CONCRETE),
+    ((89,  110, 45),  MOSS_BLOCK),
+    ((110, 118, 95),  MOSSY_COBBLESTONE),
+    ((82,  163, 133), WAXED_OXIDIZED_COPPER),
     // Blues
-    ("blue_concrete", BLUE_CONCRETE),
-    ("blue_terracotta", BLUE_TERRACOTTA),
-    ("blue_wool", BLUE_WOOL),
-    ("light_blue_concrete", LIGHT_BLUE_CONCRETE),
-    ("light_blue_terracotta", LIGHT_BLUE_TERRACOTTA),
+    ((45,  47,  143), BLUE_CONCRETE),
+    ((74,  60,  91),  BLUE_TERRACOTTA),
+    ((53,  57,  157), BLUE_WOOL),
+    ((36,  137, 199), LIGHT_BLUE_CONCRETE),
+    ((113, 109, 138), LIGHT_BLUE_TERRACOTTA),
     // Purples / magentas
-    ("purple_concrete", PURPLE_CONCRETE),
-    ("magenta_concrete", MAGENTA_CONCRETE),
+    ((100, 32,  156), PURPLE_CONCRETE),
+    ((169, 48,  159), MAGENTA_CONCRETE),
     // Cyans
-    ("cyan_concrete", CYAN_CONCRETE),
-    ("cyan_terracotta", CYAN_TERRACOTTA),
+    ((21,  119, 136), CYAN_CONCRETE),
+    ((87,  91,  91),  CYAN_TERRACOTTA),
 ];
-
-static PALETTE: Lazy<Vec<(RGBTuple, Block)>> = Lazy::new(build_palette);
-
-fn build_palette() -> Vec<(RGBTuple, Block)> {
-    let mut name_map = std::collections::HashMap::with_capacity(NAME_TO_BLOCK.len());
-    for (name, block) in NAME_TO_BLOCK {
-        name_map.insert(*name, *block);
-    }
-
-    let mut out = Vec::with_capacity(NAME_TO_BLOCK.len());
-    for line in SORTED_COLORS.lines() {
-        let Some((name, rgb)) = parse_line(line) else {
-            continue;
-        };
-        if let Some(&block) = name_map.get(name) {
-            out.push((rgb, block));
-        }
-    }
-    out
-}
-
-fn parse_line(line: &str) -> Option<(&str, RGBTuple)> {
-    let (name, rest) = line.split_once(": rgb(")?;
-    let inner = rest.split_once(')')?.0;
-    let mut parts = inner.split(',').map(|s| s.trim().parse::<u16>().ok());
-    let r = parts.next()??;
-    let g = parts.next()??;
-    let b = parts.next()??;
-    Some((name, (r.min(255) as u8, g.min(255) as u8, b.min(255) as u8)))
-}
 
 /// Palette block whose color is perceptually closest (Oklab) to the input.
 pub fn closest_block(color: RGBTuple) -> Block {
@@ -146,19 +113,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn palette_built_from_sorted_colors() {
-        // Palette should include at least most of the curated entries.
-        let n = PALETTE.len();
-        assert!(
-            n >= NAME_TO_BLOCK.len() - 5,
-            "expected palette ~{} entries, got {n} — sorted_colors.txt missing keys?",
-            NAME_TO_BLOCK.len()
-        );
+    fn palette_non_empty() {
+        assert!(PALETTE.len() >= 60);
     }
 
     #[test]
     fn closest_block_brick_red() {
-        // A typical brick/red building color sits firmly in the red palette.
         let block = closest_block((150, 40, 40));
         let acceptable = [
             RED_CONCRETE,
@@ -177,26 +137,12 @@ mod tests {
 
     #[test]
     fn closest_block_iron_brown() {
-        // Approximate Eiffel-Tower iron color.
         let block = closest_block((139, 90, 60));
-        // Should land on a brown/orange-ish block, never on white/quartz.
         let bad = [WHITE_CONCRETE, QUARTZ_BLOCK, WHITE_WOOL, SNOW_BLOCK];
         assert!(
             !bad.iter().any(|b| b.id() == block.id()),
             "iron-brown should not map to a white block — got {}",
             block.id()
         );
-    }
-
-    #[test]
-    fn parse_line_basic() {
-        let r = parse_line("oak_planks: rgb(162, 131, 79) #A2834F");
-        assert_eq!(r, Some(("oak_planks", (162u8, 131u8, 79u8))));
-    }
-
-    #[test]
-    fn parse_line_garbage() {
-        assert!(parse_line("# a comment").is_none());
-        assert!(parse_line("").is_none());
     }
 }
