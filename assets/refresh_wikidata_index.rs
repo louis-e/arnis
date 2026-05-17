@@ -1,13 +1,4 @@
-//! Pre-bake the Wikidata 3D-model index used by the runtime fetcher.
-//!
-//! Run: `cargo run --example refresh_wikidata_index --release`
-//! Writes: `assets/wikidata_3d_models.json`
-//!
-//! Pipeline:
-//!   1. SPARQL @ query.wikidata.org for P4896 ∩ P625, .stl files only
-//!   2. Batch Commons API for license + artist per file (50 per request)
-//!   3. Keep only permissive licenses (CC0, Public Domain, CC BY any version)
-//!   4. Emit JSON keyed by QID
+//! Pre-bake `assets/wikidata_3d_models.json`: SPARQL P4896 ∩ P625 → Commons API → permissive-only filter.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -22,6 +13,11 @@ const USER_AGENT: &str = concat!(
 );
 const BATCH_SIZE: usize = 50;
 const OUTPUT_PATH: &str = "assets/wikidata_3d_models.json";
+
+/// QIDs to skip. OSM tagging produces better output than the Wikimedia model.
+const DENY_LIST: &[&str] = &[
+    "Q9188", // Empire State Building — wrong height_m (1500), generic block model
+];
 
 #[derive(Serialize, Debug, Clone)]
 struct ModelEntry {
@@ -80,10 +76,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("       got {} candidates", rows.len());
 
     eprintln!("[2/3] Batching Commons API for license metadata...");
-    let mut candidates: Vec<(String, String, String, Option<f64>, Option<String>)> = Vec::new();
+    type Candidate = (String, String, String, Option<f64>, Option<String>);
+    let mut candidates: Vec<Candidate> = Vec::new();
+    let mut rejected_denylist = 0usize;
     for row in &rows {
         let qid = row.item.value.rsplit('/').next().unwrap_or("").to_string();
         if !qid.starts_with('Q') {
+            continue;
+        }
+        if DENY_LIST.contains(&qid.as_str()) {
+            rejected_denylist += 1;
             continue;
         }
         let label = row
@@ -157,7 +159,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("[3/3] Writing {OUTPUT_PATH}");
     eprintln!(
-        "       kept: {kept}    sharealike-rejected: {rejected_sharealike}    unknown-rejected: {rejected_unknown}    metadata-missing: {rejected_missing}"
+        "       kept: {kept}    sharealike-rejected: {rejected_sharealike}    unknown-rejected: {rejected_unknown}    metadata-missing: {rejected_missing}    denylist-rejected: {rejected_denylist}"
     );
 
     std::fs::create_dir_all("assets")?;

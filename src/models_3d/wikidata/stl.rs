@@ -1,5 +1,4 @@
-//! Minimal binary STL parser. Commons uploads are binary STL (`application/sla`).
-//! ASCII STL is rare and not supported (we skip those models defensively).
+//! Minimal binary STL parser; ASCII STL is rejected.
 
 use std::io::Read;
 
@@ -14,11 +13,6 @@ fn read_le_f32(b: &[u8]) -> f32 {
 }
 
 /// Parses a binary STL blob into a flat list of triangles.
-///
-/// Layout (binary STL):
-///   80-byte header   |   u32 little-endian triangle count
-///   then per triangle (50 bytes):
-///     [12 bytes normal][9 × f32 LE vertex coords][2 bytes attribute]
 pub fn parse_triangles(bytes: &[u8]) -> Result<Vec<[[f32; 3]; 3]>, String> {
     if bytes.len() < 84 {
         return Err("STL too short for header + count".into());
@@ -61,10 +55,7 @@ pub fn parse_triangles(bytes: &[u8]) -> Result<Vec<[[f32; 3]; 3]>, String> {
     Ok(out)
 }
 
-/// A few binary STLs have a "solid " prefix in their 80-byte header (most
-/// exporters write "binary STL " but some include "solid " by mistake).
-/// If the byte at offset 80 looks like a sane triangle count for the file
-/// length, treat it as binary anyway.
+/// Some binary STLs start with "solid "; if the trailing length matches the count, accept anyway.
 fn looks_like_binary_with_solid_header(bytes: &[u8]) -> bool {
     if bytes.len() < 84 {
         return false;
@@ -74,8 +65,7 @@ fn looks_like_binary_with_solid_header(bytes: &[u8]) -> bool {
     expected == bytes.len() || (expected <= bytes.len() && expected + 4 >= bytes.len())
 }
 
-/// Streaming reader that takes an `impl Read` (used by tests and possibly
-/// future callers). Loads the entire blob then forwards to `parse_triangles`.
+/// Loads `R` to bytes and forwards to `parse_triangles`.
 #[allow(dead_code)]
 pub fn parse_from_reader<R: Read>(mut r: R) -> Result<Vec<[[f32; 3]; 3]>, String> {
     let mut buf = Vec::new();

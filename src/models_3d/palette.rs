@@ -108,11 +108,7 @@ pub fn closest_block(color: RGBTuple) -> Block {
         .unwrap_or(STONE_BRICKS)
 }
 
-/// Top-K perceptually-closest palette blocks to the input color, sorted by
-/// ascending Oklab distance. Used to build a small palette pool that picks a
-/// voxel from blocks of similar but not identical hue (BRICK / RED_TERRACOTTA
-/// / RED_WOOL for a "red" element), so voxelized models read as textured
-/// rather than flat.
+/// Top-K perceptually-closest palette blocks (ascending Oklab distance).
 pub fn closest_blocks(color: RGBTuple, k: usize) -> Vec<Block> {
     let mut scored: Vec<(f32, Block)> = PALETTE
         .iter()

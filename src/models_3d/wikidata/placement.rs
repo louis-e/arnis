@@ -14,16 +14,10 @@ use colored::Colorize;
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 
-/// Number of perceptually-close blocks to pull when the OSM element has an
-/// explicit color or material tag. Larger = more texture, but eventually
-/// includes off-hue blocks.
+/// Top-K perceptually-close blocks when the OSM element has an explicit color/material tag.
 const COLOR_PALETTE_K: usize = 5;
 
-/// Hard caps on the final voxelized model's world-space extent (in meters).
-/// Y/height is allowed to be larger so tall landmarks like the Space Needle
-/// (184 m) pass freely; the horizontal cap rejects horizontally-massive
-/// models like "Penang island.stl" or wide cultural sites that would dwarf
-/// their OSM bbox.
+/// Final-extent caps in meters: tall structures pass; horizontally-massive ones don't.
 const MAX_XZ_EXTENT_M: f32 = 225.0;
 const MAX_Y_EXTENT_M: f32 = 600.0;
 const MIN_EXTENT_M: f32 = 2.0;
@@ -36,14 +30,11 @@ struct Placement {
     anchor_z: i32,
     footprint: Bbox,
     world_yaw_degrees: f64,
-    /// Pool of perceptually-similar Minecraft blocks. The voxelizer picks one
-    /// per voxel deterministically from this list to give visible texture
-    /// variation, mirroring how the standard building generator picks from
-    /// per-category wall palettes.
+    /// Block pool sampled per-voxel for texture variation.
     palette: Vec<Block>,
-    /// OSM-resolved target height in meters; `None` falls back to bbox-XZ scaling.
+    /// Target height in meters; `None` → fall back to XZ-only scaling.
     osm_height_m: Option<f64>,
-    /// OSM-resolved target XZ extent in meters; `None` falls back to height-only scaling.
+    /// Target XZ extent in meters; `None` → fall back to height-only scaling.
     osm_xz_extent_m: Option<f64>,
 }
 
@@ -72,9 +63,7 @@ impl PrescanResult {
     }
 }
 
-/// Scans for `wikidata=Q*` tags whose QID matches the bundled index. Suppresses
-/// the tagged element and any building-like element inside its footprint.
-/// Elements already suppressed by the 3DMR pre-scan are skipped — 3DMR wins.
+/// Scans `wikidata=Q*` tags against the bundled index; suppresses matched elements and overlapping buildings (3DMR wins on conflict).
 pub fn prescan(
     elements: &[ProcessedElement],
     already_suppressed: &HashSet<u64>,
@@ -344,9 +333,7 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
     );
 }
 
-// Per-category block pools, modeled after `buildings::*_WALL_OPTIONS`. These
-// give voxelized landmarks the same textured-stone look the standard building
-// generator produces for tagged towers, castles, churches, etc.
+// Per-category block pools modeled after `buildings::*_WALL_OPTIONS`.
 const TOWER_PALETTE: &[Block] = &[
     STONE_BRICKS,
     COBBLESTONE,
@@ -425,8 +412,7 @@ const DEFAULT_PALETTE: &[Block] = &[
     SMOOTH_STONE,
 ];
 
-/// Resolves the per-voxel palette pool: explicit color/material tags win, then
-/// structure-type category, then a generic stone fallback.
+/// Per-voxel palette pool: explicit color/material → structure-type category → fallback.
 fn resolve_palette(element: &ProcessedElement) -> Vec<Block> {
     let tags = element.tags();
     if let Some(c) = tags
@@ -508,12 +494,7 @@ fn structure_type_palette(tags: &std::collections::HashMap<String, String>) -> &
     DEFAULT_PALETTE
 }
 
-/// Deterministic per-voxel pick from a palette. Same QID + same voxel position
-/// always yields the same block, so re-runs are bit-identical. The hash is a
-/// splitmix64-style avalanche per axis so the low bits used by `% palette.len()`
-/// have no structural correlation between adjacent voxels (otherwise small
-/// palettes produce a visible diagonal/striped pattern instead of random
-/// texture).
+/// Deterministic per-voxel palette pick via splitmix64 (avoids pattern artifacts).
 fn pick_voxel_block(palette: &[Block], seed: u64, pos: [i32; 3]) -> Block {
     if palette.is_empty() {
         return STONE_BRICKS;
@@ -537,30 +518,14 @@ fn qid_seed(qid: &str) -> u64 {
     h
 }
 
-/// Resolved fit between an STL's raw geometry and OSM's expected dimensions.
-/// `axes` permutes (and optionally negates) model axes to world axes — world Y
-/// becomes the up axis of the rendered structure. `scale` is per-world-axis
-/// in meters per model-unit, applied after the axis remap.
-///
-/// Example: for a Z-up STL of a 200-unit-tall tower whose OSM element says
-/// height=96m, footprint=12m, this produces axes that swap Z→Y and scales
-/// such that the rendered model is 12m wide × 96m tall × 12m deep.
+/// Axis permutation + per-axis scale to fit an STL into OSM's expected dimensions.
 #[derive(Clone, Copy, Debug)]
 struct ModelFit {
     axes: [(usize, f32); 3],
     scale: [f32; 3],
 }
 
-/// Picks which model-space axis corresponds to "up" from the model's geometry
-/// alone. We look at the three extents and find the "odd one out":
-/// - If one extent is clearly the largest (>10% above the median), it's up
-///   (tower/arch convention — Big Ben, Arc de Triomphe, Space Needle).
-/// - If one extent is clearly the smallest (<85% of the median), it's up
-///   (wide/flat convention — Acropolis temple plateau).
-/// - Otherwise the model is roughly cubic: default to Y-up.
-///
-/// Robust against OSM-aspect borderline cases (Arc de Triomphe is aspect ~1.1
-/// which the previous OSM-driven heuristic put in the dead zone).
+/// Up-axis from model extents. Default Z (STL convention); override when a clear outlier exists.
 fn pick_up_axis(extents: &[f32; 3]) -> usize {
     let mut sorted: [(usize, f32); 3] = [(0, extents[0]), (1, extents[1]), (2, extents[2])];
     sorted.sort_by(|a, b| a.1.total_cmp(&b.1));
@@ -569,21 +534,18 @@ fn pick_up_axis(extents: &[f32; 3]) -> usize {
     let (max_idx, max_val) = sorted[2];
 
     if med_val <= 1e-3 {
-        return 1;
+        return 2;
     }
     if max_val / med_val > 1.10 {
         return max_idx;
     }
-    if min_val / med_val < 0.85 {
+    if min_val / med_val < 0.5 {
         return min_idx;
     }
-    1
+    2
 }
 
-/// Derives the full model fit (orientation + per-axis scale) that places the
-/// STL inside OSM's expected footprint and height. Non-uniform scaling lets
-/// thin towers and wide buildings both end up the right size even when the
-/// raw STL aspect ratio doesn't match reality.
+/// Orientation + per-axis scale to fit the STL inside OSM's footprint and height.
 fn derive_fit(bmin: &[f32; 3], bmax: &[f32; 3], p: &Placement) -> Option<ModelFit> {
     let extents = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
     if extents.iter().all(|&e| e < 1e-3) {
@@ -819,9 +781,7 @@ mod tests {
         let b0_again = pick_voxel_block(palette, seed, [0, 0, 0]);
         assert_eq!(b0.id(), b0_again.id());
 
-        // Sample a 10×10×10 cube; expect every palette block to appear at
-        // least once and the distribution to be reasonably balanced (no
-        // block hogs >40% of samples — patterning would push one above that).
+        // Sample 10×10×10; every palette block should appear and none should exceed 40%.
         let mut counts = std::collections::HashMap::new();
         for x in 0..10 {
             for y in 0..10 {
@@ -899,8 +859,7 @@ mod tests {
 
     #[test]
     fn derive_fit_wide_zup_temple_uses_shortest_as_up() {
-        // Z-up temple STL: 50 × 50 × 10 (Z is the natural height dimension).
-        // OSM says it's 10m tall × 30m wide (aspect 0.33 → "wide").
+        // Z-up temple STL 50×50×10; min-as-up override should pick Z.
         let fit = derive_fit(
             &[0.0, 0.0, 0.0],
             &[50.0, 50.0, 10.0],
@@ -914,32 +873,41 @@ mod tests {
     }
 
     #[test]
-    fn derive_fit_square_aspect_keeps_yup() {
-        // Truly cubic STL (20×20×20) — no axis is clearly longest/shortest.
+    fn derive_fit_cubic_defaults_to_zup() {
+        // Cubic STL (20×20×20). STL convention is Z-up, default to Z.
         let fit = derive_fit(
             &[0.0, 0.0, 0.0],
             &[20.0, 20.0, 20.0],
             &placement(Some(10.0), Some(10.0)),
         )
         .unwrap();
-        assert_eq!(fit.axes[1].0, 1);
+        assert_eq!(fit.axes[1].0, 2);
     }
 
     #[test]
-    fn derive_fit_arc_de_triomphe_zup() {
-        // Microsoft Z-up STL of the Arc de Triomphe: ~45 wide × 22 deep × 50 tall.
-        // OSM aspect ≈ 1.1 (just barely tall). The old OSM-driven heuristic
-        // landed in the dead zone and defaulted to Y-up, laying the arch on
-        // its side. Geometric heuristic now picks Z (the longest at 50) as up.
+    fn derive_fit_arc_de_triomphe_real_extents() {
+        // Real Arc de Triomphe extents — falls through to Z-up default.
         let fit = derive_fit(
             &[0.0, 0.0, 0.0],
-            &[45.0, 22.0, 50.0],
-            &placement(Some(50.0), Some(45.0)),
+            &[24.5, 15.24, 22.6],
+            &placement(Some(49.54), Some(45.0)),
+        )
+        .unwrap();
+        assert_eq!(fit.axes[1].0, 2, "STL is Z-up; default fires");
+    }
+
+    #[test]
+    fn derive_fit_clearly_elongated_picks_longest() {
+        // 10×100×10 — clearly elongated along Y. max/median = 10 → override fires.
+        let fit = derive_fit(
+            &[0.0, 0.0, 0.0],
+            &[10.0, 100.0, 10.0],
+            &placement(Some(96.0), Some(12.0)),
         )
         .unwrap();
         assert_eq!(
-            fit.axes[1].0, 2,
-            "longest axis (Z, 50) should become world Y"
+            fit.axes[1].0, 1,
+            "longest axis (Y) wins via elongated override"
         );
     }
 

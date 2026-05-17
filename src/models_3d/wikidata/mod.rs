@@ -1,6 +1,4 @@
-//! Wikidata-driven 3D model fetcher. Wikidata items tagged on OSM elements
-//! (`wikidata=Q*`) that have a P4896 (3D model) statement resolve to a .stl on
-//! Commons, which is voxelized and placed at the OSM element's footprint.
+//! Wikidata `wikidata=Q*` → P4896 → Commons .stl → voxelized, placed at the OSM anchor.
 
 mod client;
 mod index;

@@ -205,9 +205,7 @@ pub fn voxelize_glb(
     Ok(out)
 }
 
-/// Voxelizes a stream of model-space triangles under `transform`, painting
-/// every occupied voxel as `block`. Used by the STL path which has no
-/// per-triangle material data.
+/// Voxelizes pre-transformed triangles, painting every occupied voxel as `block`.
 pub fn voxelize_uniform_triangles<I>(
     triangles: I,
     transform: WorldTransform,

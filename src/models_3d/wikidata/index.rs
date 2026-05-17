@@ -1,9 +1,4 @@
-//! Static lookup table: QID → bundled model metadata.
-//!
-//! Built at compile time from `assets/wikidata_3d_models.json` (refreshed by
-//! `cargo run --example refresh_wikidata_index --release`). License policy is
-//! permissive-only (CC0, Public Domain, CC BY any version) — the refresh
-//! script rejects share-alike licenses at bake time.
+//! Static QID → model lookup, baked from `assets/wikidata_3d_models.json` (refresh via the example).
 
 use once_cell::sync::Lazy;
 use serde::Deserialize;
@@ -34,14 +29,12 @@ static INDEX: Lazy<HashMap<String, IndexEntry>> = Lazy::new(|| {
     parsed.models
 });
 
-/// Look up a Wikidata QID (e.g. "Q243"). Returns `None` if the QID is not in
-/// the permissive-licensed bundled index.
+/// Look up a Wikidata QID; returns `None` if not in the bundled index.
 pub fn lookup(qid: &str) -> Option<&'static IndexEntry> {
     INDEX.get(qid)
 }
 
-/// All entries in the bundled index, sorted by label for stable rendering in
-/// the Credits modal.
+/// All bundled entries sorted by label for stable Credits-modal rendering.
 pub static PERMISSIVE_ATTRIBUTIONS: Lazy<Vec<&'static IndexEntry>> = Lazy::new(|| {
     let mut v: Vec<&IndexEntry> = INDEX.values().collect();
     v.sort_by(|a, b| a.label.cmp(&b.label));

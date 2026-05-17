@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-17T20:20:32Z",
+  "generated_at": "2026-05-17T22:10:44Z",
   "source": "https://query.wikidata.org/sparql (P4896 ∩ P625) + commons.wikimedia.org imageinfo",
   "license_policy": "permissive-only: CC0, Public Domain, CC BY (any version)",
   "models": {
@@ -920,14 +920,6 @@
       "license": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0",
       "artist": "小池 隆"
-    },
-    "Q9188": {
-      "label": "Empire State Building",
-      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Empire%20State%20Building%20%28simplified%29.stl",
-      "license": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0",
-      "artist": "Microsoft",
-      "height_m": 1500.0
     },
     "Q91968249": {
       "label": "Kōshin-tō Dōhyō (Imjuku-Minami-cho, Asahi-ku, Yokohama)",
