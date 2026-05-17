@@ -402,9 +402,9 @@ fn place_arch_spandrel_cell(
     }
     for fy in arch_under_y..=fill_top {
         if use_absolute_y {
-            editor.set_block_absolute(STONE_BRICKS, set_x, fy, set_z, None, None);
+            editor.set_block_absolute(STONE_BRICKS, set_x, fy, set_z, None, Some(&[WATER]));
         } else {
-            editor.set_block(STONE_BRICKS, set_x, fy, set_z, None, None);
+            editor.set_block(STONE_BRICKS, set_x, fy, set_z, None, Some(&[WATER]));
         }
     }
 }

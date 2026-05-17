@@ -560,7 +560,7 @@ impl BridgeSurfaceMap {
     }
 }
 
-fn is_bridge_way(way: &ProcessedWay) -> bool {
+pub(crate) fn is_bridge_way(way: &ProcessedWay) -> bool {
     if way.tags.get("indoor").map(|s| s.as_str()) == Some("yes") {
         return false;
     }

@@ -177,26 +177,26 @@ pub fn fetch_elevation_data(
     // Safety net: fill any remaining NaN from tile gaps or partial provider coverage
     fill_nan_values(&mut height_grid);
 
-    // Land-cover-aware repair (targets urban LiDAR/DSM classification
-    // errors and coastal tile-boundary artifacts; leaves natural terrain
-    // untouched).
+    // Land-cover-aware repair: built-up Gaussian smoothing targets urban
+    // LiDAR/DSM classification errors, coastal pull-down flattens the
+    // shoreline cliff across all land classes.
     //
-    // Both scales are expressed in *meters* and converted to grid cells
-    // via the actual meters-per-cell for this bbox/grid, so the smoothing
-    // covers the same physical scale regardless of world size or provider
-    // resolution.
+    // Both scales are in meters and converted to grid cells via the actual
+    // meters-per-cell, so the smoothing covers the same physical scale
+    // regardless of world size or provider resolution.
     //
     // σ = 30 m for the built-up Gaussian: wide enough that a typical
     // 20 m-wide DSM artifact (tunnel portal, overpass, parking deck) is
-    // reduced to a residual the user can't distinguish from one Minecraft
-    // block. Hilly cities (SF, Pittsburgh) still keep their macro shape —
-    // the kernel falls off long before a real urban slope does. On coarse
+    // reduced to a residual indistinguishable from one Minecraft block.
+    // Hilly cities (SF, Pittsburgh) still keep their macro shape — the
+    // kernel falls off long before a real urban slope does. On coarse
     // providers (AWS fallback when σ < 1.5 cells) the Gaussian pass is
     // skipped internally.
     //
-    // 25 m coastal pull range: reaches far enough to cover DSM-captured
-    // piers/warehouses at the shoreline, short enough to leave the actual
-    // inland city alone.
+    // 25 m coastal pull range: short enough to leave the inland interior
+    // alone, long enough that a 7-10 m urban embankment (Munich Isar,
+    // Vienna Donaukanal) becomes a slope-tier-free ramp instead of a
+    // cliff with stepped stone walls.
     const BUILT_UP_SIGMA_M: f64 = 30.0;
     const COASTAL_PULL_M: f64 = 25.0;
     let (bbox_height_m, bbox_width_m) = geo_distance(bbox.min(), bbox.max());

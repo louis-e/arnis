@@ -198,20 +198,16 @@ pub fn apply_land_cover_repair(
         land_cover.refresh_water_blend_grid();
     }
 
-    if coastal_pull_distance_cells > 0 {
-        pull_coastal_builtup_toward_water(
-            heights,
-            &land_cover.grid,
-            &is_water_surface,
-            coastal_pull_distance_cells,
-        );
-    }
+    // Smooth before pull; otherwise the Gaussian raises pulled cells back up.
     smooth_built_up_gaussian(
         heights,
         &land_cover.grid,
         &is_water_surface,
         built_up_sigma_cells,
     );
+    if coastal_pull_distance_cells > 0 {
+        pull_coastal_land_toward_water(heights, &is_water_surface, coastal_pull_distance_cells);
+    }
 }
 
 /// Flatten the water surface of each connected `LC_WATER` component and
@@ -726,28 +722,9 @@ fn reclassify_non_surface_water_cells(
     n
 }
 
-/// Pull built-up cells near water down toward the local water surface.
-///
-/// DSMs (AWS Terrain Tiles, Copernicus DSM, SRTM) include buildings and
-/// waterfront structures in the elevation. In Minecraft that appears as a
-/// flat strip of "city" sitting ~10–30 m above the water it's right next to
-/// — a cliff at the shoreline. A plain Gaussian blur can't fix this
-/// cleanly: with water included in the source it creates a broad ramp
-/// instead of a cliff; with water excluded it keeps the cliff.
-///
-/// This pass walks outward from every water cell (4-connected multi-source
-/// BFS bounded at `max_distance`) and, for each built-up cell inside that
-/// distance, lerps its elevation toward the nearest water cell's surface
-/// level with a **linear distance falloff**:
-///
-///     weight = (max_distance − distance) / max_distance
-///     new    = (1 − weight) · original + weight · water_level
-///
-/// Net effect: a controlled, known-width ramp from water up to the city
-/// interior that replaces the uncontrolled Gaussian-induced ramp.
-fn pull_coastal_builtup_toward_water(
+// Linearly pull land cells within max_distance toward the local water surface; skip > MAX_PULL_DROP_M above water (real cliffs).
+fn pull_coastal_land_toward_water(
     heights: &mut [Vec<f64>],
-    lc_grid: &[Vec<u8>],
     is_water_surface: &[Vec<bool>],
     max_distance: u32,
 ) {
@@ -756,6 +733,9 @@ fn pull_coastal_builtup_toward_water(
     }
     let h = heights.len();
     let w = heights[0].len();
+
+    // Cells above this threshold are treated as real cliffs and not pulled.
+    const MAX_PULL_DROP_M: f64 = 15.0;
 
     // Multi-source BFS: seed with confirmed water-surface cells (not just
     // LC_WATER, so a canyon-wall cell misclassified as water doesn't
@@ -769,9 +749,6 @@ fn pull_coastal_builtup_toward_water(
         for x in 0..w {
             if is_water_surface[y][x] {
                 dist[y][x] = 0;
-                // Heights at water-surface cells have been flattened to the
-                // component water level, so this is the target we pull
-                // coastal built-up cells toward.
                 water_level[y][x] = heights[y][x];
                 queue.push_back((x, y));
             }
@@ -800,14 +777,11 @@ fn pull_coastal_builtup_toward_water(
         }
     }
 
-    // Apply the linear pull-down to built-up cells in range.
     let mut affected = 0usize;
+    let mut skipped_cliff = 0usize;
     let denom = max_distance as f64;
     for y in 0..h {
         for x in 0..w {
-            if lc_grid[y][x] != LC_BUILT_UP {
-                continue;
-            }
             let d = dist[y][x];
             if d == 0 || d > max_distance {
                 continue;
@@ -817,18 +791,20 @@ fn pull_coastal_builtup_toward_water(
             if !wl.is_finite() || !orig.is_finite() {
                 continue;
             }
-            // Linear falloff: weight ≈ 1 at d=1 (right next to water),
-            // weight → 0 as d → max_distance.
+            if orig - wl > MAX_PULL_DROP_M {
+                skipped_cliff += 1;
+                continue;
+            }
             let weight = ((max_distance - d) as f64 / denom).clamp(0.0, 1.0);
             heights[y][x] = orig * (1.0 - weight) + wl * weight;
             affected += 1;
         }
     }
 
-    if affected > 0 {
+    if affected > 0 || skipped_cliff > 0 {
         eprintln!(
-            "Land cover repair: pulled {} coastal built-up cells toward water (within {} cells)",
-            affected, max_distance
+            "Land cover repair: pulled {} coastal land cells toward water (within {} cells); kept {} cells above {} m as real cliffs",
+            affected, max_distance, skipped_cliff, MAX_PULL_DROP_M
         );
     }
 }

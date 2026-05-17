@@ -18,6 +18,8 @@ mod floodfill_cache;
 mod ground;
 mod ground_generation;
 mod land_cover;
+mod land_cover_bridge_repair;
+mod land_cover_osm_water_override;
 mod map_renderer;
 mod map_transformation;
 mod osm_parser;
@@ -192,6 +194,16 @@ fn run_cli() {
 
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
+
+    // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
+    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    if args.debug {
+        ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
+    }
+    ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
+    if args.debug {
+        ground.save_land_cover_debug_image("landcover_debug_post_bridge_repair");
+    }
 
     // Write the parsed OSM data to a file for inspection
     if args.debug {

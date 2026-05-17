@@ -535,30 +535,27 @@ pub fn generate_ground_layer(
                             let (surface_block, under_block) = if surface_block != WATER
                                 && slope <= 3
                             {
-                                // Transition-zone blocks that noise decided are "not
-                                // water" get sand via water_blend > 0.01 (at least one
-                                // surrounding grid cell is water).  For blocks fully
-                                // outside the blend zone, fall back to neighbor check.
+                                // Sand only at the immediate 1-cell ring around LC_WATER
+                                // (plus near_placed_water below for OSM-rendered water).
                                 let near_esa_water = has_land_cover
                                     && !is_esa_water
-                                    && (water_blend > 0.01
-                                        || [
-                                            (-1i32, 0i32),
-                                            (1, 0),
-                                            (0, -1),
-                                            (0, 1),
-                                            (-1, -1),
-                                            (-1, 1),
-                                            (1, -1),
-                                            (1, 1),
-                                        ]
-                                        .iter()
-                                        .any(|(dx, dz)| {
-                                            ground.cover_class(XZPoint::new(
-                                                x + dx - xzbbox.min_x(),
-                                                z + dz - xzbbox.min_z(),
-                                            )) == land_cover::LC_WATER
-                                        }));
+                                    && [
+                                        (-1i32, 0i32),
+                                        (1, 0),
+                                        (0, -1),
+                                        (0, 1),
+                                        (-1, -1),
+                                        (-1, 1),
+                                        (1, -1),
+                                        (1, 1),
+                                    ]
+                                    .iter()
+                                    .any(|(dx, dz)| {
+                                        ground.cover_class(XZPoint::new(
+                                            x + dx - xzbbox.min_x(),
+                                            z + dz - xzbbox.min_z(),
+                                        )) == land_cover::LC_WATER
+                                    });
 
                                 // Also check placed water blocks (OSM rivers, etc.)
                                 let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
