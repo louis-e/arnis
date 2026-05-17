@@ -42,7 +42,7 @@
   "roof": "Génération de toit",
   "fillground": "Remplir le sol",
   "land_cover": "Couverture du sol",
-  "three_dmr": "Monuments détaillés",
+  "three_dmr": "Utiliser les modèles 3D",
   "disable_height_limit": "Étendre la hauteur de construction",
   "aws_only_elevation": "Terrain hérité",
   "bedrock_auto_generated": "Le monde Bedrock est généré automatiquement",

@@ -42,7 +42,7 @@
   "roof": "Tető generálás",
   "fillground": "Talaj feltöltése",
   "land_cover": "Felszínborítás",
-  "three_dmr": "Részletes nevezetességek",
+  "three_dmr": "3D modellek használata",
   "disable_height_limit": "Építési magasság kiterjesztése",
   "aws_only_elevation": "Régi domborzat",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",

@@ -42,7 +42,7 @@
   "roof": "Geração do telhado",
   "fillground": "Preencher solo",
   "land_cover": "Cobertura do solo",
-  "three_dmr": "Marcos detalhados",
+  "three_dmr": "Usar modelos 3D",
   "disable_height_limit": "Ampliar altura de construção",
   "aws_only_elevation": "Terreno antigo",
   "bedrock_auto_generated": "O mundo de bedrock é gerado automaticamente",
