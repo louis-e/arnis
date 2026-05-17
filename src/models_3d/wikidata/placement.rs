@@ -19,10 +19,14 @@ use std::collections::{HashMap, HashSet};
 /// includes off-hue blocks.
 const COLOR_PALETTE_K: usize = 5;
 
-/// Reject Wikidata models whose final bbox diagonal exceeds this — guards
-/// against "Penang island.stl"-class entries and scale-heuristic misfires.
-const MAX_BBOX_DIAGONAL_M: f32 = 500.0;
-const MIN_BBOX_DIAGONAL_M: f32 = 2.0;
+/// Hard caps on the final voxelized model's world-space extent (in meters).
+/// Y/height is allowed to be larger so tall landmarks like the Space Needle
+/// (184 m) pass freely; the horizontal cap rejects horizontally-massive
+/// models like "Penang island.stl" or wide cultural sites that would dwarf
+/// their OSM bbox.
+const MAX_XZ_EXTENT_M: f32 = 300.0;
+const MAX_Y_EXTENT_M: f32 = 600.0;
+const MIN_EXTENT_M: f32 = 2.0;
 
 #[derive(Clone, Debug)]
 struct Placement {
@@ -249,26 +253,32 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
             continue;
         };
 
-        // After-fit world-space extents — sanity-check on the OSM-implied size
-        // rather than the raw STL, so towers (small XZ × large Y) aren't rejected.
+        // After-fit world-space extents in meters: x, y(up), z.
         let final_extents = {
             let raw = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
             [
-                raw[fit.axes[0].0] * fit.scale[0],
-                raw[fit.axes[1].0] * fit.scale[1],
-                raw[fit.axes[2].0] * fit.scale[2],
+                (raw[fit.axes[0].0] * fit.scale[0]).abs(),
+                (raw[fit.axes[1].0] * fit.scale[1]).abs(),
+                (raw[fit.axes[2].0] * fit.scale[2]).abs(),
             ]
         };
-        let max_extent = final_extents.iter().fold(0f32, |acc, e| acc.max(e.abs()));
-        if !(MIN_BBOX_DIAGONAL_M..=MAX_BBOX_DIAGONAL_M).contains(&max_extent) {
+        let max_xz = final_extents[0].max(final_extents[2]);
+        let max_overall = final_extents.iter().fold(0f32, |acc, e| acc.max(*e));
+        if max_xz > MAX_XZ_EXTENT_M
+            || final_extents[1] > MAX_Y_EXTENT_M
+            || max_overall < MIN_EXTENT_M
+        {
             eprintln!(
-                "{} Wikidata model {} (OSM {}): scaled max extent {:.1}m outside [{:.0}, {:.0}], skipping",
+                "{} Wikidata model {} (OSM {}): scaled extents {:.0}×{:.0}×{:.0} m outside caps (XZ ≤ {:.0}, Y ≤ {:.0}, min {:.0}), skipping",
                 "Warning:".yellow().bold(),
                 placement.qid,
                 placement.osm_id,
-                max_extent,
-                MIN_BBOX_DIAGONAL_M,
-                MAX_BBOX_DIAGONAL_M
+                final_extents[0],
+                final_extents[1],
+                final_extents[2],
+                MAX_XZ_EXTENT_M,
+                MAX_Y_EXTENT_M,
+                MIN_EXTENT_M,
             );
             continue;
         }
@@ -535,8 +545,13 @@ struct ModelFit {
 }
 
 /// Picks which model-space axis corresponds to "up" by combining the model's
-/// own geometry with the OSM tagging. Tall OSM landmarks (height ≫ footprint)
-/// align with the model's longest extent; otherwise default to Y-up.
+/// own geometry with the OSM tagging.
+/// - Tall landmarks (height ≫ footprint): up = the model's longest extent.
+/// - Wide/flat structures (footprint ≫ height): up = the model's shortest extent.
+/// - Otherwise: default to Y-up.
+///
+/// The "wide" case catches Z-up models of horizontal landmarks like the
+/// Acropolis temple, where the model's smallest dimension is the height.
 fn pick_up_axis(extents: &[f32; 3], osm_height: Option<f64>, osm_xz: Option<f64>) -> usize {
     let osm_aspect = match (osm_height, osm_xz) {
         (Some(h), Some(xz)) if xz > 1e-6 => h / xz,
@@ -552,6 +567,16 @@ fn pick_up_axis(extents: &[f32; 3], osm_height: Option<f64>, osm_xz: Option<f64>
             }
         }
         max_idx
+    } else if osm_aspect < 0.7 {
+        let mut min_idx = 0usize;
+        let mut min_val = extents[0];
+        for (i, &e) in extents.iter().enumerate().skip(1) {
+            if e < min_val {
+                min_val = e;
+                min_idx = i;
+            }
+        }
+        min_idx
     } else {
         1
     }
@@ -861,17 +886,31 @@ mod tests {
     }
 
     #[test]
-    fn derive_fit_wide_building_keeps_yup() {
-        // Stocky building: 50 × 20 × 50 in STL. OSM 10m tall × 30m wide → no clear tall axis.
+    fn derive_fit_wide_zup_temple_uses_shortest_as_up() {
+        // Z-up temple STL: 50 × 50 × 10 (Z is the natural height dimension).
+        // OSM says it's 10m tall × 30m wide (aspect 0.33 → "wide").
         let fit = derive_fit(
             &[0.0, 0.0, 0.0],
-            &[50.0, 20.0, 50.0],
+            &[50.0, 50.0, 10.0],
             &placement(Some(10.0), Some(30.0)),
         )
         .unwrap();
-        assert_eq!(fit.axes[1].0, 1, "no aspect-driven swap for wide buildings");
-        assert!((fit.scale[1] - 0.5).abs() < 1e-3);
+        // Z (index 2) is the shortest extent → becomes world Y.
+        assert_eq!(fit.axes[1].0, 2, "Z (shortest) became world Y");
+        assert!((fit.scale[1] - 1.0).abs() < 1e-3);
         assert!((fit.scale[0] - 0.6).abs() < 1e-3);
+    }
+
+    #[test]
+    fn derive_fit_square_aspect_keeps_yup() {
+        // 1:1 aspect (10m × 10m × 10m OSM): no aspect-driven swap, stay Y-up.
+        let fit = derive_fit(
+            &[0.0, 0.0, 0.0],
+            &[20.0, 20.0, 20.0],
+            &placement(Some(10.0), Some(10.0)),
+        )
+        .unwrap();
+        assert_eq!(fit.axes[1].0, 1);
     }
 
     #[test]
