@@ -6,7 +6,7 @@ use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
 use crate::ground_generation;
 use crate::map_renderer;
-use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
+use crate::osm_parser::{OutlineSuppression, ProcessedElement};
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -34,6 +34,7 @@ pub fn generate_world_with_options(
     ground: Ground,
     args: &Args,
     options: GenerationOptions,
+    outline_suppression: OutlineSuppression,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
@@ -108,33 +109,6 @@ pub fn generate_world_with_options(
     let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
     let mut element_counter: u64 = 0;
 
-    // Pre-scan: detect building relation outlines that should be suppressed.
-    // Only applies to type=building relations (NOT type=multipolygon).
-    // When a type=building relation has "part" members, the outline way should not
-    // render as a standalone building, the individual parts render instead.
-    let suppressed_building_outlines: HashSet<u64> = {
-        let mut outlines = HashSet::new();
-        for element in &elements {
-            if let ProcessedElement::Relation(rel) = element {
-                let is_building_type = rel.tags.get("type").map(|t| t.as_str()) == Some("building");
-                if is_building_type {
-                    let has_parts = rel
-                        .members
-                        .iter()
-                        .any(|m| m.role == ProcessedMemberRole::Part);
-                    if has_parts {
-                        for member in &rel.members {
-                            if member.role == ProcessedMemberRole::Outer {
-                                outlines.insert(member.way.id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        outlines
-    };
-
     // Pre-scan 3DMR-tagged elements first; 3DMR wins over Wikidata on conflict.
     let three_dmr_prescan = if args.use_3d {
         Some(crate::models_3d::three_dmr::prescan(
@@ -172,6 +146,7 @@ pub fn generate_world_with_options(
         let suppression_key = (element.kind(), element.id());
         if three_dmr_suppressed.contains(&suppression_key)
             || wikidata_suppressed.contains(&suppression_key)
+            || outline_suppression.contains(&suppression_key)
         {
             continue;
         }
@@ -202,19 +177,15 @@ pub fn generate_world_with_options(
         match &element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    // Skip building outlines that are suppressed by building relations with parts.
-                    // The individual building:part ways will render instead.
-                    if !suppressed_building_outlines.contains(&way.id) {
-                        buildings::generate_buildings(
-                            &mut editor,
-                            way,
-                            args,
-                            None,
-                            None,
-                            &flood_fill_cache,
-                            &building_passages,
-                        );
-                    }
+                    buildings::generate_buildings(
+                        &mut editor,
+                        way,
+                        args,
+                        None,
+                        None,
+                        &flood_fill_cache,
+                        &building_passages,
+                    );
                 } else if way.tags.contains_key("highway") {
                     highways::generate_highways(
                         &mut editor,

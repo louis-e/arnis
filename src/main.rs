@@ -170,7 +170,7 @@ fn run_cli() {
     let mut ground = ground::generate_ground_data(&args);
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox) =
+    let (mut parsed_elements, mut xzbbox, outline_suppression) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
 
     // Fetch supplementary building data from Overture Maps
@@ -299,6 +299,7 @@ fn run_cli() {
         ground,
         &args,
         generation_options,
+        outline_suppression,
     ) {
         Ok(_) => {
             if args.bedrock {

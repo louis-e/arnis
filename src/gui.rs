@@ -1086,6 +1086,7 @@ fn gui_start_generation(
                     ground,
                     &args,
                     generation_options.clone(),
+                    osm_parser::OutlineSuppression::new(),
                 );
                 if let Some(g) = cleanup_guard.as_mut() {
                     g.disarm();
@@ -1111,7 +1112,7 @@ fn gui_start_generation(
             // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox) =
+                    let (mut parsed_elements, mut xzbbox, outline_suppression) =
                         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
 
                     // Fetch supplementary building data from Overture Maps
@@ -1171,6 +1172,7 @@ fn gui_start_generation(
                         ground,
                         &args,
                         generation_options.clone(),
+                        outline_suppression,
                     );
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();
