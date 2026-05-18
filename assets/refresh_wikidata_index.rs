@@ -107,6 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kept = 0usize;
     let mut rejected_unknown = 0usize;
     let mut rejected_sharealike = 0usize;
+    let mut rejected_restricted = 0usize;
     let mut rejected_missing = 0usize;
 
     let chunks: Vec<_> = candidates.chunks(BATCH_SIZE).collect();
@@ -142,6 +143,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
                 LicenseClass::ShareAlike => rejected_sharealike += 1,
+                LicenseClass::Restricted => rejected_restricted += 1,
                 LicenseClass::Unknown => rejected_unknown += 1,
             }
         }
@@ -159,7 +161,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("[3/3] Writing {OUTPUT_PATH}");
     eprintln!(
-        "       kept: {kept}    sharealike-rejected: {rejected_sharealike}    unknown-rejected: {rejected_unknown}    metadata-missing: {rejected_missing}    denylist-rejected: {rejected_denylist}"
+        "       kept: {kept}    sharealike-rejected: {rejected_sharealike}    restricted-rejected: {rejected_restricted}    unknown-rejected: {rejected_unknown}    metadata-missing: {rejected_missing}    denylist-rejected: {rejected_denylist}"
     );
 
     std::fs::create_dir_all("assets")?;
@@ -256,6 +258,7 @@ fn fetch_commons_metadata(
 enum LicenseClass {
     Permissive,
     ShareAlike,
+    Restricted,
     Unknown,
 }
 
@@ -263,6 +266,18 @@ fn classify(s: &str) -> LicenseClass {
     let l = s.to_ascii_lowercase();
     if l.contains("share") || l.contains("by-sa") || l.contains("by sa") || l.contains("gfdl") {
         return LicenseClass::ShareAlike;
+    }
+    if l.contains("by-nc")
+        || l.contains("by nc")
+        || l.contains("by-nd")
+        || l.contains("by nd")
+        || l.contains("noncommercial")
+        || l.contains("non-commercial")
+        || l.contains("noderivatives")
+        || l.contains("no-derivatives")
+        || l.contains("no derivatives")
+    {
+        return LicenseClass::Restricted;
     }
     if l.contains("cc0")
         || l.contains("public domain")
@@ -312,7 +327,42 @@ fn strip_html(input: String) -> String {
             _ => {}
         }
     }
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    let collapsed = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    decode_html_entities(&collapsed)
+}
+
+fn decode_html_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after = &rest[amp + 1..];
+        if let Some(semi) = after.find(';') {
+            let entity = &after[..semi];
+            let decoded = match entity {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "nbsp" => Some(' '),
+                e if e.starts_with("#x") || e.starts_with("#X") => u32::from_str_radix(&e[2..], 16)
+                    .ok()
+                    .and_then(char::from_u32),
+                e if e.starts_with('#') => e[1..].parse::<u32>().ok().and_then(char::from_u32),
+                _ => None,
+            };
+            if let Some(c) = decoded {
+                out.push(c);
+                rest = &after[semi + 1..];
+                continue;
+            }
+        }
+        out.push('&');
+        rest = after;
+    }
+    out.push_str(rest);
+    out
 }
 
 fn chrono_now() -> String {

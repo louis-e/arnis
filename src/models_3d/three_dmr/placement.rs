@@ -34,7 +34,7 @@ impl Bbox {
 }
 
 pub struct PrescanResult {
-    pub suppressed_ids: HashSet<u64>,
+    pub suppressed_ids: HashSet<(&'static str, u64)>,
     placements: Vec<Placement>,
 }
 
@@ -77,7 +77,7 @@ pub fn prescan(elements: &[ProcessedElement], world_rotation: f64) -> PrescanRes
             max_z: anchor_z + 8,
         });
 
-        suppressed.insert(element.id());
+        suppressed.insert((element.kind(), element.id()));
         if let Some(bbox) = raw_footprint {
             footprints.push(bbox);
         }
@@ -93,7 +93,8 @@ pub fn prescan(elements: &[ProcessedElement], world_rotation: f64) -> PrescanRes
 
     if !footprints.is_empty() {
         for element in elements {
-            if suppressed.contains(&element.id()) {
+            let key = (element.kind(), element.id());
+            if suppressed.contains(&key) {
                 continue;
             }
             let tags = element.tags();
@@ -104,7 +105,7 @@ pub fn prescan(elements: &[ProcessedElement], world_rotation: f64) -> PrescanRes
                 continue;
             };
             if footprints.iter().any(|b| b.contains(cx, cz)) {
-                suppressed.insert(element.id());
+                suppressed.insert(key);
             }
         }
     }
@@ -475,18 +476,21 @@ mod tests {
 
         let result = prescan(&[tagged, inside, outside, road], 0.0);
         assert!(
-            result.suppressed_ids.contains(&1),
+            result.suppressed_ids.contains(&("way", 1)),
             "tagged element suppressed"
         );
         assert!(
-            result.suppressed_ids.contains(&2),
+            result.suppressed_ids.contains(&("way", 2)),
             "building inside footprint suppressed"
         );
         assert!(
-            !result.suppressed_ids.contains(&3),
+            !result.suppressed_ids.contains(&("way", 3)),
             "building outside footprint NOT suppressed"
         );
-        assert!(!result.suppressed_ids.contains(&4), "road NOT suppressed");
+        assert!(
+            !result.suppressed_ids.contains(&("way", 4)),
+            "road NOT suppressed"
+        );
         assert_eq!(result.placement_count(), 1);
     }
 }

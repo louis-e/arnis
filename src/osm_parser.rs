@@ -211,7 +211,7 @@ impl ProcessedElement {
         }
     }
 
-    pub fn kind(&self) -> &str {
+    pub fn kind(&self) -> &'static str {
         match self {
             ProcessedElement::Node(_) => "node",
             ProcessedElement::Way(_) => "way",

@@ -62,7 +62,7 @@ impl Bbox {
 }
 
 pub struct PrescanResult {
-    pub suppressed_ids: HashSet<u64>,
+    pub suppressed_ids: HashSet<(&'static str, u64)>,
     placements: Vec<Placement>,
     fetched: HashMap<String, Vec<u8>>,
 }
@@ -76,19 +76,20 @@ impl PrescanResult {
 struct Candidate {
     placement: Placement,
     raw_footprint: Option<Bbox>,
+    osm_kind: &'static str,
 }
 
 /// Identify candidates, fetch models, suppress only successful fetches.
 pub fn prescan(
     elements: &[ProcessedElement],
-    already_suppressed: &HashSet<u64>,
+    already_suppressed: &HashSet<(&'static str, u64)>,
     world_rotation: f64,
     args_scale: f64,
 ) -> PrescanResult {
     let mut candidates: Vec<Candidate> = Vec::new();
 
     for element in elements {
-        if already_suppressed.contains(&element.id()) {
+        if already_suppressed.contains(&(element.kind(), element.id())) {
             continue;
         }
         let Some(qid_raw) = element.tags().get("wikidata") else {
@@ -118,11 +119,9 @@ pub fn prescan(
         let osm_xz_extent_m = if entry.height_m.is_some() {
             None
         } else {
-            raw_footprint.map(|b| {
-                let dx = (b.max_x - b.min_x) as f64;
-                let dz = (b.max_z - b.min_z) as f64;
-                dx.max(dz) / args_scale
-            })
+            let dx = (footprint.max_x - footprint.min_x) as f64;
+            let dz = (footprint.max_z - footprint.min_z) as f64;
+            Some(dx.max(dz) / args_scale)
         };
 
         let osm_yaw = element
@@ -152,6 +151,7 @@ pub fn prescan(
                 osm_xz_extent_m,
             },
             raw_footprint,
+            osm_kind: element.kind(),
         });
     }
 
@@ -178,7 +178,7 @@ pub fn prescan(
         })
         .collect();
 
-    let mut suppressed: HashSet<u64> = HashSet::new();
+    let mut suppressed: HashSet<(&'static str, u64)> = HashSet::new();
     let mut placements: Vec<Placement> = Vec::new();
     let mut footprints: Vec<Bbox> = Vec::new();
     for c in candidates {
@@ -188,7 +188,7 @@ pub fn prescan(
         if !fetched.contains_key(&entry.url) {
             continue;
         }
-        suppressed.insert(c.placement.osm_id);
+        suppressed.insert((c.osm_kind, c.placement.osm_id));
         if let Some(b) = c.raw_footprint {
             footprints.push(b);
         }
@@ -197,7 +197,8 @@ pub fn prescan(
 
     if !footprints.is_empty() {
         for element in elements {
-            if suppressed.contains(&element.id()) || already_suppressed.contains(&element.id()) {
+            let key = (element.kind(), element.id());
+            if suppressed.contains(&key) || already_suppressed.contains(&key) {
                 continue;
             }
             let tags = element.tags();
@@ -208,7 +209,7 @@ pub fn prescan(
                 continue;
             };
             if footprints.iter().any(|b| b.contains(cx, cz)) {
-                suppressed.insert(element.id());
+                suppressed.insert(key);
             }
         }
     }

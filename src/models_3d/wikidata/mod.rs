@@ -1,6 +1,6 @@
 //! Wikidata `wikidata=Q*` → P4896 → Commons .stl → voxelized, placed at the OSM anchor.
 
-mod client;
+pub(crate) mod client;
 mod index;
 mod placement;
 mod stl;

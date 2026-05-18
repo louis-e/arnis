@@ -144,8 +144,8 @@ pub fn generate_world_with_options(
     } else {
         None
     };
-    let empty_suppressed: HashSet<u64> = HashSet::new();
-    let three_dmr_suppressed: &HashSet<u64> = three_dmr_prescan
+    let empty_suppressed: HashSet<(&'static str, u64)> = HashSet::new();
+    let three_dmr_suppressed: &HashSet<(&'static str, u64)> = three_dmr_prescan
         .as_ref()
         .map(|p| &p.suppressed_ids)
         .unwrap_or(&empty_suppressed);
@@ -161,7 +161,7 @@ pub fn generate_world_with_options(
     } else {
         None
     };
-    let wikidata_suppressed: &HashSet<u64> = wikidata_prescan
+    let wikidata_suppressed: &HashSet<(&'static str, u64)> = wikidata_prescan
         .as_ref()
         .map(|p| &p.suppressed_ids)
         .unwrap_or(&empty_suppressed);
@@ -169,8 +169,9 @@ pub fn generate_world_with_options(
     // Process all elements
     for element in elements.into_iter() {
         element_counter += 1;
-        if three_dmr_suppressed.contains(&element.id())
-            || wikidata_suppressed.contains(&element.id())
+        let suppression_key = (element.kind(), element.id());
+        if three_dmr_suppressed.contains(&suppression_key)
+            || wikidata_suppressed.contains(&suppression_key)
         {
             continue;
         }

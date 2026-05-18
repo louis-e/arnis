@@ -50,7 +50,7 @@ fn deserialize_license<'de, D: Deserializer<'de>>(de: D) -> Result<Option<String
     })
 }
 
-fn cache_root() -> PathBuf {
+pub(crate) fn cache_root() -> PathBuf {
     if let Some(dir) = dirs::cache_dir() {
         dir.join(CACHE_SUBDIR)
     } else {
