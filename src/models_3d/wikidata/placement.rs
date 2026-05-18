@@ -279,12 +279,21 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
             }
         };
 
-        if let Some(min_voxel_y) = voxels.iter().map(|(p, _)| p[1]).min() {
-            let dy = ground_y - min_voxel_y;
-            if dy != 0 {
-                for (pos, _) in voxels.iter_mut() {
-                    pos[1] += dy;
-                }
+        if voxels.is_empty() {
+            eprintln!(
+                "{} Wikidata model produced no voxels ({}, OSM {})",
+                "Warning:".yellow().bold(),
+                placement.qid,
+                placement.osm_id
+            );
+            continue;
+        }
+
+        let min_voxel_y = voxels.iter().map(|(p, _)| p[1]).min().unwrap();
+        let dy = ground_y - min_voxel_y;
+        if dy != 0 {
+            for (pos, _) in voxels.iter_mut() {
+                pos[1] += dy;
             }
         }
 
@@ -470,14 +479,16 @@ fn structure_type_palette(tags: &std::collections::HashMap<String, String>) -> &
     DEFAULT_PALETTE
 }
 
-/// OSM `height=*` in meters; accepts bare numbers and trailing-m forms.
+/// OSM `height=*` in meters; accepts bare numbers and trailing-m forms. Must be strictly positive.
 fn parse_meters(raw: &str) -> Option<f64> {
     let s = raw.trim();
-    if let Ok(v) = s.parse::<f64>() {
-        return v.is_finite().then_some(v);
-    }
-    let trimmed = s.trim_end_matches(['m', 'M']).trim_end();
-    trimmed.parse::<f64>().ok().filter(|v| v.is_finite())
+    let parsed = s.parse::<f64>().ok().or_else(|| {
+        s.trim_end_matches(['m', 'M'])
+            .trim_end()
+            .parse::<f64>()
+            .ok()
+    })?;
+    (parsed.is_finite() && parsed > 0.0).then_some(parsed)
 }
 
 fn is_glb(bytes: &[u8]) -> bool {
