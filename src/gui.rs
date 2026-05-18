@@ -153,7 +153,8 @@ pub fn run_gui() {
             gui_get_platform,
             gui_clear_tile_caches,
             gui_get_world_map_data,
-            gui_show_in_folder
+            gui_show_in_folder,
+            gui_get_3d_model_attributions
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -215,6 +216,32 @@ fn detect_minecraft_saves_directory() -> PathBuf {
 #[tauri::command]
 fn gui_get_default_save_path() -> String {
     detect_minecraft_saves_directory().display().to_string()
+}
+
+#[derive(serde::Serialize)]
+struct AttributionRow {
+    label: String,
+    artist: String,
+    license: String,
+    license_url: Option<String>,
+    source_url: String,
+}
+
+#[tauri::command]
+fn gui_get_3d_model_attributions() -> Vec<AttributionRow> {
+    crate::models_3d::wikidata::PERMISSIVE_ATTRIBUTIONS
+        .iter()
+        .map(|e| AttributionRow {
+            label: e.label.clone(),
+            artist: e
+                .artist
+                .clone()
+                .unwrap_or_else(|| "Wikimedia contributor".into()),
+            license: e.license.clone(),
+            license_url: e.license_url.clone(),
+            source_url: e.url.clone(),
+        })
+        .collect()
 }
 
 /// Validates and returns a user-provided save path.
@@ -647,8 +674,11 @@ fn gui_get_platform() -> &'static str {
 fn gui_clear_tile_caches() -> Result<String, String> {
     use crate::elevation::cache::clear_all_cached_tiles;
     use crate::land_cover::clear_land_cover_cache;
+    use crate::models_3d::clear_model_caches;
 
-    let combined = clear_all_cached_tiles().combined(clear_land_cover_cache());
+    let combined = clear_all_cached_tiles()
+        .combined(clear_land_cover_cache())
+        .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
     if combined.errors > 0 {
@@ -813,7 +843,7 @@ fn gui_start_generation(
     roof_enabled: bool,
     fillground_enabled: bool,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
-    three_dmr_enabled: bool,
+    use_3d_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
     is_new_world: bool,
@@ -1027,7 +1057,7 @@ fn gui_start_generation(
                 roof: roof_enabled,
                 fillground: fillground_enabled,
                 land_cover: land_cover_enabled,
-                three_dmr: three_dmr_enabled,
+                use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,

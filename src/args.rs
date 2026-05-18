@@ -63,9 +63,9 @@ pub struct Args {
     #[arg(long = "land-cover", alias = "city-boundaries", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
     pub land_cover: bool,
 
-    /// Use 3D models from https://3dmr.eu for OSM elements tagged `3dmr=<id>`.
-    #[arg(long = "three-dmr", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
-    pub three_dmr: bool,
+    /// Disable fetching 3D models from external sources (3DMR + Wikimedia).
+    #[arg(long = "no-3d", default_value_t = true, action = ArgAction::SetFalse)]
+    pub use_3d: bool,
 
     /// Enable debug mode (optional)
     #[arg(long)]

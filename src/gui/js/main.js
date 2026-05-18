@@ -632,17 +632,39 @@ function initSettings() {
 
 
   /// License and Credits
-  function openLicense() {
+  async function openLicense() {
     const licenseModal = document.getElementById("license-modal");
     const licenseContent = document.getElementById("license-content");
 
-    // Render the license text as HTML
     licenseContent.innerHTML = licenseText;
-
-    // Show the modal
     licenseModal.style.display = "flex";
     licenseModal.style.justifyContent = "center";
     licenseModal.style.alignItems = "center";
+
+    const threeDmrBlock =
+      `<p><b>3D Model Repository (3DMR):</b></p>` +
+      `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`;
+    licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
+
+    try {
+      const rows = await invoke("gui_get_3d_model_attributions");
+      if (Array.isArray(rows) && rows.length > 0) {
+        const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+        const items = rows.map(r => {
+          const lic = r.license_url
+            ? `<a href="${esc(r.license_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">${esc(r.license)}</a>`
+            : esc(r.license);
+          return `<li><b>${esc(r.label)}</b> — ${esc(r.artist)}, ${lic} (<a href="${esc(r.source_url)}" style="color: inherit;" target="_blank" rel="noopener noreferrer">source</a>)</li>`;
+        }).join("");
+        const block =
+          `<p><b>Bundled 3D Models (Wikimedia Commons via Wikidata P4896):</b></p>` +
+          `<p style="font-size: 0.9em;">Permissive-licensed models used to render famous landmarks. Voxelized and rescaled by Arnis.</p>` +
+          `<ul style="padding-left: 20px;">${items}</ul>`;
+        licenseContent.insertAdjacentHTML("beforeend", block);
+      }
+    } catch (e) {
+      console.warn("Failed to load 3D model attributions:", e);
+    }
   }
 
   function closeLicense() {
@@ -1302,7 +1324,7 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var land_cover = document.getElementById("land-cover-toggle").checked;
-    var three_dmr = document.getElementById("three-dmr-toggle").checked;
+    var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
@@ -1331,7 +1353,7 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         landCoverEnabled: land_cover,
-        threeDmrEnabled: three_dmr,
+        use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
         isNewWorld: true,

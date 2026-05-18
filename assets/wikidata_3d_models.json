@@ -1,0 +1,1058 @@
+{
+  "version": 1,
+  "generated_at": "2026-05-17T22:10:44Z",
+  "source": "https://query.wikidata.org/sparql (P4896 ∩ P625) + commons.wikimedia.org imageinfo",
+  "license_policy": "permissive-only: CC0, Public Domain, CC BY (any version)",
+  "models": {
+    "Q1000623": {
+      "label": "Schiller-Gymnasium Hof",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/SchillerGym%20Hof%2020240620%20001.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "PantheraLeo1359531"
+    },
+    "Q100715861": {
+      "label": "Mick O'Dwyer",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Mick%20O%27Dwyer%20-%203D%20model%20by%20Kerry3D%20%40DH%20Age%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Kerry3D @DH_Age"
+    },
+    "Q100725003": {
+      "label": "Statue of Charlie Chaplin",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Charlie%20Chaplin%20-%20Waterville%20-%203D%20model%20by%20Kerry3D%20%40DH%20Age%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Kerry3D @DH_Age"
+    },
+    "Q100725569": {
+      "label": "Ernesto Che Guevara monument",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Ernesto%20%27Che%27%20Guevara%20-%203D%20model%20by%20noe-3d.at%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "noe-3d.at"
+    },
+    "Q100750720": {
+      "label": "Wasserbüffel und Knabe",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Wasserb%C3%BCffel%20und%20Knabe%20-%203D%20model%20by%20noe-3d.at%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "noe-3d.at"
+    },
+    "Q102678907": {
+      "label": "Q102678907",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E6%99%AE%E9%96%80%E5%93%81%E4%BE%9B%E9%A4%8A%E5%A1%94%EF%BC%88%E6%97%A5%E6%9E%9D%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.69
+    },
+    "Q102683292": {
+      "label": "Q102683292",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E7%9B%B8%E6%A8%A1%E5%8E%9F%E5%B8%82%E5%8D%97%E5%8C%BA%E7%A3%AF%E9%83%A8%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q10288": {
+      "label": "Parthenon",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Parthenon.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft",
+      "height_m": 13.72
+    },
+    "Q104774507": {
+      "label": "Q104774507",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%E9%81%93%E6%A8%99%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%97%AD%E5%8C%BA%E4%B8%87%E9%A8%8E%E3%81%8C%E5%8E%9F%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.6
+    },
+    "Q1049676": {
+      "label": "Castlestrange stone",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Castlestrange%20Stone%20-%203D%20model%20by%20roscommon3d%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "roscommon3d"
+    },
+    "Q106440833": {
+      "label": "Horse",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Horse-ingrid-mol-statue.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Ingrid Mol"
+    },
+    "Q107412803": {
+      "label": "Erste mechanische Spinnerei",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/3D-Modell%20Blaues%20Haus%2020230718%20001.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "PantheraLeo1359531"
+    },
+    "Q108296769": {
+      "label": "Altstadt Hof",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/3D-Modell%20der%20Altstadt%20in%20Hof%20%28Saale%29.stl",
+      "license": "CC BY 2.0",
+      "license_url": "https://creativecommons.org/licenses/by/2.0",
+      "artist": "Touch Mapper: Relief OSM: Datengrundlage"
+    },
+    "Q1131154": {
+      "label": "Copernicus",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Copernicus%20Crater%203D.stl",
+      "license": "Public domain",
+      "artist": "Northeast Planetary Data Center, NASA RPIF System, Seth S Horowitz & Peter H. Schultz"
+    },
+    "Q11478127": {
+      "label": "Kawawachō",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BB%BF%E4%B8%89%E5%A4%9C%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%83%BD%E7%AD%91%E5%8C%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q11965101": {
+      "label": "Royal Cast Collection",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Poseidon%20eller%20Zeus%20fra%20Artemision%20-%20KAS2100.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Unknown. Digitization: Statens Museum for Kunst."
+    },
+    "Q131013": {
+      "label": "Acropolis of Athens",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Acropolis%203D.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "SebaK from blenderswap.com"
+    },
+    "Q136396319": {
+      "label": "Best Friends Forever",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Best%20Friends%20Forever.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "The Secret Handshake: https://www.printables.com/@SecretHandsh_3694299"
+    },
+    "Q137129407": {
+      "label": "Torre A de Karuay",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Torre%20A%20de%20Karuay.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wilmer Osario",
+      "height_m": 54.0
+    },
+    "Q137130414": {
+      "label": "Torre B de Karuay",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Torre%20A%20de%20Karuay.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wilmer Osario",
+      "height_m": 54.0
+    },
+    "Q137130746": {
+      "label": "Torres C y D de Karuay",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Torres%20C%20y%20D%20de%20Karuay.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wilmer Osario",
+      "height_m": 54.0
+    },
+    "Q137169596": {
+      "label": "Torre A de Vista Hermosa",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Vista%20Hermosa%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 43.39
+    },
+    "Q137169611": {
+      "label": "Torre B de Vista Hermosa",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Vista%20Hermosa%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 43.39
+    },
+    "Q137169621": {
+      "label": "Torre C de Vista Hermosa",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Vista%20Hermosa%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 43.39
+    },
+    "Q137169640": {
+      "label": "Torre A de Kamarata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Kamarata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169652": {
+      "label": "Torre B de Kamarata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Kamarata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169660": {
+      "label": "Torre C de Kamarata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Kamarata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169675": {
+      "label": "Torre A de Karimán Parú",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Karim%C3%A1n%20Par%C3%BA%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 38.59
+    },
+    "Q137169689": {
+      "label": "Torre B de Karimán Parú",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Karim%C3%A1n%20Par%C3%BA%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 38.59
+    },
+    "Q137169716": {
+      "label": "Torre C de Karimán Parú",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Kamarata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.49
+    },
+    "Q137169740": {
+      "label": "Torre D de Karimán Parú",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Kamarata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.49
+    },
+    "Q137169754": {
+      "label": "Torre 1 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%202.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169773": {
+      "label": "Torre 2 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169778": {
+      "label": "Torre 3 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169802": {
+      "label": "Torre 4 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169809": {
+      "label": "Torre 5 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169817": {
+      "label": "Torre 6 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169827": {
+      "label": "Torre 7 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169837": {
+      "label": "Torre 8 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169888": {
+      "label": "Torre 9 de La Churuata",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20La%20Churuata%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 44.59
+    },
+    "Q137169928": {
+      "label": "Torre A de Atlántico",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Atl%C3%A1ntico%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 36.67
+    },
+    "Q137169951": {
+      "label": "Torre B de Atlántico",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Atl%C3%A1ntico%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 36.67
+    },
+    "Q137169957": {
+      "label": "Torre C de Atlántico",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Residencias%20Atl%C3%A1ntico%20-%20Tipo%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana",
+      "height_m": 36.67
+    },
+    "Q137183701": {
+      "label": "Centro Comercial Ciudad Alta Vista I",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/CC%20Ciudad%20Altavista%20I.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana"
+    },
+    "Q137183756": {
+      "label": "Centro Comercial Ciudad Alta Vista II",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/CC%20Ciudad%20Altavista%20II.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Wguayana"
+    },
+    "Q137972636": {
+      "label": "Q137972636",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Aufspringendes%20Pferd%20-%203D%20model%20by%20noe-3d.at%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "noe-3d.at"
+    },
+    "Q1454685": {
+      "label": "Karl Volkmar Stoy School",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Karl-Volkmar-Stoy-Schule%20Jena%20%28HQ%29%20-%203D%20model%20by%20Jena%20-%20Lichtstadt%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Jena - Lichtstadt"
+    },
+    "Q1472679": {
+      "label": "Fuchsturm",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Fuchsturm%20Jena%20-%203D%20model%20by%20Jena%20-%20Lichtstadt%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Jena - Lichtstadt",
+      "height_m": 30.0
+    },
+    "Q151952": {
+      "label": "Venus de Milo",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Venus%20%28Afrodite%29%20fra%20Milo%20-%20KAS434%201.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "The Son of Menides. Digitization: Statens Museum for Kunst.",
+      "height_m": 2.02
+    },
+    "Q1531449": {
+      "label": "Glimmingehus",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Glimmingehus.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Riksantikvarieämbetet"
+    },
+    "Q18547": {
+      "label": "Shanghai Tower",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Shanghai%20Tower.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft",
+      "height_m": 632.0
+    },
+    "Q1867057": {
+      "label": "Lobdeburg",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Lobdeburg%20Jena%20-%203D%20model%20by%20Jena%20-%20Lichtstadt%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Jena - Lichtstadt"
+    },
+    "Q19305575": {
+      "label": "Altenberg Pinge",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Altenberger%20Pinge.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Morty"
+    },
+    "Q2002391": {
+      "label": "Église Notre-Dame de Châtel-Montagne",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Church%20of%20Ch%C3%A2tel-Montagne.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Rinaldum"
+    },
+    "Q2027162": {
+      "label": "Gateway Arch",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Gateway%20Arch.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft"
+    },
+    "Q20640455": {
+      "label": "Lion of Al-lāt",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Asad%20Al-Lat.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Georges Dahdouh",
+      "height_m": 3.5
+    },
+    "Q211522": {
+      "label": "Sannō Shrine",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Nagasaki%20torii%20shrine.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft"
+    },
+    "Q21163326": {
+      "label": "Figl-Denkmal",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Leopold%20Figl%20-%203D%20model%20by%20noe-3d.at%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "noe-3d.at"
+    },
+    "Q2206135": {
+      "label": "Château de Bonaguil",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Ch%C3%A2teau%20de%20Bonaguil.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Rinaldum"
+    },
+    "Q2300616": {
+      "label": "Delicate Arch",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Delicate%20Arch.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft",
+      "height_m": 52.0
+    },
+    "Q2550025": {
+      "label": "Wachturm",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Wartturm%20Hof%20%28Saale%29%2020220509.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "PantheraLeo1359531"
+    },
+    "Q27994067": {
+      "label": "Torre del Broletto",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Vercelli-torre-civica.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "SimoneSaviolo"
+    },
+    "Q28946109": {
+      "label": "Head of a Satyr",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/MSR-Tete-de-Satyre-Ra131.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Musée Saint-Raymond/IMA Solutions",
+      "height_m": 0.195
+    },
+    "Q30765833": {
+      "label": "Spartan",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/MV%20Spartan%20-%203D%20model%20by%20Scottish%20Maritime%20Museum%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Scottish Maritime Museum"
+    },
+    "Q3203228": {
+      "label": "The Greek Slave",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Greek-slave-plaster-cast-master-geometry%20%28Smithsonian%20Institution%29.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Smithsonian Institution Smithsonian American Art Museum, Museum purchase in memory of Ralph Cross Johnson"
+    },
+    "Q35525": {
+      "label": "White House",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/White%20House.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft, https://sketchfab.com/microsoft",
+      "height_m": 21.33
+    },
+    "Q37787303": {
+      "label": "Beethoven-Denkmal",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Ludwig%20van%20Beethoven%20-%203D%20model%20by%20noe-3d.at%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "noe-3d.at"
+    },
+    "Q40087216": {
+      "label": "Dairin-ji Temple",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E4%BA%8C%E5%8D%81%E4%B8%89%E5%A4%9C%E5%A1%94%EF%BC%88%E8%80%95%E9%9B%B2%E5%BA%B5%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q4035204": {
+      "label": "Block Island meteorite",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Block%20Island%20meteorite%203D%20model.stl",
+      "license": "Public domain",
+      "artist": "Kris Capraro et al. NASA/JPL-Caltech"
+    },
+    "Q41225": {
+      "label": "Big Ben",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Big%20Ben.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft",
+      "height_m": 96.0
+    },
+    "Q41312515": {
+      "label": "Rathaus",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/3D-Modell%20des%20Rathaus%20Hof%2020250702.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "PantheraLeo1359531"
+    },
+    "Q41804273": {
+      "label": "DSS 35",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/DSN%2034%20m%203D%20model.stl",
+      "license": "Public domain",
+      "artist": "Brian Kumanchik, Christian Lopez. NASA/JPL-Caltech"
+    },
+    "Q42297008": {
+      "label": "DSS 63",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/DSN%2070%20m%203D%20model.stl",
+      "license": "Public domain",
+      "artist": "Brian Kumanchik, Christian Lopez. NASA/JPL-Caltech"
+    },
+    "Q494924": {
+      "label": "Russky Island",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Ostrov%20russkiy%20srtm.stl",
+      "license": "Public domain",
+      "artist": "Svetlov Artem"
+    },
+    "Q4954422": {
+      "label": "Bradbury Landing",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Topographic%20model%20of%20Gale%20crater.stl",
+      "license": "Public domain",
+      "artist": "NASA/JPL-Caltech"
+    },
+    "Q5305270": {
+      "label": "Dragon River Bridge",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Dragon%20Bridge%20in%20Da%20Nang.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "-karlos-"
+    },
+    "Q5317": {
+      "label": "Space Needle",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Space%20Needle.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft",
+      "height_m": 184.0
+    },
+    "Q54384": {
+      "label": "Discovery",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/SShuttle%20Exterior-Medium%20resolution%20%28Space%20Shuttle%20Discovery%29%2002.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Smithsonian Institute NASA 3D model: NASA/Smithsonian Institute/Support generously provided by Meredith Siegfried Madden and Dr. Peter Madden.",
+      "height_m": 17.768
+    },
+    "Q570531": {
+      "label": "Anta do Paço das Vinhas",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Anta%20do%20Pa%C3%A7o%201%20-%203D%20model%20by%20Morbase%20-%20Museu%20Virtual%20-%20Sketchfab.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Morbase - Museu Virtual"
+    },
+    "Q5715": {
+      "label": "Memphis",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Colossal%20sculpture%20of%20Ramesses%20II.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Dejp3"
+    },
+    "Q619135": {
+      "label": "Apollo Belvedere",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Apollo%20Belvedere%20-%20KAS353.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Leochares(?). Digitization: Statens Museum for Kunst.",
+      "height_m": 2.24
+    },
+    "Q622221": {
+      "label": "Gale",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Topographic%20model%20of%20Gale%20crater.stl",
+      "license": "Public domain",
+      "artist": "NASA/JPL-Caltech"
+    },
+    "Q631753": {
+      "label": "Gassendi",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Gassendicrater3Xv.stl",
+      "license": "Public domain",
+      "artist": "Northeast Planetary Data Center, NASA RPIF System, Seth S Horowitz & Peter H. Schultz"
+    },
+    "Q64436": {
+      "label": "Arc de Triomphe",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Arc%20de%20Triomphe.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Microsoft",
+      "height_m": 49.54
+    },
+    "Q669194": {
+      "label": "Monastery of Leyre",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Leyre%20-%20Capitel.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "Zoilo"
+    },
+    "Q6938": {
+      "label": "Hof",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/3D-Modell%20der%20Stadt%20Hof%20%28Saale%29.stl",
+      "license": "CC BY 2.0",
+      "license_url": "https://creativecommons.org/licenses/by/2.0",
+      "artist": "Touch Mapper: Relief OSM: Datengrundlage"
+    },
+    "Q732758": {
+      "label": "Statio Tranquillitatis",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Apollo%2011%20landing%20site%203D.stl",
+      "license": "Public domain",
+      "artist": "Ames SpaceShop"
+    },
+    "Q80515752": {
+      "label": "Jūkuya-tō (Arakuda, Koga)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%8D%81%E4%B9%9D%E5%A4%9C%E5%A1%94%EF%BC%88%E5%8F%A4%E6%B2%B3%E5%B8%82%E6%96%B0%E4%B9%85%E7%94%B0%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 1.13
+    },
+    "Q80520857": {
+      "label": "Nijūsanya-tō (Kōun-an)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E4%BA%8C%E5%8D%81%E4%B8%89%E5%A4%9C%E5%A1%94%EF%BC%88%E8%80%95%E9%9B%B2%E5%BA%B5%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.64
+    },
+    "Q80523498": {
+      "label": "Kōshin-tō (Terayama Sugiyama-jinja)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E5%AF%BA%E5%B1%B1%E6%9D%89%E5%B1%B1%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.59
+    },
+    "Q80524913": {
+      "label": "Go-shinmei-jijin-tō (Asahi-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E4%BA%94%E7%A5%9E%E5%90%8D%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%97%AD%E5%8C%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.606
+    },
+    "Q80526099": {
+      "label": "Kokuzō-jijin-tō (Hodogaya-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%88%BB%E5%83%8F%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E4%BF%9D%E5%9C%9F%E3%82%B1%E8%B0%B7%E5%8C%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.697
+    },
+    "Q80528591": {
+      "label": "Ishibashi Kuyō-tō (Kishi, Musashimurayama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E7%9F%B3%E6%A9%8B%E4%BE%9B%E9%A4%8A%E5%A1%94%EF%BC%88%E6%AD%A6%E8%94%B5%E6%9D%91%E5%B1%B1%E5%B8%82%E5%B2%B8%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80529304": {
+      "label": "Kōshin-tō (Suga-jinja)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E9%A0%88%E8%B3%80%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80530871": {
+      "label": "Kōshin-tō (Jūni-jinja)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E5%8D%81%E4%BA%8C%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.785
+    },
+    "Q80532728": {
+      "label": "Kokuzō-jijin-tō (Shōkaku-ji)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%88%BB%E5%83%8F%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%AD%A3%E8%A6%9A%E5%AF%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.5
+    },
+    "Q80534557": {
+      "label": "Hachiōji-dō Dōhyō (Yarimizu, Hachiōji)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%85%AB%E7%8E%8B%E5%AD%90%E9%81%93%E9%81%93%E6%A8%99%EF%BC%88%E5%85%AB%E7%8E%8B%E5%AD%90%E5%B8%82%E9%91%93%E6%B0%B4%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80541061": {
+      "label": "Tengu-dōsojin (Minami Naruse, Machida)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%A4%A9%E7%8B%97%E9%81%93%E7%A5%96%E7%A5%9E%EF%BC%88%E7%94%BA%E7%94%B0%E5%B8%82%E5%8D%97%E6%88%90%E7%80%AC%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80545657": {
+      "label": "Sainokami (Kōgasaka, Machida)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%A6%BB%E9%87%8E%E7%A5%9E%EF%BC%88%E7%94%BA%E7%94%B0%E5%B8%82%E9%AB%98%E3%83%B6%E5%9D%82%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80546213": {
+      "label": "Nijūsanya-tō (Ōmori, Inzai)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E4%BA%8C%E5%8D%81%E4%B8%89%E5%A4%9C%E5%A1%94%EF%BC%88%E5%8D%B0%E8%A5%BF%E5%B8%82%E5%A4%A7%E6%A3%AE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80546637": {
+      "label": "Nijūsanya-tō (Tsuzuki-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BB%BF%E4%B8%89%E5%A4%9C%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%83%BD%E7%AD%91%E5%8C%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80547057": {
+      "label": "Kōshin-tō (Tomonuma, Nogi)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E9%87%8E%E6%9C%A8%E7%94%BA%E5%8F%8B%E6%B2%BC%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80547599": {
+      "label": "Jūkuya-tō (Tomonuma, Nogi)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%8D%81%E4%B9%9D%E5%A4%9C%E5%A1%94%EF%BC%88%E9%87%8E%E6%9C%A8%E7%94%BA%E5%8F%8B%E6%B2%BC%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80548164": {
+      "label": "Kōshin-tō (Ondachō, Aoba-ku, Yokohama) 1",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%EF%BC%891.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80548742": {
+      "label": "Kōshin-tō (Ondachō, Aoba-ku, Yokohama) 2",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%EF%BC%892.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q80549244": {
+      "label": "Kōshin-tō (Ondachō, Aoba-ku, Yokohama) 3",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%EF%BC%893.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q81015075": {
+      "label": "Nigabayashino Kassen Kuyōtō",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E4%B8%83%E5%A4%9C%E5%BE%85%E5%A1%94%EF%BC%88%E8%8B%A6%E6%9E%97%E5%8F%A4%E5%A2%B3%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q81947026": {
+      "label": "Kōshin-tō Dōhyō (Kosugaya, Sakae-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%E9%81%93%E6%A8%99%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%A0%84%E5%8C%BA%E5%B0%8F%E8%8F%85%E3%82%B1%E8%B0%B7%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.85
+    },
+    "Q83267754": {
+      "label": "Kōshin-tō Dōhyō (Iriya-higashi, Zama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%E9%81%93%E6%A8%99%EF%BC%88%E5%BA%A7%E9%96%93%E5%B8%82%E5%85%A5%E8%B0%B7%E6%9D%B1%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q83460278": {
+      "label": "Kōshin-tō Dōhyō (Goryo-jinja)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%E9%81%93%E6%A8%99%EF%BC%88%E5%BE%A1%E9%9C%8A%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.65
+    },
+    "Q84938244": {
+      "label": "Ōyama-dō-dōhyō (Kashio-cho, Totsuka-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%A4%A7%E5%B1%B1%E9%81%93%E9%81%93%E6%A8%99%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%88%B8%E5%A1%9A%E5%8C%BA%E6%9F%8F%E5%B0%BE%E7%94%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 1.94
+    },
+    "Q85175736": {
+      "label": "Kōshin-tō-Dōhyō (Saba-jinja)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%E9%81%93%E6%A8%99%EF%BC%88%E5%B7%A6%E9%A6%AC%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q85873517": {
+      "label": "Jijin-tō (Kamishirane-Ōike-kouen)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E4%B8%8A%E7%99%BD%E6%A0%B9%E5%A4%A7%E6%B1%A0%E5%85%AC%E5%9C%92%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.697
+    },
+    "Q866533": {
+      "label": "Bismarck Tower",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Bismarckturm%20Hof%2020220422%20001%20-%20Kopie.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "PantheraLeo1359531",
+      "height_m": 25.0
+    },
+    "Q866535": {
+      "label": "Bismarck Tower",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Bismarckturm%20Jena%20-%203D%20model%20by%20Jena%20-%20Lichtstadt%20-%20Sketchfab.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Jena - Lichtstadt",
+      "height_m": 21.0
+    },
+    "Q86694275": {
+      "label": "Batō-kannon (Gohan-zuka)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E9%A6%AC%E9%A0%AD%E8%A6%B3%E9%9F%B3%EF%BC%88%E3%81%94%E3%81%AF%E3%82%93%E5%A1%9A%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q87423645": {
+      "label": "Batō-kannon (Shirane-cho, Asahi-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E9%A6%AC%E9%A0%AD%E8%A6%B3%E9%9F%B3%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%97%AD%E5%8C%BA%E7%99%BD%E6%A0%B9%E7%94%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q87749354": {
+      "label": "Perseverance",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Perseverance.stl",
+      "license": "Public domain",
+      "artist": "NASA/JPL-Caltech",
+      "height_m": 2.2
+    },
+    "Q88325579": {
+      "label": "Hōsōshin-to (Jigenji)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E7%96%B1%E7%98%A1%E7%A5%9E%E5%A1%94%EF%BC%88%E6%85%88%E7%9C%BC%E5%AF%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.48
+    },
+    "Q88328048": {
+      "label": "Jijin-tō (Edachō, Aoba-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E8%8D%8F%E7%94%B0%E7%94%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.765
+    },
+    "Q89475372": {
+      "label": "Kōshin-tō (Kawawa-cho, Tsuzuki-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%83%BD%E7%AD%91%E5%8C%BA%E5%B7%9D%E5%92%8C%E7%94%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.595
+    },
+    "Q89525226": {
+      "label": "Nijūsanya-tō (Jūni-jinja)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E4%BA%8C%E5%8D%81%E4%B8%89%E5%A4%9C%E5%A1%94%EF%BC%88%E5%8D%81%E4%BA%8C%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.8
+    },
+    "Q90056785": {
+      "label": "Dainichi-Nyorai-tō (Jūni-jinja)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%A4%A7%E6%97%A5%E5%A6%82%E6%9D%A5%E5%A1%94%EF%BC%88%E5%8D%81%E4%BA%8C%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.52
+    },
+    "Q90858440": {
+      "label": "Nenbutsu-Jizo (Kamishirane-cho, Asahi-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BF%B5%E4%BB%8F%E5%9C%B0%E8%94%B5%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%97%AD%E5%8C%BA%E4%B8%8A%E7%99%BD%E6%A0%B9%E7%94%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q91968249": {
+      "label": "Kōshin-tō Dōhyō (Imjuku-Minami-cho, Asahi-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%E9%81%93%E6%A8%99%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%97%AD%E5%8C%BA%E4%BB%8A%E5%AE%BF%E5%8D%97%E7%94%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.64
+    },
+    "Q93165054": {
+      "label": "Dewa-sanzan-tō (Sugeta Sugiyama-sha)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%87%BA%E7%BE%BD%E4%B8%89%E5%B1%B1%E5%A1%94%EF%BC%88%E8%8F%85%E7%94%B0%E6%9D%89%E5%B1%B1%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q93910517": {
+      "label": "Jijin-tō (Tsurugamine, Asahi-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E6%97%AD%E5%8C%BA%E9%B6%B4%E3%83%B6%E5%B3%B0%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.66
+    },
+    "Q93913008": {
+      "label": "Shōtoku Taishi-tō (Santanda Inari-sha)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E8%81%96%E5%BE%B3%E5%A4%AA%E5%AD%90%E5%A1%94%EF%BC%88%E4%B8%89%E5%8F%8D%E7%94%B0%E7%A8%B2%E8%8D%B7%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.53
+    },
+    "Q93956602": {
+      "label": "Steinbruch Lasbeck",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Steinbruch%20Lasbeck.stl",
+      "license": "CC0",
+      "license_url": "http://creativecommons.org/publicdomain/zero/1.0/deed.en",
+      "artist": "Morty"
+    },
+    "Q96043190": {
+      "label": "Ontake-tō (Tennō-sha)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BE%A1%E5%B6%BD%E5%A1%94%EF%BC%88%E5%A4%A9%E7%8E%8B%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q96095584": {
+      "label": "Jijin-tō (Horinouchi, Ondachō, Aoba-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%E5%A0%80%E4%B9%8B%E5%86%85%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.65
+    },
+    "Q96095600": {
+      "label": "Jijin-tō (Idokubo, Ondachō, Aoba-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%E4%BA%95%E6%88%B8%E4%B9%85%E4%BF%9D%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q96095614": {
+      "label": "Jijin-tō (Naka-onda, Ondachō, Aoba-ku, Yokohama)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%9C%B0%E7%A5%9E%E5%A1%94%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%E4%B8%AD%E6%81%A9%E7%94%B0%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q96572839": {
+      "label": "Koyama Nishi-hassaku Seki Hi",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%B0%8F%E5%B1%B1%E8%A5%BF%E5%85%AB%E6%9C%94%E5%A0%B0%E7%A2%91.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q96694309": {
+      "label": "Q96694309",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E9%81%93%E7%A5%96%E7%A5%9E%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%E4%BA%95%E6%88%B8%E4%B9%85%E4%BF%9D%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q96694315": {
+      "label": "Q96694315",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%8F%8C%E4%BD%93%E9%81%93%E7%A5%96%E7%A5%9E%EF%BC%88%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E6%81%A9%E7%94%B0%E7%94%BA%E4%BA%95%E6%88%B8%E4%B9%85%E4%BF%9D%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q98138783": {
+      "label": "Q98138783",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%AF%8C%E5%A3%AB%E8%AC%9B%E7%A2%91%EF%BC%88%E5%B0%8F%E6%9C%BA%E5%AF%8C%E5%A3%AB%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆"
+    },
+    "Q98280284": {
+      "label": "Koshin-to (Higashikata-tenman-gu)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E6%9D%B1%E6%96%B9%E5%A4%A9%E6%BA%80%E5%AE%AE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.865
+    },
+    "Q98396978": {
+      "label": "Q98396978",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E8%A5%BF%E5%85%AB%E6%9C%94%E6%9D%89%E5%B1%B1%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.92
+    },
+    "Q98456114": {
+      "label": "Q98456114",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E5%9C%B0%E8%94%B5%E5%BA%9A%E7%94%B3%E5%A1%94%EF%BC%88%E9%95%B7%E6%B4%A5%E7%94%B0%E7%94%BA%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.91
+    },
+    "Q98564294": {
+      "label": "Q98564294",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/%E4%BA%8C%E5%8D%81%E4%B8%89%E5%A4%9C%E5%A1%94%EF%BC%88%E5%B7%9D%E5%92%8C%E5%85%AB%E5%9D%82%E7%A5%9E%E7%A4%BE%EF%BC%89.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0",
+      "artist": "小池 隆",
+      "height_m": 0.81
+    },
+    "Q98587935": {
+      "label": "Einfriedung Poststraße 17 in Hof (Saale)",
+      "url": "https://commons.wikimedia.org/wiki/Special:FilePath/Gartenzaun%20aus%20Schmiedeeisen%2020230629%20001.stl",
+      "license": "Public domain",
+      "artist": "Gartenzaun: unbekannt Modellierung / 3D-Modell: PantheraLeo1359531"
+    }
+  }
+}
