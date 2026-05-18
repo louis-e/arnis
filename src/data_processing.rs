@@ -136,7 +136,7 @@ pub fn generate_world_with_options(
     };
 
     // Pre-scan 3DMR-tagged elements first; 3DMR wins over Wikidata on conflict.
-    let three_dmr_prescan = if args.use_3d_models {
+    let three_dmr_prescan = if args.use_3d {
         Some(crate::models_3d::three_dmr::prescan(
             &elements,
             args.rotation,
@@ -151,7 +151,7 @@ pub fn generate_world_with_options(
         .unwrap_or(&empty_suppressed);
 
     // Wikidata pre-scan runs after 3DMR's, skipping any element 3DMR already claimed.
-    let wikidata_prescan = if args.use_3d_models {
+    let wikidata_prescan = if args.use_3d {
         Some(crate::models_3d::wikidata::prescan(
             &elements,
             three_dmr_suppressed,

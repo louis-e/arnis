@@ -64,8 +64,8 @@ pub struct Args {
     pub land_cover: bool,
 
     /// Disable fetching 3D models from external sources (3DMR + Wikimedia).
-    #[arg(long = "no-3d-models", default_value_t = true, action = ArgAction::SetFalse)]
-    pub use_3d_models: bool,
+    #[arg(long = "no-3d", default_value_t = true, action = ArgAction::SetFalse)]
+    pub use_3d: bool,
 
     /// Enable debug mode (optional)
     #[arg(long)]

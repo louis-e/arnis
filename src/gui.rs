@@ -843,7 +843,7 @@ fn gui_start_generation(
     roof_enabled: bool,
     fillground_enabled: bool,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
-    use_3d_models_enabled: bool,
+    use_3d_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
     is_new_world: bool,
@@ -1057,7 +1057,7 @@ fn gui_start_generation(
                 roof: roof_enabled,
                 fillground: fillground_enabled,
                 land_cover: land_cover_enabled,
-                use_3d_models: use_3d_models_enabled,
+                use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
