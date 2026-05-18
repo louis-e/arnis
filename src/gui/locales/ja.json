@@ -9,7 +9,7 @@
   "generation_process_started": "生成処理を開始しました。",
   "winter_mode": "冬モード",
   "world_scale": "ワールド倍率",
-  "custom_bounding_box": "カスタム範囲指定",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "フラッドフィルのタイムアウト（秒）",
   "ground_level": "地面レベル",
   "customization_settings": "カスタマイズ設定",

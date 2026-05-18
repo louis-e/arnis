@@ -9,7 +9,7 @@
   "generation_process_started": "Generierungsprozess gestartet.",
   "winter_mode": "Wintermodus",
   "world_scale": "Weltmaßstab",
-  "custom_bounding_box": "Benutzerdefinierte BBOX",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Floodfill-Timeout (Sek)",
   "ground_level": "Bodenhöhe",
   "customization_settings": "Einstellungen",

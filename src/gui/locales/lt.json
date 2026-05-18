@@ -9,7 +9,7 @@
   "generation_process_started": "Generacijos procesas pradėtas.",
   "winter_mode": "Žiemos režimas",
   "world_scale": "Pasaulio mastelis",
-  "custom_bounding_box": "Pasirinktinis ribos rėmas",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Užpildymo laiko limitas (sek.)",
   "ground_level": "Žemės lygis",
   "customization_settings": "Generacijos nustatymai",

@@ -9,7 +9,7 @@
   "generation_process_started": "Processo de geração iniciado.",
   "winter_mode": "Modo inverno",
   "world_scale": "Escala do mundo",
-  "custom_bounding_box": "Caixa delimitadora personalizada",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Tempo limite do floodfill (seg)",
   "ground_level": "Nível do solo",
   "customization_settings": "Configurações de personalização",
