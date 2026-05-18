@@ -18,6 +18,9 @@ export const licenseText = `
 <br><br>
 
 <b>Stadia Maps:</b><br> © <a href="https://www.stadiamaps.com/" style="color: inherit;" target="_blank">Stadia Maps</a> © <a href="https://openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a> © OpenStreetMap contributors
+<br><br>
+
+<b>OpenFreeMap:</b><br> Vector tiles © <a href="https://openfreemap.org" style="color: inherit;" target="_blank">OpenFreeMap</a>, "Liberty" style © <a href="https://www.openmaptiles.org/" style="color: inherit;" target="_blank">OpenMapTiles</a>, map data © OpenStreetMap contributors
 <p>Users of this software must comply with the respective licensing terms of these map data providers when using the application.</p>
 
 <b>AWS Terrain Tiles:</b><br>
@@ -46,6 +49,39 @@ Land cover classification data provided by the <a href="https://esa-worldcover.o
 
 <b>bedrock-rs:</b><br>
 Bedrock Edition world format support uses the <a href="https://github.com/bedrock-crustaceans/bedrock-rs" style="color: inherit;" target="_blank">bedrock-rs</a> library, licensed under the Apache License 2.0.
+<br><br>
+
+<p><b>Third-Party JavaScript Libraries:</b></p>
+<p>The map picker bundles the following libraries:</p>
+
+<b><a href="https://leafletjs.com" style="color: inherit;" target="_blank">Leaflet</a> 1.9.4:</b> © 2010-2023 Vladimir Agafonkin, © 2010-2011 CloudMade. BSD-2-Clause.
+<br><br>
+
+<b><a href="https://github.com/Leaflet/Leaflet.draw" style="color: inherit;" target="_blank">Leaflet.draw</a> 1.0.4:</b> © 2012-2017 Jacob Toye, Jon West, Smartrak, Leaflet. MIT.
+<br><br>
+
+<b><a href="https://github.com/Turbo87/leaflet-sidebar" style="color: inherit;" target="_blank">L.Control.Sidebar</a>:</b> © Tobias Bieniek, customized for this project. MIT.
+<br><br>
+
+<b><a href="https://github.com/proj4js/proj4js" style="color: inherit;" target="_blank">proj4js</a>:</b> © 2014 Mike Adair, Richard Greenwood, Didier Richard, Stephen Irons, Olivier Terral, Calvin Metcalf. MIT.
+<br><br>
+
+<b><a href="https://github.com/kartena/Proj4Leaflet" style="color: inherit;" target="_blank">Proj4Leaflet</a> 1.0.2:</b> © 2013-2016 Kartena AB. BSD-2-Clause.
+<br><br>
+
+<b><a href="https://github.com/arthur-e/Wicket" style="color: inherit;" target="_blank">Wicket (WKT parser)</a>:</b> © Arthur Endsley. GPL.
+<br><br>
+
+<b><a href="https://maplibre.org" style="color: inherit;" target="_blank">MapLibre GL JS</a> 5.6.0:</b> © MapLibre contributors. BSD-3-Clause.
+<br><br>
+
+<b><a href="https://github.com/maplibre/maplibre-gl-leaflet" style="color: inherit;" target="_blank">maplibre-gl-leaflet</a> 0.1.3:</b> © 2021 MapLibre contributors, © 2014 Mapbox. ISC.
+<br><br>
+
+<b><a href="https://jquery.com" style="color: inherit;" target="_blank">jQuery</a> 1.9.1:</b> © jQuery Foundation. MIT.
+<br><br>
+
+<b><a href="https://jqueryui.com" style="color: inherit;" target="_blank">jQuery UI</a> 1.10.3:</b> © jQuery Foundation and contributors. MIT.
 <br><br>
 
 <p><b>Privacy Policy:</b></p>

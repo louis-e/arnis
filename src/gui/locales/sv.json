@@ -9,7 +9,7 @@
   "generation_process_started": "Genereringsprocessen startad.",
   "winter_mode": "Vinterläge",
   "world_scale": "Världsskala",
-  "custom_bounding_box": "Anpassad begränsningsram",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Floodfill-tidsgräns (sek)",
   "ground_level": "Marknivå",
   "customization_settings": "Anpassningsinställningar",

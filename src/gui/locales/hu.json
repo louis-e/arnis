@@ -9,7 +9,7 @@
   "generation_process_started": "Generálási folyamat elkezdődött",
   "winter_mode": "Téli mód",
   "world_scale": "Világ nagysága",
-  "custom_bounding_box": "Egyéni határoló keret",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Földszint",
   "customization_settings": "Testreszabási lehetőségek",
