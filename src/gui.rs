@@ -674,8 +674,11 @@ fn gui_get_platform() -> &'static str {
 fn gui_clear_tile_caches() -> Result<String, String> {
     use crate::elevation::cache::clear_all_cached_tiles;
     use crate::land_cover::clear_land_cover_cache;
+    use crate::models_3d::clear_model_caches;
 
-    let combined = clear_all_cached_tiles().combined(clear_land_cover_cache());
+    let combined = clear_all_cached_tiles()
+        .combined(clear_land_cover_cache())
+        .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
     if combined.errors > 0 {

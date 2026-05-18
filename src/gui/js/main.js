@@ -643,7 +643,7 @@ function initSettings() {
 
     const threeDmrBlock =
       `<p><b>3D Model Repository (3DMR):</b></p>` +
-      `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu/model/&lt;id&gt;</a> for any model used.</p>`;
+      `<p style="font-size: 0.9em;">Landmark models from <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3dmr.eu</a> are fetched on demand and voxelized. Individual models retain the license declared by their uploader; specific per-model attribution is printed to the generation log. See the <a href="https://3dmr.eu" style="color: inherit;" target="_blank" rel="noopener noreferrer">3DMR website</a> for any model used.</p>`;
     licenseContent.insertAdjacentHTML("beforeend", threeDmrBlock);
 
     try {

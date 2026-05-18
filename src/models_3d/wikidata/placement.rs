@@ -4,8 +4,10 @@ use crate::args::Args;
 use crate::block_definitions::*;
 use crate::colors::{color_text_to_rgb_tuple, RGBTuple};
 use crate::models_3d::palette::closest_blocks;
-use crate::models_3d::voxelize::{voxelize_uniform_triangles, WorldTransform};
-use crate::models_3d::wikidata::client::fetch_stl;
+use crate::models_3d::voxelize::{
+    glb_model_bbox, voxelize_glb, voxelize_uniform_triangles, WorldTransform,
+};
+use crate::models_3d::wikidata::client::fetch_model;
 use crate::models_3d::wikidata::index::lookup;
 use crate::models_3d::wikidata::stl::{bbox, parse_triangles};
 use crate::osm_parser::ProcessedElement;
@@ -32,10 +34,17 @@ struct Placement {
     world_yaw_degrees: f64,
     /// Block pool sampled per-voxel for texture variation.
     palette: Vec<Block>,
+    palette_layers: Option<ResolvedLayers>,
     /// Target height in meters; `None` → fall back to XZ-only scaling.
     osm_height_m: Option<f64>,
     /// Target XZ extent in meters; `None` → fall back to height-only scaling.
     osm_xz_extent_m: Option<f64>,
+}
+
+#[derive(Clone, Debug)]
+struct ResolvedLayers {
+    y_max_frac: Vec<f32>,
+    blocks: Vec<Vec<Block>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -88,7 +97,8 @@ pub fn prescan(
             continue;
         };
 
-        let raw_footprint = osm_bbox(element);
+        // 1-point bbox (node) → no real footprint; fall back to synthetic 16×16.
+        let raw_footprint = osm_bbox(element).filter(|b| b.max_x > b.min_x || b.max_z > b.min_z);
         let footprint = raw_footprint.unwrap_or_else(|| Bbox {
             min_x: anchor_x - 8,
             max_x: anchor_x + 8,
@@ -96,17 +106,20 @@ pub fn prescan(
             max_z: anchor_z + 8,
         });
 
-        let osm_height_m = element
-            .tags()
-            .get("height")
-            .and_then(|s| s.trim().parse::<f64>().ok())
-            .or(entry.height_m);
+        // Curated height_m wins; force uniform scaling so OSM tag/footprint can't squash the model.
+        let osm_height_m = entry
+            .height_m
+            .or_else(|| element.tags().get("height").and_then(|s| parse_meters(s)));
 
-        let osm_xz_extent_m = raw_footprint.map(|b| {
-            let dx = (b.max_x - b.min_x) as f64;
-            let dz = (b.max_z - b.min_z) as f64;
-            dx.max(dz) / args_scale
-        });
+        let osm_xz_extent_m = if entry.height_m.is_some() {
+            None
+        } else {
+            raw_footprint.map(|b| {
+                let dx = (b.max_x - b.min_x) as f64;
+                let dz = (b.max_z - b.min_z) as f64;
+                dx.max(dz) / args_scale
+            })
+        };
 
         let osm_yaw = element
             .tags()
@@ -116,6 +129,10 @@ pub fn prescan(
         let world_yaw_degrees = osm_yaw + world_rotation;
 
         let palette = resolve_palette(element);
+        let palette_layers = entry
+            .palette_layers
+            .as_deref()
+            .and_then(resolve_palette_layers);
 
         suppressed.insert(element.id());
         if let Some(b) = raw_footprint {
@@ -129,6 +146,7 @@ pub fn prescan(
             footprint,
             world_yaw_degrees,
             palette,
+            palette_layers,
             osm_height_m,
             osm_xz_extent_m,
         });
@@ -187,7 +205,7 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
 
     let fetched: HashMap<String, Vec<u8>> = unique_urls
         .par_iter()
-        .filter_map(|url| match fetch_stl(url) {
+        .filter_map(|url| match fetch_model(url) {
             Ok(bytes) => Some((url.clone(), bytes)),
             Err(e) => {
                 eprintln!(
@@ -206,97 +224,39 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
         let Some(entry) = lookup(&placement.qid) else {
             continue;
         };
-        let Some(stl_bytes) = fetched.get(&entry.url) else {
+        let Some(bytes) = fetched.get(&entry.url) else {
             continue;
         };
-
-        let triangles = match parse_triangles(stl_bytes) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!(
-                    "{} Wikidata STL parse failed ({}, OSM {}): {e}",
-                    "Warning:".yellow().bold(),
-                    placement.qid,
-                    placement.osm_id
-                );
-                continue;
-            }
-        };
-
-        let Some((bmin, bmax)) = bbox(&triangles) else {
-            eprintln!(
-                "{} Wikidata model {} has no finite vertices, skipping",
-                "Warning:".yellow().bold(),
-                placement.qid
-            );
-            continue;
-        };
-
-        let Some(fit) = derive_fit(&bmin, &bmax, placement) else {
-            eprintln!(
-                "{} Wikidata model {} (OSM {}): could not derive scale, skipping",
-                "Warning:".yellow().bold(),
-                placement.qid,
-                placement.osm_id
-            );
-            continue;
-        };
-
-        // After-fit world-space extents in meters: x, y(up), z.
-        let final_extents = {
-            let raw = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
-            [
-                (raw[fit.axes[0].0] * fit.scale[0]).abs(),
-                (raw[fit.axes[1].0] * fit.scale[1]).abs(),
-                (raw[fit.axes[2].0] * fit.scale[2]).abs(),
-            ]
-        };
-        let max_xz = final_extents[0].max(final_extents[2]);
-        let max_overall = final_extents.iter().fold(0f32, |acc, e| acc.max(*e));
-        if max_xz > MAX_XZ_EXTENT_M
-            || final_extents[1] > MAX_Y_EXTENT_M
-            || max_overall < MIN_EXTENT_M
-        {
-            eprintln!(
-                "{} Wikidata model {} (OSM {}): scaled extents {:.0}×{:.0}×{:.0} m outside caps (XZ ≤ {:.0}, Y ≤ {:.0}, min {:.0}), skipping",
-                "Warning:".yellow().bold(),
-                placement.qid,
-                placement.osm_id,
-                final_extents[0],
-                final_extents[1],
-                final_extents[2],
-                MAX_XZ_EXTENT_M,
-                MAX_Y_EXTENT_M,
-                MIN_EXTENT_M,
-            );
-            continue;
-        }
 
         let ground_y = lowest_ground_in_bbox(editor, &placement.footprint);
 
-        let transform = WorldTransform::new(
-            0.0,
-            1.0,
-            [0.0, 0.0, 0.0],
-            args.scale,
-            placement.world_yaw_degrees,
-            placement.anchor_x as f32,
-            ground_y as f32,
-            placement.anchor_z as f32,
-        );
-
-        let fitted: Vec<[[f32; 3]; 3]> = triangles
-            .iter()
-            .map(|tri| {
-                [
-                    apply_fit(tri[0], &fit),
-                    apply_fit(tri[1], &fit),
-                    apply_fit(tri[2], &fit),
-                ]
-            })
-            .collect();
-
-        let mut voxels = voxelize_uniform_triangles(fitted, transform, STONE_BRICKS);
+        let mut voxels = if is_glb(bytes) {
+            match voxelize_glb_for_placement(bytes, placement, args, ground_y) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "{} Wikidata GLB voxelization failed ({}, OSM {}): {e}",
+                        "Warning:".yellow().bold(),
+                        placement.qid,
+                        placement.osm_id
+                    );
+                    continue;
+                }
+            }
+        } else {
+            match voxelize_stl(bytes, placement, args, ground_y) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "{} Wikidata STL voxelization failed ({}, OSM {}): {e}",
+                        "Warning:".yellow().bold(),
+                        placement.qid,
+                        placement.osm_id
+                    );
+                    continue;
+                }
+            }
+        };
 
         if let Some(min_voxel_y) = voxels.iter().map(|(p, _)| p[1]).min() {
             let dy = ground_y - min_voxel_y;
@@ -305,11 +265,6 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
                     pos[1] += dy;
                 }
             }
-        }
-
-        let seed = qid_seed(&placement.qid);
-        for ([x, y, z], block) in voxels.iter_mut() {
-            *block = pick_voxel_block(&placement.palette, seed, [*x, *y, *z]);
         }
 
         for ([x, y, z], block) in &voxels {
@@ -492,6 +447,298 @@ fn structure_type_palette(tags: &std::collections::HashMap<String, String>) -> &
         }
     }
     DEFAULT_PALETTE
+}
+
+/// OSM `height=*` in meters; accepts bare numbers and trailing-m forms.
+fn parse_meters(raw: &str) -> Option<f64> {
+    let s = raw.trim();
+    if let Ok(v) = s.parse::<f64>() {
+        return v.is_finite().then_some(v);
+    }
+    let trimmed = s.trim_end_matches(['m', 'M']).trim_end();
+    trimmed.parse::<f64>().ok().filter(|v| v.is_finite())
+}
+
+fn is_glb(bytes: &[u8]) -> bool {
+    bytes.len() >= 4 && &bytes[0..4] == b"glTF"
+}
+
+/// GLB path: uniform intrinsic scale from OSM height, then voxelize.
+fn voxelize_glb_for_placement(
+    bytes: &[u8],
+    placement: &Placement,
+    args: &Args,
+    ground_y: i32,
+) -> Result<Vec<([i32; 3], Block)>, String> {
+    let (bmin, bmax) = glb_model_bbox(bytes)?;
+    let model_y = bmax[1] - bmin[1];
+    let model_x = bmax[0] - bmin[0];
+    let model_z = bmax[2] - bmin[2];
+
+    let intrinsic_scale = match (placement.osm_height_m, placement.osm_xz_extent_m) {
+        (Some(h), _) if model_y > 1e-4 => h as f32 / model_y,
+        (_, Some(xz)) if model_x.max(model_z) > 1e-4 => xz as f32 / model_x.max(model_z),
+        _ => 1.0,
+    };
+    if !intrinsic_scale.is_finite() || intrinsic_scale <= 0.0 {
+        return Err("derived intrinsic_scale not finite/positive".into());
+    }
+
+    let final_y = model_y * intrinsic_scale;
+    let final_x = model_x * intrinsic_scale;
+    let final_z = model_z * intrinsic_scale;
+    let max_xz = final_x.max(final_z);
+    let max_overall = final_x.max(final_y).max(final_z);
+    if max_xz > MAX_XZ_EXTENT_M || final_y > MAX_Y_EXTENT_M || max_overall < MIN_EXTENT_M {
+        return Err(format!(
+            "scaled extents {:.0}×{:.0}×{:.0} m outside caps",
+            final_x, final_y, final_z
+        ));
+    }
+
+    let transform = WorldTransform::new(
+        0.0,
+        intrinsic_scale as f64,
+        [0.0, 0.0, 0.0],
+        args.scale,
+        placement.world_yaw_degrees,
+        placement.anchor_x as f32,
+        ground_y as f32,
+        placement.anchor_z as f32,
+    );
+    voxelize_glb(bytes, transform)
+}
+
+fn voxelize_stl(
+    bytes: &[u8],
+    placement: &Placement,
+    args: &Args,
+    ground_y: i32,
+) -> Result<Vec<([i32; 3], Block)>, String> {
+    let triangles = parse_triangles(bytes)?;
+    let (bmin, bmax) = bbox(&triangles).ok_or("no finite vertices")?;
+    let fit = derive_fit(&bmin, &bmax, placement).ok_or("could not derive scale")?;
+
+    let final_extents = {
+        let raw = [bmax[0] - bmin[0], bmax[1] - bmin[1], bmax[2] - bmin[2]];
+        [
+            (raw[fit.axes[0].0] * fit.scale[0]).abs(),
+            (raw[fit.axes[1].0] * fit.scale[1]).abs(),
+            (raw[fit.axes[2].0] * fit.scale[2]).abs(),
+        ]
+    };
+    let max_xz = final_extents[0].max(final_extents[2]);
+    let max_overall = final_extents.iter().fold(0f32, |acc, e| acc.max(*e));
+    if max_xz > MAX_XZ_EXTENT_M || final_extents[1] > MAX_Y_EXTENT_M || max_overall < MIN_EXTENT_M {
+        return Err(format!(
+            "scaled extents {:.0}×{:.0}×{:.0} m outside caps (XZ ≤ {:.0}, Y ≤ {:.0}, min {:.0})",
+            final_extents[0],
+            final_extents[1],
+            final_extents[2],
+            MAX_XZ_EXTENT_M,
+            MAX_Y_EXTENT_M,
+            MIN_EXTENT_M,
+        ));
+    }
+
+    // Center the model's XZ bbox on the OSM anchor.
+    let center_x = {
+        let (src, sign) = fit.axes[0];
+        (bmin[src] + bmax[src]) * 0.5 * sign * fit.scale[0]
+    };
+    let center_z = {
+        let (src, sign) = fit.axes[2];
+        (bmin[src] + bmax[src]) * 0.5 * sign * fit.scale[2]
+    };
+
+    let transform = WorldTransform::new(
+        0.0,
+        1.0,
+        [0.0, 0.0, 0.0],
+        args.scale,
+        placement.world_yaw_degrees,
+        placement.anchor_x as f32,
+        ground_y as f32,
+        placement.anchor_z as f32,
+    );
+
+    let fitted: Vec<[[f32; 3]; 3]> = triangles
+        .iter()
+        .map(|tri| {
+            let centered = |v: [f32; 3]| {
+                let p = apply_fit(v, &fit);
+                [p[0] - center_x, p[1], p[2] - center_z]
+            };
+            [centered(tri[0]), centered(tri[1]), centered(tri[2])]
+        })
+        .collect();
+
+    let mut voxels = voxelize_uniform_triangles(fitted, transform, STONE_BRICKS);
+    let seed = qid_seed(&placement.qid);
+    if let Some(layers) = &placement.palette_layers {
+        let (y_min, y_max) = voxel_y_range(&voxels);
+        for ([x, y, z], block) in voxels.iter_mut() {
+            *block = pick_layered_block(layers, seed, [*x, *y, *z], y_min, y_max);
+        }
+    } else {
+        for ([x, y, z], block) in voxels.iter_mut() {
+            *block = pick_voxel_block(&placement.palette, seed, [*x, *y, *z]);
+        }
+    }
+    Ok(voxels)
+}
+
+fn voxel_y_range(voxels: &[([i32; 3], Block)]) -> (i32, i32) {
+    let mut min = i32::MAX;
+    let mut max = i32::MIN;
+    for (p, _) in voxels {
+        if p[1] < min {
+            min = p[1];
+        }
+        if p[1] > max {
+            max = p[1];
+        }
+    }
+    if min > max {
+        (0, 1)
+    } else {
+        (min, max)
+    }
+}
+
+/// Resolve JSON `palette_layers` → Block pools sorted by `y_max_frac` ascending.
+fn resolve_palette_layers(
+    layers: &[crate::models_3d::wikidata::index::PaletteLayer],
+) -> Option<ResolvedLayers> {
+    let mut entries: Vec<(f32, Vec<Block>)> = Vec::new();
+    for l in layers {
+        let blocks: Vec<Block> = if let Some(hex) = &l.hex {
+            match color_text_to_rgb_tuple(&format!("#{}", hex.trim_start_matches('#'))) {
+                Some(rgb) => closest_blocks(rgb, COLOR_PALETTE_K),
+                None => continue,
+            }
+        } else {
+            l.blocks
+                .iter()
+                .filter_map(|name| block_by_const_name(name))
+                .collect()
+        };
+        if blocks.is_empty() {
+            continue;
+        }
+        entries.push((l.y_max_frac, blocks));
+    }
+    if entries.is_empty() {
+        return None;
+    }
+    entries.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let (y_max_frac, blocks): (Vec<_>, Vec<_>) = entries.into_iter().unzip();
+    Some(ResolvedLayers { y_max_frac, blocks })
+}
+
+fn pick_layered_block(
+    layers: &ResolvedLayers,
+    seed: u64,
+    pos: [i32; 3],
+    y_min: i32,
+    y_max: i32,
+) -> Block {
+    let span = (y_max - y_min).max(1) as f32;
+    let frac = ((pos[1] - y_min) as f32 / span).clamp(0.0, 1.0);
+    let idx = layers
+        .y_max_frac
+        .iter()
+        .position(|&f| frac <= f)
+        .unwrap_or(layers.y_max_frac.len() - 1);
+    pick_voxel_block(&layers.blocks[idx], seed, pos)
+}
+
+/// Block-constant name → Block (case-insensitive); None on unknown name.
+fn block_by_const_name(name: &str) -> Option<Block> {
+    Some(match name.to_ascii_uppercase().as_str() {
+        "ANDESITE" => ANDESITE,
+        "BLACK_CONCRETE" => BLACK_CONCRETE,
+        "BLACK_TERRACOTTA" => BLACK_TERRACOTTA,
+        "BLACK_WOOL" => BLACK_WOOL,
+        "BLACKSTONE" => BLACKSTONE,
+        "BLUE_CONCRETE" => BLUE_CONCRETE,
+        "BLUE_TERRACOTTA" => BLUE_TERRACOTTA,
+        "BLUE_WOOL" => BLUE_WOOL,
+        "BRICK" => BRICK,
+        "BROWN_CONCRETE" => BROWN_CONCRETE,
+        "BROWN_TERRACOTTA" => BROWN_TERRACOTTA,
+        "CHISELED_STONE_BRICKS" => CHISELED_STONE_BRICKS,
+        "COARSE_DIRT" => COARSE_DIRT,
+        "COBBLED_DEEPSLATE" => COBBLED_DEEPSLATE,
+        "COBBLESTONE" => COBBLESTONE,
+        "CRACKED_STONE_BRICKS" => CRACKED_STONE_BRICKS,
+        "CYAN_CONCRETE" => CYAN_CONCRETE,
+        "CYAN_TERRACOTTA" => CYAN_TERRACOTTA,
+        "DARK_OAK_LOG" => DARK_OAK_LOG,
+        "DARK_OAK_PLANKS" => DARK_OAK_PLANKS,
+        "DEEPSLATE" => DEEPSLATE,
+        "DEEPSLATE_BRICKS" => DEEPSLATE_BRICKS,
+        "DIORITE" => DIORITE,
+        "DIRT" => DIRT,
+        "END_STONE_BRICKS" => END_STONE_BRICKS,
+        "GOLD_BLOCK" => GOLD_BLOCK,
+        "GRANITE" => GRANITE,
+        "GRAY_CONCRETE" => GRAY_CONCRETE,
+        "GRAY_TERRACOTTA" => GRAY_TERRACOTTA,
+        "GREEN_CONCRETE" => GREEN_CONCRETE,
+        "GREEN_WOOL" => GREEN_WOOL,
+        "HAY_BALE" => HAY_BALE,
+        "IRON_BLOCK" => IRON_BLOCK,
+        "LIGHT_BLUE_CONCRETE" => LIGHT_BLUE_CONCRETE,
+        "LIGHT_BLUE_TERRACOTTA" => LIGHT_BLUE_TERRACOTTA,
+        "LIGHT_GRAY_CONCRETE" => LIGHT_GRAY_CONCRETE,
+        "LIGHT_GRAY_TERRACOTTA" => LIGHT_GRAY_TERRACOTTA,
+        "LIME_CONCRETE" => LIME_CONCRETE,
+        "MAGENTA_CONCRETE" => MAGENTA_CONCRETE,
+        "MOSS_BLOCK" => MOSS_BLOCK,
+        "MOSSY_COBBLESTONE" => MOSSY_COBBLESTONE,
+        "MOSSY_STONE_BRICKS" => MOSSY_STONE_BRICKS,
+        "MUD_BRICKS" => MUD_BRICKS,
+        "NETHER_BRICK" => NETHER_BRICK,
+        "NETHERITE_BLOCK" => NETHERITE_BLOCK,
+        "OAK_LOG" => OAK_LOG,
+        "OAK_PLANKS" => OAK_PLANKS,
+        "ORANGE_TERRACOTTA" => ORANGE_TERRACOTTA,
+        "ORANGE_WOOL" => ORANGE_WOOL,
+        "POLISHED_ANDESITE" => POLISHED_ANDESITE,
+        "POLISHED_BLACKSTONE" => POLISHED_BLACKSTONE,
+        "POLISHED_BLACKSTONE_BRICKS" => POLISHED_BLACKSTONE_BRICKS,
+        "POLISHED_DEEPSLATE" => POLISHED_DEEPSLATE,
+        "POLISHED_DIORITE" => POLISHED_DIORITE,
+        "POLISHED_GRANITE" => POLISHED_GRANITE,
+        "PURPLE_CONCRETE" => PURPLE_CONCRETE,
+        "QUARTZ_BLOCK" => QUARTZ_BLOCK,
+        "QUARTZ_BRICKS" => QUARTZ_BRICKS,
+        "RED_CONCRETE" => RED_CONCRETE,
+        "RED_NETHER_BRICKS" => RED_NETHER_BRICKS,
+        "RED_TERRACOTTA" => RED_TERRACOTTA,
+        "RED_WOOL" => RED_WOOL,
+        "SANDSTONE" => SANDSTONE,
+        "SMOOTH_QUARTZ" => SMOOTH_QUARTZ,
+        "SMOOTH_SANDSTONE" => SMOOTH_SANDSTONE,
+        "SMOOTH_STONE" => SMOOTH_STONE,
+        "SNOW_BLOCK" => SNOW_BLOCK,
+        "SPRUCE_LOG" => SPRUCE_LOG,
+        "SPRUCE_PLANKS" => SPRUCE_PLANKS,
+        "STONE" => STONE,
+        "STONE_BRICKS" => STONE_BRICKS,
+        "TERRACOTTA" => TERRACOTTA,
+        "WAXED_COPPER_BLOCK" => WAXED_COPPER_BLOCK,
+        "WAXED_EXPOSED_COPPER" => WAXED_EXPOSED_COPPER,
+        "WAXED_OXIDIZED_COPPER" => WAXED_OXIDIZED_COPPER,
+        "WHITE_CONCRETE" => WHITE_CONCRETE,
+        "WHITE_TERRACOTTA" => WHITE_TERRACOTTA,
+        "WHITE_WOOL" => WHITE_WOOL,
+        "YELLOW_CONCRETE" => YELLOW_CONCRETE,
+        "YELLOW_TERRACOTTA" => YELLOW_TERRACOTTA,
+        "YELLOW_WOOL" => YELLOW_WOOL,
+        _ => return None,
+    })
 }
 
 /// Deterministic per-voxel palette pick via splitmix64 (avoids pattern artifacts).
@@ -818,6 +1065,7 @@ mod tests {
             },
             world_yaw_degrees: 0.0,
             palette: vec![STONE_BRICKS],
+            palette_layers: None,
             osm_height_m: h,
             osm_xz_extent_m: xz,
         }

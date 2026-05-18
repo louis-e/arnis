@@ -107,6 +107,57 @@ const IDENT: [[f32; 4]; 4] = [
 /// Per-voxel: RGB sampled from the primitive's material plus an "uncolored" flag.
 type VoxelValue = ([f32; 3], bool);
 
+/// World-space bbox of all triangle vertices in a .glb.
+pub fn glb_model_bbox(glb_bytes: &[u8]) -> Result<([f32; 3], [f32; 3]), String> {
+    let (document, buffers, _) =
+        gltf::import_slice(glb_bytes).map_err(|e| format!("glTF parse: {e}"))?;
+    let scenes: Vec<_> = if let Some(scene) = document.default_scene() {
+        scene.nodes().collect()
+    } else {
+        document.scenes().flat_map(|s| s.nodes()).collect()
+    };
+    let mut stack: Vec<(gltf::Node, [[f32; 4]; 4])> =
+        scenes.into_iter().map(|n| (n, IDENT)).collect();
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    let mut any = false;
+    while let Some((node, parent)) = stack.pop() {
+        let world = mat_mul(&parent, &node.transform().matrix());
+        if let Some(mesh) = node.mesh() {
+            for primitive in mesh.primitives() {
+                if primitive.mode() != gltf::mesh::Mode::Triangles {
+                    continue;
+                }
+                let reader = primitive.reader(|b| Some(&buffers[b.index()]));
+                let Some(positions) = reader.read_positions() else {
+                    continue;
+                };
+                for v in positions {
+                    let p = transform_point(&world, v);
+                    for i in 0..3 {
+                        if p[i].is_finite() {
+                            if p[i] < min[i] {
+                                min[i] = p[i];
+                            }
+                            if p[i] > max[i] {
+                                max[i] = p[i];
+                            }
+                            any = true;
+                        }
+                    }
+                }
+            }
+        }
+        for child in node.children() {
+            stack.push((child, world));
+        }
+    }
+    if !any {
+        return Err("glTF has no finite vertices".into());
+    }
+    Ok((min, max))
+}
+
 /// Voxelizes a .glb model and returns each occupied voxel with its chosen Minecraft block.
 pub fn voxelize_glb(
     glb_bytes: &[u8],
