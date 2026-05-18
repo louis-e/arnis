@@ -10,7 +10,7 @@ use std::time::Duration;
 
 const CACHE_SUBDIR: &str = "arnis/wikidata_models";
 const MAX_MODEL_BYTES: u64 = 128 * 1024 * 1024;
-const REQUEST_TIMEOUT_SECS: u64 = 60;
+const REQUEST_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) fn cache_root() -> PathBuf {
     if let Some(dir) = dirs::cache_dir() {
