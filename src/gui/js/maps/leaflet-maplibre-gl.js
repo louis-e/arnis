@@ -43,7 +43,7 @@
             this._offset = this._map.containerPointToLayerPoint([0, 0]);
 
             // work around https://github.com/mapbox/mapbox-gl-leaflet/issues/47
-            if (map.options.zoomAnimation) {
+            if (map.options.zoomAnimation && map._proxy) {
                 L.DomEvent.on(map._proxy, L.DomUtil.TRANSITION_END, this._transitionEnd, this);
             }
         },

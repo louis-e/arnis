@@ -534,7 +534,7 @@ $(document).ready(function () {
                 }
                 currentTileLayer = L.maplibreGL({
                     style: theme.style,
-                    attribution: theme.attribution,
+                    attributionControl: { customAttribution: theme.attribution },
                     pixelRatio: window.devicePixelRatio || 1
                 });
                 currentTileLayer.addTo(map);
