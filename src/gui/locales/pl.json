@@ -9,7 +9,7 @@
   "generation_process_started": "Proces generowania rozpoczęty.",
   "winter_mode": "Tryb Zimowy",
   "world_scale": "Skala świata",
-  "custom_bounding_box": "Niestandardowy obszar",
+  "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Limit czasu wypełniania (sek)",
   "ground_level": "Wysokość obszaru",
   "customization_settings": "Ustawienia personalizacji",

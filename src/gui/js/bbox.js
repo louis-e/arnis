@@ -13,7 +13,7 @@ var currentmouse = L.latLng(0, 0);
 **  to fire an event after setting
 **
 **  the base parent object L.Path
-**  includes the L.Mixin.Events
+**  inherits from L.Evented
 **
 **  ensures bbox box is always
 **  the topmost SVG feature
@@ -504,6 +504,11 @@ $(document).ready(function () {
                 attribution: '&copy; <a href="https://www.stadiamaps.com/" target="_blank">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
                 ext: 'png'
             }
+        },
+        'openfreemap-liberty': {
+            type: 'vector',
+            style: 'https://tiles.openfreemap.org/styles/liberty',
+            attribution: '&copy; <a href="https://openfreemap.org" target="_blank">OpenFreeMap</a> &copy; <a href="https://www.openmaptiles.org/" target="_blank">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }
     };
 
@@ -520,34 +525,48 @@ $(document).ready(function () {
         // Get the theme configuration
         var theme = tileThemes[themeKey];
         if (theme) {
-            // Create and add new tile layer
-            currentTileLayer = L.tileLayer(theme.url, theme.options);
-
-            // Add automatic HTTP fallback for HTTPS failures
-            var failureCount = 0;
-            currentTileLayer.on('tileerror', function(error) {
-                failureCount++;
-
-                // After a few failures, try HTTP fallback
-                if (failureCount >= 6 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
-                    console.log('HTTPS tile loading failed, attempting HTTP fallback for', themeKey);
-                    this._httpFallbackAttempted = true;
-
-                    // Create HTTP version of the URL
-                    var httpUrl = theme.url.replace('https://', 'http://');
-
-                    // Remove the failed HTTPS layer
-                    map.removeLayer(this);
-
-                    // Create new layer with HTTP URL
-                    var httpLayer = L.tileLayer(httpUrl, theme.options);
-                    httpLayer._httpFallbackAttempted = true;
-                    httpLayer.addTo(map);
-                    currentTileLayer = httpLayer;
+            if (theme.type === 'vector') {
+                // Fall back to OSM raster if MapLibre plugin failed to load
+                if (typeof L.maplibreGL !== 'function') {
+                    console.warn('MapLibre GL plugin unavailable, falling back to OSM raster');
+                    changeTileTheme('osm');
+                    return;
                 }
-            });
+                currentTileLayer = L.maplibreGL({
+                    style: theme.style,
+                    attributionControl: { customAttribution: theme.attribution },
+                    pixelRatio: window.devicePixelRatio || 1
+                });
+                currentTileLayer.addTo(map);
+            } else {
+                currentTileLayer = L.tileLayer(theme.url, theme.options);
 
-            currentTileLayer.addTo(map);
+                // Add automatic HTTP fallback for HTTPS failures
+                var failureCount = 0;
+                currentTileLayer.on('tileerror', function(error) {
+                    failureCount++;
+
+                    // After a few failures, try HTTP fallback
+                    if (failureCount >= 6 && !this._httpFallbackAttempted && theme.url.startsWith('https://')) {
+                        console.log('HTTPS tile loading failed, attempting HTTP fallback for', themeKey);
+                        this._httpFallbackAttempted = true;
+
+                        // Create HTTP version of the URL
+                        var httpUrl = theme.url.replace('https://', 'http://');
+
+                        // Remove the failed HTTPS layer
+                        map.removeLayer(this);
+
+                        // Create new layer with HTTP URL
+                        var httpLayer = L.tileLayer(httpUrl, theme.options);
+                        httpLayer._httpFallbackAttempted = true;
+                        httpLayer.addTo(map);
+                        currentTileLayer = httpLayer;
+                    }
+                });
+
+                currentTileLayer.addTo(map);
+            }
 
             // Save preference to localStorage
             localStorage.setItem('selectedTileTheme', themeKey);
@@ -1026,7 +1045,7 @@ $(document).ready(function () {
         iconSize: [20, 20], // size of the icon
         iconAnchor: [10, 10], // point of the icon which will correspond to marker's location
     });
-    crosshair = new L.marker(map.getCenter(), { icon: crosshairIcon, clickable: false });
+    crosshair = new L.marker(map.getCenter(), { icon: crosshairIcon, interactive: false });
     crosshair.addTo(map);
 
     // Override default tooltips
@@ -1094,6 +1113,7 @@ $(document).ready(function () {
             polyline: false,
             polygon: false,
             circle: false,
+            circlemarker: false,
             marker: {
                 icon: customMarkerIcon
             }
