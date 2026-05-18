@@ -152,6 +152,7 @@ pub fn fetch_data_from_overpass(
     (
         nwr["building"];
         nwr["building:part"];
+        relation["type"="building"];
         nwr["highway"];
         nwr["landuse"]["landuse"!="salt_pond"];
         nwr["natural"]["natural"!="coastline"]["natural"!="bay"]["natural"!="strait"];
