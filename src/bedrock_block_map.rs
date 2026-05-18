@@ -370,6 +370,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             "concretePowder",
             vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
         ),
+        "brown_concrete_powder" => BedrockBlock::with_states(
+            "concretePowder",
+            vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
+        ),
         "light_gray_concrete" => BedrockBlock::with_states(
             "concrete",
             vec![(
@@ -1412,6 +1416,17 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(s)) if s == "gray"
+        ));
+    }
+
+    #[test]
+    fn test_brown_concrete_powder_bedrock_mapping() {
+        use crate::block_definitions::BROWN_CONCRETE_POWDER;
+        let bedrock = to_bedrock_block(BROWN_CONCRETE_POWDER);
+        assert_eq!(bedrock.name, "minecraft:concretePowder");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "brown"
         ));
     }
 

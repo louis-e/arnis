@@ -2155,9 +2155,9 @@ fn substitute_pool_only(block: Block) -> &'static [Block] {
         BLACK_TERRACOTTA => &[NETHER_BRICK],
         RED_NETHER_BRICKS => &[NETHER_BRICK],
 
-        // Mud / brown terracotta
-        MUD_BRICKS => &[BROWN_TERRACOTTA, BROWN_CONCRETE],
-        BROWN_TERRACOTTA => &[MUD_BRICKS, BROWN_CONCRETE],
+        // Brown family
+        BROWN_TERRACOTTA => &[BROWN_CONCRETE_POWDER, BROWN_CONCRETE],
+        BROWN_CONCRETE => &[BROWN_CONCRETE_POWDER, BROWN_TERRACOTTA],
 
         // Off-white / quartz
         QUARTZ_BLOCK => &[QUARTZ_BRICKS, SMOOTH_QUARTZ],
