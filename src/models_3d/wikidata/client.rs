@@ -1,4 +1,4 @@
-//! HTTP fetcher for model files (STL or GLB) with content-hash on-disk cache.
+//! HTTP fetcher for model files (STL or GLB) with URL-hash on-disk cache.
 
 use fnv::FnvHasher;
 use reqwest::blocking::{Client, ClientBuilder};

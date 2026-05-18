@@ -172,12 +172,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn fetch_sparql_rows(
     client: &reqwest::blocking::Client,
 ) -> Result<Vec<SparqlRow>, Box<dyn std::error::Error>> {
+    // `psn:P2048` is the SI-normalized statement value (metres); `wdt:` would give the raw unit.
     let query = r#"
 SELECT ?item ?itemLabel ?model ?height WHERE {
   ?item wdt:P4896 ?model .
   ?item wdt:P625 ?coord .
   FILTER(STRENDS(STR(?model), ".stl"))
-  OPTIONAL { ?item wdt:P2048 ?height . }
+  OPTIONAL { ?item p:P2048/psn:P2048/wikibase:quantityAmount ?height . }
   SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
 }"#;
     let resp = client

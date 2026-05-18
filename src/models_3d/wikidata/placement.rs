@@ -64,6 +64,7 @@ impl Bbox {
 pub struct PrescanResult {
     pub suppressed_ids: HashSet<u64>,
     placements: Vec<Placement>,
+    fetched: HashMap<String, Vec<u8>>,
 }
 
 impl PrescanResult {
@@ -72,16 +73,19 @@ impl PrescanResult {
     }
 }
 
-/// Scans `wikidata=Q*` tags against the bundled index; suppresses matched elements and overlapping buildings (3DMR wins on conflict).
+struct Candidate {
+    placement: Placement,
+    raw_footprint: Option<Bbox>,
+}
+
+/// Identify candidates, fetch models, suppress only successful fetches.
 pub fn prescan(
     elements: &[ProcessedElement],
     already_suppressed: &HashSet<u64>,
     world_rotation: f64,
     args_scale: f64,
 ) -> PrescanResult {
-    let mut placements = Vec::new();
-    let mut suppressed = HashSet::new();
-    let mut footprints: Vec<Bbox> = Vec::new();
+    let mut candidates: Vec<Candidate> = Vec::new();
 
     for element in elements {
         if already_suppressed.contains(&element.id()) {
@@ -134,22 +138,61 @@ pub fn prescan(
             .as_deref()
             .and_then(resolve_palette_layers);
 
-        suppressed.insert(element.id());
-        if let Some(b) = raw_footprint {
+        candidates.push(Candidate {
+            placement: Placement {
+                osm_id: element.id(),
+                qid: qid.to_string(),
+                anchor_x,
+                anchor_z,
+                footprint,
+                world_yaw_degrees,
+                palette,
+                palette_layers,
+                osm_height_m,
+                osm_xz_extent_m,
+            },
+            raw_footprint,
+        });
+    }
+
+    let unique_urls: Vec<String> = {
+        let mut set: HashSet<String> = HashSet::new();
+        for c in &candidates {
+            if let Some(e) = lookup(&c.placement.qid) {
+                set.insert(e.url.clone());
+            }
+        }
+        set.into_iter().collect()
+    };
+    let fetched: HashMap<String, Vec<u8>> = unique_urls
+        .par_iter()
+        .filter_map(|url| match fetch_model(url) {
+            Ok(bytes) => Some((url.clone(), bytes)),
+            Err(e) => {
+                eprintln!(
+                    "{} Wikidata model fetch failed ({url}): {e}",
+                    "Warning:".yellow().bold()
+                );
+                None
+            }
+        })
+        .collect();
+
+    let mut suppressed: HashSet<u64> = HashSet::new();
+    let mut placements: Vec<Placement> = Vec::new();
+    let mut footprints: Vec<Bbox> = Vec::new();
+    for c in candidates {
+        let Some(entry) = lookup(&c.placement.qid) else {
+            continue;
+        };
+        if !fetched.contains_key(&entry.url) {
+            continue;
+        }
+        suppressed.insert(c.placement.osm_id);
+        if let Some(b) = c.raw_footprint {
             footprints.push(b);
         }
-        placements.push(Placement {
-            osm_id: element.id(),
-            qid: qid.to_string(),
-            anchor_x,
-            anchor_z,
-            footprint,
-            world_yaw_degrees,
-            palette,
-            palette_layers,
-            osm_height_m,
-            osm_xz_extent_m,
-        });
+        placements.push(c.placement);
     }
 
     if !footprints.is_empty() {
@@ -173,17 +216,18 @@ pub fn prescan(
     PrescanResult {
         suppressed_ids: suppressed,
         placements,
+        fetched,
     }
 }
 
-/// Fetches STLs (with cache), voxelizes them, places blocks.
+/// Voxelizes pre-fetched models and places blocks.
 pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &PrescanResult) {
     if prescan.placements.is_empty() {
         return;
     }
 
     println!(
-        "{} Fetching {} Wikidata 3D model{}...",
+        "{} Placing {} Wikidata 3D model{}...",
         "  [+]".bold(),
         prescan.placements.len(),
         if prescan.placements.len() == 1 {
@@ -193,30 +237,6 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
         }
     );
 
-    let unique_urls: Vec<String> = {
-        let mut set: HashSet<String> = HashSet::new();
-        for p in &prescan.placements {
-            if let Some(e) = lookup(&p.qid) {
-                set.insert(e.url.clone());
-            }
-        }
-        set.into_iter().collect()
-    };
-
-    let fetched: HashMap<String, Vec<u8>> = unique_urls
-        .par_iter()
-        .filter_map(|url| match fetch_model(url) {
-            Ok(bytes) => Some((url.clone(), bytes)),
-            Err(e) => {
-                eprintln!(
-                    "{} Wikidata STL fetch failed ({url}): {e}",
-                    "Warning:".yellow().bold()
-                );
-                None
-            }
-        })
-        .collect();
-
     let mut placed = 0usize;
     let mut total_voxels = 0usize;
 
@@ -224,7 +244,7 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
         let Some(entry) = lookup(&placement.qid) else {
             continue;
         };
-        let Some(bytes) = fetched.get(&entry.url) else {
+        let Some(bytes) = prescan.fetched.get(&entry.url) else {
             continue;
         };
 

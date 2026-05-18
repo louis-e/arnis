@@ -17,8 +17,8 @@ pub fn parse_triangles(bytes: &[u8]) -> Result<Vec<[[f32; 3]; 3]>, String> {
     if bytes.len() < 84 {
         return Err("STL too short for header + count".into());
     }
-    // ASCII STL files start with "solid " — reject.
-    if bytes.starts_with(b"solid ") && !looks_like_binary_with_solid_header(bytes) {
+    // ASCII STL files start with "solid"; reject unless the body matches the binary layout.
+    if bytes.starts_with(b"solid") && !looks_like_binary_with_solid_header(bytes) {
         return Err("ASCII STL not supported".into());
     }
     let count = read_le_u32(&bytes[80..84]) as usize;
@@ -80,17 +80,18 @@ pub fn bbox(triangles: &[[[f32; 3]; 3]]) -> Option<([f32; 3], [f32; 3])> {
     let mut any = false;
     for tri in triangles {
         for v in tri {
+            if !v.iter().all(|c| c.is_finite()) {
+                continue;
+            }
             for i in 0..3 {
-                if v[i].is_finite() {
-                    if v[i] < min[i] {
-                        min[i] = v[i];
-                    }
-                    if v[i] > max[i] {
-                        max[i] = v[i];
-                    }
-                    any = true;
+                if v[i] < min[i] {
+                    min[i] = v[i];
+                }
+                if v[i] > max[i] {
+                    max[i] = v[i];
                 }
             }
+            any = true;
         }
     }
     if any {
