@@ -328,7 +328,7 @@ impl Block {
             229 => "daylight_detector",
             230 => "cherry_log",
             231 => "cherry_leaves",
-            232 => "purple_stained_glass",
+            232 => "brown_concrete_powder",
             233 => "orange_stained_glass",
             234 => "magenta_stained_glass",
             235 => "potted_poppy",
@@ -1030,6 +1030,7 @@ pub const POTTED_DANDELION: Block = Block::new(247);
 pub const POTTED_BLUE_ORCHID: Block = Block::new(248);
 
 pub const GRAY_CONCRETE_POWDER: Block = Block::new(252);
+pub const BROWN_CONCRETE_POWDER: Block = Block::new(232);
 pub const CYAN_TERRACOTTA: Block = Block::new(253);
 pub const BLACK_WOOL: Block = Block::new(254);
 pub const LIGHT_GRAY_WALL_BANNER: Block = Block::new(255);
@@ -1075,6 +1076,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         MUD_BRICKS => MUD_BRICK_STAIRS,
         MUD => MUD_BRICK_STAIRS,
         BROWN_CONCRETE => MUD_BRICK_STAIRS,
+        BROWN_CONCRETE_POWDER => MUD_BRICK_STAIRS,
         BROWN_TERRACOTTA => MUD_BRICK_STAIRS,
         GRAY_TERRACOTTA => MUD_BRICK_STAIRS,
         LIGHT_GRAY_TERRACOTTA => MUD_BRICK_STAIRS,
@@ -1139,7 +1141,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
 pub fn get_slab_block_for_material(material: Block) -> Block {
     match material {
         STONE_BRICKS | CHISELED_STONE_BRICKS | CRACKED_STONE_BRICKS => STONE_BRICK_SLAB,
-        BRICK | BROWN_TERRACOTTA => BRICK_SLAB,
+        BRICK | BROWN_TERRACOTTA | BROWN_CONCRETE_POWDER => BRICK_SLAB,
         MUD_BRICKS | WHITE_TERRACOTTA | GRAY_TERRACOTTA | LIGHT_BLUE_TERRACOTTA => MUD_BRICK_SLAB,
         OAK_PLANKS | OAK_LOG | SPRUCE_PLANKS | DARK_OAK_PLANKS => OAK_SLAB,
         QUARTZ_BLOCK | QUARTZ_BRICKS | WHITE_CONCRETE => QUARTZ_SLAB_TOP,
@@ -1162,7 +1164,9 @@ pub fn get_wall_piece_for_material(material: Block) -> Block {
         | SMOOTH_STONE
         | POLISHED_DEEPSLATE
         | DEEPSLATE_BRICKS => STONE_BRICK_WALL,
-        BRICK | BROWN_TERRACOTTA | MUD_BRICKS | WHITE_TERRACOTTA => BRICK_WALL,
+        BRICK | BROWN_TERRACOTTA | BROWN_CONCRETE_POWDER | MUD_BRICKS | WHITE_TERRACOTTA => {
+            BRICK_WALL
+        }
         ANDESITE | GRAY_CONCRETE | LIGHT_GRAY_CONCRETE => ANDESITE_WALL,
         _ => COBBLESTONE_WALL,
     }
