@@ -1123,7 +1123,7 @@ pub fn get_stair_block_for_material(material: Block) -> Block {
         SPRUCE_LOG => SPRUCE_STAIRS,
 
         // Misc
-        IRON_BLOCK => POLISHED_BLACKSTONE_BRICK_STAIRS,
+        IRON_BLOCK => POLISHED_DIORITE_STAIRS,
         NETHERITE_BLOCK => POLISHED_BLACKSTONE_BRICK_STAIRS,
         HAY_BALE => OAK_STAIRS,
         GRAVEL => COBBLESTONE_STAIRS,

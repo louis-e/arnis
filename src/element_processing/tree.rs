@@ -214,16 +214,16 @@ impl Tree<'_> {
         // The element_id of 0 is used as a salt for tree-specific randomness
         let mut rng = coord_rng(x, z, 0);
 
-        let tree_type = match rng.random_range(1..=13) {
-            1..=3 => TreeType::Oak,
-            4..=5 => TreeType::Spruce,
-            6..=7 => TreeType::Birch,
-            8 => TreeType::DarkOak,
-            9 => TreeType::Jungle,
-            10 => TreeType::Acacia,
-            11 => TreeType::Cherry,
-            12 => TreeType::TallOak,
-            13 => TreeType::Pine,
+        let tree_type = match rng.random_range(1..=50) {
+            1..=13 => TreeType::Oak,
+            14..=21 => TreeType::Spruce,
+            22..=29 => TreeType::Birch,
+            30..=33 => TreeType::DarkOak,
+            34..=37 => TreeType::Jungle,
+            38..=41 => TreeType::Acacia,
+            42 => TreeType::Cherry,
+            43..=46 => TreeType::TallOak,
+            47..=50 => TreeType::Pine,
             _ => unreachable!(),
         };
 
