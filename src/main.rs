@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
-#[cfg(feature = "bedrock")]
 mod bedrock_block_map;
 mod block_definitions;
 mod bresenham;
@@ -97,15 +96,6 @@ fn run_cli() {
     // Validate arguments (path requirements differ between Java and Bedrock)
     if let Err(e) = args::validate_args(&args) {
         eprintln!("{}: {}", "Error".red().bold(), e);
-        std::process::exit(1);
-    }
-
-    // Early guard: --bedrock requires the bedrock cargo feature
-    if args.bedrock && !cfg!(feature = "bedrock") {
-        eprintln!(
-            "{}: The --bedrock flag requires the 'bedrock' feature. Rebuild with: cargo build --features bedrock",
-            "Error".red().bold()
-        );
         std::process::exit(1);
     }
 
