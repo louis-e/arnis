@@ -543,7 +543,7 @@ function initSettings() {
   });
   window.updateRotation = updateRotation;
 
-  // World format toggle (Java/Bedrock)
+  // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
 
   // Save path setting
@@ -676,31 +676,68 @@ function initSettings() {
   window.closeLicense = closeLicense;
 }
 
-// World format selection (Java/Bedrock)
+// World format selection (Java/Bedrock/Luanti)
 let selectedWorldFormat = 'java'; // Default to Java
 
+const VALID_FORMATS = ['java', 'bedrock', 'luanti'];
+
 function initWorldFormatToggle() {
-  // Load saved format preference
+  initLuantiExperimentalToggle();
+
   const savedFormat = localStorage.getItem('arnis-world-format');
-  if (savedFormat && (savedFormat === 'java' || savedFormat === 'bedrock')) {
+  if (savedFormat && VALID_FORMATS.includes(savedFormat)) {
     selectedWorldFormat = savedFormat;
   }
-  
-  // Apply the saved selection to UI
+  if (selectedWorldFormat === 'luanti' && !isLuantiEnabled()) {
+    selectedWorldFormat = 'java';
+  }
+
   updateFormatToggleUI(selectedWorldFormat);
 }
 
+function isLuantiEnabled() {
+  return localStorage.getItem('arnis-luanti-enabled') === 'true';
+}
+
+function initLuantiExperimentalToggle() {
+  const toggle = document.getElementById('enable-luanti-toggle');
+  const luantiBtn = document.getElementById('format-luanti');
+  if (!toggle || !luantiBtn) return;
+
+  const enabled = isLuantiEnabled();
+  toggle.checked = enabled;
+  luantiBtn.style.display = enabled ? '' : 'none';
+
+  toggle.addEventListener('change', () => {
+    const on = toggle.checked;
+    localStorage.setItem('arnis-luanti-enabled', on ? 'true' : 'false');
+    luantiBtn.style.display = on ? '' : 'none';
+    if (!on && selectedWorldFormat === 'luanti') {
+      setWorldFormat('java');
+    }
+  });
+}
+
 function setWorldFormat(format) {
-  if (format !== 'java' && format !== 'bedrock') return;
-  
+  if (!VALID_FORMATS.includes(format)) return;
+  if (format === 'luanti' && !isLuantiEnabled()) return;
+
   selectedWorldFormat = format;
   localStorage.setItem('arnis-world-format', format);
   updateFormatToggleUI(format);
 }
 
+function getEffectiveWorldFormat() {
+  if (selectedWorldFormat === 'luanti') {
+    return 'luanti_mineclonia';
+  }
+  return selectedWorldFormat;
+}
+
 function updateFormatToggleUI(format) {
   const javaBtn = document.getElementById('format-java');
   const bedrockBtn = document.getElementById('format-bedrock');
+  const luantiBtn = document.getElementById('format-luanti');
 
   const heightLimitToggle = document.getElementById('disable-height-limit-toggle');
 
@@ -710,13 +747,18 @@ function updateFormatToggleUI(format) {
     heightLimitToggle.parentElement.closest('.settings-row').style.opacity = '1';
   }
 
+  javaBtn.classList.remove('format-active');
+  bedrockBtn.classList.remove('format-active');
+  if (luantiBtn) luantiBtn.classList.remove('format-active');
+
   if (format === 'java') {
     javaBtn.classList.add('format-active');
-    bedrockBtn.classList.remove('format-active');
-  } else {
-    javaBtn.classList.remove('format-active');
+  } else if (format === 'bedrock') {
     bedrockBtn.classList.add('format-active');
     // Clear world path for bedrock (auto-generated)
+    worldPath = "";
+  } else if (format === 'luanti') {
+    if (luantiBtn) luantiBtn.classList.add('format-active');
     worldPath = "";
   }
 }
@@ -1359,7 +1401,7 @@ async function startGeneration() {
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
-        worldFormat: selectedWorldFormat,
+        worldFormat: getEffectiveWorldFormat(),
         rotationAngle: rotationAngle
     });
 

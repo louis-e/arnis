@@ -11,6 +11,7 @@
 
 mod common;
 mod java;
+mod luanti;
 
 #[cfg(feature = "bedrock")]
 pub mod bedrock;
@@ -26,6 +27,7 @@ use crate::block_definitions::*;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
+use crate::luanti_block_map::LuantiGame;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
@@ -92,6 +94,8 @@ pub enum WorldFormat {
     JavaAnvil,
     /// Bedrock Edition .mcworld format
     BedrockMcWorld,
+    /// Luanti/Minetest world (map.sqlite)
+    LuantiWorld,
 }
 
 /// Metadata saved with the world
@@ -138,6 +142,14 @@ pub struct WorldEditor<'a> {
     bedrock_spawn_point: Option<(i32, i32)>,
     #[cfg(feature = "bedrock")]
     bedrock_extend_height: bool,
+    /// Optional level name for Luanti worlds
+    luanti_level_name: Option<String>,
+    /// Optional spawn point for Luanti worlds (x, z coordinates)
+    luanti_spawn_point: Option<(i32, i32)>,
+    /// Ground level for Luanti worlds
+    luanti_ground_level: i32,
+    /// Luanti game pack
+    luanti_game: LuantiGame,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -160,6 +172,10 @@ impl<'a> WorldEditor<'a> {
             bedrock_spawn_point: None,
             #[cfg(feature = "bedrock")]
             bedrock_extend_height: false,
+            luanti_level_name: None,
+            luanti_spawn_point: None,
+            luanti_ground_level: -62,
+            luanti_game: LuantiGame::Mineclonia,
         }
     }
 
@@ -194,10 +210,44 @@ impl<'a> WorldEditor<'a> {
             bedrock_spawn_point,
             #[cfg(feature = "bedrock")]
             bedrock_extend_height,
+            luanti_level_name: None,
+            luanti_spawn_point: None,
+            luanti_ground_level: -62,
+            luanti_game: LuantiGame::Mineclonia,
         }
     }
 
-    /// Sets the ground reference for elevation-based block placement
+    /// Creates a new WorldEditor configured for Luanti output.
+    #[allow(dead_code)]
+    pub fn new_luanti(
+        world_dir: PathBuf,
+        xzbbox: &'a XZBBox,
+        llbbox: LLBBox,
+        game: LuantiGame,
+        level_name: Option<String>,
+        spawn_point: Option<(i32, i32)>,
+        ground_level: i32,
+    ) -> Self {
+        Self {
+            world_dir,
+            world: WorldToModify::default(),
+            xzbbox,
+            llbbox,
+            ground: None,
+            format: WorldFormat::LuantiWorld,
+            road_surface_overrides: FnvHashMap::default(),
+            #[cfg(feature = "bedrock")]
+            bedrock_level_name: None,
+            #[cfg(feature = "bedrock")]
+            bedrock_spawn_point: None,
+            #[cfg(feature = "bedrock")]
+            bedrock_extend_height: false,
+            luanti_level_name: level_name,
+            luanti_spawn_point: spawn_point,
+            luanti_ground_level: ground_level,
+            luanti_game: game,
+        }
+    }
     pub fn set_ground(&mut self, ground: Arc<Ground>) {
         self.ground = Some(ground);
     }
@@ -323,6 +373,7 @@ impl<'a> WorldEditor<'a> {
             crate::world_editor::WorldFormat::BedrockMcWorld => {
                 self.set_bedrock_banner_block_entity_absolute(x, y, z, base_color, patterns);
             }
+            crate::world_editor::WorldFormat::LuantiWorld => {}
         }
     }
 
@@ -1049,6 +1100,7 @@ impl<'a> WorldEditor<'a> {
             match self.format {
                 WorldFormat::JavaAnvil => "Java Edition (Anvil)",
                 WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
+                WorldFormat::LuantiWorld => "Luanti/Minetest",
             }
         );
 
@@ -1074,6 +1126,27 @@ impl<'a> WorldEditor<'a> {
                 }
             }
             WorldFormat::BedrockMcWorld => self.save_bedrock(),
+            WorldFormat::LuantiWorld => {
+                if let Err(e) = luanti::save_luanti_world(
+                    &self.world,
+                    &self.world_dir,
+                    self.xzbbox,
+                    &self.llbbox,
+                    self.luanti_game,
+                    self.luanti_level_name.as_deref(),
+                    self.luanti_spawn_point,
+                    self.luanti_ground_level,
+                ) {
+                    let user_msg = format!("Failed to save Luanti world: {}", e);
+                    eprintln!("{}", user_msg);
+                    #[cfg(feature = "gui")]
+                    {
+                        send_log(LogLevel::Error, &user_msg);
+                        emit_gui_error(&user_msg);
+                    }
+                    return Err(e);
+                }
+            }
         }
 
         Ok(())
