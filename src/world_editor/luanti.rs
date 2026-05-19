@@ -233,6 +233,7 @@ fn find_safe_spawn(
 
 /// Single-column spawn-Y lookup used when an explicit spawn (x, z) is given.
 /// Scans a wide vertical range so columns below ground_level (e.g. ocean) still resolve.
+/// Requires 2 blocks of air clearance above to avoid spawning embedded in a wall/roof.
 fn find_spawn_y_at_column(
     world: &WorldToModify,
     x: i32,
@@ -243,12 +244,17 @@ fn find_spawn_y_at_column(
     let non_ground = non_ground_blocks();
     let y_min = (ground_level - 100).max(MIN_Y);
     let y_max = ground_level + 400;
+    let clear = |b: Option<crate::block_definitions::Block>| -> bool {
+        b.is_none() || b == Some(AIR) || non_ground.contains(&b.unwrap())
+    };
     for y in (y_min..=y_max).rev() {
         if let Some(b) = world.get_block(x, y, z) {
             if b == AIR || non_ground.contains(&b) {
                 continue;
             }
-            return (x, y + 1, z);
+            if clear(world.get_block(x, y + 1, z)) && clear(world.get_block(x, y + 2, z)) {
+                return (x, y + 1, z);
+            }
         }
     }
     (x, ground_level + 3, z)
