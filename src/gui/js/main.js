@@ -702,16 +702,25 @@ function isLuantiEnabled() {
 function initLuantiExperimentalToggle() {
   const toggle = document.getElementById('enable-luanti-toggle');
   const luantiBtn = document.getElementById('format-luanti');
+  const bedrockBtn = document.getElementById('format-bedrock');
   if (!toggle || !luantiBtn) return;
+
+  const applyRightmost = (enabled) => {
+    luantiBtn.style.display = enabled ? '' : 'none';
+    luantiBtn.classList.toggle('format-toggle-btn--rightmost', enabled);
+    if (bedrockBtn) {
+      bedrockBtn.classList.toggle('format-toggle-btn--rightmost', !enabled);
+    }
+  };
 
   const enabled = isLuantiEnabled();
   toggle.checked = enabled;
-  luantiBtn.style.display = enabled ? '' : 'none';
+  applyRightmost(enabled);
 
   toggle.addEventListener('change', () => {
     const on = toggle.checked;
     localStorage.setItem('arnis-luanti-enabled', on ? 'true' : 'false');
-    luantiBtn.style.display = on ? '' : 'none';
+    applyRightmost(on);
     if (!on && selectedWorldFormat === 'luanti') {
       setWorldFormat('java');
     }
