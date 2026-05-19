@@ -222,46 +222,32 @@ async function checkForUpdates() {
     ]);
     latestReleaseInfo = info;
     currentPlatform = platform || "unknown";
-    if (!info) return;
+    if (!info || !info.isNewer) return;
 
-    const seen = localStorage.getItem(SEEN_VERSION_KEY);
-
-    if (info.isNewer) {
-      const footer = document.querySelector(".footer");
-      const updateMessage = document.createElement("span");
-      updateMessage.setAttribute("role", "button");
-      updateMessage.setAttribute("tabindex", "0");
-      updateMessage.style.color = "#fecc44";
-      updateMessage.style.marginTop = "-5px";
-      updateMessage.style.fontSize = "0.95em";
-      updateMessage.style.display = "block";
-      updateMessage.style.cursor = "pointer";
-      updateMessage.addEventListener("click", () => openUpdateModal());
-      updateMessage.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openUpdateModal();
-        }
-      });
-      localizeElement(window.localization, { element: updateMessage }, "new_version_available");
-      footer.style.marginTop = "10px";
-      footer.appendChild(updateMessage);
-
-      // Auto-open once per new remote version; "seen" key records the last auto-shown version.
-      if (seen !== info.remoteVersion) {
+    const footer = document.querySelector(".footer");
+    const updateMessage = document.createElement("span");
+    updateMessage.setAttribute("role", "button");
+    updateMessage.setAttribute("tabindex", "0");
+    updateMessage.style.color = "#fecc44";
+    updateMessage.style.marginTop = "-5px";
+    updateMessage.style.fontSize = "0.95em";
+    updateMessage.style.display = "block";
+    updateMessage.style.cursor = "pointer";
+    updateMessage.addEventListener("click", () => openUpdateModal());
+    updateMessage.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
         openUpdateModal();
       }
-    } else if (
-      info.localVersion &&
-      info.localVersion === info.remoteVersion &&
-      seen !== info.localVersion
-    ) {
-      // First startup on a fresh install or after an update: show the release
-      // notes for the current version once, then record the local version as seen.
-      openUpdateModal({ showDownload: false });
-      try {
-        localStorage.setItem(SEEN_VERSION_KEY, info.localVersion);
-      } catch (_) {}
+    });
+    localizeElement(window.localization, { element: updateMessage }, "new_version_available");
+    footer.style.marginTop = "10px";
+    footer.appendChild(updateMessage);
+
+    // Auto-open once per new remote version; "seen" key records the last auto-shown version.
+    const seen = localStorage.getItem(SEEN_VERSION_KEY);
+    if (seen !== info.remoteVersion) {
+      openUpdateModal();
     }
   } catch (error) {
     console.error("Failed to check for updates: ", error);
