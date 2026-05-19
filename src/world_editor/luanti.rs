@@ -3,7 +3,7 @@ use crate::coordinate_system::cartesian::XZBBox;
 use crate::coordinate_system::geographic::LLBBox;
 use crate::luanti_block_map::{to_luanti_node, LuantiGame};
 use crate::progress::emit_gui_progress_update;
-use crate::world_editor::common::WorldToModify;
+use crate::world_editor::common::{WorldToModify, MIN_Y};
 use colored::Colorize;
 use fastnbt::Value;
 use rayon::prelude::*;
@@ -167,17 +167,10 @@ fn serialize_mapblock(
 }
 
 /// Find a spawn position that is outdoors on solid ground.
-/// Spirals outward from (center_x, center_z) looking for a column where
-/// there is solid ground (not trees/leaves) with air above.
-fn find_safe_spawn(
-    world: &WorldToModify,
-    center_x: i32,
-    center_z: i32,
-    ground_level: i32,
-) -> (i32, i32, i32) {
+/// Trees, leaves and other plants that shouldn't be a spawn surface.
+fn non_ground_blocks() -> [crate::block_definitions::Block; 12] {
     use crate::block_definitions::*;
-    // Blocks to avoid spawning on (trees, leaves, vegetation)
-    let non_ground = [
+    [
         OAK_LOG,
         OAK_LEAVES,
         BIRCH_LOG,
@@ -190,30 +183,34 @@ fn find_safe_spawn(
         ACACIA_LEAVES,
         SPRUCE_LOG,
         SPRUCE_LEAVES,
-    ];
+    ]
+}
 
-    // Scan range: from ground_level up to ground_level + 400 to cover elevation
+/// Spirals outward from (center_x, center_z) looking for a column where
+/// there is solid ground (not trees/leaves) with air above.
+fn find_safe_spawn(
+    world: &WorldToModify,
+    center_x: i32,
+    center_z: i32,
+    ground_level: i32,
+) -> (i32, i32, i32) {
+    use crate::block_definitions::*;
+    let non_ground = non_ground_blocks();
     let y_max = ground_level + 400;
     for radius in 0i32..=40 {
         for dx in -radius..=radius {
             for dz in -radius..=radius {
                 if dx.abs() != radius && dz.abs() != radius {
-                    continue; // only check perimeter
+                    continue;
                 }
                 let x = center_x + dx;
                 let z = center_z + dz;
-                // Scan from top down to find the highest solid block
                 for y in (ground_level..=y_max).rev() {
                     let block = world.get_block(x, y, z);
                     if let Some(b) = block {
-                        if b == AIR {
+                        if b == AIR || non_ground.contains(&b) {
                             continue;
                         }
-                        // Skip tree/leaf blocks — keep scanning down
-                        if non_ground.contains(&b) {
-                            continue;
-                        }
-                        // Found solid ground — check air above
                         let above1 = world.get_block(x, y + 1, z);
                         let above2 = world.get_block(x, y + 2, z);
                         if (above1.is_none()
@@ -225,17 +222,17 @@ fn find_safe_spawn(
                         {
                             return (x, y + 1, z);
                         }
-                        break; // solid non-tree block but enclosed, try next column
+                        break;
                     }
                 }
             }
         }
     }
-    // Fallback: center, above ground
     (center_x, ground_level + 3, center_z)
 }
 
 /// Single-column spawn-Y lookup used when an explicit spawn (x, z) is given.
+/// Scans a wide vertical range so columns below ground_level (e.g. ocean) still resolve.
 fn find_spawn_y_at_column(
     world: &WorldToModify,
     x: i32,
@@ -243,21 +240,10 @@ fn find_spawn_y_at_column(
     ground_level: i32,
 ) -> (i32, i32, i32) {
     use crate::block_definitions::*;
-    let non_ground = [
-        OAK_LOG,
-        OAK_LEAVES,
-        BIRCH_LOG,
-        BIRCH_LEAVES,
-        DARK_OAK_LOG,
-        DARK_OAK_LEAVES,
-        JUNGLE_LOG,
-        JUNGLE_LEAVES,
-        ACACIA_LOG,
-        ACACIA_LEAVES,
-        SPRUCE_LOG,
-        SPRUCE_LEAVES,
-    ];
-    for y in (ground_level..=ground_level + 400).rev() {
+    let non_ground = non_ground_blocks();
+    let y_min = (ground_level - 100).max(MIN_Y);
+    let y_max = ground_level + 400;
+    for y in (y_min..=y_max).rev() {
         if let Some(b) = world.get_block(x, y, z) {
             if b == AIR || non_ground.contains(&b) {
                 continue;
@@ -429,6 +415,11 @@ fn write_worldmod(
         "-- (overrides game-specific spawn handlers like Mineclonia's)"
     )?;
     writeln!(f, "minetest.register_on_joinplayer(function(player)")?;
+    writeln!(f, "    local name = player:get_player_name()")?;
+    writeln!(f, "    local privs = minetest.get_player_privs(name)")?;
+    writeln!(f, "    privs.fast = true")?;
+    writeln!(f, "    privs.fly = true")?;
+    writeln!(f, "    minetest.set_player_privs(name, privs)")?;
     writeln!(f, "    minetest.after(0.5, function()")?;
     writeln!(f, "        if player:is_player() then")?;
     writeln!(f, "            player:set_pos(SPAWN)")?;
@@ -443,17 +434,6 @@ fn write_worldmod(
     writeln!(f, "        end")?;
     writeln!(f, "    end)")?;
     writeln!(f, "    return true")?;
-    writeln!(f, "end)")?;
-    writeln!(f)?;
-
-    // Grant fast and fly privileges to all joining players
-    writeln!(f, "-- Grant fast and fly privileges")?;
-    writeln!(f, "minetest.register_on_joinplayer(function(player)")?;
-    writeln!(f, "    local name = player:get_player_name()")?;
-    writeln!(f, "    local privs = minetest.get_player_privs(name)")?;
-    writeln!(f, "    privs.fast = true")?;
-    writeln!(f, "    privs.fly = true")?;
-    writeln!(f, "    minetest.set_player_privs(name, privs)")?;
     writeln!(f, "end)")?;
     writeln!(f)?;
 

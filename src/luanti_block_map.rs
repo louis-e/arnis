@@ -18,17 +18,6 @@ pub enum LuantiGame {
 }
 
 impl LuantiGame {
-    #[allow(dead_code)]
-    pub fn from_str(s: &str) -> Result<Self, String> {
-        match s {
-            "mineclonia" => Ok(Self::Mineclonia),
-            _ => Err(format!(
-                "Unknown Luanti game: '{}'. Supported: mineclonia",
-                s
-            )),
-        }
-    }
-
     /// Returns the gameid string for world.mt
     pub fn game_id(&self) -> &'static str {
         match self {
