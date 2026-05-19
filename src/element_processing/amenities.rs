@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::get_nearest_road_block;
+use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
@@ -96,7 +97,13 @@ pub fn generate_amenities(
                 }
             }
             "bicycle_parking" => {
-                let ground_block: Block = OAK_PLANKS;
+                let mut ground_block: Block = OAK_PLANKS;
+                if let Some(surface) = element.tags().get("surface") {
+                    if let Some(blocks) = get_blocks_for_surface(surface) {
+                        ground_block = blocks[0];
+                    }
+                }
+
                 let roof_block: Block = STONE_BLOCK_SLAB;
 
                 // Use pre-computed flood fill from cache
@@ -268,7 +275,12 @@ pub fn generate_amenities(
                 // Process parking areas
                 let mut previous_node: Option<XZPoint> = None;
 
-                let block_type = GRAY_CONCRETE;
+                let mut block_type = GRAY_CONCRETE;
+                if let Some(surface) = element.tags().get("surface") {
+                    if let Some(blocks) = get_blocks_for_surface(surface) {
+                        block_type = blocks[0];
+                    }
+                }
 
                 for node in element.nodes() {
                     let pt: XZPoint = node.xz();

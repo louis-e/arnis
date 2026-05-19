@@ -967,7 +967,7 @@ fn generate_highways_internal(
                                     offset
                                 };
                                 if register_ground_override {
-                                    editor.register_road_surface_y(set_x, set_z, cell_y);
+                                    editor.register_surface_y(set_x, set_z, cell_y);
                                 }
 
                                 // Zebra crossing logic. Background uses the

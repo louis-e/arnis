@@ -129,7 +129,7 @@ pub struct WorldEditor<'a> {
     ///
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
-    road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    surface_overrides: FnvHashMap<(i32, i32), i32>,
     /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
     #[cfg(feature = "bedrock")]
     bedrock_level_name: Option<String>,
@@ -153,7 +153,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format: WorldFormat::JavaAnvil,
-            road_surface_overrides: FnvHashMap::default(),
+            surface_overrides: FnvHashMap::default(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name: None,
             #[cfg(feature = "bedrock")]
@@ -187,7 +187,7 @@ impl<'a> WorldEditor<'a> {
             llbbox,
             ground: None,
             format,
-            road_surface_overrides: FnvHashMap::default(),
+            surface_overrides: FnvHashMap::default(),
             #[cfg(feature = "bedrock")]
             bedrock_level_name,
             #[cfg(feature = "bedrock")]
@@ -232,8 +232,8 @@ impl<'a> WorldEditor<'a> {
     /// a hash + bucket-probe per call even though the map is empty.
     #[inline(always)]
     pub fn get_ground_level(&self, x: i32, z: i32) -> i32 {
-        if !self.road_surface_overrides.is_empty() {
-            if let Some(&y) = self.road_surface_overrides.get(&(x, z)) {
+        if !self.surface_overrides.is_empty() {
+            if let Some(&y) = self.surface_overrides.get(&(x, z)) {
                 return y;
             }
         }
@@ -248,7 +248,7 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Register a flattened ground Y for a road cell. See
-    /// `road_surface_overrides` for the full rationale; in short: wide roads
+    /// `surface_overrides` for the full rationale; in short: wide roads
     /// choose a single Y per cross-section so all lateral blocks sit flat,
     /// and the override lets the later ground pass fill below / cut above to
     /// match, yielding natural embankments/cuts instead of floating strips.
@@ -257,8 +257,8 @@ impl<'a> WorldEditor<'a> {
     /// cell come from overlapping stamps of adjacent centerline points whose
     /// target Ys differ by at most ~1 block.
     #[inline]
-    pub fn register_road_surface_y(&mut self, x: i32, z: i32, y: i32) {
-        self.road_surface_overrides.insert((x, z), y);
+    pub fn register_surface_y(&mut self, x: i32, z: i32, y: i32) {
+        self.surface_overrides.insert((x, z), y);
     }
 
     /// Get the water-appropriate Y level at a world coordinate.

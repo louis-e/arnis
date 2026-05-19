@@ -1149,27 +1149,31 @@ fn calculate_start_y_offset(
     element: &ProcessedWay,
     args: &Args,
     min_level_offset: i32,
+    flood_fill_cache: &FloodFillCache,
 ) -> i32 {
     if args.terrain {
-        let building_points: Vec<XZPoint> = element
-            .nodes
-            .iter()
-            .map(|n| {
-                XZPoint::new(
-                    n.x - editor.get_min_coords().0,
-                    n.z - editor.get_min_coords().1,
-                )
-            })
-            .collect();
+        let min_coords = editor.get_min_coords();
+        let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
+        let mut total_height: i64 = 0;
+        let mut count: i64 = 0;
 
-        let mut max_ground_level = args.ground_level;
-        for point in &building_points {
-            if let Some(ground) = editor.get_ground() {
-                let level = ground.level(*point);
-                max_ground_level = max_ground_level.max(level);
-            }
+        for &(x, z) in filled_area.iter() {
+            let point = XZPoint::new(x - min_coords.0, z - min_coords.1);
+            let h = if let Some(ground) = editor.get_ground() {
+                ground.level(point)
+            } else {
+                args.ground_level
+            };
+            total_height += h as i64;
+            count += 1;
         }
-        max_ground_level + min_level_offset
+
+        if count == 0 {
+            args.ground_level + min_level_offset
+        } else {
+            // Average ground height + user‑specified minimum level offset
+            (total_height / count) as i32 + min_level_offset
+        }
     } else {
         min_level_offset
     }
@@ -1537,6 +1541,7 @@ fn generate_roof_only_structure(
     element: &ProcessedWay,
     cached_floor_area: &[(i32, i32)],
     args: &Args,
+    flood_fill_cache: &FloodFillCache,
 ) {
     let scale_factor = args.scale;
     let abs_terrain_offset = if !args.terrain { args.ground_level } else { 0 };
@@ -1570,7 +1575,8 @@ fn generate_roof_only_structure(
         0
     };
 
-    let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
+    let start_y_offset =
+        calculate_start_y_offset(editor, element, args, min_level_offset, flood_fill_cache);
 
     // Determine roof thickness / height.
     let roof_thickness: i32 = if let Some(h) = element.tags.get("height") {
@@ -3711,6 +3717,12 @@ fn generate_floors_and_ceilings(
     building_passages: &CoordinateBitmap,
 ) -> HashSet<(i32, i32)> {
     let mut processed_points: HashSet<(i32, i32)> = HashSet::new();
+    let floor_y_abs = config.start_y_offset + config.abs_terrain_offset;
+
+    for &(x, z) in cached_floor_area {
+        editor.register_surface_y(x, z, floor_y_abs - 1);
+    }
+
     let ceiling_light_block = if config.is_abandoned_building {
         COBWEB
     } else {
@@ -3993,7 +4005,8 @@ pub fn generate_buildings(
     }
 
     // Calculate start Y offset
-    let start_y_offset = calculate_start_y_offset(editor, element, args, min_level_offset);
+    let start_y_offset =
+        calculate_start_y_offset(editor, element, args, min_level_offset, flood_fill_cache);
 
     // Calculate building bounds
     let bounds = BuildingBounds::from_nodes(&element.nodes);
@@ -4017,7 +4030,7 @@ pub fn generate_buildings(
     // with building:part="roof" (but no "building" tag) would otherwise fall
     // through to the full building pipeline and render as small boxy buildings.
     if element.tags.get("building:part").map(|v| v.as_str()) == Some("roof") {
-        generate_roof_only_structure(editor, element, &cached_floor_area, args);
+        generate_roof_only_structure(editor, element, &cached_floor_area, args, flood_fill_cache);
         return;
     }
 
@@ -4035,7 +4048,13 @@ pub fn generate_buildings(
                 return;
             }
             "roof" => {
-                generate_roof_only_structure(editor, element, &cached_floor_area, args);
+                generate_roof_only_structure(
+                    editor,
+                    element,
+                    &cached_floor_area,
+                    args,
+                    flood_fill_cache,
+                );
                 return;
             }
             "bridge" => {
@@ -4178,6 +4197,49 @@ pub fn generate_buildings(
         has_sloped_roof,
         effective_passages,
     );
+
+    if args.terrain {
+        let min_coords = editor.get_min_coords();
+        let floor_abs = config.start_y_offset + config.abs_terrain_offset;
+        let top_clear_abs = floor_abs + config.building_height;
+
+        let mut foundation_area: HashSet<(i32, i32)> = cached_floor_area.iter().copied().collect();
+        foundation_area.extend(wall_outline.iter().copied());
+
+        for &(x, z) in &foundation_area {
+            let point = XZPoint::new(x - min_coords.0, z - min_coords.1);
+            let ground_y = if let Some(ground) = editor.get_ground() {
+                ground.level(point)
+            } else {
+                args.ground_level
+            };
+            if ground_y < floor_abs {
+                for y in ground_y..floor_abs {
+                    editor.set_block_absolute(STONE, x, y, z, None, None);
+                }
+            }
+        }
+
+        for &(x, z) in &cached_floor_area {
+            if wall_outline.contains(&(x, z)) {
+                continue;
+            }
+            let point = XZPoint::new(x - min_coords.0, z - min_coords.1);
+            let ground_y = if let Some(ground) = editor.get_ground() {
+                ground.level(point)
+            } else {
+                args.ground_level
+            };
+
+            let clear_start = floor_abs + 1;
+            let clear_end = top_clear_abs;
+
+            let actual_start = clear_start.max(ground_y);
+            for y in actual_start..clear_end {
+                editor.set_block_absolute(AIR, x, y, z, None, None);
+            }
+        }
+    }
 
     if let Some(holes) = hole_polygons {
         for hole in holes {
@@ -6349,22 +6411,27 @@ fn generate_pyramidal_roof(
         &roof_heights,
         config,
         |x, z, h| {
-            let north_h = roof_heights
-                .get(&(x, z - 1))
-                .copied()
-                .unwrap_or(config.base_height);
-            let south_h = roof_heights
-                .get(&(x, z + 1))
-                .copied()
-                .unwrap_or(config.base_height);
-            let west_h = roof_heights
-                .get(&(x - 1, z))
-                .copied()
-                .unwrap_or(config.base_height);
-            let east_h = roof_heights
-                .get(&(x + 1, z))
-                .copied()
-                .unwrap_or(config.base_height);
+            let north_h = if footprint.contains(&(x, z - 1)) {
+                roof_heights[&(x, z - 1)]
+            } else {
+                h - 1
+            };
+            let south_h = if footprint.contains(&(x, z + 1)) {
+                roof_heights[&(x, z + 1)]
+            } else {
+                h - 1
+            };
+            let west_h = if footprint.contains(&(x - 1, z)) {
+                roof_heights[&(x - 1, z)]
+            } else {
+                h - 1
+            };
+            let east_h = if footprint.contains(&(x + 1, z)) {
+                roof_heights[&(x + 1, z)]
+            } else {
+                h - 1
+            };
+
             let lower_n = north_h < h;
             let lower_s = south_h < h;
             let lower_w = west_h < h;
@@ -6403,6 +6470,7 @@ fn generate_pyramidal_roof(
                 }
             }
 
+            // Обычный скат в сторону понижения
             if lower_n {
                 create_stair_with_properties(
                     stair_block_material,
