@@ -51,6 +51,18 @@ Land cover classification data provided by the <a href="https://esa-worldcover.o
 Bedrock Edition world format support uses the <a href="https://github.com/bedrock-crustaceans/bedrock-rs" style="color: inherit;" target="_blank">bedrock-rs</a> library, licensed under the Apache License 2.0.
 <br><br>
 
+<b>MC2MT:</b><br>
+The Luanti block mapping (<code>src/luanti_block_map.rs</code>) is derived from <a href="https://github.com/rollerozxa/MC2MT" style="color: inherit;" target="_blank">MC2MT</a> by rollerozxa. Licensed under <a href="https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html" style="color: inherit;" target="_blank">LGPL-2.1-or-later</a>.
+<br><br>
+
+<b>Mineclonia:</b><br>
+Generated Luanti worlds use the <a href="https://content.luanti.org/packages/Mineclonia/mineclonia/" style="color: inherit;" target="_blank">Mineclonia</a> game pack for Luanti. Mineclonia is independent of and not associated with Mojang or Microsoft.
+<br><br>
+
+<b>Luanti (formerly Minetest):</b><br>
+Luanti world export targets the <a href="https://www.luanti.org" style="color: inherit;" target="_blank">Luanti</a> engine, licensed under <a href="https://github.com/luanti-org/luanti/blob/master/LICENSE.txt" style="color: inherit;" target="_blank">LGPL-2.1+</a>.
+<br><br>
+
 <p><b>Third-Party JavaScript Libraries:</b></p>
 <p>The map picker bundles the following libraries:</p>
 

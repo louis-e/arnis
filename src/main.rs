@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
-#[cfg(feature = "bedrock")]
 mod bedrock_block_map;
 mod block_definitions;
 mod bresenham;
@@ -20,6 +19,7 @@ mod ground_generation;
 mod land_cover;
 mod land_cover_bridge_repair;
 mod land_cover_osm_water_override;
+mod luanti_block_map;
 mod map_renderer;
 mod map_transformation;
 mod models_3d;
@@ -99,18 +99,11 @@ fn run_cli() {
         std::process::exit(1);
     }
 
-    // Early guard: --bedrock requires the bedrock cargo feature
-    if args.bedrock && !cfg!(feature = "bedrock") {
-        eprintln!(
-            "{}: The --bedrock flag requires the 'bedrock' feature. Rebuild with: cargo build --features bedrock",
-            "Error".red().bold()
-        );
-        std::process::exit(1);
-    }
-
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld
+    } else if args.luanti {
+        world_editor::WorldFormat::LuantiWorld
     } else {
         world_editor::WorldFormat::JavaAnvil
     };
@@ -124,6 +117,26 @@ fn run_cli() {
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
         let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
         (output_path, Some(lvl_name))
+    } else if args.luanti {
+        let base_dir = args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_luanti_worlds_directory);
+        let _ = std::fs::create_dir_all(&base_dir);
+        let mut counter = 1;
+        let world_name = loop {
+            let candidate = format!("Arnis Luanti World {counter}");
+            if !base_dir.join(&candidate).exists() {
+                break candidate;
+            }
+            counter += 1;
+        };
+        let world_path = base_dir.join(&world_name);
+        println!(
+            "Creating Luanti world at: {}",
+            world_path.display().to_string().bright_white().bold()
+        );
+        (world_path, Some(world_name))
     } else {
         // Java: create a new world in the provided output directory
         let base_dir = args.path.clone().unwrap();
@@ -284,11 +297,19 @@ fn run_cli() {
     });
 
     // Build generation options
+    let luanti_game = if args.luanti {
+        Some(luanti_block_map::LuantiGame::Mineclonia)
+    } else {
+        None
+    };
+
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
         spawn_point,
+        luanti_game,
+        ground_level: args.ground_level,
     };
 
     // Generate world

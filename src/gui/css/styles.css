@@ -310,7 +310,7 @@ button:hover {
   border-radius: 0 0 0 8px;
 }
 
-.format-toggle-btn:last-child {
+.format-toggle-btn.format-toggle-btn--rightmost {
   border-radius: 0 0 8px 0;
   border-left: 1px solid rgba(255, 255, 255, 0.15);
 }
@@ -653,6 +653,10 @@ button:hover {
 }
 
 #disable-height-limit-toggle {
+  accent-color: #fecc44;
+}
+
+#enable-luanti-toggle {
   accent-color: #fecc44;
 }
 

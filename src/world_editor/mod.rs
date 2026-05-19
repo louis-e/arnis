@@ -7,25 +7,24 @@
 //!
 //! - `common` - Shared data structures for world modification
 //! - `java` - Java Edition Anvil format saving
-//! - `bedrock` - Bedrock Edition .mcworld format saving (behind `bedrock` feature)
+//! - `bedrock` - Bedrock Edition .mcworld format saving
 
 mod common;
 mod java;
+mod luanti;
 
-#[cfg(feature = "bedrock")]
 pub mod bedrock;
 
-// Re-export common types used internally
 pub(crate) use common::WorldToModify;
 pub use common::MIN_Y;
 
-#[cfg(feature = "bedrock")]
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
 use crate::block_definitions::*;
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
+use crate::luanti_block_map::LuantiGame;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
@@ -92,6 +91,8 @@ pub enum WorldFormat {
     JavaAnvil,
     /// Bedrock Edition .mcworld format
     BedrockMcWorld,
+    /// Luanti/Minetest world (map.sqlite)
+    LuantiWorld,
 }
 
 /// Metadata saved with the world
@@ -130,14 +131,17 @@ pub struct WorldEditor<'a> {
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
-    /// Optional level name for Bedrock worlds (e.g., "Arnis World: New York City")
-    #[cfg(feature = "bedrock")]
     bedrock_level_name: Option<String>,
-    /// Optional spawn point for Bedrock worlds (x, z coordinates)
-    #[cfg(feature = "bedrock")]
     bedrock_spawn_point: Option<(i32, i32)>,
-    #[cfg(feature = "bedrock")]
     bedrock_extend_height: bool,
+    /// Optional level name for Luanti worlds
+    luanti_level_name: Option<String>,
+    /// Optional spawn point for Luanti worlds (x, z coordinates)
+    luanti_spawn_point: Option<(i32, i32)>,
+    /// Ground level for Luanti worlds
+    luanti_ground_level: i32,
+    /// Luanti game pack
+    luanti_game: LuantiGame,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -154,31 +158,26 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
-            #[cfg(feature = "bedrock")]
             bedrock_level_name: None,
-            #[cfg(feature = "bedrock")]
             bedrock_spawn_point: None,
-            #[cfg(feature = "bedrock")]
             bedrock_extend_height: false,
+            luanti_level_name: None,
+            luanti_spawn_point: None,
+            luanti_ground_level: -62,
+            luanti_game: LuantiGame::Mineclonia,
         }
     }
 
     /// Creates a new WorldEditor with a specific format and optional level name.
-    ///
-    /// Used by GUI mode to support both Java and Bedrock formats.
     #[allow(dead_code)]
     pub fn new_with_format_and_name(
         world_dir: PathBuf,
         xzbbox: &'a XZBBox,
         llbbox: LLBBox,
         format: WorldFormat,
-        #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_level_name: Option<
-            String,
-        >,
-        #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_spawn_point: Option<
-            (i32, i32),
-        >,
-        #[cfg_attr(not(feature = "bedrock"), allow(unused_variables))] bedrock_extend_height: bool,
+        bedrock_level_name: Option<String>,
+        bedrock_spawn_point: Option<(i32, i32)>,
+        bedrock_extend_height: bool,
     ) -> Self {
         Self {
             world_dir,
@@ -188,12 +187,42 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
-            #[cfg(feature = "bedrock")]
             bedrock_level_name,
-            #[cfg(feature = "bedrock")]
             bedrock_spawn_point,
-            #[cfg(feature = "bedrock")]
             bedrock_extend_height,
+            luanti_level_name: None,
+            luanti_spawn_point: None,
+            luanti_ground_level: -62,
+            luanti_game: LuantiGame::Mineclonia,
+        }
+    }
+
+    /// Creates a new WorldEditor configured for Luanti output.
+    #[allow(dead_code)]
+    pub fn new_luanti(
+        world_dir: PathBuf,
+        xzbbox: &'a XZBBox,
+        llbbox: LLBBox,
+        game: LuantiGame,
+        level_name: Option<String>,
+        spawn_point: Option<(i32, i32)>,
+        ground_level: i32,
+    ) -> Self {
+        Self {
+            world_dir,
+            world: WorldToModify::default(),
+            xzbbox,
+            llbbox,
+            ground: None,
+            format: WorldFormat::LuantiWorld,
+            road_surface_overrides: FnvHashMap::default(),
+            bedrock_level_name: None,
+            bedrock_spawn_point: None,
+            bedrock_extend_height: false,
+            luanti_level_name: level_name,
+            luanti_spawn_point: spawn_point,
+            luanti_ground_level: ground_level,
+            luanti_game: game,
         }
     }
 
@@ -323,6 +352,7 @@ impl<'a> WorldEditor<'a> {
             crate::world_editor::WorldFormat::BedrockMcWorld => {
                 self.set_bedrock_banner_block_entity_absolute(x, y, z, base_color, patterns);
             }
+            crate::world_editor::WorldFormat::LuantiWorld => {}
         }
     }
 
@@ -1049,6 +1079,7 @@ impl<'a> WorldEditor<'a> {
             match self.format {
                 WorldFormat::JavaAnvil => "Java Edition (Anvil)",
                 WorldFormat::BedrockMcWorld => "Bedrock Edition (.mcworld)",
+                WorldFormat::LuantiWorld => "Luanti/Minetest",
             }
         );
 
@@ -1074,42 +1105,46 @@ impl<'a> WorldEditor<'a> {
                 }
             }
             WorldFormat::BedrockMcWorld => self.save_bedrock(),
+            WorldFormat::LuantiWorld => {
+                if let Err(e) = luanti::save_luanti_world(
+                    &self.world,
+                    &self.world_dir,
+                    self.xzbbox,
+                    &self.llbbox,
+                    self.luanti_game,
+                    self.luanti_level_name.as_deref(),
+                    self.luanti_spawn_point,
+                    self.luanti_ground_level,
+                ) {
+                    let user_msg = format!("Failed to save Luanti world: {}", e);
+                    eprintln!("{}", user_msg);
+                    #[cfg(feature = "gui")]
+                    {
+                        send_log(LogLevel::Error, &user_msg);
+                        emit_gui_error(&user_msg);
+                    }
+                    return Err(e);
+                }
+            }
         }
 
         Ok(())
     }
 
-    #[allow(unreachable_code)]
     fn save_bedrock(&mut self) {
         println!("{} Saving Bedrock world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving Bedrock world...");
 
-        #[cfg(feature = "bedrock")]
-        {
-            if let Err(error) = self.save_bedrock_internal() {
-                eprintln!("Failed to save Bedrock world: {error}");
-                #[cfg(feature = "gui")]
-                send_log(
-                    LogLevel::Error,
-                    &format!("Failed to save Bedrock world: {error}"),
-                );
-            }
-        }
-
-        #[cfg(not(feature = "bedrock"))]
-        {
-            eprintln!(
-                "Bedrock output requested but the 'bedrock' feature is not enabled at build time."
-            );
+        if let Err(error) = self.save_bedrock_internal() {
+            eprintln!("Failed to save Bedrock world: {error}");
             #[cfg(feature = "gui")]
             send_log(
                 LogLevel::Error,
-                "Bedrock output requested but the 'bedrock' feature is not enabled at build time.",
+                &format!("Failed to save Bedrock world: {error}"),
             );
         }
     }
 
-    #[cfg(feature = "bedrock")]
     fn save_bedrock_internal(&mut self) -> Result<(), BedrockSaveError> {
         // Use the stored level name if available, otherwise extract from path
         let level_name = self.bedrock_level_name.clone().unwrap_or_else(|| {
