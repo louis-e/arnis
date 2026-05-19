@@ -248,6 +248,8 @@ impl<'a> WorldEditor<'a> {
             luanti_game: game,
         }
     }
+
+    /// Sets the ground reference for elevation-based block placement
     pub fn set_ground(&mut self, ground: Arc<Ground>) {
         self.ground = Some(ground);
     }

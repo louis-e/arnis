@@ -40,7 +40,7 @@ fn serialize_mapblock(
     block_z: i32,
     section: &crate::world_editor::common::SectionToModify,
     game: LuantiGame,
-) -> (i64, Vec<u8>) {
+) -> std::io::Result<(i64, Vec<u8>)> {
     // Build name-ID mapping: collect unique node names in this mapblock
     let mut name_to_local_id: std::collections::HashMap<&'static str, u16> =
         std::collections::HashMap::new();
@@ -157,17 +157,13 @@ fn serialize_mapblock(
     buf.push(10); // data length per timer (2 + 4 + 4)
     buf.extend_from_slice(&0u16.to_be_bytes()); // count = 0
 
-    // Compress the entire buffer with zstd
-    let compressed =
-        zstd::bulk::compress(&buf, 3).expect("zstd compression failed for mapblock data");
-
-    // Final blob: version byte + compressed data
+    let compressed = zstd::bulk::compress(&buf, 3)?;
     let mut blob = Vec::with_capacity(1 + compressed.len());
     blob.push(MAP_FORMAT_VERSION);
     blob.extend_from_slice(&compressed);
 
     let pos = encode_block_pos(block_x, block_y, block_z);
-    (pos, blob)
+    Ok((pos, blob))
 }
 
 /// Find a spawn position that is outdoors on solid ground.
@@ -239,6 +235,39 @@ fn find_safe_spawn(
     (center_x, ground_level + 3, center_z)
 }
 
+/// Single-column spawn-Y lookup used when an explicit spawn (x, z) is given.
+fn find_spawn_y_at_column(
+    world: &WorldToModify,
+    x: i32,
+    z: i32,
+    ground_level: i32,
+) -> (i32, i32, i32) {
+    use crate::block_definitions::*;
+    let non_ground = [
+        OAK_LOG,
+        OAK_LEAVES,
+        BIRCH_LOG,
+        BIRCH_LEAVES,
+        DARK_OAK_LOG,
+        DARK_OAK_LEAVES,
+        JUNGLE_LOG,
+        JUNGLE_LEAVES,
+        ACACIA_LOG,
+        ACACIA_LEAVES,
+        SPRUCE_LOG,
+        SPRUCE_LEAVES,
+    ];
+    for y in (ground_level..=ground_level + 400).rev() {
+        if let Some(b) = world.get_block(x, y, z) {
+            if b == AIR || non_ground.contains(&b) {
+                continue;
+            }
+            return (x, y + 1, z);
+        }
+    }
+    (x, ground_level + 3, z)
+}
+
 /// Creates all Luanti world files and writes the map database.
 #[allow(clippy::too_many_arguments)]
 pub fn save_luanti_world(
@@ -257,15 +286,14 @@ pub fn save_luanti_world(
     // Create world directory if needed
     fs::create_dir_all(world_dir)?;
 
-    // Determine spawn coordinates — find an outdoor position
-    let (base_x, base_z) = if let Some((sx, sz)) = spawn_point {
-        (sx, sz)
+    let (spawn_x, spawn_y, spawn_z) = if let Some((sx, sz)) = spawn_point {
+        // Explicit spawn: only scan the single column, no perimeter search.
+        find_spawn_y_at_column(world, sx, sz, ground_level)
     } else {
         let cx = (xzbbox.min_x() + xzbbox.max_x()) / 2;
         let cz = (xzbbox.min_z() + xzbbox.max_z()) / 2;
-        (cx, cz)
+        find_safe_spawn(world, cx, cz, ground_level)
     };
-    let (spawn_x, spawn_y, spawn_z) = find_safe_spawn(world, base_x, base_z, ground_level);
 
     // Convert spawn Z from internal (Z+ = South) to Luanti (Z+ = North)
     let spawn_z = -spawn_z - 1;
@@ -497,7 +525,7 @@ fn write_worldmod(
 
 /// Serialize an air-only mapblock with full sunlight.
 /// Used to place sky blocks above the world so the engine can propagate sun downward.
-fn serialize_air_mapblock(game: LuantiGame) -> Vec<u8> {
+fn serialize_air_mapblock(game: LuantiGame) -> std::io::Result<Vec<u8>> {
     let air_name = to_luanti_node(AIR, game, None).name;
 
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
@@ -537,12 +565,11 @@ fn serialize_air_mapblock(game: LuantiGame) -> Vec<u8> {
     buf.push(10);
     buf.extend_from_slice(&0u16.to_be_bytes());
 
-    // Compress with zstd, prepend version byte
-    let compressed = zstd::bulk::compress(&buf, 3).expect("zstd compression failed");
+    let compressed = zstd::bulk::compress(&buf, 3)?;
     let mut blob = Vec::with_capacity(1 + compressed.len());
     blob.push(MAP_FORMAT_VERSION);
     blob.extend_from_slice(&compressed);
-    blob
+    Ok(blob)
 }
 
 fn write_map_database(
@@ -607,15 +634,13 @@ fn write_map_database(
         block_entries.len().to_string().bold()
     );
 
-    // Serialize mapblocks in parallel
     let serialized: Vec<(i64, Vec<u8>)> = block_entries
         .par_iter()
         .map(|&(bx, by, bz, section)| serialize_mapblock(bx, by, bz, section, game))
-        .collect();
+        .collect::<std::io::Result<Vec<_>>>()?;
 
-    // Generate air-only mapblocks above the world (2 extra layers) so the engine
-    // can propagate sunlight down into the content blocks.
-    let air_blob = serialize_air_mapblock(game);
+    // Air mapblocks above the world so the engine can propagate sunlight down.
+    let air_blob = serialize_air_mapblock(game)?;
     let mut air_blocks: Vec<(i64, Vec<u8>)> = Vec::new();
     for extra_y in 1..=2 {
         let ay = mb_max_y + extra_y;
@@ -668,6 +693,6 @@ mod tests {
     fn test_encode_block_pos_negative() {
         // Negative coordinates should work with signed arithmetic
         let pos = encode_block_pos(-1, -1, -1);
-        assert_eq!(pos, (-1i64) * 0x1000000 + (-1i64) * 0x1000 + (-1i64));
+        assert_eq!(pos, -0x1000000_i64 - 0x1000_i64 - 1);
     }
 }
