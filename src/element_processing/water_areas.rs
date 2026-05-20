@@ -1,6 +1,4 @@
-use crate::block_definitions::{
-    Block, ANDESITE, CLAY, COARSE_DIRT, GRAVEL, SAND, STONE, WATER,
-};
+use crate::block_definitions::{Block, GRAVEL, SAND, WATER};
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::water_depth::{ocean_depth_for_cell, BigWaterField};
 use crate::{
@@ -473,44 +471,27 @@ fn scanline_fill_water(
     }
 }
 
-/// Per-cell bed palette for the underwater carve. Uses `coord_hash` (cheap,
-/// per-cell salt-and-pepper) rather than `value_noise_01` (smooth blobs):
-/// `value_noise_01` is already used by `ocean_depth_for_cell` for the
-/// depth jitter, so reusing it here would correlate palette with depth
-/// and reintroduce the concentric rings we're trying to kill.
+/// Linear SAND→GRAVEL probability gradient by depth:
+///   d=0  → 100% SAND     (shoal: top layer always sand)
+///   d=1  → 80/20  SAND/GRAVEL
+///   d=2  → 60/40
+///   d=3  → 40/60
+///   d=4  → 20/80
+///   d≥5  → 100% GRAVEL    (ocean floor: only gravel)
 ///
-/// Palette tiers:
-/// * shoal (depth 0)   — 55% SAND / 20% GRAVEL / 13% CLAY / 12% COARSE_DIRT.
-///                       SAND dominates so the "beach platform" still reads
-///                       as a beach; the other three break up large flats.
-/// * near (depth 1-2)  — 70% SAND / 22% GRAVEL / 8% CLAY.
-/// * deep (depth 3-4)  — 55% GRAVEL / 27% STONE / 18% ANDESITE.
-/// * abyss (depth ≥ 5) — 75% STONE / 25% ANDESITE.
+/// Two-block palette by design — the user explicitly asked for SAND-only
+/// at the top layer, a smooth blend through the middle, and pure GRAVEL
+/// at the bottom. Per-cell `coord_hash` decides which side of the share
+/// this cell falls on, so neighbouring cells of d=2 and d=3 mix freely
+/// along the depth boundary (60/40 ↔ 40/60 reads as smooth) and the
+/// concentric-ring artifact dissolves.
 fn pick_underwater_bed(x: i32, z: i32, depth: i32) -> Block {
-    let h = crate::land_cover::coord_hash(x, z) % 100;
-    match depth {
-        0 => match h {
-            0..=54 => SAND,
-            55..=74 => GRAVEL,
-            75..=87 => CLAY,
-            _ => COARSE_DIRT,
-        },
-        1..=2 => match h {
-            0..=69 => SAND,
-            70..=91 => GRAVEL,
-            _ => CLAY,
-        },
-        3..=4 => match h {
-            0..=54 => GRAVEL,
-            55..=81 => STONE,
-            _ => ANDESITE,
-        },
-        _ => {
-            if h < 75 {
-                STONE
-            } else {
-                ANDESITE
-            }
-        }
+    let d = depth.clamp(0, 5);
+    let sand_share = ((5 - d) as i64) * 20;
+    let h = (crate::land_cover::coord_hash(x, z) % 100) as i64;
+    if h < sand_share {
+        SAND
+    } else {
+        GRAVEL
     }
 }

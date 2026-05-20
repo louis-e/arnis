@@ -25,12 +25,6 @@ use crate::land_cover::LC_WATER;
 /// the shoal so the first ~3 cells from shore stay level.
 const SHOAL_DT_UNITS: u16 = 9;
 
-/// Pure-formula slope past the shoal band. depth = floor((dt - shoal)/3
-/// * SLOPE) + jitter, clamped by polygon_local_max. Halved from the
-/// arnis-source-water v148 1/3 rate: rings now step every 6 horizontal
-/// blocks instead of every 3, breaking up the concentric stair-step.
-const SLOPE_BLOCKS_PER_BLOCK: f64 = 1.0 / 6.0;
-
 /// Per-cell bit grid backing the chamfer DT input.
 struct WaterBitmap {
     min_x: i32,
@@ -320,26 +314,50 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
 ///    paints the bed block at water_y - 1, which produces the level
 ///    near-shore platform the user asked for).
 /// 3. Past the shoal: `depth = floor((dt - shoal)/3 * slope + jitter)`,
-///    clamped to polygon_local_max. Slope is a single gentle 1/6 for
-///    every body size — small pools still bottom out via local_max.
-/// 4. `value_noise_01(x, z, 4) - 0.5` jitter (±0.5) breaks the otherwise
-///    perfectly concentric integer-depth rings into organic contours.
+///    clamped to polygon_local_max. Slope is size-tiered (halved from
+///    the v131 source-water table) so small ponds carve too while big
+///    seas stay calm.
+/// 4. `coord_hash` ±0.5 jitter is per-cell uncorrelated, so adjacent
+///    cells get independent jitter and the integer-depth contours
+///    dissolve into noise instead of reading as concentric stripes.
 pub fn ocean_depth_for_cell(
     x: i32,
     z: i32,
     dt_units: u16,
     component_max_units: u16,
 ) -> i32 {
-    if dt_units == 0 {
-        return 0;
-    }
-    if dt_units < SHOAL_DT_UNITS {
+    if dt_units == 0 || dt_units < SHOAL_DT_UNITS {
         return 0;
     }
     let local_max = polygon_local_max(component_max_units);
+
+    // Halved from the arnis-source-water v131 tiers (1.0, 2/3, 1/2, 1/3).
+    // Small ponds still steepest (1/2) so a 7-block puddle carves to
+    // depth 1; big bodies use 1/6 so wide rivers don't bottom out in
+    // 9 blocks. Tier breakpoints match polygon_local_max above.
+    let slope = if component_max_units < 21 {
+        1.0 / 2.0
+    } else if component_max_units < 45 {
+        1.0 / 3.0
+    } else if component_max_units < 75 {
+        1.0 / 4.0
+    } else {
+        1.0 / 6.0
+    };
+
     let effective_dt = dt_units - SHOAL_DT_UNITS;
     let dist_blocks = (effective_dt as f64) / 3.0;
-    let jitter = crate::ground_generation::value_noise_01(x, z, 4) - 0.5;
-    let depth_f = dist_blocks * SLOPE_BLOCKS_PER_BLOCK + jitter;
+
+    // Per-cell uncorrelated jitter via coord_hash. Each cell gets an
+    // independent ±0.5 push on depth_f before floor(), so neighbouring
+    // cells of d=2 and d=3 mix freely along the boundary instead of
+    // forming a clean contour line. Combined with the SAND→GRAVEL
+    // statistical palette in pick_underwater_bed this fully dissolves
+    // the concentric-ring artifact.
+    let jitter_raw =
+        (crate::land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
+    let jitter = jitter_raw - 0.5;
+
+    let depth_f = dist_blocks * slope + jitter;
     (depth_f.floor() as i32).clamp(0, local_max)
 }
