@@ -117,7 +117,8 @@ fn get_setting_for_barrier(element: &ProcessedElement) -> Option<BarrierSetting>
                 Some("corrugated_metal") => Some(BarrierSetting::solid(STONE_BRICK_WALL, 2)),
                 Some("slatted" | "paling") => Some(BarrierSetting::solid(OAK_FENCE, 1)),
                 Some("wood" | "split_rail" | "panel" | "pole") => Some(BarrierSetting::solid(OAK_FENCE, 2)),
-                Some("concrete" | "stone") => Some(BarrierSetting::solid(STONE_BRICK_WALL, 2)),
+                Some("concrete") => Some(BarrierSetting::solid(ANDESITE_WALL, 2)),
+                Some("stone") => Some(BarrierSetting::solid(STONE_BRICK_WALL, 2)),
                 Some("glass") => Some(BarrierSetting::solid(GLASS, 1)),
                 Some("metal" | "wire" | "chain_link" | "metal_bars") => Some(BarrierSetting {
                     style: BarrierStyle::Alternating {
