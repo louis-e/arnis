@@ -1132,7 +1132,7 @@ pub fn generate_ground_layer(
 ///
 /// Cost: 4 hash calls + a few f64 ops per block — still well under 100 ns,
 /// negligible over the whole ground pass.
-fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
+pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
     let s = scale.max(1);
     // Integer lattice cell containing (x, z). div_euclid gives floor
     // division for negative coordinates too, so patches tile uniformly

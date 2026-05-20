@@ -1235,41 +1235,6 @@ fn calculate_start_y_offset(
     }
 }
 
-/// Wall block from an OSM material/colour tag, or None if no tag is set.
-fn determine_wall_block_from_tags(
-    element: &ProcessedWay,
-    category: BuildingCategory,
-    rng: &mut impl Rng,
-) -> Option<Block> {
-    if category == BuildingCategory::GlassySkyscraper {
-        // GlassySkyscraper walls must stay glass.
-        return None;
-    }
-    if element.tags.get("historic") == Some(&"castle".to_string()) {
-        return None;
-    }
-    if let Some(material) = element
-        .tags
-        .get("building:material")
-        .or_else(|| element.tags.get("building:facade:material"))
-        .or_else(|| element.tags.get("facade:material"))
-    {
-        if let Some(block) = get_wall_block_for_material(material, rng) {
-            return Some(block);
-        }
-    }
-    let colour = element
-        .tags
-        .get("building:colour")
-        .or_else(|| element.tags.get("colour"));
-    if let Some(building_colour) = colour {
-        if let Some(rgb) = color_text_to_rgb_tuple(building_colour) {
-            return Some(get_building_wall_block_for_color(rgb, rng));
-        }
-    }
-    None
-}
-
 /// Wall block from explicit material/colour tags, falling back to category palette.
 fn determine_wall_block(
     element: &ProcessedWay,

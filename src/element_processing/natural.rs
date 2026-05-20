@@ -351,19 +351,87 @@ pub fn generate_natural(
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                     continue;
                                 }
-                                // All the other types of wetland
-                                if rng.random_bool(0.3) {
-                                    editor.set_block(
-                                        WATER,
-                                        x,
-                                        0,
-                                        z,
-                                        Some(&[MUD, GRASS_BLOCK]),
-                                        None,
+                                // arnis-update-290 G3 wetland puddles —
+                                // noise-driven WATER + MOSS_BLOCK ring +
+                                // COARSE_DIRT patches. Spatially coherent
+                                // ~28-block lake patches replace upstream's
+                                // 30% per-cell RNG (which produced fizzy
+                                // single-block puddles).
+                                let region_noise = crate::ground_generation::value_noise_01(
+                                    x + 11,
+                                    z + 7,
+                                    28,
+                                );
+                                if region_noise > 0.55 {
+                                    let cell_var = crate::ground_generation::value_noise_01(
+                                        x + 31,
+                                        z + 17,
+                                        6,
                                     );
-                                    continue;
+                                    if cell_var > 0.78 {
+                                        editor.set_block(
+                                            WATER,
+                                            x,
+                                            0,
+                                            z,
+                                            Some(&[MUD, GRASS_BLOCK]),
+                                            None,
+                                        );
+                                        continue;
+                                    }
+                                    // MOSS_BLOCK ring around puddles —
+                                    // 4-cardinal check for WATER already
+                                    // placed by an earlier cell this pass.
+                                    let mut near_water = false;
+                                    for &(dx, dz) in
+                                        &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                                    {
+                                        if editor.check_for_block(
+                                            x + dx,
+                                            0,
+                                            z + dz,
+                                            Some(&[WATER]),
+                                        ) {
+                                            near_water = true;
+                                            break;
+                                        }
+                                    }
+                                    if near_water {
+                                        editor.set_block(
+                                            MOSS_BLOCK,
+                                            x,
+                                            0,
+                                            z,
+                                            Some(&[MUD]),
+                                            None,
+                                        );
+                                    } else {
+                                        // COARSE_DIRT patches via separate
+                                        // noise. Whitelist MUD so the MOSS
+                                        // ring above isn't overwritten.
+                                        let cd_noise = crate::ground_generation::value_noise_01(
+                                            x + 53,
+                                            z + 71,
+                                            8,
+                                        );
+                                        if cd_noise > 0.62 {
+                                            editor.set_block(
+                                                COARSE_DIRT,
+                                                x,
+                                                0,
+                                                z,
+                                                Some(&[MUD]),
+                                                None,
+                                            );
+                                        }
+                                    }
                                 }
-                                if !editor.check_for_block(x, 0, z, Some(&[MUD, MOSS_BLOCK])) {
+                                if !editor.check_for_block(
+                                    x,
+                                    0,
+                                    z,
+                                    Some(&[MUD, MOSS_BLOCK, COARSE_DIRT]),
+                                ) {
                                     continue;
                                 }
                                 match wetland_type.as_str() {
@@ -407,10 +475,71 @@ pub fn generate_natural(
                                     }
                                 }
                             } else {
-                                // Generic natural=wetland without wetland=... tag
-                                if rng.random_bool(0.3) {
-                                    editor.set_block(WATER, x, 0, z, Some(&[MUD]), None);
-                                    continue;
+                                // Generic natural=wetland without wetland=... tag.
+                                // arnis-update-290 G3 — same noise-driven puddle
+                                // pattern as typed wetlands.
+                                let region_noise = crate::ground_generation::value_noise_01(
+                                    x + 11,
+                                    z + 7,
+                                    28,
+                                );
+                                if region_noise > 0.55 {
+                                    let cell_var = crate::ground_generation::value_noise_01(
+                                        x + 31,
+                                        z + 17,
+                                        6,
+                                    );
+                                    if cell_var > 0.78 {
+                                        editor.set_block(
+                                            WATER,
+                                            x,
+                                            0,
+                                            z,
+                                            Some(&[MUD]),
+                                            None,
+                                        );
+                                        continue;
+                                    }
+                                    let mut near_water = false;
+                                    for &(dx, dz) in
+                                        &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                                    {
+                                        if editor.check_for_block(
+                                            x + dx,
+                                            0,
+                                            z + dz,
+                                            Some(&[WATER]),
+                                        ) {
+                                            near_water = true;
+                                            break;
+                                        }
+                                    }
+                                    if near_water {
+                                        editor.set_block(
+                                            MOSS_BLOCK,
+                                            x,
+                                            0,
+                                            z,
+                                            Some(&[MUD]),
+                                            None,
+                                        );
+                                    } else {
+                                        let cd_noise = crate::ground_generation::value_noise_01(
+                                            x + 53,
+                                            z + 71,
+                                            8,
+                                        );
+                                        if cd_noise > 0.62 {
+                                            editor.set_block(
+                                                COARSE_DIRT,
+                                                x,
+                                                0,
+                                                z,
+                                                Some(&[MUD]),
+                                                None,
+                                            );
+                                        }
+                                    }
                                 }
                                 editor.set_block(GRASS, x, 1, z, None, None);
                             }
