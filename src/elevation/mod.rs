@@ -101,6 +101,7 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
 /// and coastal tile-boundary artifacts.
 ///
 /// The returned ElevationData contains heights in Minecraft Y coordinates.
+#[allow(clippy::too_many_arguments)]
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,

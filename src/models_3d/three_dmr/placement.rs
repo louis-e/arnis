@@ -419,7 +419,13 @@ mod tests {
             z,
         };
         let mk_way = |id: u64, nodes: Vec<ProcessedNode>, tags: StdMap<String, String>| {
-            ProcessedWay { id, nodes, tags }
+            ProcessedWay {
+                id,
+                nodes,
+                tags,
+                unclipped_bounds: None,
+                unclipped_polygon_area: None,
+            }
         };
 
         // 3DMR-tagged way: square (0..100, 0..100)

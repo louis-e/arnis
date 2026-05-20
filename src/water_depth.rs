@@ -70,8 +70,8 @@ fn chamfer_3_4_dt(bm: &WaterBitmap) -> Vec<u16> {
     const INF: u16 = u16::MAX / 2;
     let mut d = vec![0u16; w * h];
 
-    for i in 0..(w * h) {
-        d[i] = if bm.cells[i] { INF } else { 0 };
+    for (i, slot) in d.iter_mut().enumerate() {
+        *slot = if bm.cells[i] { INF } else { 0 };
     }
 
     // Forward sweep.
@@ -380,8 +380,8 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     // GRAVEL boundary forms smooth ~6-block blobs instead of per-cell
     // salt-and-pepper. The SAND threshold simply drifts with depth.
     let (top_block, under_block) = match depth {
-        0 | 1 => (SAND, SANDSTONE),
-        2 | 3 | 4 => {
+        0..=1 => (SAND, SANDSTONE),
+        2..=4 => {
             let n = crate::ground_generation::value_noise_01(x, z, 6);
             // Probability of SAND at this cell:
             //   d=2 → 0.70   d=3 → 0.50   d=4 → 0.30
