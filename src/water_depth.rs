@@ -19,14 +19,17 @@ use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::ground::Ground;
 use crate::land_cover::LC_WATER;
 
-/// Minimum cell count for a LC_WATER component to be promoted to a "big
-/// water" body with full depth grading. Smaller ponds stay surface-only
-/// (no underwater carve). Edge-touching components are always promoted.
-const BIG_WATER_MIN_CELLS: usize = 400;
+/// Shoal band width measured in chamfer-DT units (3 = orthogonal step).
+/// Cells with `dt < SHOAL_DT_UNITS` are inside the flat shoal — bed sits
+/// at `water_y - 1` regardless of polygon size. Slope only kicks in past
+/// the shoal so the first ~3 cells from shore stay level.
+const SHOAL_DT_UNITS: u16 = 9;
 
-/// Pure-formula slope for large bodies. dt/3 (block units) * SLOPE_RATE,
-/// floored, capped at polygon_local_max. Narrow pools get a steeper slope.
-const SLOPE_RATE: f64 = 1.0 / 3.0;
+/// Pure-formula slope past the shoal band. depth = floor((dt - shoal)/3
+/// * SLOPE) + jitter, clamped by polygon_local_max. Halved from the
+/// arnis-source-water v148 1/3 rate: rings now step every 6 horizontal
+/// blocks instead of every 3, breaking up the concentric stair-step.
+const SLOPE_BLOCKS_PER_BLOCK: f64 = 1.0 / 6.0;
 
 /// Per-cell bit grid backing the chamfer DT input.
 struct WaterBitmap {
@@ -218,12 +221,8 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
             comp_cells.clear();
             queue.push((sx, sz));
             visited[idx(sx, sz)] = true;
-            let mut touches_edge = false;
             while let Some((x, z)) = queue.pop() {
                 comp_cells.push((x, z));
-                if x == min_x || x == max_x || z == min_z || z == max_z {
-                    touches_edge = true;
-                }
                 for (dx, dz) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
                     let nx = x + dx;
                     let nz = z + dz;
@@ -242,9 +241,12 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
                     }
                 }
             }
-            if comp_cells.len() >= BIG_WATER_MIN_CELLS || touches_edge {
-                components.push(std::mem::take(&mut comp_cells));
-            }
+            // Promote every LC_WATER component. `polygon_local_max` caps
+            // small ponds at 2 blocks deep, so no risk of weirdly-deep
+            // 4-cell puddles. Previously gated on >= BIG_WATER_MIN_CELLS
+            // (400 cells) || touches_edge — both dropped so river spurs
+            // and small lakes get depth too.
+            components.push(std::mem::take(&mut comp_cells));
         }
     }
 
@@ -292,7 +294,10 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
     }
 }
 
-/// Width-tiered max carve depth for a water polygon.
+/// Width-tiered max carve depth for a water polygon. Big bodies get a
+/// 6-block max (was 5) to compensate for the gentler `SLOPE_BLOCKS_PER_BLOCK`
+/// — rivers ≥ 75 chamfer units wide now reach the floor at ~36 blocks
+/// from shore instead of bottoming out in 9.
 #[inline]
 fn polygon_local_max(component_max_units: u16) -> i32 {
     if component_max_units < 21 {
@@ -302,32 +307,39 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
     } else if component_max_units < 75 {
         4
     } else {
-        5
+        6
     }
 }
 
 /// Compute carve depth at a single cell from its chamfer-DT distance to
 /// the nearest shore and the polygon's component max DT.
 ///
-/// Pure-formula linear slope: 0.5 blocks vertical per 1 cell horizontal
-/// from the shore (or steeper for narrow pools so 5-wide canals still
-/// bottom out). Capped at `polygon_local_max`. Returns 0 for cells with
-/// no DT (small pond / non-promoted component).
-pub fn ocean_depth_for_cell(dt_units: u16, component_max_units: u16) -> i32 {
+/// Pipeline:
+/// 1. dt == 0 → 0 (cell is the shore itself).
+/// 2. dt < SHOAL_DT_UNITS → 0 (still inside the flat shoal band; caller
+///    paints the bed block at water_y - 1, which produces the level
+///    near-shore platform the user asked for).
+/// 3. Past the shoal: `depth = floor((dt - shoal)/3 * slope + jitter)`,
+///    clamped to polygon_local_max. Slope is a single gentle 1/6 for
+///    every body size — small pools still bottom out via local_max.
+/// 4. `value_noise_01(x, z, 4) - 0.5` jitter (±0.5) breaks the otherwise
+///    perfectly concentric integer-depth rings into organic contours.
+pub fn ocean_depth_for_cell(
+    x: i32,
+    z: i32,
+    dt_units: u16,
+    component_max_units: u16,
+) -> i32 {
     if dt_units == 0 {
         return 0;
     }
+    if dt_units < SHOAL_DT_UNITS {
+        return 0;
+    }
     let local_max = polygon_local_max(component_max_units);
-    let slope = if component_max_units < 21 {
-        1.0
-    } else if component_max_units < 45 {
-        2.0 / 3.0
-    } else if component_max_units < 75 {
-        1.0 / 2.0
-    } else {
-        SLOPE_RATE
-    };
-    let dist_blocks = (dt_units as f64) / 3.0;
-    let depth_f = dist_blocks * slope;
+    let effective_dt = dt_units - SHOAL_DT_UNITS;
+    let dist_blocks = (effective_dt as f64) / 3.0;
+    let jitter = crate::ground_generation::value_noise_01(x, z, 4) - 0.5;
+    let depth_f = dist_blocks * SLOPE_BLOCKS_PER_BLOCK + jitter;
     (depth_f.floor() as i32).clamp(0, local_max)
 }

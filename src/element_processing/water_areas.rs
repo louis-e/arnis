@@ -1,4 +1,6 @@
-use crate::block_definitions::{GRAVEL, SAND, STONE, WATER};
+use crate::block_definitions::{
+    Block, ANDESITE, CLAY, COARSE_DIRT, GRAVEL, SAND, STONE, WATER,
+};
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::water_depth::{ocean_depth_for_cell, BigWaterField};
 use crate::{
@@ -442,32 +444,72 @@ fn scanline_fill_water(
                 }
                 editor.set_block_absolute(WATER, x, water_y, z, None, None);
 
-                // Phase 3 (arnis-update-290) — depth carve from
-                // BigWaterField chamfer DT. Only big LC_WATER components
-                // (≥400 cells or edge-touching) get depth > 0; small
-                // ponds stay surface-only.
+                // arnis-update-290 — depth carve from the BigWaterField
+                // chamfer DT, with a flat shoal band right under the
+                // waterline. Universal — every LC_WATER component gets
+                // treatment now (gate dropped in water_depth.rs).
                 let (dt, comp_max) = bwf.depth_at(x, z);
                 if dt == 0 {
                     continue;
                 }
-                let depth = ocean_depth_for_cell(dt, comp_max);
-                if depth <= 0 {
-                    continue;
-                }
-                // Carve a WATER column down from water_y - 1 to water_y - depth.
+                let depth = ocean_depth_for_cell(x, z, dt, comp_max);
+                // Carve the WATER column wy-1..wy-depth (no-op when
+                // depth == 0 inside the shoal band).
                 for dy in 1..=depth {
                     editor.set_block_absolute(WATER, x, water_y - dy, z, None, None);
                 }
-                // Bed palette one block below the deepest water cell.
+                // Bed sits one block under the deepest water cell. In
+                // the shoal band (depth == 0) that's wy - 1 — the flat
+                // platform the user asked for. Past the shoal it follows
+                // the depth ramp. Palette is per-cell noise so neighbours
+                // never agree on the same block: salt-and-pepper
+                // SAND/GRAVEL/CLAY/COARSE_DIRT near shore, drifting to
+                // STONE/ANDESITE in deeper cells.
                 let bed_y = water_y - depth - 1;
-                let bed = if depth <= 1 {
-                    SAND
-                } else if depth <= 3 {
-                    GRAVEL
-                } else {
-                    STONE
-                };
+                let bed = pick_underwater_bed(x, z, depth);
                 editor.set_block_absolute(bed, x, bed_y, z, None, None);
+            }
+        }
+    }
+}
+
+/// Per-cell bed palette for the underwater carve. Uses `coord_hash` (cheap,
+/// per-cell salt-and-pepper) rather than `value_noise_01` (smooth blobs):
+/// `value_noise_01` is already used by `ocean_depth_for_cell` for the
+/// depth jitter, so reusing it here would correlate palette with depth
+/// and reintroduce the concentric rings we're trying to kill.
+///
+/// Palette tiers:
+/// * shoal (depth 0)   — 55% SAND / 20% GRAVEL / 13% CLAY / 12% COARSE_DIRT.
+///                       SAND dominates so the "beach platform" still reads
+///                       as a beach; the other three break up large flats.
+/// * near (depth 1-2)  — 70% SAND / 22% GRAVEL / 8% CLAY.
+/// * deep (depth 3-4)  — 55% GRAVEL / 27% STONE / 18% ANDESITE.
+/// * abyss (depth ≥ 5) — 75% STONE / 25% ANDESITE.
+fn pick_underwater_bed(x: i32, z: i32, depth: i32) -> Block {
+    let h = crate::land_cover::coord_hash(x, z) % 100;
+    match depth {
+        0 => match h {
+            0..=54 => SAND,
+            55..=74 => GRAVEL,
+            75..=87 => CLAY,
+            _ => COARSE_DIRT,
+        },
+        1..=2 => match h {
+            0..=69 => SAND,
+            70..=91 => GRAVEL,
+            _ => CLAY,
+        },
+        3..=4 => match h {
+            0..=54 => GRAVEL,
+            55..=81 => STONE,
+            _ => ANDESITE,
+        },
+        _ => {
+            if h < 75 {
+                STONE
+            } else {
+                ANDESITE
             }
         }
     }
