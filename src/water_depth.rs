@@ -340,14 +340,18 @@ pub fn ocean_depth_for_cell(
         return 0;
     }
     let local_max = polygon_local_max(component_max_units);
+    // Tighter than v3 (1/4 .. 1/12) but still calmer than v1 (1/2 .. 1/6).
+    // User: "the slopes like not that far away" — want depth to grow
+    // visibly sooner from the shoreline. depth=6 reached at ~48 blocks
+    // from shore for big bodies (was 72).
     let slope = if component_max_units < 21 {
-        1.0 / 4.0
+        1.0 / 3.0
     } else if component_max_units < 45 {
-        1.0 / 6.0
+        1.0 / 4.0
     } else if component_max_units < 75 {
-        1.0 / 8.0
+        1.0 / 6.0
     } else {
-        1.0 / 12.0
+        1.0 / 8.0
     };
     let dist_blocks = (dt_eff - SHOAL_DT_UNITS as f64) / 3.0;
     let depth_f = dist_blocks * slope;
@@ -379,13 +383,18 @@ pub fn carve_water_column(
 
     // Depth-tiered bed palette per user spec:
     //   d 0, 1, 2  → SAND        (top)  + SANDSTONE (under)
-    //   d 3        → 50/50 SAND/GRAVEL  + matching SANDSTONE/STONE under
+    //   d 3        → wobbly SAND/GRAVEL blobs + matching SANDSTONE/STONE
     //   d ≥ 4      → GRAVEL                + STONE under
-    let h = crate::land_cover::coord_hash(x, z) % 100;
+    //
+    // The d = 3 mix uses `value_noise_01` at scale 6 (smooth ~6-block
+    // blobs of SAND or GRAVEL) instead of the per-cell coord_hash split
+    // — user requested "wobbly noise not static". Adjacent cells now
+    // share the same block within each blob.
     let (top_block, under_block) = match depth {
         0..=2 => (SAND, SANDSTONE),
         3 => {
-            if (h as i32) < 50 {
+            let n = crate::ground_generation::value_noise_01(x, z, 6);
+            if n < 0.5 {
                 (SAND, SANDSTONE)
             } else {
                 (GRAVEL, STONE)
@@ -455,6 +464,14 @@ pub fn carve_lc_water_pass(
                 continue;
             }
             let water_y = ground.water_level(coord);
+            // Skip cells where terrain sits ABOVE the waterline — those
+            // are hillside / land bumps that an OSM water polygon (or
+            // ESA classification) over-claims as water. Carving here
+            // would erase the visible land. Matches the same guard in
+            // water_areas.rs:scanline_fill_water.
+            if editor.get_ground_level(x, z) > water_y {
+                continue;
+            }
             let (dt, comp_max) = bwf.depth_at(x, z);
             let depth = ocean_depth_for_cell(x, z, dt, comp_max);
             // Carve the water column. Bed Y sits at water_y - depth - 1.
