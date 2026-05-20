@@ -318,18 +318,19 @@ pub fn generate_ground_layer(
                         }
 
                         if place_esa_water {
-                            // Single block of water at snapped level
+                            // Single block of water at snapped level.
+                            // arnis-update-290: plain SAND floor + SANDSTONE
+                            // under it. The universal `carve_lc_water_pass`
+                            // in data_processing.rs overwrites this with the
+                            // proper depth carve afterwards; the pre-paint
+                            // here only matters for the brief window when
+                            // ground_generation is mid-pass. Static noise
+                            // SAND/GRAVEL/CLAY palette dropped per user
+                            // request — vegetation/colour variation belongs
+                            // in carve_water_column, not here.
                             editor.set_block_if_absent_absolute(WATER, x, water_y, z);
-
-                            // Floor: sand/gravel/clay + sandstone below
-                            let h = land_cover::coord_hash(x, z);
-                            let floor_block = match h % 5 {
-                                0 => GRAVEL,
-                                1 => CLAY,
-                                _ => SAND,
-                            };
                             if water_y - 1 > MIN_Y {
-                                editor.set_block_if_absent_absolute(floor_block, x, water_y - 1, z);
+                                editor.set_block_if_absent_absolute(SAND, x, water_y - 1, z);
                             }
                             if water_y - 2 > MIN_Y {
                                 editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);

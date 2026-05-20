@@ -15,7 +15,7 @@
 //! concentric-ring artifact passes — the v2.8.0 OSM override + bridge
 //! repair already resolves those.
 
-use crate::block_definitions::{SAND, SANDSTONE, STONE, WATER};
+use crate::block_definitions::{COBBLESTONE, GRAVEL, MOSSY_COBBLESTONE, SAND, SANDSTONE, STONE, WATER};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
@@ -319,20 +319,27 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
 /// halved-again slope rates below keep those bands wide enough to read
 /// as a gradient rather than stripes.
 pub fn ocean_depth_for_cell(
-    _x: i32,
-    _z: i32,
+    x: i32,
+    z: i32,
     dt_units: u16,
     component_max_units: u16,
 ) -> i32 {
-    if dt_units == 0 || dt_units < SHOAL_DT_UNITS {
+    if dt_units == 0 {
+        return 0;
+    }
+    // Smooth contour wobble — value_noise_01 at scale 12 means a single
+    // sample is shared by a ~12-block patch of neighbours, so depth Y
+    // stays smooth across adjacent cells while the SHAPE of contour
+    // lines bends organically. ±2 chamfer units = ±0.66 horizontal
+    // blocks of wobble — enough to round straight banks, not enough to
+    // create jagged bed Y.
+    let wobble =
+        (crate::ground_generation::value_noise_01(x, z, 12) - 0.5) * 4.0;
+    let dt_eff = (dt_units as f64) + wobble;
+    if dt_eff < SHOAL_DT_UNITS as f64 {
         return 0;
     }
     let local_max = polygon_local_max(component_max_units);
-
-    // Halved again from v2 (1/2, 1/3, 1/4, 1/6). Visible depth bands now
-    // sit 8-24 horizontal blocks apart instead of 4-12. Small ponds at
-    // 1/4 still bottom out (7-block puddle reaches depth 1 at centre);
-    // big seas at 1/12 only reach depth 6 ≈ 72 blocks from shore.
     let slope = if component_max_units < 21 {
         1.0 / 4.0
     } else if component_max_units < 45 {
@@ -342,9 +349,7 @@ pub fn ocean_depth_for_cell(
     } else {
         1.0 / 12.0
     };
-
-    let effective_dt = dt_units - SHOAL_DT_UNITS;
-    let dist_blocks = (effective_dt as f64) / 3.0;
+    let dist_blocks = (dt_eff - SHOAL_DT_UNITS as f64) / 3.0;
     let depth_f = dist_blocks * slope;
     (depth_f.floor() as i32).clamp(0, local_max)
 }
@@ -371,11 +376,29 @@ pub fn carve_water_column(
         editor.set_block_absolute(WATER, x, water_y - dy, z, None, Some(&[]));
     }
     let bed_y = water_y - depth - 1;
+
+    // Depth-tiered bed palette per user spec:
+    //   d 0, 1, 2  → SAND        (top)  + SANDSTONE (under)
+    //   d 3        → 50/50 SAND/GRAVEL  + matching SANDSTONE/STONE under
+    //   d ≥ 4      → GRAVEL                + STONE under
+    let h = crate::land_cover::coord_hash(x, z) % 100;
+    let (top_block, under_block) = match depth {
+        0..=2 => (SAND, SANDSTONE),
+        3 => {
+            if (h as i32) < 50 {
+                (SAND, SANDSTONE)
+            } else {
+                (GRAVEL, STONE)
+            }
+        }
+        _ => (GRAVEL, STONE),
+    };
+
     if bed_y > MIN_Y {
-        editor.set_block_absolute(SAND, x, bed_y, z, None, Some(&[]));
+        editor.set_block_absolute(top_block, x, bed_y, z, None, Some(&[]));
     }
     if bed_y - 1 > MIN_Y {
-        editor.set_block_absolute(SANDSTONE, x, bed_y - 1, z, None, Some(&[]));
+        editor.set_block_absolute(under_block, x, bed_y - 1, z, None, Some(&[]));
     }
     let stone_top = bed_y - 2;
     let stone_bottom = MIN_Y + 1;
@@ -383,6 +406,25 @@ pub fn carve_water_column(
         // skip_existing = true: only fills AIR / WATER pockets, preserves
         // any terrain block ground_generation already placed below.
         editor.fill_column_absolute(STONE, x, z, stone_bottom, stone_top, true);
+    }
+}
+
+/// Place a bridge pier column at (x, z): COBBLESTONE / MOSSY_COBBLESTONE
+/// mix from `top_y` down to `bottom_y`. Used by `carve_lc_water_pass` at
+/// sparse bridge-over-water cells to give bridges visible feet/pillars
+/// in the water instead of the deck floating with empty water under it.
+fn place_bridge_pier(editor: &mut WorldEditor, x: i32, z: i32, top_y: i32, bottom_y: i32) {
+    let h = crate::land_cover::coord_hash(x, z);
+    let mut y = top_y;
+    while y >= bottom_y && y > MIN_Y {
+        // 70% COBBLE / 30% MOSSY for organic look.
+        let block = if ((h.wrapping_add(y as u64) ^ (y as u64).wrapping_mul(2654435761)) % 100) < 30 {
+            MOSSY_COBBLESTONE
+        } else {
+            COBBLESTONE
+        };
+        editor.set_block_absolute(block, x, y, z, None, Some(&[]));
+        y -= 1;
     }
 }
 
@@ -408,16 +450,6 @@ pub fn carve_lc_water_pass(
     let max_z = xzbbox.max_z();
     for z in min_z..=max_z {
         for x in min_x..=max_x {
-            // Roads / bridges paint their own surface — leave them alone.
-            // Note: bridges over water get reclassified to LC_WATER by
-            // v2.8.0's `apply_bridge_land_cover_repair`, but
-            // `road_mask` also covers the bridge deck cells so they're
-            // skipped here. Water _under_ the bridge gets carved via
-            // the OSM polygon scanline (water_areas.rs) which the v2.8.0
-            // base allows to run on bridge-over-water spans.
-            if road_mask.contains(x, z) {
-                continue;
-            }
             let coord = XZPoint::new(x - min_x, z - min_z);
             if ground.cover_class(coord) != LC_WATER {
                 continue;
@@ -425,7 +457,23 @@ pub fn carve_lc_water_pass(
             let water_y = ground.water_level(coord);
             let (dt, comp_max) = bwf.depth_at(x, z);
             let depth = ocean_depth_for_cell(x, z, dt, comp_max);
+            // Carve the water column. Bed Y sits at water_y - depth - 1.
+            // For road/bridge cells over LC_WATER, this places water
+            // UNDER the deck (deck_y > water_y) so the river continues
+            // visibly across the bridge.
             carve_water_column(editor, x, z, water_y, depth);
+
+            // Sparse cobblestone piers at bridge cells — 1 in every 12
+            // cells via coord_hash. Pier goes from water_y - 1 (just
+            // below the water surface; never pokes above) down to the
+            // bed, force-overwriting the WATER blocks we just placed.
+            if road_mask.contains(x, z)
+                && (crate::land_cover::coord_hash(x, z) % 12) == 0
+            {
+                let pier_top = water_y - 1;
+                let pier_bottom = water_y - depth - 1;
+                place_bridge_pier(editor, x, z, pier_top, pier_bottom);
+            }
         }
     }
 }
