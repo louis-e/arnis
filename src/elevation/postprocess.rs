@@ -1174,10 +1174,7 @@ pub fn scale_to_minecraft(
     // Otherwise derive min/max from this tile's data (original per-tile behaviour).
     let (min_height, max_height) = match (elevation_min_override, elevation_max_override) {
         (Some(lo), Some(hi)) => {
-            eprintln!(
-                "Elevation lock: using global range {:.1}m – {:.1}m",
-                lo, hi
-            );
+            eprintln!("Elevation lock: using global range {:.1}m – {:.1}m", lo, hi);
             (lo, hi)
         }
         _ => blurred_heights

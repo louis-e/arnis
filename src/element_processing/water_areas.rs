@@ -164,7 +164,9 @@ fn generate_water_areas(
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    scanline_fill_water(min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf);
+    scanline_fill_water(
+        min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf,
+    );
 }
 
 /// Verifies all rings are properly closed (first node matches last).
@@ -454,4 +456,3 @@ fn scanline_fill_water(
         }
     }
 }
-

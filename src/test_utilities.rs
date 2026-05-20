@@ -7,11 +7,13 @@ use crate::retrieve_data;
 // this is copied from main.rs
 pub fn generate_example(llbbox: LLBBox) -> (XZBBox, Vec<ProcessedElement>) {
     // Fetch data
-    let raw_data = retrieve_data::fetch_data_from_overpass(llbbox, false, "requests", None, &[], "max")
-        .expect("Failed to fetch data");
+    let raw_data =
+        retrieve_data::fetch_data_from_overpass(llbbox, false, "requests", None, &[], "max")
+            .expect("Failed to fetch data");
 
     // Parse raw data
-    let (mut parsed_elements, xzbbox, _outline_suppression) = osm_parser::parse_osm_data(raw_data, llbbox, 1.0, false, None, None, None);
+    let (mut parsed_elements, xzbbox, _outline_suppression) =
+        osm_parser::parse_osm_data(raw_data, llbbox, 1.0, false, None, None, None);
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
 

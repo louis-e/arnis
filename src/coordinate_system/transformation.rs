@@ -51,9 +51,11 @@ impl CoordTransformer {
 
         if master_origin_lat.is_some() && master_origin_lng.is_some() {
             // Use NW and SE corners for min and max XZ because +Z is South
-            let nw = transformer.transform_point(LLPoint::new(llbbox.max().lat(), llbbox.min().lng()).unwrap());
-            let se = transformer.transform_point(LLPoint::new(llbbox.min().lat(), llbbox.max().lng()).unwrap());
-            
+            let nw = transformer
+                .transform_point(LLPoint::new(llbbox.max().lat(), llbbox.min().lng()).unwrap());
+            let se = transformer
+                .transform_point(LLPoint::new(llbbox.min().lat(), llbbox.max().lng()).unwrap());
+
             let absolute_xzbbox = crate::coordinate_system::cartesian::XZBBox::from_points(nw, se)
                 .map_err(|e| format!("{}:\n{}", &err_header, e))?;
 
@@ -75,13 +77,15 @@ impl CoordTransformer {
     }
 
     pub fn transform_point(&self, llpoint: LLPoint) -> XZPoint {
-        if let (Some(origin_lat), Some(origin_lng)) = (self.master_origin_lat, self.master_origin_lng) {
+        if let (Some(origin_lat), Some(origin_lng)) =
+            (self.master_origin_lat, self.master_origin_lng)
+        {
             let avg_lat = (llpoint.lat() + origin_lat) / 2.0;
             let mpd_lon = METERS_PER_DEG_LAT * avg_lat.to_radians().cos();
-            
+
             let dx_m = (llpoint.lng() - origin_lng) * mpd_lon;
             let dz_m = (origin_lat - llpoint.lat()) * METERS_PER_DEG_LAT;
-            
+
             let x = (dx_m * self.scale).floor() as i32;
             let z = (dz_m * self.scale).floor() as i32;
             return XZPoint::new(x, z);
@@ -170,7 +174,8 @@ mod test {
             llbbox.min().lng() + (llbbox.max().lng() - llbbox.min().lng()) * test_lngfactor,
         )
         .unwrap();
-        let (transformer, xzbbox_new) = CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, None, None).unwrap();
+        let (transformer, xzbbox_new) =
+            CoordTransformer::llbbox_to_xzbbox(&llbbox, scale, None, None).unwrap();
 
         // legacy xzbbox creation
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());

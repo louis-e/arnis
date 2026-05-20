@@ -208,10 +208,18 @@ pub fn compute_node_bounds(nodes: &[ProcessedNode]) -> Option<(i32, i32, i32, i3
     let mut min_z = first.z;
     let mut max_z = first.z;
     for n in nodes.iter().skip(1) {
-        if n.x < min_x { min_x = n.x; }
-        if n.x > max_x { max_x = n.x; }
-        if n.z < min_z { min_z = n.z; }
-        if n.z > max_z { max_z = n.z; }
+        if n.x < min_x {
+            min_x = n.x;
+        }
+        if n.x > max_x {
+            max_x = n.x;
+        }
+        if n.z < min_z {
+            min_z = n.z;
+        }
+        if n.z > max_z {
+            max_z = n.z;
+        }
     }
     Some((min_x, max_x, min_z, max_z))
 }
@@ -292,11 +300,12 @@ pub fn parse_osm_data(
     // Deserialize the JSON data into the OSMData structure
     let data = SplitOsmData::from_raw_osm_data(osm_data);
 
-    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale, master_origin_lat, master_origin_lng)
-        .unwrap_or_else(|e| {
-            eprintln!("Error in defining coordinate transformation:\n{e}");
-            panic!();
-        });
+    let (coord_transformer, xzbbox) =
+        CoordTransformer::llbbox_to_xzbbox(&bbox, scale, master_origin_lat, master_origin_lng)
+            .unwrap_or_else(|e| {
+                eprintln!("Error in defining coordinate transformation:\n{e}");
+                panic!();
+            });
 
     if debug {
         println!("Total elements: {}", data.total_count());

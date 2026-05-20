@@ -56,13 +56,8 @@ pub fn element_rng_salted(element_id: u64, salt: u64) -> ChaCha8Rng {
 /// * `global_seed` — project-wide seed (0 = no global mixing)
 #[inline]
 #[allow(dead_code)]
-pub fn element_rng_salted_with_global(
-    element_id: u64,
-    salt: u64,
-    global_seed: u64,
-) -> ChaCha8Rng {
-    let combined =
-        element_id ^ salt.rotate_left(32) ^ global_seed.rotate_left(16);
+pub fn element_rng_salted_with_global(element_id: u64, salt: u64, global_seed: u64) -> ChaCha8Rng {
+    let combined = element_id ^ salt.rotate_left(32) ^ global_seed.rotate_left(16);
     ChaCha8Rng::seed_from_u64(combined)
 }
 

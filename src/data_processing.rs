@@ -255,7 +255,12 @@ pub fn generate_world_with_options(
                 } else if let Some(val) = way.tags.get("waterway") {
                     if val == "dock" {
                         // docks count as water areas
-                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox, &big_water_field);
+                        water_areas::generate_water_area_from_way(
+                            &mut editor,
+                            way,
+                            &xzbbox,
+                            &big_water_field,
+                        );
                     } else {
                         waterways::generate_waterways(&mut editor, way);
                     }
@@ -354,7 +359,12 @@ pub fn generate_world_with_options(
                         .map(|val| val == "water" || val == "bay")
                         .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox, &big_water_field);
+                    water_areas::generate_water_areas_from_relation(
+                        &mut editor,
+                        rel,
+                        &xzbbox,
+                        &big_water_field,
+                    );
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(
                         &mut editor,

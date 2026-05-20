@@ -871,8 +871,9 @@ fn gui_start_generation(
             let llbbox = LLBBox::from_str(&bbox_text)
                 .map_err(|e| format!("Failed to parse bounding box: {e}"))?;
 
-            let (transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale, None, None)
-                .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
+            let (transformer, xzbbox) =
+                CoordTransformer::llbbox_to_xzbbox(&llbbox, world_scale, None, None)
+                    .map_err(|e| format!("Failed to create coordinate transformer: {e}"))?;
 
             let (spawn_x, spawn_z) = if let Some(coords) = spawn_point {
                 let llpoint = LLPoint::new(coords.0, coords.1)
@@ -1156,15 +1157,34 @@ fn gui_start_generation(
             }
 
             // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
-            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None, &[], "max") {
+            match retrieve_data::fetch_data_from_overpass(
+                args.bbox,
+                args.debug,
+                "requests",
+                None,
+                &[],
+                "max",
+            ) {
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox, outline_suppression) =
-                        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng, args.tile_invariant_rendering);
+                        osm_parser::parse_osm_data(
+                            raw_data,
+                            args.bbox,
+                            args.scale,
+                            args.debug,
+                            args.master_origin_lat,
+                            args.master_origin_lng,
+                            args.tile_invariant_rendering,
+                        );
 
                     // Fetch supplementary building data from Overture Maps
                     {
-                        let overture_elements =
-                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug, args.tile_invariant_rendering);
+                        let overture_elements = overture::fetch_overture_buildings(
+                            &args.bbox,
+                            args.scale,
+                            args.debug,
+                            args.tile_invariant_rendering,
+                        );
                         if !overture_elements.is_empty() {
                             let unique_overture = overture::deduplicate_against_osm(
                                 overture_elements,

@@ -955,7 +955,11 @@ impl BuildingStyle {
         let diagonality = match (element.unclipped_polygon_area, element.unclipped_bounds) {
             (Some(area), Some((min_x, max_x, min_z, max_z))) => {
                 let bbox_area = ((max_x - min_x + 1) as f64) * ((max_z - min_z + 1) as f64);
-                if bbox_area > 0.0 { (area / bbox_area).min(1.0) } else { 1.0 }
+                if bbox_area > 0.0 {
+                    (area / bbox_area).min(1.0)
+                } else {
+                    1.0
+                }
             }
             _ => compute_building_diagonality(&element.nodes),
         };
@@ -6877,12 +6881,15 @@ pub fn generate_building_from_relation(
                         let synthetic_id = (1u64 << 63) | (relation.id << 16) | ring_slot;
                         HolePolygon {
                             way: {
-                                let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering.is_some() {
-                                    (crate::osm_parser::compute_node_bounds(&ring),
-                                     crate::osm_parser::compute_polygon_area(&ring))
-                                } else {
-                                    (None, None)
-                                };
+                                let (unclipped_bounds, unclipped_polygon_area) =
+                                    if args.tile_invariant_rendering.is_some() {
+                                        (
+                                            crate::osm_parser::compute_node_bounds(&ring),
+                                            crate::osm_parser::compute_polygon_area(&ring),
+                                        )
+                                    } else {
+                                        (None, None)
+                                    };
                                 ProcessedWay {
                                     id: synthetic_id,
                                     tags: HashMap::new(),
@@ -6907,12 +6914,15 @@ pub fn generate_building_from_relation(
         // fill cache and the deterministic RNG seeded by element ID.
         for (ring_idx, ring) in outer_rings.into_iter().enumerate() {
             let synthetic_id = (1u64 << 63) | (relation.id << 16) | (ring_idx as u64 & 0xFFFF);
-            let (unclipped_bounds, unclipped_polygon_area) = if args.tile_invariant_rendering.is_some() {
-                (crate::osm_parser::compute_node_bounds(&ring),
-                 crate::osm_parser::compute_polygon_area(&ring))
-            } else {
-                (None, None)
-            };
+            let (unclipped_bounds, unclipped_polygon_area) =
+                if args.tile_invariant_rendering.is_some() {
+                    (
+                        crate::osm_parser::compute_node_bounds(&ring),
+                        crate::osm_parser::compute_polygon_area(&ring),
+                    )
+                } else {
+                    (None, None)
+                };
             let merged_way = ProcessedWay {
                 id: synthetic_id,
                 tags: relation.tags.clone(),

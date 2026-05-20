@@ -1427,10 +1427,7 @@ static DEFINED_COLORS: &[ColorBlockMapping] = &[
 // Accepts caller-provided rng so v2.8.0 callsites that already seed
 // per-element get deterministic palette. Seeded variant below preserved
 // for Teddy fork callers that want explicit naming.
-pub fn get_building_wall_block_for_color(
-    color: RGBTuple,
-    rng: &mut impl rand::Rng,
-) -> Block {
+pub fn get_building_wall_block_for_color(color: RGBTuple, rng: &mut impl rand::Rng) -> Block {
     let closest_color = DEFINED_COLORS
         .iter()
         .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));

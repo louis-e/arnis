@@ -186,14 +186,25 @@ fn run_cli() {
     let mut ground = ground::generate_ground_data(&args);
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox, outline_suppression) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng, args.tile_invariant_rendering);   /* Option<u64> already */
+    let (mut parsed_elements, mut xzbbox, outline_suppression) = osm_parser::parse_osm_data(
+        raw_data,
+        args.bbox,
+        args.scale,
+        args.debug,
+        args.master_origin_lat,
+        args.master_origin_lng,
+        args.tile_invariant_rendering,
+    ); /* Option<u64> already */
 
     // Fetch supplementary building data from Overture Maps
     {
         println!("{} Fetching Overture Maps data...", "  [+]".bold());
-        let overture_elements =
-            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug, args.tile_invariant_rendering);
+        let overture_elements = overture::fetch_overture_buildings(
+            &args.bbox,
+            args.scale,
+            args.debug,
+            args.tile_invariant_rendering,
+        );
         if !overture_elements.is_empty() {
             let before_count = parsed_elements.len();
             let unique_overture =
@@ -266,15 +277,20 @@ fn run_cli() {
                 std::process::exit(1);
             });
 
-            let (transformer, pre_rot_bbox) =
-                CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale, args.master_origin_lat, args.master_origin_lng).unwrap_or_else(|e| {
-                    eprintln!(
-                        "{} Failed to convert spawn point: {}",
-                        "Error:".red().bold(),
-                        e
-                    );
-                    std::process::exit(1);
-                });
+            let (transformer, pre_rot_bbox) = CoordTransformer::llbbox_to_xzbbox(
+                &args.bbox,
+                args.scale,
+                args.master_origin_lat,
+                args.master_origin_lng,
+            )
+            .unwrap_or_else(|e| {
+                eprintln!(
+                    "{} Failed to convert spawn point: {}",
+                    "Error:".red().bold(),
+                    e
+                );
+                std::process::exit(1);
+            });
 
             let xzpoint = transformer.transform_point(llpoint);
             let (sx, sz) = map_transformation::rotate::rotate_xz_point(

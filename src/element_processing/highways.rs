@@ -229,9 +229,7 @@ fn is_pedestrian_way(element: &ProcessedElement) -> bool {
 /// Compact mode targets low-scale renders (1 block ≥ 1.5 m) where
 /// pedestrian features compress onto the same blocks as vehicle roads
 /// and produce dotted-checker visual noise at intersections.
-fn road_detail_skip(highway_type: &str,
-                    tags: &HashMap<String, String>,
-                    detail: &str) -> bool {
+fn road_detail_skip(highway_type: &str, tags: &HashMap<String, String>, detail: &str) -> bool {
     match detail {
         "compact" => {
             // Pedestrian-grade + low-traffic highway types collapse
@@ -239,11 +237,19 @@ fn road_detail_skip(highway_type: &str,
             // without giving the road network extra legibility.
             // `service` (driveways, parking aisles) + `track`
             // (agricultural roads) join the skip list at this resolution.
-            if matches!(highway_type,
-                "footway" | "path" | "cycleway" | "steps"
-                | "corridor" | "pedestrian" | "platform" | "bus_stop"
-                | "service" | "track")
-            {
+            if matches!(
+                highway_type,
+                "footway"
+                    | "path"
+                    | "cycleway"
+                    | "steps"
+                    | "corridor"
+                    | "pedestrian"
+                    | "platform"
+                    | "bus_stop"
+                    | "service"
+                    | "track"
+            ) {
                 return true;
             }
             // Crossing markers (zebra, traffic-signal nodes, etc.) sit
@@ -255,16 +261,14 @@ fn road_detail_skip(highway_type: &str,
             if tags.get("crossing").is_some() {
                 return true;
             }
-            if matches!(tags.get("footway").map(|s| s.as_str()),
-                        Some("crossing")) {
+            if matches!(tags.get("footway").map(|s| s.as_str()), Some("crossing")) {
                 return true;
             }
             false
         }
-        _ => false,   // "max" never skips
+        _ => false, // "max" never skips
     }
 }
-
 
 /// Type alias for highway connectivity map
 pub type HighwayConnectivityMap = HashMap<(i32, i32), Vec<i32>>;
@@ -875,12 +879,11 @@ fn generate_highways_internal(
                     // upstream behaviour byte-for-byte.
                     let mut stripe_length: i32 = 0;
                     let base_dash: i32 = (5.0 * scale_factor).ceil() as i32;
-                    let (dash_length, gap_length): (i32, i32) =
-                        if args.road_detail == "compact" {
-                            (base_dash.max(4), base_dash.max(4))
-                        } else {
-                            (base_dash, base_dash)
-                        };
+                    let (dash_length, gap_length): (i32, i32) = if args.road_detail == "compact" {
+                        (base_dash.max(4), base_dash.max(4))
+                    } else {
+                        (base_dash, base_dash)
+                    };
 
                     // Segment-constants for multi-lane divider placement.
                     // Computed once here instead of at every bresenham point:
@@ -921,9 +924,15 @@ fn generate_highways_internal(
                     // looks wrong in-game.
                     let is_pedestrian_grade = matches!(
                         highway_type.as_str(),
-                        "footway" | "path" | "cycleway" | "steps"
-                            | "corridor" | "pedestrian" | "platform"
-                            | "bus_stop" | "track"
+                        "footway"
+                            | "path"
+                            | "cycleway"
+                            | "steps"
+                            | "corridor"
+                            | "pedestrian"
+                            | "platform"
+                            | "bus_stop"
+                            | "track"
                     );
                     let effective_lanes: i32 = match args.road_detail.as_str() {
                         "compact" => lanes.min(2),
@@ -1401,7 +1410,11 @@ fn generate_highways_internal(
                                     // "divided highway" without occupying
                                     // multiple lane widths.
                                     let perp_dist = if twin_centre_stripe {
-                                        if l == 1 { -0.5 } else { 0.5 }
+                                        if l == 1 {
+                                            -0.5
+                                        } else {
+                                            0.5
+                                        }
                                     } else {
                                         l as f32 * lane_width - half_width
                                     };

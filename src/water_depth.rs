@@ -318,12 +318,7 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
 /// the universal SAND palette in `carve_water_column` plus the gentler
 /// halved-again slope rates below keep those bands wide enough to read
 /// as a gradient rather than stripes.
-pub fn ocean_depth_for_cell(
-    x: i32,
-    z: i32,
-    dt_units: u16,
-    component_max_units: u16,
-) -> i32 {
+pub fn ocean_depth_for_cell(x: i32, z: i32, dt_units: u16, component_max_units: u16) -> i32 {
     if dt_units == 0 {
         return 0;
     }
@@ -333,8 +328,7 @@ pub fn ocean_depth_for_cell(
     // lines bends organically. ±2 chamfer units = ±0.66 horizontal
     // blocks of wobble — enough to round straight banks, not enough to
     // create jagged bed Y.
-    let wobble =
-        (crate::ground_generation::value_noise_01(x, z, 12) - 0.5) * 4.0;
+    let wobble = (crate::ground_generation::value_noise_01(x, z, 12) - 0.5) * 4.0;
     let dt_eff = (dt_units as f64) + wobble;
     if dt_eff < SHOAL_DT_UNITS as f64 {
         return 0;
@@ -368,13 +362,7 @@ pub fn ocean_depth_for_cell(
 /// platform). `depth ≥ 1` ⇒ carves a WATER column down to
 /// `water_y - depth` with the same stack one block below the deepest
 /// water cell.
-pub fn carve_water_column(
-    editor: &mut WorldEditor,
-    x: i32,
-    z: i32,
-    water_y: i32,
-    depth: i32,
-) {
+pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32, depth: i32) {
     // WATER column. dy = 0 = surface, dy = depth = bottom water block.
     for dy in 0..=depth {
         editor.set_block_absolute(WATER, x, water_y - dy, z, None, Some(&[]));
@@ -425,7 +413,6 @@ pub fn carve_water_column(
         editor.fill_column_absolute(STONE, x, z, stone_bottom, stone_top, true);
     }
 }
-
 
 /// Universal post-pass: every LC_WATER cell in the bbox gets the same
 /// depth carve as OSM water polygons. Solves the user-reported gap where
