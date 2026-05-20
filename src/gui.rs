@@ -851,6 +851,8 @@ fn gui_start_generation(
     telemetry_consent: bool,
     world_format: String,
     rotation_angle: f64,
+    road_detail: String,
+    tile_invariant_seed: Option<u64>,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -1101,8 +1103,15 @@ fn gui_start_generation(
                 aws_only_elevation,
                 benchmark: false,
                 overpass_url: Vec::new(),
-                road_detail: "max".to_string(),
-                tile_invariant_rendering: None,
+                road_detail: {
+                    // Whitelist GUI value so a bad payload can't bypass clap's
+                    // value_parser. Falls back to upstream "max".
+                    match road_detail.as_str() {
+                        "max" | "clean" | "compact" => road_detail.clone(),
+                        _ => "max".to_string(),
+                    }
+                },
+                tile_invariant_rendering: tile_invariant_seed,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

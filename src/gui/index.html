@@ -176,6 +176,44 @@
           </div>
         </div>
 
+        <!-- Road Detail Level -->
+        <div class="settings-row">
+          <label for="road-detail-select">
+            <span>Road Detail</span>
+            <span class="tooltip-icon" data-tooltip="Road rendering detail. Default = scale-based auto (compact under 0.7, clean at or above). Max = full upstream detail. Clean = visual cleanup, capped dividers. Compact = pedestrian-grade dropped + lanes capped to 2 (for low scales).">?</span>
+          </label>
+          <div class="settings-control">
+            <select id="road-detail-select" name="road-detail-select" class="theme-dropdown">
+              <option value="default" selected>Default (auto)</option>
+              <option value="max">Max</option>
+              <option value="clean">Clean</option>
+              <option value="compact">Compact</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Custom Ground Height -->
+        <div class="settings-row">
+          <label for="ground-level-input">
+            <span>Ground Height (Y)</span>
+            <span class="tooltip-icon" data-tooltip="Minecraft Y-coordinate at which the ground surface is placed. Default -62 (just above bedrock). Raise for floating islands above mountains, lower for deep oceans.">?</span>
+          </label>
+          <div class="settings-control rotation-control">
+            <input type="number" id="ground-level-input" name="ground-level-input" min="-62" max="319" step="1" value="-62">
+          </div>
+        </div>
+
+        <!-- Tile-Invariant Seed -->
+        <div class="settings-row">
+          <label for="seed-input">
+            <span>Seed (tile-invariant)</span>
+            <span class="tooltip-icon" data-tooltip="Optional numeric seed. When set, buildings straddling adjacent bbox tiles render byte-identically in both. Same seed → same building palette across runs. Leave blank to use upstream non-deterministic palette.">?</span>
+          </label>
+          <div class="settings-control rotation-control">
+            <input type="number" id="seed-input" name="seed-input" min="0" max="4294967295" step="1" placeholder="Off">
+          </div>
+        </div>
+
         <!-- World Scale Slider -->
         <div class="settings-row">
           <label for="scale-value-slider">

@@ -1379,12 +1379,30 @@ async function startGeneration() {
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
-    // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
-    // DEPRECATED: Ground level input removed from UI
-    var ground_level = -62;
 
-    // Validate ground_level
-    ground_level = isNaN(ground_level) || ground_level < -62 ? -62 : ground_level;
+    // Ground height (custom): falls back to -62 if blank / out-of-range.
+    var ground_level_raw = parseInt(document.getElementById("ground-level-input").value, 10);
+    var ground_level = (isNaN(ground_level_raw) || ground_level_raw < -62 || ground_level_raw > 319)
+        ? -62
+        : ground_level_raw;
+
+    // Road detail: "default" → auto-resolve by scale (matches Meld scheduler:
+    // compact under 0.7, clean at or above). Explicit values pass through.
+    var road_detail_choice = document.getElementById("road-detail-select").value || "default";
+    var road_detail = road_detail_choice;
+    if (road_detail === "default") {
+        road_detail = (scale < 0.7) ? "compact" : "clean";
+    }
+
+    // Seed (tile-invariant). Blank input → omitted (None). Non-negative u64 → enabled.
+    var seed_raw = document.getElementById("seed-input").value;
+    var tile_invariant_seed = null;
+    if (seed_raw !== null && seed_raw !== undefined && seed_raw !== "") {
+        var seed_parsed = parseInt(seed_raw, 10);
+        if (!isNaN(seed_parsed) && seed_parsed >= 0) {
+            tile_invariant_seed = seed_parsed;
+        }
+    }
 
     // Get telemetry consent (defaults to false if not set)
     const telemetryConsent = window.getTelemetryConsent ? window.getTelemetryConsent() : false;
@@ -1411,7 +1429,9 @@ async function startGeneration() {
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
-        rotationAngle: rotationAngle
+        rotationAngle: rotationAngle,
+        roadDetail: road_detail,
+        tileInvariantSeed: tile_invariant_seed
     });
 
     console.log("Generation process started.");
