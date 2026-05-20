@@ -1424,13 +1424,13 @@ static DEFINED_COLORS: &[ColorBlockMapping] = &[
 ];
 
 // Function to randomly select building wall block with alternatives.
-// Non-deterministic — uses thread_rng. Kept for any caller that wants
-// upstream-style random palette per call. Building rendering uses the
-// `_seeded` variant below so adjacent tiles agree on the same block.
-pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
-    use rand::Rng;
-    let mut rng = rand::rng();
-
+// Accepts caller-provided rng so v2.8.0 callsites that already seed
+// per-element get deterministic palette. Seeded variant below preserved
+// for Teddy fork callers that want explicit naming.
+pub fn get_building_wall_block_for_color(
+    color: RGBTuple,
+    rng: &mut impl rand::Rng,
+) -> Block {
     let closest_color = DEFINED_COLORS
         .iter()
         .min_by_key(|(defined_color, _)| crate::colors::rgb_distance(&color, defined_color));
@@ -1438,7 +1438,7 @@ pub fn get_building_wall_block_for_color(color: RGBTuple) -> Block {
     if let Some((_, options)) = closest_color {
         options[rng.random_range(0..options.len())]
     } else {
-        get_fallback_building_block()
+        get_fallback_building_block_seeded(rng)
     }
 }
 
@@ -1486,6 +1486,105 @@ pub fn get_castle_wall_block() -> Block {
 pub fn get_castle_wall_block_seeded<R: rand::Rng>(rng: &mut R) -> Block {
     let castle_wall_options = CASTLE_WALL_OPTIONS;
     castle_wall_options[rng.random_range(0..castle_wall_options.len())]
+}
+
+/// Maps an OSM building:material tag to a wall block, or None if unrecognized. (v2.8.0)
+pub fn get_wall_block_for_material(material: &str, rng: &mut impl rand::Rng) -> Option<Block> {
+    let normalized: String = material
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+
+    let options: &[Block] =
+        match normalized.as_str() {
+            "brick" | "bricks" | "redbrick" => &[BRICK, NETHER_BRICK],
+            "stone" | "limestone" | "sandstone" | "naturalstone" => {
+                &[STONE_BRICKS, COBBLESTONE, SANDSTONE, SMOOTH_STONE, ANDESITE]
+            }
+            "marble" | "granite" => &[POLISHED_GRANITE, POLISHED_DIORITE, QUARTZ_BLOCK],
+            "concrete" | "reinforcedconcrete" | "cementblock" | "cement" | "breezeblock"
+            | "concreteblock" | "concreteblocks" => &[
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                WHITE_CONCRETE,
+                SMOOTH_STONE,
+            ],
+            "plaster" | "stucco" | "render" | "rendering" | "limerender" => &[
+                WHITE_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                QUARTZ_BLOCK,
+                SMOOTH_SANDSTONE,
+            ],
+            "wood" | "timber" | "timberframe" | "halftimber" | "halftimbered" | "loghouse"
+            | "logs" => &[OAK_PLANKS, SPRUCE_PLANKS, DARK_OAK_PLANKS, OAK_LOG],
+            "metal" | "steel" | "iron" | "aluminium" | "aluminum" | "corrugatedsteel"
+            | "corrugatediron" | "corrugatedmetal" | "tin" | "sheetmetal" | "metalsheet" => {
+                &[IRON_BLOCK, LIGHT_GRAY_CONCRETE, GRAY_CONCRETE]
+            }
+            "copper" | "oxidisedcopper" | "oxidizedcopper" | "patina" | "verdigris" => {
+                &[WAXED_OXIDIZED_COPPER]
+            }
+            "glass" => &[GLASS, LIGHT_GRAY_STAINED_GLASS, WHITE_STAINED_GLASS],
+            "tiles" | "tile" | "rooftiles" | "ceramictiles" | "ceramic" | "terracotta" => &[
+                WHITE_TERRACOTTA,
+                BROWN_TERRACOTTA,
+                RED_TERRACOTTA,
+                ORANGE_TERRACOTTA,
+                LIGHT_GRAY_CONCRETE,
+            ],
+            "mud" | "adobe" | "earth" | "clay" | "rammedearth" | "cob" => {
+                &[MUD_BRICKS, BROWN_TERRACOTTA, BROWN_CONCRETE]
+            }
+            "thatch" | "straw" => &[HAY_BALE],
+            "asbestos" | "asbestoscement" | "fibrecement" | "fibercement" => {
+                &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE]
+            }
+            "vinyl" | "siding" | "vinylsiding" | "weatherboard" | "weatherboarding"
+            | "clapboard" => &[OAK_PLANKS, SPRUCE_PLANKS, WHITE_CONCRETE],
+            "panel" | "panels" | "panelling" | "paneling" | "panelhouse" | "prefab"
+            | "prefabricated" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, WHITE_CONCRETE],
+            _ => return None,
+        };
+
+    Some(options[rng.random_range(0..options.len())])
+}
+
+/// Maps an OSM roof:material to a roof block, or None if unrecognized. (v2.8.0)
+pub fn get_roof_block_for_material(material: &str, rng: &mut impl rand::Rng) -> Option<Block> {
+    let normalized: String = material
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '_' && *c != '-')
+        .flat_map(|c| c.to_lowercase())
+        .collect();
+
+    let options: &[Block] = match normalized.as_str() {
+        "glass" | "glazing" => &[GLASS],
+        "tile" | "tiles" | "rooftiles" | "ceramic" | "ceramictiles" | "claytile" | "claytiles"
+        | "terracotta" => &[BRICK, NETHER_BRICK, RED_NETHER_BRICKS, MUD_BRICKS],
+        "slate" | "slates" => &[POLISHED_BLACKSTONE, DEEPSLATE_BRICKS, BLACKSTONE],
+        "metal" | "steel" | "aluminium" | "aluminum" | "corrugatedsteel" | "corrugatediron"
+        | "corrugatedmetal" | "tin" | "zinc" | "lead" | "sheetmetal" | "metalsheet" => {
+            &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, IRON_BLOCK]
+        }
+        "concrete" | "reinforcedconcrete" => &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE, SMOOTH_STONE],
+        "wood" | "timber" | "shingle" | "shingles" | "woodshingle" | "woodshingles" => {
+            &[OAK_PLANKS, SPRUCE_PLANKS, DARK_OAK_PLANKS]
+        }
+        "thatch" | "straw" | "reed" | "reeds" => &[HAY_BALE],
+        "asphalt" | "bitumen" | "tar" | "tarpaper" | "rolledasphalt" | "rolledroofing" => {
+            &[BLACKSTONE, POLISHED_BLACKSTONE]
+        }
+        "stone" => &[STONE_BRICKS, SMOOTH_STONE, ANDESITE],
+        "gravel" => &[GRAVEL],
+        "grass" | "green" | "vegetation" | "greenroof" | "sod" => &[GRASS_BLOCK, MOSS_BLOCK],
+        "eternit" | "asbestos" | "fibrecement" | "fibercement" => {
+            &[LIGHT_GRAY_CONCRETE, GRAY_CONCRETE]
+        }
+        _ => return None,
+    };
+
+    Some(options[rng.random_range(0..options.len())])
 }
 
 // Shared option arrays so deterministic + non-deterministic variants

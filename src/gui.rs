@@ -1149,7 +1149,7 @@ fn gui_start_generation(
             // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None, &[], "max") {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox) =
+                    let (mut parsed_elements, mut xzbbox, outline_suppression) =
                         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.master_origin_lat, args.master_origin_lng, args.tile_invariant_rendering);
 
                     // Fetch supplementary building data from Overture Maps

@@ -61,6 +61,7 @@ impl Ground {
         extended_max_y: i32,
         elevation_min: Option<f64>,
         elevation_max: Option<f64>,
+        aws_only: bool,
     ) -> Self {
         // Fetch land cover FIRST so we can feed it into the elevation
         // post-processing pipeline for land-cover-aware artifact repair.
@@ -88,6 +89,7 @@ impl Ground {
             land_cover.as_mut(),
             elevation_min,
             elevation_max,
+            aws_only,
         ) {
             Ok(elevation_data) => Self {
                 elevation_enabled: true,
@@ -553,6 +555,7 @@ pub fn generate_ground_data(args: &Args) -> Ground {
             extended_max_y_for(args),
             args.elevation_min,
             args.elevation_max,
+            args.aws_only_elevation,
         );
         if args.debug {
             ground.save_debug_image("elevation_debug");

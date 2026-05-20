@@ -284,7 +284,7 @@ pub fn parse_osm_data(
     master_origin_lat: Option<f64>,
     master_origin_lng: Option<f64>,
     tile_invariant_rendering: Option<u64>,
-) -> (Vec<ProcessedElement>, XZBBox) {
+) -> (Vec<ProcessedElement>, XZBBox, OutlineSuppression) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
     emit_gui_progress_update(5.0, "Parsing data...");

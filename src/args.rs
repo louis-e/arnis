@@ -123,6 +123,7 @@ pub struct Args {
     ///   --tile-invariant-rendering         (treated as seed=1)
     ///   --tile-invariant-rendering 1
     ///   --tile-invariant-rendering 42
+    ///   --seed 42                          (alias)
     ///
     /// Off (omitted): upstream behaviour — clipped nodes drive every
     /// decision; salted RNG seeded from element_id + salt only.
@@ -130,6 +131,7 @@ pub struct Args {
     /// stream is seeded as `element_id ^ salt^32 ^ N^16`, so two runs
     /// passing the same N produce byte-identical building palette.
     #[arg(long = "tile-invariant-rendering",
+          visible_alias = "seed",
           num_args = 0..=1, default_missing_value = "1",
           value_parser = clap::value_parser!(u64))]
     pub tile_invariant_rendering: Option<u64>,

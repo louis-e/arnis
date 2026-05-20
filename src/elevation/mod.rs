@@ -110,6 +110,7 @@ pub fn fetch_elevation_data(
     land_cover: Option<&mut LandCoverData>,
     elevation_min: Option<f64>,
     elevation_max: Option<f64>,
+    aws_only: bool,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
