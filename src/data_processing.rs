@@ -68,6 +68,11 @@ pub fn generate_world_with_options(
     };
     let ground = Arc::new(ground);
 
+    // Phase 3 (arnis-update-290) — per-cell water depth field for large
+    // water bodies. Computed once from the ESA LC_WATER mask via BFS +
+    // chamfer-3-4 DT. Empty when land cover is disabled.
+    let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+
     println!("{} Processing data...", "[4/7]".bold());
 
     // Build highway connectivity map once before processing
@@ -250,7 +255,7 @@ pub fn generate_world_with_options(
                 } else if let Some(val) = way.tags.get("waterway") {
                     if val == "dock" {
                         // docks count as water areas
-                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox);
+                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox, &big_water_field);
                     } else {
                         waterways::generate_waterways(&mut editor, way);
                     }
@@ -349,7 +354,7 @@ pub fn generate_world_with_options(
                         .map(|val| val == "water" || val == "bay")
                         .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
+                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox, &big_water_field);
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(
                         &mut editor,

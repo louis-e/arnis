@@ -1,5 +1,6 @@
-use crate::block_definitions::WATER;
+use crate::block_definitions::{GRAVEL, SAND, STONE, WATER};
 use crate::clipping::clip_water_ring_to_bbox;
+use crate::water_depth::{ocean_depth_for_cell, BigWaterField};
 use crate::{
     coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
@@ -10,6 +11,7 @@ pub fn generate_water_area_from_way(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     _xzbbox: &XZBBox,
+    bwf: &BigWaterField,
 ) {
     let outers = [element.nodes.clone()];
     if !verify_closed_rings(&outers) {
@@ -17,13 +19,14 @@ pub fn generate_water_area_from_way(
         return;
     }
 
-    generate_water_areas(editor, &outers, &[]);
+    generate_water_areas(editor, &outers, &[], bwf);
 }
 
 pub fn generate_water_areas_from_relation(
     editor: &mut WorldEditor,
     element: &ProcessedRelation,
     xzbbox: &XZBBox,
+    bwf: &BigWaterField,
 ) {
     // Check if this is a water relation (either with water tag or natural=water)
     let is_water = element.tags.contains_key("water")
@@ -116,13 +119,14 @@ pub fn generate_water_areas_from_relation(
         return;
     }
 
-    generate_water_areas(editor, &outers, &inners);
+    generate_water_areas(editor, &outers, &inners, bwf);
 }
 
 fn generate_water_areas(
     editor: &mut WorldEditor,
     outers: &[Vec<ProcessedNode>],
     inners: &[Vec<ProcessedNode>],
+    bwf: &BigWaterField,
 ) {
     // Calculate polygon bounding box to limit fill area
     let mut poly_min_x = i32::MAX;
@@ -161,7 +165,7 @@ fn generate_water_areas(
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    scanline_fill_water(min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor);
+    scanline_fill_water(min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf);
 }
 
 /// Verifies all rings are properly closed (first node matches last).
@@ -391,6 +395,7 @@ fn scanline_fill_water(
     outers: &[Vec<XZPoint>],
     inners: &[Vec<XZPoint>],
     editor: &mut WorldEditor,
+    bwf: &BigWaterField,
 ) {
     // Collect edges per outer ring so we can union their spans correctly,
     // even if multiple outer rings happen to overlap (invalid OSM, but
@@ -432,9 +437,37 @@ fn scanline_fill_water(
                 // Only place water where terrain is at or below the water
                 // surface — skip hillside blocks where the polygon extends
                 // above the actual waterline.
-                if ground_y <= water_y {
-                    editor.set_block_absolute(WATER, x, water_y, z, None, None);
+                if ground_y > water_y {
+                    continue;
                 }
+                editor.set_block_absolute(WATER, x, water_y, z, None, None);
+
+                // Phase 3 (arnis-update-290) — depth carve from
+                // BigWaterField chamfer DT. Only big LC_WATER components
+                // (≥400 cells or edge-touching) get depth > 0; small
+                // ponds stay surface-only.
+                let (dt, comp_max) = bwf.depth_at(x, z);
+                if dt == 0 {
+                    continue;
+                }
+                let depth = ocean_depth_for_cell(dt, comp_max);
+                if depth <= 0 {
+                    continue;
+                }
+                // Carve a WATER column down from water_y - 1 to water_y - depth.
+                for dy in 1..=depth {
+                    editor.set_block_absolute(WATER, x, water_y - dy, z, None, None);
+                }
+                // Bed palette one block below the deepest water cell.
+                let bed_y = water_y - depth - 1;
+                let bed = if depth <= 1 {
+                    SAND
+                } else if depth <= 3 {
+                    GRAVEL
+                } else {
+                    STONE
+                };
+                editor.set_block_absolute(bed, x, bed_y, z, None, None);
             }
         }
     }
