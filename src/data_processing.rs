@@ -393,10 +393,11 @@ pub fn generate_world_with_options(
     process_pb.inc(element_counter % pb_batch_size);
     process_pb.finish();
 
-    // Drop remaining caches
+    // Drop remaining caches (keep road_mask alive — needed below for the
+    // universal LC_WATER carve so road / bridge surfaces aren't replaced
+    // with water).
     drop(highway_connectivity);
     drop(flood_fill_cache);
-    drop(road_mask);
 
     // Generate ground layer (surface blocks, vegetation, shorelines, underground fill)
     ground_generation::generate_ground_layer(
@@ -406,6 +407,22 @@ pub fn generate_world_with_options(
         &xzbbox,
         &building_footprints,
     )?;
+
+    // Universal LC_WATER carve — every ESA-classified water cell now gets
+    // depth from BigWaterField + a uniform SAND / SANDSTONE / STONE bed
+    // stack. Kills the "wide rivers / oceans without depth" patches the
+    // user reported (water_areas.rs only handles OSM water polygons; ESA
+    // LC_WATER cells without an OSM polygon were rendered flat by
+    // ground_generation.rs).
+    crate::water_depth::carve_lc_water_pass(
+        &mut editor,
+        ground.as_ref(),
+        &xzbbox,
+        &big_water_field,
+        &road_mask,
+    );
+
+    drop(road_mask);
 
     // Carve subway tunnel interiors now that underground is filled with stone.
     // This must happen after ground generation so AIR blocks are not overwritten.

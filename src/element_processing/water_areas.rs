@@ -1,6 +1,5 @@
-use crate::block_definitions::{Block, GRAVEL, SAND, WATER};
 use crate::clipping::clip_water_ring_to_bbox;
-use crate::water_depth::{ocean_depth_for_cell, BigWaterField};
+use crate::water_depth::{carve_water_column, ocean_depth_for_cell, BigWaterField};
 use crate::{
     coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
@@ -434,64 +433,25 @@ fn scanline_fill_water(
             for x in start..=end {
                 let water_y = editor.get_water_level(x, z);
                 let ground_y = editor.get_ground_level(x, z);
-                // Only place water where terrain is at or below the water
-                // surface — skip hillside blocks where the polygon extends
-                // above the actual waterline.
+                // Only carve where terrain is at or below the water
+                // surface — skip hillside blocks where the polygon
+                // extends above the actual waterline.
                 if ground_y > water_y {
                     continue;
                 }
-                editor.set_block_absolute(WATER, x, water_y, z, None, None);
-
-                // arnis-update-290 — depth carve from the BigWaterField
-                // chamfer DT, with a flat shoal band right under the
-                // waterline. Universal — every LC_WATER component gets
-                // treatment now (gate dropped in water_depth.rs).
+                // Depth from BigWaterField. dt = 0 means the cell isn't
+                // in any tracked LC_WATER component, but we still want a
+                // single surface WATER block here so OSM-only polygons
+                // (no ESA water classification) still render water.
                 let (dt, comp_max) = bwf.depth_at(x, z);
-                if dt == 0 {
-                    continue;
-                }
-                let depth = ocean_depth_for_cell(x, z, dt, comp_max);
-                // Carve the WATER column wy-1..wy-depth (no-op when
-                // depth == 0 inside the shoal band).
-                for dy in 1..=depth {
-                    editor.set_block_absolute(WATER, x, water_y - dy, z, None, None);
-                }
-                // Bed sits one block under the deepest water cell. In
-                // the shoal band (depth == 0) that's wy - 1 — the flat
-                // platform the user asked for. Past the shoal it follows
-                // the depth ramp. Palette is per-cell noise so neighbours
-                // never agree on the same block: salt-and-pepper
-                // SAND/GRAVEL/CLAY/COARSE_DIRT near shore, drifting to
-                // STONE/ANDESITE in deeper cells.
-                let bed_y = water_y - depth - 1;
-                let bed = pick_underwater_bed(x, z, depth);
-                editor.set_block_absolute(bed, x, bed_y, z, None, None);
+                let depth = if dt == 0 {
+                    0
+                } else {
+                    ocean_depth_for_cell(x, z, dt, comp_max)
+                };
+                carve_water_column(editor, x, z, water_y, depth);
             }
         }
     }
 }
 
-/// Linear SAND→GRAVEL probability gradient by depth:
-///   d=0  → 100% SAND     (shoal: top layer always sand)
-///   d=1  → 80/20  SAND/GRAVEL
-///   d=2  → 60/40
-///   d=3  → 40/60
-///   d=4  → 20/80
-///   d≥5  → 100% GRAVEL    (ocean floor: only gravel)
-///
-/// Two-block palette by design — the user explicitly asked for SAND-only
-/// at the top layer, a smooth blend through the middle, and pure GRAVEL
-/// at the bottom. Per-cell `coord_hash` decides which side of the share
-/// this cell falls on, so neighbouring cells of d=2 and d=3 mix freely
-/// along the depth boundary (60/40 ↔ 40/60 reads as smooth) and the
-/// concentric-ring artifact dissolves.
-fn pick_underwater_bed(x: i32, z: i32, depth: i32) -> Block {
-    let d = depth.clamp(0, 5);
-    let sand_share = ((5 - d) as i64) * 20;
-    let h = (crate::land_cover::coord_hash(x, z) % 100) as i64;
-    if h < sand_share {
-        SAND
-    } else {
-        GRAVEL
-    }
-}

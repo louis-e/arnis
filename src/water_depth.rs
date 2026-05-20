@@ -15,9 +15,12 @@
 //! concentric-ring artifact passes — the v2.8.0 OSM override + bridge
 //! repair already resolves those.
 
+use crate::block_definitions::{SAND, SANDSTONE, STONE, WATER};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
+use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::land_cover::LC_WATER;
+use crate::world_editor::{WorldEditor, MIN_Y};
 
 /// Shoal band width measured in chamfer-DT units (3 = orthogonal step).
 /// Cells with `dt < SHOAL_DT_UNITS` are inside the flat shoal — bed sits
@@ -308,21 +311,16 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
 /// Compute carve depth at a single cell from its chamfer-DT distance to
 /// the nearest shore and the polygon's component max DT.
 ///
-/// Pipeline:
-/// 1. dt == 0 → 0 (cell is the shore itself).
-/// 2. dt < SHOAL_DT_UNITS → 0 (still inside the flat shoal band; caller
-///    paints the bed block at water_y - 1, which produces the level
-///    near-shore platform the user asked for).
-/// 3. Past the shoal: `depth = floor((dt - shoal)/3 * slope + jitter)`,
-///    clamped to polygon_local_max. Slope is size-tiered (halved from
-///    the v131 source-water table) so small ponds carve too while big
-///    seas stay calm.
-/// 4. `coord_hash` ±0.5 jitter is per-cell uncorrelated, so adjacent
-///    cells get independent jitter and the integer-depth contours
-///    dissolve into noise instead of reading as concentric stripes.
+/// Pure deterministic — NO per-cell jitter on depth. User feedback from
+/// v2 was that coord_hash jitter on `depth_f` produced a bumpy bed-Y
+/// (neighbouring cells at depth=2, 3, 1, 4, 2 → jagged seabed). Smooth
+/// contours win, even if integer depth still produces concentric bands;
+/// the universal SAND palette in `carve_water_column` plus the gentler
+/// halved-again slope rates below keep those bands wide enough to read
+/// as a gradient rather than stripes.
 pub fn ocean_depth_for_cell(
-    x: i32,
-    z: i32,
+    _x: i32,
+    _z: i32,
     dt_units: u16,
     component_max_units: u16,
 ) -> i32 {
@@ -331,33 +329,103 @@ pub fn ocean_depth_for_cell(
     }
     let local_max = polygon_local_max(component_max_units);
 
-    // Halved from the arnis-source-water v131 tiers (1.0, 2/3, 1/2, 1/3).
-    // Small ponds still steepest (1/2) so a 7-block puddle carves to
-    // depth 1; big bodies use 1/6 so wide rivers don't bottom out in
-    // 9 blocks. Tier breakpoints match polygon_local_max above.
+    // Halved again from v2 (1/2, 1/3, 1/4, 1/6). Visible depth bands now
+    // sit 8-24 horizontal blocks apart instead of 4-12. Small ponds at
+    // 1/4 still bottom out (7-block puddle reaches depth 1 at centre);
+    // big seas at 1/12 only reach depth 6 ≈ 72 blocks from shore.
     let slope = if component_max_units < 21 {
-        1.0 / 2.0
-    } else if component_max_units < 45 {
-        1.0 / 3.0
-    } else if component_max_units < 75 {
         1.0 / 4.0
-    } else {
+    } else if component_max_units < 45 {
         1.0 / 6.0
+    } else if component_max_units < 75 {
+        1.0 / 8.0
+    } else {
+        1.0 / 12.0
     };
 
     let effective_dt = dt_units - SHOAL_DT_UNITS;
     let dist_blocks = (effective_dt as f64) / 3.0;
-
-    // Per-cell uncorrelated jitter via coord_hash. Each cell gets an
-    // independent ±0.5 push on depth_f before floor(), so neighbouring
-    // cells of d=2 and d=3 mix freely along the boundary instead of
-    // forming a clean contour line. Combined with the SAND→GRAVEL
-    // statistical palette in pick_underwater_bed this fully dissolves
-    // the concentric-ring artifact.
-    let jitter_raw =
-        (crate::land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
-    let jitter = jitter_raw - 0.5;
-
-    let depth_f = dist_blocks * slope + jitter;
+    let depth_f = dist_blocks * slope;
     (depth_f.floor() as i32).clamp(0, local_max)
+}
+
+/// Place the canonical underwater stack at (x, z) with a given depth.
+/// User-spec stack: SAND on top, SANDSTONE one below, STONE filling down
+/// to bedrock-safe. Force-overwrites existing blocks via `Some(&[])` so
+/// `ground_generation`'s SAND/GRAVEL/CLAY ESA-water palette can't bleed
+/// through.
+///
+/// `depth = 0` ⇒ shoal: bed sits at `water_y - 1` (the flat near-shore
+/// platform). `depth ≥ 1` ⇒ carves a WATER column down to
+/// `water_y - depth` with the same stack one block below the deepest
+/// water cell.
+pub fn carve_water_column(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    depth: i32,
+) {
+    // WATER column. dy = 0 = surface, dy = depth = bottom water block.
+    for dy in 0..=depth {
+        editor.set_block_absolute(WATER, x, water_y - dy, z, None, Some(&[]));
+    }
+    let bed_y = water_y - depth - 1;
+    if bed_y > MIN_Y {
+        editor.set_block_absolute(SAND, x, bed_y, z, None, Some(&[]));
+    }
+    if bed_y - 1 > MIN_Y {
+        editor.set_block_absolute(SANDSTONE, x, bed_y - 1, z, None, Some(&[]));
+    }
+    let stone_top = bed_y - 2;
+    let stone_bottom = MIN_Y + 1;
+    if stone_top >= stone_bottom {
+        // skip_existing = true: only fills AIR / WATER pockets, preserves
+        // any terrain block ground_generation already placed below.
+        editor.fill_column_absolute(STONE, x, z, stone_bottom, stone_top, true);
+    }
+}
+
+/// Universal post-pass: every LC_WATER cell in the bbox gets the same
+/// depth carve as OSM water polygons. Solves the user-reported gap where
+/// ESA-classified water without an OSM polygon (big inland seas, bay
+/// heads, wide river mid-spans) rendered flat — `water_areas.rs` only
+/// runs on OSM water polygons.
+///
+/// Idempotent vs `water_areas.rs`: cells already processed by an OSM
+/// polygon scanline get re-carved with the same depth and the same bed
+/// stack (force-overwrite produces identical bytes).
+pub fn carve_lc_water_pass(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    xzbbox: &XZBBox,
+    bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
+) {
+    let min_x = xzbbox.min_x();
+    let max_x = xzbbox.max_x();
+    let min_z = xzbbox.min_z();
+    let max_z = xzbbox.max_z();
+    for z in min_z..=max_z {
+        for x in min_x..=max_x {
+            // Roads / bridges paint their own surface — leave them alone.
+            // Note: bridges over water get reclassified to LC_WATER by
+            // v2.8.0's `apply_bridge_land_cover_repair`, but
+            // `road_mask` also covers the bridge deck cells so they're
+            // skipped here. Water _under_ the bridge gets carved via
+            // the OSM polygon scanline (water_areas.rs) which the v2.8.0
+            // base allows to run on bridge-over-water spans.
+            if road_mask.contains(x, z) {
+                continue;
+            }
+            let coord = XZPoint::new(x - min_x, z - min_z);
+            if ground.cover_class(coord) != LC_WATER {
+                continue;
+            }
+            let water_y = ground.water_level(coord);
+            let (dt, comp_max) = bwf.depth_at(x, z);
+            let depth = ocean_depth_for_cell(x, z, dt, comp_max);
+            carve_water_column(editor, x, z, water_y, depth);
+        }
+    }
 }
