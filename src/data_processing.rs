@@ -66,6 +66,7 @@ pub fn generate_world_with_options(
             args.disable_height_limit,
         )
     };
+    editor.set_bake_lighting(args.bake_lighting);
     let ground = Arc::new(ground);
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.

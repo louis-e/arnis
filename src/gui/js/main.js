@@ -120,6 +120,7 @@ async function applyLocalization(localization) {
     "span[data-localize='three_dmr']": "three_dmr",
     "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
+    "span[data-localize='bake_lighting']": "bake_lighting",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
@@ -1378,6 +1379,7 @@ async function startGeneration() {
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
+    var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
@@ -1407,6 +1409,7 @@ async function startGeneration() {
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
+        bakeLightingEnabled: bake_lighting,
         isNewWorld: true,
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,

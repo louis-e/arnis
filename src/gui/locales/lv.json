@@ -45,6 +45,7 @@
   "three_dmr": "Lietot 3D modeļus",
   "disable_height_limit": "Paplašināt būvniecības augstumu",
   "aws_only_elevation": "Mantotais reljefs",
+  "bake_lighting": "Iepriekš aprēķināt apgaismojumu",
   "bedrock_auto_generated": "Bedrock pasaule tiek ģenerēta automātiski",
   "save_path": "Saglabāšanas ceļš",
   "rotation_angle": "Rotācijas Leņķis",

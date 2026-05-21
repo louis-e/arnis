@@ -45,6 +45,7 @@
   "three_dmr": "Naudoti 3D modelius",
   "disable_height_limit": "Praplėsti statybos aukštį",
   "aws_only_elevation": "Senasis reljefas",
+  "bake_lighting": "Iš anksto apskaičiuoti apšvietimą",
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
   "save_path": "Išsaugojimo kelias",
   "rotation_angle": "Pasukimo Kampas",

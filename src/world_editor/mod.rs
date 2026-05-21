@@ -142,6 +142,8 @@ pub struct WorldEditor<'a> {
     luanti_ground_level: i32,
     /// Luanti game pack
     luanti_game: LuantiGame,
+    /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
+    bake_lighting: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -165,6 +167,7 @@ impl<'a> WorldEditor<'a> {
             luanti_spawn_point: None,
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
+            bake_lighting: false,
         }
     }
 
@@ -194,6 +197,7 @@ impl<'a> WorldEditor<'a> {
             luanti_spawn_point: None,
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
+            bake_lighting: false,
         }
     }
 
@@ -223,12 +227,18 @@ impl<'a> WorldEditor<'a> {
             luanti_spawn_point: spawn_point,
             luanti_ground_level: ground_level,
             luanti_game: game,
+            bake_lighting: false,
         }
     }
 
     /// Sets the ground reference for elevation-based block placement
     pub fn set_ground(&mut self, ground: Arc<Ground>) {
         self.ground = Some(ground);
+    }
+
+    /// Enables baking per-chunk lighting into Java chunks.
+    pub fn set_bake_lighting(&mut self, enabled: bool) {
+        self.bake_lighting = enabled;
     }
 
     /// Gets a reference to the ground data if available

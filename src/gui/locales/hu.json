@@ -45,6 +45,7 @@
   "three_dmr": "3D modellek használata",
   "disable_height_limit": "Építési magasság kiterjesztése",
   "aws_only_elevation": "Régi domborzat",
+  "bake_lighting": "Megvilágítás előszámítása",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal",
   "rotation_angle": "Forgatási Szög",

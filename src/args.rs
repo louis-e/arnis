@@ -104,6 +104,11 @@ pub struct Args {
     /// Print generation-only timing to stderr (excludes data fetching)
     #[arg(long, hide = true)]
     pub benchmark: bool,
+
+    /// Bake per-chunk lighting so distant chunks render lit in LOD mods
+    /// (Voxy/Chunky) without visiting them. Slower; off by default.
+    #[arg(long, default_value_t = false)]
+    pub bake_lighting: bool,
 }
 
 /// Validates CLI arguments after parsing.
@@ -220,6 +225,7 @@ mod tests {
         assert!(!args.terrain);
         assert!(!args.bedrock);
         assert!(!args.disable_height_limit);
+        assert!(!args.bake_lighting);
         // interior, roof, land_cover default to true
         assert!(args.interior);
         assert!(args.roof);
