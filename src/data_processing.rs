@@ -258,6 +258,7 @@ pub fn generate_world_with_options(
                             way,
                             &xzbbox,
                             &big_water_field,
+                            &road_mask,
                         );
                     } else {
                         waterways::generate_waterways(&mut editor, way);
@@ -362,6 +363,7 @@ pub fn generate_world_with_options(
                         rel,
                         &xzbbox,
                         &big_water_field,
+                        &road_mask,
                     );
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(

@@ -123,6 +123,11 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
     let sw = (smax_x - smin_x + 1) as usize;
     let sh = (smax_z - smin_z + 1) as usize;
     let total = sw.checked_mul(sh).expect("water sub-rect size overflow");
+    // comp stores cell indices as u32; bail clearly rather than truncate.
+    assert!(
+        total <= u32::MAX as usize,
+        "water sub-rect too large for u32 indices ({total} cells); tile the area"
+    );
 
     // Seed DT: water = DT_MAX (unreached), shore/land = 0.
     let mut dt = vec![0u8; total];
