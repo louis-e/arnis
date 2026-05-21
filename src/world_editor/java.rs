@@ -8,7 +8,7 @@ use crate::block_definitions::GRASS_BLOCK;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{LongArray, Value};
+use fastnbt::{ByteArray, LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -254,6 +254,317 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)>
     Some((x, y, z))
 }
 
+// Light a block emits, 0 if none.
+fn block_light_emission(name: &str) -> u8 {
+    match name {
+        "minecraft:beacon"
+        | "minecraft:conduit"
+        | "minecraft:end_gateway"
+        | "minecraft:end_portal"
+        | "minecraft:fire"
+        | "minecraft:campfire"
+        | "minecraft:glowstone"
+        | "minecraft:jack_o_lantern"
+        | "minecraft:lantern"
+        | "minecraft:lava"
+        | "minecraft:ochre_froglight"
+        | "minecraft:pearlescent_froglight"
+        | "minecraft:verdant_froglight"
+        | "minecraft:sea_lantern"
+        | "minecraft:shroomlight" => 15,
+        "minecraft:end_rod" | "minecraft:torch" | "minecraft:wall_torch" => 14,
+        "minecraft:crying_obsidian"
+        | "minecraft:soul_campfire"
+        | "minecraft:soul_lantern"
+        | "minecraft:soul_torch"
+        | "minecraft:soul_wall_torch" => 10,
+        "minecraft:glow_lichen" | "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" => 7,
+        "minecraft:sculk_catalyst" => 6,
+        "minecraft:magma_block" => 3,
+        "minecraft:brewing_stand" | "minecraft:brown_mushroom" => 1,
+        _ => 0,
+    }
+}
+
+// Blocks that don't occlude skylight: air, glass, leaves, water/ice, plants, thin decor.
+fn is_light_transparent(name: &str) -> bool {
+    let n = name.strip_prefix("minecraft:").unwrap_or(name);
+    if n.ends_with("air") || n.ends_with("leaves") || n.contains("glass") {
+        return true;
+    }
+    const EXACT: &[&str] = &[
+        "water",
+        "ice",
+        "frosted_ice",
+        "bubble_column",
+        "grass",
+        "short_grass",
+        "tall_grass",
+        "fern",
+        "large_fern",
+        "dead_bush",
+        "bush",
+        "dandelion",
+        "poppy",
+        "blue_orchid",
+        "allium",
+        "azure_bluet",
+        "oxeye_daisy",
+        "cornflower",
+        "lily_of_the_valley",
+        "wither_rose",
+        "torchflower",
+        "red_tulip",
+        "orange_tulip",
+        "white_tulip",
+        "pink_tulip",
+        "sunflower",
+        "lilac",
+        "rose_bush",
+        "peony",
+        "pink_petals",
+        "spore_blossom",
+        "hanging_roots",
+        "glow_lichen",
+        "sweet_berry_bush",
+        "cactus",
+        "bamboo",
+        "sugar_cane",
+        "nether_wart",
+        "lily_pad",
+        "sea_pickle",
+        "cobweb",
+        "snow",
+        "lever",
+        "tripwire",
+        "tripwire_hook",
+        "end_rod",
+        "lightning_rod",
+        "scaffolding",
+        "pointed_dripstone",
+        "turtle_egg",
+    ];
+    if EXACT.contains(&n) {
+        return true;
+    }
+    if n.ends_with("_block") || n.ends_with("_stem") {
+        return false;
+    }
+    const SUB: &[&str] = &[
+        "torch", "lantern", "sign", "rail", "carpet", "candle", "chain", "ladder", "banner",
+        "sapling", "coral", "sprouts", "roots", "vine", "flower", "mushroom", "amethyst", "_bud",
+        "seagrass", "kelp", "petals",
+    ];
+    SUB.iter().any(|s| n.contains(s))
+}
+
+// Per-cell opacity and emission for a section (YZX order, 4096 cells).
+fn decode_section_light_props(section: &Section) -> (Vec<bool>, Vec<u8>) {
+    let palette = &section.block_states.palette;
+    let pal_opaque: Vec<bool> = palette
+        .iter()
+        .map(|p| !is_light_transparent(&p.name))
+        .collect();
+    let pal_emission: Vec<u8> = palette
+        .iter()
+        .map(|p| block_light_emission(&p.name))
+        .collect();
+
+    let mut opaque = vec![false; 4096];
+    let mut emission = vec![0u8; 4096];
+
+    match &section.block_states.data {
+        None => {
+            let o = pal_opaque.first().copied().unwrap_or(false);
+            let e = pal_emission.first().copied().unwrap_or(0);
+            if o {
+                opaque.iter_mut().for_each(|v| *v = true);
+            }
+            if e > 0 {
+                emission.iter_mut().for_each(|v| *v = e);
+            }
+        }
+        Some(data) => {
+            let mut bits = 4;
+            while (1usize << bits) < palette.len() {
+                bits += 1;
+            }
+            let vals_per_long = 64 / bits;
+            let mask = (1u64 << bits) - 1;
+            for i in 0..4096usize {
+                let long_idx = i / vals_per_long;
+                let off = (i % vals_per_long) * bits;
+                if long_idx < data.len() {
+                    let pi = ((data[long_idx] as u64 >> off) & mask) as usize;
+                    if pi < palette.len() {
+                        opaque[i] = pal_opaque[pi];
+                        emission[i] = pal_emission[pi];
+                    }
+                }
+            }
+        }
+    }
+    (opaque, emission)
+}
+
+// Flood-fill light from the seeded queue, -1 per block, through non-opaque cells.
+fn propagate_light(
+    light: &mut [u8],
+    opaque: &[bool],
+    queue: &mut std::collections::VecDeque<(usize, usize, usize, u8)>,
+    height: usize,
+) {
+    let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
+    while let Some((x, y, z, level)) = queue.pop_front() {
+        if level <= 1 {
+            continue;
+        }
+        let next = level - 1;
+        let try_spread =
+            |nx: usize,
+             ny: usize,
+             nz: usize,
+             light: &mut [u8],
+             queue: &mut std::collections::VecDeque<(usize, usize, usize, u8)>| {
+                let g = idx(nx, ny, nz);
+                if !opaque[g] && light[g] < next {
+                    light[g] = next;
+                    queue.push_back((nx, ny, nz, next));
+                }
+            };
+        if x > 0 {
+            try_spread(x - 1, y, z, light, queue);
+        }
+        if x < 15 {
+            try_spread(x + 1, y, z, light, queue);
+        }
+        if z > 0 {
+            try_spread(x, y, z - 1, light, queue);
+        }
+        if z < 15 {
+            try_spread(x, y, z + 1, light, queue);
+        }
+        if y > 0 {
+            try_spread(x, y - 1, z, light, queue);
+        }
+        if y + 1 < height {
+            try_spread(x, y + 1, z, light, queue);
+        }
+    }
+}
+
+// Pack a 0..15 value into the 4-bit-per-cell light array.
+#[inline]
+fn pack_light_nibble(arr: &mut [i8], index: usize, value: u8) {
+    let byte = index >> 1;
+    let cur = arr[byte] as u8;
+    let new = if index & 1 == 0 {
+        (cur & 0xF0) | (value & 0x0F)
+    } else {
+        (cur & 0x0F) | (value << 4)
+    };
+    arr[byte] = new as i8;
+}
+
+// Sky + block light per section as 2048-byte nibble arrays.
+fn compute_lighting(
+    sections: &[Section],
+    min_section_y: i8,
+    max_section_y: i8,
+) -> HashMap<i8, (Vec<i8>, Vec<i8>)> {
+    use std::collections::VecDeque;
+
+    let num_sections = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
+    let height = num_sections * 16;
+    if height == 0 {
+        return HashMap::new();
+    }
+    let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
+
+    let mut opaque = vec![false; height * 256];
+    let mut emission = vec![0u8; height * 256];
+
+    let sec_by_y: HashMap<i8, &Section> = sections.iter().map(|s| (s.y, s)).collect();
+    for sy in min_section_y..=max_section_y {
+        let Some(sec) = sec_by_y.get(&sy) else {
+            continue;
+        };
+        let base_y = ((sy as i32 - min_section_y as i32) * 16) as usize;
+        let (op, em) = decode_section_light_props(sec);
+        for ly in 0..16usize {
+            for z in 0..16usize {
+                for x in 0..16usize {
+                    let local = ly * 256 + z * 16 + x;
+                    let g = idx(x, base_y + ly, z);
+                    opaque[g] = op[local];
+                    emission[g] = em[local];
+                }
+            }
+        }
+    }
+
+    // SkyLight: vertical cast then flood-fill.
+    let mut sky = vec![0u8; height * 256];
+    let mut sq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
+    for z in 0..16usize {
+        for x in 0..16usize {
+            for y in (0..height).rev() {
+                let g = idx(x, y, z);
+                if opaque[g] {
+                    break;
+                }
+                sky[g] = 15;
+            }
+        }
+    }
+    for y in 0..height {
+        for z in 0..16usize {
+            for x in 0..16usize {
+                if sky[idx(x, y, z)] == 15 {
+                    sq.push_back((x, y, z, 15));
+                }
+            }
+        }
+    }
+    propagate_light(&mut sky, &opaque, &mut sq, height);
+
+    // BlockLight: flood-fill from emitters.
+    let mut block = vec![0u8; height * 256];
+    let mut bq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
+    for y in 0..height {
+        for z in 0..16usize {
+            for x in 0..16usize {
+                let g = idx(x, y, z);
+                if emission[g] > 0 {
+                    block[g] = emission[g];
+                    bq.push_back((x, y, z, emission[g]));
+                }
+            }
+        }
+    }
+    propagate_light(&mut block, &opaque, &mut bq, height);
+
+    // Pack each section.
+    let mut out = HashMap::new();
+    for sy in min_section_y..=max_section_y {
+        let base_y = ((sy as i32 - min_section_y as i32) * 16) as usize;
+        let mut sl = vec![0i8; 2048];
+        let mut bl = vec![0i8; 2048];
+        for ly in 0..16usize {
+            for z in 0..16usize {
+                for x in 0..16usize {
+                    let local = ly * 256 + z * 16 + x;
+                    let g = idx(x, base_y + ly, z);
+                    pack_light_nibble(&mut sl, local, sky[g]);
+                    pack_light_nibble(&mut bl, local, block[g]);
+                }
+            }
+        }
+        out.insert(sy, (sl, bl));
+    }
+    out
+}
+
 /// Creates modern chunk NBT data (post-1.18 format, no Level wrapper).
 ///
 /// Writes all required fields for server compatibility:
@@ -287,6 +598,9 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
         Value::List(vec![Value::String("minecraft:plains".to_string())]),
     )]));
 
+    // Bake lighting so isLightOn=1 chunks load lit (vanilla + off-disk Voxy/Chunky).
+    let lighting = compute_lighting(&chunk.sections, min_section_y, max_section_y);
+
     // Build all sections in the determined range
     let sections: Vec<Value> = (min_section_y..=max_section_y)
         .map(|y| {
@@ -309,6 +623,16 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
                 ])
             };
             section_nbt.insert("biomes".to_string(), biome_value.clone());
+            if let Some((sky_light, block_light)) = lighting.get(&y) {
+                section_nbt.insert(
+                    "SkyLight".to_string(),
+                    Value::ByteArray(ByteArray::new(sky_light.clone())),
+                );
+                section_nbt.insert(
+                    "BlockLight".to_string(),
+                    Value::ByteArray(ByteArray::new(block_light.clone())),
+                );
+            }
             Value::Compound(section_nbt)
         })
         .collect();
@@ -330,7 +654,8 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
             "Status".to_string(),
             Value::String("minecraft:full".to_string()),
         ),
-        ("isLightOn".to_string(), Value::Byte(0)),
+        // Lighting baked above; mark valid.
+        ("isLightOn".to_string(), Value::Byte(1)),
         ("InhabitedTime".to_string(), Value::Long(0)),
         ("LastUpdate".to_string(), Value::Long(0)),
         ("sections".to_string(), Value::List(sections)),
