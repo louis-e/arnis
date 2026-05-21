@@ -958,3 +958,85 @@ fn value_to_i32(value: &Value) -> Option<i32> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::common::{Chunk, ChunkToModify};
+    use super::create_chunk_nbt;
+    use crate::block_definitions::GRASS_BLOCK;
+    use fastnbt::Value;
+    use fnv::FnvHashMap;
+    use std::collections::HashMap;
+
+    fn grass_chunk() -> Chunk {
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -62, z, GRASS_BLOCK);
+            }
+        }
+        Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        }
+    }
+
+    fn sections(nbt: &HashMap<String, Value>) -> &Vec<Value> {
+        match &nbt["sections"] {
+            Value::List(v) => v,
+            _ => panic!("sections is not a list"),
+        }
+    }
+
+    #[test]
+    fn bake_lighting_writes_valid_light_arrays() {
+        let nbt = create_chunk_nbt(&grass_chunk(), true);
+        assert_eq!(nbt["isLightOn"], Value::Byte(1));
+        assert!(nbt.contains_key("Heightmaps"));
+        let secs = sections(&nbt);
+        assert_eq!(secs.len(), 24);
+        for s in secs {
+            let Value::Compound(m) = s else { panic!() };
+            for key in ["SkyLight", "BlockLight"] {
+                match &m[key] {
+                    Value::ByteArray(b) => assert_eq!(b.len(), 2048),
+                    _ => panic!("{key} is not a byte array"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_bake_lighting_omits_light_arrays() {
+        let nbt = create_chunk_nbt(&grass_chunk(), false);
+        assert_eq!(nbt["isLightOn"], Value::Byte(0));
+        for s in sections(&nbt) {
+            let Value::Compound(m) = s else { panic!() };
+            assert!(!m.contains_key("SkyLight"));
+            assert!(!m.contains_key("BlockLight"));
+        }
+    }
+
+    #[test]
+    fn all_air_chunk_is_fully_skylit() {
+        let chunk = Chunk {
+            sections: vec![],
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        };
+        let nbt = create_chunk_nbt(&chunk, true);
+        for s in sections(&nbt) {
+            let Value::Compound(m) = s else { panic!() };
+            let Value::ByteArray(b) = &m["SkyLight"] else {
+                panic!()
+            };
+            // 0xFF == two nibbles of 15 (full skylight)
+            assert!(b.iter().all(|&v| v == -1));
+        }
+    }
+}
