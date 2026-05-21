@@ -365,10 +365,11 @@ fn is_light_transparent(name: &str) -> bool {
     if n.ends_with("_block") || n.ends_with("_stem") {
         return false;
     }
+    // Slabs/stairs are left opaque: their solid half occludes light via shape.
     const SUB: &[&str] = &[
         "torch", "lantern", "sign", "rail", "carpet", "candle", "chain", "ladder", "banner",
         "sapling", "coral", "sprouts", "roots", "vine", "flower", "mushroom", "amethyst", "_bud",
-        "seagrass", "kelp", "petals",
+        "seagrass", "kelp", "petals", "fence", "wall", "_bars", "door",
     ];
     SUB.iter().any(|s| n.contains(s))
 }
@@ -486,13 +487,13 @@ fn compute_lighting(
     sections: &[Section],
     min_section_y: i8,
     max_section_y: i8,
-) -> HashMap<i8, (Vec<i8>, Vec<i8>)> {
+) -> Vec<(Vec<i8>, Vec<i8>)> {
     use std::collections::VecDeque;
 
     let num_sections = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
     let height = num_sections * 16;
     if height == 0 {
-        return HashMap::new();
+        return Vec::new();
     }
     let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
 
@@ -500,6 +501,8 @@ fn compute_lighting(
     let mut emission = vec![0u8; height * 256];
 
     let sec_by_y: HashMap<i8, &Section> = sections.iter().map(|s| (s.y, s)).collect();
+    let mut htop = 0usize;
+    let mut any_opaque = false;
     for sy in min_section_y..=max_section_y {
         let Some(sec) = sec_by_y.get(&sy) else {
             continue;
@@ -513,17 +516,27 @@ fn compute_lighting(
                     let g = idx(x, base_y + ly, z);
                     opaque[g] = op[local];
                     emission[g] = em[local];
+                    if op[local] {
+                        any_opaque = true;
+                        htop = htop.max(base_y + ly);
+                    }
                 }
             }
         }
     }
 
-    // SkyLight: vertical cast then flood-fill.
+    // SkyLight: open sky above the highest opaque block is 15; only flood-fill the band below.
+    let top = if any_opaque {
+        (htop + 2).min(height)
+    } else {
+        0
+    };
     let mut sky = vec![0u8; height * 256];
+    sky[top * 256..].fill(15);
     let mut sq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
     for z in 0..16usize {
         for x in 0..16usize {
-            for y in (0..height).rev() {
+            for y in (0..top).rev() {
                 let g = idx(x, y, z);
                 if opaque[g] {
                     break;
@@ -538,23 +551,18 @@ fn compute_lighting(
     // BlockLight: flood-fill from emitters.
     let mut block = vec![0u8; height * 256];
     let mut bq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
-    for y in 0..height {
-        for z in 0..16usize {
-            for x in 0..16usize {
-                let g = idx(x, y, z);
-                if emission[g] > 0 {
-                    block[g] = emission[g];
-                    bq.push_back((x, y, z, emission[g]));
-                }
-            }
+    for g in 0..height * 256 {
+        if emission[g] > 0 {
+            block[g] = emission[g];
+            let rem = g % 256;
+            bq.push_back((rem % 16, g / 256, rem / 16, emission[g]));
         }
     }
     propagate_light(&mut block, &opaque, &mut bq, height);
 
-    // Pack each section.
-    let mut out = HashMap::new();
-    for sy in min_section_y..=max_section_y {
-        let base_y = ((sy as i32 - min_section_y as i32) * 16) as usize;
+    let mut out = Vec::with_capacity(num_sections);
+    for s in 0..num_sections {
+        let base_y = s * 16;
         let mut sl = vec![0i8; 2048];
         let mut bl = vec![0i8; 2048];
         for ly in 0..16usize {
@@ -567,7 +575,7 @@ fn compute_lighting(
                 }
             }
         }
-        out.insert(sy, (sl, bl));
+        out.push((sl, bl));
     }
     out
 }
@@ -610,7 +618,8 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
 
     // Build all sections in the determined range
     let sections: Vec<Value> = (min_section_y..=max_section_y)
-        .map(|y| {
+        .zip(lighting)
+        .map(|(y, (sky_light, block_light))| {
             let mut section_nbt = if let Some(&idx) = section_map.get(&y) {
                 build_section_value(&chunk.sections[idx])
             } else {
@@ -630,16 +639,14 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
                 ])
             };
             section_nbt.insert("biomes".to_string(), biome_value.clone());
-            if let Some((sky_light, block_light)) = lighting.get(&y) {
-                section_nbt.insert(
-                    "SkyLight".to_string(),
-                    Value::ByteArray(ByteArray::new(sky_light.clone())),
-                );
-                section_nbt.insert(
-                    "BlockLight".to_string(),
-                    Value::ByteArray(ByteArray::new(block_light.clone())),
-                );
-            }
+            section_nbt.insert(
+                "SkyLight".to_string(),
+                Value::ByteArray(ByteArray::new(sky_light)),
+            );
+            section_nbt.insert(
+                "BlockLight".to_string(),
+                Value::ByteArray(ByteArray::new(block_light)),
+            );
             Value::Compound(section_nbt)
         })
         .collect();
