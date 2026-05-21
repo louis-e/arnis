@@ -78,8 +78,8 @@ impl Ground {
             None
         };
 
-        // Raise the floor just enough for the deepest water carve to clear bedrock.
-        let ground_level = match &land_cover {
+        // Raise the floor for the deepest water carve (elevation path only).
+        let water_floor = match &land_cover {
             Some(lc) => {
                 let max_depth =
                     crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h);
@@ -91,7 +91,7 @@ impl Ground {
         match fetch_elevation_data(
             bbox,
             scale,
-            ground_level,
+            water_floor,
             disable_height_limit,
             extended_max_y,
             land_cover.as_mut(),
@@ -99,7 +99,7 @@ impl Ground {
         ) {
             Ok(elevation_data) => Self {
                 elevation_enabled: true,
-                ground_level,
+                ground_level: water_floor,
                 elevation_data: Some(elevation_data),
                 land_cover,
                 rotation_mask: None,

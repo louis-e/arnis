@@ -28,11 +28,12 @@ fn nibble_get(buf: &[u8], i: usize) -> u8 {
 
 #[inline]
 fn nibble_set(buf: &mut [u8], i: usize, v: u8) {
+    debug_assert!(v < 16, "nibble value {v} out of range");
     let byte = &mut buf[i >> 1];
     if i & 1 == 0 {
         *byte = (*byte & 0xF0) | (v & 0x0F);
     } else {
-        *byte = (*byte & 0x0F) | (v << 4);
+        *byte = (*byte & 0x0F) | ((v & 0x0F) << 4);
     }
 }
 
@@ -125,12 +126,14 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
     let smax_z = (wmax_z + 1).min(max_z);
     let sw = (smax_x - smin_x + 1) as usize;
     let sh = (smax_z - smin_z + 1) as usize;
-    let total = sw.checked_mul(sh).expect("water sub-rect size overflow");
-    // comp stores cell indices as u32; bail clearly rather than truncate.
-    assert!(
-        total <= u32::MAX as usize,
-        "water sub-rect too large for u32 indices ({total} cells); tile the area"
-    );
+    // comp indexes cells as u32; on absurd sizes, render flat water instead of crashing.
+    let total = match sw.checked_mul(sh) {
+        Some(t) if t <= u32::MAX as usize => t,
+        _ => {
+            eprintln!("Warning: water area too large for depth carving; rendering flat water");
+            return BigWaterField::empty();
+        }
+    };
 
     // Seed DT: water = DT_MAX (unreached), shore/land = 0.
     let mut dt = vec![0u8; total];
@@ -333,8 +336,10 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
         depth <= MAX_WATER_DEPTH,
         "water carve depth {depth} exceeds the max tier {MAX_WATER_DEPTH}"
     );
-    // Safety net: keep the bed above bedrock even if the reserve fell short.
-    let depth = depth.min((water_y - MIN_Y - 2).max(0));
+    // Clamp to the valid tier range, and keep the bed above bedrock.
+    let depth = depth
+        .clamp(0, MAX_WATER_DEPTH)
+        .min((water_y - MIN_Y - 2).max(0));
     for dy in 0..=depth {
         editor.set_block_absolute(WATER, x, water_y - dy, z, None, Some(&[]));
     }
