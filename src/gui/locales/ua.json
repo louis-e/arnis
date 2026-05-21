@@ -45,6 +45,7 @@
   "three_dmr": "Використовувати 3D-моделі",
   "disable_height_limit": "Розширити висоту будівництва",
   "aws_only_elevation": "Застарілий рельєф",
+  "bake_lighting": "Попередній розрахунок освітлення",
   "bedrock_auto_generated": "Bedrock світ генерується автоматично",
   "save_path": "Шлях збереження",
   "rotation_angle": "Кут Обертання",

@@ -74,6 +74,7 @@ impl<'a> WorldEditor<'a> {
     pub(super) fn create_base_chunk(
         abs_chunk_x: i32,
         abs_chunk_z: i32,
+        bake_lighting: bool,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         // Use cached sections (computed once on first call)
         let sections = get_base_chunk_sections();
@@ -87,7 +88,7 @@ impl<'a> WorldEditor<'a> {
             other: FnvHashMap::default(),
         };
 
-        let chunk_nbt = create_chunk_nbt(&chunk_data);
+        let chunk_nbt = create_chunk_nbt(&chunk_data, bake_lighting);
 
         let mut ser_buffer = Vec::with_capacity(8192);
         fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
@@ -198,7 +199,7 @@ impl<'a> WorldEditor<'a> {
                     other: chunk_to_modify.other.clone(),
                 };
 
-                let chunk_nbt = create_chunk_nbt(&chunk);
+                let chunk_nbt = create_chunk_nbt(&chunk, self.bake_lighting);
                 ser_buffer.clear();
                 fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
                 region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
@@ -216,7 +217,8 @@ impl<'a> WorldEditor<'a> {
 
                 // If chunk doesn't exist, create it with base layer
                 if !chunk_exists {
-                    let ser_buffer = Self::create_base_chunk(abs_chunk_x, abs_chunk_z)?;
+                    let ser_buffer =
+                        Self::create_base_chunk(abs_chunk_x, abs_chunk_z, self.bake_lighting)?;
                     region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
                 }
             }
@@ -610,7 +612,7 @@ fn compute_lighting(
 /// DataVersion, Status, yPos, Heightmaps, biomes, structures, etc.
 /// Section range is determined dynamically: at minimum the vanilla range
 /// (Y=-4 to Y=19), extended upward/downward to cover any sections with content.
-fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
+fn create_chunk_nbt(chunk: &Chunk, bake_lighting: bool) -> HashMap<String, Value> {
     // Index existing sections by Y for quick lookup
     let section_map: HashMap<i8, usize> = chunk
         .sections
@@ -637,13 +639,17 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
         Value::List(vec![Value::String("minecraft:plains".to_string())]),
     )]));
 
-    // Bake lighting so isLightOn=1 chunks load lit (vanilla + off-disk Voxy/Chunky).
-    let lighting = compute_lighting(&chunk.sections, min_section_y, max_section_y);
+    // Bake lighting only when requested; otherwise leave it for the engine to relight on load.
+    let mut lighting = if bake_lighting {
+        compute_lighting(&chunk.sections, min_section_y, max_section_y)
+    } else {
+        Vec::new()
+    };
 
     // Build all sections in the determined range
     let sections: Vec<Value> = (min_section_y..=max_section_y)
-        .zip(lighting)
-        .map(|(y, (sky_light, block_light))| {
+        .enumerate()
+        .map(|(off, y)| {
             let mut section_nbt = if let Some(&idx) = section_map.get(&y) {
                 build_section_value(&chunk.sections[idx])
             } else {
@@ -663,14 +669,17 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
                 ])
             };
             section_nbt.insert("biomes".to_string(), biome_value.clone());
-            section_nbt.insert(
-                "SkyLight".to_string(),
-                Value::ByteArray(ByteArray::new(sky_light)),
-            );
-            section_nbt.insert(
-                "BlockLight".to_string(),
-                Value::ByteArray(ByteArray::new(block_light)),
-            );
+            if bake_lighting {
+                let (sky_light, block_light) = std::mem::take(&mut lighting[off]);
+                section_nbt.insert(
+                    "SkyLight".to_string(),
+                    Value::ByteArray(ByteArray::new(sky_light)),
+                );
+                section_nbt.insert(
+                    "BlockLight".to_string(),
+                    Value::ByteArray(ByteArray::new(block_light)),
+                );
+            }
             Value::Compound(section_nbt)
         })
         .collect();
@@ -692,8 +701,7 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
             "Status".to_string(),
             Value::String("minecraft:full".to_string()),
         ),
-        // Lighting baked above; mark valid.
-        ("isLightOn".to_string(), Value::Byte(1)),
+        ("isLightOn".to_string(), Value::Byte(bake_lighting as i8)),
         ("InhabitedTime".to_string(), Value::Long(0)),
         ("LastUpdate".to_string(), Value::Long(0)),
         ("sections".to_string(), Value::List(sections)),
