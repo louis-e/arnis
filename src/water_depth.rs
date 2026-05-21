@@ -13,8 +13,8 @@ const SHOAL_DT_UNITS: u16 = 9;
 /// DT saturation cap. Depth clamps to <=6 long before this.
 const DT_MAX: u8 = u8::MAX;
 
-/// Deepest block the carve places below the surface (max depth + SAND bed).
-pub const MAX_CARVE_BELOW_SURFACE: i32 = 7;
+/// Maximum water carve depth, in blocks (the deepest tier).
+const MAX_WATER_DEPTH: i32 = 6;
 
 #[inline]
 fn nibble_get(buf: &[u8], i: usize) -> u8 {
@@ -86,34 +86,37 @@ impl BigWaterField {
     }
 }
 
+/// Map a grid-cell span to the block span that samples into it (a safe superset).
+pub(crate) fn grid_span_to_block_span(
+    g_lo: usize,
+    g_hi: usize,
+    world_dim: usize,
+    grid_dim: usize,
+) -> (i32, i32) {
+    if grid_dim <= 1 || world_dim <= 1 {
+        return (0, world_dim.saturating_sub(1) as i32);
+    }
+    let f = (world_dim - 1) as f64 / (grid_dim - 1) as f64;
+    let lo = ((g_lo as f64 - 0.5) * f).floor() as i32 - 1;
+    let hi = ((g_hi as f64 + 0.5) * f).ceil() as i32 + 1;
+    (lo.max(0), hi.min(world_dim as i32 - 1))
+}
+
 /// Run a chamfer DT over the LC_WATER mask and bake per-cell carve depth.
 pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterField {
-    if !ground.has_land_cover() {
-        return BigWaterField::empty();
-    }
     let min_x = xzbbox.min_x();
     let max_x = xzbbox.max_x();
     let min_z = xzbbox.min_z();
     let max_z = xzbbox.max_z();
 
+    // Water bbox from the small land-cover grid, avoiding a full-world scan.
+    let (wmin_x, wmin_z, wmax_x, wmax_z) = match ground.lc_water_block_bounds() {
+        Some((lx, lz, hx, hz)) => (min_x + lx, min_z + lz, min_x + hx, min_z + hz),
+        None => return BigWaterField::empty(),
+    };
+
     let is_lc_water =
         |x: i32, z: i32| ground.cover_class(XZPoint::new(x - min_x, z - min_z)) == LC_WATER;
-
-    // Tight bbox of all water cells.
-    let (mut wmin_x, mut wmin_z, mut wmax_x, mut wmax_z) = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
-    for z in min_z..=max_z {
-        for x in min_x..=max_x {
-            if is_lc_water(x, z) {
-                wmin_x = wmin_x.min(x);
-                wmax_x = wmax_x.max(x);
-                wmin_z = wmin_z.min(z);
-                wmax_z = wmax_z.max(z);
-            }
-        }
-    }
-    if wmax_x < wmin_x {
-        return BigWaterField::empty();
-    }
 
     // Pad by one for the shore ring (clamped); keeps the DT identical to full-bbox.
     let smin_x = (wmin_x - 1).max(min_x);
@@ -327,8 +330,8 @@ pub fn estimate_max_carve_depth(
 /// Place the underwater stack: WATER column, then a SAND/GRAVEL bed over SANDSTONE/STONE.
 pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32, depth: i32) {
     debug_assert!(
-        depth < MAX_CARVE_BELOW_SURFACE,
-        "water carve depth {depth} exceeds reserved headroom {MAX_CARVE_BELOW_SURFACE}"
+        depth <= MAX_WATER_DEPTH,
+        "water carve depth {depth} exceeds the max tier {MAX_WATER_DEPTH}"
     );
     // Safety net: keep the bed above bedrock even if the reserve fell short.
     let depth = depth.min((water_y - MIN_Y - 2).max(0));
@@ -372,17 +375,18 @@ pub fn carve_lc_water_pass(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
 ) {
-    let min_x = xzbbox.min_x();
-    let max_x = xzbbox.max_x();
-    let min_z = xzbbox.min_z();
-    let max_z = xzbbox.max_z();
-    for z in min_z..=max_z {
-        for x in min_x..=max_x {
+    let off_x = xzbbox.min_x();
+    let off_z = xzbbox.min_z();
+    // Only the water sub-rect can hold LC_WATER cells; skip the rest of the world.
+    let x1 = bwf.min_x + bwf.width as i32 - 1;
+    let z1 = bwf.min_z + bwf.height as i32 - 1;
+    for z in bwf.min_z..=z1 {
+        for x in bwf.min_x..=x1 {
             // Keep road/bridge surfaces (causeways, decks).
             if road_mask.contains(x, z) {
                 continue;
             }
-            let coord = XZPoint::new(x - min_x, z - min_z);
+            let coord = XZPoint::new(x - off_x, z - off_z);
             if ground.cover_class(coord) != LC_WATER {
                 continue;
             }
@@ -439,6 +443,24 @@ mod tests {
     fn estimate_large_open_water_reaches_max() {
         let grid = vec![vec![LC_WATER; 32]; 32];
         assert_eq!(estimate_max_carve_depth(&grid, 32, 32), 6);
+    }
+
+    #[test]
+    fn grid_span_covers_all_mapped_blocks() {
+        // Brute-force every block that samples into grid cells [1,2]; the span must cover them.
+        let (world_dim, grid_dim) = (100usize, 10usize);
+        let (g_lo, g_hi) = (1usize, 2usize);
+        let (lo, hi) = grid_span_to_block_span(g_lo, g_hi, world_dim, grid_dim);
+        for bx in 0..world_dim {
+            let gx =
+                ((bx as f64 / (world_dim - 1) as f64) * (grid_dim - 1) as f64).round() as usize;
+            if gx >= g_lo && gx <= g_hi {
+                assert!(
+                    bx as i32 >= lo && bx as i32 <= hi,
+                    "block {bx} (grid {gx}) not covered by span [{lo},{hi}]"
+                );
+            }
+        }
     }
 
     #[test]

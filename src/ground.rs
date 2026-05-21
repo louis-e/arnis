@@ -175,6 +175,36 @@ impl Ground {
         );
     }
 
+    /// Local block bbox (min_x, min_z, max_x, max_z) covering all LC_WATER cells,
+    /// derived from the land-cover grid; None if no land cover or no water.
+    pub fn lc_water_block_bounds(&self) -> Option<(i32, i32, i32, i32)> {
+        let (lc, data) = match (&self.land_cover, &self.elevation_data) {
+            (Some(lc), Some(data)) => (lc, data),
+            _ => return None,
+        };
+        let (mut gx0, mut gz0, mut gx1, mut gz1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+        let mut any = false;
+        for (z, row) in lc.grid.iter().enumerate() {
+            for (x, &c) in row.iter().enumerate() {
+                if c == land_cover::LC_WATER {
+                    gx0 = gx0.min(x);
+                    gx1 = gx1.max(x);
+                    gz0 = gz0.min(z);
+                    gz1 = gz1.max(z);
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return None;
+        }
+        let (x0, x1) =
+            crate::water_depth::grid_span_to_block_span(gx0, gx1, data.world_width, lc.width);
+        let (z0, z1) =
+            crate::water_depth::grid_span_to_block_span(gz0, gz1, data.world_height, lc.height);
+        Some((x0, z0, x1, z1))
+    }
+
     /// Returns the ESA WorldCover land cover class at the given coordinates.
     /// Returns 0 if land cover data is not available.
     #[inline(always)]
