@@ -254,15 +254,25 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)>
     Some((x, y, z))
 }
 
-// Light a block emits, 0 if none.
-fn block_light_emission(name: &str) -> u8 {
+// Reads a string blockstate property, if present.
+fn prop_str<'a>(props: Option<&'a Value>, key: &str) -> Option<&'a str> {
+    if let Some(Value::Compound(m)) = props {
+        if let Some(Value::String(s)) = m.get(key) {
+            return Some(s.as_str());
+        }
+    }
+    None
+}
+
+// Light a block emits, 0 if none. Honours the `lit` state where it matters.
+fn block_light_emission(name: &str, props: Option<&Value>) -> u8 {
+    let unlit = matches!(prop_str(props, "lit"), Some("false"));
     match name {
         "minecraft:beacon"
         | "minecraft:conduit"
         | "minecraft:end_gateway"
         | "minecraft:end_portal"
         | "minecraft:fire"
-        | "minecraft:campfire"
         | "minecraft:glowstone"
         | "minecraft:jack_o_lantern"
         | "minecraft:lantern"
@@ -272,13 +282,15 @@ fn block_light_emission(name: &str) -> u8 {
         | "minecraft:verdant_froglight"
         | "minecraft:sea_lantern"
         | "minecraft:shroomlight" => 15,
+        "minecraft:campfire" if !unlit => 15,
         "minecraft:end_rod" | "minecraft:torch" | "minecraft:wall_torch" => 14,
         "minecraft:crying_obsidian"
-        | "minecraft:soul_campfire"
         | "minecraft:soul_lantern"
         | "minecraft:soul_torch"
         | "minecraft:soul_wall_torch" => 10,
-        "minecraft:glow_lichen" | "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" => 7,
+        "minecraft:soul_campfire" if !unlit => 10,
+        "minecraft:glow_lichen" => 7,
+        "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" if !unlit => 7,
         "minecraft:sculk_catalyst" => 6,
         "minecraft:magma_block" => 3,
         "minecraft:brewing_stand" | "minecraft:brown_mushroom" => 1,
@@ -289,6 +301,9 @@ fn block_light_emission(name: &str) -> u8 {
 // Blocks that don't occlude skylight: air, glass, leaves, water/ice, plants, thin decor.
 fn is_light_transparent(name: &str) -> bool {
     let n = name.strip_prefix("minecraft:").unwrap_or(name);
+    if n == "tinted_glass" {
+        return false; // tinted glass blocks all light, unlike other glass
+    }
     if n.ends_with("air") || n.ends_with("leaves") || n.contains("glass") {
         return true;
     }
@@ -367,7 +382,7 @@ fn decode_section_light_props(section: &Section) -> (Vec<bool>, Vec<u8>) {
         .collect();
     let pal_emission: Vec<u8> = palette
         .iter()
-        .map(|p| block_light_emission(&p.name))
+        .map(|p| block_light_emission(&p.name, p.properties.as_ref()))
         .collect();
 
     let mut opaque = vec![false; 4096];
@@ -514,15 +529,7 @@ fn compute_lighting(
                     break;
                 }
                 sky[g] = 15;
-            }
-        }
-    }
-    for y in 0..height {
-        for z in 0..16usize {
-            for x in 0..16usize {
-                if sky[idx(x, y, z)] == 15 {
-                    sq.push_back((x, y, z, 15));
-                }
+                sq.push_back((x, y, z, 15));
             }
         }
     }
