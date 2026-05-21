@@ -374,27 +374,49 @@ fn is_light_transparent(name: &str) -> bool {
     SUB.iter().any(|s| n.contains(s))
 }
 
-// Per-cell opacity and emission for a section (YZX order, 4096 cells).
-fn decode_section_light_props(section: &Section) -> (Vec<bool>, Vec<u8>) {
+// Light a block removes: 0 passes, 1 attenuates (water/leaves/ice), 15 blocks.
+fn light_opacity(name: &str) -> u8 {
+    let n = name.strip_prefix("minecraft:").unwrap_or(name);
+    if n.ends_with("leaves")
+        || matches!(
+            n,
+            "water"
+                | "ice"
+                | "frosted_ice"
+                | "bubble_column"
+                | "kelp"
+                | "kelp_plant"
+                | "seagrass"
+                | "tall_seagrass"
+        )
+    {
+        return 1;
+    }
+    if is_light_transparent(name) {
+        0
+    } else {
+        15
+    }
+}
+
+// Per-cell light opacity and emission for a section (YZX order, 4096 cells).
+fn decode_section_light_props(section: &Section) -> (Vec<u8>, Vec<u8>) {
     let palette = &section.block_states.palette;
-    let pal_opaque: Vec<bool> = palette
-        .iter()
-        .map(|p| !is_light_transparent(&p.name))
-        .collect();
+    let pal_opacity: Vec<u8> = palette.iter().map(|p| light_opacity(&p.name)).collect();
     let pal_emission: Vec<u8> = palette
         .iter()
         .map(|p| block_light_emission(&p.name, p.properties.as_ref()))
         .collect();
 
-    let mut opaque = vec![false; 4096];
+    let mut opacity = vec![0u8; 4096];
     let mut emission = vec![0u8; 4096];
 
     match &section.block_states.data {
         None => {
-            let o = pal_opaque.first().copied().unwrap_or(false);
+            let o = pal_opacity.first().copied().unwrap_or(0);
             let e = pal_emission.first().copied().unwrap_or(0);
-            if o {
-                opaque.iter_mut().for_each(|v| *v = true);
+            if o > 0 {
+                opacity.iter_mut().for_each(|v| *v = o);
             }
             if e > 0 {
                 emission.iter_mut().for_each(|v| *v = e);
@@ -413,20 +435,20 @@ fn decode_section_light_props(section: &Section) -> (Vec<bool>, Vec<u8>) {
                 if long_idx < data.len() {
                     let pi = ((data[long_idx] as u64 >> off) & mask) as usize;
                     if pi < palette.len() {
-                        opaque[i] = pal_opaque[pi];
+                        opacity[i] = pal_opacity[pi];
                         emission[i] = pal_emission[pi];
                     }
                 }
             }
         }
     }
-    (opaque, emission)
+    (opacity, emission)
 }
 
-// Flood-fill light from the seeded queue, -1 per block, through non-opaque cells.
+// Flood-fill light from the seeded queue, -1 per block, through cells light can enter.
 fn propagate_light(
     light: &mut [u8],
-    opaque: &[bool],
+    opacity: &[u8],
     queue: &mut std::collections::VecDeque<(usize, usize, usize, u8)>,
     height: usize,
 ) {
@@ -443,7 +465,7 @@ fn propagate_light(
              light: &mut [u8],
              queue: &mut std::collections::VecDeque<(usize, usize, usize, u8)>| {
                 let g = idx(nx, ny, nz);
-                if !opaque[g] && light[g] < next {
+                if opacity[g] < 15 && light[g] < next {
                     light[g] = next;
                     queue.push_back((nx, ny, nz, next));
                 }
@@ -497,12 +519,12 @@ fn compute_lighting(
     }
     let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
 
-    let mut opaque = vec![false; height * 256];
+    let mut opacity = vec![0u8; height * 256];
     let mut emission = vec![0u8; height * 256];
 
     let sec_by_y: HashMap<i8, &Section> = sections.iter().map(|s| (s.y, s)).collect();
     let mut htop = 0usize;
-    let mut any_opaque = false;
+    let mut any_solid = false;
     for sy in min_section_y..=max_section_y {
         let Some(sec) = sec_by_y.get(&sy) else {
             continue;
@@ -514,10 +536,10 @@ fn compute_lighting(
                 for x in 0..16usize {
                     let local = ly * 256 + z * 16 + x;
                     let g = idx(x, base_y + ly, z);
-                    opaque[g] = op[local];
+                    opacity[g] = op[local];
                     emission[g] = em[local];
-                    if op[local] {
-                        any_opaque = true;
+                    if op[local] > 0 {
+                        any_solid = true;
                         htop = htop.max(base_y + ly);
                     }
                 }
@@ -525,28 +547,30 @@ fn compute_lighting(
         }
     }
 
-    // SkyLight: open sky above the highest opaque block is 15; only flood-fill the band below.
-    let top = if any_opaque {
-        (htop + 2).min(height)
-    } else {
-        0
-    };
+    // SkyLight: open sky above the highest non-transparent block is 15; flood-fill the band below.
+    let top = if any_solid { (htop + 2).min(height) } else { 0 };
     let mut sky = vec![0u8; height * 256];
     sky[top * 256..].fill(15);
     let mut sq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
     for z in 0..16usize {
         for x in 0..16usize {
+            let mut level = 15u8;
             for y in (0..top).rev() {
                 let g = idx(x, y, z);
-                if opaque[g] {
+                if opacity[g] >= 15 {
                     break;
                 }
-                sky[g] = 15;
-                sq.push_back((x, y, z, 15));
+                sky[g] = level;
+                if level > 0 {
+                    sq.push_back((x, y, z, level));
+                }
+                if opacity[g] > 0 {
+                    level = level.saturating_sub(1);
+                }
             }
         }
     }
-    propagate_light(&mut sky, &opaque, &mut sq, height);
+    propagate_light(&mut sky, &opacity, &mut sq, height);
 
     // BlockLight: flood-fill from emitters.
     let mut block = vec![0u8; height * 256];
@@ -558,7 +582,7 @@ fn compute_lighting(
             bq.push_back((rem % 16, g / 256, rem / 16, emission[g]));
         }
     }
-    propagate_light(&mut block, &opaque, &mut bq, height);
+    propagate_light(&mut block, &opacity, &mut bq, height);
 
     let mut out = Vec::with_capacity(num_sections);
     for s in 0..num_sections {
