@@ -16,6 +16,9 @@ const DT_MAX: u8 = u8::MAX;
 /// Maximum water carve depth, in blocks (the deepest tier).
 const MAX_WATER_DEPTH: i32 = 6;
 
+/// Cap on water sub-rect cells (bounds memory, keeps u32 indices valid); ~1000 km².
+const MAX_WATER_FIELD_CELLS: usize = 1_000_000_000;
+
 #[inline]
 fn nibble_get(buf: &[u8], i: usize) -> u8 {
     let byte = buf[i >> 1];
@@ -126,9 +129,9 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
     let smax_z = (wmax_z + 1).min(max_z);
     let sw = (smax_x - smin_x + 1) as usize;
     let sh = (smax_z - smin_z + 1) as usize;
-    // comp indexes cells as u32; on absurd sizes, render flat water instead of crashing.
+    // Cap cells to bound memory; above it, render flat water instead of crashing.
     let total = match sw.checked_mul(sh) {
-        Some(t) if t <= u32::MAX as usize => t,
+        Some(t) if t <= MAX_WATER_FIELD_CELLS => t,
         _ => {
             eprintln!("Warning: water area too large for depth carving; rendering flat water");
             return BigWaterField::empty();
@@ -321,11 +324,10 @@ pub fn estimate_max_carve_depth(
     }
     chamfer_3_4_dt(&mut dt, gw, gh);
     let grid_max_dt = dt.iter().copied().max().unwrap_or(0);
-    // Stretch grid DT to block units by the larger axis ratio (rounding up = safe).
-    let ratio = (world_width as f64 / gw as f64)
-        .max(world_height as f64 / gh as f64)
-        .max(1.0);
-    let block_max_dt = f64::from(grid_max_dt) * ratio;
+    // Inclusive-span ratio, matching the grid<->block mapping elsewhere (safe upper bound).
+    let wr = world_width.saturating_sub(1).max(1) as f64 / gw.saturating_sub(1).max(1) as f64;
+    let hr = world_height.saturating_sub(1).max(1) as f64 / gh.saturating_sub(1).max(1) as f64;
+    let block_max_dt = f64::from(grid_max_dt) * wr.max(hr).max(1.0);
     let comp_max = block_max_dt.min(f64::from(u16::MAX)) as u16;
     depth_from_dt(block_max_dt + 2.0, comp_max)
 }
