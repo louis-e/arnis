@@ -1,5 +1,5 @@
-use crate::block_definitions::WATER;
 use crate::clipping::clip_water_ring_to_bbox;
+use crate::water_depth::{carve_water_column, BigWaterField};
 use crate::{
     coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
@@ -10,6 +10,7 @@ pub fn generate_water_area_from_way(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     _xzbbox: &XZBBox,
+    bwf: &BigWaterField,
 ) {
     let outers = [element.nodes.clone()];
     if !verify_closed_rings(&outers) {
@@ -17,13 +18,14 @@ pub fn generate_water_area_from_way(
         return;
     }
 
-    generate_water_areas(editor, &outers, &[]);
+    generate_water_areas(editor, &outers, &[], bwf);
 }
 
 pub fn generate_water_areas_from_relation(
     editor: &mut WorldEditor,
     element: &ProcessedRelation,
     xzbbox: &XZBBox,
+    bwf: &BigWaterField,
 ) {
     // Check if this is a water relation (either with water tag or natural=water)
     let is_water = element.tags.contains_key("water")
@@ -116,13 +118,14 @@ pub fn generate_water_areas_from_relation(
         return;
     }
 
-    generate_water_areas(editor, &outers, &inners);
+    generate_water_areas(editor, &outers, &inners, bwf);
 }
 
 fn generate_water_areas(
     editor: &mut WorldEditor,
     outers: &[Vec<ProcessedNode>],
     inners: &[Vec<ProcessedNode>],
+    bwf: &BigWaterField,
 ) {
     // Calculate polygon bounding box to limit fill area
     let mut poly_min_x = i32::MAX;
@@ -161,7 +164,9 @@ fn generate_water_areas(
         .map(|x| x.iter().map(|y| y.xz()).collect::<Vec<_>>())
         .collect();
 
-    scanline_fill_water(min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor);
+    scanline_fill_water(
+        min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf,
+    );
 }
 
 /// Verifies all rings are properly closed (first node matches last).
@@ -391,6 +396,7 @@ fn scanline_fill_water(
     outers: &[Vec<XZPoint>],
     inners: &[Vec<XZPoint>],
     editor: &mut WorldEditor,
+    bwf: &BigWaterField,
 ) {
     // Collect edges per outer ring so we can union their spans correctly,
     // even if multiple outer rings happen to overlap (invalid OSM, but
@@ -429,12 +435,12 @@ fn scanline_fill_water(
             for x in start..=end {
                 let water_y = editor.get_water_level(x, z);
                 let ground_y = editor.get_ground_level(x, z);
-                // Only place water where terrain is at or below the water
-                // surface — skip hillside blocks where the polygon extends
-                // above the actual waterline.
-                if ground_y <= water_y {
-                    editor.set_block_absolute(WATER, x, water_y, z, None, None);
+                // Skip hillside blocks the polygon claims above the waterline.
+                if ground_y > water_y {
+                    continue;
                 }
+                // depth_at is 0 for OSM-only water, giving a single surface block.
+                carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z));
             }
         }
     }

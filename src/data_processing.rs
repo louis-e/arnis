@@ -68,6 +68,9 @@ pub fn generate_world_with_options(
     };
     let ground = Arc::new(ground);
 
+    // Per-cell water depth field from the LC_WATER mask; empty without land cover.
+    let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
+
     println!("{} Processing data...", "[4/7]".bold());
 
     // Build highway connectivity map once before processing
@@ -250,7 +253,12 @@ pub fn generate_world_with_options(
                 } else if let Some(val) = way.tags.get("waterway") {
                     if val == "dock" {
                         // docks count as water areas
-                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox);
+                        water_areas::generate_water_area_from_way(
+                            &mut editor,
+                            way,
+                            &xzbbox,
+                            &big_water_field,
+                        );
                     } else {
                         waterways::generate_waterways(&mut editor, way);
                     }
@@ -349,7 +357,12 @@ pub fn generate_world_with_options(
                         .map(|val| val == "water" || val == "bay")
                         .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
+                    water_areas::generate_water_areas_from_relation(
+                        &mut editor,
+                        rel,
+                        &xzbbox,
+                        &big_water_field,
+                    );
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(
                         &mut editor,
@@ -388,10 +401,9 @@ pub fn generate_world_with_options(
     process_pb.inc(element_counter % pb_batch_size);
     process_pb.finish();
 
-    // Drop remaining caches
+    // Keep road_mask alive for the LC_WATER carve below.
     drop(highway_connectivity);
     drop(flood_fill_cache);
-    drop(road_mask);
 
     // Generate ground layer (surface blocks, vegetation, shorelines, underground fill)
     ground_generation::generate_ground_layer(
@@ -401,6 +413,17 @@ pub fn generate_world_with_options(
         &xzbbox,
         &building_footprints,
     )?;
+
+    // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
+    crate::water_depth::carve_lc_water_pass(
+        &mut editor,
+        ground.as_ref(),
+        &xzbbox,
+        &big_water_field,
+        &road_mask,
+    );
+
+    drop(road_mask);
 
     // Carve subway tunnel interiors now that underground is filled with stone.
     // This must happen after ground generation so AIR blocks are not overwritten.

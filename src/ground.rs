@@ -65,7 +65,7 @@ impl Ground {
         // post-processing pipeline for land-cover-aware artifact repair.
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
-        let (_, _, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
         let mut land_cover = if fetch_land_cover {
             let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
             if lc.is_some() {
@@ -76,6 +76,16 @@ impl Ground {
             lc
         } else {
             None
+        };
+
+        // Raise the floor just enough for the deepest water carve to clear bedrock.
+        let ground_level = match &land_cover {
+            Some(lc) => {
+                let max_depth =
+                    crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h);
+                ground_level.max(crate::world_editor::MIN_Y + max_depth + 2)
+            }
+            None => ground_level,
         };
 
         match fetch_elevation_data(

@@ -33,6 +33,7 @@ mod telemetry;
 #[cfg(test)]
 mod test_utilities;
 mod version_check;
+mod water_depth;
 mod world_editor;
 mod world_utils;
 

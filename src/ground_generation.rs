@@ -318,18 +318,10 @@ pub fn generate_ground_layer(
                         }
 
                         if place_esa_water {
-                            // Single block of water at snapped level
+                            // Pre-paint; carve_lc_water_pass later overwrites with depth.
                             editor.set_block_if_absent_absolute(WATER, x, water_y, z);
-
-                            // Floor: sand/gravel/clay + sandstone below
-                            let h = land_cover::coord_hash(x, z);
-                            let floor_block = match h % 5 {
-                                0 => GRAVEL,
-                                1 => CLAY,
-                                _ => SAND,
-                            };
                             if water_y - 1 > MIN_Y {
-                                editor.set_block_if_absent_absolute(floor_block, x, water_y - 1, z);
+                                editor.set_block_if_absent_absolute(SAND, x, water_y - 1, z);
                             }
                             if water_y - 2 > MIN_Y {
                                 editor.set_block_if_absent_absolute(SANDSTONE, x, water_y - 2, z);
@@ -1132,7 +1124,7 @@ pub fn generate_ground_layer(
 ///
 /// Cost: 4 hash calls + a few f64 ops per block — still well under 100 ns,
 /// negligible over the whole ground pass.
-fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
+pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
     let s = scale.max(1);
     // Integer lattice cell containing (x, z). div_euclid gives floor
     // division for negative coordinates too, so patches tile uniformly
