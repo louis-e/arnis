@@ -341,6 +341,20 @@ pub(super) trait FixedTileProvider: Send + Sync {
     /// flaky or strict services can lower it further.
     const MAX_CONCURRENT_DOWNLOADS: usize = 4;
 
+
+    /// Number of tiles to download per batch before pausing. Large
+    /// bboxes can enumerate thousands of tiles (e.g. a city-scale 1 m
+    /// USGS request can exceed 6000); firing them all at a fixed
+    /// concurrency still sustains continuous pressure on the upstream
+    /// and trips rate limiting. Downloading in batches with a short
+    /// pause between them gives strict services (USGS ArcGIS) room to
+    /// breathe. 0 disables batching (all tiles in one pass).
+    const DOWNLOAD_BATCH_SIZE: usize = 256;
+
+    /// Pause between download batches, in milliseconds. Only applied
+    /// between batches (never before the first or after the last), and
+    /// only when DOWNLOAD_BATCH_SIZE > 0.
+    const BATCH_PAUSE_MS: u64 = 1000;
     /// Resolution levels from finest (smallest m/px) to coarsest. The
     /// level-selection logic walks this list.
     fn resolution_levels(&self) -> &'static [Self::Level];
@@ -425,18 +439,46 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     type FetchResult<R> = (TileKey<R>, Result<Vec<Vec<f64>>, String>);
-    let tile_results: Vec<FetchResult<P::Level>> = pool.install(|| {
-        tile_keys
-            .par_iter()
-            .map(|key| {
-                let url = provider.tile_url(key);
-                let cache_path = key.cache_path(&cache_dir);
-                let res = fetch_tile_raster(&url, &cache_path, &client);
-                (*key, res)
-            })
-            .collect()
-    });
-
+    // Download in batches with a short pause between them. Enumerating a
+    // city-scale 1 m bbox can produce 6000+ tiles; hammering a strict
+    // upstream (USGS ArcGIS) at sustained concurrency trips rate limiting
+    // and stalls the run in endless retries. Batching paces the load.
+    // Batching only changes *when* requests fire — already-cached tiles
+    // short-circuit inside fetch_tile_raster, and the result set is
+    // identical to a single par_iter pass.
+    let batch_size = if P::DOWNLOAD_BATCH_SIZE == 0 {
+        tile_keys.len().max(1)
+    } else {
+        P::DOWNLOAD_BATCH_SIZE
+    };
+    let total_batches = tile_keys.len().div_ceil(batch_size);
+    let mut tile_results: Vec<FetchResult<P::Level>> = Vec::with_capacity(tile_keys.len());
+    for (batch_idx, batch) in tile_keys.chunks(batch_size).enumerate() {
+        if batch_idx > 0 && P::BATCH_PAUSE_MS > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(P::BATCH_PAUSE_MS));
+        }
+        if total_batches > 1 {
+            eprintln!(
+                "{}: downloading tile batch {}/{} ({} tiles)...",
+                provider.log_prefix(),
+                batch_idx + 1,
+                total_batches,
+                batch.len(),
+            );
+        }
+        let batch_results: Vec<FetchResult<P::Level>> = pool.install(|| {
+            batch
+                .par_iter()
+                .map(|key| {
+                    let url = provider.tile_url(key);
+                    let cache_path = key.cache_path(&cache_dir);
+                    let res = fetch_tile_raster(&url, &cache_path, &client);
+                    (*key, res)
+                })
+                .collect()
+        });
+        tile_results.extend(batch_results);
+    }
     let mut tile_cache: FnvHashMap<TileKey<P::Level>, Vec<Vec<f64>>> = FnvHashMap::default();
     let mut failed_keys: Vec<TileKey<P::Level>> = Vec::new();
     for (key, res) in tile_results {
