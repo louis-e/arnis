@@ -341,7 +341,6 @@ pub(super) trait FixedTileProvider: Send + Sync {
     /// flaky or strict services can lower it further.
     const MAX_CONCURRENT_DOWNLOADS: usize = 4;
 
-
     /// Number of tiles to download per batch before pausing. Large
     /// bboxes can enumerate thousands of tiles (e.g. a city-scale 1 m
     /// USGS request can exceed 6000); firing them all at a fixed
