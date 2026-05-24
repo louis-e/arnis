@@ -24,9 +24,11 @@ use std::time::Duration;
 
 // ─── Constants ────────────────────────────────────────────────────────────
 
-/// Overture STAC catalog URL for the collections.parquet index (~230 KB).
-/// Contains bbox + asset URLs for every partition of every theme/type.
-const OVERTURE_STAC_URL: &str = "https://stac.overturemaps.org/2026-03-18.0/collections.parquet";
+/// Overture STAC catalog root; releases live at /<release>/collections.parquet.
+const OVERTURE_STAC_ROOT: &str = "https://stac.overturemaps.org";
+
+/// Used when /catalog.json discovery fails; bump occasionally to a recent release.
+const OVERTURE_STAC_RELEASE_FALLBACK: &str = "2026-05-20.0";
 
 /// High bit marker for Overture IDs to avoid collision with OSM IDs.
 /// OSM IDs are sequential positive u64 (currently up to ~12 billion, well under 2^34).
@@ -272,6 +274,21 @@ fn fetch_overture_buildings_inner(
     Ok(elements)
 }
 
+/// Resolve the current STAC collections URL via /catalog.json's `latest` field,
+/// falling back to the bundled release if discovery fails.
+fn resolve_stac_url(client: &Client) -> String {
+    let release = client
+        .get(format!("{OVERTURE_STAC_ROOT}/catalog.json"))
+        .send()
+        .ok()
+        .filter(|r| r.status().is_success())
+        .and_then(|r| r.text().ok())
+        .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok())
+        .and_then(|v| v.get("latest").and_then(|s| s.as_str().map(String::from)))
+        .unwrap_or_else(|| OVERTURE_STAC_RELEASE_FALLBACK.to_string());
+    format!("{OVERTURE_STAC_ROOT}/{release}/collections.parquet")
+}
+
 /// List partition file URLs that overlap the target bbox.
 ///
 /// Downloads the STAC `collections.parquet` index (~230 KB) and filters
@@ -283,11 +300,12 @@ fn list_partition_files(
     bbox: &LLBBox,
     debug: bool,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    // Download the small STAC collections index
-    let response = client.get(OVERTURE_STAC_URL).send()?;
+    // Resolve the current release dynamically; old releases are retired and 404.
+    let stac_url = resolve_stac_url(client);
+    let response = client.get(&stac_url).send()?;
     if !response.status().is_success() {
         return Err(format!(
-            "STAC catalog download failed with status {}",
+            "STAC catalog download failed with status {} (url: {stac_url})",
             response.status()
         )
         .into());

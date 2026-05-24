@@ -15,6 +15,18 @@
         { "y_max_frac": 0.95, "blocks": ["WAXED_OXIDIZED_COPPER"] },
         { "y_max_frac": 1.00, "hex": "F3E370" }
       ]
+    },
+    "Q79961": {
+      "label": "Christ the Redeemer",
+      "url": "https://arnismc.com/assets/3dmodels/christ_the_redeemer.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "artist": "louis-e",
+      "height_m": 110.0,
+      "palette_layers": [
+        { "y_max_frac": 0.22, "blocks": ["MUD_BRICKS"] },
+        { "y_max_frac": 1.00, "blocks": ["LIGHT_GRAY_CONCRETE"] }
+      ]
     }
   }
 }
