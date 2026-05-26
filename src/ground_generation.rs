@@ -176,6 +176,44 @@ pub fn generate_ground_layer(
                 )
             });
 
+            // --fillground fast path: bulk-fill fully-buried sections to
+            // Uniform(STONE) so the per-column loop only walks the boundary
+            // section. Gated on full bbox coverage so out-of-bbox columns
+            // don't get stone underneath.
+            let mut column_fill_y_min = crate::world_editor::MIN_Y + 1;
+            if args.fillground {
+                let chunk_fully_in_bbox = chunk_min_x == chunk_x << 4
+                    && chunk_max_x == (chunk_x << 4) + 15
+                    && chunk_min_z == chunk_z << 4
+                    && chunk_max_z == (chunk_z << 4) + 15;
+                let rotated_in = chunk_fully_in_bbox
+                    && ground.is_in_rotated_bounds(chunk_min_x, chunk_min_z)
+                    && ground.is_in_rotated_bounds(chunk_max_x, chunk_min_z)
+                    && ground.is_in_rotated_bounds(chunk_min_x, chunk_max_z)
+                    && ground.is_in_rotated_bounds(chunk_max_x, chunk_max_z);
+                if rotated_in {
+                    let min_ground_y: i32 = if let Some(ref cache) = chunk_ground_cache {
+                        cache
+                            .grid
+                            .iter()
+                            .copied()
+                            .min()
+                            .unwrap_or(args.ground_level)
+                    } else {
+                        args.ground_level
+                    };
+                    // section_top = section_y*16 + 15 <= min_ground_y - 3
+                    let top_buried = (min_ground_y - 18).div_euclid(16) as i8;
+                    if top_buried >= crate::world_editor::MIN_SECTION_Y {
+                        let all_clean = editor
+                            .bulk_fill_chunk_sections_below(chunk_x, chunk_z, top_buried, STONE);
+                        if all_clean {
+                            column_fill_y_min = (top_buried as i32 + 1) * 16;
+                        }
+                    }
+                }
+            }
+
             for x in chunk_min_x..=chunk_max_x {
                 for z in chunk_min_z..=chunk_max_z {
                     // Skip blocks outside the rotated original bounding box
@@ -1072,13 +1110,13 @@ pub fn generate_ground_layer(
                         }
                     }
 
-                    // Fill underground with stone
+                    // Fill underground; column_fill_y_min skips already-Uniform sections.
                     if args.fillground {
                         editor.fill_column_absolute(
                             STONE,
                             x,
                             z,
-                            MIN_Y + 1,
+                            column_fill_y_min,
                             ground_y - 3,
                             true, // skip_existing: don't overwrite blocks placed by element processing
                         );

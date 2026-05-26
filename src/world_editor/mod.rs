@@ -16,7 +16,7 @@ mod luanti;
 pub mod bedrock;
 
 pub(crate) use common::WorldToModify;
-pub use common::MIN_Y;
+pub use common::{MIN_SECTION_Y, MIN_Y};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
@@ -1075,6 +1075,18 @@ impl<'a> WorldEditor<'a> {
         }
         self.world
             .fill_column(x, z, y_min, y_max, block, skip_existing);
+    }
+
+    /// See [`WorldToModify::bulk_fill_chunk_sections_below`].
+    pub fn bulk_fill_chunk_sections_below(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        section_y_max: i8,
+        block: Block,
+    ) -> bool {
+        self.world
+            .bulk_fill_chunk_sections_below(chunk_x, chunk_z, section_y_max, block)
     }
 
     /// Saves all changes made to the world by writing to the appropriate format.

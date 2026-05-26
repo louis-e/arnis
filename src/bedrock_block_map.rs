@@ -229,6 +229,24 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             ],
         ),
 
+        // Mangrove leaves with persistence (1.19+)
+        "mangrove_leaves" => BedrockBlock::with_states(
+            "mangrove_leaves",
+            vec![
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+                ("update_bit", BedrockBlockStateValue::Bool(false)),
+            ],
+        ),
+
+        // Azalea leaves with persistence (1.17+)
+        "azalea_leaves" => BedrockBlock::with_states(
+            "azalea_leaves",
+            vec![
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+                ("update_bit", BedrockBlockStateValue::Bool(false)),
+            ],
+        ),
+
         // Stone slab (bottom half by default)
         "stone_slab" => BedrockBlock::with_states(
             "stone_block_slab",

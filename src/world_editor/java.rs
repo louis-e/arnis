@@ -75,6 +75,7 @@ impl<'a> WorldEditor<'a> {
         abs_chunk_x: i32,
         abs_chunk_z: i32,
         bake_lighting: bool,
+        biome_value: &Value,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         // Use cached sections (computed once on first call)
         let sections = get_base_chunk_sections();
@@ -88,7 +89,7 @@ impl<'a> WorldEditor<'a> {
             other: FnvHashMap::default(),
         };
 
-        let chunk_nbt = create_chunk_nbt(&chunk_data, bake_lighting);
+        let chunk_nbt = create_chunk_nbt(&chunk_data, bake_lighting, biome_value);
 
         let mut ser_buffer = Vec::with_capacity(8192);
         fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
@@ -186,20 +187,33 @@ impl<'a> WorldEditor<'a> {
         let mut region = self.create_region(region_x, region_z)?;
         let mut ser_buffer = Vec::with_capacity(8192);
 
+        // World-center latitude drives temperature-based biome variants (taiga
+        // vs forest vs jungle) at chunk-build time. Cheap to recompute.
+        let center_lat = (self.llbbox.min().lat() + self.llbbox.max().lat()) * 0.5;
+        let ground_ref = self.ground.as_deref();
+
         // First pass: write all chunks that have content
         for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
             if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
+                let abs_chunk_x = chunk_x + (region_x * 32);
+                let abs_chunk_z = chunk_z + (region_z * 32);
                 // Create chunk directly, we're writing to a fresh region file
                 // so there's no existing data to preserve
                 let chunk = Chunk {
                     sections: chunk_to_modify.sections().collect(),
-                    x_pos: chunk_x + (region_x * 32),
-                    z_pos: chunk_z + (region_z * 32),
+                    x_pos: abs_chunk_x,
+                    z_pos: abs_chunk_z,
                     is_light_on: 0,
                     other: chunk_to_modify.other.clone(),
                 };
 
-                let chunk_nbt = create_chunk_nbt(&chunk, self.bake_lighting);
+                let biome_value = crate::biome::build_chunk_biome_nbt(
+                    abs_chunk_x,
+                    abs_chunk_z,
+                    ground_ref,
+                    center_lat,
+                );
+                let chunk_nbt = create_chunk_nbt(&chunk, self.bake_lighting, &biome_value);
                 ser_buffer.clear();
                 fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
                 region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
@@ -217,8 +231,18 @@ impl<'a> WorldEditor<'a> {
 
                 // If chunk doesn't exist, create it with base layer
                 if !chunk_exists {
-                    let ser_buffer =
-                        Self::create_base_chunk(abs_chunk_x, abs_chunk_z, self.bake_lighting)?;
+                    let biome_value = crate::biome::build_chunk_biome_nbt(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        ground_ref,
+                        center_lat,
+                    );
+                    let ser_buffer = Self::create_base_chunk(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        self.bake_lighting,
+                        &biome_value,
+                    )?;
                     region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
                 }
             }
@@ -612,7 +636,11 @@ fn compute_lighting(
 /// DataVersion, Status, yPos, Heightmaps, biomes, structures, etc.
 /// Section range is determined dynamically: at minimum the vanilla range
 /// (Y=-4 to Y=19), extended upward/downward to cover any sections with content.
-fn create_chunk_nbt(chunk: &Chunk, bake_lighting: bool) -> HashMap<String, Value> {
+fn create_chunk_nbt(
+    chunk: &Chunk,
+    bake_lighting: bool,
+    biome_value: &Value,
+) -> HashMap<String, Value> {
     // Index existing sections by Y for quick lookup
     let section_map: HashMap<i8, usize> = chunk
         .sections
@@ -632,12 +660,6 @@ fn create_chunk_nbt(chunk: &Chunk, bake_lighting: bool) -> HashMap<String, Value
             max_section_y = y;
         }
     }
-
-    // Biome palette shared by all sections (single "plains" entry, no data array needed)
-    let biome_value = Value::Compound(HashMap::from([(
-        "palette".to_string(),
-        Value::List(vec![Value::String("minecraft:plains".to_string())]),
-    )]));
 
     // Bake lighting only when requested; otherwise leave it for the engine to relight on load.
     let mut lighting = if bake_lighting {
@@ -991,9 +1013,13 @@ mod tests {
         }
     }
 
+    fn plains_biome() -> Value {
+        crate::biome::build_chunk_biome_nbt(0, 0, None, 0.0)
+    }
+
     #[test]
     fn bake_lighting_writes_valid_light_arrays() {
-        let nbt = create_chunk_nbt(&grass_chunk(), true);
+        let nbt = create_chunk_nbt(&grass_chunk(), true, &plains_biome());
         assert_eq!(nbt["isLightOn"], Value::Byte(1));
         assert!(nbt.contains_key("Heightmaps"));
         let secs = sections(&nbt);
@@ -1011,7 +1037,7 @@ mod tests {
 
     #[test]
     fn no_bake_lighting_omits_light_arrays() {
-        let nbt = create_chunk_nbt(&grass_chunk(), false);
+        let nbt = create_chunk_nbt(&grass_chunk(), false, &plains_biome());
         assert_eq!(nbt["isLightOn"], Value::Byte(0));
         for s in sections(&nbt) {
             let Value::Compound(m) = s else { panic!() };
@@ -1029,7 +1055,7 @@ mod tests {
             is_light_on: 0,
             other: FnvHashMap::default(),
         };
-        let nbt = create_chunk_nbt(&chunk, true);
+        let nbt = create_chunk_nbt(&chunk, true, &plains_biome());
         for s in sections(&nbt) {
             let Value::Compound(m) = s else { panic!() };
             let Value::ByteArray(b) = &m["SkyLight"] else {

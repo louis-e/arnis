@@ -417,6 +417,10 @@ pub fn generate_world_with_options(
         &building_footprints,
     )?;
 
+    if args.fillground {
+        crate::ore_generation::generate_ores(&mut editor, &xzbbox);
+    }
+
     // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
     crate::water_depth::carve_lc_water_pass(
         &mut editor,
