@@ -24,6 +24,7 @@ mod luanti_block_map;
 mod map_renderer;
 mod map_transformation;
 mod models_3d;
+mod ore_generation;
 mod osm_parser;
 mod overture;
 #[cfg(feature = "gui")]

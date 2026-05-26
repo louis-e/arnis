@@ -345,9 +345,9 @@ impl Block {
             246 => "potted_red_tulip",
             247 => "potted_dandelion",
             248 => "potted_blue_orchid",
-            249 => "red_sand",
-            250 => "red_sandstone",
-            251 => "cactus",
+            249 => "diamond_ore",
+            250 => "redstone_ore",
+            251 => "lapis_ore",
             252 => "gray_concrete_powder",
             253 => "cyan_terracotta",
             254 => "black_wool",
@@ -1038,6 +1038,10 @@ pub const LIGHT_GRAY_WALL_BANNER: Block = Block::new(255);
 pub const MANGROVE_LOG: Block = Block::new(0);
 pub const MANGROVE_LEAVES: Block = Block::new(233);
 pub const AZALEA_LEAVES: Block = Block::new(234);
+
+pub const DIAMOND_ORE: Block = Block::new(249);
+pub const REDSTONE_ORE: Block = Block::new(250);
+pub const LAPIS_ORE: Block = Block::new(251);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]
