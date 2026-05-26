@@ -189,8 +189,7 @@ impl<'a> WorldEditor<'a> {
 
         // World-center latitude drives temperature-based biome variants (taiga
         // vs forest vs jungle) at chunk-build time. Cheap to recompute.
-        let center_lat =
-            (self.llbbox.min().lat() + self.llbbox.max().lat()) * 0.5;
+        let center_lat = (self.llbbox.min().lat() + self.llbbox.max().lat()) * 0.5;
         let ground_ref = self.ground.as_deref();
 
         // First pass: write all chunks that have content

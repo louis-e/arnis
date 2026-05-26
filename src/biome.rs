@@ -1,10 +1,4 @@
 //! Land-cover-driven biome assignment for Java Anvil chunks (1.18+).
-//!
-//! Each section in a chunk stores biomes as a 4×4×4 grid (64 cells) referencing
-//! a per-section palette of biome IDs. The data array is omitted entirely when
-//! the palette has only one entry, which is the common case for arnis chunks
-//! that sit inside a uniform land-cover region. See
-//! <https://minecraft.wiki/w/Chunk_format#NBT_structure>.
 
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::ground::Ground;
@@ -16,11 +10,6 @@ use fastnbt::{LongArray, Value};
 use std::collections::HashMap;
 
 /// Map an ESA WorldCover class to a Minecraft biome ID.
-///
-/// `lat_deg` is the absolute world-center latitude; tree cover narrows to
-/// `taiga` above ~55° and to `jungle` below ~23.5°. `water_dist` is the LC
-/// distance-to-shore — large open water becomes `ocean`, anything narrower
-/// stays `river`.
 pub fn biome_for_class(lc: u8, lat_deg: f64, water_dist: u8) -> &'static str {
     let abs_lat = lat_deg.abs();
     match lc {
@@ -47,25 +36,14 @@ pub fn biome_for_class(lc: u8, lat_deg: f64, water_dist: u8) -> &'static str {
         LC_WETLAND => "minecraft:swamp",
         LC_MANGROVES => "minecraft:mangrove_swamp",
         LC_MOSS => "minecraft:taiga",
-        // LC == 0 (no data) or any unknown value
         _ => "minecraft:plains",
     }
 }
 
-/// A precomputed biome compound the same chunk can share across all of its
-/// sections. The fastnbt `Value` is cloned per-section at NBT-build time.
 pub type ChunkBiomeNbt = Value;
 
-/// Build the `biomes` compound for one chunk.
-///
-/// Samples land cover at a 4×4 grid (one sample per biome cell, centred in
-/// each 4-block footprint) and packs it into the Anvil 1.18+ palette+data
-/// layout. The resulting compound is identical for every section in the
-/// chunk because biomes are y-invariant under our 2D land-cover model.
-///
-/// When `ground` is `None` (no land cover loaded) or all 16 samples reduce to
-/// a single biome, the compound contains just the palette and no data array,
-/// keeping memory and NBT size minimal.
+/// Build the `biomes` compound for one chunk, sampling LC at a 4x4 grid
+/// (4-block resolution) and packing into the Anvil 1.18+ palette+data layout.
 pub fn build_chunk_biome_nbt(
     chunk_x: i32,
     chunk_z: i32,
@@ -77,7 +55,6 @@ pub fn build_chunk_biome_nbt(
     if let Some(g) = ground {
         for zi in 0..4i32 {
             for xi in 0..4i32 {
-                // Sample at the geometric centre of each 4×4-block footprint.
                 let world_x = chunk_x * 16 + xi * 4 + 2;
                 let world_z = chunk_z * 16 + zi * 4 + 2;
                 let coord = XZPoint::new(world_x, world_z);
@@ -88,7 +65,6 @@ pub fn build_chunk_biome_nbt(
         }
     }
 
-    // Dedup palette in first-occurrence order; record per-cell index in parallel.
     let mut palette: Vec<&'static str> = Vec::with_capacity(4);
     let mut indices: [u8; 16] = [0; 16];
     for (i, &name) in names.iter().enumerate() {
@@ -110,7 +86,6 @@ pub fn build_chunk_biome_nbt(
     );
 
     if palette.len() <= 1 {
-        // Uniform-biome chunk: data array omitted, all 64 cells default to palette[0].
         let mut map = HashMap::with_capacity(1);
         map.insert("palette".to_string(), palette_value);
         return Value::Compound(map);
@@ -125,8 +100,6 @@ pub fn build_chunk_biome_nbt(
     Value::Compound(map)
 }
 
-/// Bits required to index `palette_size` distinct biomes. Biome data has no
-/// 4-bit minimum (unlike block_states); a 2-biome chunk uses 1 bit per cell.
 fn bits_per_index(palette_size: usize) -> u32 {
     if palette_size <= 1 {
         0
@@ -135,11 +108,7 @@ fn bits_per_index(palette_size: usize) -> u32 {
     }
 }
 
-/// Pack 64 biome cell indices into i64 longs using the post-1.16 layout
-/// (values do NOT straddle long boundaries; remaining bits are zero-padded).
-///
-/// `indices_16` holds the 4×4 xz biome map; it is replicated across the 4
-/// y-layers of the section's 4×4×4 grid because LC is two-dimensional.
+// Post-1.16 packing: values do not straddle long boundaries.
 fn pack_biome_indices(indices_16: &[u8; 16], bits: u32) -> Vec<i64> {
     debug_assert!((1..=6).contains(&bits));
     let bits = bits as usize;
@@ -149,7 +118,7 @@ fn pack_biome_indices(indices_16: &[u8; 16], bits: u32) -> Vec<i64> {
 
     let mut longs = vec![0u64; num_longs];
     for cell in 0..64usize {
-        // cell index = y*16 + z*4 + x; xz biomes repeat across y, so xz_idx = cell % 16.
+        // xz biomes repeat across y, so xz_idx = cell % 16.
         let xz_idx = cell % 16;
         let value = (indices_16[xz_idx] as u64) & mask;
         let long_idx = cell / vals_per_long;
@@ -199,7 +168,6 @@ mod tests {
 
     #[test]
     fn pack_three_bit_pads_to_four_longs() {
-        // bits=3, vals_per_long = 64/3 = 21, num_longs = ceil(64/21) = 4
         let indices = [4u8; 16];
         let longs = pack_biome_indices(&indices, 3);
         assert_eq!(longs.len(), 4);
@@ -211,7 +179,7 @@ mod tests {
         match nbt {
             Value::Compound(map) => {
                 assert!(map.contains_key("palette"));
-                assert!(!map.contains_key("data")); // uniform → no data array
+                assert!(!map.contains_key("data"));
             }
             _ => panic!("expected compound"),
         }
@@ -222,7 +190,6 @@ mod tests {
         assert_eq!(biome_for_class(LC_TREE_COVER, 0.0, 0), "minecraft:jungle");
         assert_eq!(biome_for_class(LC_TREE_COVER, 40.0, 0), "minecraft:forest");
         assert_eq!(biome_for_class(LC_TREE_COVER, 60.0, 0), "minecraft:taiga");
-        // Hemisphere symmetry
         assert_eq!(biome_for_class(LC_TREE_COVER, -60.0, 0), "minecraft:taiga");
     }
 

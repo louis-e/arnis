@@ -6,9 +6,7 @@ use rand::Rng;
 
 type Coord = (i32, i32, i32);
 
-// ─── Round patterns ────────────────────────────────────────────────────────
-// Concentric rings added on top of the central trunk column to bulk up the canopy.
-
+// Concentric rings added on top of the trunk column to bulk up the canopy.
 #[rustfmt::skip]
 const ROUND1_PATTERN: [Coord; 8] = [
     (-2, 0, 0),
@@ -53,10 +51,7 @@ const ROUND3_PATTERN: [Coord; 12] = [
 
 const ROUND_PATTERNS: [&[Coord]; 3] = [&ROUND1_PATTERN, &ROUND2_PATTERN, &ROUND3_PATTERN];
 
-// ─── Leaves-fill data per (species, variant) ──────────────────────────────
-// Each entry is a y-axis range describing a "column" of leaves around the trunk.
-
-// Oak — five variants for shape variety in dense forests.
+// Leaves-fill data per (species, variant): y-axis columns around the trunk.
 const OAK_LEAVES_FILL_STANDARD: [(Coord, Coord); 5] = [
     ((-1, 3, 0), (-1, 9, 0)),
     ((1, 3, 0), (1, 9, 0)),
@@ -279,8 +274,6 @@ const WILLOW_LEAVES_FILL: [(Coord, Coord); 5] = [
     ((0, 7, 0), (0, 8, 0)),
 ];
 
-// ─── Geometry ──────────────────────────────────────────────────────────────
-
 const MAX_CANOPY_RADIUS: i32 = 3;
 
 #[derive(Clone, Copy)]
@@ -301,24 +294,19 @@ pub enum TreeType {
     Mangrove,
 }
 
-// Per-instance, per-shape tree configuration.
 pub struct Tree {
     log_block: Block,
     log_height: i32,
     leaves_block: Block,
     leaves_fill: &'static [(Coord, Coord)],
     round_ranges: [Vec<i32>; 3],
-    // 0.0..1.0 chance to grow a single horizontal side branch
     branch_chance: f32,
-    // Sprinkled accent leaves block (e.g. cherry blossoms inside an oak canopy)
     accent_block: Option<Block>,
-    // 0..100 percent chance per leaf to be the accent
+    /// 0..100 percent chance per surface leaf to be the accent block.
     accent_chance: u8,
-    // Long willow-style drooping leaf tendrils at canopy edge
     drooping: bool,
 }
 
-// Helper used inside create_of_type to keep leaf-placement logic in one place.
 struct LeafPlacer<'a> {
     leaves_block: Block,
     accent_block: Option<Block>,
@@ -328,24 +316,15 @@ struct LeafPlacer<'a> {
 }
 
 impl LeafPlacer<'_> {
-    // Inner-canopy leaf: ~4% organic gap, never an accent block.
     fn place_core(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
         self.place_with(editor, x, y, z, false);
     }
 
-    // Surface (visible) leaf: ~4% gap, may be the accent block.
     fn place_surface(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
         self.place_with(editor, x, y, z, true);
     }
 
-    fn place_with(
-        &self,
-        editor: &mut WorldEditor,
-        x: i32,
-        y: i32,
-        z: i32,
-        allow_accent: bool,
-    ) {
+    fn place_with(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32, allow_accent: bool) {
         if self.check_collision {
             if let Some(fp) = self.footprints {
                 if fp.contains(x, z) {
@@ -353,11 +332,10 @@ impl LeafPlacer<'_> {
                 }
             }
         }
-        let h = (x as i64 as u64)
-            .wrapping_mul(73856093)
+        let h = (x as i64 as u64).wrapping_mul(73856093)
             ^ (y as i64 as u64).wrapping_mul(19349663)
             ^ (z as i64 as u64).wrapping_mul(83492791);
-        // ~4% of leaves are skipped — enough texture without carving holes.
+        // ~4% organic leaf gap.
         if h % 100 < 4 {
             return;
         }
@@ -401,18 +379,11 @@ impl Tree {
     }
 
     /// Creates a tree at the specified coordinates.
-    ///
-    /// # Arguments
-    /// * `editor` - The world editor to place blocks
-    /// * `(x, y, z)` - The base coordinates for the tree
-    /// * `building_footprints` - Optional bitmap of (x, z) coordinates that are inside buildings.
-    ///   If provided, trees will not be placed at coordinates within this bitmap.
     pub fn create(
         editor: &mut WorldEditor,
         (x, y, z): Coord,
         building_footprints: Option<&BuildingFootprintBitmap>,
     ) {
-        // Deterministic per-coord type pick (salt 0).
         let mut rng = coord_rng(x, z, 0);
 
         let tree_type = match rng.random_range(1..=100) {
@@ -443,14 +414,13 @@ impl Tree {
         tree_type: TreeType,
         building_footprints: Option<&BuildingFootprintBitmap>,
     ) {
-        // Skip if this coordinate is inside a building
         if let Some(footprints) = building_footprints {
             if footprints.contains(x, z) {
                 return;
             }
         }
 
-        // Skip if this coordinate is on a road, path, or other paved surface
+        // Skip road/path/water surfaces.
         if editor.check_for_block(
             x,
             0,
@@ -476,8 +446,7 @@ impl Tree {
         blacklist.extend(Self::get_functional_blocks());
         blacklist.push(WATER);
 
-        // Separate per-coord RNG for shape variation (salt 1). Same coord always
-        // gets the same variant_idx regardless of which caller stamped the tree.
+        // Salt 1 keeps the shape RNG independent of the type-pick RNG.
         let mut shape_rng = coord_rng(x, z, 1);
         let variant_idx: u32 = shape_rng.random();
 
@@ -485,12 +454,10 @@ impl Tree {
         let check_canopy_collision =
             Self::canopy_might_intersect_building(x, z, building_footprints);
 
-        // Resolve trunk base Y once from the trunk's (x,z) position so the
-        // canopy doesn't warp to follow the hillside terrain.
+        // One base_y for the whole tree so the canopy doesn't warp to follow terrain.
         let base_y = editor.get_absolute_y(x, y, z);
 
-        // Trunk-height jitter: drawn from bits 8-9 of variant_idx → -1..=+2,
-        // then clamped so the canopy cap always sits above the trunk top.
+        // Trunk jitter clamped so the canopy cap always sits above the trunk top.
         let height_jitter = ((variant_idx >> 8) & 0x3) as i32 - 1;
         let min_trunk = if tree.log_height == 0 { 0 } else { 2 };
         let canopy_top = tree
@@ -504,7 +471,6 @@ impl Tree {
             .max(min_trunk)
             .min(trunk_cap);
 
-        // Place the trunk (skipped for log_height == 0, e.g. Bush).
         if tree.log_height > 0 {
             editor.fill_blocks_absolute(
                 tree.log_block,
@@ -527,7 +493,7 @@ impl Tree {
             footprints: building_footprints,
         };
 
-        // Inner canopy columns — no accent here, so blossoms stay on the surface.
+        // Inner canopy columns — accent only on the outermost ring (below).
         for ((i1, j1, k1), (i2, j2, k2)) in tree.leaves_fill {
             for leaf_x in (x + i1)..=(x + i2) {
                 for leaf_y in (base_y + j1)..=(base_y + j2) {
@@ -538,9 +504,7 @@ impl Tree {
             }
         }
 
-        // Outer rings: only the OUTERMOST non-empty ring is treated as surface
-        // (so accent blocks like cherry blossoms don't land on inner rings that
-        // sit visually inside the visible canopy edge).
+        // Only the outermost non-empty ring gets surface (accent-eligible) leaves.
         let outermost_ring_idx: Option<usize> = tree
             .round_ranges
             .iter()
@@ -566,7 +530,6 @@ impl Tree {
             }
         }
 
-        // Side branch — gives the tree asymmetric character.
         let branch_roll = ((variant_idx >> 16) & 0xFF) as f32 / 255.0;
         if branch_roll < tree.branch_chance && trunk_height >= 5 {
             let (dx, dz) = match (variant_idx >> 24) & 0x3 {
@@ -587,26 +550,20 @@ impl Tree {
                     Some(&blacklist),
                 );
             }
-            // Tapered leaf cluster (octahedron, Manhattan ≤ 2) — rounder than a 3×3×3 cube.
+            // Tapered cluster (Manhattan <= 2): rounder than a 3x3x3 cube.
             let tip_x = x + dx * 2;
             let tip_z = z + dz * 2;
             for ddx in -1i32..=1 {
                 for ddy in -1i32..=1 {
                     for ddz in -1i32..=1 {
                         if ddx.abs() + ddy.abs() + ddz.abs() <= 2 {
-                            placer.place_surface(
-                                editor,
-                                tip_x + ddx,
-                                branch_y + ddy,
-                                tip_z + ddz,
-                            );
+                            placer.place_surface(editor, tip_x + ddx, branch_y + ddy, tip_z + ddz);
                         }
                     }
                 }
             }
         }
 
-        // Willow droops — eight cardinal+diagonal columns of hanging leaves.
         if tree.drooping {
             let droop_dirs: [(i32, i32); 8] = [
                 (2, 0),
@@ -717,7 +674,6 @@ impl Tree {
         self
     }
 
-    // ─── Oak variants ──────────────────────────────────────────────────────
     fn oak_standard() -> Self {
         Self::make(
             OAK_LOG,
@@ -739,11 +695,7 @@ impl Tree {
             10,
             OAK_LEAVES,
             &OAK_LEAVES_FILL_TALL_SLIM,
-            [
-                (7..=11).rev().collect(),
-                (8..=10).rev().collect(),
-                vec![],
-            ],
+            [(7..=11).rev().collect(), (8..=10).rev().collect(), vec![]],
         )
         .with_branch(0.40)
     }
@@ -773,9 +725,8 @@ impl Tree {
         )
     }
 
+    // Standard oak silhouette with a guaranteed side branch (the branch is the asymmetry).
     fn oak_lopsided() -> Self {
-        // Standard oak silhouette with a guaranteed side branch — the branch
-        // is the asymmetry, no need to deform the canopy into a rectangle.
         Self::make(
             OAK_LOG,
             8,
@@ -790,7 +741,6 @@ impl Tree {
         .with_branch(1.0)
     }
 
-    // ─── Spruce variants ───────────────────────────────────────────────────
     fn spruce_standard() -> Self {
         Self::make(
             SPRUCE_LOG,
@@ -821,7 +771,6 @@ impl Tree {
         )
     }
 
-    // ─── Birch variants ────────────────────────────────────────────────────
     fn birch_standard() -> Self {
         Self::make(
             BIRCH_LOG,
@@ -854,7 +803,6 @@ impl Tree {
         )
     }
 
-    // ─── Dark oak variants ─────────────────────────────────────────────────
     fn dark_oak_standard() -> Self {
         Self::make(
             DARK_OAK_LOG,
@@ -895,7 +843,6 @@ impl Tree {
         )
     }
 
-    // ─── Jungle variants ───────────────────────────────────────────────────
     fn jungle_standard() -> Self {
         Self::make(
             JUNGLE_LOG,
@@ -922,7 +869,6 @@ impl Tree {
         .with_branch(0.60)
     }
 
-    // ─── Acacia variants ───────────────────────────────────────────────────
     fn acacia_standard() -> Self {
         Self::make(
             ACACIA_LOG,
@@ -949,7 +895,6 @@ impl Tree {
         .with_branch(0.45)
     }
 
-    // ─── Cherry variants ───────────────────────────────────────────────────
     fn cherry_standard() -> Self {
         Self::make(
             CHERRY_LOG,
@@ -980,7 +925,6 @@ impl Tree {
         .drooping()
     }
 
-    // ─── Tall oak variants ─────────────────────────────────────────────────
     fn tall_oak_standard() -> Self {
         Self::make(
             OAK_LOG,
@@ -1007,7 +951,6 @@ impl Tree {
         .with_branch(0.60)
     }
 
-    // ─── Pine variants ─────────────────────────────────────────────────────
     fn pine_standard() -> Self {
         Self::make(
             SPRUCE_LOG,
@@ -1028,9 +971,8 @@ impl Tree {
         )
     }
 
-    // ─── New species ───────────────────────────────────────────────────────
+    // log_height == 0 → no trunk placed.
     fn bush() -> Self {
-        // log_height == 0 → no trunk placed
         Self::make(
             OAK_LOG,
             0,
@@ -1041,7 +983,6 @@ impl Tree {
     }
 
     fn azalea_bush() -> Self {
-        // Small flowering shrub using azalea leaves
         Self::make(
             OAK_LOG,
             0,
@@ -1057,17 +998,13 @@ impl Tree {
             5,
             OAK_LEAVES,
             &WILLOW_LEAVES_FILL,
-            [
-                (4..=6).rev().collect(),
-                (4..=5).rev().collect(),
-                vec![5],
-            ],
+            [(4..=6).rev().collect(), (4..=5).rev().collect(), vec![5]],
         )
         .drooping()
     }
 
+    // Oak silhouette with cherry-pink blossom accents on the outermost ring.
     fn flowering_oak() -> Self {
-        // Oak silhouette with cherry-pink blossom accents (~18% of leaves).
         Self::make(
             OAK_LOG,
             8,
@@ -1247,4 +1184,3 @@ impl Tree {
         ]
     }
 }
-
