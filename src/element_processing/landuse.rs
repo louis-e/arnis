@@ -56,6 +56,7 @@ pub fn generate_landuse(
     // Get the area of the landuse element using cache
     let floor_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
+    // Cherry/FloweringOak only via the random Tree::create pool (rare).
     let trees_ok_to_generate: Vec<TreeType> = {
         let mut trees: Vec<TreeType> = vec![];
         if let Some(leaf_type) = element.tags.get("leaf_type") {
@@ -64,8 +65,6 @@ pub fn generate_landuse(
                     trees.push(TreeType::Oak);
                     trees.push(TreeType::Birch);
                     trees.push(TreeType::TallOak);
-                    trees.push(TreeType::Cherry);
-                    trees.push(TreeType::FloweringOak);
                     trees.push(TreeType::Bush);
                     trees.push(TreeType::AzaleaBush);
                 }
@@ -79,8 +78,6 @@ pub fn generate_landuse(
                     trees.push(TreeType::Birch);
                     trees.push(TreeType::TallOak);
                     trees.push(TreeType::Pine);
-                    trees.push(TreeType::Cherry);
-                    trees.push(TreeType::FloweringOak);
                     trees.push(TreeType::Bush);
                     trees.push(TreeType::AzaleaBush);
                     trees.push(TreeType::Willow);
@@ -92,8 +89,6 @@ pub fn generate_landuse(
             trees.push(TreeType::Birch);
             trees.push(TreeType::TallOak);
             trees.push(TreeType::Pine);
-            trees.push(TreeType::Cherry);
-            trees.push(TreeType::FloweringOak);
             trees.push(TreeType::Bush);
             trees.push(TreeType::AzaleaBush);
         }
@@ -199,8 +194,7 @@ pub fn generate_landuse(
                 }
             }
             "forest" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
-                // Density-modulated tree spawn: dense thickets in some patches,
-                // clearings in others. Average rate stays ~1/30 like before.
+                // Density-modulated spawn: thickets in some patches, clearings in others.
                 let density = crate::ground_generation::value_noise_01(x, z, 32);
                 let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
                 if rng.random_range(0..tree_threshold) == 0 {

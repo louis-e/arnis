@@ -56,8 +56,6 @@ pub fn generate_natural(
                             trees_ok_to_generate.push(TreeType::Oak);
                             trees_ok_to_generate.push(TreeType::Birch);
                             trees_ok_to_generate.push(TreeType::TallOak);
-                            trees_ok_to_generate.push(TreeType::Cherry);
-                            trees_ok_to_generate.push(TreeType::FloweringOak);
                         }
                         "needleleaved" => {
                             trees_ok_to_generate.push(TreeType::Spruce);
@@ -69,8 +67,6 @@ pub fn generate_natural(
                             trees_ok_to_generate.push(TreeType::Birch);
                             trees_ok_to_generate.push(TreeType::TallOak);
                             trees_ok_to_generate.push(TreeType::Pine);
-                            trees_ok_to_generate.push(TreeType::Cherry);
-                            trees_ok_to_generate.push(TreeType::FloweringOak);
                         }
                     }
                 } else {
@@ -78,8 +74,6 @@ pub fn generate_natural(
                     trees_ok_to_generate.push(TreeType::Spruce);
                     trees_ok_to_generate.push(TreeType::Birch);
                     trees_ok_to_generate.push(TreeType::TallOak);
-                    trees_ok_to_generate.push(TreeType::Cherry);
-                    trees_ok_to_generate.push(TreeType::FloweringOak);
                 }
 
                 if trees_ok_to_generate.is_empty() {
@@ -195,8 +189,6 @@ pub fn generate_natural(
                                 trees.push(TreeType::Oak);
                                 trees.push(TreeType::Birch);
                                 trees.push(TreeType::TallOak);
-                                trees.push(TreeType::Cherry);
-                                trees.push(TreeType::FloweringOak);
                                 trees.push(TreeType::Bush);
                                 trees.push(TreeType::AzaleaBush);
                             }
@@ -210,8 +202,6 @@ pub fn generate_natural(
                                 trees.push(TreeType::Birch);
                                 trees.push(TreeType::TallOak);
                                 trees.push(TreeType::Pine);
-                                trees.push(TreeType::Cherry);
-                                trees.push(TreeType::FloweringOak);
                                 trees.push(TreeType::Bush);
                                 trees.push(TreeType::AzaleaBush);
                             }
@@ -221,8 +211,6 @@ pub fn generate_natural(
                         trees.push(TreeType::Spruce);
                         trees.push(TreeType::Birch);
                         trees.push(TreeType::TallOak);
-                        trees.push(TreeType::Cherry);
-                        trees.push(TreeType::FloweringOak);
                         trees.push(TreeType::Bush);
                         trees.push(TreeType::AzaleaBush);
                     }
@@ -341,7 +329,6 @@ pub fn generate_natural(
                             if !editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) {
                                 continue;
                             }
-                            // Density-modulated tree spawn for organic clearings/thickets.
                             let density = crate::ground_generation::value_noise_01(x, z, 32);
                             let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
                             let spawn_tree = rng.random_range(0..tree_threshold) == 0;
