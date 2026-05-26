@@ -7,6 +7,8 @@ use crate::block_definitions::*;
 
 /// Minimum Y coordinate in Minecraft (1.18+)
 pub const MIN_Y: i32 = -64;
+/// Lowest section index covering MIN_Y (-64 / 16).
+pub const MIN_SECTION_Y: i8 = (MIN_Y / 16) as i8;
 /// Maximum Y coordinate in Minecraft (data pack maximum: 2031)
 /// Vanilla limit is 319, but data packs can extend this up to 2031.
 /// The world editor supports the full range; the elevation system controls
@@ -534,6 +536,42 @@ impl WorldToModify {
         }
     }
 
+    /// Fill empty sections of a chunk up to `section_y_max` with `Uniform(block)`,
+    /// bypassing the per-cell Uniform(AIR) -> Full(Vec) 4 KiB promotion.
+    /// Returns true when every section in the range is now Uniform(block);
+    /// false if any section was occupied and left untouched.
+    pub fn bulk_fill_chunk_sections_below(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        section_y_max: i8,
+        block: Block,
+    ) -> bool {
+        if section_y_max < MIN_SECTION_Y {
+            return true;
+        }
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+        let region = self.regions.entry((region_x, region_z)).or_default();
+        let chunk = region
+            .chunks
+            .entry((chunk_x & 31, chunk_z & 31))
+            .or_default();
+
+        let mut all_clean = true;
+        for section_y in MIN_SECTION_Y..=section_y_max {
+            let section = chunk.sections.entry(section_y).or_default();
+            let is_empty = section.properties.is_empty()
+                && matches!(&section.storage, BlockStorage::Uniform(b) if *b == AIR);
+            if is_empty {
+                section.storage = BlockStorage::Uniform(block);
+            } else {
+                all_clean = false;
+            }
+        }
+        all_clean
+    }
+
     /// Scan every section and collapse any that are entirely one block type
     /// from `Full(Vec)` back to `Uniform(Block)`, freeing the 4 KiB allocation.
     pub fn compact_sections(&mut self) {
@@ -545,6 +583,105 @@ impl WorldToModify {
                     }
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bulk_fill_empty_chunk_all_clean() {
+        let mut world = WorldToModify::default();
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        assert!(all_clean, "fresh chunk should report all sections clean");
+
+        let region = world.get_region(0, 0).unwrap();
+        let chunk = region.get_chunk(0, 0).unwrap();
+        // Sections -4, -3, -2 must now exist as Uniform(STONE)
+        for y in MIN_SECTION_Y..=-2 {
+            let section = chunk
+                .sections
+                .get(&y)
+                .unwrap_or_else(|| panic!("section {y} should have been created"));
+            assert!(
+                matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
+                "section {y} should be Uniform(STONE), got {:?}",
+                std::mem::discriminant(&section.storage)
+            );
+            assert!(
+                section.properties.is_empty(),
+                "section {y} should have no per-cell properties"
+            );
+        }
+    }
+
+    #[test]
+    fn bulk_fill_skips_occupied_section() {
+        let mut world = WorldToModify::default();
+        // Pre-place a non-AIR block deep underground (section -2: y=-32..=-17)
+        // to simulate e.g. a bridge pier.
+        world.set_block_if_absent(0, -20, 0, COBBLESTONE);
+
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        assert!(
+            !all_clean,
+            "should return false because section -2 was occupied"
+        );
+
+        let region = world.get_region(0, 0).unwrap();
+        let chunk = region.get_chunk(0, 0).unwrap();
+        // Section -4 and -3 should be Uniform(STONE)
+        for y in [-4i8, -3] {
+            let section = chunk.sections.get(&y).unwrap();
+            assert!(
+                matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
+                "section {y} should be Uniform(STONE)"
+            );
+        }
+        // Section -2 should be left alone (Full(Vec) with COBBLESTONE at y=-20)
+        let section = chunk.sections.get(&-2).unwrap();
+        assert!(
+            matches!(&section.storage, BlockStorage::Full(_)),
+            "section -2 should still be Full(Vec) (had COBBLESTONE)"
+        );
+        // The pre-existing block must still be there
+        let local_y = (-20i32 & 15) as u8;
+        let idx = SectionToModify::index(0, local_y, 0);
+        assert_eq!(
+            section.storage.get(idx),
+            COBBLESTONE,
+            "pre-existing COBBLESTONE must not be overwritten"
+        );
+    }
+
+    #[test]
+    fn bulk_fill_below_min_section_is_noop() {
+        let mut world = WorldToModify::default();
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, MIN_SECTION_Y - 1, STONE);
+        assert!(all_clean, "below-min request should be vacuously clean");
+        // No region should have been created
+        assert!(world.get_region(0, 0).is_none());
+    }
+
+    #[test]
+    fn bulk_fill_second_call_treats_existing_stone_as_occupied() {
+        // The "empty" check is strict Uniform(AIR). A second bulk-fill call
+        // on already-Uniform(STONE) sections sees them as occupied (returns
+        // false) but leaves them in their correct final state — calling
+        // bulk_fill twice is harmless.
+        let mut world = WorldToModify::default();
+        assert!(world.bulk_fill_chunk_sections_below(0, 0, -2, STONE));
+        let second = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        assert!(!second, "second call sees Uniform(STONE) as occupied");
+        let chunk = world.get_region(0, 0).unwrap().get_chunk(0, 0).unwrap();
+        for y in MIN_SECTION_Y..=-2 {
+            let section = chunk.sections.get(&y).unwrap();
+            assert!(
+                matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
+                "section {y} should still be Uniform(STONE)"
+            );
         }
     }
 }
