@@ -110,8 +110,7 @@ pub fn generate_ores(editor: &mut WorldEditor, xzbbox: &XZBBox) {
     }
 }
 
-// 3D random walk that replaces STONE only — any other block ends the placement
-// at that step (next step continues from the new position).
+// Whitelist on set_block_absolute is required to overwrite STONE; pre-check filters AIR.
 fn place_vein(
     editor: &mut WorldEditor,
     block: Block,
@@ -124,7 +123,7 @@ fn place_vein(
     let (mut cx, mut cy, mut cz) = (x, y, z);
     for _ in 0..size {
         if editor.check_for_block_absolute(cx, cy, cz, Some(&[STONE]), None) {
-            editor.set_block_absolute(block, cx, cy, cz, None, None);
+            editor.set_block_absolute(block, cx, cy, cz, Some(&[STONE]), None);
         }
         match rng.random_range(0..6) {
             0 => cx += 1,
