@@ -1,19 +1,21 @@
 //! Random ore veins for the stone produced by `--fillground`.
 
 use crate::block_definitions::{
-    Block, COAL_ORE, COPPER_ORE, DIAMOND_ORE, GOLD_ORE, IRON_ORE, LAPIS_ORE, REDSTONE_ORE, STONE,
+    Block, COAL_ORE, DIAMOND_ORE, GOLD_ORE, IRON_ORE, LAPIS_ORE, REDSTONE_ORE, STONE,
 };
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::deterministic_rng::coord_rng;
 use crate::progress::emit_gui_progress_update;
-use crate::world_editor::WorldEditor;
+use crate::world_editor::{WorldEditor, MIN_Y};
 use colored::Colorize;
 use rand::Rng;
 
 struct OreDef {
     block: Block,
-    y_min: i32,
-    y_max: i32,
+    /// Shallowest depth below local ground level (e.g. 3 = 3 blocks under surface).
+    depth_min: i32,
+    /// Deepest depth below local ground level.
+    depth_max: i32,
     vein_min: u32,
     vein_max: u32,
     /// Sampled as uniform 0..=2*avg, giving the requested mean.
@@ -23,64 +25,57 @@ struct OreDef {
 const ORES: &[OreDef] = &[
     OreDef {
         block: COAL_ORE,
-        y_min: -20,
-        y_max: 50,
+        depth_min: 3,
+        depth_max: 45,
         vein_min: 8,
         vein_max: 17,
         avg_veins_per_chunk: 8,
     },
     OreDef {
         block: IRON_ORE,
-        y_min: -50,
-        y_max: 30,
+        depth_min: 3,
+        depth_max: 60,
         vein_min: 5,
         vein_max: 9,
         avg_veins_per_chunk: 6,
     },
     OreDef {
-        block: COPPER_ORE,
-        y_min: -16,
-        y_max: 30,
-        vein_min: 8,
-        vein_max: 12,
-        avg_veins_per_chunk: 4,
-    },
-    OreDef {
         block: LAPIS_ORE,
-        y_min: -50,
-        y_max: 10,
+        depth_min: 25,
+        depth_max: 55,
         vein_min: 4,
         vein_max: 7,
         avg_veins_per_chunk: 2,
     },
     OreDef {
         block: GOLD_ORE,
-        y_min: -50,
-        y_max: -10,
+        depth_min: 40,
+        depth_max: 60,
         vein_min: 5,
         vein_max: 9,
         avg_veins_per_chunk: 3,
     },
     OreDef {
         block: REDSTONE_ORE,
-        y_min: -60,
-        y_max: -10,
+        depth_min: 45,
+        depth_max: 65,
         vein_min: 5,
         vein_max: 10,
         avg_veins_per_chunk: 4,
     },
     OreDef {
         block: DIAMOND_ORE,
-        y_min: -60,
-        y_max: -30,
+        depth_min: 50,
+        depth_max: 65,
         vein_min: 4,
         vein_max: 7,
         avg_veins_per_chunk: 1,
     },
 ];
 
-/// Place ore veins across every chunk in `xzbbox`. Only meaningful when
-/// `--fillground` populated the underground; caller gates the call.
+/// Place ore veins across every chunk in `xzbbox`. Y ranges are anchored to
+/// the chunk's local ground level so mountains carry ore inside their bulk
+/// instead of all veins collapsing to the lowest world layer.
 pub fn generate_ores(editor: &mut WorldEditor, xzbbox: &XZBBox) {
     println!("{} Sprinkling ore veins...", "[6b/7]".bold());
     emit_gui_progress_update(89.0, "Sprinkling ore veins...");
@@ -92,16 +87,24 @@ pub fn generate_ores(editor: &mut WorldEditor, xzbbox: &XZBBox) {
 
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
+            // One ground sample at chunk centre — cheap, and ore depth bands
+            // smear over many blocks anyway so per-cell ground accuracy doesn't matter.
+            let ground_y = editor.get_ground_level((chunk_x << 4) + 8, (chunk_z << 4) + 8);
             // Salt 0xC0DE so this RNG can't collide with tree-variant or biome RNGs.
             let mut rng = coord_rng(chunk_x, chunk_z, 0xC0DE);
 
             for ore in ORES {
+                let y_min = (ground_y - ore.depth_max).max(MIN_Y + 1);
+                let y_max = (ground_y - ore.depth_min).max(MIN_Y + 1);
+                if y_min > y_max {
+                    continue;
+                }
                 let max_veins = ore.avg_veins_per_chunk * 2;
                 let n = rng.random_range(0..=max_veins);
                 for _ in 0..n {
                     let cx = (chunk_x << 4) + rng.random_range(0..16);
                     let cz = (chunk_z << 4) + rng.random_range(0..16);
-                    let cy = rng.random_range(ore.y_min..=ore.y_max);
+                    let cy = rng.random_range(y_min..=y_max);
                     let size = rng.random_range(ore.vein_min..=ore.vein_max);
                     place_vein(editor, ore.block, cx, cy, cz, size, &mut rng);
                 }

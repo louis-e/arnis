@@ -536,10 +536,10 @@ impl WorldToModify {
         }
     }
 
-    /// Fill empty sections of a chunk up to `section_y_max` with `Uniform(block)`,
-    /// bypassing the per-cell Uniform(AIR) -> Full(Vec) 4 KiB promotion.
-    /// Returns true when every section in the range is now Uniform(block);
-    /// false if any section was occupied and left untouched.
+    /// Fill empty (Uniform(AIR), no properties) sections of a chunk up to
+    /// `section_y_max` with `Uniform(block)`. Returns true only if every section
+    /// in the range was empty and got filled; false if any was already occupied
+    /// (including sections that are already `Uniform(block)`).
     pub fn bulk_fill_chunk_sections_below(
         &mut self,
         chunk_x: i32,
