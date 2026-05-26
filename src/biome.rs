@@ -152,7 +152,7 @@ mod tests {
         }
         let longs = pack_biome_indices(&indices, 1);
         assert_eq!(longs.len(), 1);
-        let expected: u64 = (0..64u64).fold(0, |acc, c| acc | (((c % 2) as u64) << c));
+        let expected: u64 = (0..64u64).fold(0, |acc, c| acc | ((c % 2) << c));
         assert_eq!(longs[0] as u64, expected);
     }
 

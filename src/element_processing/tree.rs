@@ -85,29 +85,26 @@ const OAK_LEAVES_FILL_COMPACT: [(Coord, Coord); 5] = [
 ];
 
 // Spruce — three variants. Conifer cone shape with cross pattern.
-const SPRUCE_LEAVES_FILL_STANDARD: [(Coord, Coord); 6] = [
+const SPRUCE_LEAVES_FILL_STANDARD: [(Coord, Coord); 5] = [
     ((-1, 3, 0), (-1, 10, 0)),
     ((0, 3, -1), (0, 10, -1)),
     ((1, 3, 0), (1, 10, 0)),
-    ((0, 3, -1), (0, 10, -1)),
     ((0, 3, 1), (0, 10, 1)),
     ((0, 11, 0), (0, 11, 0)),
 ];
 
-const SPRUCE_LEAVES_FILL_TOWERING: [(Coord, Coord); 6] = [
+const SPRUCE_LEAVES_FILL_TOWERING: [(Coord, Coord); 5] = [
     ((-1, 4, 0), (-1, 13, 0)),
     ((0, 4, -1), (0, 13, -1)),
     ((1, 4, 0), (1, 13, 0)),
-    ((0, 4, -1), (0, 13, -1)),
     ((0, 4, 1), (0, 13, 1)),
     ((0, 14, 0), (0, 14, 0)),
 ];
 
-const SPRUCE_LEAVES_FILL_SQUAT: [(Coord, Coord); 6] = [
+const SPRUCE_LEAVES_FILL_SQUAT: [(Coord, Coord); 5] = [
     ((-1, 2, 0), (-1, 7, 0)),
     ((0, 2, -1), (0, 7, -1)),
     ((1, 2, 0), (1, 7, 0)),
-    ((0, 2, -1), (0, 7, -1)),
     ((0, 2, 1), (0, 7, 1)),
     ((0, 8, 0), (0, 8, 0)),
 ];
@@ -231,20 +228,18 @@ const TALL_OAK_LEAVES_FILL_GIANT: [(Coord, Coord); 5] = [
 ];
 
 // Pine — two variants. Narrow conifer using spruce blocks.
-const PINE_LEAVES_FILL_STANDARD: [(Coord, Coord); 6] = [
+const PINE_LEAVES_FILL_STANDARD: [(Coord, Coord); 5] = [
     ((-1, 5, 0), (-1, 12, 0)),
     ((0, 5, -1), (0, 12, -1)),
     ((1, 5, 0), (1, 12, 0)),
-    ((0, 5, -1), (0, 12, -1)),
     ((0, 5, 1), (0, 12, 1)),
     ((0, 13, 0), (0, 13, 0)),
 ];
 
-const PINE_LEAVES_FILL_TALL: [(Coord, Coord); 6] = [
+const PINE_LEAVES_FILL_TALL: [(Coord, Coord); 5] = [
     ((-1, 6, 0), (-1, 15, 0)),
     ((0, 6, -1), (0, 15, -1)),
     ((1, 6, 0), (1, 15, 0)),
-    ((0, 6, -1), (0, 15, -1)),
     ((0, 6, 1), (0, 15, 1)),
     ((0, 16, 0), (0, 16, 0)),
 ];
