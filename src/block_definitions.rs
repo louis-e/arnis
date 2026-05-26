@@ -106,7 +106,7 @@ impl Block {
 
     pub fn name(&self) -> &str {
         match self.id {
-            0 => "acacia_planks",
+            0 => "mangrove_log",
             1 => "air",
             2 => "andesite",
             3 => "birch_leaves",
@@ -329,8 +329,8 @@ impl Block {
             230 => "cherry_log",
             231 => "cherry_leaves",
             232 => "brown_concrete_powder",
-            233 => "orange_stained_glass",
-            234 => "magenta_stained_glass",
+            233 => "mangrove_leaves",
+            234 => "azalea_leaves",
             235 => "potted_poppy",
             236 => "oak_trapdoor",
             237 => "oak_trapdoor",
@@ -1034,6 +1034,10 @@ pub const BROWN_CONCRETE_POWDER: Block = Block::new(232);
 pub const CYAN_TERRACOTTA: Block = Block::new(253);
 pub const BLACK_WOOL: Block = Block::new(254);
 pub const LIGHT_GRAY_WALL_BANNER: Block = Block::new(255);
+
+pub const MANGROVE_LOG: Block = Block::new(0);
+pub const MANGROVE_LEAVES: Block = Block::new(233);
+pub const AZALEA_LEAVES: Block = Block::new(234);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

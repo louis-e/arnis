@@ -63,18 +63,39 @@ pub fn generate_landuse(
                 "broadleaved" => {
                     trees.push(TreeType::Oak);
                     trees.push(TreeType::Birch);
+                    trees.push(TreeType::TallOak);
+                    trees.push(TreeType::Cherry);
+                    trees.push(TreeType::FloweringOak);
+                    trees.push(TreeType::Bush);
+                    trees.push(TreeType::AzaleaBush);
                 }
-                "needleleaved" => trees.push(TreeType::Spruce),
+                "needleleaved" => {
+                    trees.push(TreeType::Spruce);
+                    trees.push(TreeType::Pine);
+                }
                 _ => {
                     trees.push(TreeType::Oak);
                     trees.push(TreeType::Spruce);
                     trees.push(TreeType::Birch);
+                    trees.push(TreeType::TallOak);
+                    trees.push(TreeType::Pine);
+                    trees.push(TreeType::Cherry);
+                    trees.push(TreeType::FloweringOak);
+                    trees.push(TreeType::Bush);
+                    trees.push(TreeType::AzaleaBush);
+                    trees.push(TreeType::Willow);
                 }
             }
         } else {
             trees.push(TreeType::Oak);
             trees.push(TreeType::Spruce);
             trees.push(TreeType::Birch);
+            trees.push(TreeType::TallOak);
+            trees.push(TreeType::Pine);
+            trees.push(TreeType::Cherry);
+            trees.push(TreeType::FloweringOak);
+            trees.push(TreeType::Bush);
+            trees.push(TreeType::AzaleaBush);
         }
         trees
     };
@@ -178,27 +199,33 @@ pub fn generate_landuse(
                 }
             }
             "forest" if editor.check_for_block(x, 0, z, Some(&[GRASS_BLOCK])) => {
-                let random_choice: i32 = rng.random_range(0..30);
-                if random_choice == 20 {
+                // Density-modulated tree spawn: dense thickets in some patches,
+                // clearings in others. Average rate stays ~1/30 like before.
+                let density = crate::ground_generation::value_noise_01(x, z, 32);
+                let tree_threshold = ((60.0 - density * 45.0) as i32).max(5);
+                if rng.random_range(0..tree_threshold) == 0 {
                     let tree_type = *trees_ok_to_generate
                         .choose(&mut rng)
                         .unwrap_or(&TreeType::Oak);
                     Tree::create_of_type(editor, (x, 1, z), tree_type, Some(building_footprints));
-                } else if random_choice == 2 {
-                    let flower_block: Block = match rng.random_range(1..=6) {
-                        1 => OAK_LEAVES,
-                        2 => RED_FLOWER,
-                        3 => BLUE_FLOWER,
-                        4 => YELLOW_FLOWER,
-                        5 => FERN,
-                        _ => WHITE_FLOWER,
-                    };
-                    editor.set_block(flower_block, x, 1, z, None, None);
-                } else if random_choice <= 12 {
-                    if rng.random_range(0..100) < 12 {
-                        editor.set_block(FERN, x, 1, z, None, None);
-                    } else {
-                        editor.set_block(GRASS, x, 1, z, None, None);
+                } else {
+                    let random_choice: i32 = rng.random_range(0..30);
+                    if random_choice == 2 {
+                        let flower_block: Block = match rng.random_range(1..=6) {
+                            1 => OAK_LEAVES,
+                            2 => RED_FLOWER,
+                            3 => BLUE_FLOWER,
+                            4 => YELLOW_FLOWER,
+                            5 => FERN,
+                            _ => WHITE_FLOWER,
+                        };
+                        editor.set_block(flower_block, x, 1, z, None, None);
+                    } else if random_choice <= 12 {
+                        if rng.random_range(0..100) < 12 {
+                            editor.set_block(FERN, x, 1, z, None, None);
+                        } else {
+                            editor.set_block(GRASS, x, 1, z, None, None);
+                        }
                     }
                 }
             }
