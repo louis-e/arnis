@@ -73,9 +73,7 @@ const ORES: &[OreDef] = &[
     },
 ];
 
-/// Place ore veins across every chunk in `xzbbox`. Y ranges are anchored to
-/// the chunk's local ground level so mountains carry ore inside their bulk
-/// instead of all veins collapsing to the lowest world layer.
+/// Place ore veins across every chunk; Y is relative to local ground.
 pub fn generate_ores(editor: &mut WorldEditor, xzbbox: &XZBBox) {
     println!("{} Sprinkling ore veins...", "[6b/7]".bold());
     emit_gui_progress_update(89.0, "Sprinkling ore veins...");
@@ -87,10 +85,7 @@ pub fn generate_ores(editor: &mut WorldEditor, xzbbox: &XZBBox) {
 
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
-            // One ground sample at chunk centre — cheap, and ore depth bands
-            // smear over many blocks anyway so per-cell ground accuracy doesn't matter.
             let ground_y = editor.get_ground_level((chunk_x << 4) + 8, (chunk_z << 4) + 8);
-            // Salt 0xC0DE so this RNG can't collide with tree-variant or biome RNGs.
             let mut rng = coord_rng(chunk_x, chunk_z, 0xC0DE);
 
             for ore in ORES {
