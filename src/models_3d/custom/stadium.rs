@@ -12,6 +12,10 @@ const MODEL_URL: &str = "https://arnismc.com/assets/3dmodels/stadium.glb";
 const CACHE_FILE: &str = "stadium.glb";
 
 const MIN_SHORT_EXTENT_M: f32 = 10.0;
+/// Caps to avoid voxelizing absurd polygons (entire sports complexes mis-tagged as one stadium).
+const MAX_LONG_EXTENT_M: f32 = 500.0;
+const MAX_SHORT_EXTENT_M: f32 = 400.0;
+const MAX_HEIGHT_M: f32 = 200.0;
 /// `leisure=stadium` qualifies on its own above this footprint area (m²).
 const LARGE_STADIUM_AREA_M2: f64 = 20_000.0;
 /// Smaller `leisure=stadium` needs an inner `building=stadium` to qualify.
@@ -230,7 +234,7 @@ fn build_placement(element: &ProcessedElement, args_scale: f64) -> Option<Placem
     let (long_blocks, short_blocks, theta) = principal_axis(&points)?;
     let long_m = (long_blocks / args_scale) as f32;
     let short_m = (short_blocks / args_scale) as f32;
-    if short_m < MIN_SHORT_EXTENT_M {
+    if short_m < MIN_SHORT_EXTENT_M || long_m > MAX_LONG_EXTENT_M || short_m > MAX_SHORT_EXTENT_M {
         return None;
     }
 
@@ -239,7 +243,7 @@ fn build_placement(element: &ProcessedElement, args_scale: f64) -> Option<Placem
         .tags()
         .get("height")
         .and_then(|s| parse_meters(s))
-        .map(|m| m as f32);
+        .map(|m| (m as f32).min(MAX_HEIGHT_M));
 
     Some(Placement {
         osm_id: element.id(),
@@ -833,6 +837,27 @@ mod tests {
         assert_eq!(placements.len(), 1);
         assert!(suppressed.contains(&("way", 12)));
         assert!(suppressed.contains(&("way", 13)));
+    }
+
+    #[test]
+    fn prescan_rejects_oversize_stadium() {
+        // 1500×800 m — likely a whole sports complex mis-tagged. Above MAX_LONG_EXTENT_M.
+        let mut tags = StdMap::new();
+        tags.insert("leisure".to_string(), "stadium".to_string());
+        let huge = ProcessedElement::Way(mk_way(
+            20,
+            vec![
+                mk_node(200, 0, 0),
+                mk_node(201, 1500, 0),
+                mk_node(202, 1500, 800),
+                mk_node(203, 0, 800),
+            ],
+            tags,
+        ));
+        let empty = HashSet::new();
+        let (placements, suppressed) = prescan_offline(&[huge], &empty);
+        assert_eq!(placements.len(), 0);
+        assert!(!suppressed.contains(&("way", 20)));
     }
 
     #[test]

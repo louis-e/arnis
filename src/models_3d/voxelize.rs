@@ -251,7 +251,7 @@ pub fn voxelize_glb(
                 } else {
                     (0..positions.len() as u32).collect()
                 };
-                // Vertex colors (COLOR_0) override material color when present.
+                // Vertex colors (COLOR_0) modulate the material color when present.
                 let vertex_colors: Option<Vec<[f32; 4]>> =
                     reader.read_colors(0).map(|c| c.into_rgba_f32().collect());
 
