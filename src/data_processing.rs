@@ -129,43 +129,20 @@ pub fn generate_world_with_options(
     let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
     let mut element_counter: u64 = 0;
 
-    // Pre-scan 3DMR-tagged elements first; 3DMR wins over Wikidata on conflict.
-    let three_dmr_prescan = if args.use_3d {
-        Some(crate::models_3d::three_dmr::prescan(
-            &elements,
-            args.rotation,
-        ))
-    } else {
-        None
-    };
+    let models_3d_pipeline = args
+        .use_3d
+        .then(|| crate::models_3d::Models3dPipeline::prescan(&elements, args));
     let empty_suppressed: HashSet<(&'static str, u64)> = HashSet::new();
-    let three_dmr_suppressed: &HashSet<(&'static str, u64)> = three_dmr_prescan
+    let models_3d_suppressed: &HashSet<(&'static str, u64)> = models_3d_pipeline
         .as_ref()
-        .map(|p| &p.suppressed_ids)
-        .unwrap_or(&empty_suppressed);
-
-    // Wikidata pre-scan runs after 3DMR's, skipping any element 3DMR already claimed.
-    let wikidata_prescan = if args.use_3d {
-        Some(crate::models_3d::wikidata::prescan(
-            &elements,
-            three_dmr_suppressed,
-            args.rotation,
-            args.scale,
-        ))
-    } else {
-        None
-    };
-    let wikidata_suppressed: &HashSet<(&'static str, u64)> = wikidata_prescan
-        .as_ref()
-        .map(|p| &p.suppressed_ids)
+        .map(|p| p.suppressed())
         .unwrap_or(&empty_suppressed);
 
     // Process all elements
     for element in elements.into_iter() {
         element_counter += 1;
         let suppression_key = (element.kind(), element.id());
-        if three_dmr_suppressed.contains(&suppression_key)
-            || wikidata_suppressed.contains(&suppression_key)
+        if models_3d_suppressed.contains(&suppression_key)
             || outline_suppression.contains(&suppression_key)
         {
             continue;
@@ -439,15 +416,8 @@ pub fn generate_world_with_options(
     }
 
     // Run after ground generation so anchor Y reflects the final terrain.
-    if let Some(prescan) = three_dmr_prescan.as_ref() {
-        if prescan.placement_count() > 0 {
-            crate::models_3d::three_dmr::place_three_dmr_models(&mut editor, args, prescan);
-        }
-    }
-    if let Some(prescan) = wikidata_prescan.as_ref() {
-        if prescan.placement_count() > 0 {
-            crate::models_3d::wikidata::place_wikidata_models(&mut editor, args, prescan);
-        }
+    if let Some(p) = models_3d_pipeline.as_ref() {
+        p.place(&mut editor, args);
     }
 
     // Save world

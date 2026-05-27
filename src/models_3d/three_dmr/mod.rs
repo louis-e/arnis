@@ -3,4 +3,4 @@
 pub(crate) mod client;
 mod placement;
 
-pub use placement::{place_three_dmr_models, prescan};
+pub use placement::{place_three_dmr_models, prescan, PrescanResult};
