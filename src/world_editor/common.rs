@@ -489,6 +489,45 @@ impl WorldToModify {
         }
     }
 
+    /// Like [`set_block_if_absent`] but also persists optional NBT properties.
+    #[inline]
+    pub fn set_with_props_if_absent(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_with_props: BlockWithProperties,
+    ) {
+        let chunk_x: i32 = x >> 4;
+        let chunk_z: i32 = z >> 4;
+        let region_x: i32 = chunk_x >> 5;
+        let region_z: i32 = chunk_z >> 5;
+
+        let region = self.regions.entry((region_x, region_z)).or_default();
+        let chunk = region
+            .chunks
+            .entry((chunk_x & 31, chunk_z & 31))
+            .or_default();
+
+        let y = y.clamp(MIN_Y, MAX_Y);
+        let section_idx: i8 = (y >> 4) as i8;
+        let section = chunk.sections.entry(section_idx).or_default();
+
+        let local_x = (x & 15) as u8;
+        let local_y = (y & 15) as u8;
+        let local_z = (z & 15) as u8;
+        let idx = SectionToModify::index(local_x, local_y, local_z);
+
+        if section.storage.get(idx) == AIR {
+            section.storage.set(idx, block_with_props.block);
+            if let Some(props) = block_with_props.properties {
+                section.properties.insert(idx, props);
+            } else {
+                section.properties.remove(&idx);
+            }
+        }
+    }
+
     /// Fill an entire column (single x, z) from y_min to y_max with the same block,
     /// resolving region/chunk only once.  Used by ground generation.
     #[inline]
