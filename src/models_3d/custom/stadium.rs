@@ -14,7 +14,7 @@ const CACHE_FILE: &str = "stadium.glb";
 const MIN_SHORT_EXTENT_M: f32 = 10.0;
 /// `leisure=stadium` qualifies on its own above this footprint area (m²).
 const LARGE_STADIUM_AREA_M2: f64 = 20_000.0;
-/// Smaller `leisure=stadium` qualifies only with an inner `building=stadium` corroborating.
+/// Smaller `leisure=stadium` needs an inner `building=stadium` to qualify.
 const MEDIUM_STADIUM_AREA_M2: f64 = 10_000.0;
 const DEFAULT_HEIGHT_M: f32 = 28.0;
 const HEIGHT_MULTIPLIER: f32 = 1.5;
@@ -287,7 +287,7 @@ pub fn place_stadium_models(editor: &mut WorldEditor, args: &Args, prescan: &Pre
     let model_long_extent = mx.max(mz);
     let model_short_extent = mx.min(mz);
 
-    // Center the model on the origin in XZ; Y is handled by post-voxelize ground snap.
+    // Center XZ on origin; Y is set by the post-voxelize ground snap.
     let center_x = -(model_min[0] + model_max[0]) * 0.5;
     let center_z = -(model_min[2] + model_max[2]) * 0.5;
 
@@ -313,7 +313,7 @@ pub fn place_stadium_models(editor: &mut WorldEditor, args: &Args, prescan: &Pre
             * block_per_meter
             * HEIGHT_MULTIPLIER;
 
-        // 90° pre-rotation when model is Z-long so its long axis lines up with X for per-axis scale.
+        // Pre-rotate Z-long models 90° so X is the effective long axis.
         let intrinsic_yaw_deg = if model_x_is_long { 0.0 } else { 90.0 };
         let scale_x = target_long_blocks / model_long_extent;
         let scale_z = target_short_blocks / model_short_extent;
