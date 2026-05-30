@@ -1518,30 +1518,123 @@ pub fn generate_siding(
     }
 }
 
-/// Generates an aeroway
+/// A centerline point with its segment's unit travel direction (`ux`, `uz`) and cumulative
+/// distance `s` (blocks) from the way start, used for dash phase.
+struct AerowayCenterPoint {
+    x: i32,
+    z: i32,
+    ux: f32,
+    uz: f32,
+    s: f32,
+}
+
+/// Runway centerline dash: stripe-on / stripe-off lengths in meters (scaled by `--scale`).
+const RUNWAY_DASH_ON_M: f32 = 10.0;
+const RUNWAY_DASH_OFF_M: f32 = 6.0;
+/// How far inside the runway edge (blocks) the solid white edge stripes sit.
+const RUNWAY_EDGE_INSET: f32 = 1.0;
+/// Half-width (metres) used when an aeroway has no `width=*` tag (~24 m strip).
+const AEROWAY_DEFAULT_HALF_M: f64 = 12.0;
+/// Clamp (metres) for `width=*`-derived half-widths — guards against absurd tags.
+const AEROWAY_MIN_HALF_M: f64 = 6.0;
+const AEROWAY_MAX_HALF_M: f64 = 40.0;
+
+/// True where a runway centerline dash is painted, given distance `s` (blocks) from the way start.
+fn runway_centerline_dash_on(s: f32, scale: f64) -> bool {
+    let on = (RUNWAY_DASH_ON_M * scale as f32).max(1.0);
+    let off = (RUNWAY_DASH_OFF_M * scale as f32).max(1.0);
+    (s % (on + off)) < on
+}
+
+/// Parses an OSM `width=*` value in metres (tolerates a trailing "m").
+fn parse_aeroway_width_m(tags: &HashMap<String, String>) -> Option<f64> {
+    let raw = tags.get("width")?;
+    let s = raw.trim().trim_end_matches('m').trim();
+    s.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
+}
+
+/// Renders an aeroway as a concrete strip with markings: runways get asphalt-gray with a dashed
+/// white centerline + white edge stripes, taxiways a lighter surface with a yellow centerline.
+/// No threshold "piano keys" — OSM splits runways into segments, so a per-way renderer can't tell
+/// a real end from an internal split.
 pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Args) {
-    let mut previous_node: Option<(i32, i32)> = None;
-    let surface_block = LIGHT_GRAY_CONCRETE;
+    let aeroway = way.tags.get("aeroway").map(String::as_str);
+    let is_runway = aeroway == Some("runway");
+    let is_taxiway = aeroway == Some("taxiway");
 
-    for node in &way.nodes {
-        if let Some(prev) = previous_node {
-            let (x1, z1) = prev;
-            let x2 = node.x;
-            let z2 = node.z;
-            let points = bresenham_line(x1, 0, z1, x2, 0, z2);
-            let way_width: i32 = (12.0 * args.scale).ceil() as i32;
+    let base_block = if is_runway {
+        GRAY_CONCRETE
+    } else {
+        LIGHT_GRAY_CONCRETE
+    };
 
-            for (x, _, z) in points {
-                for dx in -way_width..=way_width {
-                    for dz in -way_width..=way_width {
-                        let set_x = x + dx;
-                        let set_z = z + dz;
-                        editor.set_block(surface_block, set_x, 0, set_z, None, None);
-                    }
-                }
+    // Half-width from the OSM `width=*` tag (metres, clamped to sane sizes); default when absent.
+    let half_m = parse_aeroway_width_m(&way.tags)
+        .map(|w| (w * 0.5).clamp(AEROWAY_MIN_HALF_M, AEROWAY_MAX_HALF_M))
+        .unwrap_or(AEROWAY_DEFAULT_HALF_M);
+    let half_width: i32 = (half_m * args.scale).round().max(1.0) as i32;
+
+    // Build the centerline once: bresenham per segment, consecutive duplicates dropped, with a
+    // running distance so dash phase and markings stay consistent across segments and regions.
+    let mut points: Vec<AerowayCenterPoint> = Vec::new();
+    let mut s_accum = 0.0_f32;
+    let mut last: Option<(i32, i32)> = None;
+    for pair in way.nodes.windows(2) {
+        let (x1, z1) = (pair[0].x, pair[0].z);
+        let (x2, z2) = (pair[1].x, pair[1].z);
+        let len = (((x2 - x1) as f32).hypot((z2 - z1) as f32)).max(1e-6);
+        let (ux, uz) = ((x2 - x1) as f32 / len, (z2 - z1) as f32 / len);
+        for (x, _, z) in bresenham_line(x1, 0, z1, x2, 0, z2) {
+            if last == Some((x, z)) {
+                continue;
+            }
+            if let Some((lx, lz)) = last {
+                s_accum += ((x - lx) as f32).hypot((z - lz) as f32);
+            }
+            points.push(AerowayCenterPoint {
+                x,
+                z,
+                ux,
+                uz,
+                s: s_accum,
+            });
+            last = Some((x, z));
+        }
+    }
+
+    // Pass 1: full surface, before markings. A runway's base may overwrite taxiway surface so it
+    // wins crossings regardless of element order; a taxiway's base only fills empty cells (`None`),
+    // so it never paints over a runway.
+    let runway_overwrites = [LIGHT_GRAY_CONCRETE, YELLOW_CONCRETE];
+    let base_over: Option<&[Block]> = is_runway.then_some(&runway_overwrites[..]);
+    for cp in &points {
+        for dx in -half_width..=half_width {
+            for dz in -half_width..=half_width {
+                editor.set_block(base_block, cp.x + dx, 0, cp.z + dz, base_over, None);
             }
         }
-        previous_node = Some((node.x, node.z));
+    }
+
+    // Pass 2: markings. `set_block` only overwrites a whitelisted block, so markings must list
+    // the base surface they replace — else pass 1 has claimed every cell and they're dropped.
+    let base_overwrite = [base_block];
+    let over_base = Some(&base_overwrite[..]);
+    for cp in &points {
+        // Perpendicular unit vector across the strip.
+        let (px, pz) = (-cp.uz, cp.ux);
+        if is_runway {
+            if runway_centerline_dash_on(cp.s, args.scale) {
+                editor.set_block(WHITE_CONCRETE, cp.x, 0, cp.z, over_base, None);
+            }
+            let off = (half_width as f32 - RUNWAY_EDGE_INSET).max(0.0);
+            for sign in [1.0_f32, -1.0] {
+                let ex = (cp.x as f32 + sign * px * off).round() as i32;
+                let ez = (cp.z as f32 + sign * pz * off).round() as i32;
+                editor.set_block(WHITE_CONCRETE, ex, 0, ez, over_base, None);
+            }
+        } else if is_taxiway {
+            editor.set_block(YELLOW_CONCRETE, cp.x, 0, cp.z, over_base, None);
+        }
     }
 }
 
@@ -1722,4 +1815,193 @@ pub fn collect_building_passage_coords(
     }
 
     bitmap
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn runway_dash_alternates_on_and_off() {
+        // At scale 1: 10 blocks on, 6 off, repeating every 16.
+        assert!(runway_centerline_dash_on(0.0, 1.0));
+        assert!(runway_centerline_dash_on(9.0, 1.0));
+        assert!(!runway_centerline_dash_on(10.0, 1.0));
+        assert!(!runway_centerline_dash_on(15.0, 1.0));
+        assert!(
+            runway_centerline_dash_on(16.0, 1.0),
+            "pattern repeats at 16"
+        );
+        assert!(
+            runway_centerline_dash_on(160.0, 1.0),
+            "phase stays consistent far along"
+        );
+    }
+
+    #[test]
+    fn runway_dash_scales_with_world_scale() {
+        // At scale 2: 20 blocks on, 12 off.
+        assert!(runway_centerline_dash_on(19.0, 2.0));
+        assert!(!runway_centerline_dash_on(20.0, 2.0));
+    }
+
+    // --- Rendering regression tests: markings must actually overwrite the base surface. ---
+
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use crate::osm_parser::ProcessedNode;
+    use crate::world_editor::WorldEditor;
+    use clap::Parser as _;
+    use std::collections::HashMap as StdMap;
+    use std::path::PathBuf;
+
+    /// Builds an in-memory editor (never saved) over a 400×100 area at ground Y=0.
+    fn test_editor(xzbbox: &XZBBox) -> WorldEditor<'_> {
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        WorldEditor::new(PathBuf::from("/dev/null/unused"), xzbbox, llbbox)
+    }
+
+    fn straight_aeroway(kind: &str) -> ProcessedWay {
+        let mut tags = StdMap::new();
+        tags.insert("aeroway".to_string(), kind.to_string());
+        ProcessedWay {
+            id: 1,
+            nodes: vec![
+                ProcessedNode {
+                    id: 1,
+                    tags: StdMap::new(),
+                    x: 10,
+                    z: 50,
+                },
+                ProcessedNode {
+                    id: 2,
+                    tags: StdMap::new(),
+                    x: 390,
+                    z: 50,
+                },
+            ],
+            tags,
+        }
+    }
+
+    #[test]
+    fn runway_paints_white_centerline_and_edges_over_gray() {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+
+        generate_aeroway(&mut editor, &straight_aeroway("runway"), &args);
+
+        // Centerline at the way start (s=0, dash on) is white; a dash-gap cell stays gray.
+        assert!(
+            editor.check_for_block(10, 0, 50, Some(&[WHITE_CONCRETE])),
+            "centerline dash"
+        );
+        assert!(
+            editor.check_for_block(22, 0, 50, Some(&[GRAY_CONCRETE])),
+            "dash gap stays asphalt"
+        );
+        // Solid white edge stripe one block inside the 12-wide half (z = 50 ± 11).
+        assert!(
+            editor.check_for_block(10, 0, 39, Some(&[WHITE_CONCRETE])),
+            "left edge stripe"
+        );
+        assert!(
+            editor.check_for_block(10, 0, 61, Some(&[WHITE_CONCRETE])),
+            "right edge stripe"
+        );
+        // Plain surface between centerline and edge is asphalt gray.
+        assert!(
+            editor.check_for_block(10, 0, 45, Some(&[GRAY_CONCRETE])),
+            "asphalt base"
+        );
+    }
+
+    #[test]
+    fn taxiway_paints_yellow_centerline_over_light_gray() {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+
+        generate_aeroway(&mut editor, &straight_aeroway("taxiway"), &args);
+
+        assert!(
+            editor.check_for_block(10, 0, 50, Some(&[YELLOW_CONCRETE])),
+            "yellow centerline"
+        );
+        assert!(
+            editor.check_for_block(10, 0, 45, Some(&[LIGHT_GRAY_CONCRETE])),
+            "light-gray base"
+        );
+        // Taxiways get no white edge stripes.
+        assert!(
+            !editor.check_for_block(10, 0, 39, Some(&[WHITE_CONCRETE])),
+            "no edge stripe"
+        );
+    }
+
+    #[test]
+    fn runway_width_tag_widens_the_strip() {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+
+        let mut way = straight_aeroway("runway");
+        way.tags.insert("width".to_string(), "60".to_string());
+        generate_aeroway(&mut editor, &way, &args);
+
+        // 60 m wide ⇒ half-width 30: asphalt reaches z=70 and the edge stripe sits at z=50+29.
+        assert!(
+            editor.check_for_block(10, 0, 70, Some(&[GRAY_CONCRETE])),
+            "widened asphalt"
+        );
+        assert!(
+            editor.check_for_block(10, 0, 79, Some(&[WHITE_CONCRETE])),
+            "edge stripe at width/2-1"
+        );
+    }
+
+    #[test]
+    fn runway_overrides_a_crossing_taxiway_regardless_of_order() {
+        let args = Args::parse_from(["arnis", "--bbox", "1,2,3,4"].iter());
+        let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
+        let mut editor = test_editor(&xzbbox);
+
+        // Process the taxiway FIRST — the order that used to leak taxiway surface onto the runway.
+        let mut tags = StdMap::new();
+        tags.insert("aeroway".to_string(), "taxiway".to_string());
+        let taxiway = ProcessedWay {
+            id: 2,
+            nodes: vec![
+                ProcessedNode {
+                    id: 3,
+                    tags: StdMap::new(),
+                    x: 200,
+                    z: 10,
+                },
+                ProcessedNode {
+                    id: 4,
+                    tags: StdMap::new(),
+                    x: 200,
+                    z: 90,
+                },
+            ],
+            tags,
+        };
+        generate_aeroway(&mut editor, &taxiway, &args);
+        generate_aeroway(&mut editor, &straight_aeroway("runway"), &args);
+
+        // The crossing cell belongs to the runway, not the taxiway.
+        assert!(
+            editor.check_for_block(200, 0, 50, Some(&[GRAY_CONCRETE])),
+            "runway wins crossing"
+        );
+        assert!(!editor.check_for_block(200, 0, 50, Some(&[YELLOW_CONCRETE])));
+        assert!(!editor.check_for_block(200, 0, 50, Some(&[LIGHT_GRAY_CONCRETE])));
+        // Away from the runway the taxiway is untouched.
+        assert!(
+            editor.check_for_block(200, 0, 20, Some(&[YELLOW_CONCRETE])),
+            "taxiway intact off-runway"
+        );
+    }
 }
