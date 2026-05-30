@@ -10,6 +10,7 @@ pub struct Models3dPipeline {
     three_dmr: three_dmr::PrescanResult,
     wikidata: wikidata::PrescanResult,
     stadium: custom::stadium::PrescanResult,
+    plane: custom::plane::PrescanResult,
     union_suppressed: HashSet<(&'static str, u64)>,
 }
 
@@ -30,10 +31,14 @@ impl Models3dPipeline {
         let stadium = custom::stadium::prescan(elements, &combined, args.scale);
         combined.extend(stadium.suppressed_ids.iter().copied());
 
+        // Planes are decorative props placed on runways; they suppress nothing.
+        let plane = custom::plane::prescan(elements, args.scale);
+
         Self {
             three_dmr,
             wikidata,
             stadium,
+            plane,
             union_suppressed: combined,
         }
     }
@@ -51,6 +56,9 @@ impl Models3dPipeline {
         }
         if self.stadium.placement_count() > 0 {
             custom::stadium::place_stadium_models(editor, args, &self.stadium);
+        }
+        if self.plane.placement_count() > 0 {
+            custom::plane::place_plane_models(editor, args, &self.plane);
         }
     }
 }

@@ -249,7 +249,9 @@ pub fn place_wikidata_models(editor: &mut WorldEditor, args: &Args, prescan: &Pr
             continue;
         };
 
-        let ground_y = lowest_ground_in_bbox(editor, &placement.footprint);
+        let fp = &placement.footprint;
+        let ground_y =
+            crate::models_3d::lowest_ground_in_bbox(editor, fp.min_x, fp.min_z, fp.max_x, fp.max_z);
 
         let mut voxels = if is_glb(bytes) {
             match voxelize_glb_for_placement(bytes, placement, args, ground_y) {
@@ -938,35 +940,6 @@ fn osm_bbox(element: &ProcessedElement) -> Option<Bbox> {
         max_x,
         max_z,
     })
-}
-
-fn lowest_ground_in_bbox(editor: &WorldEditor, bbox: &Bbox) -> i32 {
-    let dx = bbox.max_x - bbox.min_x;
-    let dz = bbox.max_z - bbox.min_z;
-    let stride = (dx.max(dz) / 16).clamp(1, 8);
-    let mut lowest = i32::MAX;
-    let mut x = bbox.min_x;
-    while x <= bbox.max_x {
-        let mut z = bbox.min_z;
-        while z <= bbox.max_z {
-            lowest = lowest.min(editor.get_ground_level(x, z));
-            z += stride;
-        }
-        x += stride;
-    }
-    for (x, z) in [
-        (bbox.min_x, bbox.min_z),
-        (bbox.max_x, bbox.min_z),
-        (bbox.min_x, bbox.max_z),
-        (bbox.max_x, bbox.max_z),
-    ] {
-        lowest = lowest.min(editor.get_ground_level(x, z));
-    }
-    if lowest == i32::MAX {
-        editor.get_ground_level((bbox.min_x + bbox.max_x) / 2, (bbox.min_z + bbox.max_z) / 2)
-    } else {
-        lowest
-    }
 }
 
 fn parse_direction(raw: &str) -> Option<f64> {

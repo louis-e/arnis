@@ -24,6 +24,9 @@ pub struct WorldTransform {
     intrinsic_tx: f32,
     intrinsic_ty: f32,
     intrinsic_tz: f32,
+    /// Model-space pitch about X (identity when sin=0), applied before scale/yaw.
+    pitch_cos: f32,
+    pitch_sin: f32,
     world_scale: [f32; 3],
     world_rot_cos: f32,
     world_rot_sin: f32,
@@ -77,6 +80,8 @@ impl WorldTransform {
             intrinsic_tx: intrinsic_translation[0] as f32,
             intrinsic_ty: intrinsic_translation[1] as f32,
             intrinsic_tz: intrinsic_translation[2] as f32,
+            pitch_cos: 1.0,
+            pitch_sin: 0.0,
             world_scale,
             world_rot_cos: wt.cos(),
             world_rot_sin: wt.sin(),
@@ -86,11 +91,23 @@ impl WorldTransform {
         }
     }
 
+    /// Tilts the model nose-up by `pitch_degrees` about X, so a +Z forward axis climbs into +Y.
+    pub fn pitched(mut self, pitch_degrees: f64) -> Self {
+        let p = (pitch_degrees as f32).to_radians();
+        self.pitch_cos = p.cos();
+        self.pitch_sin = p.sin();
+        self
+    }
+
     #[inline]
     fn apply(&self, p: [f32; 3]) -> [f32; 3] {
-        let sx = p[0] * self.intrinsic_scale;
-        let sy = p[1] * self.intrinsic_scale;
-        let sz = p[2] * self.intrinsic_scale;
+        // Model-space pitch about X: +Z forward tilts up into +Y. Identity when pitch_sin == 0.
+        let px = p[0];
+        let py = p[1] * self.pitch_cos + p[2] * self.pitch_sin;
+        let pz = -p[1] * self.pitch_sin + p[2] * self.pitch_cos;
+        let sx = px * self.intrinsic_scale;
+        let sy = py * self.intrinsic_scale;
+        let sz = pz * self.intrinsic_scale;
         let r1x = sx * self.intrinsic_rot_cos - sz * self.intrinsic_rot_sin + self.intrinsic_tx;
         let r1y = sy + self.intrinsic_ty;
         let r1z = sx * self.intrinsic_rot_sin + sz * self.intrinsic_rot_cos + self.intrinsic_tz;
@@ -438,6 +455,39 @@ mod tests {
         );
         let out = t.apply([1.0, 1.0, 1.0]);
         assert_eq!(out, [3.0, 5.0, 7.0]);
+    }
+
+    #[test]
+    fn pitch_identity_when_unset() {
+        // Default transform must behave exactly as before (no tilt).
+        let t = make_identity();
+        let out = t.apply([0.0, 0.0, 1.0]);
+        assert!((out[0]).abs() < 1e-5 && (out[1]).abs() < 1e-5 && (out[2] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn pitch_90_lifts_forward_axis_up() {
+        // A +Z nose vertex pitched 90° nose-up lands on +Y.
+        let t = make_identity().pitched(90.0);
+        let out = t.apply([0.0, 0.0, 1.0]);
+        assert!(out[0].abs() < 1e-5, "got {out:?}");
+        assert!((out[1] - 1.0).abs() < 1e-5, "got {out:?}");
+        assert!(out[2].abs() < 1e-5, "got {out:?}");
+    }
+
+    #[test]
+    fn pitch_positive_raises_nose_partially() {
+        // A modest nose-up pitch gives the +Z nose a positive Y and shorter Z.
+        let t = make_identity().pitched(30.0);
+        let out = t.apply([0.0, 0.0, 1.0]);
+        assert!(out[1] > 0.0, "nose should rise, got {out:?}");
+        assert!(
+            out[2] > 0.0 && out[2] < 1.0,
+            "nose Z should shorten, got {out:?}"
+        );
+        // Tail (-Z) drops below the pitch axis.
+        let tail = t.apply([0.0, 0.0, -1.0]);
+        assert!(tail[1] < 0.0, "tail should drop, got {tail:?}");
     }
 
     #[test]
