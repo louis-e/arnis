@@ -1,0 +1,40 @@
+# Comments on newly opened issues with links to likely duplicates. Does not close or label them.
+name: Duplicate issue finder
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Existing issue number to check for duplicates"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_non_write_users: "*"
+          claude_args: "--model sonnet"
+          prompt: |
+            A new GitHub issue was opened in ${{ github.repository }}: issue number ${{ github.event.issue.number || inputs.issue_number }}.
+            Find up to 3 existing issues that are genuine duplicates and, only if you find any, post one comment linking them.
+
+            Steps:
+            1. View it: `gh issue view ${{ github.event.issue.number || inputs.issue_number }} --repo ${{ github.repository }}`. If it is not a specific bug report or feature request (vague/positive feedback, a usage question, or spam), or it already has a comment from you listing duplicates, stop and do nothing.
+            2. Run several `gh search issues --repo ${{ github.repository }} "<keywords>"` queries with different keywords and phrasings from the issue. Include open and closed issues.
+            3. Keep only issues describing the same underlying bug or request; discard loose keyword-only matches and exclude the issue itself.
+            4. If at least one genuine duplicate remains, post exactly one comment with `gh issue comment ${{ github.event.issue.number || inputs.issue_number }} --repo ${{ github.repository }} --body "<body>"`, where <body> is "Found N possible duplicate issue(s):" followed by a numbered markdown list of the full issue URLs (max 3). If none remain, do nothing.
+
+            Use only the `gh` CLI. Do not edit files, and do not label, close, or react to issues.
