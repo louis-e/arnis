@@ -1479,16 +1479,19 @@ mod tests {
                 "Data3D record missing for chunk ({cx}, {cz})"
             );
 
-            let subchunk = build_chunk_key_bytes(
-                pos,
-                Dimension::Overworld,
-                KeyTypeTag::SubChunkPrefix,
-                Some(4),
-            );
-            assert!(
-                db.get(&subchunk).is_some_and(|b| !b.is_empty()),
-                "subchunk record missing for chunk ({cx}, {cz})"
-            );
+            // Every section we populated (positive, zero, negative index) must be written.
+            for section_y in [4i8, 0, -2] {
+                let subchunk = build_chunk_key_bytes(
+                    pos,
+                    Dimension::Overworld,
+                    KeyTypeTag::SubChunkPrefix,
+                    Some(section_y),
+                );
+                assert!(
+                    db.get(&subchunk).is_some_and(|b| !b.is_empty()),
+                    "subchunk {section_y} missing for chunk ({cx}, {cz})"
+                );
+            }
         }
     }
 }
