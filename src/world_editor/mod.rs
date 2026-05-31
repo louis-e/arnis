@@ -889,6 +889,13 @@ impl<'a> WorldEditor<'a> {
             return;
         }
 
+        // None/None is the dominant pattern; skip the redundant get_block() read.
+        if override_whitelist.is_none() && override_blacklist.is_none() {
+            self.world
+                .set_with_props_if_absent(x, absolute_y, z, block_with_props);
+            return;
+        }
+
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
