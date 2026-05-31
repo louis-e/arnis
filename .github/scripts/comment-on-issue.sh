@@ -23,8 +23,10 @@ while (($#)); do
       ;;
     --resolution)
       shift
-      resolution="${1-}"
-      (($#)) && shift
+      # Only take the next arg if it's a real value, not another flag (or end of args).
+      if (($#)) && [[ "$1" != --* ]]; then
+        resolution="$1"; shift
+      fi
       ;;
     *)
       # Tolerate bare issue numbers as duplicates; reject anything else.
