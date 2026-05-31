@@ -454,42 +454,21 @@ impl WorldToModify {
         );
     }
 
-    /// Set a block only if the position is currently empty (AIR / absent).
-    ///
-    /// This avoids the double HashMap traversal of `get_block()` + `set_block()`
-    /// which is the hot path in ground generation and many element processors.
+    /// Set a block only if the cell is empty (AIR). Thin `#[inline]` wrapper over [`set_with_props_if_absent`].
     #[inline]
     pub fn set_block_if_absent(&mut self, x: i32, y: i32, z: i32, block: Block) {
-        let chunk_x: i32 = x >> 4;
-        let chunk_z: i32 = z >> 4;
-        let region_x: i32 = chunk_x >> 5;
-        let region_z: i32 = chunk_z >> 5;
-
-        let region = self.regions.entry((region_x, region_z)).or_default();
-        let chunk = region
-            .chunks
-            .entry((chunk_x & 31, chunk_z & 31))
-            .or_default();
-
-        // Clamp Y
-        let y = y.clamp(MIN_Y, MAX_Y);
-        let section_idx: i8 = (y >> 4) as i8;
-        let section = chunk.sections.entry(section_idx).or_default();
-
-        let local_x = (x & 15) as u8;
-        let local_y = (y & 15) as u8;
-        let local_z = (z & 15) as u8;
-        let idx = SectionToModify::index(local_x, local_y, local_z);
-
-        // Only write if the current block is AIR
-        if section.storage.get(idx) == AIR {
-            section.storage.set(idx, block);
-            // Clear any stale properties from a previous block at this position
-            section.properties.remove(&idx);
-        }
+        self.set_with_props_if_absent(
+            x,
+            y,
+            z,
+            BlockWithProperties {
+                block,
+                properties: None,
+            },
+        );
     }
 
-    /// Like [`set_block_if_absent`] but also persists optional NBT properties.
+    /// Set a block (+ optional NBT) only if the cell is empty (AIR), in one region/chunk/section descent.
     #[inline]
     pub fn set_with_props_if_absent(
         &mut self,
@@ -720,5 +699,72 @@ mod tests {
                 "section {y} should still be Uniform(STONE)"
             );
         }
+    }
+
+    #[test]
+    fn set_with_props_if_absent_writes_then_protects_occupied() {
+        let mut world = WorldToModify::default();
+        let first = BlockWithProperties {
+            block: STONE,
+            properties: None,
+        };
+        world.set_with_props_if_absent(5, 70, 9, first);
+        assert_eq!(world.get_block(5, 70, 9), Some(STONE));
+
+        // A second write to the now-occupied cell must be ignored (the None/None contract).
+        let second = BlockWithProperties {
+            block: COBBLESTONE,
+            properties: None,
+        };
+        world.set_with_props_if_absent(5, 70, 9, second);
+        assert_eq!(
+            world.get_block(5, 70, 9),
+            Some(STONE),
+            "occupied cell must not be overwritten"
+        );
+    }
+
+    #[test]
+    fn set_block_if_absent_delegates_with_same_semantics() {
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(1, 64, 2, STONE);
+        assert_eq!(world.get_block(1, 64, 2), Some(STONE));
+        world.set_block_if_absent(1, 64, 2, COBBLESTONE);
+        assert_eq!(
+            world.get_block(1, 64, 2),
+            Some(STONE),
+            "delegating wrapper must preserve set-if-absent behaviour"
+        );
+    }
+
+    #[test]
+    fn set_with_props_if_absent_stores_and_omits_properties() {
+        let mut world = WorldToModify::default();
+        // y=64 → section index 4, local_y 0.
+        let section_idx = 4i8;
+        let local_y = (64 & 15) as u8;
+
+        let with_props = BlockWithProperties {
+            block: STONE,
+            properties: Some(std::sync::Arc::new(Value::Int(7))),
+        };
+        world.set_with_props_if_absent(0, 64, 0, with_props);
+        // A no-properties write to a different empty cell.
+        world.set_block_if_absent(1, 64, 0, STONE);
+
+        let chunk = world.get_region(0, 0).unwrap().get_chunk(0, 0).unwrap();
+        let section = chunk.sections.get(&section_idx).unwrap();
+        assert!(
+            section
+                .properties
+                .contains_key(&SectionToModify::index(0, local_y, 0)),
+            "block written with properties should store them"
+        );
+        assert!(
+            !section
+                .properties
+                .contains_key(&SectionToModify::index(1, local_y, 0)),
+            "block written without properties should leave none"
+        );
     }
 }
