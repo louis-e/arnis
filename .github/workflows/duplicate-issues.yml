@@ -1,5 +1,4 @@
 # Comments on newly opened issues with links to likely duplicates. Does not close or label them.
-# Auth: repo secret CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token` (uses a Pro/Max subscription).
 name: Duplicate issue finder
 
 on:
