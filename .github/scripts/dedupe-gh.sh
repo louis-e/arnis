@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# Read-only gh wrapper for the duplicate finder: only issue lookups and searches are allowed.
+# Read-only gh wrapper for the issue bot: issue/PR/release lookups and searches only.
 set -euo pipefail
 case "${1:-} ${2:-}" in
-  "issue view" | "issue list" | "search issues")
+  "issue view" | "issue list" | "search issues" \
+  | "pr view" | "pr list" | "search prs" \
+  | "release view" | "release list")
     exec gh "$@"
     ;;
   *)
-    echo "dedupe-gh.sh: only 'issue view', 'issue list', 'search issues' allowed (got: $*)" >&2
+    echo "dedupe-gh.sh: read-only lookup not allowed: $*" >&2
     exit 1
     ;;
 esac
