@@ -426,13 +426,16 @@ pub fn carve_water_column_with_flags(
             let dirt_blob = crate::ground_generation::value_noise_01(x + 311, z + 47, 16);
             let sand_pocket = crate::ground_generation::value_noise_01(x + 47, z + 191, 22);
 
-            // v2.8.4 — tighter thresholds: ~7% COARSE_DIRT, ~14% DIRT,
-            // ~8% SAND pockets, rest goes to upstream depth-drift base.
-            // d>=5 cells fall through to (GRAVEL, STONE) → ocean floor
-            // reads ~70% GRAVEL as user spec.
-            if coarse_blob > 0.80 {
+            // v2.8.4 iter 2 — tightened further after measured 61.2% GRAVEL
+            // share at lagoon-v1. Targets ~70%:
+            //   COARSE_DIRT: 0.80 → 0.87 (~3% coverage, was ~8%)
+            //   DIRT:        0.74 → 0.82 (~9% coverage, was ~17%)
+            //   SAND pocket: 0.82 unchanged (~8% coverage)
+            // Remaining ~80% goes to upstream depth-drift, which is
+            // GRAVEL-dominant at d≥5 → ocean floor reads ~70% GRAVEL.
+            if coarse_blob > 0.87 {
                 (COARSE_DIRT, DIRT)
-            } else if dirt_blob > 0.74 {
+            } else if dirt_blob > 0.82 {
                 (DIRT, DIRT)
             } else if sand_pocket > 0.82 {
                 (SAND, SANDSTONE)
