@@ -374,12 +374,13 @@ pub fn generate_natural(
                                     editor.set_block(GRASS, x, 1, z, None, None);
                                     continue;
                                 }
-                                // arnis-update-290 G3 wetland puddles —
-                                // noise-driven WATER + MOSS_BLOCK ring +
-                                // COARSE_DIRT patches. Spatially coherent
-                                // ~28-block lake patches replace upstream's
-                                // 30% per-cell RNG (which produced fizzy
-                                // single-block puddles).
+                                // v2.8.3 — full source-water G3 port.
+                                //   * `has_static` region gate (scale 28) creates
+                                //     a wet/dry mosaic across the wetland
+                                //   * Wet cells: WATER puddle / MOSS ring / COARSE_DIRT
+                                //   * Dry cells: stay as GRASS_BLOCK overlay (40% chance)
+                                //   * MOSS ring widened to 8-neighbour (diagonals)
+                                //   * COARSE_DIRT threshold 0.62 -> 0.55 (denser mud)
                                 let region_noise =
                                     crate::ground_generation::value_noise_01(x + 11, z + 7, 28);
                                 if region_noise > 0.55 {
@@ -397,10 +398,18 @@ pub fn generate_natural(
                                         continue;
                                     }
                                     // MOSS_BLOCK ring around puddles —
-                                    // 4-cardinal check for WATER already
-                                    // placed by an earlier cell this pass.
+                                    // 8-neighbour widened scan for visibly thicker rings.
                                     let mut near_water = false;
-                                    for &(dx, dz) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                                    for &(dx, dz) in &[
+                                        (-1i32, 0i32),
+                                        (1, 0),
+                                        (0, -1),
+                                        (0, 1),
+                                        (-1, -1),
+                                        (1, -1),
+                                        (-1, 1),
+                                        (1, 1),
+                                    ] {
                                         if editor.check_for_block(x + dx, 0, z + dz, Some(&[WATER]))
                                         {
                                             near_water = true;
@@ -411,14 +420,13 @@ pub fn generate_natural(
                                         editor.set_block(MOSS_BLOCK, x, 0, z, Some(&[MUD]), None);
                                     } else {
                                         // COARSE_DIRT patches via separate
-                                        // noise. Whitelist MUD so the MOSS
-                                        // ring above isn't overwritten.
+                                        // noise. Whitelist MUD so MOSS ring stays.
                                         let cd_noise = crate::ground_generation::value_noise_01(
                                             x + 53,
                                             z + 71,
                                             8,
                                         );
-                                        if cd_noise > 0.62 {
+                                        if cd_noise > 0.55 {
                                             editor.set_block(
                                                 COARSE_DIRT,
                                                 x,
@@ -429,19 +437,46 @@ pub fn generate_natural(
                                             );
                                         }
                                     }
+                                } else {
+                                    // Dry zone — wetland edges read as a
+                                    // wet/dry mosaic instead of uniform wet.
+                                    if rng.random_bool(0.4) {
+                                        editor.set_block(GRASS_BLOCK, x, 0, z, Some(&[MUD]), None);
+                                    }
                                 }
                                 if !editor.check_for_block(
                                     x,
                                     0,
                                     z,
-                                    Some(&[MUD, MOSS_BLOCK, COARSE_DIRT]),
+                                    Some(&[MUD, MOSS_BLOCK, COARSE_DIRT, GRASS_BLOCK, DIRT]),
                                 ) {
                                     continue;
                                 }
                                 match wetland_type.as_str() {
                                     "reedbed" => {
-                                        editor.set_block(TALL_GRASS_BOTTOM, x, 1, z, None, None);
-                                        editor.set_block(TALL_GRASS_TOP, x, 2, z, None, None);
+                                        // 70% tall_grass; 6% cattail (TALL_GRASS_BOTTOM
+                                        // + BROWN_CANDLE head, ~20% of the non-tall slice).
+                                        if rng.random_bool(0.7) {
+                                            editor.set_block(
+                                                TALL_GRASS_BOTTOM,
+                                                x,
+                                                1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                            editor.set_block(TALL_GRASS_TOP, x, 2, z, None, None);
+                                        } else if rng.random_bool(0.20) {
+                                            editor.set_block(
+                                                TALL_GRASS_BOTTOM,
+                                                x,
+                                                1,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                            editor.set_block(BROWN_CANDLE, x, 2, z, None, None);
+                                        }
                                     }
                                     "swamp" | "mangrove" => {
                                         let random_choice: i32 = rng.random_range(0..40);

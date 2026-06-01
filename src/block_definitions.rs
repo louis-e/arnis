@@ -333,7 +333,7 @@ impl Block {
             234 => "azalea_leaves",
             235 => "potted_poppy",
             236 => "oak_trapdoor",
-            237 => "oak_trapdoor",
+            237 => "brown_candle",
             238 => "oak_trapdoor",
             239 => "oak_trapdoor",
             240 => "quartz_slab",
@@ -682,14 +682,9 @@ impl Block {
                 map.insert("half".to_string(), Value::String("top".to_string()));
                 map
             })),
-            // Open oak trapdoor facing south
-            237 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("south".to_string()));
-                map.insert("open".to_string(), Value::String("true".to_string()));
-                map.insert("half".to_string(), Value::String("top".to_string()));
-                map
-            })),
+            // v2.8.3 — ID 237 repurposed from open-south oak_trapdoor (no
+            // callers verified) to BROWN_CANDLE. Default candles=1, no
+            // state needed; the vanilla block-state model picks it up.
             // Open oak trapdoor facing east
             238 => Some(Value::Compound({
                 let mut map = HashMap::new();
@@ -1042,6 +1037,9 @@ pub const AZALEA_LEAVES: Block = Block::new(234);
 pub const DIAMOND_ORE: Block = Block::new(249);
 pub const REDSTONE_ORE: Block = Block::new(250);
 pub const LAPIS_ORE: Block = Block::new(251);
+
+// v2.8.3 Meld additions
+pub const BROWN_CANDLE: Block = Block::new(237);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]
