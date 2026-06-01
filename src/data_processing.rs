@@ -42,6 +42,11 @@ pub fn generate_world_with_options(
     let world_format = options.format;
     let generation_start = args.benchmark.then(std::time::Instant::now);
 
+    // v1.8.3 — pin global noise seed from --seed (alias of
+    // --tile-invariant-rendering). Drives every value_noise_01 sample so
+    // identical seed → identical bed/dune/shore noise patterns.
+    crate::ground_generation::set_noise_seed(args.tile_invariant_rendering.unwrap_or(0));
+
     // Create editor with appropriate format
     let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
         WorldEditor::new_luanti(
@@ -406,6 +411,12 @@ pub fn generate_world_with_options(
         &big_water_field,
         &road_mask,
     );
+
+    // v2.8.10 F10 — sweep floating veg over WATER + roads.
+    // Wetland places TALL_GRASS/CANDLE/SUGAR_CANE/FLOWER at y=1 BEFORE water
+    // carve overlays WATER → results in floating veg + candles. Roads also
+    // get veg from natural pass overlap. Sweep removes them post-carve.
+    crate::water_depth::sweep_floating_veg(&mut editor, &xzbbox, &road_mask);
 
     drop(road_mask);
 

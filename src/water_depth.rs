@@ -1,8 +1,11 @@
 //! Per-cell water depth carving from a chamfer-3-4 distance transform over the LC_WATER mask.
 
 use crate::block_definitions::{
-    Block, COARSE_DIRT, DIRT, GRAVEL, KELP_PLANT, MOSS_BLOCK, SAND, SANDSTONE, SEAGRASS, STONE,
-    WATER,
+    AIR, BLACK_CONCRETE, BLUE_FLOWER, BROWN_CANDLE, BROWN_CANDLE_2, BROWN_CANDLE_3, BROWN_CANDLE_4,
+    Block, CLAY, COARSE_DIRT, CYAN_TERRACOTTA, DIRT, GRASS, GRAVEL, GRAY_CONCRETE,
+    GRAY_CONCRETE_POWDER, KELP, KELP_PLANT, LIGHT_GRAY_CONCRETE, MAGMA_BLOCK, RED_FLOWER, SAND,
+    SEAGRASS, SEA_PICKLE, SOUL_SAND, STONE, SUGAR_CANE, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
@@ -291,23 +294,32 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
     }
 }
 
-/// Depth from an effective DT and component max: ramp past the shoal, tier-clamped.
+/// Depth from an effective DT and component max.
+///
+/// v2.8.8 — SQRT curve (rounded, replaces v2.8.7 tier-bands which were
+/// visibly staircased in MC). Steep near shore (first cells reach a real
+/// depth fast), smooth plateau far out (large central areas converge to
+/// `local_max`). Symmetric per body-width via `span` lookup.
+///
+/// depth = local_max * sqrt(dist / span), clamped to 0..local_max.
 fn depth_from_dt(dt_eff: f64, component_max_units: u16) -> i32 {
     if dt_eff < f64::from(SHOAL_DT_UNITS) {
         return 0;
     }
     let local_max = polygon_local_max(component_max_units);
-    let slope = if component_max_units < 21 {
-        1.0 / 3.0
-    } else if component_max_units < 45 {
-        1.0 / 4.0
-    } else if component_max_units < 75 {
-        1.0 / 6.0
-    } else {
-        1.0 / 8.0
-    };
     let dist_blocks = (dt_eff - f64::from(SHOAL_DT_UNITS)) / 3.0;
-    ((dist_blocks * slope).floor() as i32).clamp(0, local_max)
+    let span: f64 = if component_max_units < 21 {
+        6.0
+    } else if component_max_units < 45 {
+        12.0
+    } else if component_max_units < 75 {
+        20.0
+    } else {
+        35.0
+    };
+    let t = (dist_blocks / span).clamp(0.0, 1.0);
+    let depth_f = (local_max as f64) * t.sqrt();
+    (depth_f.floor() as i32).clamp(0, local_max)
 }
 
 /// Per-cell carve depth, with deterministic contour wobble on the bank lines.
@@ -354,11 +366,7 @@ pub fn estimate_max_carve_depth(
 }
 
 /// Place the underwater stack: WATER column, then a SAND/GRAVEL bed over SANDSTONE/STONE.
-pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32, depth: i32) {
-    carve_water_column_with_flags(editor, x, z, water_y, depth, false)
-}
-
-/// Variant that suppresses the Meld blob/dune/vegetation overlays when
+/// Suppresses the Meld blob/dune/vegetation overlays when
 /// the cell is adjacent to a bridge/road. Plain WATER + GRAVEL bed under
 /// causeways so the bridge "shadow" doesn't get textured with DIRT strips.
 pub fn carve_water_column_with_flags(
@@ -368,6 +376,7 @@ pub fn carve_water_column_with_flags(
     water_y: i32,
     depth: i32,
     near_bridge: bool,
+    body_max: i32,
 ) {
     debug_assert!(
         depth <= MAX_WATER_DEPTH,
@@ -394,65 +403,90 @@ pub fn carve_water_column_with_flags(
     //
     // Shoal (d=0/1) still always SAND (the doc 05 mossy accents come in
     // a separate match arm).
+    // v2.8.6 — bed palette via blob noise + STONE bedrock under everything.
+    //
+    // F1 (doc 01): SAND blob restricted to depth<=3 only — no deep SAND
+    //              terraces carving through the GRAVEL ocean floor.
+    // F3 (doc 03): each palette block has its own coarse blob noise field
+    //              (scale 14-22) so patches are 5-10 cells wide, not pepper.
+    // F8 (doc 08): under_block is STONE for every sea cell (vanilla bedrock
+    //              under bed). Shore-band SANDSTONE moved to ground_generation.
     let (top_block, under_block) = match depth {
-        0..=1 => {
-            // v2.8.3 shoal accents: ~5% MOSS_BLOCK + ~2% COARSE_DIRT clumps
-            // break the perfect SAND ring. Per-cell coord_hash sub-samples
-            // the value_noise patch so accents land in coherent clusters.
-            let accent_noise = crate::ground_generation::value_noise_01(x + 73, z + 19, 18);
-            let accent_pick = (crate::land_cover::coord_hash(x, z) % 100) as i32;
-            if accent_noise > 0.78 && accent_pick < 60 {
-                (MOSS_BLOCK, DIRT)
-            } else if accent_noise > 0.70 && accent_pick < 25 {
-                (COARSE_DIRT, DIRT)
-            } else {
-                (SAND, SANDSTONE)
-            }
-        }
+        0..=1 => (SAND, STONE),
         2..=6 if near_bridge => {
-            // Under-bridge zone: plain bed, no blobs, no dunes, no veg.
-            // Keeps a clean "shadow" under causeways so the bridge piers
-            // don't get textured with DIRT strips across the canal.
-            if depth >= 5 {
-                (GRAVEL, STONE)
-            } else if crate::ground_generation::value_noise_01(x, z, 6) < 0.4 {
-                (SAND, SANDSTONE)
+            // Under-bridge zone: plain bed, no blobs, no veg.
+            if crate::ground_generation::value_noise_01(x, z, 6) < 0.4 && depth <= 3 {
+                (SAND, STONE)
             } else {
                 (GRAVEL, STONE)
             }
         }
         2..=6 => {
-            let coarse_blob = crate::ground_generation::value_noise_01(x + 113, z + 251, 28);
-            let dirt_blob = crate::ground_generation::value_noise_01(x + 311, z + 47, 16);
-            let sand_pocket = crate::ground_generation::value_noise_01(x + 47, z + 191, 22);
+            // v2.8.10 — vanilla-MC bed pattern: INDEPENDENT per-block noise
+            // fields with DIFFERENT scales so each block type forms its own
+            // patch size (small SAND specks 3-5 cells, medium DIRT patches
+            // 8-12 cells, larger CLAY/COARSE blobs 12-18 cells, tiny MAGMA
+            // pockets 2-3 cells). No hierarchy — each block independently
+            // tested against its threshold, FIRST positive wins by depth
+            // priority, else GRAVEL.
+            //
+            // Depth-tier jitter via coord_hash breaks concentric depth rings.
+            let h = crate::land_cover::coord_hash(x + 7, z + 13);
+            let jitter = (h % 3) as i32 - 1;
+            let d = (depth + jitter).max(1);
 
-            // v2.8.4 iter 2 — tightened further after measured 61.2% GRAVEL
-            // share at lagoon-v1. Targets ~70%:
-            //   COARSE_DIRT: 0.80 → 0.87 (~3% coverage, was ~8%)
-            //   DIRT:        0.74 → 0.82 (~9% coverage, was ~17%)
-            //   SAND pocket: 0.82 unchanged (~8% coverage)
-            // Remaining ~80% goes to upstream depth-drift, which is
-            // GRAVEL-dominant at d≥5 → ocean floor reads ~70% GRAVEL.
-            if coarse_blob > 0.87 {
-                (COARSE_DIRT, DIRT)
-            } else if dirt_blob > 0.82 {
-                (DIRT, DIRT)
-            } else if sand_pocket > 0.82 {
-                (SAND, SANDSTONE)
-            } else if depth >= 5 {
-                (GRAVEL, STONE)
-            } else {
-                let sand_threshold = match depth {
-                    2 => 0.70,
-                    3 => 0.50,
-                    _ => 0.30,
-                };
-                if crate::ground_generation::value_noise_01(x, z, 6) < sand_threshold {
-                    (SAND, SANDSTONE)
+            // Per-block independent noise — different seeds + scales.
+            // Scale ≈ patch radius in blocks.
+            // v2.8.10 iter5 — RARE BIG patches per user spec.
+            //   * SOUL_SAND + MAGMA: 5-13 cell clusters, spread apart, RARE
+            //   * SAND: BIGGER patches (scale 36, ~6% coverage)
+            //   * CLAY: BIGGER patches (scale 42, ~5%) — 2nd most common per user
+            //   * DIRT: medium patches (scale 26, ~4%)
+            //   * COARSE_DIRT: medium patches (scale 30, ~3%)
+            //   * GRAVEL: ~80% background (vanilla MC ocean floor)
+            //
+            // Domain-warp displaces sampling coords → patches are organic
+            // (long rounded AND bubble shapes), not circles.
+            let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 40);
+            let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 40);
+            let wx = x + ((warp_x - 0.5) * 24.0) as i32;
+            let wz = z + ((warp_z - 0.5) * 24.0) as i32;
+
+            let n_sand = crate::ground_generation::value_noise_01(wx + 53, wz + 97, 36);
+            let n_clay = crate::ground_generation::value_noise_01(wx + 73, wz + 109, 42);
+            let n_dirt = crate::ground_generation::value_noise_01(wx + 211, wz + 41, 26);
+            let n_coarse = crate::ground_generation::value_noise_01(wx + 311, wz + 17, 30);
+            // 5-13 cell clusters: scale 8 → cluster radius ~3-6 cells.
+            // Very tight threshold 0.96 → very few sites pass → spread apart.
+            let n_magma = crate::ground_generation::value_noise_01(wx + 401, wz + 503, 8);
+            let n_soul = crate::ground_generation::value_noise_01(wx + 727, wz + 911, 8);
+
+            let top = if d <= 1 {
+                SAND
+            } else if d == 2 {
+                // Shallow shore-band: SAND dominant near shore, transitions
+                // to GRAVEL outward. No DIRT here.
+                if n_sand > 0.50 {
+                    SAND
                 } else {
-                    (GRAVEL, STONE)
+                    GRAVEL
                 }
-            }
+            } else if d >= 5 && n_magma > 0.96 {
+                MAGMA_BLOCK
+            } else if d >= 5 && n_soul > 0.96 {
+                SOUL_SAND
+            } else if n_clay > 0.74 {
+                CLAY
+            } else if n_sand > 0.81 {
+                SAND
+            } else if n_dirt > 0.88 {
+                DIRT
+            } else if n_coarse > 0.90 {
+                COARSE_DIRT
+            } else {
+                GRAVEL
+            };
+            (top, STONE)
         }
         _ => (GRAVEL, STONE),
     };
@@ -460,26 +494,71 @@ pub fn carve_water_column_with_flags(
     if bed_y > MIN_Y {
         editor.set_block_absolute(top_block, x, bed_y, z, None, Some(&[]));
     }
-    // Supports the gravity-affected bed; dropped onto bedrock at the lowest carve.
     if bed_y - 1 > MIN_Y {
         editor.set_block_absolute(under_block, x, bed_y - 1, z, None, Some(&[]));
     }
+    // v2.8.7 F2 — fill STONE from bed_y-2 down 12 cells so neighbour-column
+    // side faces never expose AIR pockets (image 2 noise-hole artefact).
+    // skip_existing=true means we only paint AIR — pre-existing terrain stays.
+    let fill_to = (bed_y - 2).max(MIN_Y + 1);
+    let fill_from = (bed_y - 12).max(MIN_Y + 1);
+    if fill_from <= fill_to {
+        editor.fill_column_absolute(STONE, x, z, fill_from, fill_to, true);
+    }
 
-    // Meld underwater dunes — 3-octave value_noise places 1-3 block bumps
-    // on top of the bed, capped at depth/2 so tips never pierce the water
-    // surface. Dunes inherit the top_block (DIRT patch -> DIRT dune).
-    // Skip dunes under bridges so the bed stays flat under causeway shadows.
-    if depth >= 2 && !near_bridge {
-        place_underwater_dunes(editor, x, z, water_y, bed_y, depth, top_block);
+    // v2.8.7 F8 — dunes fire at depth>=1 (was >=2). Shallow shore-band dunes
+    // give the bed natural undulation even where the water is just 1 block deep.
+    if depth >= 1 && !near_bridge {
+        place_underwater_dunes(editor, x, z, water_y, bed_y, depth, body_max, top_block);
     }
 
     // v2.8.4 — sparse underwater vegetation in deep water far from bridges.
     if depth >= 3 && !near_bridge {
-        place_underwater_vegetation(editor, x, z, water_y, bed_y, depth);
+        place_underwater_vegetation(editor, x, z, water_y, bed_y, depth, body_max);
     }
 }
 
-/// Sparse SEAGRASS + KELP_PLANT placement in deep water.
+/// v2.8.10 — Compute the dune bump height at (x, z). Mirrors the calc
+/// inside `place_underwater_dunes` exactly so vegetation can plant ABOVE
+/// the dune top instead of inside it (which dug holes in the bed when
+/// veg paint was AIR-gated).
+fn dune_bump_at(x: i32, z: i32, depth: i32, body_max: i32) -> i32 {
+    let target_amp: i32 = match body_max {
+        0..=3 => 2,
+        4..=6 => 3,
+        _ => 4,
+    };
+    let amp_cap = (depth - 1).max(0);
+    let amp = target_amp.min(amp_cap);
+    if amp <= 0 {
+        return 0;
+    }
+    let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 50);
+    let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 50);
+    let wx = x + ((warp_x - 0.5) * 30.0) as i32;
+    let wz = z + ((warp_z - 0.5) * 30.0) as i32;
+    let n_large = crate::ground_generation::value_noise_01(wx + 113, wz + 257, 44) as f32;
+    let n_med = crate::ground_generation::value_noise_01(wx + 31, wz + 71, 18) as f32;
+    let n_sharp = crate::ground_generation::value_noise_01(wx + 7, wz + 11, 10) as f32;
+    let h_f = 0.40 * n_large + 0.30 * n_med + 0.30 * n_sharp;
+    if h_f < 0.28 {
+        return 0;
+    }
+    let t = (h_f - 0.28) / 0.72;
+    let bump = (t.powf(0.45) * (amp as f32 + 0.99)).floor() as i32;
+    if bump <= 0 {
+        return 0;
+    }
+    bump.clamp(1, amp)
+}
+
+/// v2.8.5 — Clumped underwater vegetation. Two decorrelated noise fields
+/// (`field_noise` scale 30 + `cluster_noise` scale 10) gate SEAGRASS meadows;
+/// rarer KELP_PLANT columns (capped by KELP tip at the top) only fire where
+/// BOTH noises are high and `depth >= 5`.
+///
+/// User feedback v2.8.5: "patches of seagrass should be like bigger clumps
+/// and better like random patches with the tall kelp rarer".
 fn place_underwater_vegetation(
     editor: &mut WorldEditor,
     x: i32,
@@ -487,37 +566,90 @@ fn place_underwater_vegetation(
     water_y: i32,
     bed_y: i32,
     depth: i32,
+    body_max: i32,
 ) {
-    let veg_zone = crate::ground_generation::value_noise_01(x + 53, z + 89, 14);
-    if veg_zone < 0.55 {
-        return;
-    }
-    let h_dense = crate::land_cover::coord_hash(x, z) % 40;
-    let h_seagrass = crate::land_cover::coord_hash(x + 17, z + 31) % 25;
+    // v2.8.10 — true bed top = bed_y + dune bump for this cell. Veg plants
+    // ABOVE the dune (avoids carving "holes" where veg cells lack dune blocks).
+    let bump = dune_bump_at(x, z, depth, body_max);
+    let bed_top = bed_y + bump;
+    // Big patches (scale 30) carve broad meadows; cluster (scale 10) carves
+    // the clumpy interior. Multiply them so SEAGRASS lands in 8-20-cell
+    // patches with empty gravel between, instead of pepper-shot single cells.
+    let field_noise = crate::ground_generation::value_noise_01(x + 53, z + 89, 30);
+    let cluster_noise = crate::ground_generation::value_noise_01(x + 401, z + 17, 10);
+    let combined = field_noise * cluster_noise;
 
-    // Kelp columns at d>=4 in dense patches (~2.5% of cells inside zone).
-    if depth >= 4 && veg_zone > 0.65 && h_dense == 0 {
-        let plant_top = water_y - 1;
-        let plant_bottom = bed_y + 1;
-        if plant_top >= plant_bottom {
-            for y in plant_bottom..=plant_top {
-                editor.set_block_absolute(KELP_PLANT, x, y, z, None, Some(&[]));
+    // KELP — only deep cells where BOTH noises ring high. v2.8.5 spec:
+    // "the tall kelp rarer". Gates tightened (was 0.70/0.70 → 0.78/0.80)
+    // plus 25% per-cell dropout. KELP tip on top of column.
+    let kelp_pick = (crate::land_cover::coord_hash(x + 91, z + 41) % 100) as i32;
+    // v2.8.7 F4 — kelp gate depth>=4 (was 6) so shallow kelp forests fire.
+    // Min 3 cells per column ("lowest 3 tall"), variance 30..=100% of avail.
+    if depth >= 4 && field_noise > 0.78 && cluster_noise > 0.80 && kelp_pick < 25 {
+        let plant_top_full = water_y - 1;
+        let plant_bottom = bed_top + 1;
+        let avail = plant_top_full - plant_bottom;
+        if avail >= 3 {
+            let hgt_pick = (crate::land_cover::coord_hash(x + 211, z + 503) % 100) as i32;
+            let share = 30 + hgt_pick * 70 / 100;
+            let used = ((avail as i64 * share as i64) / 100) as i32;
+            let used = used.max(3).min(avail);
+            let plant_top = plant_bottom + used;
+            // v2.8.8 F4 — veg paints ONLY into AIR. Empty `Some(&[])`
+            // was a whitelist that matched nothing → fell through to
+            // ALWAYS REPLACE → overwrote dune blocks → visible holes
+            // in bed surface. AIR-only whitelist fixes this.
+            for y in plant_bottom..plant_top {
+                editor.set_block_absolute(KELP_PLANT, x, y, z, None, Some(&[AIR]));
             }
+            editor.set_block_absolute(KELP, x, plant_top, z, None, Some(&[AIR]));
         }
         return;
     }
 
-    // Single-block SEAGRASS scattered (~4% of cells inside zone).
-    if h_seagrass == 0 {
-        let plant_y = bed_y + 1;
-        if plant_y < water_y {
-            editor.set_block_absolute(SEAGRASS, x, plant_y, z, None, Some(&[]));
+    // v2.8.7 F3 — seagrass meadow mix:
+    //   50% short SEAGRASS
+    //   35% TALL_SEAGRASS (2-block) when there's room
+    //   15% SEA_PICKLE (waterlogged pickle stack)
+    // v2.8.8 F4 — paint into AIR only (no dune overwrite).
+    if combined > 0.42 {
+        let dropout = crate::land_cover::coord_hash(x + 17, z + 31) % 10;
+        if dropout < 4 {
+            let plant_y = bed_top + 1;
+            if plant_y < water_y {
+                let pick = (crate::land_cover::coord_hash(x + 211, z + 73) % 100) as i32;
+                if pick < 50 {
+                    editor.set_block_absolute(SEAGRASS, x, plant_y, z, None, Some(&[AIR]));
+                } else if pick < 85 && plant_y + 1 < water_y {
+                    editor.set_block_absolute(
+                        TALL_SEAGRASS_BOTTOM,
+                        x,
+                        plant_y,
+                        z,
+                        None,
+                        Some(&[AIR]),
+                    );
+                    editor.set_block_absolute(
+                        TALL_SEAGRASS_TOP,
+                        x,
+                        plant_y + 1,
+                        z,
+                        None,
+                        Some(&[AIR]),
+                    );
+                } else {
+                    editor.set_block_absolute(SEA_PICKLE, x, plant_y, z, None, Some(&[AIR]));
+                }
+            }
         }
     }
 }
 
-/// Place 1-3 block dune bumps on top of the underwater bed at (x, z).
-/// Inherits `bed_block` so dunes blend with the bed palette beneath them.
+/// v2.8.6 — Width-aware multi-octave dunes 1-4 blocks tall on top of bed.
+///
+/// `body_max` is the BWF-derived max depth of the water body (7x7 sample
+/// from caller). Wider bodies (DT_max >= 8) get full 3-4 cell amplitude
+/// for visible vanilla-MC-style rolling waves; narrow rivers stay flat.
 fn place_underwater_dunes(
     editor: &mut WorldEditor,
     x: i32,
@@ -525,32 +657,46 @@ fn place_underwater_dunes(
     water_y: i32,
     bed_y: i32,
     depth: i32,
+    body_max: i32,
     bed_block: Block,
 ) {
-    let m_a = crate::ground_generation::value_noise_01(x, z, 22);
-    let m_b = crate::ground_generation::value_noise_01(x, z, 36);
-    let m_c = crate::ground_generation::value_noise_01(x + 17, z + 41, 14);
-    let mound_noise = m_a * 0.50 + m_b * 0.35 + m_c * 0.15;
-
-    // v2.8.3 — flat gate at 0.55 (~40-45% coverage), max height 3 everywhere.
-    // depth_cap is what actually limits height-by-depth; tiering is dropped.
-    if mound_noise < 0.55 {
+    // v2.8.10 iter4 — taller more-prominent dunes. Coverage gate lowered
+    // 0.38→0.28 (more cells have a dune), amp 3→4 max, sharper power 0.45
+    // (rapid rise to max in high-noise cells), domain-warped sampling for
+    // organic non-circular dune ridges.
+    let target_amp: i32 = match body_max {
+        0..=3 => 2,
+        4..=6 => 3,
+        _ => 4,
+    };
+    let amp_cap = (depth - 1).max(0);
+    let amp = target_amp.min(amp_cap);
+    if amp <= 0 {
         return;
     }
 
-    let raw_height = if mound_noise < 0.72 {
-        1
-    } else if mound_noise < 0.86 {
-        2
-    } else {
-        3
-    };
-    // ((depth + 1) / 2) max-1 so depth=3 cells finally allow height-2 dunes
-    // and depth=5 cells get height-3, while still keeping 2+ water blocks above.
-    let depth_cap = ((depth + 1) / 2).max(1);
-    let height = raw_height.clamp(1, depth_cap);
+    // Domain-warped sampling so dune ridges curve organically.
+    let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 50);
+    let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 50);
+    let wx = x + ((warp_x - 0.5) * 30.0) as i32;
+    let wz = z + ((warp_z - 0.5) * 30.0) as i32;
 
-    for dy in 1..=height {
+    let n_large = crate::ground_generation::value_noise_01(wx + 113, wz + 257, 44) as f32;
+    let n_med = crate::ground_generation::value_noise_01(wx + 31, wz + 71, 18) as f32;
+    let n_sharp = crate::ground_generation::value_noise_01(wx + 7, wz + 11, 10) as f32;
+    let h_f = 0.40 * n_large + 0.30 * n_med + 0.30 * n_sharp;
+
+    if h_f < 0.28 {
+        return;
+    }
+    let t = (h_f - 0.28) / 0.72;
+    let bump = (t.powf(0.45) * (amp as f32 + 0.99)).floor() as i32;
+    if bump <= 0 {
+        return;
+    }
+    let bump = bump.clamp(1, amp);
+
+    for dy in 1..=bump {
         let y = bed_y + dy;
         if y >= water_y {
             break;
@@ -587,15 +733,89 @@ pub fn carve_lc_water_pass(
             if editor.get_ground_level(x, z) > water_y {
                 continue;
             }
-            // v2.8.4 — flag cells whose cardinal neighbour is a road
-            // (typically the bridge deck). carve_water_column_with_flags
-            // skips DIRT/COARSE_DIRT/MOSS blob overlays + dunes + veg
-            // when set, so the bed under a bridge stays clean.
-            let near_bridge = road_mask.contains(x - 1, z)
-                || road_mask.contains(x + 1, z)
-                || road_mask.contains(x, z - 1)
-                || road_mask.contains(x, z + 1);
-            carve_water_column_with_flags(editor, x, z, water_y, bwf.depth_at(x, z), near_bridge);
+            // v2.8.5 — widened from 4-cardinal to 5x5 ring (24 cells).
+            // Catches diagonal + 1-cell-out neighbours of bridge decks so
+            // the "shadow" zone under causeways stays clean GRAVEL/SAND
+            // with no DIRT strips peeking out at the bridge edges.
+            let near_bridge = (-2..=2).any(|dx: i32| {
+                (-2..=2).any(|dz: i32| {
+                    !(dx == 0 && dz == 0) && road_mask.contains(x + dx, z + dz)
+                })
+            });
+            // v2.8.6 F2 — body_max via 7x7 BWF sample (proxy for body width).
+            let mut body_max = 0;
+            for dx in -3..=3 {
+                for dz in -3..=3 {
+                    let d = bwf.depth_at(x + dx, z + dz);
+                    if d > body_max {
+                        body_max = d;
+                    }
+                }
+            }
+            carve_water_column_with_flags(
+                editor,
+                x,
+                z,
+                water_y,
+                bwf.depth_at(x, z),
+                near_bridge,
+                body_max,
+            );
+        }
+    }
+}
+
+/// v2.8.10 F10 — sweep floating veg (cattail, grass, candles, flowers,
+/// sugar_cane) placed BEFORE water/road overlays. Scans every bbox cell:
+/// if ground-level block is WATER or the cell is in road_mask, AIR-out
+/// any veg cells y=1..=5 above it.
+pub fn sweep_floating_veg(
+    editor: &mut WorldEditor,
+    xzbbox: &XZBBox,
+    road_mask: &RoadMaskBitmap,
+) {
+    let min_x = xzbbox.min_x();
+    let max_x = xzbbox.max_x();
+    let min_z = xzbbox.min_z();
+    let max_z = xzbbox.max_z();
+    let veg_set: &[Block] = &[
+        TALL_GRASS_BOTTOM,
+        TALL_GRASS_TOP,
+        GRASS,
+        BROWN_CANDLE,
+        BROWN_CANDLE_2,
+        BROWN_CANDLE_3,
+        BROWN_CANDLE_4,
+        SUGAR_CANE,
+        BLUE_FLOWER,
+        RED_FLOWER,
+        WHITE_FLOWER,
+        YELLOW_FLOWER,
+    ];
+    let road_blocks: &[Block] = &[
+        BLACK_CONCRETE,
+        GRAY_CONCRETE_POWDER,
+        GRAY_CONCRETE,
+        LIGHT_GRAY_CONCRETE,
+        WHITE_CONCRETE,
+        CYAN_TERRACOTTA,
+    ];
+    for z in min_z..=max_z {
+        for x in min_x..=max_x {
+            let gy = editor.get_ground_level(x, z);
+            let is_water =
+                editor.check_for_block_absolute(x, gy, z, Some(&[WATER]), None);
+            let is_road_ground = road_mask.contains(x, z)
+                || editor.check_for_block_absolute(x, gy, z, Some(road_blocks), None);
+            if !(is_water || is_road_ground) {
+                continue;
+            }
+            for dy in 1..=5 {
+                let y = gy + dy;
+                if editor.check_for_block_absolute(x, y, z, Some(veg_set), None) {
+                    editor.set_block_absolute(AIR, x, y, z, None, None);
+                }
+            }
         }
     }
 }

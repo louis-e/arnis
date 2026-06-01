@@ -380,6 +380,16 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         253 => "mcl_colorblocks:hardened_clay_cyan",   // CYAN_TERRACOTTA
         254 => "mcl_wool:black",                       // BLACK_WOOL
         255 => "mcl_banners:hanging_banner_silver",    // LIGHT_GRAY_WALL_BANNER
+        256 => "mcl_nether:magma",                     // MAGMA_BLOCK
+        257 => "mcl_farming:sugar_cane",               // SUGAR_CANE
+        258 => "mcl_ocean:kelp",                       // KELP
+        259 => "mcl_ocean:tall_seagrass",              // TALL_SEAGRASS_BOTTOM
+        260 => "mcl_ocean:tall_seagrass",              // TALL_SEAGRASS_TOP
+        261 => "mcl_ocean:sea_pickle",                 // SEA_PICKLE
+        262 => "mcl_lights:candle_brown",              // BROWN_CANDLE_2
+        263 => "mcl_lights:candle_brown",              // BROWN_CANDLE_3
+        264 => "mcl_lights:candle_brown",              // BROWN_CANDLE_4
+        265 => "mcl_nether:soul_sand",                 // SOUL_SAND
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

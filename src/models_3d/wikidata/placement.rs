@@ -982,7 +982,7 @@ mod tests {
         assert_eq!(material_to_rgb("nonsense"), None);
     }
 
-    fn block_ids(palette: &[Block]) -> Vec<u8> {
+    fn block_ids(palette: &[Block]) -> Vec<u16> {
         palette.iter().map(|b| b.id()).collect()
     }
 

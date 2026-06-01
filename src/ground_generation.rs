@@ -15,12 +15,13 @@
 
 use crate::args::Args;
 use crate::block_definitions::{
-    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, BRICK, CARROTS, CLAY, COARSE_DIRT,
-    COBBLED_DEEPSLATE, COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE,
-    DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER,
-    HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND,
-    SANDSTONE, SMOOTH_STONE, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER,
-    WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+    AIR, ANDESITE, BEDROCK, BLACK_CONCRETE, BLUE_FLOWER, BRICK, BROWN_CANDLE, BROWN_CANDLE_2,
+    BROWN_CANDLE_3, BROWN_CANDLE_4, CARROTS, CLAY, COARSE_DIRT, COBBLED_DEEPSLATE, COBBLESTONE,
+    CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE, DIORITE, DIRT, DIRT_PATH, FARMLAND,
+    GRANITE, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER, HAY_BALE,
+    LIGHT_GRAY_CONCRETE, MOSSY_COBBLESTONE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND,
+    SANDSTONE, SMOOTH_STONE, STONE, STONE_BRICKS, SUGAR_CANE, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::tree;
@@ -557,52 +558,148 @@ pub fn generate_ground_layer(
                                 (GRASS_BLOCK, DIRT)
                             };
 
-                            // Shoreline blending: land blocks near water get sand
-                            // surface for a natural beach/shore transition.
-                            // Uses water_blend gradient for ESA water (scales with
-                            // grid resolution) plus neighbor check for OSM water.
-                            // Skip on steep terrain — canyon walls should stay rock.
-                            let (surface_block, under_block) = if surface_block != WATER
+                            // Shoreline blending: land blocks near water get a
+                            // gradient palette for a natural beach/shore transition.
+                            //
+                            // v2.8.5 — multi-cell taper (1..=SHORE_BAND_BLOCKS) with
+                            // mixed palette per user spec: "land that has grass
+                            // blocks its 60% sand shore with 20% coarse dirt".
+                            //   * band 1 (touching water):
+                            //       60% SAND / 20% COARSE_DIRT / 20% COBBLESTONE
+                            //   * band 2-3 (near):
+                            //       30% SAND / 40% COARSE_DIRT / 30% original
+                            //   * band 4-6 (far):
+                            //       15% SAND / 25% COARSE_DIRT / 60% original
+                            // Only applies when original surface is GRASS_BLOCK
+                            // (per spec) and slope is gentle. Cliff faces (slope > 3)
+                            // and rocky/sandy/farmland cover keep their original palette.
+                            const SHORE_BAND_BLOCKS: i32 = 6;
+                            let shore_distance = if surface_block != WATER
                                 && slope <= 3
+                                && surface_block == GRASS_BLOCK
                             {
-                                // Sand only at the immediate 1-cell ring around LC_WATER
-                                // (plus near_placed_water below for OSM-rendered water).
-                                let near_esa_water = has_land_cover
-                                    && !is_esa_water
-                                    && [
-                                        (-1i32, 0i32),
-                                        (1, 0),
-                                        (0, -1),
-                                        (0, 1),
-                                        (-1, -1),
-                                        (-1, 1),
-                                        (1, -1),
-                                        (1, 1),
-                                    ]
-                                    .iter()
-                                    .any(|(dx, dz)| {
-                                        ground.cover_class(XZPoint::new(
-                                            x + dx - xzbbox.min_x(),
-                                            z + dz - xzbbox.min_z(),
-                                        )) == land_cover::LC_WATER
-                                    });
+                                let mut found: i32 = 0;
+                                'outer: for r in 1..=SHORE_BAND_BLOCKS {
+                                    for dx in -r..=r {
+                                        for dz in -r..=r {
+                                            if dx.abs() != r && dz.abs() != r {
+                                                continue; // ring only
+                                            }
+                                            // ESA water neighbour?
+                                            if has_land_cover
+                                                && !is_esa_water
+                                                && ground.cover_class(XZPoint::new(
+                                                    x + dx - xzbbox.min_x(),
+                                                    z + dz - xzbbox.min_z(),
+                                                )) == land_cover::LC_WATER
+                                            {
+                                                found = r;
+                                                break 'outer;
+                                            }
+                                            // Placed-WATER neighbour (cardinal only at r=1)?
+                                            if r == 1
+                                                && (dx == 0 || dz == 0)
+                                                && editor.check_for_block_absolute(
+                                                    x + dx,
+                                                    ground_y,
+                                                    z + dz,
+                                                    Some(&[WATER]),
+                                                    None,
+                                                )
+                                            {
+                                                found = r;
+                                                break 'outer;
+                                            }
+                                        }
+                                    }
+                                }
+                                found
+                            } else {
+                                0
+                            };
 
-                                // Also check placed water blocks (OSM rivers, etc.)
-                                let near_placed_water = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
-                                    .iter()
-                                    .any(|(dx, dz)| {
-                                        editor.check_for_block_absolute(
-                                            x + dx,
-                                            ground_y,
-                                            z + dz,
-                                            Some(&[WATER]),
-                                            None,
-                                        )
-                                    });
-                                if near_esa_water || near_placed_water {
-                                    (SAND, SANDSTONE)
+                            // v2.8.8 F5 — shore palette uses SMOOTH value_noise
+                            // (scale 16) for SAND/COARSE_DIRT/GRASS distribution
+                            // instead of high-frequency coord_hash bins. Result:
+                            // coherent SAND blobs fading into COARSE_DIRT then
+                            // GRASS_BLOCK across the 5-block band, not pepper.
+                            //
+                            // Stoney (STONE_BRICKS or other stone-class neighbour):
+                            //   shore_distance==1 → 50% COBBLE, 30% MOSSY_COBBLE,
+                            //   20% COARSE_DIRT (vanilla MC-look stone shore).
+                            let (surface_block, under_block) = if shore_distance > 0 {
+                                let stoney = matches!(
+                                    surface_block,
+                                    STONE
+                                        | COBBLESTONE
+                                        | ANDESITE
+                                        | GRANITE
+                                        | DIORITE
+                                        | STONE_BRICKS
+                                        | MOSSY_COBBLESTONE
+                                ) || [
+                                    (-1i32, 0i32),
+                                    (1, 0),
+                                    (0, -1),
+                                    (0, 1),
+                                    (-1, -1),
+                                    (-1, 1),
+                                    (1, -1),
+                                    (1, 1),
+                                ]
+                                .iter()
+                                .any(|(dx, dz)| {
+                                    editor.check_for_block_absolute(
+                                        x + dx,
+                                        ground_y,
+                                        z + dz,
+                                        Some(&[
+                                            STONE,
+                                            COBBLESTONE,
+                                            ANDESITE,
+                                            GRANITE,
+                                            DIORITE,
+                                            STONE_BRICKS,
+                                            MOSSY_COBBLESTONE,
+                                        ]),
+                                        None,
+                                    )
+                                });
+                                if shore_distance == 1 && stoney {
+                                    let smix =
+                                        (land_cover::coord_hash(x + 43, z + 67) % 100) as i32;
+                                    if smix < 50 {
+                                        (COBBLESTONE, STONE)
+                                    } else if smix < 80 {
+                                        (MOSSY_COBBLESTONE, STONE)
+                                    } else {
+                                        (COARSE_DIRT, DIRT)
+                                    }
                                 } else {
-                                    (surface_block, under_block)
+                                    // Smooth shore noise field (scale 16) drives
+                                    // SAND coherence — same noise → same shore
+                                    // visual flow for neighbouring cells.
+                                    let n = value_noise_01(x + 41, z + 11, 16);
+                                    // Static-fade per band:
+                                    //   d=1: 80% SAND, 10% COARSE_DIRT, 10% GRASS
+                                    //   d=2: 50% SAND, 25% COARSE_DIRT, 25% GRASS
+                                    //   d=3: 30% SAND, 15% COARSE_DIRT, 55% GRASS
+                                    //   d=4: 15% SAND, 10% COARSE_DIRT, 75% GRASS
+                                    //   d=5+: 5% SAND, 5% COARSE_DIRT, 90% GRASS
+                                    let (sand_p, cd_p) = match shore_distance {
+                                        1 => (0.80f64, 0.90f64),
+                                        2 => (0.50, 0.75),
+                                        3 => (0.30, 0.45),
+                                        4 => (0.15, 0.25),
+                                        _ => (0.05, 0.10),
+                                    };
+                                    if n < sand_p {
+                                        (SAND, SANDSTONE)
+                                    } else if n < cd_p {
+                                        (COARSE_DIRT, DIRT)
+                                    } else {
+                                        (surface_block, under_block)
+                                    }
                                 }
                             } else {
                                 (surface_block, under_block)
@@ -639,6 +736,100 @@ pub fn generate_ground_layer(
                                 );
                             } else {
                                 editor.set_block_if_absent_absolute(surface_block, x, ground_y, z);
+                            }
+
+                            // v2.8.6 F6 — rare cattail/sugar_cane on shore land.
+                            // Coastal ecotone: shore_distance > 0 AND surface
+                            // is sand/dirt-class AND nothing built above →
+                            // 2% tiered cattail, 1% sugar_cane (needs cardinal
+                            // WATER neighbour). coord_hash gives deterministic
+                            // placement per cell.
+                            if shore_distance > 0
+                                && matches!(
+                                    surface_block,
+                                    SAND | DIRT | COARSE_DIRT | GRASS_BLOCK
+                                )
+                                && !editor.block_exists_absolute(x, ground_y + 1, z)
+                            {
+                                let pick = land_cover::coord_hash(x + 113, z + 47) % 1000;
+                                if pick < 20 {
+                                    // v2.8.7 F9b — max 2 stalks + 1/2/3/4 candle state.
+                                    let double_stalk = pick % 2 == 0;
+                                    let candle_block = match pick % 4 {
+                                        0 => BROWN_CANDLE,
+                                        1 => BROWN_CANDLE_2,
+                                        2 => BROWN_CANDLE_3,
+                                        _ => BROWN_CANDLE_4,
+                                    };
+                                    if double_stalk {
+                                        editor.set_block_absolute(
+                                            TALL_GRASS_BOTTOM,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
+                                        );
+                                        editor.set_block_absolute(
+                                            TALL_GRASS_TOP,
+                                            x,
+                                            ground_y + 2,
+                                            z,
+                                            None,
+                                            None,
+                                        );
+                                        editor.set_block_absolute(
+                                            candle_block,
+                                            x,
+                                            ground_y + 3,
+                                            z,
+                                            None,
+                                            None,
+                                        );
+                                    } else {
+                                        editor.set_block_absolute(
+                                            GRASS,
+                                            x,
+                                            ground_y + 1,
+                                            z,
+                                            None,
+                                            None,
+                                        );
+                                        editor.set_block_absolute(
+                                            candle_block,
+                                            x,
+                                            ground_y + 2,
+                                            z,
+                                            None,
+                                            None,
+                                        );
+                                    }
+                                } else if pick < 30 {
+                                    let edge = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                                        .iter()
+                                        .any(|(dx, dz)| {
+                                            editor.check_for_block_absolute(
+                                                x + dx,
+                                                ground_y,
+                                                z + dz,
+                                                Some(&[WATER]),
+                                                None,
+                                            )
+                                        });
+                                    if edge {
+                                        let h = (pick % 3) + 1;
+                                        for y_off in 1..=h as i32 {
+                                            editor.set_block_absolute(
+                                                SUGAR_CANE,
+                                                x,
+                                                ground_y + y_off,
+                                                z,
+                                                None,
+                                                None,
+                                            );
+                                        }
+                                    }
+                                }
                             }
 
                             // Don't place dirt/under blocks below water surfaces.
@@ -1162,23 +1353,37 @@ pub fn generate_ground_layer(
 ///
 /// Cost: 4 hash calls + a few f64 ops per block — still well under 100 ns,
 /// negligible over the whole ground pass.
+// v1.8.3 — global noise seed, set once from args.tile_invariant_rendering
+// (--seed CLI alias). Ties every value_noise_01 sample to the user-chosen
+// seed so two runs with the same --seed produce identical bed/dune/shore
+// patterns, while different --seed values shuffle them.
+static NOISE_SEED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// Set the global noise seed. Safe to call multiple times; only first wins.
+pub fn set_noise_seed(seed: u64) {
+    let _ = NOISE_SEED.set(seed);
+}
+
+#[inline]
+fn current_noise_seed() -> u64 {
+    *NOISE_SEED.get().unwrap_or(&0)
+}
+
 pub(crate) fn value_noise_01(x: i32, z: i32, scale: i32) -> f64 {
     let s = scale.max(1);
-    // Integer lattice cell containing (x, z). div_euclid gives floor
-    // division for negative coordinates too, so patches tile uniformly
-    // across the origin.
     let x0 = x.div_euclid(s) * s;
     let z0 = z.div_euclid(s) * s;
     let x1 = x0 + s;
     let z1 = z0 + s;
-    // Fractional position inside the cell.
     let tx = (x - x0) as f64 / s as f64;
     let tz = (z - z0) as f64 / s as f64;
-    // Cubic Hermite smoothstep: derivative = 0 at both ends, so neighbouring
-    // cells join smoothly instead of with a visible slope change.
     let fx = tx * tx * (3.0 - 2.0 * tx);
     let fz = tz * tz * (3.0 - 2.0 * tz);
-    let sample = |x: i32, z: i32| (land_cover::coord_hash(x, z) % 1000) as f64 / 1000.0;
+    let seed = current_noise_seed().wrapping_mul(0x9E3779B97F4A7C15);
+    let sample = |x: i32, z: i32| {
+        let h = land_cover::coord_hash(x, z) ^ seed;
+        (h % 1000) as f64 / 1000.0
+    };
     let v00 = sample(x0, z0);
     let v10 = sample(x1, z0);
     let v01 = sample(x0, z1);

@@ -1,6 +1,6 @@
 use crate::clipping::clip_water_ring_to_bbox;
 use crate::floodfill_cache::RoadMaskBitmap;
-use crate::water_depth::{carve_water_column, BigWaterField};
+use crate::water_depth::{carve_water_column_with_flags, BigWaterField};
 use crate::{
     coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
@@ -449,7 +449,33 @@ fn scanline_fill_water(
                     continue;
                 }
                 // depth_at gives the carved depth (0 without land-cover water data).
-                carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z));
+                // v2.8.5 — 5x5 ring near_bridge check (matches the LC_WATER pass
+                // in water_depth::carve_lc_water_pass) so OSM water polygons
+                // also get the clean under-bridge bed treatment.
+                let near_bridge = (-2..=2).any(|dx: i32| {
+                    (-2..=2).any(|dz: i32| {
+                        !(dx == 0 && dz == 0) && road_mask.contains(x + dx, z + dz)
+                    })
+                });
+                // v2.8.6 F2 — body_max via 7x7 BWF sample for dune amplitude.
+                let mut body_max = 0;
+                for dx in -3..=3 {
+                    for dz in -3..=3 {
+                        let d = bwf.depth_at(x + dx, z + dz);
+                        if d > body_max {
+                            body_max = d;
+                        }
+                    }
+                }
+                carve_water_column_with_flags(
+                    editor,
+                    x,
+                    z,
+                    water_y,
+                    bwf.depth_at(x, z),
+                    near_bridge,
+                    body_max,
+                );
             }
         }
     }
