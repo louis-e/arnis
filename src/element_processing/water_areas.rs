@@ -1,5 +1,6 @@
 use crate::clipping::clip_water_ring_to_bbox;
-use crate::water_depth::{carve_water_column, ocean_depth_for_cell, BigWaterField};
+use crate::floodfill_cache::RoadMaskBitmap;
+use crate::water_depth::{carve_water_column, BigWaterField};
 use crate::{
     coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
@@ -11,6 +12,7 @@ pub fn generate_water_area_from_way(
     element: &ProcessedWay,
     _xzbbox: &XZBBox,
     bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
 ) {
     let outers = [element.nodes.clone()];
     if !verify_closed_rings(&outers) {
@@ -18,7 +20,7 @@ pub fn generate_water_area_from_way(
         return;
     }
 
-    generate_water_areas(editor, &outers, &[], bwf);
+    generate_water_areas(editor, &outers, &[], bwf, road_mask);
 }
 
 pub fn generate_water_areas_from_relation(
@@ -26,6 +28,7 @@ pub fn generate_water_areas_from_relation(
     element: &ProcessedRelation,
     xzbbox: &XZBBox,
     bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Check if this is a water relation (either with water tag or natural=water)
     let is_water = element.tags.contains_key("water")
@@ -118,7 +121,7 @@ pub fn generate_water_areas_from_relation(
         return;
     }
 
-    generate_water_areas(editor, &outers, &inners, bwf);
+    generate_water_areas(editor, &outers, &inners, bwf, road_mask);
 }
 
 fn generate_water_areas(
@@ -126,6 +129,7 @@ fn generate_water_areas(
     outers: &[Vec<ProcessedNode>],
     inners: &[Vec<ProcessedNode>],
     bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Calculate polygon bounding box to limit fill area
     let mut poly_min_x = i32::MAX;
@@ -165,7 +169,7 @@ fn generate_water_areas(
         .collect();
 
     scanline_fill_water(
-        min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf,
+        min_x, min_z, max_x, max_z, &outers_xz, &inners_xz, editor, bwf, road_mask,
     );
 }
 
@@ -397,6 +401,7 @@ fn scanline_fill_water(
     inners: &[Vec<XZPoint>],
     editor: &mut WorldEditor,
     bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Collect edges per outer ring so we can union their spans correctly,
     // even if multiple outer rings happen to overlap (invalid OSM, but
@@ -433,25 +438,18 @@ fn scanline_fill_water(
 
         for (start, end) in fill_spans {
             for x in start..=end {
+                // Keep road/bridge surfaces (carve would overwrite them).
+                if road_mask.contains(x, z) {
+                    continue;
+                }
                 let water_y = editor.get_water_level(x, z);
                 let ground_y = editor.get_ground_level(x, z);
-                // Only carve where terrain is at or below the water
-                // surface — skip hillside blocks where the polygon
-                // extends above the actual waterline.
+                // Skip hillside blocks the polygon claims above the waterline.
                 if ground_y > water_y {
                     continue;
                 }
-                // Depth from BigWaterField. dt = 0 means the cell isn't
-                // in any tracked LC_WATER component, but we still want a
-                // single surface WATER block here so OSM-only polygons
-                // (no ESA water classification) still render water.
-                let (dt, comp_max) = bwf.depth_at(x, z);
-                let depth = if dt == 0 {
-                    0
-                } else {
-                    ocean_depth_for_cell(x, z, dt, comp_max)
-                };
-                carve_water_column(editor, x, z, water_y, depth);
+                // depth_at gives the carved depth (0 without land-cover water data).
+                carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z));
             }
         }
     }

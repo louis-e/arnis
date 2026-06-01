@@ -171,28 +171,9 @@ pub struct Args {
     /// the same blocks and produce checker noise at intersections.
     ///
     ///   max     (default) — render every highway exactly as upstream
-    ///                       Arnis does: all types, crossings, full
-    ///                       multi-lane width, dense dashed lane
-    ///                       dividers. Single-tile output byte-identical
-    ///                       to v2.7.0. Use this if `clean` produces
-    ///                       visuals you don't like — full revert.
-    ///   clean             — visual-cleanup pass for scale ≥ 0.7. Caps
-    ///                       lane dividers to {1, 2} (single centre
-    ///                       stripe for `lanes ≤ 4`, twin centre stripes
-    ///                       for `lanes ≥ 5` to read as a divided
-    ///                       highway). Suppresses dividers on
-    ///                       service/parking_aisle ways. Same highway
-    ///                       coverage as `max`. Junction overdraw and
-    ///                       crowded boulevards become legible without
-    ///                       changing road geometry.
-    ///   compact         — vehicle-grade highways only (motorway/
-    ///                       primary/secondary/tertiary/residential/
-    ///                       unclassified/living_street). Lanes capped
-    ///                       at 1 (single centre stripe). Crossings +
-    ///                       pedestrian/cycleway types dropped. Dash
-    ///                       period floored to 4-on / 4-off so dashes
-    ///                       stay legible at scale 0.5. Trims Overpass
-    ///                       payload.
+    ///                       Arnis does.
+    ///   clean             — visual-cleanup pass for scale ≥ 0.7.
+    ///   compact           — vehicle-grade highways only, lanes capped.
     ///
     /// Upstream-friendly: when omitted, behaviour identical to upstream
     /// (max). Multi-tile schedulers (Meld) auto-select `compact` at
@@ -200,6 +181,11 @@ pub struct Args {
     #[arg(long = "road-detail", default_value = "max",
           value_parser = ["max", "clean", "compact"])]
     pub road_detail: String,
+
+    /// Bake per-chunk lighting so distant chunks render lit in LOD mods
+    /// (Voxy/Chunky) without visiting them. Slower; off by default.
+    #[arg(long, default_value_t = false)]
+    pub bake_lighting: bool,
 }
 
 /// Validates CLI arguments after parsing.
@@ -316,6 +302,7 @@ mod tests {
         assert!(!args.terrain);
         assert!(!args.bedrock);
         assert!(!args.disable_height_limit);
+        assert!(!args.bake_lighting);
         // interior, roof, land_cover default to true
         assert!(args.interior);
         assert!(args.roof);

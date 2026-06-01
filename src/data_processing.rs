@@ -66,11 +66,10 @@ pub fn generate_world_with_options(
             args.disable_height_limit,
         )
     };
+    editor.set_bake_lighting(args.bake_lighting);
     let ground = Arc::new(ground);
 
-    // Phase 3 (arnis-update-290) — per-cell water depth field for large
-    // water bodies. Computed once from the ESA LC_WATER mask via BFS +
-    // chamfer-3-4 DT. Empty when land cover is disabled.
+    // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
@@ -130,43 +129,20 @@ pub fn generate_world_with_options(
     let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
     let mut element_counter: u64 = 0;
 
-    // Pre-scan 3DMR-tagged elements first; 3DMR wins over Wikidata on conflict.
-    let three_dmr_prescan = if args.use_3d {
-        Some(crate::models_3d::three_dmr::prescan(
-            &elements,
-            args.rotation,
-        ))
-    } else {
-        None
-    };
+    let models_3d_pipeline = args
+        .use_3d
+        .then(|| crate::models_3d::Models3dPipeline::prescan(&elements, args));
     let empty_suppressed: HashSet<(&'static str, u64)> = HashSet::new();
-    let three_dmr_suppressed: &HashSet<(&'static str, u64)> = three_dmr_prescan
+    let models_3d_suppressed: &HashSet<(&'static str, u64)> = models_3d_pipeline
         .as_ref()
-        .map(|p| &p.suppressed_ids)
-        .unwrap_or(&empty_suppressed);
-
-    // Wikidata pre-scan runs after 3DMR's, skipping any element 3DMR already claimed.
-    let wikidata_prescan = if args.use_3d {
-        Some(crate::models_3d::wikidata::prescan(
-            &elements,
-            three_dmr_suppressed,
-            args.rotation,
-            args.scale,
-        ))
-    } else {
-        None
-    };
-    let wikidata_suppressed: &HashSet<(&'static str, u64)> = wikidata_prescan
-        .as_ref()
-        .map(|p| &p.suppressed_ids)
+        .map(|p| p.suppressed())
         .unwrap_or(&empty_suppressed);
 
     // Process all elements
     for element in elements.into_iter() {
         element_counter += 1;
         let suppression_key = (element.kind(), element.id());
-        if three_dmr_suppressed.contains(&suppression_key)
-            || wikidata_suppressed.contains(&suppression_key)
+        if models_3d_suppressed.contains(&suppression_key)
             || outline_suppression.contains(&suppression_key)
         {
             continue;
@@ -260,6 +236,7 @@ pub fn generate_world_with_options(
                             way,
                             &xzbbox,
                             &big_water_field,
+                            &road_mask,
                         );
                     } else {
                         waterways::generate_waterways(&mut editor, way);
@@ -364,6 +341,7 @@ pub fn generate_world_with_options(
                         rel,
                         &xzbbox,
                         &big_water_field,
+                        &road_mask,
                     );
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(
@@ -403,9 +381,7 @@ pub fn generate_world_with_options(
     process_pb.inc(element_counter % pb_batch_size);
     process_pb.finish();
 
-    // Drop remaining caches (keep road_mask alive — needed below for the
-    // universal LC_WATER carve so road / bridge surfaces aren't replaced
-    // with water).
+    // Keep road_mask alive for the LC_WATER carve below.
     drop(highway_connectivity);
     drop(flood_fill_cache);
 
@@ -418,12 +394,11 @@ pub fn generate_world_with_options(
         &building_footprints,
     )?;
 
-    // Universal LC_WATER carve — every ESA-classified water cell now gets
-    // depth from BigWaterField + a uniform SAND / SANDSTONE / STONE bed
-    // stack. Kills the "wide rivers / oceans without depth" patches the
-    // user reported (water_areas.rs only handles OSM water polygons; ESA
-    // LC_WATER cells without an OSM polygon were rendered flat by
-    // ground_generation.rs).
+    if args.fillground {
+        crate::ore_generation::generate_ores(&mut editor, &xzbbox);
+    }
+
+    // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
     crate::water_depth::carve_lc_water_pass(
         &mut editor,
         ground.as_ref(),
@@ -441,15 +416,8 @@ pub fn generate_world_with_options(
     }
 
     // Run after ground generation so anchor Y reflects the final terrain.
-    if let Some(prescan) = three_dmr_prescan.as_ref() {
-        if prescan.placement_count() > 0 {
-            crate::models_3d::three_dmr::place_three_dmr_models(&mut editor, args, prescan);
-        }
-    }
-    if let Some(prescan) = wikidata_prescan.as_ref() {
-        if prescan.placement_count() > 0 {
-            crate::models_3d::wikidata::place_wikidata_models(&mut editor, args, prescan);
-        }
+    if let Some(p) = models_3d_pipeline.as_ref() {
+        p.place(&mut editor, args);
     }
 
     // Save world

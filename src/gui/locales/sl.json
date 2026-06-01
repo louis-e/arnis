@@ -45,6 +45,7 @@
   "three_dmr": "Uporabi 3D modele",
   "disable_height_limit": "Razširi višino gradnje",
   "aws_only_elevation": "Starejši teren",
+  "bake_lighting": "Predizračun osvetlitve",
   "bedrock_auto_generated": "Bedrock svet je samodejno ustvarjen",
   "save_path": "Pot shranjevanja",
   "rotation_angle": "Kot zasuka",

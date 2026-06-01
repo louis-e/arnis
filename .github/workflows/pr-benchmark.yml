@@ -6,7 +6,7 @@ permissions:
 
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
   issue_comment:
     types: [created]
 
@@ -19,7 +19,13 @@ jobs:
        contains(github.event.comment.body, 'retrigger-benchmark'))
     runs-on: ubuntu-latest
     steps:
+      # Check out the PR head so comment-triggered runs benchmark the PR, not main.
       - uses: actions/checkout@v6
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
+      - name: Resolve benchmarked commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: ./.github/actions/setup-arnis-linux
         with:
           gui-deps: "false"
@@ -60,6 +66,8 @@ jobs:
 
       - name: Format duration and generate summary
         id: comment_body
+        env:
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
         run: |
           duration=${{ steps.end_time.outputs.duration }}
           minutes=$((duration / 60))
@@ -127,7 +135,7 @@ jobs:
             echo ""
             echo "📈 Compared against baseline: **${baseline_time}s** time, **${baseline_mem} MB** memory"
             echo "🧮 Delta: **${diff}s** time, **${mem_diff} MB** memory"
-            echo "🔢 Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
+            echo "🔢 Commit: [\`${COMMIT_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${COMMIT_SHA})"
             echo ""
             echo "${verdict}"
             echo "${mem_verdict}"

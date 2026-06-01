@@ -68,7 +68,7 @@ impl Ground {
         // post-processing pipeline for land-cover-aware artifact repair.
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
-        let (_, _, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
         let mut land_cover = if fetch_land_cover {
             let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
             if lc.is_some() {
@@ -81,10 +81,20 @@ impl Ground {
             None
         };
 
+        // Raise the floor for the deepest water carve (elevation path only).
+        let water_floor = match &land_cover {
+            Some(lc) => {
+                let max_depth =
+                    crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h);
+                ground_level.max(crate::world_editor::MIN_Y + max_depth + 2)
+            }
+            None => ground_level,
+        };
+
         match fetch_elevation_data(
             bbox,
             scale,
-            ground_level,
+            water_floor,
             disable_height_limit,
             extended_max_y,
             land_cover.as_mut(),
@@ -94,7 +104,7 @@ impl Ground {
         ) {
             Ok(elevation_data) => Self {
                 elevation_enabled: true,
-                ground_level,
+                ground_level: water_floor,
                 elevation_data: Some(elevation_data),
                 land_cover,
                 rotation_mask: None,
@@ -168,6 +178,36 @@ impl Ground {
             xzbbox,
             scale,
         );
+    }
+
+    /// Local block bbox (min_x, min_z, max_x, max_z) covering all LC_WATER cells,
+    /// derived from the land-cover grid; None if no land cover or no water.
+    pub fn lc_water_block_bounds(&self) -> Option<(i32, i32, i32, i32)> {
+        let (lc, data) = match (&self.land_cover, &self.elevation_data) {
+            (Some(lc), Some(data)) => (lc, data),
+            _ => return None,
+        };
+        let (mut gx0, mut gz0, mut gx1, mut gz1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+        let mut any = false;
+        for (z, row) in lc.grid.iter().enumerate() {
+            for (x, &c) in row.iter().enumerate() {
+                if c == land_cover::LC_WATER {
+                    gx0 = gx0.min(x);
+                    gx1 = gx1.max(x);
+                    gz0 = gz0.min(z);
+                    gz1 = gz1.max(z);
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return None;
+        }
+        let (x0, x1) =
+            crate::water_depth::grid_span_to_block_span(gx0, gx1, data.world_width, lc.width);
+        let (z0, z1) =
+            crate::water_depth::grid_span_to_block_span(gz0, gz1, data.world_height, lc.height);
+        Some((x0, z0, x1, z1))
     }
 
     /// Returns the ESA WorldCover land cover class at the given coordinates.

@@ -1,8 +1,19 @@
 //! glTF (.glb) → triangles → voxels via dda-voxelize.
 
-use crate::block_definitions::{Block, STONE_BRICKS};
+use crate::block_definitions::{Block, GLASS, STONE_BRICKS};
 use crate::models_3d::palette::closest_block;
 use dda_voxelize::DdaVoxelizer;
+
+/// Pure magenta (#FF00FF) in model colors becomes GLASS instead of palette-mapping.
+const GLASS_SENTINEL: [f32; 3] = [1.0, 0.0, 1.0];
+const GLASS_SENTINEL_TOL: f32 = 1e-3;
+
+#[inline]
+fn is_glass_sentinel(c: [f32; 3]) -> bool {
+    (c[0] - GLASS_SENTINEL[0]).abs() < GLASS_SENTINEL_TOL
+        && (c[1] - GLASS_SENTINEL[1]).abs() < GLASS_SENTINEL_TOL
+        && (c[2] - GLASS_SENTINEL[2]).abs() < GLASS_SENTINEL_TOL
+}
 
 /// Composed vertex transform: intrinsic glTF/3DMR step, then world placement step.
 #[derive(Clone, Copy, Debug)]
@@ -13,7 +24,10 @@ pub struct WorldTransform {
     intrinsic_tx: f32,
     intrinsic_ty: f32,
     intrinsic_tz: f32,
-    world_scale: f32,
+    /// Model-space pitch about X (identity when sin=0), applied before scale/yaw.
+    pitch_cos: f32,
+    pitch_sin: f32,
+    world_scale: [f32; 3],
     world_rot_cos: f32,
     world_rot_sin: f32,
     world_tx: f32,
@@ -33,6 +47,30 @@ impl WorldTransform {
         anchor_y: f32,
         anchor_z: f32,
     ) -> Self {
+        let s = world_scale as f32;
+        Self::with_world_scale_xyz(
+            intrinsic_yaw_degrees,
+            intrinsic_scale,
+            intrinsic_translation,
+            [s, s, s],
+            world_yaw_degrees,
+            anchor_x,
+            anchor_y,
+            anchor_z,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_world_scale_xyz(
+        intrinsic_yaw_degrees: f64,
+        intrinsic_scale: f64,
+        intrinsic_translation: [f64; 3],
+        world_scale: [f32; 3],
+        world_yaw_degrees: f64,
+        anchor_x: f32,
+        anchor_y: f32,
+        anchor_z: f32,
+    ) -> Self {
         let it = (intrinsic_yaw_degrees as f32).to_radians();
         let wt = (world_yaw_degrees as f32).to_radians();
         Self {
@@ -42,7 +80,9 @@ impl WorldTransform {
             intrinsic_tx: intrinsic_translation[0] as f32,
             intrinsic_ty: intrinsic_translation[1] as f32,
             intrinsic_tz: intrinsic_translation[2] as f32,
-            world_scale: world_scale as f32,
+            pitch_cos: 1.0,
+            pitch_sin: 0.0,
+            world_scale,
             world_rot_cos: wt.cos(),
             world_rot_sin: wt.sin(),
             world_tx: anchor_x,
@@ -51,18 +91,30 @@ impl WorldTransform {
         }
     }
 
+    /// Tilts the model nose-up by `pitch_degrees` about X, so a +Z forward axis climbs into +Y.
+    pub fn pitched(mut self, pitch_degrees: f64) -> Self {
+        let p = (pitch_degrees as f32).to_radians();
+        self.pitch_cos = p.cos();
+        self.pitch_sin = p.sin();
+        self
+    }
+
     #[inline]
     fn apply(&self, p: [f32; 3]) -> [f32; 3] {
-        let sx = p[0] * self.intrinsic_scale;
-        let sy = p[1] * self.intrinsic_scale;
-        let sz = p[2] * self.intrinsic_scale;
+        // Model-space pitch about X: +Z forward tilts up into +Y. Identity when pitch_sin == 0.
+        let px = p[0];
+        let py = p[1] * self.pitch_cos + p[2] * self.pitch_sin;
+        let pz = -p[1] * self.pitch_sin + p[2] * self.pitch_cos;
+        let sx = px * self.intrinsic_scale;
+        let sy = py * self.intrinsic_scale;
+        let sz = pz * self.intrinsic_scale;
         let r1x = sx * self.intrinsic_rot_cos - sz * self.intrinsic_rot_sin + self.intrinsic_tx;
         let r1y = sy + self.intrinsic_ty;
         let r1z = sx * self.intrinsic_rot_sin + sz * self.intrinsic_rot_cos + self.intrinsic_tz;
 
-        let mx = r1x * self.world_scale;
-        let my = r1y * self.world_scale;
-        let mz = r1z * self.world_scale;
+        let mx = r1x * self.world_scale[0];
+        let my = r1y * self.world_scale[1];
+        let mz = r1z * self.world_scale[2];
         let r2x = mx * self.world_rot_cos - mz * self.world_rot_sin + self.world_tx;
         let r2y = my + self.world_ty;
         let r2z = mx * self.world_rot_sin + mz * self.world_rot_cos + self.world_tz;
@@ -198,16 +250,13 @@ pub fn voxelize_glb(
                     })
                     .and_then(image_average_color);
 
-                let final_color = if let Some(tex) = texture_avg {
+                let material_color = if let Some(tex) = texture_avg {
                     [factor[0] * tex[0], factor[1] * tex[1], factor[2] * tex[2]]
                 } else {
                     [factor[0], factor[1], factor[2]]
                 };
-                let uncolored = texture_avg.is_none() && is_default_white(factor);
-                let value: VoxelValue = (final_color, uncolored);
-
-                let shader =
-                    |prev: Option<&VoxelValue>, _: [i32; 3], _: [f32; 3]| *prev.unwrap_or(&value);
+                let material_uncolored = texture_avg.is_none() && is_default_white(factor);
+                let material_value: VoxelValue = (material_color, material_uncolored);
 
                 let reader = primitive.reader(|b| Some(&buffers[b.index()]));
                 let Some(positions) = reader.read_positions() else {
@@ -219,17 +268,41 @@ pub fn voxelize_glb(
                 } else {
                     (0..positions.len() as u32).collect()
                 };
+                // Vertex colors (COLOR_0) modulate the material color when present.
+                let vertex_colors: Option<Vec<[f32; 4]>> =
+                    reader.read_colors(0).map(|c| c.into_rgba_f32().collect());
 
                 for tri in indices.chunks_exact(3) {
-                    let a = positions[tri[0] as usize];
-                    let b = positions[tri[1] as usize];
-                    let c = positions[tri[2] as usize];
+                    let ia = tri[0] as usize;
+                    let ib = tri[1] as usize;
+                    let ic = tri[2] as usize;
+                    let a = positions[ia];
+                    let b = positions[ib];
+                    let c = positions[ic];
                     let wa = transform.apply(transform_point(&world, a));
                     let wb = transform.apply(transform_point(&world, b));
                     let wc = transform.apply(transform_point(&world, c));
                     if !triangle_finite(&wa, &wb, &wc) {
                         continue;
                     }
+
+                    let value: VoxelValue = match vertex_colors.as_ref() {
+                        Some(vc) if ia < vc.len() && ib < vc.len() && ic < vc.len() => {
+                            let ca = vc[ia];
+                            let cb = vc[ib];
+                            let cc = vc[ic];
+                            let avg = [
+                                (ca[0] + cb[0] + cc[0]) / 3.0 * material_color[0],
+                                (ca[1] + cb[1] + cc[1]) / 3.0 * material_color[1],
+                                (ca[2] + cb[2] + cc[2]) / 3.0 * material_color[2],
+                            ];
+                            (avg, false)
+                        }
+                        _ => material_value,
+                    };
+                    let shader = |prev: Option<&VoxelValue>, _: [i32; 3], _: [f32; 3]| {
+                        *prev.unwrap_or(&value)
+                    };
                     voxelizer.add_triangle(&[wa, wb, wc], &shader);
                 }
             }
@@ -245,6 +318,8 @@ pub fn voxelize_glb(
     for (pos, (color, uncolored)) in occupied {
         let block = if uncolored {
             STONE_BRICKS
+        } else if is_glass_sentinel(color) {
+            GLASS
         } else {
             let r = (color[0].clamp(0.0, 1.0) * 255.0) as u8;
             let g = (color[1].clamp(0.0, 1.0) * 255.0) as u8;
@@ -364,6 +439,66 @@ mod tests {
         let t = WorldTransform::new(0.0, 2.0, [5.0, 0.0, 0.0], 1.0, 0.0, 0.0, 0.0, 0.0);
         let out = t.apply([1.0, 0.0, 0.0]);
         assert_eq!(out, [7.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn world_transform_nonuniform_xyz_scale() {
+        let t = WorldTransform::with_world_scale_xyz(
+            0.0,
+            1.0,
+            [0.0, 0.0, 0.0],
+            [3.0, 5.0, 7.0],
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        );
+        let out = t.apply([1.0, 1.0, 1.0]);
+        assert_eq!(out, [3.0, 5.0, 7.0]);
+    }
+
+    #[test]
+    fn pitch_identity_when_unset() {
+        // Default transform must behave exactly as before (no tilt).
+        let t = make_identity();
+        let out = t.apply([0.0, 0.0, 1.0]);
+        assert!((out[0]).abs() < 1e-5 && (out[1]).abs() < 1e-5 && (out[2] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn pitch_90_lifts_forward_axis_up() {
+        // A +Z nose vertex pitched 90° nose-up lands on +Y.
+        let t = make_identity().pitched(90.0);
+        let out = t.apply([0.0, 0.0, 1.0]);
+        assert!(out[0].abs() < 1e-5, "got {out:?}");
+        assert!((out[1] - 1.0).abs() < 1e-5, "got {out:?}");
+        assert!(out[2].abs() < 1e-5, "got {out:?}");
+    }
+
+    #[test]
+    fn pitch_positive_raises_nose_partially() {
+        // A modest nose-up pitch gives the +Z nose a positive Y and shorter Z.
+        let t = make_identity().pitched(30.0);
+        let out = t.apply([0.0, 0.0, 1.0]);
+        assert!(out[1] > 0.0, "nose should rise, got {out:?}");
+        assert!(
+            out[2] > 0.0 && out[2] < 1.0,
+            "nose Z should shorten, got {out:?}"
+        );
+        // Tail (-Z) drops below the pitch axis.
+        let tail = t.apply([0.0, 0.0, -1.0]);
+        assert!(tail[1] < 0.0, "tail should drop, got {tail:?}");
+    }
+
+    #[test]
+    fn glass_sentinel_matches_pure_magenta() {
+        assert!(is_glass_sentinel([1.0, 0.0, 1.0]));
+        assert!(is_glass_sentinel([0.9995, 0.0005, 0.9998]));
+        assert!(!is_glass_sentinel([1.0, 0.0, 0.9]));
+        assert!(!is_glass_sentinel([1.0, 0.1, 1.0]));
+        assert!(!is_glass_sentinel([0.9, 0.0, 1.0]));
+        // Reddish-pink shouldn't trigger.
+        assert!(!is_glass_sentinel([1.0, 0.5, 0.8]));
     }
 
     #[test]

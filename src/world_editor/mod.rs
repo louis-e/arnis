@@ -16,7 +16,7 @@ mod luanti;
 pub mod bedrock;
 
 pub(crate) use common::WorldToModify;
-pub use common::MIN_Y;
+pub use common::{MIN_SECTION_Y, MIN_Y};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
@@ -142,6 +142,8 @@ pub struct WorldEditor<'a> {
     luanti_ground_level: i32,
     /// Luanti game pack
     luanti_game: LuantiGame,
+    /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
+    bake_lighting: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -165,6 +167,7 @@ impl<'a> WorldEditor<'a> {
             luanti_spawn_point: None,
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
+            bake_lighting: false,
         }
     }
 
@@ -194,6 +197,7 @@ impl<'a> WorldEditor<'a> {
             luanti_spawn_point: None,
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
+            bake_lighting: false,
         }
     }
 
@@ -223,12 +227,18 @@ impl<'a> WorldEditor<'a> {
             luanti_spawn_point: spawn_point,
             luanti_ground_level: ground_level,
             luanti_game: game,
+            bake_lighting: false,
         }
     }
 
     /// Sets the ground reference for elevation-based block placement
     pub fn set_ground(&mut self, ground: Arc<Ground>) {
         self.ground = Some(ground);
+    }
+
+    /// Enables baking per-chunk lighting into Java chunks.
+    pub fn set_bake_lighting(&mut self, enabled: bool) {
+        self.bake_lighting = enabled;
     }
 
     /// Gets a reference to the ground data if available
@@ -879,6 +889,13 @@ impl<'a> WorldEditor<'a> {
             return;
         }
 
+        // None/None is the dominant pattern; skip the redundant get_block() read.
+        if override_whitelist.is_none() && override_blacklist.is_none() {
+            self.world
+                .set_with_props_if_absent(x, absolute_y, z, block_with_props);
+            return;
+        }
+
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
             if let Some(whitelist) = override_whitelist {
@@ -1065,6 +1082,18 @@ impl<'a> WorldEditor<'a> {
         }
         self.world
             .fill_column(x, z, y_min, y_max, block, skip_existing);
+    }
+
+    /// See [`WorldToModify::bulk_fill_chunk_sections_below`].
+    pub fn bulk_fill_chunk_sections_below(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        section_y_max: i8,
+        block: Block,
+    ) -> bool {
+        self.world
+            .bulk_fill_chunk_sections_below(chunk_x, chunk_z, section_y_max, block)
     }
 
     /// Saves all changes made to the world by writing to the appropriate format.

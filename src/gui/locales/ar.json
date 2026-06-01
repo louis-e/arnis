@@ -45,6 +45,7 @@
   "three_dmr": "استخدام نماذج ثلاثية الأبعاد",
   "disable_height_limit": "توسيع ارتفاع البناء",
   "aws_only_elevation": "تضاريس قديمة",
+  "bake_lighting": "حساب الإضاءة مسبقًا",
   "bedrock_auto_generated": "يتم إنشاء عالم Bedrock تلقائيًا",
   "save_path": "مسار الحفظ",
   "rotation_angle": "زاوية الدوران",

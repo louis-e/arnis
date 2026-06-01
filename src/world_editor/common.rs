@@ -7,6 +7,8 @@ use crate::block_definitions::*;
 
 /// Minimum Y coordinate in Minecraft (1.18+)
 pub const MIN_Y: i32 = -64;
+/// Lowest section index covering MIN_Y (-64 / 16).
+pub const MIN_SECTION_Y: i8 = (MIN_Y / 16) as i8;
 /// Maximum Y coordinate in Minecraft (data pack maximum: 2031)
 /// Vanilla limit is 319, but data packs can extend this up to 2031.
 /// The world editor supports the full range; the elevation system controls
@@ -452,12 +454,29 @@ impl WorldToModify {
         );
     }
 
-    /// Set a block only if the position is currently empty (AIR / absent).
-    ///
-    /// This avoids the double HashMap traversal of `get_block()` + `set_block()`
-    /// which is the hot path in ground generation and many element processors.
+    /// Set a block only if the cell is empty (AIR). Thin `#[inline]` wrapper over [`set_with_props_if_absent`].
     #[inline]
     pub fn set_block_if_absent(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        self.set_with_props_if_absent(
+            x,
+            y,
+            z,
+            BlockWithProperties {
+                block,
+                properties: None,
+            },
+        );
+    }
+
+    /// Set a block (+ optional NBT) only if the cell is empty (AIR), in one region/chunk/section descent.
+    #[inline]
+    pub fn set_with_props_if_absent(
+        &mut self,
+        x: i32,
+        y: i32,
+        z: i32,
+        block_with_props: BlockWithProperties,
+    ) {
         let chunk_x: i32 = x >> 4;
         let chunk_z: i32 = z >> 4;
         let region_x: i32 = chunk_x >> 5;
@@ -469,7 +488,6 @@ impl WorldToModify {
             .entry((chunk_x & 31, chunk_z & 31))
             .or_default();
 
-        // Clamp Y
         let y = y.clamp(MIN_Y, MAX_Y);
         let section_idx: i8 = (y >> 4) as i8;
         let section = chunk.sections.entry(section_idx).or_default();
@@ -479,11 +497,13 @@ impl WorldToModify {
         let local_z = (z & 15) as u8;
         let idx = SectionToModify::index(local_x, local_y, local_z);
 
-        // Only write if the current block is AIR
         if section.storage.get(idx) == AIR {
-            section.storage.set(idx, block);
-            // Clear any stale properties from a previous block at this position
-            section.properties.remove(&idx);
+            section.storage.set(idx, block_with_props.block);
+            if let Some(props) = block_with_props.properties {
+                section.properties.insert(idx, props);
+            } else {
+                section.properties.remove(&idx);
+            }
         }
     }
 
@@ -534,6 +554,40 @@ impl WorldToModify {
         }
     }
 
+    /// Fill empty (Uniform(AIR)) sections of a chunk up to `section_y_max` with
+    /// `Uniform(block)`. Returns true only if every section in the range was empty.
+    pub fn bulk_fill_chunk_sections_below(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        section_y_max: i8,
+        block: Block,
+    ) -> bool {
+        if section_y_max < MIN_SECTION_Y {
+            return true;
+        }
+        let region_x = chunk_x >> 5;
+        let region_z = chunk_z >> 5;
+        let region = self.regions.entry((region_x, region_z)).or_default();
+        let chunk = region
+            .chunks
+            .entry((chunk_x & 31, chunk_z & 31))
+            .or_default();
+
+        let mut all_clean = true;
+        for section_y in MIN_SECTION_Y..=section_y_max {
+            let section = chunk.sections.entry(section_y).or_default();
+            let is_empty = section.properties.is_empty()
+                && matches!(&section.storage, BlockStorage::Uniform(b) if *b == AIR);
+            if is_empty {
+                section.storage = BlockStorage::Uniform(block);
+            } else {
+                all_clean = false;
+            }
+        }
+        all_clean
+    }
+
     /// Scan every section and collapse any that are entirely one block type
     /// from `Full(Vec)` back to `Uniform(Block)`, freeing the 4 KiB allocation.
     pub fn compact_sections(&mut self) {
@@ -546,5 +600,171 @@ impl WorldToModify {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bulk_fill_empty_chunk_all_clean() {
+        let mut world = WorldToModify::default();
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        assert!(all_clean, "fresh chunk should report all sections clean");
+
+        let region = world.get_region(0, 0).unwrap();
+        let chunk = region.get_chunk(0, 0).unwrap();
+        // Sections -4, -3, -2 must now exist as Uniform(STONE)
+        for y in MIN_SECTION_Y..=-2 {
+            let section = chunk
+                .sections
+                .get(&y)
+                .unwrap_or_else(|| panic!("section {y} should have been created"));
+            assert!(
+                matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
+                "section {y} should be Uniform(STONE), got {:?}",
+                std::mem::discriminant(&section.storage)
+            );
+            assert!(
+                section.properties.is_empty(),
+                "section {y} should have no per-cell properties"
+            );
+        }
+    }
+
+    #[test]
+    fn bulk_fill_skips_occupied_section() {
+        let mut world = WorldToModify::default();
+        // Pre-place a non-AIR block deep underground (section -2: y=-32..=-17)
+        // to simulate e.g. a bridge pier.
+        world.set_block_if_absent(0, -20, 0, COBBLESTONE);
+
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        assert!(
+            !all_clean,
+            "should return false because section -2 was occupied"
+        );
+
+        let region = world.get_region(0, 0).unwrap();
+        let chunk = region.get_chunk(0, 0).unwrap();
+        // Section -4 and -3 should be Uniform(STONE)
+        for y in [-4i8, -3] {
+            let section = chunk.sections.get(&y).unwrap();
+            assert!(
+                matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
+                "section {y} should be Uniform(STONE)"
+            );
+        }
+        // Section -2 should be left alone (Full(Vec) with COBBLESTONE at y=-20)
+        let section = chunk.sections.get(&-2).unwrap();
+        assert!(
+            matches!(&section.storage, BlockStorage::Full(_)),
+            "section -2 should still be Full(Vec) (had COBBLESTONE)"
+        );
+        // The pre-existing block must still be there
+        let local_y = (-20i32 & 15) as u8;
+        let idx = SectionToModify::index(0, local_y, 0);
+        assert_eq!(
+            section.storage.get(idx),
+            COBBLESTONE,
+            "pre-existing COBBLESTONE must not be overwritten"
+        );
+    }
+
+    #[test]
+    fn bulk_fill_below_min_section_is_noop() {
+        let mut world = WorldToModify::default();
+        let all_clean = world.bulk_fill_chunk_sections_below(0, 0, MIN_SECTION_Y - 1, STONE);
+        assert!(all_clean, "below-min request should be vacuously clean");
+        // No region should have been created
+        assert!(world.get_region(0, 0).is_none());
+    }
+
+    #[test]
+    fn bulk_fill_second_call_treats_existing_stone_as_occupied() {
+        // The "empty" check is strict Uniform(AIR). A second bulk-fill call
+        // on already-Uniform(STONE) sections sees them as occupied (returns
+        // false) but leaves them in their correct final state — calling
+        // bulk_fill twice is harmless.
+        let mut world = WorldToModify::default();
+        assert!(world.bulk_fill_chunk_sections_below(0, 0, -2, STONE));
+        let second = world.bulk_fill_chunk_sections_below(0, 0, -2, STONE);
+        assert!(!second, "second call sees Uniform(STONE) as occupied");
+        let chunk = world.get_region(0, 0).unwrap().get_chunk(0, 0).unwrap();
+        for y in MIN_SECTION_Y..=-2 {
+            let section = chunk.sections.get(&y).unwrap();
+            assert!(
+                matches!(&section.storage, BlockStorage::Uniform(b) if *b == STONE),
+                "section {y} should still be Uniform(STONE)"
+            );
+        }
+    }
+
+    #[test]
+    fn set_with_props_if_absent_writes_then_protects_occupied() {
+        let mut world = WorldToModify::default();
+        let first = BlockWithProperties {
+            block: STONE,
+            properties: None,
+        };
+        world.set_with_props_if_absent(5, 70, 9, first);
+        assert_eq!(world.get_block(5, 70, 9), Some(STONE));
+
+        // A second write to the now-occupied cell must be ignored (the None/None contract).
+        let second = BlockWithProperties {
+            block: COBBLESTONE,
+            properties: None,
+        };
+        world.set_with_props_if_absent(5, 70, 9, second);
+        assert_eq!(
+            world.get_block(5, 70, 9),
+            Some(STONE),
+            "occupied cell must not be overwritten"
+        );
+    }
+
+    #[test]
+    fn set_block_if_absent_delegates_with_same_semantics() {
+        let mut world = WorldToModify::default();
+        world.set_block_if_absent(1, 64, 2, STONE);
+        assert_eq!(world.get_block(1, 64, 2), Some(STONE));
+        world.set_block_if_absent(1, 64, 2, COBBLESTONE);
+        assert_eq!(
+            world.get_block(1, 64, 2),
+            Some(STONE),
+            "delegating wrapper must preserve set-if-absent behaviour"
+        );
+    }
+
+    #[test]
+    fn set_with_props_if_absent_stores_and_omits_properties() {
+        let mut world = WorldToModify::default();
+        // y=64 → section index 4, local_y 0.
+        let section_idx = 4i8;
+        let local_y = (64 & 15) as u8;
+
+        let with_props = BlockWithProperties {
+            block: STONE,
+            properties: Some(std::sync::Arc::new(Value::Int(7))),
+        };
+        world.set_with_props_if_absent(0, 64, 0, with_props);
+        // A no-properties write to a different empty cell.
+        world.set_block_if_absent(1, 64, 0, STONE);
+
+        let chunk = world.get_region(0, 0).unwrap().get_chunk(0, 0).unwrap();
+        let section = chunk.sections.get(&section_idx).unwrap();
+        assert!(
+            section
+                .properties
+                .contains_key(&SectionToModify::index(0, local_y, 0)),
+            "block written with properties should store them"
+        );
+        assert!(
+            !section
+                .properties
+                .contains_key(&SectionToModify::index(1, local_y, 0)),
+            "block written without properties should leave none"
+        );
     }
 }

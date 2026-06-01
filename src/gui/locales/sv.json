@@ -45,6 +45,7 @@
   "three_dmr": "Använd 3D-modeller",
   "disable_height_limit": "Utöka byggnadshöjd",
   "aws_only_elevation": "Äldre terräng",
+  "bake_lighting": "Förberäkna ljussättning",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "save_path": "Sökväg",
   "rotation_angle": "Rotationsvinkel",
