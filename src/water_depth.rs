@@ -1,6 +1,6 @@
 //! Per-cell water depth carving from a chamfer-3-4 distance transform over the LC_WATER mask.
 
-use crate::block_definitions::{GRAVEL, SAND, SANDSTONE, STONE, WATER};
+use crate::block_definitions::{Block, COARSE_DIRT, DIRT, GRAVEL, SAND, SANDSTONE, STONE, WATER};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
@@ -18,6 +18,17 @@ const MAX_WATER_DEPTH: i32 = 6;
 
 /// Cap on water sub-rect cells (bounds memory, keeps u32 indices valid); ~1000 km².
 const MAX_WATER_FIELD_CELLS: usize = 1_000_000_000;
+
+// Meld additions: puddle threshold + dirt-blob bed overlay + dunes.
+
+/// Component DT threshold below which a water body is treated as a puddle
+/// and stays surface-only (no carve). Matches SHOAL_DT_UNITS — a body that
+/// doesn't even reach past the shoal ring shouldn't carve depth.
+const PUDDLE_DT_THRESHOLD: u8 = 9;
+
+/// Component cell-count threshold below which a body stays surface-only.
+/// A 5x5 cell body (~25 m^2 at ESA 10 m/cell) is a puddle by any sane def.
+const PUDDLE_CELL_THRESHOLD: usize = 25;
 
 #[inline]
 fn nibble_get(buf: &[u8], i: usize) -> u8 {
@@ -188,6 +199,13 @@ pub fn compute_big_water_field(ground: &Ground, xzbbox: &XZBBox) -> BigWaterFiel
                 visit(idx + sw, &mut comp);
             }
         }
+        // Meld puddle threshold: components whose peak DT is below the
+        // shoal-band reach OR whose cell count is tiny stay surface-only
+        // (depth nibbles stay 0; carve_water_column paints the WATER+SAND
+        // shoal stack with no carve below water_y).
+        if comp_max < PUDDLE_DT_THRESHOLD || comp.len() < PUDDLE_CELL_THRESHOLD {
+            continue;
+        }
         let cm = u16::from(comp_max);
         for &c in &comp {
             let idx = c as usize;
@@ -347,19 +365,31 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     }
     let bed_y = water_y - depth - 1;
 
-    // SAND share drifts down with depth; value_noise blends the boundary.
+    // Meld dirt-blob overlay on the upstream SAND/GRAVEL depth-drift mix.
+    // Sparse ~8% DIRT patches (scale-24 value_noise > 0.72) with rarer
+    // COARSE_DIRT hotspots inside (scale-9 > 0.78). Shoal (d=0/1) unchanged.
     let (top_block, under_block) = match depth {
         0..=1 => (SAND, SANDSTONE),
         2..=4 => {
-            let sand_threshold = match depth {
-                2 => 0.70,
-                3 => 0.50,
-                _ => 0.30,
-            };
-            if crate::ground_generation::value_noise_01(x, z, 6) < sand_threshold {
-                (SAND, SANDSTONE)
+            let dirt_blob = crate::ground_generation::value_noise_01(x + 113, z + 251, 24);
+            if dirt_blob > 0.72 {
+                let coarse_hot = crate::ground_generation::value_noise_01(x + 311, z + 47, 9);
+                if coarse_hot > 0.78 {
+                    (COARSE_DIRT, DIRT)
+                } else {
+                    (DIRT, DIRT)
+                }
             } else {
-                (GRAVEL, STONE)
+                let sand_threshold = match depth {
+                    2 => 0.70,
+                    3 => 0.50,
+                    _ => 0.30,
+                };
+                if crate::ground_generation::value_noise_01(x, z, 6) < sand_threshold {
+                    (SAND, SANDSTONE)
+                } else {
+                    (GRAVEL, STONE)
+                }
             }
         }
         _ => (GRAVEL, STONE),
@@ -371,6 +401,61 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     // Supports the gravity-affected bed; dropped onto bedrock at the lowest carve.
     if bed_y - 1 > MIN_Y {
         editor.set_block_absolute(under_block, x, bed_y - 1, z, None, Some(&[]));
+    }
+
+    // Meld underwater dunes — 3-octave value_noise places 1-3 block bumps
+    // on top of the bed, capped at depth/2 so tips never pierce the water
+    // surface. Dunes inherit the top_block (DIRT patch -> DIRT dune).
+    if depth >= 2 {
+        place_underwater_dunes(editor, x, z, water_y, bed_y, depth, top_block);
+    }
+}
+
+/// Place 1-3 block dune bumps on top of the underwater bed at (x, z).
+/// Inherits `bed_block` so dunes blend with the bed palette beneath them.
+fn place_underwater_dunes(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    bed_y: i32,
+    depth: i32,
+    bed_block: Block,
+) {
+    let m_a = crate::ground_generation::value_noise_01(x, z, 22);
+    let m_b = crate::ground_generation::value_noise_01(x, z, 36);
+    let m_c = crate::ground_generation::value_noise_01(x + 17, z + 41, 14);
+    let mound_noise = m_a * 0.50 + m_b * 0.35 + m_c * 0.15;
+
+    let depth_factor = (depth as f64 / MAX_WATER_DEPTH as f64).clamp(0.0, 1.0);
+    // Shelf cells (near shore) get a sparser gate so the SAND ring doesn't lump up.
+    let gate = if depth_factor < 0.34 { 0.72 } else { 0.65 };
+    if mound_noise < gate {
+        return;
+    }
+
+    let max_height = if depth_factor < 0.34 {
+        1
+    } else if depth_factor < 0.67 {
+        2
+    } else {
+        3
+    };
+    let raw_height = if mound_noise < 0.78 {
+        1
+    } else {
+        1 + ((mound_noise - 0.78) / 0.22 * max_height as f64).floor() as i32
+    };
+    // Cap to depth/2 so 2+ water blocks stay above; tops never reach the surface.
+    let depth_cap = (depth / 2).max(1);
+    let height = raw_height.clamp(1, depth_cap);
+
+    for dy in 1..=height {
+        let y = bed_y + dy;
+        if y >= water_y {
+            break;
+        }
+        editor.set_block_absolute(bed_block, x, y, z, None, Some(&[]));
     }
 }
 
