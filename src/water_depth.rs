@@ -1,6 +1,8 @@
 //! Per-cell water depth carving from a chamfer-3-4 distance transform over the LC_WATER mask.
 
-use crate::block_definitions::{Block, COARSE_DIRT, DIRT, GRAVEL, SAND, SANDSTONE, STONE, WATER};
+use crate::block_definitions::{
+    Block, COARSE_DIRT, DIRT, GRAVEL, MOSS_BLOCK, SAND, SANDSTONE, STONE, WATER,
+};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
@@ -365,20 +367,46 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     }
     let bed_y = water_y - depth - 1;
 
-    // Meld dirt-blob overlay on the upstream SAND/GRAVEL depth-drift mix.
-    // Sparse ~8% DIRT patches (scale-24 value_noise > 0.72) with rarer
-    // COARSE_DIRT hotspots inside (scale-9 > 0.78). Shoal (d=0/1) unchanged.
+    // Meld v2.8.3 multi-layer wobbly blob bed. Three noise layers stack on
+    // top of upstream's SAND/GRAVEL depth-drift base, decorrelated by
+    // distinct (offset_x, offset_z) so blobs don't lock in phase.
+    //
+    //   Layer A — big COARSE_DIRT blobs, scale 28, ~20% coverage
+    //   Layer B — medium DIRT blobs,     scale 16, ~30% coverage
+    //   Layer C — SAND pockets,          scale 22, ~12% coverage (reinjects
+    //             SAND into deep tiers so the floor isn't a uniform GRAVEL plane)
+    //   Layer D — upstream SAND vs GRAVEL drift (scale 6, depth-tiered)
+    //
+    // Shoal (d=0/1) still always SAND (the doc 05 mossy accents come in
+    // a separate match arm).
     let (top_block, under_block) = match depth {
-        0..=1 => (SAND, SANDSTONE),
-        2..=4 => {
-            let dirt_blob = crate::ground_generation::value_noise_01(x + 113, z + 251, 24);
-            if dirt_blob > 0.72 {
-                let coarse_hot = crate::ground_generation::value_noise_01(x + 311, z + 47, 9);
-                if coarse_hot > 0.78 {
-                    (COARSE_DIRT, DIRT)
-                } else {
-                    (DIRT, DIRT)
-                }
+        0..=1 => {
+            // v2.8.3 shoal accents: ~5% MOSS_BLOCK + ~2% COARSE_DIRT clumps
+            // break the perfect SAND ring. Per-cell coord_hash sub-samples
+            // the value_noise patch so accents land in coherent clusters.
+            let accent_noise = crate::ground_generation::value_noise_01(x + 73, z + 19, 18);
+            let accent_pick = (crate::land_cover::coord_hash(x, z) % 100) as i32;
+            if accent_noise > 0.78 && accent_pick < 60 {
+                (MOSS_BLOCK, DIRT)
+            } else if accent_noise > 0.70 && accent_pick < 25 {
+                (COARSE_DIRT, DIRT)
+            } else {
+                (SAND, SANDSTONE)
+            }
+        }
+        2..=6 => {
+            let coarse_blob = crate::ground_generation::value_noise_01(x + 113, z + 251, 28);
+            let dirt_blob = crate::ground_generation::value_noise_01(x + 311, z + 47, 16);
+            let sand_pocket = crate::ground_generation::value_noise_01(x + 47, z + 191, 22);
+
+            if coarse_blob > 0.62 {
+                (COARSE_DIRT, DIRT)
+            } else if dirt_blob > 0.58 {
+                (DIRT, DIRT)
+            } else if sand_pocket > 0.72 {
+                (SAND, SANDSTONE)
+            } else if depth >= 5 {
+                (GRAVEL, STONE)
             } else {
                 let sand_threshold = match depth {
                     2 => 0.70,
@@ -427,27 +455,22 @@ fn place_underwater_dunes(
     let m_c = crate::ground_generation::value_noise_01(x + 17, z + 41, 14);
     let mound_noise = m_a * 0.50 + m_b * 0.35 + m_c * 0.15;
 
-    let depth_factor = (depth as f64 / MAX_WATER_DEPTH as f64).clamp(0.0, 1.0);
-    // Shelf cells (near shore) get a sparser gate so the SAND ring doesn't lump up.
-    let gate = if depth_factor < 0.34 { 0.72 } else { 0.65 };
-    if mound_noise < gate {
+    // v2.8.3 — flat gate at 0.55 (~40-45% coverage), max height 3 everywhere.
+    // depth_cap is what actually limits height-by-depth; tiering is dropped.
+    if mound_noise < 0.55 {
         return;
     }
 
-    let max_height = if depth_factor < 0.34 {
+    let raw_height = if mound_noise < 0.72 {
         1
-    } else if depth_factor < 0.67 {
+    } else if mound_noise < 0.86 {
         2
     } else {
         3
     };
-    let raw_height = if mound_noise < 0.78 {
-        1
-    } else {
-        1 + ((mound_noise - 0.78) / 0.22 * max_height as f64).floor() as i32
-    };
-    // Cap to depth/2 so 2+ water blocks stay above; tops never reach the surface.
-    let depth_cap = (depth / 2).max(1);
+    // ((depth + 1) / 2) max-1 so depth=3 cells finally allow height-2 dunes
+    // and depth=5 cells get height-3, while still keeping 2+ water blocks above.
+    let depth_cap = ((depth + 1) / 2).max(1);
     let height = raw_height.clamp(1, depth_cap);
 
     for dy in 1..=height {
