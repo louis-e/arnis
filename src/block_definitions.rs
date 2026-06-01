@@ -334,8 +334,8 @@ impl Block {
             235 => "potted_poppy",
             236 => "oak_trapdoor",
             237 => "brown_candle",
-            238 => "oak_trapdoor",
-            239 => "oak_trapdoor",
+            238 => "seagrass",
+            239 => "kelp_plant",
             240 => "quartz_slab",
             241 => "dark_oak_trapdoor",
             242 => "spruce_trapdoor",
@@ -685,22 +685,8 @@ impl Block {
             // v2.8.3 — ID 237 repurposed from open-south oak_trapdoor (no
             // callers verified) to BROWN_CANDLE. Default candles=1, no
             // state needed; the vanilla block-state model picks it up.
-            // Open oak trapdoor facing east
-            238 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
-                map.insert("open".to_string(), Value::String("true".to_string()));
-                map.insert("half".to_string(), Value::String("top".to_string()));
-                map
-            })),
-            // Open oak trapdoor facing west
-            239 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("west".to_string()));
-                map.insert("open".to_string(), Value::String("true".to_string()));
-                map.insert("half".to_string(), Value::String("top".to_string()));
-                map
-            })),
+            // v2.8.4 — IDs 238/239 repurposed to SEAGRASS / KELP_PLANT
+            // (vanilla seagrass + kelp_plant blocks contain water natively).
             _ => None,
         }
     }
@@ -1038,8 +1024,10 @@ pub const DIAMOND_ORE: Block = Block::new(249);
 pub const REDSTONE_ORE: Block = Block::new(250);
 pub const LAPIS_ORE: Block = Block::new(251);
 
-// v2.8.3 Meld additions
+// v2.8.3 / v2.8.4 Meld additions
 pub const BROWN_CANDLE: Block = Block::new(237);
+pub const SEAGRASS: Block = Block::new(238);
+pub const KELP_PLANT: Block = Block::new(239);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

@@ -1,7 +1,8 @@
 //! Per-cell water depth carving from a chamfer-3-4 distance transform over the LC_WATER mask.
 
 use crate::block_definitions::{
-    Block, COARSE_DIRT, DIRT, GRAVEL, MOSS_BLOCK, SAND, SANDSTONE, STONE, WATER,
+    Block, COARSE_DIRT, DIRT, GRAVEL, KELP_PLANT, MOSS_BLOCK, SAND, SANDSTONE, SEAGRASS, STONE,
+    WATER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
@@ -354,6 +355,20 @@ pub fn estimate_max_carve_depth(
 
 /// Place the underwater stack: WATER column, then a SAND/GRAVEL bed over SANDSTONE/STONE.
 pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32, depth: i32) {
+    carve_water_column_with_flags(editor, x, z, water_y, depth, false)
+}
+
+/// Variant that suppresses the Meld blob/dune/vegetation overlays when
+/// the cell is adjacent to a bridge/road. Plain WATER + GRAVEL bed under
+/// causeways so the bridge "shadow" doesn't get textured with DIRT strips.
+pub fn carve_water_column_with_flags(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    depth: i32,
+    near_bridge: bool,
+) {
     debug_assert!(
         depth <= MAX_WATER_DEPTH,
         "water carve depth {depth} exceeds the max tier {MAX_WATER_DEPTH}"
@@ -394,16 +409,32 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
                 (SAND, SANDSTONE)
             }
         }
+        2..=6 if near_bridge => {
+            // Under-bridge zone: plain bed, no blobs, no dunes, no veg.
+            // Keeps a clean "shadow" under causeways so the bridge piers
+            // don't get textured with DIRT strips across the canal.
+            if depth >= 5 {
+                (GRAVEL, STONE)
+            } else if crate::ground_generation::value_noise_01(x, z, 6) < 0.4 {
+                (SAND, SANDSTONE)
+            } else {
+                (GRAVEL, STONE)
+            }
+        }
         2..=6 => {
             let coarse_blob = crate::ground_generation::value_noise_01(x + 113, z + 251, 28);
             let dirt_blob = crate::ground_generation::value_noise_01(x + 311, z + 47, 16);
             let sand_pocket = crate::ground_generation::value_noise_01(x + 47, z + 191, 22);
 
-            if coarse_blob > 0.62 {
+            // v2.8.4 — tighter thresholds: ~7% COARSE_DIRT, ~14% DIRT,
+            // ~8% SAND pockets, rest goes to upstream depth-drift base.
+            // d>=5 cells fall through to (GRAVEL, STONE) → ocean floor
+            // reads ~70% GRAVEL as user spec.
+            if coarse_blob > 0.80 {
                 (COARSE_DIRT, DIRT)
-            } else if dirt_blob > 0.58 {
+            } else if dirt_blob > 0.74 {
                 (DIRT, DIRT)
-            } else if sand_pocket > 0.72 {
+            } else if sand_pocket > 0.82 {
                 (SAND, SANDSTONE)
             } else if depth >= 5 {
                 (GRAVEL, STONE)
@@ -434,8 +465,51 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     // Meld underwater dunes — 3-octave value_noise places 1-3 block bumps
     // on top of the bed, capped at depth/2 so tips never pierce the water
     // surface. Dunes inherit the top_block (DIRT patch -> DIRT dune).
-    if depth >= 2 {
+    // Skip dunes under bridges so the bed stays flat under causeway shadows.
+    if depth >= 2 && !near_bridge {
         place_underwater_dunes(editor, x, z, water_y, bed_y, depth, top_block);
+    }
+
+    // v2.8.4 — sparse underwater vegetation in deep water far from bridges.
+    if depth >= 3 && !near_bridge {
+        place_underwater_vegetation(editor, x, z, water_y, bed_y, depth);
+    }
+}
+
+/// Sparse SEAGRASS + KELP_PLANT placement in deep water.
+fn place_underwater_vegetation(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    bed_y: i32,
+    depth: i32,
+) {
+    let veg_zone = crate::ground_generation::value_noise_01(x + 53, z + 89, 14);
+    if veg_zone < 0.55 {
+        return;
+    }
+    let h_dense = crate::land_cover::coord_hash(x, z) % 40;
+    let h_seagrass = crate::land_cover::coord_hash(x + 17, z + 31) % 25;
+
+    // Kelp columns at d>=4 in dense patches (~2.5% of cells inside zone).
+    if depth >= 4 && veg_zone > 0.65 && h_dense == 0 {
+        let plant_top = water_y - 1;
+        let plant_bottom = bed_y + 1;
+        if plant_top >= plant_bottom {
+            for y in plant_bottom..=plant_top {
+                editor.set_block_absolute(KELP_PLANT, x, y, z, None, Some(&[]));
+            }
+        }
+        return;
+    }
+
+    // Single-block SEAGRASS scattered (~4% of cells inside zone).
+    if h_seagrass == 0 {
+        let plant_y = bed_y + 1;
+        if plant_y < water_y {
+            editor.set_block_absolute(SEAGRASS, x, plant_y, z, None, Some(&[]));
+        }
     }
 }
 
@@ -510,7 +584,15 @@ pub fn carve_lc_water_pass(
             if editor.get_ground_level(x, z) > water_y {
                 continue;
             }
-            carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z));
+            // v2.8.4 — flag cells whose cardinal neighbour is a road
+            // (typically the bridge deck). carve_water_column_with_flags
+            // skips DIRT/COARSE_DIRT/MOSS blob overlays + dunes + veg
+            // when set, so the bed under a bridge stays clean.
+            let near_bridge = road_mask.contains(x - 1, z)
+                || road_mask.contains(x + 1, z)
+                || road_mask.contains(x, z - 1)
+                || road_mask.contains(x, z + 1);
+            carve_water_column_with_flags(editor, x, z, water_y, bwf.depth_at(x, z), near_bridge);
         }
     }
 }
