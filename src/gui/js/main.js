@@ -1377,6 +1377,7 @@ async function startGeneration() {
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var land_cover = document.getElementById("land-cover-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
+    var catastro = document.getElementById("catastro-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
@@ -1407,6 +1408,7 @@ async function startGeneration() {
         fillgroundEnabled: fill_ground,
         landCoverEnabled: land_cover,
         use3dEnabled: use_3d,
+        catastroEnabled: catastro,
         disableHeightLimit: disable_height_limit,
         awsOnlyElevation: aws_only_elevation,
         bakeLightingEnabled: bake_lighting,

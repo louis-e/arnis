@@ -5,6 +5,7 @@ mod bedrock_block_map;
 mod biome;
 mod block_definitions;
 mod bresenham;
+mod catastro;
 mod clipping;
 mod colors;
 mod coordinate_system;
@@ -172,7 +173,7 @@ fn run_cli() {
     };
 
     // Fetch data
-    let raw_data = match &args.file {
+    let mut raw_data = match &args.file {
         Some(file) => retrieve_data::fetch_data_from_file(file),
         None => retrieve_data::fetch_data_from_overpass(
             args.bbox,
@@ -182,6 +183,11 @@ fn run_cli() {
         ),
     }
     .expect("Failed to fetch data");
+
+    // Enrich building heights with real floor counts from the Spanish Cadastre.
+    if args.catastro {
+        catastro::enrich_building_heights(&mut raw_data, args.bbox);
+    }
 
     let mut ground = ground::generate_ground_data(&args);
 
