@@ -477,11 +477,9 @@ impl WorldToModify {
     /// at flush time and still match this whole-world value exactly. Used to verify
     /// parallel output is race-free and equals the non-eviction path.
     pub fn content_hash(&self) -> u64 {
-        self.regions
-            .keys()
-            .fold(0u64, |acc, &(rx, rz)| {
-                acc.wrapping_add(self.region_content_hash(rx, rz))
-            })
+        self.regions.keys().fold(0u64, |acc, &(rx, rz)| {
+            acc.wrapping_add(self.region_content_hash(rx, rz))
+        })
     }
 
     /// Deterministic hash of a single region's block content (region key + sorted

@@ -42,18 +42,22 @@ impl XZBBoxRect {
         self.max
     }
 
-    /// Total number of blocks covered in this 2D bbox
+    /// Total number of blocks covered in this 2D bbox. Exercised only by tests
+    /// since ground generation switched to explicit iter-bounds; kept as rect API.
+    #[allow(dead_code)]
     pub fn total_blocks(&self) -> u64 {
         (self.total_blocks_x() as u64) * (self.total_blocks_z() as u64)
     }
 
     /// Total number of blocks covered in x direction
+    #[allow(dead_code)]
     pub fn total_blocks_x(&self) -> u32 {
         let nx = self.max.x - self.min.x + 1;
         nx as u32
     }
 
     /// Total number of blocks covered in z direction
+    #[allow(dead_code)]
     pub fn total_blocks_z(&self) -> u32 {
         let nz = self.max.z - self.min.z + 1;
         nz as u32
