@@ -117,7 +117,29 @@ impl<'a> WorldEditor<'a> {
             return Ok(());
         }
 
-        let total_regions = self.world.regions.len() as u64;
+        // Compute region bounds from original bbox to skip halo regions.
+        // A region at (rx, rz) covers blocks [rx*512 .. rx*512+511] × [rz*512 .. rz*512+511].
+        let min_region_x = self.xzbbox.min_x().div_euclid(512);
+        let max_region_x = self.xzbbox.max_x().div_euclid(512);
+        let min_region_z = self.xzbbox.min_z().div_euclid(512);
+        let max_region_z = self.xzbbox.max_z().div_euclid(512);
+
+        let total_regions = self
+            .world
+            .regions
+            .keys()
+            .filter(|(rx, rz)| {
+                *rx >= min_region_x
+                    && *rx <= max_region_x
+                    && *rz >= min_region_z
+                    && *rz <= max_region_z
+            })
+            .count() as u64;
+
+        if total_regions == 0 {
+            return Ok(());
+        }
+
         let save_pb = ProgressBar::new(total_regions);
         save_pb.set_style(
             ProgressStyle::default_bar()
@@ -129,7 +151,6 @@ impl<'a> WorldEditor<'a> {
         );
 
         let regions_processed = AtomicU64::new(0);
-        // AtomicBool for a lock-free fast-path stop check; the Mutex only stores the error value.
         let should_stop = std::sync::atomic::AtomicBool::new(false);
         let first_error: Mutex<Option<Box<dyn std::error::Error + Send + Sync>>> = Mutex::new(None);
 
@@ -137,6 +158,15 @@ impl<'a> WorldEditor<'a> {
             .regions
             .par_iter()
             .for_each(|((region_x, region_z), region_to_modify)| {
+                // Skip halo regions outside the original bbox.
+                if *region_x < min_region_x
+                    || *region_x > max_region_x
+                    || *region_z < min_region_z
+                    || *region_z > max_region_z
+                {
+                    return;
+                }
+
                 // Fast-path: bail out without locking once an error has been recorded.
                 if should_stop.load(Ordering::Acquire) {
                     return;
@@ -147,7 +177,6 @@ impl<'a> WorldEditor<'a> {
                     if guard.is_none() {
                         *guard = Some(e);
                     }
-                    // Signal other workers to stop without re-acquiring the mutex.
                     should_stop.store(true, Ordering::Release);
                     return;
                 }
@@ -155,7 +184,6 @@ impl<'a> WorldEditor<'a> {
                 // Update progress
                 let regions_done = regions_processed.fetch_add(1, Ordering::SeqCst) + 1;
 
-                // Update progress at regular intervals (every ~10% or at least every 10 regions)
                 let update_interval = (total_regions / 10).max(1);
                 if regions_done.is_multiple_of(update_interval) || regions_done == total_regions {
                     let progress = 90.0 + (regions_done as f64 / total_regions as f64) * 9.0;
@@ -220,30 +248,29 @@ impl<'a> WorldEditor<'a> {
             }
         }
 
-        // Second pass: ensure all chunks exist (fill with base layer if not)
-        for chunk_x in 0..32 {
-            for chunk_z in 0..32 {
-                let abs_chunk_x = chunk_x + (region_x * 32);
-                let abs_chunk_z = chunk_z + (region_z * 32);
-
-                // Check if chunk exists in our modifications
-                let chunk_exists = region_to_modify.chunks.contains_key(&(chunk_x, chunk_z));
-
-                // If chunk doesn't exist, create it with base layer
-                if !chunk_exists {
-                    let biome_value = crate::biome::build_chunk_biome_nbt(
-                        abs_chunk_x,
-                        abs_chunk_z,
-                        ground_ref,
-                        center_lat,
-                    );
-                    let ser_buffer = Self::create_base_chunk(
-                        abs_chunk_x,
-                        abs_chunk_z,
-                        self.bake_lighting,
-                        &biome_value,
-                    )?;
-                    region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+        // Second pass: ensure all chunks exist (fill with base layer if not).
+        // Skip entirely when region already has all 1024 chunks (common after ground gen).
+        if region_to_modify.chunks.len() < 1024 {
+            for chunk_x in 0..32 {
+                for chunk_z in 0..32 {
+                    // If chunk doesn't exist, create it with base layer
+                    if !region_to_modify.chunks.contains_key(&(chunk_x, chunk_z)) {
+                        let abs_chunk_x = chunk_x + (region_x * 32);
+                        let abs_chunk_z = chunk_z + (region_z * 32);
+                        let biome_value = crate::biome::build_chunk_biome_nbt(
+                            abs_chunk_x,
+                            abs_chunk_z,
+                            ground_ref,
+                            center_lat,
+                        );
+                        let ser_buffer = Self::create_base_chunk(
+                            abs_chunk_x,
+                            abs_chunk_z,
+                            self.bake_lighting,
+                            &biome_value,
+                        )?;
+                        region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
+                    }
                 }
             }
         }
@@ -630,6 +657,33 @@ fn compute_lighting(
     out
 }
 
+/// Cached air block_states value shared by all empty sections.
+static AIR_BLOCK_STATES: OnceLock<Value> = OnceLock::new();
+
+fn get_air_block_states() -> &'static Value {
+    AIR_BLOCK_STATES.get_or_init(|| {
+        Value::Compound(HashMap::from([(
+            "palette".to_string(),
+            Value::List(vec![Value::Compound(HashMap::from([(
+                "Name".to_string(),
+                Value::String("minecraft:air".to_string()),
+            )]))]),
+        )]))
+    })
+}
+
+/// Cached structures value shared by all chunks.
+static STRUCTURES_VALUE: OnceLock<Value> = OnceLock::new();
+
+fn get_structures_value() -> &'static Value {
+    STRUCTURES_VALUE.get_or_init(|| {
+        Value::Compound(HashMap::from([
+            ("References".to_string(), Value::Compound(HashMap::new())),
+            ("starts".to_string(), Value::Compound(HashMap::new())),
+        ]))
+    })
+}
+
 /// Creates modern chunk NBT data (post-1.18 format, no Level wrapper).
 ///
 /// Writes all required fields for server compatibility:
@@ -678,16 +732,7 @@ fn create_chunk_nbt(
                 // Empty air section
                 HashMap::from([
                     ("Y".to_string(), Value::Byte(y)),
-                    (
-                        "block_states".to_string(),
-                        Value::Compound(HashMap::from([(
-                            "palette".to_string(),
-                            Value::List(vec![Value::Compound(HashMap::from([(
-                                "Name".to_string(),
-                                Value::String("minecraft:air".to_string()),
-                            )]))]),
-                        )])),
-                    ),
+                    ("block_states".to_string(), get_air_block_states().clone()),
                 ])
             };
             section_nbt.insert("biomes".to_string(), biome_value.clone());
@@ -728,13 +773,7 @@ fn create_chunk_nbt(
         ("LastUpdate".to_string(), Value::Long(0)),
         ("sections".to_string(), Value::List(sections)),
         ("Heightmaps".to_string(), heightmaps),
-        (
-            "structures".to_string(),
-            Value::Compound(HashMap::from([
-                ("References".to_string(), Value::Compound(HashMap::new())),
-                ("starts".to_string(), Value::Compound(HashMap::new())),
-            ])),
-        ),
+        ("structures".to_string(), get_structures_value().clone()),
         ("PostProcessing".to_string(), Value::List(post_processing)),
         ("block_ticks".to_string(), Value::List(vec![])),
         ("fluid_ticks".to_string(), Value::List(vec![])),

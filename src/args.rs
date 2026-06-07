@@ -40,6 +40,12 @@ pub struct Args {
     #[arg(long, default_value_t = 1.0)]
     pub scale: f64,
 
+    /// Projection mode for coordinate mapping
+    /// web_mercator: Global projection for multi-generation worlds (default)
+    /// local: Legacy mode, each generation starts at Minecraft (0,0)
+    #[arg(long, default_value = "local")]
+    pub projection: crate::projection::ProjectionKind,
+
     /// Ground level to use in the Minecraft world
     #[arg(long, default_value_t = -62)]
     pub ground_level: i32,

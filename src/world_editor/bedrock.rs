@@ -739,6 +739,8 @@ impl BedrockWriter {
                 max_geo_lat: llbbox.max().lat(),
                 min_geo_lon: llbbox.min().lng(),
                 max_geo_lon: llbbox.max().lng(),
+                projection: "local".to_string(),
+                scale: 1.0,
             },
             format: "bedrock-mcworld",
             chunk_count,

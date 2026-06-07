@@ -108,6 +108,11 @@ pub(crate) struct WorldMetadata {
     pub max_geo_lat: f64,
     pub min_geo_lon: f64,
     pub max_geo_lon: f64,
+
+    /// Projection mode used for coordinate mapping ("local" or "web_mercator")
+    pub projection: String,
+    /// World scale in blocks per meter
+    pub scale: f64,
 }
 
 /// The main world editor struct for placing blocks and saving worlds.
@@ -131,6 +136,17 @@ pub struct WorldEditor<'a> {
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    /// Origin coordinates for ground-level elevation lookups. Defaults to
+    /// `xzbbox.min_x()/min_z()`. Tile editors used by the parallel
+    /// data-processing path override these to the *main* world's xzbbox
+    /// origin so the shared `Ground` elevation grid is indexed correctly
+    /// even though each tile has its own (haloed) xzbbox.
+    ground_origin_x: i32,
+    ground_origin_z: i32,
+    /// Projection mode used for this generation ("local" or "web_mercator").
+    projection: String,
+    /// World scale in blocks per meter.
+    scale: f64,
     bedrock_level_name: Option<String>,
     bedrock_spawn_point: Option<(i32, i32)>,
     bedrock_extend_height: bool,
@@ -160,6 +176,10 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
+            ground_origin_x: xzbbox.min_x(),
+            ground_origin_z: xzbbox.min_z(),
+            projection: "local".to_string(),
+            scale: 1.0,
             bedrock_level_name: None,
             bedrock_spawn_point: None,
             bedrock_extend_height: false,
@@ -190,6 +210,10 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
+            ground_origin_x: xzbbox.min_x(),
+            ground_origin_z: xzbbox.min_z(),
+            projection: "local".to_string(),
+            scale: 1.0,
             bedrock_level_name,
             bedrock_spawn_point,
             bedrock_extend_height,
@@ -220,6 +244,10 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
+            ground_origin_x: xzbbox.min_x(),
+            ground_origin_z: xzbbox.min_z(),
+            projection: "local".to_string(),
+            scale: 1.0,
             bedrock_level_name: None,
             bedrock_spawn_point: None,
             bedrock_extend_height: false,
@@ -229,6 +257,22 @@ impl<'a> WorldEditor<'a> {
             luanti_game: game,
             bake_lighting: false,
         }
+    }
+
+    /// Set the projection and scale metadata for this world.
+    pub fn set_projection_info(&mut self, projection: &str, scale: f64) {
+        self.projection = projection.to_string();
+        self.scale = scale;
+    }
+
+    /// Override the ground lookup origin for tile editors.
+    ///
+    /// By default, ground lookups subtract `xzbbox.min_x/z()`. Tile editors
+    /// must call this with the *main* world's xzbbox origin so the shared
+    /// elevation grid is indexed correctly.
+    pub fn set_ground_origin(&mut self, origin_x: i32, origin_z: i32) {
+        self.ground_origin_x = origin_x;
+        self.ground_origin_z = origin_z;
     }
 
     /// Sets the ground reference for elevation-based block placement
@@ -250,6 +294,27 @@ impl<'a> WorldEditor<'a> {
     #[allow(dead_code)]
     pub fn format(&self) -> WorldFormat {
         self.format
+    }
+
+    /// Consume the WorldEditor and return the underlying WorldToModify.
+    /// Used for tile-based parallel processing where tile results need to be merged.
+    pub(crate) fn into_world(self) -> WorldToModify {
+        self.world
+    }
+
+    /// Merge another WorldToModify into this editor's world with authoritative bounds.
+    /// Blocks within the authoritative region always overwrite; blocks outside only
+    /// write if the target position is currently AIR (empty).
+    pub(crate) fn merge_world(
+        &mut self,
+        other: WorldToModify,
+        auth_min_x: i32,
+        auth_min_z: i32,
+        auth_max_x: i32,
+        auth_max_z: i32,
+    ) {
+        self.world
+            .merge(other, auth_min_x, auth_min_z, auth_max_x, auth_max_z);
     }
 
     /// Calculate the absolute Y position from a ground-relative offset
@@ -278,8 +343,8 @@ impl<'a> WorldEditor<'a> {
         }
         if let Some(ground) = &self.ground {
             ground.level(XZPoint::new(
-                x - self.xzbbox.min_x(),
-                z - self.xzbbox.min_z(),
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
             ))
         } else {
             0 // Default ground level if no terrain data
@@ -307,8 +372,8 @@ impl<'a> WorldEditor<'a> {
     pub fn get_water_level(&self, x: i32, z: i32) -> i32 {
         if let Some(ground) = &self.ground {
             ground.water_level(XZPoint::new(
-                x - self.xzbbox.min_x(),
-                z - self.xzbbox.min_z(),
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
             ))
         } else {
             0
@@ -1216,6 +1281,9 @@ impl<'a> WorldEditor<'a> {
             max_geo_lat: self.llbbox.max().lat(),
             min_geo_lon: self.llbbox.min().lng(),
             max_geo_lon: self.llbbox.max().lng(),
+
+            projection: self.projection.clone(),
+            scale: self.scale,
         };
 
         let contents = serde_json::to_string(&metadata)
@@ -1245,6 +1313,19 @@ fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32) -> IntArray {
         seed_b as i32,
     ])
 }
+
+// Compile-time assertions that WorldEditor is thread-safe for shared reads.
+// Needed for rayon-based parallel tile processing — the build fails here
+// if anyone adds a non-Send/Sync field to WorldEditor.
+#[allow(dead_code)]
+const _: () = {
+    fn assert_sync<T: Sync>() {}
+    fn assert_send<T: Send>() {}
+    fn check() {
+        assert_sync::<WorldEditor<'_>>();
+        assert_send::<WorldEditor<'_>>();
+    }
+};
 
 #[allow(dead_code)]
 fn single_item(id: &str, slot: i8, count: i8) -> HashMap<String, Value> {

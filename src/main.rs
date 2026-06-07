@@ -29,11 +29,13 @@ mod osm_parser;
 mod overture;
 #[cfg(feature = "gui")]
 mod progress;
+mod projection;
 mod retrieve_data;
 #[cfg(feature = "gui")]
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
+mod tile;
 mod version_check;
 mod water_depth;
 mod world_editor;
@@ -187,7 +189,7 @@ fn run_cli() {
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox, outline_suppression) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.projection);
 
     // Fetch supplementary building data from Overture Maps
     {
@@ -266,15 +268,26 @@ fn run_cli() {
                 std::process::exit(1);
             });
 
-            let (transformer, pre_rot_bbox) =
-                CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale).unwrap_or_else(|e| {
-                    eprintln!(
-                        "{} Failed to convert spawn point: {}",
-                        "Error:".red().bold(),
-                        e
-                    );
-                    std::process::exit(1);
-                });
+            let (transformer, pre_rot_bbox) = match args.projection {
+                projection::ProjectionKind::WebMercator => {
+                    let origin_lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
+                    let origin_lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
+                    let proj =
+                        projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
+                    CoordTransformer::with_projection(&args.bbox, args.scale, &proj)
+                }
+                projection::ProjectionKind::Local => {
+                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                }
+            }
+            .unwrap_or_else(|e| {
+                eprintln!(
+                    "{} Failed to convert spawn point: {}",
+                    "Error:".red().bold(),
+                    e
+                );
+                std::process::exit(1);
+            });
 
             let xzpoint = transformer.transform_point(llpoint);
             let (sx, sz) = map_transformation::rotate::rotate_xz_point(
