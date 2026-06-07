@@ -110,6 +110,26 @@ fn run_cli() {
         std::process::exit(1);
     }
 
+    // Heads-up for very large areas: generation is long and memory-heavy, and big
+    // requests load the public OpenStreetMap / elevation servers. Non-blocking.
+    {
+        const MAX_RECOMMENDED_AREA_KM2: f64 = 250.0;
+        let b = &args.bbox;
+        let mid_lat = ((b.min().lat() + b.max().lat()) / 2.0).to_radians();
+        let width_m = (b.max().lng() - b.min().lng()) * 111_320.0 * mid_lat.cos();
+        let height_m = (b.max().lat() - b.min().lat()) * 111_320.0;
+        let area_km2 = (width_m * height_m).abs() / 1_000_000.0;
+        if area_km2 > MAX_RECOMMENDED_AREA_KM2 {
+            eprintln!(
+                "{} Large area selected (~{:.0} km²). Generation may take a long time and \
+                 use many GB of memory, and places heavy load on public OpenStreetMap and \
+                 elevation servers. Use a smaller area if this was unintended.",
+                "Note:".yellow().bold(),
+                area_km2
+            );
+        }
+    }
+
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld
