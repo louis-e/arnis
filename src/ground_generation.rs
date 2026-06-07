@@ -118,19 +118,58 @@ pub fn generate_ground_layer(
     xzbbox: &XZBBox,
     building_footprints: &BuildingFootprintBitmap,
 ) -> Result<(), String> {
+    generate_ground_region(
+        editor,
+        ground,
+        args,
+        xzbbox,
+        building_footprints,
+        xzbbox.min_x(),
+        xzbbox.max_x(),
+        xzbbox.min_z(),
+        xzbbox.max_z(),
+        true,
+    );
+    Ok(())
+}
+
+/// Generate the ground layer for the inclusive `[iter_min_*..=iter_max_*]` block
+/// range. The shared elevation / land-cover grid is indexed against `xzbbox`
+/// (the *main* world origin), so per-tile callers pass the main bbox here and
+/// their strict tile bounds as the iter range, with `show_progress = false`.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_ground_region(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    args: &Args,
+    xzbbox: &XZBBox,
+    building_footprints: &BuildingFootprintBitmap,
+    iter_min_x: i32,
+    iter_max_x: i32,
+    iter_min_z: i32,
+    iter_max_z: i32,
+    show_progress: bool,
+) {
     let has_land_cover = ground.has_land_cover();
     let terrain_enabled = ground.elevation_enabled;
 
-    let total_blocks: u64 = xzbbox.bounding_rect().total_blocks();
+    let total_blocks: u64 =
+        (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
     let desired_updates: u64 = 1500;
     let batch_size: u64 = (total_blocks / desired_updates).max(1);
 
     let mut block_counter: u64 = 0;
 
-    println!("{} Generating ground...", "[6/7]".bold());
-    emit_gui_progress_update(70.0, "Generating ground...");
+    if show_progress {
+        println!("{} Generating ground...", "[6/7]".bold());
+        emit_gui_progress_update(70.0, "Generating ground...");
+    }
 
-    let ground_pb: ProgressBar = ProgressBar::new(total_blocks);
+    let ground_pb: ProgressBar = if show_progress {
+        ProgressBar::new(total_blocks)
+    } else {
+        ProgressBar::hidden()
+    };
     ground_pb.set_style(
         ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:45}] {pos}/{len} blocks ({eta})")
@@ -146,18 +185,18 @@ pub fn generate_ground_layer(
     // Process ground generation chunk-by-chunk for better cache locality.
     // This keeps the same region/chunk HashMap entries hot in CPU cache,
     // rather than jumping between regions on every Z iteration.
-    let min_chunk_x = xzbbox.min_x() >> 4;
-    let max_chunk_x = xzbbox.max_x() >> 4;
-    let min_chunk_z = xzbbox.min_z() >> 4;
-    let max_chunk_z = xzbbox.max_z() >> 4;
+    let min_chunk_x = iter_min_x >> 4;
+    let max_chunk_x = iter_max_x >> 4;
+    let min_chunk_z = iter_min_z >> 4;
+    let max_chunk_z = iter_max_z >> 4;
 
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
             // Calculate the block range for this chunk, clamped to bbox
-            let chunk_min_x = (chunk_x << 4).max(xzbbox.min_x());
-            let chunk_max_x = ((chunk_x << 4) + 15).min(xzbbox.max_x());
-            let chunk_min_z = (chunk_z << 4).max(xzbbox.min_z());
-            let chunk_max_z = ((chunk_z << 4) + 15).min(xzbbox.max_z());
+            let chunk_min_x = (chunk_x << 4).max(iter_min_x);
+            let chunk_max_x = ((chunk_x << 4) + 15).min(iter_max_x);
+            let chunk_min_z = (chunk_z << 4).max(iter_min_z);
+            let chunk_max_z = ((chunk_z << 4) + 15).min(iter_max_z);
 
             // Precompute a per-chunk ground-Y cache so subsequent lookups
             // (main column + water-column + depth-fill neighbours, ~20+ per
@@ -1130,10 +1169,12 @@ pub fn generate_ground_layer(
                         ground_pb.inc(batch_size);
                     }
 
-                    gui_progress_grnd += progress_increment_grnd;
-                    if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
-                        emit_gui_progress_update(gui_progress_grnd, "");
-                        last_emitted_progress = gui_progress_grnd;
+                    if show_progress {
+                        gui_progress_grnd += progress_increment_grnd;
+                        if (gui_progress_grnd - last_emitted_progress).abs() > 0.25 {
+                            emit_gui_progress_update(gui_progress_grnd, "");
+                            last_emitted_progress = gui_progress_grnd;
+                        }
                     }
                 }
             }
@@ -1145,8 +1186,6 @@ pub fn generate_ground_layer(
 
     ground_pb.inc(block_counter % batch_size);
     ground_pb.finish();
-
-    Ok(())
 }
 
 /// Smooth scalar noise in `[0, 1]` at approximately `scale`-block resolution.

@@ -51,11 +51,6 @@ pub const TILE_EDITOR_HALO: i32 = 64;
 /// owning tile's editor halo instead of being lost.
 const TREE_HALO: i32 = 8;
 
-/// Halo for linear-element intersection testing. Roads/rails up to ~5 blocks
-/// per side; the centerline is what gets assigned, and any extra width is
-/// absorbed by `TILE_EDITOR_HALO` on the owning tile.
-const LINEAR_INTERSECTION_HALO: i32 = 6;
-
 /// Subdivide the world bounding box into tiles of the given size.
 /// Tiles at the edge may be smaller than the full tile size.
 pub fn create_tiles(xzbbox: &XZBBox, tile_size: i32) -> Vec<TileBounds> {
@@ -97,32 +92,11 @@ pub fn create_tiles(xzbbox: &XZBBox, tile_size: i32) -> Vec<TileBounds> {
     tiles
 }
 
-/// Compute the centroid of a way's nodes.
-fn way_centroid(way: &ProcessedWay) -> (i32, i32) {
-    if way.nodes.is_empty() {
-        return (0, 0);
-    }
-    let sum_x: i64 = way.nodes.iter().map(|n| n.x as i64).sum();
-    let sum_z: i64 = way.nodes.iter().map(|n| n.z as i64).sum();
-    let count = way.nodes.len() as i64;
-    ((sum_x / count) as i32, (sum_z / count) as i32)
-}
-
-/// Compute the centroid of a relation (average of all member way centroids).
-fn relation_centroid(rel: &ProcessedRelation) -> (i32, i32) {
-    let mut sum_x: i64 = 0;
-    let mut sum_z: i64 = 0;
-    let mut count: i64 = 0;
-    for member in &rel.members {
-        let (cx, cz) = way_centroid(&member.way);
-        sum_x += cx as i64;
-        sum_z += cz as i64;
-        count += 1;
-    }
-    if count == 0 {
-        return (0, 0);
-    }
-    ((sum_x / count) as i32, (sum_z / count) as i32)
+/// Check if any of a relation's member ways intersect the given bounds.
+fn relation_intersects_bounds(rel: &ProcessedRelation, bounds: &TileBounds) -> bool {
+    rel.members
+        .iter()
+        .any(|member| way_intersects_bounds(&member.way, bounds))
 }
 
 /// Check if a way's bounding box intersects with the given bounds.
@@ -165,9 +139,10 @@ fn is_linear_element(way: &ProcessedWay) -> bool {
 ///
 /// Assignment rules:
 /// - Point elements (nodes): assigned to the tile containing the point (with halo for trees)
-/// - Area elements (buildings, landuse): assigned to the tile containing their centroid
+/// - Area elements (buildings, landuse) and relations: assigned to ALL tiles whose
+///   editor halo their geometry overlaps (renders large polygons fully and gives
+///   per-tile ground generation complete neighbour data across strict boundaries)
 /// - Linear elements (roads, railways): assigned to ALL tiles they intersect
-/// - Relations: assigned by centroid of outer ring
 pub fn assign_elements_to_tiles(
     elements: &[ProcessedElement],
     tiles: &[TileBounds],
@@ -195,30 +170,34 @@ pub fn assign_elements_to_tiles(
             }
             ProcessedElement::Way(way) => {
                 if is_linear_element(way) {
-                    // Linear elements: assign to ALL tiles they intersect
+                    // Linear elements: assign to every tile whose editor halo their
+                    // centerline AABB overlaps. The halo must cover the widest rendered
+                    // half-width (aeroways reach ~40 blocks) so a tile that receives the
+                    // element's blocks in its strict bounds also renders them — otherwise
+                    // per-tile ground generation would overwrite that surface with terrain.
                     for (tile_idx, tile) in tiles.iter().enumerate() {
-                        if way_intersects_bounds(way, &tile.expanded(LINEAR_INTERSECTION_HALO)) {
+                        if way_intersects_bounds(way, &tile.expanded(TILE_EDITOR_HALO)) {
                             tile_elements[tile_idx].push(elem_idx);
                         }
                     }
                 } else {
-                    // Area elements: assign by centroid
-                    let (cx, cz) = way_centroid(way);
+                    // Area elements: assign to every tile whose editor halo their
+                    // geometry overlaps, so each tile renders its portion fully (no
+                    // large-polygon clipping) and per-tile ground generation sees
+                    // complete neighbour data across strict-tile boundaries.
                     for (tile_idx, tile) in tiles.iter().enumerate() {
-                        if tile.contains(cx, cz) {
+                        if way_intersects_bounds(way, &tile.expanded(TILE_EDITOR_HALO)) {
                             tile_elements[tile_idx].push(elem_idx);
-                            break;
                         }
                     }
                 }
             }
             ProcessedElement::Relation(rel) => {
-                // Relations: assign by centroid
-                let (cx, cz) = relation_centroid(rel);
+                // Relations: assign to every tile whose editor halo any member way
+                // overlaps (same rationale as area ways).
                 for (tile_idx, tile) in tiles.iter().enumerate() {
-                    if tile.contains(cx, cz) {
+                    if relation_intersects_bounds(rel, &tile.expanded(TILE_EDITOR_HALO)) {
                         tile_elements[tile_idx].push(elem_idx);
-                        break;
                     }
                 }
             }

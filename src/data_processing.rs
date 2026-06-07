@@ -276,6 +276,7 @@ pub fn generate_world_with_options(
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     let ground = Arc::new(ground);
     let mut bench = crate::bench::Bench::new(args.benchmark);
+    let whole_bbox_ground = std::env::var_os("ARNIS_WHOLE_BBOX_GROUND").is_some();
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
@@ -419,6 +420,29 @@ pub fn generate_world_with_options(
                         );
                     }
 
+                    // Generate ground per-tile so the dominant ground phase scales
+                    // with cores. Restricted to strict tile bounds (authoritative at
+                    // merge); neighbour reads come from the 64-block editor halo, which
+                    // now holds complete area/relation data via intersection assignment.
+                    if !whole_bbox_ground {
+                        let g_min_x = tile_bounds.min_x.max(xzbbox.min_x());
+                        let g_max_x = (tile_bounds.max_x - 1).min(xzbbox.max_x());
+                        let g_min_z = tile_bounds.min_z.max(xzbbox.min_z());
+                        let g_max_z = (tile_bounds.max_z - 1).min(xzbbox.max_z());
+                        ground_generation::generate_ground_region(
+                            &mut tile_editor,
+                            ground.as_ref(),
+                            args,
+                            &xzbbox,
+                            &building_footprints,
+                            g_min_x,
+                            g_max_x,
+                            g_min_z,
+                            g_max_z,
+                            false,
+                        );
+                    }
+
                     (tile_idx, tile_editor.into_world(), tile_subway_points)
                 })
                 .collect();
@@ -532,14 +556,17 @@ pub fn generate_world_with_options(
     drop(highway_connectivity);
     drop(flood_fill_cache);
 
-    // Generate ground layer (surface blocks, vegetation, shorelines, underground fill)
-    ground_generation::generate_ground_layer(
-        &mut editor,
-        ground.as_ref(),
-        args,
-        &xzbbox,
-        &building_footprints,
-    )?;
+    // Sequential (small-area) path generates ground on the merged editor here.
+    // The parallel path already generated ground per-tile inside the rayon closure.
+    if tiles.len() < 3 || whole_bbox_ground {
+        ground_generation::generate_ground_layer(
+            &mut editor,
+            ground.as_ref(),
+            args,
+            &xzbbox,
+            &building_footprints,
+        )?;
+    }
     bench.mark("ground_gen");
 
     if args.fillground {
@@ -568,6 +595,10 @@ pub fn generate_world_with_options(
         p.place(&mut editor, args);
     }
     bench.mark("post_passes");
+
+    if std::env::var_os("ARNIS_BLOCK_HASH").is_some() {
+        eprintln!("[BENCHMARK] block_hash={:016x}", editor.content_hash());
+    }
 
     // Save world
     if let Err(e) = editor.save() {

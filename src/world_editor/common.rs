@@ -471,6 +471,43 @@ pub(crate) struct WorldToModify {
 }
 
 impl WorldToModify {
+    /// Deterministic, storage-representation-independent hash of all block IDs.
+    /// Sorts region/chunk/section keys so the result is order-independent; used to
+    /// verify parallel output is race-free and matches the sequential ground path.
+    pub fn content_hash(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut region_keys: Vec<&(i32, i32)> = self.regions.keys().collect();
+        region_keys.sort_unstable();
+        for rk in region_keys {
+            rk.hash(&mut h);
+            let region = &self.regions[rk];
+            let mut chunk_keys: Vec<&(i32, i32)> = region.chunks.keys().collect();
+            chunk_keys.sort_unstable();
+            for ck in chunk_keys {
+                ck.hash(&mut h);
+                let chunk = &region.chunks[ck];
+                let mut sec_keys: Vec<&i8> = chunk.sections.keys().collect();
+                sec_keys.sort_unstable();
+                for sk in sec_keys {
+                    sk.hash(&mut h);
+                    match &chunk.sections[sk].storage {
+                        BlockStorage::Uniform(b) => b.hash(&mut h),
+                        BlockStorage::Full(v) => {
+                            let first = v[0];
+                            if v.iter().all(|&x| x == first) {
+                                first.hash(&mut h);
+                            } else {
+                                v.hash(&mut h);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        h.finish()
+    }
+
     #[inline]
     pub fn get_or_create_region(&mut self, x: i32, z: i32) -> &mut RegionToModify {
         self.regions.entry((x, z)).or_default()

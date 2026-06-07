@@ -302,6 +302,11 @@ impl<'a> WorldEditor<'a> {
         self.world
     }
 
+    /// Deterministic content hash of the world (see `WorldToModify::content_hash`).
+    pub fn content_hash(&self) -> u64 {
+        self.world.content_hash()
+    }
+
     /// Merge another WorldToModify into this editor's world with authoritative bounds.
     /// Blocks within the authoritative region always overwrite; blocks outside only
     /// write if the target position is currently AIR (empty).
