@@ -472,34 +472,44 @@ pub(crate) struct WorldToModify {
 
 impl WorldToModify {
     /// Deterministic, storage-representation-independent hash of all block IDs.
-    /// Sorts region/chunk/section keys so the result is order-independent; used to
-    /// verify parallel output is race-free and matches the sequential ground path.
+    /// Combined across regions with an order-independent fold (wrapping_add of each
+    /// region's hash) so the streaming/eviction path can accumulate it region-by-region
+    /// at flush time and still match this whole-world value exactly. Used to verify
+    /// parallel output is race-free and equals the non-eviction path.
     pub fn content_hash(&self) -> u64 {
+        self.regions
+            .keys()
+            .fold(0u64, |acc, &(rx, rz)| {
+                acc.wrapping_add(self.region_content_hash(rx, rz))
+            })
+    }
+
+    /// Deterministic hash of a single region's block content (region key + sorted
+    /// chunk/section/storage). Returns 0 if the region is absent.
+    pub fn region_content_hash(&self, rx: i32, rz: i32) -> u64 {
         use std::hash::{Hash, Hasher};
+        let Some(region) = self.regions.get(&(rx, rz)) else {
+            return 0;
+        };
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        let mut region_keys: Vec<&(i32, i32)> = self.regions.keys().collect();
-        region_keys.sort_unstable();
-        for rk in region_keys {
-            rk.hash(&mut h);
-            let region = &self.regions[rk];
-            let mut chunk_keys: Vec<&(i32, i32)> = region.chunks.keys().collect();
-            chunk_keys.sort_unstable();
-            for ck in chunk_keys {
-                ck.hash(&mut h);
-                let chunk = &region.chunks[ck];
-                let mut sec_keys: Vec<&i8> = chunk.sections.keys().collect();
-                sec_keys.sort_unstable();
-                for sk in sec_keys {
-                    sk.hash(&mut h);
-                    match &chunk.sections[sk].storage {
-                        BlockStorage::Uniform(b) => b.hash(&mut h),
-                        BlockStorage::Full(v) => {
-                            let first = v[0];
-                            if v.iter().all(|&x| x == first) {
-                                first.hash(&mut h);
-                            } else {
-                                v.hash(&mut h);
-                            }
+        (rx, rz).hash(&mut h);
+        let mut chunk_keys: Vec<&(i32, i32)> = region.chunks.keys().collect();
+        chunk_keys.sort_unstable();
+        for ck in chunk_keys {
+            ck.hash(&mut h);
+            let chunk = &region.chunks[ck];
+            let mut sec_keys: Vec<&i8> = chunk.sections.keys().collect();
+            sec_keys.sort_unstable();
+            for sk in sec_keys {
+                sk.hash(&mut h);
+                match &chunk.sections[sk].storage {
+                    BlockStorage::Uniform(b) => b.hash(&mut h),
+                    BlockStorage::Full(v) => {
+                        let first = v[0];
+                        if v.iter().all(|&x| x == first) {
+                            first.hash(&mut h);
+                        } else {
+                            v.hash(&mut h);
                         }
                     }
                 }
