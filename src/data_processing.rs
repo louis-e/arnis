@@ -441,6 +441,31 @@ pub fn generate_world_with_options(
                             g_max_z,
                             false,
                         );
+                        // Per-tile post-passes that only read shared grids + the tile's
+                        // own placed stone and write non-AIR: ore veins and ESA-water
+                        // depth. (Subway carve and 3D models stay global — they need the
+                        // merged world / cross-region data.)
+                        if args.fillground {
+                            crate::ore_generation::generate_ores_region(
+                                &mut tile_editor,
+                                g_min_x,
+                                g_max_x,
+                                g_min_z,
+                                g_max_z,
+                                false,
+                            );
+                        }
+                        crate::water_depth::carve_lc_water_region(
+                            &mut tile_editor,
+                            ground.as_ref(),
+                            &xzbbox,
+                            &big_water_field,
+                            &road_mask,
+                            g_min_x,
+                            g_max_x,
+                            g_min_z,
+                            g_max_z,
+                        );
                     }
 
                     (tile_idx, tile_editor.into_world(), tile_subway_points)
@@ -556,9 +581,12 @@ pub fn generate_world_with_options(
     drop(highway_connectivity);
     drop(flood_fill_cache);
 
-    // Sequential (small-area) path generates ground on the merged editor here.
-    // The parallel path already generated ground per-tile inside the rayon closure.
-    if tiles.len() < 3 || whole_bbox_ground {
+    // True when ground (and the ore/water post-passes) run on the merged editor:
+    // the small-area sequential path, or the whole-bbox-ground override. The
+    // parallel per-tile path already did ground + ore + water inside the closure.
+    let ground_on_merged = tiles.len() < 3 || whole_bbox_ground;
+
+    if ground_on_merged {
         ground_generation::generate_ground_layer(
             &mut editor,
             ground.as_ref(),
@@ -569,18 +597,19 @@ pub fn generate_world_with_options(
     }
     bench.mark("ground_gen");
 
-    if args.fillground {
-        crate::ore_generation::generate_ores(&mut editor, &xzbbox);
+    if ground_on_merged {
+        if args.fillground {
+            crate::ore_generation::generate_ores(&mut editor, &xzbbox);
+        }
+        // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
+        crate::water_depth::carve_lc_water_pass(
+            &mut editor,
+            ground.as_ref(),
+            &xzbbox,
+            &big_water_field,
+            &road_mask,
+        );
     }
-
-    // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
-    crate::water_depth::carve_lc_water_pass(
-        &mut editor,
-        ground.as_ref(),
-        &xzbbox,
-        &big_water_field,
-        &road_mask,
-    );
 
     drop(road_mask);
 

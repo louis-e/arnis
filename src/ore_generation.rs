@@ -75,13 +75,38 @@ const ORES: &[OreDef] = &[
 
 /// Place ore veins across every chunk; Y is relative to local ground.
 pub fn generate_ores(editor: &mut WorldEditor, xzbbox: &XZBBox) {
-    println!("{} Sprinkling ore veins...", "[6b/7]".bold());
-    emit_gui_progress_update(89.0, "Sprinkling ore veins...");
+    generate_ores_region(
+        editor,
+        xzbbox.min_x(),
+        xzbbox.max_x(),
+        xzbbox.min_z(),
+        xzbbox.max_z(),
+        true,
+    );
+}
 
-    let min_chunk_x = xzbbox.min_x() >> 4;
-    let max_chunk_x = xzbbox.max_x() >> 4;
-    let min_chunk_z = xzbbox.min_z() >> 4;
-    let max_chunk_z = xzbbox.max_z() >> 4;
+/// Place ore veins across the chunks covering the inclusive `[iter_min..=iter_max]`
+/// block range. Per-tile callers pass their strict tile bounds; the editor's own
+/// ground origin makes `get_ground_level` return main-world values. Per-chunk RNG
+/// is seeded only on chunk coords, so output is identical regardless of tiling
+/// (veins simply truncate at the un-stone-filled tile halo).
+pub fn generate_ores_region(
+    editor: &mut WorldEditor,
+    iter_min_x: i32,
+    iter_max_x: i32,
+    iter_min_z: i32,
+    iter_max_z: i32,
+    show_progress: bool,
+) {
+    if show_progress {
+        println!("{} Sprinkling ore veins...", "[6b/7]".bold());
+        emit_gui_progress_update(89.0, "Sprinkling ore veins...");
+    }
+
+    let min_chunk_x = iter_min_x >> 4;
+    let max_chunk_x = iter_max_x >> 4;
+    let min_chunk_z = iter_min_z >> 4;
+    let max_chunk_z = iter_max_z >> 4;
 
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
