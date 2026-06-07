@@ -48,6 +48,11 @@ use colored::*;
 use std::path::PathBuf;
 use std::{env, fs, io::Write};
 
+// mimalloc scales far better than the system allocator under the concurrent
+// 4 KiB section-vec / hashmap churn of tile-parallel processing.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[cfg(feature = "gui")]
 mod gui;
 
