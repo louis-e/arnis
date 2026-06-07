@@ -2,6 +2,7 @@
 
 mod args;
 mod bedrock_block_map;
+mod bench;
 mod biome;
 mod block_definitions;
 mod bresenham;

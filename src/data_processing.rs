@@ -275,6 +275,7 @@ pub fn generate_world_with_options(
     editor.set_bake_lighting(args.bake_lighting);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     let ground = Arc::new(ground);
+    let mut bench = crate::bench::Bench::new(args.benchmark);
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
@@ -332,6 +333,8 @@ pub fn generate_world_with_options(
         .map(|p| p.suppressed())
         .unwrap_or(&empty_suppressed);
 
+    bench.mark("precompute");
+
     // Decide between sequential and parallel processing based on world size.
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
     let tiles = tile::create_tiles(&xzbbox, tile::DEFAULT_TILE_SIZE);
@@ -367,8 +370,11 @@ pub fn generate_world_with_options(
                 .cmp(&tile_assignments[a.0].len())
         });
 
+        let mut place_dur = std::time::Duration::ZERO;
+        let mut merge_dur = std::time::Duration::ZERO;
         for batch in indexed_tiles.chunks(tile_batch_size) {
             // Phase 1: process this batch of tiles in parallel
+            let place_start = std::time::Instant::now();
             let batch_results: Vec<_> = batch
                 .par_iter()
                 .map(|&(tile_idx, tile_bounds)| {
@@ -416,7 +422,9 @@ pub fn generate_world_with_options(
                     (tile_idx, tile_editor.into_world(), tile_subway_points)
                 })
                 .collect();
+            place_dur += place_start.elapsed();
 
+            let merge_start = std::time::Instant::now();
             // Phase 2: merge this batch's results into the main editor (sequential).
             // batch_results is dropped after this loop, freeing memory before next batch.
             for (tile_idx, tile_world, tile_subway_pts) in batch_results {
@@ -429,7 +437,11 @@ pub fn generate_world_with_options(
                 );
                 subway_points.extend(tile_subway_pts);
             }
+            merge_dur += merge_start.elapsed();
         }
+        bench.report("element_placement", place_dur);
+        bench.report("tile_merge", merge_dur);
+        bench.reset();
 
         emit_gui_progress_update(70.0, "");
     } else {
@@ -513,6 +525,7 @@ pub fn generate_world_with_options(
 
         process_pb.inc(element_counter % pb_batch_size);
         process_pb.finish();
+        bench.mark("elements_sequential");
     }
 
     // Keep road_mask alive for the LC_WATER carve below.
@@ -527,6 +540,7 @@ pub fn generate_world_with_options(
         &xzbbox,
         &building_footprints,
     )?;
+    bench.mark("ground_gen");
 
     if args.fillground {
         crate::ore_generation::generate_ores(&mut editor, &xzbbox);
@@ -553,11 +567,13 @@ pub fn generate_world_with_options(
     if let Some(p) = models_3d_pipeline.as_ref() {
         p.place(&mut editor, args);
     }
+    bench.mark("post_passes");
 
     // Save world
     if let Err(e) = editor.save() {
         return Err(e.to_string());
     }
+    bench.mark("save");
 
     if let Some(start) = generation_start {
         let gen_ms = start.elapsed().as_millis();
