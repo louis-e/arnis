@@ -116,8 +116,7 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub bake_lighting: bool,
 
-    /// Stream finished regions to disk during generation to lower peak RAM on
-    /// very large areas (Java only, no 3D models). Slower; disables subways.
+    /// Stream finished regions to disk to lower peak RAM on huge areas (Java, no 3D models); slower, disables subways.
     #[arg(long, default_value_t = false)]
     pub stream_to_disk: bool,
 }

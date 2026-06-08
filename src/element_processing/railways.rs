@@ -68,8 +68,7 @@ pub fn generate_railways(
             .map(|v| v == "yes")
             .unwrap_or(false);
     if is_subway {
-        // Streaming evicts regions before the post-merge subway carve runs, so
-        // skip subways entirely when it's on (also keeps their regions evictable).
+        // Streaming evicts regions before the post-merge subway carve, so skip subways when on.
         if !skip_subways {
             generate_subway_shell(editor, element, subway_points);
         }
