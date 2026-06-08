@@ -57,6 +57,7 @@ fn process_element(
     bridge_outlines: &bridge_styles::BridgeOutlineIndex,
     rail_bridge_internal_endpoints: &railways::RailBridgeInternalEndpoints,
     subway_points: &mut Vec<(i32, i32)>,
+    skip_subways: bool,
 ) {
     match element {
         ProcessedElement::Way(way) => {
@@ -117,6 +118,7 @@ fn process_element(
                     subway_points,
                     rail_bridge_internal_endpoints,
                     bridge_outlines,
+                    skip_subways,
                 );
             } else if way.tags.contains_key("roller_coaster") {
                 railways::generate_roller_coaster(editor, way);
@@ -366,14 +368,14 @@ pub fn generate_world_with_options(
 
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
-        // Stream-to-disk (opt-in, ARNIS_STREAM_TO_DISK): flush+evict each region once its
+        // Stream-to-disk (opt-in, --stream-to-disk): flush+evict each region once its
         // owner + 8 neighbour tiles merge. Java only, no 3D models. See task notes.
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
             && models_3d_pipeline
                 .as_ref()
                 .map_or(0, |p| p.total_placements())
                 == 0
-            && std::env::var_os("ARNIS_STREAM_TO_DISK").is_some();
+            && args.stream_to_disk;
 
         let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
         if eviction_active {
@@ -463,6 +465,7 @@ pub fn generate_world_with_options(
                             &bridge_outlines,
                             &rail_bridge_internal_endpoints,
                             &mut tile_subway_points,
+                            eviction_active,
                         );
                     }
 
@@ -637,6 +640,7 @@ pub fn generate_world_with_options(
                 &bridge_outlines,
                 &rail_bridge_internal_endpoints,
                 &mut subway_points,
+                false,
             );
 
             // Release flood fill cache entries for memory optimization.

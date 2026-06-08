@@ -46,6 +46,7 @@
   "disable_height_limit": "Ampliar altura de construção",
   "aws_only_elevation": "Terreno antigo",
   "bake_lighting": "Pré-calcular iluminação",
+  "stream_to_disk": "Modo de baixa memória",
   "bedrock_auto_generated": "O mundo de bedrock é gerado automaticamente",
   "save_path": "Caminho de salvamento",
   "rotation_angle": "Ângulo de Rotação",

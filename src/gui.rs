@@ -847,6 +847,7 @@ fn gui_start_generation(
     disable_height_limit: bool,
     aws_only_elevation: bool,
     bake_lighting_enabled: bool,
+    stream_to_disk_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
@@ -1099,6 +1100,7 @@ fn gui_start_generation(
                 aws_only_elevation,
                 benchmark: false,
                 bake_lighting: bake_lighting_enabled,
+                stream_to_disk: stream_to_disk_enabled,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data

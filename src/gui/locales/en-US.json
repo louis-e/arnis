@@ -53,6 +53,7 @@
   "disable_height_limit": "Extend build height",
   "aws_only_elevation": "Legacy terrain",
   "bake_lighting": "Bake lighting",
+  "stream_to_disk": "Low memory mode",
   "bedrock_auto_generated": "Bedrock world is auto-generated",
   "save_path": "Save Path",
   "rotation_angle": "Rotation Angle",

@@ -46,6 +46,7 @@
   "disable_height_limit": "Építési magasság kiterjesztése",
   "aws_only_elevation": "Régi domborzat",
   "bake_lighting": "Megvilágítás előszámítása",
+  "stream_to_disk": "Memóriatakarékos mód",
   "bedrock_auto_generated": "A Bedrock világ automatikusan generálódik",
   "save_path": "Mentési útvonal",
   "rotation_angle": "Forgatási Szög",
