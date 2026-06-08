@@ -22,6 +22,7 @@ mod land_cover;
 mod land_cover_bridge_repair;
 mod land_cover_osm_water_override;
 mod luanti_block_map;
+mod map_preview;
 mod map_renderer;
 mod map_transformation;
 mod models_3d;

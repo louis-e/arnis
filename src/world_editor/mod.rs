@@ -1372,7 +1372,7 @@ fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32) -> IntArray {
 }
 
 // Compile-time assertions that WorldEditor is thread-safe for shared reads.
-// Needed for rayon-based parallel tile processing — the build fails here
+// Needed for rayon-based parallel tile processing; the build fails here
 // if anyone adds a non-Send/Sync field to WorldEditor.
 #[allow(dead_code)]
 const _: () = {

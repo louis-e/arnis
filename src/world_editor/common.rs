@@ -257,7 +257,7 @@ impl SectionToModify {
         }
 
         // Medium path: Full storage with no per-index properties.
-        // Use Block (u8) directly as palette key — no string formatting needed.
+        // Use Block (u8) directly as palette key; no string formatting needed.
         if self.properties.is_empty() {
             if let BlockStorage::Full(blocks) = &self.storage {
                 // Build palette from unique blocks using a small array (Block is u8, max 256 values)
@@ -948,10 +948,10 @@ impl WorldToModify {
     ) {
         match &other_section.storage {
             BlockStorage::Uniform(block) if *block == AIR => {
-                // Auth tile is entirely AIR in this section — keep all halo data.
+                // Auth tile is entirely AIR in this section; keep all halo data.
             }
             BlockStorage::Uniform(block) => {
-                // Auth tile is uniformly one non-AIR block — overwrite everything.
+                // Auth tile is uniformly one non-AIR block; overwrite everything.
                 let block = *block;
                 for idx in 0..4096usize {
                     self_section.storage.set(idx, block);
@@ -965,7 +965,7 @@ impl WorldToModify {
             BlockStorage::Full(blocks) => {
                 for (idx, &block) in blocks.iter().enumerate() {
                     if block == AIR {
-                        // Auth tile placed nothing here — preserve halo data.
+                        // Auth tile placed nothing here; preserve halo data.
                         continue;
                     }
                     self_section.storage.set(idx, block);

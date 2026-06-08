@@ -4,6 +4,7 @@ use crate::coordinate_system::geographic::{LLBBox, LLPoint};
 use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
+use crate::map_preview;
 use crate::map_transformation;
 use crate::osm_parser;
 use crate::overture;
@@ -1134,11 +1135,9 @@ fn gui_start_generation(
 
                 // Start map preview generation silently in background (Java only)
                 if world_format == WorldFormat::JavaAnvil {
-                    let preview_info = data_processing::MapPreviewInfo::new(
-                        generation_options.path.clone(),
-                        &xzbbox,
-                    );
-                    data_processing::start_map_preview_generation(preview_info);
+                    let preview_info =
+                        map_preview::MapPreviewInfo::new(generation_options.path.clone(), &xzbbox);
+                    map_preview::start_map_preview_generation(preview_info);
                 }
 
                 return Ok(());
@@ -1226,11 +1225,11 @@ fn gui_start_generation(
 
                     // Start map preview generation silently in background (Java only)
                     if world_format == WorldFormat::JavaAnvil {
-                        let preview_info = data_processing::MapPreviewInfo::new(
+                        let preview_info = map_preview::MapPreviewInfo::new(
                             generation_options.path.clone(),
                             &xzbbox,
                         );
-                        data_processing::start_map_preview_generation(preview_info);
+                        map_preview::start_map_preview_generation(preview_info);
                     }
 
                     Ok(())
