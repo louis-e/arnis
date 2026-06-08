@@ -276,7 +276,6 @@ pub fn generate_world_with_options(
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     let ground = Arc::new(ground);
     let mut bench = crate::bench::Bench::new(args.benchmark);
-    let whole_bbox_ground = std::env::var_os("ARNIS_WHOLE_BBOX_GROUND").is_some();
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
@@ -338,6 +337,7 @@ pub fn generate_world_with_options(
 
     // Stream-to-disk eviction state (populated in the parallel branch below).
     let mut eviction_active = false;
+    let hash_check = std::env::var_os("ARNIS_BLOCK_HASH").is_some();
     let mut hash_acc: u64 = 0;
     let mut real_regions: HashSet<(i32, i32)> = HashSet::new();
     let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
@@ -366,14 +366,9 @@ pub fn generate_world_with_options(
 
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
-        // Stream-to-disk: flush each region to its .mca and drop it from RAM once its
-        // owner tile and all 8 neighbour tiles have merged (halo writes settle). Active
-        // only for Java with no 3D models placed (models need the merged world);
-        // subway-touched regions are deferred (kept resident) for the global carve.
-        // Opt-in (ARNIS_STREAM_TO_DISK, default off): flush+evict regions during the run
-        // to bound RAM. Java only, no 3D models. See task notes for the remaining work.
+        // Stream-to-disk (opt-in, ARNIS_STREAM_TO_DISK): flush+evict each region once its
+        // owner + 8 neighbour tiles merge. Java only, no 3D models. See task notes.
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
-            && !whole_bbox_ground
             && models_3d_pipeline
                 .as_ref()
                 .map_or(0, |p| p.total_placements())
@@ -471,49 +466,45 @@ pub fn generate_world_with_options(
                         );
                     }
 
-                    // Per-tile ground over strict bounds (parallel); neighbour reads use
-                    // the editor halo populated by intersection assignment.
-                    if !whole_bbox_ground {
-                        let g_min_x = tile_bounds.min_x.max(xzbbox.min_x());
-                        let g_max_x = (tile_bounds.max_x - 1).min(xzbbox.max_x());
-                        let g_min_z = tile_bounds.min_z.max(xzbbox.min_z());
-                        let g_max_z = (tile_bounds.max_z - 1).min(xzbbox.max_z());
-                        ground_generation::generate_ground_region(
+                    // Per-tile ground + ore + ESA-water over strict bounds (parallel);
+                    // neighbour reads use the editor halo from intersection assignment.
+                    let g_min_x = tile_bounds.min_x.max(xzbbox.min_x());
+                    let g_max_x = (tile_bounds.max_x - 1).min(xzbbox.max_x());
+                    let g_min_z = tile_bounds.min_z.max(xzbbox.min_z());
+                    let g_max_z = (tile_bounds.max_z - 1).min(xzbbox.max_z());
+                    ground_generation::generate_ground_region(
+                        &mut tile_editor,
+                        ground.as_ref(),
+                        args,
+                        &xzbbox,
+                        &building_footprints,
+                        g_min_x,
+                        g_max_x,
+                        g_min_z,
+                        g_max_z,
+                        false,
+                    );
+                    if args.fillground {
+                        crate::ore_generation::generate_ores_region(
                             &mut tile_editor,
-                            ground.as_ref(),
-                            args,
-                            &xzbbox,
-                            &building_footprints,
                             g_min_x,
                             g_max_x,
                             g_min_z,
                             g_max_z,
                             false,
                         );
-                        // Per-tile ore + ESA-water (read shared grids + own stone, write
-                        // non-AIR). Subway/3D stay global (need the merged world).
-                        if args.fillground {
-                            crate::ore_generation::generate_ores_region(
-                                &mut tile_editor,
-                                g_min_x,
-                                g_max_x,
-                                g_min_z,
-                                g_max_z,
-                                false,
-                            );
-                        }
-                        crate::water_depth::carve_lc_water_region(
-                            &mut tile_editor,
-                            ground.as_ref(),
-                            &xzbbox,
-                            &big_water_field,
-                            &road_mask,
-                            g_min_x,
-                            g_max_x,
-                            g_min_z,
-                            g_max_z,
-                        );
                     }
+                    crate::water_depth::carve_lc_water_region(
+                        &mut tile_editor,
+                        ground.as_ref(),
+                        &xzbbox,
+                        &big_water_field,
+                        &road_mask,
+                        g_min_x,
+                        g_max_x,
+                        g_min_z,
+                        g_max_z,
+                    );
 
                     (tile_idx, tile_editor.into_world(), tile_subway_points)
                 })
@@ -554,8 +545,10 @@ pub fn generate_world_with_options(
                                     && !evicted_regions.contains(&d)
                                     && !subway_regions.contains(&d)
                                 {
-                                    hash_acc =
-                                        hash_acc.wrapping_add(editor.region_content_hash(d.0, d.1));
+                                    if hash_check {
+                                        hash_acc = hash_acc
+                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
+                                    }
                                     editor.flush_region(d.0, d.1).map_err(|e| e.to_string())?;
                                     evicted_regions.insert(d);
                                 }
@@ -673,7 +666,7 @@ pub fn generate_world_with_options(
     // True when ground (and the ore/water post-passes) run on the merged editor:
     // the small-area sequential path, or the whole-bbox-ground override. The
     // parallel per-tile path already did ground + ore + water inside the closure.
-    let ground_on_merged = tiles.len() < 3 || whole_bbox_ground;
+    let ground_on_merged = tiles.len() < 3;
 
     if ground_on_merged {
         ground_generation::generate_ground_layer(
@@ -715,23 +708,26 @@ pub fn generate_world_with_options(
     bench.mark("post_passes");
 
     if eviction_active {
-        // Flush the deferred (subway-touched) regions now that the global subway carve
-        // has run on them, then hash every remaining region (deferred reals + out-of-bbox
-        // halo) so hash_acc equals the non-eviction whole-world content hash.
+        // Flush deferred (subway-touched) regions now the global carve has run on them.
         let mut leftover: Vec<(i32, i32)> =
             real_regions.difference(&evicted_regions).copied().collect();
         leftover.sort_unstable();
         for (rx, rz) in leftover {
-            hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
+            if hash_check {
+                hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
+            }
             editor.flush_region(rx, rz).map_err(|e| e.to_string())?;
             evicted_regions.insert((rx, rz));
         }
-        for (rx, rz) in editor.resident_region_keys() {
-            hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
+        // Hash remaining (out-of-bbox halo) regions so hash_acc == the whole-world hash.
+        if hash_check {
+            for (rx, rz) in editor.resident_region_keys() {
+                hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
+            }
         }
     }
 
-    if std::env::var_os("ARNIS_BLOCK_HASH").is_some() {
+    if hash_check {
         let h = if eviction_active {
             hash_acc
         } else {
