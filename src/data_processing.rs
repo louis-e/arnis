@@ -364,17 +364,14 @@ pub fn generate_world_with_options(
             tiles.len()
         );
 
-        let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles);
+        let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
         // Stream-to-disk: flush each region to its .mca and drop it from RAM once its
         // owner tile and all 8 neighbour tiles have merged (halo writes settle). Active
         // only for Java with no 3D models placed (models need the merged world);
         // subway-touched regions are deferred (kept resident) for the global carve.
-        // Opt-in (default off, ARNIS_STREAM_TO_DISK=1): the RAM win only materialises on
-        // large areas where the region world dominates RAM; it currently costs time
-        // (inline flush I/O + banded ordering) and is ineffective in subway-dense cities
-        // (the subway deferral keeps most regions resident). Kept off until per-region
-        // subway carving + a background flush land. Verified correct + deterministic.
+        // Opt-in (ARNIS_STREAM_TO_DISK, default off): flush+evict regions during the run
+        // to bound RAM. Java only, no 3D models. See task notes for the remaining work.
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
             && !whole_bbox_ground
             && models_3d_pipeline
@@ -385,10 +382,7 @@ pub fn generate_world_with_options(
 
         let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
         if eviction_active {
-            // Banded row-major order: sort by region-row so the seal frontier sweeps
-            // top-to-bottom and the resident-region window stays ~3 rows (a region seals
-            // once its row and the rows above/below have merged); LPT (element count
-            // desc) within a row keeps cores balanced.
+            // Row-major bands (LPT within a row) so the seal frontier sweeps top-to-bottom.
             indexed_tiles.sort_by(|a, b| {
                 let za = a.1.min_z >> 9;
                 let zb = b.1.min_z >> 9;
@@ -477,10 +471,8 @@ pub fn generate_world_with_options(
                         );
                     }
 
-                    // Generate ground per-tile so the dominant ground phase scales
-                    // with cores. Restricted to strict tile bounds (authoritative at
-                    // merge); neighbour reads come from the 64-block editor halo, which
-                    // now holds complete area/relation data via intersection assignment.
+                    // Per-tile ground over strict bounds (parallel); neighbour reads use
+                    // the editor halo populated by intersection assignment.
                     if !whole_bbox_ground {
                         let g_min_x = tile_bounds.min_x.max(xzbbox.min_x());
                         let g_max_x = (tile_bounds.max_x - 1).min(xzbbox.max_x());
@@ -498,10 +490,8 @@ pub fn generate_world_with_options(
                             g_max_z,
                             false,
                         );
-                        // Per-tile post-passes that only read shared grids + the tile's
-                        // own placed stone and write non-AIR: ore veins and ESA-water
-                        // depth. (Subway carve and 3D models stay global — they need the
-                        // merged world / cross-region data.)
+                        // Per-tile ore + ESA-water (read shared grids + own stone, write
+                        // non-AIR). Subway/3D stay global (need the merged world).
                         if args.fillground {
                             crate::ore_generation::generate_ores_region(
                                 &mut tile_editor,

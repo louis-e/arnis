@@ -133,10 +133,8 @@ pub fn generate_ground_layer(
     Ok(())
 }
 
-/// Generate the ground layer for the inclusive `[iter_min_*..=iter_max_*]` block
-/// range. The shared elevation / land-cover grid is indexed against `xzbbox`
-/// (the *main* world origin), so per-tile callers pass the main bbox here and
-/// their strict tile bounds as the iter range, with `show_progress = false`.
+/// Generate ground for `[iter_min_*..=iter_max_*]`. The shared grid is indexed against
+/// `xzbbox` (main origin); per-tile callers pass the main bbox + strict tile iter bounds.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_ground_region(
     editor: &mut WorldEditor,

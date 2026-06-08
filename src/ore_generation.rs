@@ -85,11 +85,8 @@ pub fn generate_ores(editor: &mut WorldEditor, xzbbox: &XZBBox) {
     );
 }
 
-/// Place ore veins across the chunks covering the inclusive `[iter_min..=iter_max]`
-/// block range. Per-tile callers pass their strict tile bounds; the editor's own
-/// ground origin makes `get_ground_level` return main-world values. Per-chunk RNG
-/// is seeded only on chunk coords, so output is identical regardless of tiling
-/// (veins simply truncate at the un-stone-filled tile halo).
+/// Place ore veins across the chunks covering `[iter_min..=iter_max]` (per-tile callers
+/// pass strict tile bounds). Chunk-coord-seeded RNG; veins truncate at tile seams.
 pub fn generate_ores_region(
     editor: &mut WorldEditor,
     iter_min_x: i32,

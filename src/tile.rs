@@ -51,6 +51,9 @@ pub const TILE_EDITOR_HALO: i32 = 64;
 /// owning tile's editor halo instead of being lost.
 const TREE_HALO: i32 = 8;
 
+/// Widest rendered half-width of any linear element (aeroway runways), in metres.
+const MAX_LINEAR_HALF_WIDTH_M: f64 = 40.0;
+
 /// Subdivide the world bounding box into tiles of the given size.
 /// Tiles at the edge may be smaller than the full tile size.
 pub fn create_tiles(xzbbox: &XZBBox, tile_size: i32) -> Vec<TileBounds> {
@@ -146,8 +149,12 @@ fn is_linear_element(way: &ProcessedWay) -> bool {
 pub fn assign_elements_to_tiles(
     elements: &[ProcessedElement],
     tiles: &[TileBounds],
+    scale: f64,
 ) -> Vec<Vec<usize>> {
     let mut tile_elements: Vec<Vec<usize>> = vec![Vec::new(); tiles.len()];
+    // Cover the widest rendered linear element (aeroway 40m * scale) so a tile whose
+    // strict bounds receive its blocks is assigned it (else per-tile ground overwrites).
+    let linear_halo = TILE_EDITOR_HALO.max((MAX_LINEAR_HALF_WIDTH_M * scale).ceil() as i32);
 
     for (elem_idx, element) in elements.iter().enumerate() {
         match element {
@@ -170,21 +177,15 @@ pub fn assign_elements_to_tiles(
             }
             ProcessedElement::Way(way) => {
                 if is_linear_element(way) {
-                    // Linear elements: assign to every tile whose editor halo their
-                    // centerline AABB overlaps. The halo must cover the widest rendered
-                    // half-width (aeroways reach ~40 blocks) so a tile that receives the
-                    // element's blocks in its strict bounds also renders them — otherwise
-                    // per-tile ground generation would overwrite that surface with terrain.
+                    // Linear: every tile within the rendered half-width of the centerline.
                     for (tile_idx, tile) in tiles.iter().enumerate() {
-                        if way_intersects_bounds(way, &tile.expanded(TILE_EDITOR_HALO)) {
+                        if way_intersects_bounds(way, &tile.expanded(linear_halo)) {
                             tile_elements[tile_idx].push(elem_idx);
                         }
                     }
                 } else {
-                    // Area elements: assign to every tile whose editor halo their
-                    // geometry overlaps, so each tile renders its portion fully (no
-                    // large-polygon clipping) and per-tile ground generation sees
-                    // complete neighbour data across strict-tile boundaries.
+                    // Area: every tile its AABB+halo overlaps, so large polygons render
+                    // fully and per-tile ground sees complete neighbour data.
                     for (tile_idx, tile) in tiles.iter().enumerate() {
                         if way_intersects_bounds(way, &tile.expanded(TILE_EDITOR_HALO)) {
                             tile_elements[tile_idx].push(elem_idx);
@@ -193,8 +194,7 @@ pub fn assign_elements_to_tiles(
                 }
             }
             ProcessedElement::Relation(rel) => {
-                // Relations: assign to every tile whose editor halo any member way
-                // overlaps (same rationale as area ways).
+                // Relations: every tile any member way's AABB+halo overlaps.
                 for (tile_idx, tile) in tiles.iter().enumerate() {
                     if relation_intersects_bounds(rel, &tile.expanded(TILE_EDITOR_HALO)) {
                         tile_elements[tile_idx].push(elem_idx);
