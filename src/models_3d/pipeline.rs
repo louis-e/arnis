@@ -47,6 +47,15 @@ impl Models3dPipeline {
         &self.union_suppressed
     }
 
+    /// Total 3D models that will be placed across all sub-pipelines. Stream-to-disk
+    /// eviction is disabled when this is non-zero (models need the merged world).
+    pub fn total_placements(&self) -> usize {
+        self.three_dmr.placement_count()
+            + self.wikidata.placement_count()
+            + self.stadium.placement_count()
+            + self.plane.placement_count()
+    }
+
     pub fn place(&self, editor: &mut WorldEditor, args: &Args) {
         if self.three_dmr.placement_count() > 0 {
             three_dmr::place_three_dmr_models(editor, args, &self.three_dmr);

@@ -314,9 +314,13 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Deterministic hash of one region (see `WorldToModify::region_content_hash`).
-    #[allow(dead_code)]
     pub fn region_content_hash(&self, rx: i32, rz: i32) -> u64 {
         self.world.region_content_hash(rx, rz)
+    }
+
+    /// Region keys currently resident in memory (not yet flushed to disk).
+    pub(crate) fn resident_region_keys(&self) -> Vec<(i32, i32)> {
+        self.world.regions.keys().copied().collect()
     }
 
     /// Stream one region to its `.mca` and evict it from RAM (stream-to-disk).
@@ -324,7 +328,6 @@ impl<'a> WorldEditor<'a> {
     /// region is recorded so any later stray write to it is dropped by the guard.
     /// Java-only and a no-op for other formats (which build the whole world in RAM).
     /// Returns `Ok(true)` if a region was flushed.
-    #[allow(dead_code)]
     pub(crate) fn flush_region(
         &mut self,
         rx: i32,

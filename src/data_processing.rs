@@ -15,7 +15,7 @@ use crate::world_editor::{WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -336,6 +336,12 @@ pub fn generate_world_with_options(
 
     bench.mark("precompute");
 
+    // Stream-to-disk eviction state (populated in the parallel branch below).
+    let mut eviction_active = false;
+    let mut hash_acc: u64 = 0;
+    let mut real_regions: HashSet<(i32, i32)> = HashSet::new();
+    let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
+
     // Decide between sequential and parallel processing based on world size.
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
     let tiles = tile::create_tiles(&xzbbox, tile::DEFAULT_TILE_SIZE);
@@ -370,6 +376,39 @@ pub fn generate_world_with_options(
                 .len()
                 .cmp(&tile_assignments[a.0].len())
         });
+
+        // Stream-to-disk: flush each region to its .mca and drop it from RAM once its
+        // owner tile and all 8 neighbour tiles have merged (halo writes settle). Active
+        // only for Java with no 3D models placed (models need the merged world);
+        // subway-touched regions are deferred (kept resident) for the global carve.
+        eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
+            && !whole_bbox_ground
+            && models_3d_pipeline
+                .as_ref()
+                .map_or(0, |p| p.total_placements())
+                == 0
+            && std::env::var_os("ARNIS_NO_EVICT").is_none();
+
+        let region_of_tile: Vec<(i32, i32)> =
+            tiles.iter().map(|t| (t.min_x >> 9, t.min_z >> 9)).collect();
+        real_regions = region_of_tile.iter().copied().collect();
+        // remaining[R] = 1 (owner) + count of R's in-grid region neighbours; R is
+        // flushable when this reaches 0 (owner + all neighbour tiles merged).
+        let mut remaining: HashMap<(i32, i32), u32> = HashMap::new();
+        if eviction_active {
+            for &r in &real_regions {
+                let mut c = 1u32;
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        if (dx, dz) != (0, 0) && real_regions.contains(&(r.0 + dx, r.1 + dz)) {
+                            c += 1;
+                        }
+                    }
+                }
+                remaining.insert(r, c);
+            }
+        }
+        let mut subway_regions: HashSet<(i32, i32)> = HashSet::new();
 
         let mut place_dur = std::time::Duration::ZERO;
         let mut merge_dur = std::time::Duration::ZERO;
@@ -484,6 +523,39 @@ pub fn generate_world_with_options(
                     tiles[tile_idx].max_x - 1,
                     tiles[tile_idx].max_z - 1,
                 );
+
+                if eviction_active {
+                    // Defer every region a subway point can touch (carve + ±1 spill).
+                    for &(bx, bz) in &tile_subway_pts {
+                        let (pr_x, pr_z) = (bx >> 9, bz >> 9);
+                        for dz in -1..=1 {
+                            for dx in -1..=1 {
+                                subway_regions.insert((pr_x + dx, pr_z + dz));
+                            }
+                        }
+                    }
+                    // This tile contributes to its own region and its 8 neighbours;
+                    // flush each non-deferred region whose contributors are all merged.
+                    let rt = region_of_tile[tile_idx];
+                    for dz in -1..=1 {
+                        for dx in -1..=1 {
+                            let d = (rt.0 + dx, rt.1 + dz);
+                            if let Some(c) = remaining.get_mut(&d) {
+                                *c -= 1;
+                                if *c == 0
+                                    && !evicted_regions.contains(&d)
+                                    && !subway_regions.contains(&d)
+                                {
+                                    hash_acc =
+                                        hash_acc.wrapping_add(editor.region_content_hash(d.0, d.1));
+                                    editor.flush_region(d.0, d.1).map_err(|e| e.to_string())?;
+                                    evicted_regions.insert(d);
+                                }
+                            }
+                        }
+                    }
+                }
+
                 subway_points.extend(tile_subway_pts);
             }
             merge_dur += merge_start.elapsed();
@@ -625,8 +697,30 @@ pub fn generate_world_with_options(
     }
     bench.mark("post_passes");
 
+    if eviction_active {
+        // Flush the deferred (subway-touched) regions now that the global subway carve
+        // has run on them, then hash every remaining region (deferred reals + out-of-bbox
+        // halo) so hash_acc equals the non-eviction whole-world content hash.
+        let mut leftover: Vec<(i32, i32)> =
+            real_regions.difference(&evicted_regions).copied().collect();
+        leftover.sort_unstable();
+        for (rx, rz) in leftover {
+            hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
+            editor.flush_region(rx, rz).map_err(|e| e.to_string())?;
+            evicted_regions.insert((rx, rz));
+        }
+        for (rx, rz) in editor.resident_region_keys() {
+            hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
+        }
+    }
+
     if std::env::var_os("ARNIS_BLOCK_HASH").is_some() {
-        eprintln!("[BENCHMARK] block_hash={:016x}", editor.content_hash());
+        let h = if eviction_active {
+            hash_acc
+        } else {
+            editor.content_hash()
+        };
+        eprintln!("[BENCHMARK] block_hash={:016x}", h);
     }
 
     // Save world
