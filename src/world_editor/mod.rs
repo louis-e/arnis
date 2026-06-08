@@ -28,7 +28,7 @@ use crate::luanti_block_map::LuantiGame;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use serde::Serialize;
 use std::collections::{hash_map::Entry, HashMap};
 use std::fs::File;
@@ -136,6 +136,9 @@ pub struct WorldEditor<'a> {
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    /// Regions already streamed to disk and evicted; writes to them are dropped
+    /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
+    flushed_regions: FnvHashSet<(i32, i32)>,
     /// Origin coordinates for ground-level elevation lookups. Defaults to
     /// `xzbbox.min_x()/min_z()`. Tile editors used by the parallel
     /// data-processing path override these to the *main* world's xzbbox
@@ -176,6 +179,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
+            flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
             projection: "local".to_string(),
@@ -210,6 +214,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
+            flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
             projection: "local".to_string(),
@@ -244,6 +249,7 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
+            flushed_regions: FnvHashSet::default(),
             ground_origin_x: xzbbox.min_x(),
             ground_origin_z: xzbbox.min_z(),
             projection: "local".to_string(),
@@ -305,6 +311,39 @@ impl<'a> WorldEditor<'a> {
     /// Deterministic content hash of the world (see `WorldToModify::content_hash`).
     pub fn content_hash(&self) -> u64 {
         self.world.content_hash()
+    }
+
+    /// Deterministic hash of one region (see `WorldToModify::region_content_hash`).
+    #[allow(dead_code)]
+    pub fn region_content_hash(&self, rx: i32, rz: i32) -> u64 {
+        self.world.region_content_hash(rx, rz)
+    }
+
+    /// Stream one region to its `.mca` and evict it from RAM (stream-to-disk).
+    /// Removes the region, compacts its sections, serializes, then drops it; the
+    /// region is recorded so any later stray write to it is dropped by the guard.
+    /// Java-only and a no-op for other formats (which build the whole world in RAM).
+    /// Returns `Ok(true)` if a region was flushed.
+    #[allow(dead_code)]
+    pub(crate) fn flush_region(
+        &mut self,
+        rx: i32,
+        rz: i32,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        if self.format != WorldFormat::JavaAnvil {
+            return Ok(false);
+        }
+        let Some(mut region) = self.world.regions.remove(&(rx, rz)) else {
+            return Ok(false);
+        };
+        for chunk in region.chunks.values_mut() {
+            for section in chunk.sections.values_mut() {
+                section.compact();
+            }
+        }
+        self.save_single_region(rx, rz, &region)?;
+        self.flushed_regions.insert((rx, rz));
+        Ok(true)
     }
 
     /// Merge another WorldToModify into this editor's world with authoritative bounds.
@@ -958,6 +997,10 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
+        // Drop writes to regions already flushed to disk (stream-to-disk eviction).
+        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+            return;
+        }
 
         // None/None is the dominant pattern; skip the redundant get_block() read.
         if override_whitelist.is_none() && override_blacklist.is_none() {
@@ -1124,6 +1167,9 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
+        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+            return;
+        }
         self.world.set_block_if_absent(x, absolute_y, z, block);
     }
 
@@ -1148,6 +1194,9 @@ impl<'a> WorldEditor<'a> {
         skip_existing: bool,
     ) {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
+            return;
+        }
+        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
             return;
         }
         self.world
