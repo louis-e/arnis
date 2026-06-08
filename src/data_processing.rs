@@ -366,28 +366,46 @@ pub fn generate_world_with_options(
 
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles);
 
-        // LPT scheduling: sort tiles by element-count descending so dense urban
-        // tiles run first. Without this, a straggler dense tile arriving in the
-        // last batch (with otherwise-empty siblings) blocks the whole pipeline;
-        // running it earlier lets the rest fill in around it.
-        let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
-        indexed_tiles.sort_by(|a, b| {
-            tile_assignments[b.0]
-                .len()
-                .cmp(&tile_assignments[a.0].len())
-        });
-
         // Stream-to-disk: flush each region to its .mca and drop it from RAM once its
         // owner tile and all 8 neighbour tiles have merged (halo writes settle). Active
         // only for Java with no 3D models placed (models need the merged world);
         // subway-touched regions are deferred (kept resident) for the global carve.
+        // Opt-in (default off, ARNIS_STREAM_TO_DISK=1): the RAM win only materialises on
+        // large areas where the region world dominates RAM; it currently costs time
+        // (inline flush I/O + banded ordering) and is ineffective in subway-dense cities
+        // (the subway deferral keeps most regions resident). Kept off until per-region
+        // subway carving + a background flush land. Verified correct + deterministic.
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
             && !whole_bbox_ground
             && models_3d_pipeline
                 .as_ref()
                 .map_or(0, |p| p.total_placements())
                 == 0
-            && std::env::var_os("ARNIS_NO_EVICT").is_none();
+            && std::env::var_os("ARNIS_STREAM_TO_DISK").is_some();
+
+        let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
+        if eviction_active {
+            // Banded row-major order: sort by region-row so the seal frontier sweeps
+            // top-to-bottom and the resident-region window stays ~3 rows (a region seals
+            // once its row and the rows above/below have merged); LPT (element count
+            // desc) within a row keeps cores balanced.
+            indexed_tiles.sort_by(|a, b| {
+                let za = a.1.min_z >> 9;
+                let zb = b.1.min_z >> 9;
+                za.cmp(&zb).then_with(|| {
+                    tile_assignments[b.0]
+                        .len()
+                        .cmp(&tile_assignments[a.0].len())
+                })
+            });
+        } else {
+            // LPT scheduling: dense tiles first so a straggler doesn't block the pipeline.
+            indexed_tiles.sort_by(|a, b| {
+                tile_assignments[b.0]
+                    .len()
+                    .cmp(&tile_assignments[a.0].len())
+            });
+        }
 
         let region_of_tile: Vec<(i32, i32)> =
             tiles.iter().map(|t| (t.min_x >> 9, t.min_z >> 9)).collect();
@@ -563,6 +581,15 @@ pub fn generate_world_with_options(
         bench.report("element_placement", place_dur);
         bench.report("tile_merge", merge_dur);
         bench.reset();
+
+        if eviction_active && args.benchmark {
+            eprintln!(
+                "[BENCHMARK] evicted_in_loop={} subway_deferred={} real_regions={}",
+                evicted_regions.len(),
+                subway_regions.len(),
+                real_regions.len()
+            );
+        }
 
         emit_gui_progress_update(70.0, "");
     } else {
