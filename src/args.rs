@@ -41,8 +41,8 @@ pub struct Args {
     pub scale: f64,
 
     /// Projection mode for coordinate mapping
-    /// web_mercator: Global projection for multi-generation worlds (default)
-    /// local: Legacy mode, each generation starts at Minecraft (0,0)
+    /// local: each generation starts at Minecraft (0,0) (default)
+    /// web_mercator: global projection for multi-generation worlds
     #[arg(long, default_value = "local")]
     pub projection: crate::projection::ProjectionKind,
 

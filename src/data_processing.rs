@@ -349,7 +349,13 @@ pub fn generate_world_with_options(
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
     let tiles = tile::create_tiles(&xzbbox, tile::DEFAULT_TILE_SIZE);
 
-    if tiles.len() >= 3 {
+    // Tile editors are created as JavaAnvil (WorldEditor::new), so their
+    // format-dependent block-entity schema (banners) only matches Java output.
+    // Restrict the parallel tile path to Java; Bedrock/Luanti large worlds use
+    // the sequential path (correct, just not tile-parallel).
+    let use_parallel_tiles = tiles.len() >= 3 && matches!(world_format, WorldFormat::JavaAnvil);
+
+    if use_parallel_tiles {
         // Large area: process tiles in parallel using rayon.
         // Each tile gets its own WorldEditor with an expanded bounding box (64-block
         // halo) so that elements whose centroid falls inside the tile can render blocks
@@ -432,11 +438,14 @@ pub fn generate_world_with_options(
             let batch_results: Vec<_> = batch
                 .par_iter()
                 .map(|&(tile_idx, tile_bounds)| {
+                    // max_* are exclusive; rect_from_min_max treats max as inclusive,
+                    // so subtract 1. Clamp to the world bbox so edge-tile halos don't
+                    // extend past world bounds.
                     let tile_xzbbox = XZBBox::rect_from_min_max(
-                        tile_bounds.min_x - tile::TILE_EDITOR_HALO,
-                        tile_bounds.min_z - tile::TILE_EDITOR_HALO,
-                        tile_bounds.max_x + tile::TILE_EDITOR_HALO,
-                        tile_bounds.max_z + tile::TILE_EDITOR_HALO,
+                        (tile_bounds.min_x - tile::TILE_EDITOR_HALO).max(xzbbox.min_x()),
+                        (tile_bounds.min_z - tile::TILE_EDITOR_HALO).max(xzbbox.min_z()),
+                        (tile_bounds.max_x - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_x()),
+                        (tile_bounds.max_z - 1 + tile::TILE_EDITOR_HALO).min(xzbbox.max_z()),
                     )
                     .expect("Failed to create tile XZBBox");
 
@@ -677,7 +686,7 @@ pub fn generate_world_with_options(
     // True when ground (and the ore/water post-passes) run on the merged editor:
     // the small-area sequential path, or the whole-bbox-ground override. The
     // parallel per-tile path already did ground + ore + water inside the closure.
-    let ground_on_merged = tiles.len() < 3;
+    let ground_on_merged = !use_parallel_tiles;
 
     if ground_on_merged {
         ground_generation::generate_ground_layer(

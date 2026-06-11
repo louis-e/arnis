@@ -812,7 +812,39 @@ impl WorldToModify {
                     && c_max_z <= authoritative_max_z;
 
                 if chunk_fully_auth {
-                    self_region.chunks.insert((chunk_lx, chunk_lz), other_chunk);
+                    match self_region.chunks.entry((chunk_lx, chunk_lz)) {
+                        std::collections::hash_map::Entry::Vacant(e) => {
+                            e.insert(other_chunk);
+                        }
+                        std::collections::hash_map::Entry::Occupied(mut e) => {
+                            // Dest already holds a prior tile's halo data: overwrite
+                            // auth non-AIR, preserve halo at auth-AIR (matches the
+                            // region fast path) instead of clobbering the whole chunk.
+                            let self_chunk = e.get_mut();
+                            for (section_y, other_section) in other_chunk.sections {
+                                Self::merge_section_auth_overwrite_nonair(
+                                    self_chunk.sections.entry(section_y).or_default(),
+                                    &other_section,
+                                );
+                            }
+                            for (key, value) in other_chunk.other {
+                                if key == "block_entities" || key == "entities" {
+                                    match self_chunk.other.entry(key) {
+                                        std::collections::hash_map::Entry::Occupied(mut entry) => {
+                                            if let Value::List(self_list) = entry.get_mut() {
+                                                if let Value::List(other_list) = &value {
+                                                    self_list.extend(other_list.iter().cloned());
+                                                }
+                                            }
+                                        }
+                                        std::collections::hash_map::Entry::Vacant(entry) => {
+                                            entry.insert(value);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     continue;
                 }
 
@@ -915,6 +947,8 @@ impl WorldToModify {
                         self_section.storage.set(idx, block);
                         if let Some(props) = other_section.properties.get(&idx) {
                             self_section.properties.insert(idx, props.clone());
+                        } else {
+                            self_section.properties.remove(&idx);
                         }
                     }
                 }
@@ -1010,6 +1044,8 @@ impl WorldToModify {
                         self_section.storage.set(idx, block);
                         if let Some(props) = other_section.properties.get(&idx) {
                             self_section.properties.insert(idx, props.clone());
+                        } else {
+                            self_section.properties.remove(&idx);
                         }
                     }
                 }
