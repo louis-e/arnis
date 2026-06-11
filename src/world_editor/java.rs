@@ -43,32 +43,6 @@ fn get_base_chunk_sections() -> &'static [Section] {
 use crate::telemetry::{send_log, LogLevel};
 
 impl<'a> WorldEditor<'a> {
-    /// Creates a region file for the given region coordinates.
-    pub(super) fn create_region(
-        &self,
-        region_x: i32,
-        region_z: i32,
-    ) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
-        let region_dir = self.world_dir.join("region");
-        let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
-
-        // Ensure region directory exists before creating region files
-        std::fs::create_dir_all(&region_dir)?;
-
-        const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
-
-        let mut region_file: File = File::options()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&out_path)?;
-
-        region_file.write_all(REGION_TEMPLATE)?;
-
-        Ok(Region::from_stream(region_file)?)
-    }
-
     /// Helper function to create a base chunk with grass blocks at Y -62
     /// Uses cached sections for efficiency - only serialization happens per chunk
     pub(super) fn create_base_chunk(
@@ -212,70 +186,147 @@ impl<'a> WorldEditor<'a> {
         region_z: i32,
         region_to_modify: &super::common::RegionToModify,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let mut region = self.create_region(region_x, region_z)?;
-        let mut ser_buffer = Vec::with_capacity(8192);
+        write_region_to_disk(
+            &self.world_dir,
+            &self.llbbox,
+            self.ground.as_deref(),
+            self.bake_lighting,
+            region_x,
+            region_z,
+            region_to_modify,
+        )
+    }
+}
 
-        // World-center latitude drives temperature-based biome variants (taiga
-        // vs forest vs jungle) at chunk-build time. Cheap to recompute.
-        let center_lat = (self.llbbox.min().lat() + self.llbbox.max().lat()) * 0.5;
-        let ground_ref = self.ground.as_deref();
+/// Open (truncating) a fresh `r.X.Z.mca` under `world_dir/region`.
+fn create_region_file(
+    world_dir: &std::path::Path,
+    region_x: i32,
+    region_z: i32,
+) -> Result<Region<File>, Box<dyn std::error::Error + Send + Sync>> {
+    let region_dir = world_dir.join("region");
+    let out_path = region_dir.join(format!("r.{}.{}.mca", region_x, region_z));
+    std::fs::create_dir_all(&region_dir)?;
 
-        // First pass: write all chunks that have content
-        for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
-            if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
-                let abs_chunk_x = chunk_x + (region_x * 32);
-                let abs_chunk_z = chunk_z + (region_z * 32);
-                // Create chunk directly, we're writing to a fresh region file
-                // so there's no existing data to preserve
-                let chunk = Chunk {
-                    sections: chunk_to_modify.sections().collect(),
-                    x_pos: abs_chunk_x,
-                    z_pos: abs_chunk_z,
-                    is_light_on: 0,
-                    other: chunk_to_modify.other.clone(),
-                };
+    const REGION_TEMPLATE: &[u8] = include_bytes!("../../assets/minecraft/region.template");
+    let mut region_file: File = File::options()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(&out_path)?;
+    region_file.write_all(REGION_TEMPLATE)?;
+    Ok(Region::from_stream(region_file)?)
+}
 
-                let biome_value = crate::biome::build_chunk_biome_nbt(
-                    abs_chunk_x,
-                    abs_chunk_z,
-                    ground_ref,
-                    center_lat,
-                );
-                let chunk_nbt = create_chunk_nbt(&chunk, self.bake_lighting, &biome_value);
-                ser_buffer.clear();
-                fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
-                region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
-            }
+/// Serialize one region's chunks to its `.mca`. Shared by the synchronous save
+/// path and the background flush worker (hence free-standing, not `&self`).
+fn write_region_to_disk(
+    world_dir: &std::path::Path,
+    llbbox: &crate::coordinate_system::geographic::LLBBox,
+    ground: Option<&crate::ground::Ground>,
+    bake_lighting: bool,
+    region_x: i32,
+    region_z: i32,
+    region_to_modify: &super::common::RegionToModify,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let mut region = create_region_file(world_dir, region_x, region_z)?;
+    let mut ser_buffer = Vec::with_capacity(8192);
+
+    // World-center latitude drives temperature-based biome variants (taiga
+    // vs forest vs jungle) at chunk-build time. Cheap to recompute.
+    let center_lat = (llbbox.min().lat() + llbbox.max().lat()) * 0.5;
+
+    // First pass: write all chunks that have content
+    for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
+        if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
+            let abs_chunk_x = chunk_x + (region_x * 32);
+            let abs_chunk_z = chunk_z + (region_z * 32);
+            let chunk = Chunk {
+                sections: chunk_to_modify.sections().collect(),
+                x_pos: abs_chunk_x,
+                z_pos: abs_chunk_z,
+                is_light_on: 0,
+                other: chunk_to_modify.other.clone(),
+            };
+
+            let biome_value =
+                crate::biome::build_chunk_biome_nbt(abs_chunk_x, abs_chunk_z, ground, center_lat);
+            let chunk_nbt = create_chunk_nbt(&chunk, bake_lighting, &biome_value);
+            ser_buffer.clear();
+            fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
+            region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
         }
+    }
 
-        // Second pass: ensure all chunks exist (fill with base layer if not).
-        // Skip entirely when region already has all 1024 chunks (common after ground gen).
-        if region_to_modify.chunks.len() < 1024 {
-            for chunk_x in 0..32 {
-                for chunk_z in 0..32 {
-                    // If chunk doesn't exist, create it with base layer
-                    if !region_to_modify.chunks.contains_key(&(chunk_x, chunk_z)) {
-                        let abs_chunk_x = chunk_x + (region_x * 32);
-                        let abs_chunk_z = chunk_z + (region_z * 32);
-                        let biome_value = crate::biome::build_chunk_biome_nbt(
-                            abs_chunk_x,
-                            abs_chunk_z,
-                            ground_ref,
-                            center_lat,
-                        );
-                        let ser_buffer = Self::create_base_chunk(
-                            abs_chunk_x,
-                            abs_chunk_z,
-                            self.bake_lighting,
-                            &biome_value,
-                        )?;
-                        region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
-                    }
+    // Second pass: ensure all chunks exist (fill with base layer if not).
+    // Skip entirely when region already has all 1024 chunks (common after ground gen).
+    if region_to_modify.chunks.len() < 1024 {
+        for chunk_x in 0..32 {
+            for chunk_z in 0..32 {
+                if !region_to_modify.chunks.contains_key(&(chunk_x, chunk_z)) {
+                    let abs_chunk_x = chunk_x + (region_x * 32);
+                    let abs_chunk_z = chunk_z + (region_z * 32);
+                    let biome_value = crate::biome::build_chunk_biome_nbt(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        ground,
+                        center_lat,
+                    );
+                    let ser_buffer = WorldEditor::create_base_chunk(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        bake_lighting,
+                        &biome_value,
+                    )?;
+                    region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
                 }
             }
         }
+    }
 
-        Ok(())
+    Ok(())
+}
+
+/// Owned, `Send` context for writing regions off the main thread (background flush).
+/// Mirrors the fields `write_region_to_disk` needs from a `WorldEditor`.
+pub(crate) struct RegionWriteCtx {
+    world_dir: std::path::PathBuf,
+    llbbox: crate::coordinate_system::geographic::LLBBox,
+    ground: Option<std::sync::Arc<crate::ground::Ground>>,
+    bake_lighting: bool,
+}
+
+impl RegionWriteCtx {
+    pub(crate) fn new(
+        world_dir: std::path::PathBuf,
+        llbbox: crate::coordinate_system::geographic::LLBBox,
+        ground: Option<std::sync::Arc<crate::ground::Ground>>,
+        bake_lighting: bool,
+    ) -> Self {
+        Self {
+            world_dir,
+            llbbox,
+            ground,
+            bake_lighting,
+        }
+    }
+
+    pub(crate) fn write(
+        &self,
+        region_x: i32,
+        region_z: i32,
+        region_to_modify: &super::common::RegionToModify,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        write_region_to_disk(
+            &self.world_dir,
+            &self.llbbox,
+            self.ground.as_deref(),
+            self.bake_lighting,
+            region_x,
+            region_z,
+            region_to_modify,
+        )
     }
 }
 

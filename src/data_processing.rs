@@ -10,7 +10,7 @@ use crate::progress::{emit_gui_progress_update, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::tile;
-use crate::world_editor::{WorldEditor, WorldFormat};
+use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -342,6 +342,8 @@ pub fn generate_world_with_options(
     let mut hash_acc: u64 = 0;
     let mut real_regions: HashSet<(i32, i32)> = HashSet::new();
     let mut evicted_regions: HashSet<(i32, i32)> = HashSet::new();
+    // Background writer for eviction; None unless eviction is active.
+    let mut flush_worker: Option<FlushWorker> = None;
 
     // Decide between sequential and parallel processing based on world size.
     // Tile subdivision is aligned to 512-block Minecraft region boundaries.
@@ -375,6 +377,10 @@ pub fn generate_world_with_options(
                 .map_or(0, |p| p.total_placements())
                 == 0
             && args.stream_to_disk;
+
+        if eviction_active {
+            flush_worker = Some(FlushWorker::spawn(editor.region_write_ctx(), 3));
+        }
 
         let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
         if eviction_active {
@@ -551,7 +557,9 @@ pub fn generate_world_with_options(
                                         hash_acc = hash_acc
                                             .wrapping_add(editor.region_content_hash(d.0, d.1));
                                     }
-                                    editor.flush_region(d.0, d.1).map_err(|e| e.to_string())?;
+                                    if let Some(w) = flush_worker.as_ref() {
+                                        editor.flush_region_via(w, d.0, d.1)?;
+                                    }
                                     evicted_regions.insert(d);
                                 }
                             }
@@ -719,7 +727,9 @@ pub fn generate_world_with_options(
             if hash_check {
                 hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
             }
-            editor.flush_region(rx, rz).map_err(|e| e.to_string())?;
+            if let Some(w) = flush_worker.as_ref() {
+                editor.flush_region_via(w, rx, rz)?;
+            }
             evicted_regions.insert((rx, rz));
         }
         // Hash remaining (out-of-bbox halo) regions so hash_acc == the whole-world hash.
@@ -727,6 +737,10 @@ pub fn generate_world_with_options(
             for (rx, rz) in editor.resident_region_keys() {
                 hash_acc = hash_acc.wrapping_add(editor.region_content_hash(rx, rz));
             }
+        }
+        // Wait for all background writes to land (and surface any I/O error) before save.
+        if let Some(w) = flush_worker.take() {
+            w.finish()?;
         }
     }
 

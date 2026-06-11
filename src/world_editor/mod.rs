@@ -10,7 +10,7 @@
 //! - `bedrock` - Bedrock Edition .mcworld format saving
 
 mod common;
-mod java;
+pub(crate) mod java;
 mod luanti;
 
 pub mod bedrock;
@@ -323,29 +323,33 @@ impl<'a> WorldEditor<'a> {
         self.world.regions.keys().copied().collect()
     }
 
-    /// Stream one region to its `.mca` and evict it from RAM (stream-to-disk).
-    /// Removes the region, compacts its sections, serializes, then drops it; the
-    /// region is recorded so any later stray write to it is dropped by the guard.
-    /// Java-only and a no-op for other formats (which build the whole world in RAM).
-    /// Returns `Ok(true)` if a region was flushed.
-    pub(crate) fn flush_region(
+    /// Owned, `Send` context for writing regions off the merge thread.
+    pub(crate) fn region_write_ctx(&self) -> java::RegionWriteCtx {
+        java::RegionWriteCtx::new(
+            self.world_dir.clone(),
+            self.llbbox,
+            self.ground.clone(),
+            self.bake_lighting,
+        )
+    }
+
+    /// Evict one region (stream-to-disk): remove it from RAM, record it so any
+    /// later stray write is dropped by the guard, then hand it to the background
+    /// `worker` for compaction + serialization. Java-only; `Ok(true)` if evicted.
+    pub(crate) fn flush_region_via(
         &mut self,
+        worker: &FlushWorker,
         rx: i32,
         rz: i32,
-    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<bool, String> {
         if self.format != WorldFormat::JavaAnvil {
             return Ok(false);
         }
-        let Some(mut region) = self.world.regions.remove(&(rx, rz)) else {
+        let Some(region) = self.world.regions.remove(&(rx, rz)) else {
             return Ok(false);
         };
-        for chunk in region.chunks.values_mut() {
-            for section in chunk.sections.values_mut() {
-                section.compact();
-            }
-        }
-        self.save_single_region(rx, rz, &region)?;
         self.flushed_regions.insert((rx, rz));
+        worker.send(rx, rz, region)?;
         Ok(true)
     }
 
@@ -1383,6 +1387,55 @@ const _: () = {
         assert_send::<WorldEditor<'_>>();
     }
 };
+
+/// Background writer for stream-to-disk eviction. Regions taken off the merge
+/// thread are compacted + serialized + written on a separate thread, overlapping
+/// disk I/O with the next tile batch's compute. A bounded channel applies
+/// backpressure so at most `capacity` evicted regions sit in RAM awaiting write.
+pub(crate) struct FlushWorker {
+    tx: Option<std::sync::mpsc::SyncSender<(i32, i32, common::RegionToModify)>>,
+    handle: Option<std::thread::JoinHandle<Result<(), String>>>,
+}
+
+impl FlushWorker {
+    pub(crate) fn spawn(ctx: java::RegionWriteCtx, capacity: usize) -> Self {
+        let (tx, rx) =
+            std::sync::mpsc::sync_channel::<(i32, i32, common::RegionToModify)>(capacity.max(1));
+        let handle = std::thread::spawn(move || -> Result<(), String> {
+            while let Ok((rxx, rzz, mut region)) = rx.recv() {
+                for chunk in region.chunks.values_mut() {
+                    for section in chunk.sections.values_mut() {
+                        section.compact();
+                    }
+                }
+                ctx.write(rxx, rzz, &region).map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        });
+        Self {
+            tx: Some(tx),
+            handle: Some(handle),
+        }
+    }
+
+    /// Enqueue a region; blocks when the channel is full (backpressure).
+    fn send(&self, rx: i32, rz: i32, region: common::RegionToModify) -> Result<(), String> {
+        self.tx
+            .as_ref()
+            .ok_or_else(|| "flush worker already finished".to_string())?
+            .send((rx, rz, region))
+            .map_err(|_| "flush worker terminated early".to_string())
+    }
+
+    /// Close the queue and wait for all pending writes; propagates the first error.
+    pub(crate) fn finish(mut self) -> Result<(), String> {
+        drop(self.tx.take());
+        match self.handle.take() {
+            Some(h) => h.join().map_err(|_| "flush worker panicked".to_string())?,
+            None => Ok(()),
+        }
+    }
+}
 
 #[allow(dead_code)]
 fn single_item(id: &str, slot: i8, count: i8) -> HashMap<String, Value> {
