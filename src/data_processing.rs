@@ -432,7 +432,8 @@ pub fn generate_world_with_options(
 
         let mut place_dur = std::time::Duration::ZERO;
         let mut merge_dur = std::time::Duration::ZERO;
-        for batch in indexed_tiles.chunks(tile_batch_size) {
+        let num_batches = indexed_tiles.len().div_ceil(tile_batch_size);
+        for (batch_idx, batch) in indexed_tiles.chunks(tile_batch_size).enumerate() {
             // Phase 1: process this batch of tiles in parallel
             let place_start = std::time::Instant::now();
             let batch_results: Vec<_> = batch
@@ -579,6 +580,9 @@ pub fn generate_world_with_options(
                 subway_points.extend(tile_subway_pts);
             }
             merge_dur += merge_start.elapsed();
+            // Spread 25%->70% across batches so the bar moves during tile processing.
+            let pct = 25.0 + ((batch_idx + 1) as f64 / num_batches as f64) * 45.0;
+            emit_gui_progress_update(pct, "Processing area...");
         }
         bench.report("element_placement", place_dur);
         bench.report("tile_merge", merge_dur);

@@ -291,11 +291,6 @@ impl<'a> WorldEditor<'a> {
         self.bake_lighting = enabled;
     }
 
-    /// Gets a reference to the ground data if available
-    pub fn get_ground(&self) -> Option<&Ground> {
-        self.ground.as_deref()
-    }
-
     /// Returns the current world format
     #[allow(dead_code)]
     pub fn format(&self) -> WorldFormat {
@@ -400,6 +395,16 @@ impl<'a> WorldEditor<'a> {
         } else {
             0 // Default ground level if no terrain data
         }
+    }
+
+    /// Raw terrain elevation at world (x, z) via the ground origin (correct in tile editors, unlike get_min_coords); None without elevation data.
+    pub fn terrain_level(&self, x: i32, z: i32) -> Option<i32> {
+        self.ground.as_ref().map(|g| {
+            g.level(XZPoint::new(
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
+            ))
+        })
     }
 
     /// Register a flattened ground Y for a road cell. See
