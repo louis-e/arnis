@@ -52,3 +52,7 @@ gen/
 /flake/*
 !/flake/flake.nix
 !/flake/flake.lock
+
+# Local-only: stray diff + Teddy fork clone (must never be committed)
+/diff.diff
+/teddy-arnis/
