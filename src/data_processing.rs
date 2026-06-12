@@ -432,8 +432,10 @@ pub fn generate_world_with_options(
 
         let mut place_dur = std::time::Duration::ZERO;
         let mut merge_dur = std::time::Duration::ZERO;
-        let num_batches = indexed_tiles.len().div_ceil(tile_batch_size);
-        for (batch_idx, batch) in indexed_tiles.chunks(tile_batch_size).enumerate() {
+        let total_tiles = indexed_tiles.len().max(1);
+        let mut tiles_merged = 0usize;
+        let mut last_emitted_pct = 25.0_f64;
+        for batch in indexed_tiles.chunks(tile_batch_size) {
             // Phase 1: process this batch of tiles in parallel
             let place_start = std::time::Instant::now();
             let batch_results: Vec<_> = batch
@@ -524,7 +526,13 @@ pub fn generate_world_with_options(
                         g_max_z,
                     );
 
-                    (tile_idx, tile_editor.into_world(), tile_subway_points)
+                    let tile_road_overrides = tile_editor.take_road_surface_overrides();
+                    (
+                        tile_idx,
+                        tile_editor.into_world(),
+                        tile_subway_points,
+                        tile_road_overrides,
+                    )
                 })
                 .collect();
             place_dur += place_start.elapsed();
@@ -532,7 +540,7 @@ pub fn generate_world_with_options(
             let merge_start = std::time::Instant::now();
             // Phase 2: merge this batch's results into the main editor (sequential).
             // batch_results is dropped after this loop, freeing memory before next batch.
-            for (tile_idx, tile_world, tile_subway_pts) in batch_results {
+            for (tile_idx, tile_world, tile_subway_pts, tile_road_overrides) in batch_results {
                 editor.merge_world(
                     tile_world,
                     tiles[tile_idx].min_x,
@@ -540,6 +548,12 @@ pub fn generate_world_with_options(
                     tiles[tile_idx].max_x - 1,
                     tiles[tile_idx].max_z - 1,
                 );
+                // Carry road-surface overrides to the main editor so the post-merge 3D/subway
+                // passes stay road-aware. Skipped under eviction: those passes don't run there
+                // (subways off, no 3D) and streaming wants minimal resident RAM.
+                if !eviction_active {
+                    editor.merge_road_surface_overrides(tile_road_overrides);
+                }
 
                 if eviction_active {
                     // Defer every region a subway point can touch (carve + ±1 spill).
@@ -578,11 +592,16 @@ pub fn generate_world_with_options(
                 }
 
                 subway_points.extend(tile_subway_pts);
+
+                // Step 25%->70% per merged tile, throttled to whole-percent steps.
+                tiles_merged += 1;
+                let pct = 25.0 + (tiles_merged as f64 / total_tiles as f64) * 45.0;
+                if pct - last_emitted_pct >= 1.0 {
+                    emit_gui_progress_update(pct, "Processing area...");
+                    last_emitted_pct = pct;
+                }
             }
             merge_dur += merge_start.elapsed();
-            // Spread 25%->70% across batches so the bar moves during tile processing.
-            let pct = 25.0 + ((batch_idx + 1) as f64 / num_batches as f64) * 45.0;
-            emit_gui_progress_update(pct, "Processing area...");
         }
         bench.report("element_placement", place_dur);
         bench.report("tile_merge", merge_dur);

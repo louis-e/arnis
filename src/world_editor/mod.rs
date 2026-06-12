@@ -421,6 +421,16 @@ impl<'a> WorldEditor<'a> {
         self.road_surface_overrides.insert((x, z), y);
     }
 
+    /// Take this editor's road-surface overrides (tile editors hand theirs to the main editor).
+    pub(crate) fn take_road_surface_overrides(&mut self) -> FnvHashMap<(i32, i32), i32> {
+        std::mem::take(&mut self.road_surface_overrides)
+    }
+
+    /// Merge in road-surface overrides from a tile editor so post-merge passes stay road-aware.
+    pub(crate) fn merge_road_surface_overrides(&mut self, overrides: FnvHashMap<(i32, i32), i32>) {
+        self.road_surface_overrides.extend(overrides);
+    }
+
     /// Get the water-appropriate Y level at a world coordinate.
     /// On steep terrain, snaps to the local minimum to compensate for
     /// spatial misalignment between water data and the elevation DEM.
