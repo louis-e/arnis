@@ -71,6 +71,16 @@ impl PrescanResult {
     pub fn placement_count(&self) -> usize {
         self.placements.len()
     }
+
+    /// Regions each placement may write to (stream-to-disk deferral). XZ extent is capped
+    /// at MAX_XZ_EXTENT_M, so anchor ± that radius (+ ring) is a safe superset.
+    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+        let r = (MAX_XZ_EXTENT_M as f64 * scale).ceil() as i32;
+        self.placements
+            .iter()
+            .flat_map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
+            .collect()
+    }
 }
 
 struct Candidate {

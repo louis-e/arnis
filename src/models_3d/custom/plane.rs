@@ -85,6 +85,16 @@ impl PrescanResult {
     pub fn placement_count(&self) -> usize {
         self.placements.len()
     }
+
+    /// Regions each placement may write to (stream-to-disk deferral). The model spans at
+    /// most PLANE_LENGTH_M from the anchor, so that radius (+ ring) is a safe superset.
+    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+        let r = (PLANE_LENGTH_M * scale).ceil() as i32;
+        self.placements
+            .iter()
+            .flat_map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
+            .collect()
+    }
 }
 
 pub fn prescan(elements: &[ProcessedElement], args_scale: f64) -> PrescanResult {

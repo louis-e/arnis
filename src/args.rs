@@ -115,10 +115,6 @@ pub struct Args {
     /// (Voxy/Chunky) without visiting them. Slower; off by default.
     #[arg(long, default_value_t = false)]
     pub bake_lighting: bool,
-
-    /// Stream finished regions to disk to lower peak RAM on huge areas (Java, no 3D models); slower, disables subways.
-    #[arg(long, default_value_t = false)]
-    pub stream_to_disk: bool,
 }
 
 /// Validates CLI arguments after parsing.
@@ -236,7 +232,6 @@ mod tests {
         assert!(!args.bedrock);
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
-        assert!(!args.stream_to_disk);
         // interior, roof, land_cover default to true
         assert!(args.interior);
         assert!(args.roof);

@@ -235,6 +235,28 @@ fn process_element(
     }
 }
 
+/// Whether to stream regions to disk (lower peak RAM) for a run of `num_regions` regions.
+/// Auto-enabled when the estimated resident world would crowd available system memory.
+/// Trades generation time for RAM and skips subways (their post-merge carve conflicts with
+/// eviction); 3D models are kept via region deferral. So on large areas subway presence
+/// depends on host RAM. `ARNIS_STREAM_TO_DISK=1/0` overrides. Constants are conservative/tunable.
+fn should_stream_to_disk(num_regions: usize) -> bool {
+    match std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() {
+        Some("1") => return true,
+        Some("0") => return false,
+        _ => {}
+    }
+    const BASE_MB: u64 = 800;
+    const PER_REGION_MB: u64 = 14;
+    let est_peak_mb = BASE_MB + PER_REGION_MB * num_regions as u64;
+
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
+    let available_mb = sys.available_memory() / (1024 * 1024);
+    // Stream once the estimate would use >55% of available RAM (unknown memory -> fast path).
+    available_mb > 0 && est_peak_mb * 100 > available_mb * 55
+}
+
 /// Generate world with explicit format options (used by GUI for Bedrock support)
 pub fn generate_world_with_options(
     elements: Vec<ProcessedElement>,
@@ -377,19 +399,35 @@ pub fn generate_world_with_options(
 
         // Stream-to-disk (opt-in, --stream-to-disk): flush+evict each region once its
         // owner + 8 neighbour tiles merge. Java only, no 3D models. See task notes.
+        // Auto-enable stream-to-disk when the resident world would crowd available RAM.
+        // Disabled when any 3DMR placement exists (uncapped extent, can't be safely deferred).
+        // Java only. Capped 3D models (wikidata/stadium/plane) are kept via region deferral.
         eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
             && models_3d_pipeline
                 .as_ref()
-                .map_or(0, |p| p.total_placements())
+                .map_or(0, |p| p.three_dmr_placement_count())
                 == 0
-            && args.stream_to_disk;
+            && should_stream_to_disk(tiles.len());
+
+        // Regions any capped 3D placement may write to: kept resident (not evicted in-loop)
+        // so the post-merge placement pass lands in RAM, then flushed at finalize.
+        let model_regions: HashSet<(i32, i32)> = if eviction_active {
+            models_3d_pipeline
+                .as_ref()
+                .map(|p| p.deferred_region_keys(args.scale))
+                .unwrap_or_default()
+        } else {
+            HashSet::new()
+        };
 
         if eviction_active {
             flush_worker = Some(FlushWorker::spawn(editor.region_write_ctx(), 3));
         }
 
         let mut indexed_tiles: Vec<(usize, &tile::TileBounds)> = tiles.iter().enumerate().collect();
-        if eviction_active {
+        // ARNIS_NO_BAND forces LPT order even under eviction (debug: isolates ordering effects).
+        let band = eviction_active && std::env::var_os("ARNIS_NO_BAND").is_none();
+        if band {
             // Row-major bands (LPT within a row) so the seal frontier sweeps top-to-bottom.
             indexed_tiles.sort_by(|a, b| {
                 let za = a.1.min_z >> 9;
@@ -548,10 +586,15 @@ pub fn generate_world_with_options(
                     tiles[tile_idx].max_x - 1,
                     tiles[tile_idx].max_z - 1,
                 );
-                // Carry road-surface overrides to the main editor so the post-merge 3D/subway
-                // passes stay road-aware. Skipped under eviction: those passes don't run there
-                // (subways off, no 3D) and streaming wants minimal resident RAM.
-                if !eviction_active {
+                // Carry road-surface overrides to the main editor so the post-merge 3D-model
+                // pass stays road-aware. Under eviction keep only the deferred 3D regions'
+                // overrides (the rest are evicted; this caps the extra resident RAM).
+                if eviction_active {
+                    editor.merge_road_surface_overrides_in_regions(
+                        tile_road_overrides,
+                        &model_regions,
+                    );
+                } else {
                     editor.merge_road_surface_overrides(tile_road_overrides);
                 }
 
@@ -576,6 +619,7 @@ pub fn generate_world_with_options(
                                 if *c == 0
                                     && !evicted_regions.contains(&d)
                                     && !subway_regions.contains(&d)
+                                    && !model_regions.contains(&d)
                                 {
                                     if hash_check {
                                         hash_acc = hash_acc
@@ -609,9 +653,10 @@ pub fn generate_world_with_options(
 
         if eviction_active && args.benchmark {
             eprintln!(
-                "[BENCHMARK] evicted_in_loop={} subway_deferred={} real_regions={}",
+                "[BENCHMARK] evicted_in_loop={} subway_deferred={} model_deferred={} real_regions={}",
                 evicted_regions.len(),
                 subway_regions.len(),
+                model_regions.len(),
                 real_regions.len()
             );
         }

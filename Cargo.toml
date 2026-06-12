@@ -50,6 +50,7 @@ semver = "1.0.27"
 parquet = { version = "58", default-features = false, features = ["snap", "zstd"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 tauri = { version = "2", optional = true }
 tauri-plugin-log = { version = "2.6.0", optional = true }
 tauri-plugin-shell = { version = "2", optional = true }

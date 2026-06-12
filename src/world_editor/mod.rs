@@ -431,6 +431,20 @@ impl<'a> WorldEditor<'a> {
         self.road_surface_overrides.extend(overrides);
     }
 
+    /// Merge only the overrides whose cell falls in `regions`. Under stream-to-disk, only the
+    /// deferred 3D regions need road-aware ground for the post-merge placement pass.
+    pub(crate) fn merge_road_surface_overrides_in_regions(
+        &mut self,
+        overrides: FnvHashMap<(i32, i32), i32>,
+        regions: &std::collections::HashSet<(i32, i32)>,
+    ) {
+        self.road_surface_overrides.extend(
+            overrides
+                .into_iter()
+                .filter(|((x, z), _)| regions.contains(&(x >> 9, z >> 9))),
+        );
+    }
+
     /// Get the water-appropriate Y level at a world coordinate.
     /// On steep terrain, snaps to the local minimum to compensate for
     /// spatial misalignment between water data and the elevation DEM.
