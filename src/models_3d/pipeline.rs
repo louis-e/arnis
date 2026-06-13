@@ -47,18 +47,12 @@ impl Models3dPipeline {
         &self.union_suppressed
     }
 
-    /// Total 3D models that will be placed across all sub-pipelines. Stream-to-disk
-    /// eviction is disabled when this is non-zero (models need the merged world).
-    /// 3DMR placements have uncapped extent (model fetched at place-time), so they can't
-    /// be safely deferred; stream-to-disk is disabled when this is non-zero.
-    pub fn three_dmr_placement_count(&self) -> usize {
-        self.three_dmr.placement_count()
-    }
-
-    /// Union of regions the capped placements (wikidata/stadium/plane) may write to, so
-    /// stream-to-disk can defer (keep resident) those regions until post-merge placement.
+    /// Union of regions every 3D placement may write to, so stream-to-disk can defer (keep
+    /// resident) those regions until the post-merge placement pass. wikidata/stadium/plane use
+    /// their size caps; 3DMR (uncapped) uses a generous assumed extent.
     pub fn deferred_region_keys(&self, scale: f64) -> HashSet<(i32, i32)> {
         let mut s: HashSet<(i32, i32)> = HashSet::new();
+        s.extend(self.three_dmr.deferred_region_keys(scale));
         s.extend(self.wikidata.deferred_region_keys(scale));
         s.extend(self.stadium.deferred_region_keys(scale));
         s.extend(self.plane.deferred_region_keys(scale));

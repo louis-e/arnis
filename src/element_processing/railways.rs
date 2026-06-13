@@ -55,7 +55,6 @@ pub fn generate_railways(
     subway_points: &mut Vec<(i32, i32)>,
     rail_bridge_internal_endpoints: &RailBridgeInternalEndpoints,
     bridge_outlines: &BridgeOutlineIndex,
-    skip_subways: bool,
 ) {
     let Some(railway_type) = element.tags.get("railway") else {
         return;
@@ -68,10 +67,7 @@ pub fn generate_railways(
             .map(|v| v == "yes")
             .unwrap_or(false);
     if is_subway {
-        // Streaming evicts regions before the post-merge subway carve, so skip subways when on.
-        if !skip_subways {
-            generate_subway_shell(editor, element, subway_points);
-        }
+        generate_subway_shell(editor, element, subway_points);
         return;
     }
 

@@ -56,7 +56,6 @@ fn process_element(
     bridge_outlines: &bridge_styles::BridgeOutlineIndex,
     rail_bridge_internal_endpoints: &railways::RailBridgeInternalEndpoints,
     subway_points: &mut Vec<(i32, i32)>,
-    skip_subways: bool,
 ) {
     match element {
         ProcessedElement::Way(way) => {
@@ -117,7 +116,6 @@ fn process_element(
                     subway_points,
                     rail_bridge_internal_endpoints,
                     bridge_outlines,
-                    skip_subways,
                 );
             } else if way.tags.contains_key("roller_coaster") {
                 railways::generate_roller_coaster(editor, way);
@@ -397,19 +395,13 @@ pub fn generate_world_with_options(
 
         let tile_assignments = tile::assign_elements_to_tiles(&elements, &tiles, args.scale);
 
-        // Stream-to-disk (opt-in, --stream-to-disk): flush+evict each region once its
-        // owner + 8 neighbour tiles merge. Java only, no 3D models. See task notes.
-        // Auto-enable stream-to-disk when the resident world would crowd available RAM.
-        // Disabled when any 3DMR placement exists (uncapped extent, can't be safely deferred).
-        // Java only. Capped 3D models (wikidata/stadium/plane) are kept via region deferral.
-        eviction_active = matches!(world_format, WorldFormat::JavaAnvil)
-            && models_3d_pipeline
-                .as_ref()
-                .map_or(0, |p| p.three_dmr_placement_count())
-                == 0
-            && should_stream_to_disk(tiles.len());
+        // Stream-to-disk: flush+evict each region once its owner + 8 neighbour tiles merge,
+        // auto-enabled when the resident world would crowd available RAM. Java only; 3D models
+        // are kept via region deferral.
+        eviction_active =
+            matches!(world_format, WorldFormat::JavaAnvil) && should_stream_to_disk(tiles.len());
 
-        // Regions any capped 3D placement may write to: kept resident (not evicted in-loop)
+        // Regions any 3D placement may write to: kept resident (not evicted in-loop)
         // so the post-merge placement pass lands in RAM, then flushed at finalize.
         let model_regions: HashSet<(i32, i32)> = if eviction_active {
             models_3d_pipeline
@@ -466,7 +458,6 @@ pub fn generate_world_with_options(
                 remaining.insert(r, c);
             }
         }
-        let mut subway_regions: HashSet<(i32, i32)> = HashSet::new();
 
         let mut place_dur = std::time::Duration::ZERO;
         let mut merge_dur = std::time::Duration::ZERO;
@@ -520,7 +511,6 @@ pub fn generate_world_with_options(
                             &bridge_outlines,
                             &rail_bridge_internal_endpoints,
                             &mut tile_subway_points,
-                            eviction_active,
                         );
                     }
 
@@ -564,6 +554,12 @@ pub fn generate_world_with_options(
                         g_max_z,
                     );
 
+                    // Under eviction the post-merge subway carve can't run (regions get freed),
+                    // so carve in-tile now, after ground/fill so the interior isn't refilled.
+                    if eviction_active {
+                        railways::carve_subway_interior(&mut tile_editor, &tile_subway_points);
+                    }
+
                     let tile_road_overrides = tile_editor.take_road_surface_overrides();
                     (
                         tile_idx,
@@ -599,17 +595,9 @@ pub fn generate_world_with_options(
                 }
 
                 if eviction_active {
-                    // Defer every region a subway point can touch (carve + ±1 spill).
-                    for &(bx, bz) in &tile_subway_pts {
-                        let (pr_x, pr_z) = (bx >> 9, bz >> 9);
-                        for dz in -1..=1 {
-                            for dx in -1..=1 {
-                                subway_regions.insert((pr_x + dx, pr_z + dz));
-                            }
-                        }
-                    }
                     // This tile contributes to its own region and its 8 neighbours;
                     // flush each non-deferred region whose contributors are all merged.
+                    // (Subways are carved in-tile above, so they don't defer regions.)
                     let rt = region_of_tile[tile_idx];
                     for dz in -1..=1 {
                         for dx in -1..=1 {
@@ -618,7 +606,6 @@ pub fn generate_world_with_options(
                                 *c -= 1;
                                 if *c == 0
                                     && !evicted_regions.contains(&d)
-                                    && !subway_regions.contains(&d)
                                     && !model_regions.contains(&d)
                                 {
                                     if hash_check {
@@ -653,9 +640,8 @@ pub fn generate_world_with_options(
 
         if eviction_active && args.benchmark {
             eprintln!(
-                "[BENCHMARK] evicted_in_loop={} subway_deferred={} model_deferred={} real_regions={}",
+                "[BENCHMARK] evicted_in_loop={} model_deferred={} real_regions={}",
                 evicted_regions.len(),
-                subway_regions.len(),
                 model_regions.len(),
                 real_regions.len()
             );
@@ -724,7 +710,6 @@ pub fn generate_world_with_options(
                 &bridge_outlines,
                 &rail_bridge_internal_endpoints,
                 &mut subway_points,
-                false,
             );
 
             // Release flood fill cache entries for memory optimization.
@@ -784,8 +769,8 @@ pub fn generate_world_with_options(
     drop(road_mask);
 
     // Carve subway tunnel interiors now that underground is filled with stone.
-    // This must happen after ground generation so AIR blocks are not overwritten.
-    if !subway_points.is_empty() {
+    // Under eviction this already ran in-tile (regions get freed before here).
+    if !eviction_active && !subway_points.is_empty() {
         railways::carve_subway_interior(&mut editor, &subway_points);
     }
 
