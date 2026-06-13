@@ -47,10 +47,6 @@ pub const DEFAULT_TILE_SIZE: i32 = 512;
 /// scales linearly.
 pub const TILE_EDITOR_HALO: i32 = 64;
 
-/// Halo for tree-trunk-to-tile assignment so canopy overflow lands in the
-/// owning tile's editor halo instead of being lost.
-const TREE_HALO: i32 = 8;
-
 /// Widest rendered half-width of any linear element (aeroway runways), in metres.
 const MAX_LINEAR_HALF_WIDTH_M: f64 = 40.0;
 
@@ -159,17 +155,12 @@ pub fn assign_elements_to_tiles(
     for (elem_idx, element) in elements.iter().enumerate() {
         match element {
             ProcessedElement::Node(node) => {
-                // Trees need halo for canopy overflow
-                let is_tree = node.tags.get("natural").map(String::as_str) == Some("tree");
-                let halo = if is_tree { TREE_HALO } else { 0 };
-
+                // Assign to the strict containing tile so it is authoritative; the owning
+                // tile's editor halo renders any canopy overflow into neighbours. Assigning
+                // by an expanded halo could hand a node to a non-owner tile whose write is
+                // then dropped (write-if-AIR) by the owner's ground (seam drop).
                 for (tile_idx, tile) in tiles.iter().enumerate() {
-                    let check_bounds = if halo > 0 {
-                        tile.expanded(halo)
-                    } else {
-                        tile.clone()
-                    };
-                    if check_bounds.contains(node.x, node.z) {
+                    if tile.contains(node.x, node.z) {
                         tile_elements[tile_idx].push(elem_idx);
                         break; // Nodes go to exactly one tile
                     }

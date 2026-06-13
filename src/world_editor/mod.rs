@@ -1345,6 +1345,8 @@ impl<'a> WorldEditor<'a> {
             self.bedrock_spawn_point,
             self.ground.clone(),
             self.bedrock_extend_height,
+            self.projection.clone(),
+            self.scale,
         )
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }

@@ -134,16 +134,21 @@ pub struct BedrockWriter {
     spawn_point: Option<(i32, i32)>,
     ground: Option<Arc<Ground>>,
     extend_build_height: bool,
+    projection: String,
+    scale: f64,
 }
 
 impl BedrockWriter {
     /// Creates a new BedrockWriter
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         output_path: PathBuf,
         level_name: String,
         spawn_point: Option<(i32, i32)>,
         ground: Option<Arc<Ground>>,
         extend_build_height: bool,
+        projection: String,
+        scale: f64,
     ) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
@@ -159,6 +164,8 @@ impl BedrockWriter {
             spawn_point,
             ground,
             extend_build_height,
+            projection,
+            scale,
         }
     }
 
@@ -739,8 +746,8 @@ impl BedrockWriter {
                 max_geo_lat: llbbox.max().lat(),
                 min_geo_lon: llbbox.min().lng(),
                 max_geo_lon: llbbox.max().lng(),
-                projection: "local".to_string(),
-                scale: 1.0,
+                projection: self.projection.clone(),
+                scale: self.scale,
             },
             format: "bedrock-mcworld",
             chunk_count,
@@ -1304,6 +1311,8 @@ mod tests {
             None,
             None,
             false,
+            "local".to_string(),
+            1.0,
         )
         .write_world(&world, &xzbbox, &llbbox)
         .expect("write_world");
@@ -1351,6 +1360,8 @@ mod tests {
             Some((42, 84)),
             None,
             false,
+            "local".to_string(),
+            1.0,
         )
         .write_world(&world, &xzbbox, &llbbox)
         .expect("write_world");
@@ -1375,6 +1386,8 @@ mod tests {
             None,
             None,
             true,
+            "local".to_string(),
+            1.0,
         )
         .write_world(&world, &xzbbox, &llbbox)
         .expect("write_world");
@@ -1455,6 +1468,8 @@ mod tests {
             None,
             None,
             false,
+            "local".to_string(),
+            1.0,
         );
         writer.prepare_output_dir().expect("prepare dir");
         writer.write_chunks_to_db(&world).expect("write chunks");
