@@ -503,7 +503,10 @@ pub fn generate_world_with_options(
                             &building_footprints,
                             &building_passages,
                             &road_mask,
-                            &tile_xzbbox,
+                            // World bbox (not tile) for relation/area ring clipping: clipping to
+                            // the tile can drop a relation whose ring fails to close. The tile
+                            // editor still bounds the actual writes.
+                            &xzbbox,
                             &big_water_field,
                             &bridge_structures,
                             &bridge_surface,

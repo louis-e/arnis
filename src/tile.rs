@@ -59,8 +59,8 @@ pub fn create_tiles(xzbbox: &XZBBox, tile_size: i32) -> Vec<TileBounds> {
     // This ensures each tile maps cleanly to Minecraft regions
     let aligned_min_x = (xzbbox.min_x() >> 9) << 9; // floor to nearest 512
     let aligned_min_z = (xzbbox.min_z() >> 9) << 9;
-    let aligned_max_x = ((xzbbox.max_x() + tile_size) >> 9) << 9; // ceil to nearest 512
-    let aligned_max_z = ((xzbbox.max_z() + tile_size) >> 9) << 9;
+    let aligned_max_x = ((xzbbox.max_x() + 512) >> 9) << 9; // ceil to nearest 512 region
+    let aligned_max_z = ((xzbbox.max_z() + 512) >> 9) << 9;
 
     let mut z = aligned_min_z;
     while z < aligned_max_z {
