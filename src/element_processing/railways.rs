@@ -1,13 +1,23 @@
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
-use crate::osm_parser::ProcessedWay;
+use crate::element_processing::bridge_styles::{
+    decorate_bridge_above_deck, place_bridge_support_below_deck, resolve_bridge_style_with_outline,
+    BridgeOutlineIndex, BridgePathSample, BridgeStyle,
+};
+use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
-
-/// Number of blocks per OSM layer level (matches highway elevation step).
-const LAYER_HEIGHT_STEP: i32 = 6;
+use std::collections::{HashMap, HashSet};
 
 /// Vertical offset in blocks from the terrain surface to the tunnel ceiling.
 const SUBWAY_DEPTH: i32 = 3;
+
+const RAIL_BRIDGE_FLAT_CLEARANCE: i32 = 4;
+const RAIL_BRIDGE_DIP_THRESHOLD: i32 = 4;
+const RAIL_BRIDGE_RAMP_MIN: usize = 8;
+const RAIL_BRIDGE_RAMP_MAX: usize = 30;
+const RAIL_BRIDGE_RAMP_FRACTION: f32 = 0.25;
+
+pub type RailBridgeInternalEndpoints = HashSet<(i32, i32)>;
 
 /// Half-width of the outer stone shell (total footprint = 2 * WALL_RADIUS + 1 = 5).
 const WALL_RADIUS: i32 = 2;
@@ -43,128 +53,347 @@ pub fn generate_railways(
     editor: &mut WorldEditor,
     element: &ProcessedWay,
     subway_points: &mut Vec<(i32, i32)>,
+    rail_bridge_internal_endpoints: &RailBridgeInternalEndpoints,
+    bridge_outlines: &BridgeOutlineIndex,
 ) {
-    if let Some(railway_type) = element.tags.get("railway") {
-        // Subway lines get their own two-phase generation pipeline.
-        let is_subway = railway_type == "subway"
-            || element
-                .tags
-                .get("subway")
-                .map(|v| v == "yes")
-                .unwrap_or(false);
-        if is_subway {
-            generate_subway_shell(editor, element, subway_points);
-            return;
-        }
+    let Some(railway_type) = element.tags.get("railway") else {
+        return;
+    };
 
-        if [
-            "proposed",
-            "abandoned",
-            "construction",
-            "razed",
-            "turntable",
-        ]
-        .contains(&railway_type.as_str())
-        {
-            return;
-        }
-
-        if let Some(tunnel) = element.tags.get("tunnel") {
-            if tunnel == "yes" {
-                return;
-            }
-        }
-
-        // Respect the OSM `layer` tag so elevated railways (bridges, overpasses)
-        // are placed above ground level instead of clipping through it.
-        let layer_value: i32 = element
+    let is_subway = railway_type == "subway"
+        || element
             .tags
-            .get("layer")
-            .and_then(|l| l.parse::<i32>().ok())
-            .unwrap_or(0)
-            .max(0); // underground (<0) is handled by the tunnel check above
+            .get("subway")
+            .map(|v| v == "yes")
+            .unwrap_or(false);
+    if is_subway {
+        generate_subway_shell(editor, element, subway_points);
+        return;
+    }
 
-        let layer_offset = layer_value * LAYER_HEIGHT_STEP;
+    if [
+        "proposed",
+        "abandoned",
+        "construction",
+        "razed",
+        "turntable",
+    ]
+    .contains(&railway_type.as_str())
+    {
+        return;
+    }
 
-        for i in 1..element.nodes.len() {
-            let prev_node = element.nodes[i - 1].xz();
-            let cur_node = element.nodes[i].xz();
+    if let Some(tunnel) = element.tags.get("tunnel") {
+        if tunnel == "yes" {
+            return;
+        }
+    }
 
-            let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
-            let smoothed_points = smooth_diagonal_rails(&points);
+    if is_rail_bridge(element) {
+        generate_rail_bridge(
+            editor,
+            element,
+            rail_bridge_internal_endpoints,
+            bridge_outlines,
+        );
+    } else {
+        generate_at_grade_rail(editor, element);
+    }
+}
 
-            for j in 0..smoothed_points.len() {
-                let (bx, _, bz) = smoothed_points[j];
+fn is_rail_bridge(way: &ProcessedWay) -> bool {
+    if way.tags.get("indoor").map(|v| v.as_str()) == Some("yes") {
+        return false;
+    }
+    way.tags
+        .get("bridge")
+        .map(|v| v.as_str())
+        .is_some_and(|v| v != "no")
+}
 
-                // Base offsets from ground level.
-                // When layer_offset > 0 the rail floats above terrain (bridge/overpass).
-                let gravel_y = layer_offset;
-                let rail_y = layer_offset + 1;
+// Mirrors generate_railways' dispatch so the internal-endpoint set only counts rendered bridges.
+fn renders_as_rail_bridge(way: &ProcessedWay) -> bool {
+    let Some(railway_type) = way.tags.get("railway") else {
+        return false;
+    };
+    if way.nodes.len() < 2 || !is_rail_bridge(way) {
+        return false;
+    }
+    let is_subway =
+        railway_type == "subway" || way.tags.get("subway").map(|v| v == "yes").unwrap_or(false);
+    if is_subway {
+        return false;
+    }
+    if [
+        "proposed",
+        "abandoned",
+        "construction",
+        "razed",
+        "turntable",
+    ]
+    .contains(&railway_type.as_str())
+    {
+        return false;
+    }
+    if way.tags.get("tunnel").map(|v| v.as_str()) == Some("yes") {
+        return false;
+    }
+    true
+}
 
-                // --- Terrain-slope detection (only for at-grade railways) ---
-                // When terrain is enabled and layer == 0 we try to place ascending
-                // rail variants so consecutive blocks stay visually connected even
-                // when the ground rises or falls by one block per step.
-                let prev_ground = if j > 0 {
-                    let (px, _, pz) = smoothed_points[j - 1];
-                    editor.get_ground_level(px, pz)
-                } else {
-                    editor.get_ground_level(bx, bz)
-                };
+/// Endpoints shared by 2+ rendered rail-bridge ways — used to suppress per-way ramps mid-bridge.
+pub fn collect_rail_bridge_internal_endpoints(
+    elements: &[ProcessedElement],
+) -> RailBridgeInternalEndpoints {
+    let mut counts: HashMap<(i32, i32), u32> = HashMap::new();
+    for elem in elements {
+        let ProcessedElement::Way(w) = elem else {
+            continue;
+        };
+        if !renders_as_rail_bridge(w) {
+            continue;
+        }
+        let s = &w.nodes[0];
+        let e = &w.nodes[w.nodes.len() - 1];
+        *counts.entry((s.x, s.z)).or_default() += 1;
+        if (e.x, e.z) != (s.x, s.z) {
+            *counts.entry((e.x, e.z)).or_default() += 1;
+        }
+    }
+    counts
+        .into_iter()
+        .filter_map(|(k, c)| (c > 1).then_some(k))
+        .collect()
+}
 
-                let next_ground = if j + 1 < smoothed_points.len() {
-                    let (nx, _, nz) = smoothed_points[j + 1];
-                    editor.get_ground_level(nx, nz)
-                } else {
-                    editor.get_ground_level(bx, bz)
-                };
+fn generate_at_grade_rail(editor: &mut WorldEditor, element: &ProcessedWay) {
+    // Cumulative cell index across segments so sleeper spacing stays consistent at OSM-node joins.
+    let mut tds: usize = 0;
+    for i in 1..element.nodes.len() {
+        let prev_node = element.nodes[i - 1].xz();
+        let cur_node = element.nodes[i].xz();
 
-                let current_ground = editor.get_ground_level(bx, bz);
+        let points = bresenham_line(prev_node.x, 0, prev_node.z, cur_node.x, 0, cur_node.z);
+        let smoothed_points = smooth_diagonal_rails(&points);
+        let skip_first = if i > 1 { 1 } else { 0 };
 
-                // Fill the vertical gap under the rail when terrain rises steeply
-                // so there is always a solid gravel block supporting the track.
-                if layer_offset == 0 && prev_ground < current_ground {
-                    for fill_y in prev_ground..current_ground {
-                        editor.set_block_absolute(GRAVEL, bx, fill_y, bz, None, None);
-                    }
+        for j in skip_first..smoothed_points.len() {
+            let (bx, _, bz) = smoothed_points[j];
+
+            let prev_ground = if j > 0 {
+                let (px, _, pz) = smoothed_points[j - 1];
+                editor.get_ground_level(px, pz)
+            } else {
+                editor.get_ground_level(bx, bz)
+            };
+            let next_ground = if j + 1 < smoothed_points.len() {
+                let (nx, _, nz) = smoothed_points[j + 1];
+                editor.get_ground_level(nx, nz)
+            } else {
+                editor.get_ground_level(bx, bz)
+            };
+            let current_ground = editor.get_ground_level(bx, bz);
+
+            // Fill any vertical gap under the rail when terrain rises step-wise.
+            if prev_ground < current_ground {
+                for fill_y in prev_ground..current_ground {
+                    editor.set_block_absolute(GRAVEL, bx, fill_y, bz, None, None);
                 }
+            }
 
-                editor.set_block(GRAVEL, bx, gravel_y, bz, None, None);
+            editor.set_block(GRAVEL, bx, 0, bz, None, None);
 
-                let prev_xz = if j > 0 {
-                    let (px, _, pz) = smoothed_points[j - 1];
-                    Some((px, pz))
-                } else {
-                    None
-                };
-                let next_xz = if j + 1 < smoothed_points.len() {
-                    let (nx, _, nz) = smoothed_points[j + 1];
-                    Some((nx, nz))
-                } else {
-                    None
-                };
+            let prev_xz = if j > 0 {
+                let (px, _, pz) = smoothed_points[j - 1];
+                Some((px, pz))
+            } else {
+                None
+            };
+            let next_xz = if j + 1 < smoothed_points.len() {
+                let (nx, _, nz) = smoothed_points[j + 1];
+                Some((nx, nz))
+            } else {
+                None
+            };
 
-                let rail_block = if layer_offset == 0 {
-                    determine_rail_with_slope(
-                        (bx, bz),
-                        prev_xz,
-                        next_xz,
-                        prev_ground,
-                        current_ground,
-                        next_ground,
-                    )
-                } else {
-                    determine_rail_direction((bx, bz), prev_xz, next_xz)
-                };
+            let rail_block = determine_rail_with_slope(
+                (bx, bz),
+                prev_xz,
+                next_xz,
+                prev_ground,
+                current_ground,
+                next_ground,
+            );
 
-                editor.set_block(rail_block, bx, rail_y, bz, None, None);
+            editor.set_block(rail_block, bx, 1, bz, None, None);
 
-                if bx % 4 == 0 {
-                    editor.set_block(OAK_LOG, bx, gravel_y, bz, None, None);
-                }
+            if tds.is_multiple_of(4) {
+                editor.set_block(OAK_LOG, bx, 0, bz, None, None);
+            }
+            tds += 1;
+        }
+    }
+}
+
+fn generate_rail_bridge(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    internal_endpoints: &RailBridgeInternalEndpoints,
+    bridge_outlines: &BridgeOutlineIndex,
+) {
+    if way.nodes.len() < 2 {
+        return;
+    }
+
+    let style = resolve_bridge_style_with_outline(way, bridge_outlines);
+
+    let mut all_points: Vec<(i32, i32)> = Vec::new();
+    for window in way.nodes.windows(2) {
+        let bp = bresenham_line(window[0].x, 0, window[0].z, window[1].x, 0, window[1].z);
+        let smoothed = smooth_diagonal_rails(&bp);
+        for (bx, _, bz) in smoothed.iter() {
+            if all_points.last() != Some(&(*bx, *bz)) {
+                all_points.push((*bx, *bz));
             }
         }
     }
+    if all_points.is_empty() {
+        return;
+    }
+
+    // Sample terrain at every centerline cell, not just OSM nodes, so a hill mid-span still clears the deck.
+    let mut terrain_ys: Vec<i32> = Vec::with_capacity(all_points.len());
+    let mut max_y = i32::MIN;
+    let mut min_y = i32::MAX;
+    for &(bx, bz) in &all_points {
+        let y = editor.get_ground_level(bx, bz);
+        terrain_ys.push(y);
+        max_y = max_y.max(y);
+        min_y = min_y.min(y);
+    }
+    let dip = max_y - min_y;
+    // Arch needs vertical room for its curve on flat terrain.
+    let flat_clearance = if style == BridgeStyle::Arch {
+        RAIL_BRIDGE_FLAT_CLEARANCE.max(8)
+    } else {
+        RAIL_BRIDGE_FLAT_CLEARANCE
+    };
+    // Flat span: lift by clearance so the structure is visible. Canyon span: deck at terrain_max.
+    let deck_y = if dip < RAIL_BRIDGE_DIP_THRESHOLD {
+        max_y + flat_clearance
+    } else {
+        max_y
+    };
+
+    let total = all_points.len();
+    let last_idx = total - 1;
+
+    let start_xz = all_points[0];
+    let end_xz = all_points[last_idx];
+    let start_ground = terrain_ys[0];
+    let end_ground = terrain_ys[last_idx];
+    // Shared endpoints stay at deck Y to avoid a mid-bridge dip between adjacent segments.
+    let start_internal = internal_endpoints.contains(&start_xz);
+    let end_internal = internal_endpoints.contains(&end_xz);
+
+    // Ramp length sized so per-cell linear delta stays <= 1 (rail step limit). No horizontal cap:
+    // when needed > total/2 the start/end ramps overlap and min(start, end) below produces a pyramid.
+    let mut needed = 0usize;
+    if !start_internal {
+        needed = needed.max((deck_y - start_ground).max(0) as usize);
+    }
+    if !end_internal {
+        needed = needed.max((deck_y - end_ground).max(0) as usize);
+    }
+    let needed = needed + 1;
+
+    let raw_ramp = (total as f32 * RAIL_BRIDGE_RAMP_FRACTION) as usize;
+    let ramp_length = raw_ramp
+        .clamp(RAIL_BRIDGE_RAMP_MIN, RAIL_BRIDGE_RAMP_MAX)
+        .max(needed);
+    let denom = ramp_length.saturating_sub(1).max(1) as f32;
+
+    let bridge_ys: Vec<i32> = (0..total)
+        .map(|tds| {
+            // Two rising ramps from each endpoint, capped at deck_y. min combines them: trapezoid
+            // for long bridges (both ramps reach deck_y mid-span), pyramid for short ones.
+            let start_ramp_y = if start_internal {
+                deck_y
+            } else {
+                let t = (tds as f32 / denom).min(1.0);
+                let span = (deck_y - start_ground) as f32;
+                (start_ground as f32 + span * t).round() as i32
+            };
+            let end_ramp_y = if end_internal {
+                deck_y
+            } else {
+                let dist_from_end = last_idx.saturating_sub(tds);
+                let t = (dist_from_end as f32 / denom).min(1.0);
+                let span = (deck_y - end_ground) as f32;
+                (end_ground as f32 + span * t).round() as i32
+            };
+            let linear_y = start_ramp_y.min(end_ramp_y);
+            // Clamp to local terrain so a mid-ramp hillside doesn't bury the deck/foundation.
+            linear_y.max(terrain_ys[tds])
+        })
+        .collect();
+
+    let foundation_block = style.foundation_block();
+    let mut bridge_path: Vec<BridgePathSample> = Vec::with_capacity(total);
+
+    for (i, &(bx, bz)) in all_points.iter().enumerate() {
+        let y = bridge_ys[i];
+        let prev_xz = if i > 0 { Some(all_points[i - 1]) } else { None };
+        let next_xz = if i + 1 < total {
+            Some(all_points[i + 1])
+        } else {
+            None
+        };
+        let prev_y = if i > 0 { bridge_ys[i - 1] } else { y };
+        let next_y = if i + 1 < total { bridge_ys[i + 1] } else { y };
+        let rail_block = determine_rail_with_slope((bx, bz), prev_xz, next_xz, prev_y, y, next_y);
+
+        editor.set_block_absolute(foundation_block, bx, y - 1, bz, None, None);
+        let bed_block = if i % 4 == 0 { OAK_LOG } else { GRAVEL };
+        editor.set_block_absolute(bed_block, bx, y, bz, None, None);
+        editor.set_block_absolute(rail_block, bx, y + 1, bz, None, None);
+
+        // Smooth perpendicular from neighbouring centerline points.
+        let p_prev = prev_xz.unwrap_or((bx, bz));
+        let p_next = next_xz.unwrap_or((bx, bz));
+        let dxp = (p_next.0 - p_prev.0) as f32;
+        let dzp = (p_next.1 - p_prev.1) as f32;
+        let mag = (dxp * dxp + dzp * dzp).sqrt().max(1e-6);
+        let perp = (-dzp / mag, dxp / mag);
+        bridge_path.push((bx, y, bz, perp));
+
+        let pillar_interval = style.pillar_interval().max(1);
+        let is_pillar = i % pillar_interval == 0;
+        place_bridge_support_below_deck(
+            editor,
+            style,
+            bx,
+            y,
+            bz,
+            terrain_ys[i],
+            i,
+            total,
+            true,
+            true,
+            is_pillar,
+        );
+    }
+
+    let start_is_boundary = !internal_endpoints.contains(&all_points[0]);
+    let end_is_boundary = !internal_endpoints.contains(&all_points[last_idx]);
+    decorate_bridge_above_deck(
+        editor,
+        style,
+        &bridge_path,
+        0,
+        start_is_boundary,
+        end_is_boundary,
+    );
 }
 
 /// Choose between a flat or ascending rail block based on the ground-level

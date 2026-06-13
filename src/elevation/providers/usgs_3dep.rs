@@ -8,8 +8,7 @@
 //! relative* sub-requests disagree at their boundaries by 10–500 m.
 //! Anchoring every request to a fixed global tile grid means two users
 //! over the same area hit the same tile URLs, the same cached bytes,
-//! and the same data — the way Tellus's `Usgs3depElevationSource` and
-//! the standard slippy-map pattern already do.
+//! and the same data — matching the standard slippy-map pattern.
 //!
 //! All the heavy lifting lives in [`super::fixed_tile`]; this module
 //! contributes the USGS-specific pieces:
@@ -26,9 +25,7 @@ use super::fixed_tile::{
 };
 
 /// USGS 3DEP's published zoom levels, each covering a fixed
-/// meters-per-pixel. The values match the Tellus reference
-/// implementation so disk-cache entries stay compatible across
-/// projects that happen to share a cache root.
+/// meters-per-pixel.
 // Visibility: `pub(super)` because the shared `FixedTileProvider` trait
 // (in `super::fixed_tile`) exposes this as its associated `Level` type —
 // anything `impl`ing a `pub(super)` trait has to keep that associated

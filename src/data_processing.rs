@@ -6,7 +6,7 @@ use crate::floodfill_cache::FloodFillCache;
 use crate::ground::Ground;
 use crate::ground_generation;
 use crate::map_renderer;
-use crate::osm_parser::{ProcessedElement, ProcessedMemberRole};
+use crate::osm_parser::{OutlineSuppression, ProcessedElement};
 use crate::progress::{emit_gui_progress_update, emit_map_preview_ready, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -24,6 +24,8 @@ pub struct GenerationOptions {
     pub format: WorldFormat,
     pub level_name: Option<String>,
     pub spawn_point: Option<(i32, i32)>,
+    pub luanti_game: Option<crate::luanti_block_map::LuantiGame>,
+    pub ground_level: i32,
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
@@ -34,22 +36,41 @@ pub fn generate_world_with_options(
     ground: Ground,
     args: &Args,
     options: GenerationOptions,
+    outline_suppression: OutlineSuppression,
 ) -> Result<PathBuf, String> {
     let output_path = options.path.clone();
     let world_format = options.format;
     let generation_start = args.benchmark.then(std::time::Instant::now);
 
     // Create editor with appropriate format
-    let mut editor: WorldEditor = WorldEditor::new_with_format_and_name(
-        options.path,
-        &xzbbox,
-        llbbox,
-        options.format,
-        options.level_name.clone(),
-        options.spawn_point,
-        args.disable_height_limit,
-    );
+    let mut editor: WorldEditor = if options.format == WorldFormat::LuantiWorld {
+        WorldEditor::new_luanti(
+            options.path,
+            &xzbbox,
+            llbbox,
+            options
+                .luanti_game
+                .unwrap_or(crate::luanti_block_map::LuantiGame::Mineclonia),
+            options.level_name.clone(),
+            options.spawn_point,
+            options.ground_level,
+        )
+    } else {
+        WorldEditor::new_with_format_and_name(
+            options.path,
+            &xzbbox,
+            llbbox,
+            options.format,
+            options.level_name.clone(),
+            options.spawn_point,
+            args.disable_height_limit,
+        )
+    };
+    editor.set_bake_lighting(args.bake_lighting);
     let ground = Arc::new(ground);
+
+    // Per-cell water depth field from the LC_WATER mask; empty without land cover.
+    let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
 
@@ -83,6 +104,16 @@ pub fn generate_world_with_options(
     // Amenity processors use this for O(1) nearest-road-block lookups.
     let road_mask = highways::collect_road_surface_coords(&elements, &xzbbox, args.scale);
 
+    let bridge_outlines =
+        crate::element_processing::bridge_styles::BridgeOutlineIndex::build(&elements);
+    let bridge_structures =
+        bridges::BridgeStructureMap::build(&elements, &editor, &bridge_outlines);
+    let bridge_surface =
+        bridges::BridgeSurfaceMap::build(&elements, &bridge_structures, args.scale);
+
+    let rail_bridge_internal_endpoints =
+        railways::collect_rail_bridge_internal_endpoints(&elements);
+
     // Process all elements (no longer need to partition boundaries)
     let elements_count: usize = elements.len();
     let process_pb: ProgressBar = ProgressBar::new(elements_count as u64);
@@ -98,36 +129,24 @@ pub fn generate_world_with_options(
     let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
     let mut element_counter: u64 = 0;
 
-    // Pre-scan: detect building relation outlines that should be suppressed.
-    // Only applies to type=building relations (NOT type=multipolygon).
-    // When a type=building relation has "part" members, the outline way should not
-    // render as a standalone building, the individual parts render instead.
-    let suppressed_building_outlines: HashSet<u64> = {
-        let mut outlines = HashSet::new();
-        for element in &elements {
-            if let ProcessedElement::Relation(rel) = element {
-                let is_building_type = rel.tags.get("type").map(|t| t.as_str()) == Some("building");
-                if is_building_type {
-                    let has_parts = rel
-                        .members
-                        .iter()
-                        .any(|m| m.role == ProcessedMemberRole::Part);
-                    if has_parts {
-                        for member in &rel.members {
-                            if member.role == ProcessedMemberRole::Outer {
-                                outlines.insert(member.way.id);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        outlines
-    };
+    let models_3d_pipeline = args
+        .use_3d
+        .then(|| crate::models_3d::Models3dPipeline::prescan(&elements, args));
+    let empty_suppressed: HashSet<(&'static str, u64)> = HashSet::new();
+    let models_3d_suppressed: &HashSet<(&'static str, u64)> = models_3d_pipeline
+        .as_ref()
+        .map(|p| p.suppressed())
+        .unwrap_or(&empty_suppressed);
 
     // Process all elements
     for element in elements.into_iter() {
         element_counter += 1;
+        let suppression_key = (element.kind(), element.id());
+        if models_3d_suppressed.contains(&suppression_key)
+            || outline_suppression.contains(&suppression_key)
+        {
+            continue;
+        }
         if element_counter.is_multiple_of(pb_batch_size) {
             process_pb.inc(pb_batch_size);
         }
@@ -155,19 +174,15 @@ pub fn generate_world_with_options(
         match &element {
             ProcessedElement::Way(way) => {
                 if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
-                    // Skip building outlines that are suppressed by building relations with parts.
-                    // The individual building:part ways will render instead.
-                    if !suppressed_building_outlines.contains(&way.id) {
-                        buildings::generate_buildings(
-                            &mut editor,
-                            way,
-                            args,
-                            None,
-                            None,
-                            &flood_fill_cache,
-                            &building_passages,
-                        );
-                    }
+                    buildings::generate_buildings(
+                        &mut editor,
+                        way,
+                        args,
+                        None,
+                        None,
+                        &flood_fill_cache,
+                        &building_passages,
+                    );
                 } else if way.tags.contains_key("highway") {
                     highways::generate_highways(
                         &mut editor,
@@ -176,6 +191,8 @@ pub fn generate_world_with_options(
                         &highway_connectivity,
                         &flood_fill_cache,
                         &road_mask,
+                        &bridge_structures,
+                        &bridge_surface,
                     );
                 } else if way.tags.contains_key("landuse") {
                     landuse::generate_landuse(
@@ -210,25 +227,35 @@ pub fn generate_world_with_options(
                         &building_footprints,
                     );
                 } else if way.tags.contains_key("barrier") {
-                    barriers::generate_barriers(&mut editor, &element);
+                    barriers::generate_barriers(&mut editor, &element, &bridge_surface);
                 } else if let Some(val) = way.tags.get("waterway") {
                     if val == "dock" {
                         // docks count as water areas
-                        water_areas::generate_water_area_from_way(&mut editor, way, &xzbbox);
+                        water_areas::generate_water_area_from_way(
+                            &mut editor,
+                            way,
+                            &xzbbox,
+                            &big_water_field,
+                            &road_mask,
+                        );
                     } else {
                         waterways::generate_waterways(&mut editor, way);
                     }
-                } else if way.tags.contains_key("bridge") {
-                    //bridges::generate_bridges(&mut editor, way, ground_level); // TODO FIX
                 } else if way.tags.contains_key("railway") {
-                    railways::generate_railways(&mut editor, way, &mut subway_points);
+                    railways::generate_railways(
+                        &mut editor,
+                        way,
+                        &mut subway_points,
+                        &rail_bridge_internal_endpoints,
+                        &bridge_outlines,
+                    );
                 } else if way.tags.contains_key("roller_coaster") {
                     railways::generate_roller_coaster(&mut editor, way);
                 } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway")
                 {
                     highways::generate_aeroway(&mut editor, way, args);
                 } else if way.tags.get("service") == Some(&"siding".to_string()) {
-                    highways::generate_siding(&mut editor, way);
+                    highways::generate_siding(&mut editor, way, &bridge_surface);
                 } else if way.tags.get("tomb") == Some(&"pyramid".to_string()) {
                     historic::generate_pyramid(&mut editor, way, args, &flood_fill_cache);
                 } else if way.tags.contains_key("man_made") {
@@ -263,7 +290,7 @@ pub fn generate_world_with_options(
                         &road_mask,
                     );
                 } else if node.tags.contains_key("barrier") {
-                    barriers::generate_barrier_nodes(&mut editor, node);
+                    barriers::generate_barrier_nodes(&mut editor, node, &bridge_surface);
                 } else if node.tags.contains_key("highway") {
                     highways::generate_highways(
                         &mut editor,
@@ -272,11 +299,13 @@ pub fn generate_world_with_options(
                         &highway_connectivity,
                         &flood_fill_cache,
                         &road_mask,
+                        &bridge_structures,
+                        &bridge_surface,
                     );
                 } else if node.tags.contains_key("tourism") {
                     tourisms::generate_tourisms(&mut editor, node);
                 } else if node.tags.contains_key("man_made") {
-                    man_made::generate_man_made_nodes(&mut editor, node);
+                    man_made::generate_man_made_nodes(&mut editor, node, args);
                 } else if node.tags.contains_key("power") {
                     power::generate_power_nodes(&mut editor, node);
                 } else if node.tags.contains_key("historic") {
@@ -307,7 +336,13 @@ pub fn generate_world_with_options(
                         .map(|val| val == "water" || val == "bay")
                         .unwrap_or(false)
                 {
-                    water_areas::generate_water_areas_from_relation(&mut editor, rel, &xzbbox);
+                    water_areas::generate_water_areas_from_relation(
+                        &mut editor,
+                        rel,
+                        &xzbbox,
+                        &big_water_field,
+                        &road_mask,
+                    );
                 } else if rel.tags.contains_key("natural") {
                     natural::generate_natural_from_relation(
                         &mut editor,
@@ -346,10 +381,9 @@ pub fn generate_world_with_options(
     process_pb.inc(element_counter % pb_batch_size);
     process_pb.finish();
 
-    // Drop remaining caches
+    // Keep road_mask alive for the LC_WATER carve below.
     drop(highway_connectivity);
     drop(flood_fill_cache);
-    drop(road_mask);
 
     // Generate ground layer (surface blocks, vegetation, shorelines, underground fill)
     ground_generation::generate_ground_layer(
@@ -360,10 +394,30 @@ pub fn generate_world_with_options(
         &building_footprints,
     )?;
 
+    if args.fillground {
+        crate::ore_generation::generate_ores(&mut editor, &xzbbox);
+    }
+
+    // Carve depth into ESA water cells (water_areas.rs only covers OSM polygons).
+    crate::water_depth::carve_lc_water_pass(
+        &mut editor,
+        ground.as_ref(),
+        &xzbbox,
+        &big_water_field,
+        &road_mask,
+    );
+
+    drop(road_mask);
+
     // Carve subway tunnel interiors now that underground is filled with stone.
     // This must happen after ground generation so AIR blocks are not overwritten.
     if !subway_points.is_empty() {
         railways::carve_subway_interior(&mut editor, &subway_points);
+    }
+
+    // Run after ground generation so anchor Y reflects the final terrain.
+    if let Some(p) = models_3d_pipeline.as_ref() {
+        p.place(&mut editor, args);
     }
 
     // Save world

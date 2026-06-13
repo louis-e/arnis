@@ -227,10 +227,7 @@ pub fn generate_amenities(
                         ("powered".to_string(), Value::String("true".to_string())),
                     ]);
                     editor.set_block_with_properties_absolute(
-                        BlockWithProperties {
-                            block: LEVER,
-                            properties: Some(Value::Compound(lever_props)),
-                        },
+                        BlockWithProperties::new(LEVER, Some(Value::Compound(lever_props))),
                         pt.x - 1,
                         absolute_y + 1,
                         pt.z,
@@ -241,10 +238,10 @@ pub fn generate_amenities(
                     let spout_props =
                         HashMap::from([("west".to_string(), Value::String("low".to_string()))]);
                     editor.set_block_with_properties_absolute(
-                        BlockWithProperties {
-                            block: COBBLESTONE_WALL,
-                            properties: Some(Value::Compound(spout_props)),
-                        },
+                        BlockWithProperties::new(
+                            COBBLESTONE_WALL,
+                            Some(Value::Compound(spout_props)),
+                        ),
                         pt.x,
                         absolute_y + 1,
                         pt.z,
@@ -255,10 +252,10 @@ pub fn generate_amenities(
                     let cauldron_props =
                         HashMap::from([("level".to_string(), Value::String("3".to_string()))]);
                     editor.set_block_with_properties_absolute(
-                        BlockWithProperties {
-                            block: WATER_CAULDRON,
-                            properties: Some(Value::Compound(cauldron_props)),
-                        },
+                        BlockWithProperties::new(
+                            WATER_CAULDRON,
+                            Some(Value::Compound(cauldron_props)),
+                        ),
                         pt.x - 1,
                         absolute_y,
                         pt.z,

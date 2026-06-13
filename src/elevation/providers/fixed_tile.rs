@@ -61,10 +61,10 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
 
-/// Pixels per tile edge. 512 matches the Tellus reference mod and the
-/// classic slippy-map conventions; small enough that a tile usually
-/// sits within a single LiDAR flight, large enough that total tile
-/// counts stay reasonable for city-scale bboxes.
+/// Pixels per tile edge. 512 matches classic slippy-map conventions;
+/// small enough that a tile usually sits within a single LiDAR flight,
+/// large enough that total tile counts stay reasonable for city-scale
+/// bboxes.
 pub(super) const TILE_PIXELS: usize = 512;
 
 /// Half-extent of the Web Mercator world in meters (EPSG:3857).

@@ -6,7 +6,7 @@ permissions:
 
 on:
   pull_request:
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
   issue_comment:
     types: [created]
 
@@ -19,15 +19,16 @@ jobs:
        contains(github.event.comment.body, 'retrigger-benchmark'))
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@v1
+      # Check out the PR head so comment-triggered runs benchmark the PR, not main.
+      - uses: actions/checkout@v6
         with:
-          toolchain: stable
-
-      - uses: Swatinem/rust-cache@v2
+          ref: refs/pull/${{ github.event.pull_request.number || github.event.issue.number }}/head
+      - name: Resolve benchmarked commit
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: ./.github/actions/setup-arnis-linux
+        with:
+          gui-deps: "false"
 
       - name: Create dummy Minecraft world directory
         run: |
@@ -65,6 +66,8 @@ jobs:
 
       - name: Format duration and generate summary
         id: comment_body
+        env:
+          COMMIT_SHA: ${{ steps.commit.outputs.sha }}
         run: |
           duration=${{ steps.end_time.outputs.duration }}
           minutes=$((duration / 60))
@@ -72,10 +75,6 @@ jobs:
           peak_mem=${{ steps.benchmark.outputs.peak_memory }}
           gen_time=${{ steps.benchmark.outputs.gen_time }}
 
-          # Calibrated after the multi-source elevation pipeline landed (PR #939),
-          # the road-flatten perf fix (PR #965), and the grid-precision shrink.
-          # Update this value whenever main-branch generation changes materially
-          # so the verdict thresholds below stay meaningful.
           baseline_time=27
           diff=$((duration - baseline_time))
           abs_diff=${diff#-}
@@ -98,12 +97,30 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          baseline_mem=935
+          baseline_mem=900
+          mem_diff=$((peak_mem - baseline_mem))
+          mem_abs_diff=${mem_diff#-}
           mem_annotation=""
-          if [ "$peak_mem" -gt 2000 ]; then
-            mem_diff=$((peak_mem - baseline_mem))
+          if [ "$mem_abs_diff" -gt 30 ]; then
             mem_percent=$((mem_diff * 100 / baseline_mem))
-            mem_annotation=" (↗ ${mem_percent}% more)"
+            mem_abs_percent=${mem_percent#-}
+            if [ "$mem_diff" -gt 0 ]; then
+              mem_annotation=" (↗ ${mem_abs_percent}% more)"
+            else
+              mem_annotation=" (↘ ${mem_abs_percent}% less)"
+            fi
+          fi
+
+          if [ "$mem_diff" -lt -100 ]; then
+            mem_verdict="✅ This PR **drastically reduces peak memory**."
+          elif [ "$mem_diff" -lt -30 ]; then
+            mem_verdict="🌱 This PR **reduces peak memory**."
+          elif [ "$mem_abs_diff" -le 30 ]; then
+            mem_verdict="🟢 Peak memory is unchanged."
+          elif [ "$mem_diff" -le 200 ]; then
+            mem_verdict="⚠️ This PR **increases peak memory**."
+          else
+            mem_verdict="🚨 This PR **drastically increases peak memory**."
           fi
 
           benchmark_time=$(date -u "+%Y-%m-%d %H:%M:%S UTC")
@@ -116,11 +133,12 @@ jobs:
             fi
             echo "🧠 Peak memory usage: **${peak_mem} MB**${mem_annotation}"
             echo ""
-            echo "📈 Compared against baseline: **${baseline_time}s**"
-            echo "🧮 Delta: **${diff}s**"
-            echo "🔢 Commit: [\`${GITHUB_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA})"
+            echo "📈 Compared against baseline: **${baseline_time}s** time, **${baseline_mem} MB** memory"
+            echo "🧮 Delta: **${diff}s** time, **${mem_diff} MB** memory"
+            echo "🔢 Commit: [\`${COMMIT_SHA:0:7}\`](https://github.com/${GITHUB_REPOSITORY}/commit/${COMMIT_SHA})"
             echo ""
             echo "${verdict}"
+            echo "${mem_verdict}"
             echo ""
             echo "📅 **Last benchmark:** ${benchmark_time}"
             echo ""

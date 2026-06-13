@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod args;
-#[cfg(feature = "bedrock")]
 mod bedrock_block_map;
+mod biome;
 mod block_definitions;
 mod bresenham;
 mod clipping;
@@ -18,8 +18,13 @@ mod floodfill_cache;
 mod ground;
 mod ground_generation;
 mod land_cover;
+mod land_cover_bridge_repair;
+mod land_cover_osm_water_override;
+mod luanti_block_map;
 mod map_renderer;
 mod map_transformation;
+mod models_3d;
+mod ore_generation;
 mod osm_parser;
 mod overture;
 #[cfg(feature = "gui")]
@@ -30,6 +35,7 @@ mod telemetry;
 #[cfg(test)]
 mod test_utilities;
 mod version_check;
+mod water_depth;
 mod world_editor;
 mod world_utils;
 
@@ -84,14 +90,8 @@ fn run_cli() {
         repository.bright_white().bold()
     );
 
-    // Check for updates
-    if let Err(e) = version_check::check_for_updates() {
-        eprintln!(
-            "{}: {}",
-            "Error checking for version updates".red().bold(),
-            e
-        );
-    }
+    // Fire-and-forget update check; prints a one-line notice on a background thread.
+    version_check::check_for_updates_async();
 
     // Parse input arguments
     let args: Args = Args::parse();
@@ -102,18 +102,11 @@ fn run_cli() {
         std::process::exit(1);
     }
 
-    // Early guard: --bedrock requires the bedrock cargo feature
-    if args.bedrock && !cfg!(feature = "bedrock") {
-        eprintln!(
-            "{}: The --bedrock flag requires the 'bedrock' feature. Rebuild with: cargo build --features bedrock",
-            "Error".red().bold()
-        );
-        std::process::exit(1);
-    }
-
     // Determine world format and output path
     let world_format = if args.bedrock {
         world_editor::WorldFormat::BedrockMcWorld
+    } else if args.luanti {
+        world_editor::WorldFormat::LuantiWorld
     } else {
         world_editor::WorldFormat::JavaAnvil
     };
@@ -127,6 +120,26 @@ fn run_cli() {
             .unwrap_or_else(world_utils::get_bedrock_output_directory);
         let (output_path, lvl_name) = world_utils::build_bedrock_output(&args.bbox, output_dir);
         (output_path, Some(lvl_name))
+    } else if args.luanti {
+        let base_dir = args
+            .path
+            .clone()
+            .unwrap_or_else(world_utils::get_luanti_worlds_directory);
+        let _ = std::fs::create_dir_all(&base_dir);
+        let mut counter = 1;
+        let world_name = loop {
+            let candidate = format!("Arnis Luanti World {counter}");
+            if !base_dir.join(&candidate).exists() {
+                break candidate;
+            }
+            counter += 1;
+        };
+        let world_path = base_dir.join(&world_name);
+        println!(
+            "Creating Luanti world at: {}",
+            world_path.display().to_string().bright_white().bold()
+        );
+        (world_path, Some(world_name))
     } else {
         // Java: create a new world in the provided output directory
         let base_dir = args.path.clone().unwrap();
@@ -173,7 +186,7 @@ fn run_cli() {
     let mut ground = ground::generate_ground_data(&args);
 
     // Parse raw data
-    let (mut parsed_elements, mut xzbbox) =
+    let (mut parsed_elements, mut xzbbox, outline_suppression) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
 
     // Fetch supplementary building data from Overture Maps
@@ -198,6 +211,16 @@ fn run_cli() {
 
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
+
+    // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
+    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+    if args.debug {
+        ground.save_land_cover_debug_image("landcover_debug_post_osm_water");
+    }
+    ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
+    if args.debug {
+        ground.save_land_cover_debug_image("landcover_debug_post_bridge_repair");
+    }
 
     // Write the parsed OSM data to a file for inspection
     if args.debug {
@@ -277,11 +300,19 @@ fn run_cli() {
     });
 
     // Build generation options
+    let luanti_game = if args.luanti {
+        Some(luanti_block_map::LuantiGame::Mineclonia)
+    } else {
+        None
+    };
+
     let generation_options = data_processing::GenerationOptions {
         path: generation_path.clone(),
         format: world_format,
         level_name,
         spawn_point,
+        luanti_game,
+        ground_level: args.ground_level,
     };
 
     // Generate world
@@ -292,6 +323,7 @@ fn run_cli() {
         ground,
         &args,
         generation_options,
+        outline_suppression,
     ) {
         Ok(_) => {
             if args.bedrock {

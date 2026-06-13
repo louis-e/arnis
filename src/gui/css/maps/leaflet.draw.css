@@ -38,6 +38,25 @@
 	text-decoration: none;
 }
 
+/* Hide a11y labels injected by leaflet-draw 1.0+ */
+.leaflet-draw a .sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	border: 0;
+}
+
+/* Force 26px buttons in touch mode to match the 7-sprite layout */
+.leaflet-touch .leaflet-draw-toolbar a {
+	width: 26px;
+	height: 26px;
+	line-height: 26px;
+}
+
 /* ================================================================== */
 /* Toolbar actions menu
 /* ================================================================== */

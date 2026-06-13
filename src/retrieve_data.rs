@@ -152,6 +152,7 @@ pub fn fetch_data_from_overpass(
     (
         nwr["building"];
         nwr["building:part"];
+        relation["type"="building"];
         nwr["highway"];
         nwr["landuse"]["landuse"!="salt_pond"];
         nwr["natural"]["natural"!="coastline"]["natural"!="bay"]["natural"!="strait"];
@@ -172,6 +173,7 @@ pub fn fetch_data_from_overpass(
         nwr["advertising"];
         nwr["man_made"];
         nwr["aeroway"];
+        nwr["3dmr"];
         way["place"]["place"!~"^(ocean|sea|bay|strait|sound|fjord)$"];
         way;
     )->.relsinbbox;
@@ -194,7 +196,7 @@ pub fn fetch_data_from_overpass(
     {
         // Fetch data from Overpass API.
         // Strategy:
-        // 1) 25% chance: probe one random official server first.
+        // 1) 50% chance: probe one random official server first.
         // 2) If the probe does not succeed, run the normal path: arnis API once,
         //    then shuffled official, then shuffled fallback servers.
         #[derive(Clone, Copy, PartialEq, Eq)]
@@ -207,7 +209,7 @@ pub fn fetch_data_from_overpass(
         let mut request_plan: Vec<(&str, ServerKind)> = Vec::new();
         let mut probed_server: Option<&str> = None;
 
-        if rng.random_bool(0.25) {
+        if rng.random_bool(0.5) {
             let probe_idx = rng.random_range(0..api_servers.len());
             let probe_server = api_servers[probe_idx];
             request_plan.push((probe_server, ServerKind::Primary));
@@ -309,35 +311,45 @@ pub fn fetch_data_from_overpass(
         let data: OsmData = OsmData::deserialize(&mut deserializer)?;
 
         if data.is_empty() {
+            // Distinguish a real server error (memory/runtime) from a benign
+            // "this bbox has no mapped objects" response. The former still
+            // aborts; the latter is allowed because Arnis can generate
+            // nature/terrain on its own from elevation + land-cover data,
+            // and unmapped natural areas are common on OSM.
             if let Some(remark) = data.remark.as_deref() {
-                // Check if the remark mentions memory or other runtime errors
                 if remark.contains("runtime error") && remark.contains("out of memory") {
                     eprintln!("{}", "Error! The query ran out of memory on the Overpass API server. Try using a smaller area.".red().bold());
                     emit_gui_error("Try using a smaller area.");
+
+                    if debug {
+                        println!("Additional debug information: {data:?}");
+                    }
+
+                    if !is_running_with_gui() {
+                        std::process::exit(1);
+                    } else {
+                        return Err("Data fetch failed".into());
+                    }
                 } else {
-                    // Handle other Overpass API errors if present in the remark field
-                    eprintln!("{}", format!("Error! API returned: {remark}").red().bold());
-                    emit_gui_error(&format!("API returned: {remark}"));
+                    // Non-fatal upstream remark (e.g. timeout that still returned an empty body).
+                    eprintln!(
+                        "{}",
+                        format!("Warning: API returned: {remark}. Continuing without OSM data.")
+                            .yellow()
+                            .bold()
+                    );
                 }
             } else {
-                // General case for when there are no elements and no specific remark
                 eprintln!(
                     "{}",
-                    "Error! API returned no data. Please try again!"
-                        .red()
+                    "Warning: OSM API returned no data for this area. Continuing with terrain/nature only."
+                        .yellow()
                         .bold()
                 );
-                emit_gui_error("API returned no data. Please try again!");
             }
 
             if debug {
                 println!("Additional debug information: {data:?}");
-            }
-
-            if !is_running_with_gui() {
-                std::process::exit(1);
-            } else {
-                return Err("Data fetch failed".into());
             }
         }
 

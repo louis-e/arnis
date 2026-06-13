@@ -14,6 +14,27 @@ pub fn get_bedrock_output_directory() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Returns Luanti's worlds directory for the current OS.
+/// Windows: %APPDATA%\Minetest\worlds
+/// macOS:   ~/Library/Application Support/minetest/worlds
+/// Linux:   ~/.minetest/worlds
+/// Falls back to Desktop/Arnis Luanti Worlds if no path can be resolved.
+pub fn get_luanti_worlds_directory() -> PathBuf {
+    let base = if cfg!(target_os = "windows") {
+        dirs::data_dir().map(|p| p.join("Minetest"))
+    } else if cfg!(target_os = "macos") {
+        dirs::data_dir().map(|p| p.join("minetest"))
+    } else {
+        dirs::home_dir().map(|p| p.join(".minetest"))
+    };
+
+    base.map(|p| p.join("worlds")).unwrap_or_else(|| {
+        dirs::desktop_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("Arnis Luanti Worlds")
+    })
+}
+
 /// Gets the area name for a given bounding box using the center point.
 pub fn get_area_name_for_bedrock(bbox: &LLBBox) -> String {
     let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;

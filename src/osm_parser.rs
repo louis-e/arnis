@@ -5,8 +5,68 @@ use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+
+// Tags Arnis never reads. Filtered at parse time to save memory.
+const IGNORED_TAGS: &[&str] = &[
+    "created_by",
+    "note",
+    "fixme",
+    "FIXME",
+    "todo",
+    "TODO",
+    "wikipedia",
+    "wikimedia_commons",
+    "import_uuid",
+    "import",
+    "old_name",
+    "loc_name",
+    "official_name",
+    "alt_name",
+    "operator",
+    "phone",
+    "fax",
+    "email",
+    "url",
+    "website",
+    "opening_hours",
+    "description",
+    "attribution",
+    "start_date",
+    "check_date",
+    "survey:date",
+    "ref:bag",
+    "ref:bygningsnr",
+];
+
+// Tag-key prefixes Arnis never reads (localized names, addresses, regional import refs).
+const IGNORED_PREFIXES: &[&str] = &[
+    "addr:",
+    "source",
+    "name:",
+    "alt_name:",
+    "contact:",
+    "is_in:",
+    "operator:",
+    "tiger:",
+    "NHD:",
+    "lacounty:",
+    "nysgissam:",
+    "ref:ruian:",
+    "building:ruian:",
+    "osak:",
+    "gnis:",
+    "yh:",
+    "check_date:",
+];
+
+fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
+    tags.retain(|k, _| {
+        !IGNORED_TAGS.contains(&k.as_str()) && !IGNORED_PREFIXES.iter().any(|p| k.starts_with(p))
+    });
+    tags
+}
 
 // Raw data from OSM
 
@@ -151,7 +211,7 @@ impl ProcessedElement {
         }
     }
 
-    pub fn kind(&self) -> &str {
+    pub fn kind(&self) -> &'static str {
         match self {
             ProcessedElement::Node(_) => "node",
             ProcessedElement::Way(_) => "way",
@@ -168,12 +228,14 @@ impl ProcessedElement {
     }
 }
 
+pub type OutlineSuppression = HashSet<(&'static str, u64)>;
+
 pub fn parse_osm_data(
     osm_data: OsmData,
     bbox: LLBBox,
     scale: f64,
     debug: bool,
-) -> (Vec<ProcessedElement>, XZBBox) {
+) -> (Vec<ProcessedElement>, XZBBox, OutlineSuppression) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
     emit_gui_progress_update(5.0, "Parsing data...");
@@ -193,6 +255,8 @@ pub fn parse_osm_data(
         println!("Scale factor Z: {}", coord_transformer.scale_factor_z());
     }
 
+    let outline_suppression = compute_outline_suppression(&data.relations);
+
     let mut nodes_map: HashMap<u64, ProcessedNode> = HashMap::new();
     let mut ways_map: HashMap<u64, Arc<ProcessedWay>> = HashMap::new();
 
@@ -210,7 +274,7 @@ pub fn parse_osm_data(
 
             let processed: ProcessedNode = ProcessedNode {
                 id: element.id,
-                tags: element.tags.clone().unwrap_or_default(),
+                tags: filter_tags(element.tags.unwrap_or_default()),
                 x: xzpoint.x,
                 z: xzpoint.z,
             };
@@ -219,11 +283,8 @@ pub fn parse_osm_data(
 
             // Only add tagged nodes to processed_elements if they're within or near the bbox
             // This significantly improves performance by filtering out distant nodes
-            if !element.tags.as_ref().map(|t| t.is_empty()).unwrap_or(true) {
-                // Node has tags, check if it's in the bbox (with some margin)
-                if xzbbox.contains(&xzpoint) {
-                    processed_elements.push(ProcessedElement::Node(processed));
-                }
+            if !processed.tags.is_empty() && xzbbox.contains(&xzpoint) {
+                processed_elements.push(ProcessedElement::Node(processed));
             }
         }
     }
@@ -240,7 +301,7 @@ pub fn parse_osm_data(
         }
 
         // Clip the way to bbox to reduce node count dramatically
-        let tags = element.tags.clone().unwrap_or_default();
+        let tags = filter_tags(element.tags.unwrap_or_default());
 
         // Store unclipped way for relation assembly (clipping happens after ring merging)
         let way = Arc::new(ProcessedWay {
@@ -297,7 +358,9 @@ pub fn parse_osm_data(
             .iter()
             .filter_map(|mem: &OsmMember| {
                 if mem.r#type != "way" {
-                    eprintln!("WARN: Unknown relation member type \"{}\"", mem.r#type);
+                    if mem.r#type != "relation" && mem.r#type != "node" {
+                        eprintln!("WARN: Unknown relation member type \"{}\"", mem.r#type);
+                    }
                     return None;
                 }
 
@@ -358,7 +421,7 @@ pub fn parse_osm_data(
             processed_elements.push(ProcessedElement::Relation(ProcessedRelation {
                 id: element.id,
                 members,
-                tags: tags.clone(),
+                tags: filter_tags(tags.clone()),
             }));
         }
     }
@@ -368,7 +431,37 @@ pub fn parse_osm_data(
     drop(nodes_map);
     drop(ways_map);
 
-    (processed_elements, xzbbox)
+    (processed_elements, xzbbox, outline_suppression)
+}
+
+fn compute_outline_suppression(relations: &[OsmElement]) -> OutlineSuppression {
+    let mut suppressed: OutlineSuppression = HashSet::new();
+    for rel in relations {
+        let Some(tags) = &rel.tags else { continue };
+        if tags.get("type").map(|t| t.as_str()) != Some("building") {
+            continue;
+        }
+        let has_parts = rel
+            .members
+            .iter()
+            .any(|m| m.role.trim().eq_ignore_ascii_case("part"));
+        if !has_parts {
+            continue;
+        }
+        for m in &rel.members {
+            let r = m.role.trim();
+            if !(r.eq_ignore_ascii_case("outline") || r.eq_ignore_ascii_case("outer")) {
+                continue;
+            }
+            let kind: &'static str = match m.r#type.as_str() {
+                "way" => "way",
+                "relation" => "relation",
+                _ => continue,
+            };
+            suppressed.insert((kind, m.r#ref));
+        }
+    }
+    suppressed
 }
 
 /// Returns true if tags indicate a water element handled by water_areas.rs.

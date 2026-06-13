@@ -149,10 +149,12 @@ pub fn run_gui() {
             gui_pick_save_directory,
             gui_start_generation,
             gui_get_version,
-            gui_check_for_updates,
+            gui_get_update_info,
+            gui_get_platform,
             gui_clear_tile_caches,
             gui_get_world_map_data,
-            gui_show_in_folder
+            gui_show_in_folder,
+            gui_get_3d_model_attributions
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -214,6 +216,32 @@ fn detect_minecraft_saves_directory() -> PathBuf {
 #[tauri::command]
 fn gui_get_default_save_path() -> String {
     detect_minecraft_saves_directory().display().to_string()
+}
+
+#[derive(serde::Serialize)]
+struct AttributionRow {
+    label: String,
+    artist: String,
+    license: String,
+    license_url: Option<String>,
+    source_url: String,
+}
+
+#[tauri::command]
+fn gui_get_3d_model_attributions() -> Vec<AttributionRow> {
+    crate::models_3d::wikidata::PERMISSIVE_ATTRIBUTIONS
+        .iter()
+        .map(|e| AttributionRow {
+            label: e.label.clone(),
+            artist: e
+                .artist
+                .clone()
+                .unwrap_or_else(|| "Wikimedia contributor".into()),
+            license: e.license.clone(),
+            license_url: e.license_url.clone(),
+            source_url: e.url.clone(),
+        })
+        .collect()
 }
 
 /// Validates and returns a user-provided save path.
@@ -608,11 +636,23 @@ fn gui_get_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// Latest release info from the GitHub Releases API + a comparison to the running version.
 #[tauri::command]
-fn gui_check_for_updates() -> Result<bool, String> {
-    match version_check::check_for_updates() {
-        Ok(is_newer) => Ok(is_newer),
-        Err(e) => Err(format!("Error checking for updates: {e}")),
+fn gui_get_update_info() -> Result<version_check::UpdateInfo, String> {
+    version_check::check_for_updates().map_err(|e| format!("Update check failed: {e}"))
+}
+
+/// Compile-time target platform: "windows" / "macos" / "linux" / "unknown".
+#[tauri::command]
+fn gui_get_platform() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
     }
 }
 
@@ -634,8 +674,11 @@ fn gui_check_for_updates() -> Result<bool, String> {
 fn gui_clear_tile_caches() -> Result<String, String> {
     use crate::elevation::cache::clear_all_cached_tiles;
     use crate::land_cover::clear_land_cover_cache;
+    use crate::models_3d::clear_model_caches;
 
-    let combined = clear_all_cached_tiles().combined(clear_land_cover_cache());
+    let combined = clear_all_cached_tiles()
+        .combined(clear_land_cover_cache())
+        .combined(clear_model_caches());
     let megabytes = combined.bytes_freed as f64 / (1024.0 * 1024.0);
 
     if combined.errors > 0 {
@@ -800,7 +843,10 @@ fn gui_start_generation(
     roof_enabled: bool,
     fillground_enabled: bool,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
+    use_3d_enabled: bool,
     disable_height_limit: bool,
+    aws_only_elevation: bool,
+    bake_lighting_enabled: bool,
     is_new_world: bool,
     spawn_point: Option<(f64, f64)>,
     telemetry_consent: bool,
@@ -819,7 +865,7 @@ fn gui_start_generation(
     // For new Java worlds, set the spawn point in level.dat
     // Only update player position for Java worlds - Bedrock worlds don't have a pre-existing
     // level.dat to modify (the spawn point will be set when the .mcworld is created)
-    if is_new_world && world_format != "bedrock" {
+    if is_new_world && world_format != "bedrock" && !world_format.starts_with("luanti") {
         let prep_result: Result<(), String> = (|| -> Result<(), String> {
             let llbbox = LLBBox::from_str(&bbox_text)
                 .map_err(|e| format!("Failed to parse bounding box: {e}"))?;
@@ -872,8 +918,17 @@ fn gui_start_generation(
             let world_path = PathBuf::from(&selected_world);
 
             // Determine world format from UI selection first (needed for session lock decision)
+
+            let luanti_game = if world_format.starts_with("luanti") {
+                Some(crate::luanti_block_map::LuantiGame::Mineclonia)
+            } else {
+                None
+            };
+
             let world_format = if world_format == "bedrock" {
                 WorldFormat::BedrockMcWorld
+            } else if world_format.starts_with("luanti") {
+                WorldFormat::LuantiWorld
             } else {
                 WorldFormat::JavaAnvil
             };
@@ -957,6 +1012,24 @@ fn gui_start_generation(
                     progress::emit_world_name_update(&lvl_name);
                     (output_path, Some(lvl_name))
                 }
+                WorldFormat::LuantiWorld => {
+                    let worlds_dir = crate::world_utils::get_luanti_worlds_directory();
+                    let _ = std::fs::create_dir_all(&worlds_dir);
+                    let mut counter = 1;
+                    let world_name = loop {
+                        let candidate = format!("Arnis Luanti World {counter}");
+                        if !worlds_dir.join(&candidate).exists() {
+                            break candidate;
+                        }
+                        counter += 1;
+                    };
+                    let luanti_path = worlds_dir.join(&world_name);
+                    println!(
+                        "Creating Luanti world at: {}",
+                        luanti_path.display().to_string().bright_white().bold()
+                    );
+                    (luanti_path, Some(world_name))
+                }
             };
 
             // Calculate MC spawn coordinates from lat/lng if spawn point was provided
@@ -990,6 +1063,8 @@ fn gui_start_generation(
                 format: world_format,
                 level_name,
                 spawn_point: mc_spawn_point,
+                luanti_game,
+                ground_level,
             };
 
             // Create an Args instance with the chosen bounding box
@@ -1004,6 +1079,7 @@ fn gui_start_generation(
                     world_path
                 }),
                 bedrock: world_format == WorldFormat::BedrockMcWorld,
+                luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 ground_level,
@@ -1012,13 +1088,16 @@ fn gui_start_generation(
                 roof: roof_enabled,
                 fillground: fillground_enabled,
                 land_cover: land_cover_enabled,
+                use_3d: use_3d_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
                 spawn_lng: None,
                 rotation: rotation_angle.clamp(-90.0, 90.0),
                 disable_height_limit,
+                aws_only_elevation,
                 benchmark: false,
+                bake_lighting: bake_lighting_enabled,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -1039,6 +1118,7 @@ fn gui_start_generation(
                     ground,
                     &args,
                     generation_options.clone(),
+                    osm_parser::OutlineSuppression::new(),
                 );
                 if let Some(g) = cleanup_guard.as_mut() {
                     g.disarm();
@@ -1064,7 +1144,7 @@ fn gui_start_generation(
             // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
                 Ok(raw_data) => {
-                    let (mut parsed_elements, mut xzbbox) =
+                    let (mut parsed_elements, mut xzbbox, outline_suppression) =
                         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
 
                     // Fetch supplementary building data from Overture Maps
@@ -1095,6 +1175,10 @@ fn gui_start_generation(
 
                     let mut ground = ground::generate_ground_data(&args);
 
+                    // OSM water override first, then bridge repair.
+                    ground.apply_osm_water_override(&parsed_elements, &xzbbox);
+                    ground.apply_bridge_land_cover_repair(&parsed_elements, &xzbbox, args.scale);
+
                     // Transform map (parsed_elements). Operations are defined in a json file
                     map_transformation::transform_map(
                         &mut parsed_elements,
@@ -1120,6 +1204,7 @@ fn gui_start_generation(
                         ground,
                         &args,
                         generation_options.clone(),
+                        outline_suppression,
                     );
                     if let Some(g) = cleanup_guard.as_mut() {
                         g.disarm();

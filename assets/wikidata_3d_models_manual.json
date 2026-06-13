@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "source": "manual curation (never overwritten by refresh_wikidata_index)",
+  "license_policy": "permissive-only: CC0, Public Domain, CC BY (any version)",
+  "models": {
+    "Q9202": {
+      "label": "Statue of Liberty",
+      "url": "https://arnismc.com/assets/3dmodels/statue_of_liberty.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "artist": "louis-e",
+      "height_m": 186.0,
+      "palette_layers": [
+        { "y_max_frac": 0.39, "hex": "AB9371" },
+        { "y_max_frac": 0.95, "blocks": ["WAXED_OXIDIZED_COPPER"] },
+        { "y_max_frac": 1.00, "hex": "F3E370" }
+      ]
+    },
+    "Q79961": {
+      "label": "Christ the Redeemer",
+      "url": "https://arnismc.com/assets/3dmodels/christ_the_redeemer.stl",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "artist": "louis-e",
+      "height_m": 110.0,
+      "palette_layers": [
+        { "y_max_frac": 0.22, "blocks": ["MUD_BRICKS"] },
+        { "y_max_frac": 1.00, "blocks": ["LIGHT_GRAY_CONCRETE"] }
+      ]
+    }
+  }
+}
+
+

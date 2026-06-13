@@ -8,7 +8,7 @@ use crate::block_definitions::GRASS_BLOCK;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastanvil::Region;
-use fastnbt::{LongArray, Value};
+use fastnbt::{ByteArray, LongArray, Value};
 use fnv::FnvHashMap;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -74,6 +74,8 @@ impl<'a> WorldEditor<'a> {
     pub(super) fn create_base_chunk(
         abs_chunk_x: i32,
         abs_chunk_z: i32,
+        bake_lighting: bool,
+        biome_value: &Value,
     ) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
         // Use cached sections (computed once on first call)
         let sections = get_base_chunk_sections();
@@ -87,7 +89,7 @@ impl<'a> WorldEditor<'a> {
             other: FnvHashMap::default(),
         };
 
-        let chunk_nbt = create_chunk_nbt(&chunk_data);
+        let chunk_nbt = create_chunk_nbt(&chunk_data, bake_lighting, biome_value);
 
         let mut ser_buffer = Vec::with_capacity(8192);
         fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
@@ -185,20 +187,33 @@ impl<'a> WorldEditor<'a> {
         let mut region = self.create_region(region_x, region_z)?;
         let mut ser_buffer = Vec::with_capacity(8192);
 
+        // World-center latitude drives temperature-based biome variants (taiga
+        // vs forest vs jungle) at chunk-build time. Cheap to recompute.
+        let center_lat = (self.llbbox.min().lat() + self.llbbox.max().lat()) * 0.5;
+        let ground_ref = self.ground.as_deref();
+
         // First pass: write all chunks that have content
         for (&(chunk_x, chunk_z), chunk_to_modify) in &region_to_modify.chunks {
             if !chunk_to_modify.sections.is_empty() || !chunk_to_modify.other.is_empty() {
+                let abs_chunk_x = chunk_x + (region_x * 32);
+                let abs_chunk_z = chunk_z + (region_z * 32);
                 // Create chunk directly, we're writing to a fresh region file
                 // so there's no existing data to preserve
                 let chunk = Chunk {
                     sections: chunk_to_modify.sections().collect(),
-                    x_pos: chunk_x + (region_x * 32),
-                    z_pos: chunk_z + (region_z * 32),
+                    x_pos: abs_chunk_x,
+                    z_pos: abs_chunk_z,
                     is_light_on: 0,
                     other: chunk_to_modify.other.clone(),
                 };
 
-                let chunk_nbt = create_chunk_nbt(&chunk);
+                let biome_value = crate::biome::build_chunk_biome_nbt(
+                    abs_chunk_x,
+                    abs_chunk_z,
+                    ground_ref,
+                    center_lat,
+                );
+                let chunk_nbt = create_chunk_nbt(&chunk, self.bake_lighting, &biome_value);
                 ser_buffer.clear();
                 fastnbt::to_writer(&mut ser_buffer, &chunk_nbt)?;
                 region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
@@ -216,7 +231,18 @@ impl<'a> WorldEditor<'a> {
 
                 // If chunk doesn't exist, create it with base layer
                 if !chunk_exists {
-                    let ser_buffer = Self::create_base_chunk(abs_chunk_x, abs_chunk_z)?;
+                    let biome_value = crate::biome::build_chunk_biome_nbt(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        ground_ref,
+                        center_lat,
+                    );
+                    let ser_buffer = Self::create_base_chunk(
+                        abs_chunk_x,
+                        abs_chunk_z,
+                        self.bake_lighting,
+                        &biome_value,
+                    )?;
                     region.write_chunk(chunk_x as usize, chunk_z as usize, &ser_buffer)?;
                 }
             }
@@ -254,13 +280,367 @@ fn get_entity_coords(entity: &HashMap<String, Value>) -> Option<(i32, i32, i32)>
     Some((x, y, z))
 }
 
+// Reads a string blockstate property, if present.
+fn prop_str<'a>(props: Option<&'a Value>, key: &str) -> Option<&'a str> {
+    if let Some(Value::Compound(m)) = props {
+        if let Some(Value::String(s)) = m.get(key) {
+            return Some(s.as_str());
+        }
+    }
+    None
+}
+
+// Light a block emits, 0 if none. Honours the `lit` state where it matters.
+fn block_light_emission(name: &str, props: Option<&Value>) -> u8 {
+    let unlit = matches!(prop_str(props, "lit"), Some("false"));
+    match name {
+        "minecraft:beacon"
+        | "minecraft:conduit"
+        | "minecraft:end_gateway"
+        | "minecraft:end_portal"
+        | "minecraft:fire"
+        | "minecraft:glowstone"
+        | "minecraft:jack_o_lantern"
+        | "minecraft:lantern"
+        | "minecraft:lava"
+        | "minecraft:ochre_froglight"
+        | "minecraft:pearlescent_froglight"
+        | "minecraft:verdant_froglight"
+        | "minecraft:sea_lantern"
+        | "minecraft:shroomlight" => 15,
+        "minecraft:campfire" if !unlit => 15,
+        "minecraft:end_rod" | "minecraft:torch" | "minecraft:wall_torch" => 14,
+        "minecraft:crying_obsidian"
+        | "minecraft:soul_lantern"
+        | "minecraft:soul_torch"
+        | "minecraft:soul_wall_torch" => 10,
+        "minecraft:soul_campfire" if !unlit => 10,
+        "minecraft:glow_lichen" => 7,
+        "minecraft:redstone_torch" | "minecraft:redstone_wall_torch" if !unlit => 7,
+        "minecraft:sculk_catalyst" => 6,
+        "minecraft:magma_block" => 3,
+        "minecraft:brewing_stand" | "minecraft:brown_mushroom" => 1,
+        _ => 0,
+    }
+}
+
+// Blocks that don't occlude skylight: air, glass, leaves, water/ice, plants, thin decor.
+fn is_light_transparent(name: &str) -> bool {
+    let n = name.strip_prefix("minecraft:").unwrap_or(name);
+    if n == "tinted_glass" {
+        return false; // tinted glass blocks all light, unlike other glass
+    }
+    if n.ends_with("air") || n.ends_with("leaves") || n.contains("glass") {
+        return true;
+    }
+    const EXACT: &[&str] = &[
+        "water",
+        "ice",
+        "frosted_ice",
+        "bubble_column",
+        "grass",
+        "short_grass",
+        "tall_grass",
+        "fern",
+        "large_fern",
+        "dead_bush",
+        "bush",
+        "dandelion",
+        "poppy",
+        "blue_orchid",
+        "allium",
+        "azure_bluet",
+        "oxeye_daisy",
+        "cornflower",
+        "lily_of_the_valley",
+        "wither_rose",
+        "torchflower",
+        "red_tulip",
+        "orange_tulip",
+        "white_tulip",
+        "pink_tulip",
+        "sunflower",
+        "lilac",
+        "rose_bush",
+        "peony",
+        "pink_petals",
+        "spore_blossom",
+        "hanging_roots",
+        "glow_lichen",
+        "sweet_berry_bush",
+        "cactus",
+        "bamboo",
+        "sugar_cane",
+        "nether_wart",
+        "lily_pad",
+        "sea_pickle",
+        "cobweb",
+        "snow",
+        "lever",
+        "tripwire",
+        "tripwire_hook",
+        "end_rod",
+        "lightning_rod",
+        "scaffolding",
+        "pointed_dripstone",
+        "turtle_egg",
+    ];
+    if EXACT.contains(&n) {
+        return true;
+    }
+    if n.ends_with("_block") || n.ends_with("_stem") {
+        return false;
+    }
+    // Slabs/stairs are left opaque: their solid half occludes light via shape.
+    const SUB: &[&str] = &[
+        "torch", "lantern", "sign", "rail", "carpet", "candle", "chain", "ladder", "banner",
+        "sapling", "coral", "sprouts", "roots", "vine", "flower", "mushroom", "amethyst", "_bud",
+        "seagrass", "kelp", "petals", "fence", "wall", "_bars", "door",
+    ];
+    SUB.iter().any(|s| n.contains(s))
+}
+
+// Light a block removes: 0 passes, 1 attenuates (water/leaves/ice), 15 blocks.
+fn light_opacity(name: &str) -> u8 {
+    let n = name.strip_prefix("minecraft:").unwrap_or(name);
+    if n.ends_with("leaves")
+        || matches!(
+            n,
+            "water"
+                | "ice"
+                | "frosted_ice"
+                | "bubble_column"
+                | "kelp"
+                | "kelp_plant"
+                | "seagrass"
+                | "tall_seagrass"
+        )
+    {
+        return 1;
+    }
+    if is_light_transparent(name) {
+        0
+    } else {
+        15
+    }
+}
+
+// Per-cell light opacity and emission for a section (YZX order, 4096 cells).
+fn decode_section_light_props(section: &Section) -> (Vec<u8>, Vec<u8>) {
+    let palette = &section.block_states.palette;
+    let pal_opacity: Vec<u8> = palette.iter().map(|p| light_opacity(&p.name)).collect();
+    let pal_emission: Vec<u8> = palette
+        .iter()
+        .map(|p| block_light_emission(&p.name, p.properties.as_ref()))
+        .collect();
+
+    let mut opacity = vec![0u8; 4096];
+    let mut emission = vec![0u8; 4096];
+
+    match &section.block_states.data {
+        None => {
+            let o = pal_opacity.first().copied().unwrap_or(0);
+            let e = pal_emission.first().copied().unwrap_or(0);
+            if o > 0 {
+                opacity.iter_mut().for_each(|v| *v = o);
+            }
+            if e > 0 {
+                emission.iter_mut().for_each(|v| *v = e);
+            }
+        }
+        Some(data) => {
+            let mut bits = 4;
+            while (1usize << bits) < palette.len() {
+                bits += 1;
+            }
+            let vals_per_long = 64 / bits;
+            let mask = (1u64 << bits) - 1;
+            for i in 0..4096usize {
+                let long_idx = i / vals_per_long;
+                let off = (i % vals_per_long) * bits;
+                if long_idx < data.len() {
+                    let pi = ((data[long_idx] as u64 >> off) & mask) as usize;
+                    if pi < palette.len() {
+                        opacity[i] = pal_opacity[pi];
+                        emission[i] = pal_emission[pi];
+                    }
+                }
+            }
+        }
+    }
+    (opacity, emission)
+}
+
+// Flood-fill light from the seeded queue, -1 per block, through cells light can enter.
+fn propagate_light(
+    light: &mut [u8],
+    opacity: &[u8],
+    queue: &mut std::collections::VecDeque<(usize, usize, usize, u8)>,
+    height: usize,
+) {
+    let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
+    while let Some((x, y, z, level)) = queue.pop_front() {
+        if level <= 1 {
+            continue;
+        }
+        let next = level - 1;
+        let try_spread =
+            |nx: usize,
+             ny: usize,
+             nz: usize,
+             light: &mut [u8],
+             queue: &mut std::collections::VecDeque<(usize, usize, usize, u8)>| {
+                let g = idx(nx, ny, nz);
+                if opacity[g] < 15 && light[g] < next {
+                    light[g] = next;
+                    queue.push_back((nx, ny, nz, next));
+                }
+            };
+        if x > 0 {
+            try_spread(x - 1, y, z, light, queue);
+        }
+        if x < 15 {
+            try_spread(x + 1, y, z, light, queue);
+        }
+        if z > 0 {
+            try_spread(x, y, z - 1, light, queue);
+        }
+        if z < 15 {
+            try_spread(x, y, z + 1, light, queue);
+        }
+        if y > 0 {
+            try_spread(x, y - 1, z, light, queue);
+        }
+        if y + 1 < height {
+            try_spread(x, y + 1, z, light, queue);
+        }
+    }
+}
+
+// Pack a 0..15 value into the 4-bit-per-cell light array.
+#[inline]
+fn pack_light_nibble(arr: &mut [i8], index: usize, value: u8) {
+    let byte = index >> 1;
+    let cur = arr[byte] as u8;
+    let new = if index & 1 == 0 {
+        (cur & 0xF0) | (value & 0x0F)
+    } else {
+        (cur & 0x0F) | (value << 4)
+    };
+    arr[byte] = new as i8;
+}
+
+// Sky + block light per section as 2048-byte nibble arrays.
+fn compute_lighting(
+    sections: &[Section],
+    min_section_y: i8,
+    max_section_y: i8,
+) -> Vec<(Vec<i8>, Vec<i8>)> {
+    use std::collections::VecDeque;
+
+    let num_sections = (max_section_y as i32 - min_section_y as i32 + 1).max(0) as usize;
+    let height = num_sections * 16;
+    if height == 0 {
+        return Vec::new();
+    }
+    let idx = |x: usize, y: usize, z: usize| y * 256 + z * 16 + x;
+
+    let mut opacity = vec![0u8; height * 256];
+    let mut emission = vec![0u8; height * 256];
+
+    let sec_by_y: HashMap<i8, &Section> = sections.iter().map(|s| (s.y, s)).collect();
+    let mut htop = 0usize;
+    let mut any_solid = false;
+    for sy in min_section_y..=max_section_y {
+        let Some(sec) = sec_by_y.get(&sy) else {
+            continue;
+        };
+        let base_y = ((sy as i32 - min_section_y as i32) * 16) as usize;
+        let (op, em) = decode_section_light_props(sec);
+        for ly in 0..16usize {
+            for z in 0..16usize {
+                for x in 0..16usize {
+                    let local = ly * 256 + z * 16 + x;
+                    let g = idx(x, base_y + ly, z);
+                    opacity[g] = op[local];
+                    emission[g] = em[local];
+                    if op[local] > 0 {
+                        any_solid = true;
+                        htop = htop.max(base_y + ly);
+                    }
+                }
+            }
+        }
+    }
+
+    // SkyLight: open sky above the highest non-transparent block is 15; flood-fill the band below.
+    let top = if any_solid { (htop + 2).min(height) } else { 0 };
+    let mut sky = vec![0u8; height * 256];
+    sky[top * 256..].fill(15);
+    let mut sq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
+    for z in 0..16usize {
+        for x in 0..16usize {
+            let mut level = 15u8;
+            for y in (0..top).rev() {
+                let g = idx(x, y, z);
+                if opacity[g] >= 15 {
+                    break;
+                }
+                sky[g] = level;
+                if level > 0 {
+                    sq.push_back((x, y, z, level));
+                }
+                if opacity[g] > 0 {
+                    level = level.saturating_sub(1);
+                }
+            }
+        }
+    }
+    propagate_light(&mut sky, &opacity, &mut sq, height);
+
+    // BlockLight: flood-fill from emitters.
+    let mut block = vec![0u8; height * 256];
+    let mut bq: VecDeque<(usize, usize, usize, u8)> = VecDeque::new();
+    for g in 0..height * 256 {
+        if emission[g] > 0 {
+            block[g] = emission[g];
+            let rem = g % 256;
+            bq.push_back((rem % 16, g / 256, rem / 16, emission[g]));
+        }
+    }
+    propagate_light(&mut block, &opacity, &mut bq, height);
+
+    let mut out = Vec::with_capacity(num_sections);
+    for s in 0..num_sections {
+        let base_y = s * 16;
+        let mut sl = vec![0i8; 2048];
+        let mut bl = vec![0i8; 2048];
+        for ly in 0..16usize {
+            for z in 0..16usize {
+                for x in 0..16usize {
+                    let local = ly * 256 + z * 16 + x;
+                    let g = idx(x, base_y + ly, z);
+                    pack_light_nibble(&mut sl, local, sky[g]);
+                    pack_light_nibble(&mut bl, local, block[g]);
+                }
+            }
+        }
+        out.push((sl, bl));
+    }
+    out
+}
+
 /// Creates modern chunk NBT data (post-1.18 format, no Level wrapper).
 ///
 /// Writes all required fields for server compatibility:
 /// DataVersion, Status, yPos, Heightmaps, biomes, structures, etc.
 /// Section range is determined dynamically: at minimum the vanilla range
 /// (Y=-4 to Y=19), extended upward/downward to cover any sections with content.
-fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
+fn create_chunk_nbt(
+    chunk: &Chunk,
+    bake_lighting: bool,
+    biome_value: &Value,
+) -> HashMap<String, Value> {
     // Index existing sections by Y for quick lookup
     let section_map: HashMap<i8, usize> = chunk
         .sections
@@ -281,15 +661,17 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
         }
     }
 
-    // Biome palette shared by all sections (single "plains" entry, no data array needed)
-    let biome_value = Value::Compound(HashMap::from([(
-        "palette".to_string(),
-        Value::List(vec![Value::String("minecraft:plains".to_string())]),
-    )]));
+    // Bake lighting only when requested; otherwise leave it for the engine to relight on load.
+    let mut lighting = if bake_lighting {
+        compute_lighting(&chunk.sections, min_section_y, max_section_y)
+    } else {
+        Vec::new()
+    };
 
     // Build all sections in the determined range
     let sections: Vec<Value> = (min_section_y..=max_section_y)
-        .map(|y| {
+        .enumerate()
+        .map(|(off, y)| {
             let mut section_nbt = if let Some(&idx) = section_map.get(&y) {
                 build_section_value(&chunk.sections[idx])
             } else {
@@ -309,6 +691,17 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
                 ])
             };
             section_nbt.insert("biomes".to_string(), biome_value.clone());
+            if bake_lighting {
+                let (sky_light, block_light) = std::mem::take(&mut lighting[off]);
+                section_nbt.insert(
+                    "SkyLight".to_string(),
+                    Value::ByteArray(ByteArray::new(sky_light)),
+                );
+                section_nbt.insert(
+                    "BlockLight".to_string(),
+                    Value::ByteArray(ByteArray::new(block_light)),
+                );
+            }
             Value::Compound(section_nbt)
         })
         .collect();
@@ -330,7 +723,7 @@ fn create_chunk_nbt(chunk: &Chunk) -> HashMap<String, Value> {
             "Status".to_string(),
             Value::String("minecraft:full".to_string()),
         ),
-        ("isLightOn".to_string(), Value::Byte(0)),
+        ("isLightOn".to_string(), Value::Byte(bake_lighting as i8)),
         ("InhabitedTime".to_string(), Value::Long(0)),
         ("LastUpdate".to_string(), Value::Long(0)),
         ("sections".to_string(), Value::List(sections)),
@@ -585,5 +978,91 @@ fn value_to_i32(value: &Value) -> Option<i32> {
         Value::Float(v) => Some(*v as i32),
         Value::Double(v) => Some(*v as i32),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::common::{Chunk, ChunkToModify};
+    use super::create_chunk_nbt;
+    use crate::block_definitions::GRASS_BLOCK;
+    use fastnbt::Value;
+    use fnv::FnvHashMap;
+    use std::collections::HashMap;
+
+    fn grass_chunk() -> Chunk {
+        let mut c = ChunkToModify::default();
+        for x in 0..16 {
+            for z in 0..16 {
+                c.set_block(x, -62, z, GRASS_BLOCK);
+            }
+        }
+        Chunk {
+            sections: c.sections().collect(),
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        }
+    }
+
+    fn sections(nbt: &HashMap<String, Value>) -> &Vec<Value> {
+        match &nbt["sections"] {
+            Value::List(v) => v,
+            _ => panic!("sections is not a list"),
+        }
+    }
+
+    fn plains_biome() -> Value {
+        crate::biome::build_chunk_biome_nbt(0, 0, None, 0.0)
+    }
+
+    #[test]
+    fn bake_lighting_writes_valid_light_arrays() {
+        let nbt = create_chunk_nbt(&grass_chunk(), true, &plains_biome());
+        assert_eq!(nbt["isLightOn"], Value::Byte(1));
+        assert!(nbt.contains_key("Heightmaps"));
+        let secs = sections(&nbt);
+        assert_eq!(secs.len(), 24);
+        for s in secs {
+            let Value::Compound(m) = s else { panic!() };
+            for key in ["SkyLight", "BlockLight"] {
+                match &m[key] {
+                    Value::ByteArray(b) => assert_eq!(b.len(), 2048),
+                    _ => panic!("{key} is not a byte array"),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_bake_lighting_omits_light_arrays() {
+        let nbt = create_chunk_nbt(&grass_chunk(), false, &plains_biome());
+        assert_eq!(nbt["isLightOn"], Value::Byte(0));
+        for s in sections(&nbt) {
+            let Value::Compound(m) = s else { panic!() };
+            assert!(!m.contains_key("SkyLight"));
+            assert!(!m.contains_key("BlockLight"));
+        }
+    }
+
+    #[test]
+    fn all_air_chunk_is_fully_skylit() {
+        let chunk = Chunk {
+            sections: vec![],
+            x_pos: 0,
+            z_pos: 0,
+            is_light_on: 0,
+            other: FnvHashMap::default(),
+        };
+        let nbt = create_chunk_nbt(&chunk, true, &plains_biome());
+        for s in sections(&nbt) {
+            let Value::Compound(m) = s else { panic!() };
+            let Value::ByteArray(b) = &m["SkyLight"] else {
+                panic!()
+            };
+            // 0xFF == two nibbles of 15 (full skylight)
+            assert!(b.iter().all(|&v| v == -1));
+        }
     }
 }

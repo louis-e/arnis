@@ -14,6 +14,11 @@ const TERRAIN_HEIGHT_BUFFER: i32 = 15;
 /// outliers while preserving real terrain features like mountain ridges and canyons.
 /// Runs iteratively so that multi-pixel artifact clusters are eroded from the outside
 /// in — each pass fixes boundary pixels that have enough normal neighbors.
+///
+/// Each pass reads from a row-snapshot of the grid taken at the top of the pass and
+/// writes only into the inner cells of `heights`, so the per-row work is independent
+/// and parallelised with rayon. On a 16k² grid (the worst case the elevation
+/// pipeline allows) this is the dominant elevation post-processing cost.
 pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
     let grid_h = heights.len();
     if grid_h < 5 {
@@ -38,63 +43,69 @@ pub fn repair_terrain_anomalies(heights: &mut [Vec<f64>]) {
 
     for pass in 0..PASSES {
         if pass > 0 {
-            for (dst, src) in snapshot.iter_mut().zip(heights.iter()) {
-                dst.clone_from(src);
-            }
+            // Refresh the snapshot to last pass's writes — also done in
+            // parallel because both sides are large contiguous allocs and
+            // the row-pair copy is independent.
+            snapshot
+                .par_iter_mut()
+                .zip(heights.par_iter())
+                .for_each(|(dst, src)| dst.clone_from(src));
         }
 
-        let mut repaired = 0;
-        let mut neighbors: Vec<f64> = Vec::with_capacity(24);
-        let mut abs_devs: Vec<f64> = Vec::with_capacity(24);
-
-        for y in r..grid_h - r {
-            for x in r..grid_w - r {
-                let center = snapshot[y][x];
-                if !center.is_finite() {
-                    continue;
-                }
-
-                // Collect finite neighbors in the 5x5 window.
-                neighbors.clear();
-                for dy in -RADIUS..=RADIUS {
-                    for dx in -RADIUS..=RADIUS {
-                        if dy == 0 && dx == 0 {
+        // Stream writes directly into `heights` per row in parallel, reading
+        // from the immutable snapshot. Avoids buffering all changes in a Vec.
+        let snapshot_ref: &[Vec<f64>] = &snapshot;
+        let repaired: usize = heights
+            .par_iter_mut()
+            .enumerate()
+            .filter(|(y, _)| *y >= r && *y < grid_h - r)
+            .map_init(
+                || (Vec::with_capacity(24), Vec::with_capacity(24)),
+                |(neighbors, abs_devs), (y, row)| {
+                    let mut row_repaired = 0usize;
+                    for x in r..grid_w - r {
+                        let center = snapshot_ref[y][x];
+                        if !center.is_finite() {
                             continue;
                         }
-                        let v = snapshot[(y as i32 + dy) as usize][(x as i32 + dx) as usize];
-                        if v.is_finite() {
-                            neighbors.push(v);
+
+                        neighbors.clear();
+                        for dy in -RADIUS..=RADIUS {
+                            for dx in -RADIUS..=RADIUS {
+                                if dy == 0 && dx == 0 {
+                                    continue;
+                                }
+                                let v = snapshot_ref[(y as i32 + dy) as usize]
+                                    [(x as i32 + dx) as usize];
+                                if v.is_finite() {
+                                    neighbors.push(v);
+                                }
+                            }
+                        }
+                        if neighbors.len() < 8 {
+                            continue;
+                        }
+
+                        let mid = neighbors.len() / 2;
+                        neighbors.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
+                        let median = neighbors[mid];
+
+                        abs_devs.clear();
+                        abs_devs.extend(neighbors.iter().map(|&v| (v - median).abs()));
+                        let mad_mid = abs_devs.len() / 2;
+                        abs_devs.select_nth_unstable_by(mad_mid, |a, b| a.partial_cmp(b).unwrap());
+                        let mad = abs_devs[mad_mid];
+
+                        let deviation = (center - median).abs();
+                        if deviation > ABS_THRESHOLD && deviation > RELATIVE_FACTOR * mad.max(1.0) {
+                            row[x] = median;
+                            row_repaired += 1;
                         }
                     }
-                }
-                if neighbors.len() < 8 {
-                    continue;
-                }
-
-                // Median of neighbors — O(n) via select_nth (vs sort O(n log n)).
-                let mid = neighbors.len() / 2;
-                neighbors.select_nth_unstable_by(mid, |a, b| a.partial_cmp(b).unwrap());
-                let median = neighbors[mid];
-
-                // MAD (median absolute deviation) — robust scale estimator.
-                // High MAD = real terrain variation (slopes, ridges) → large deviations allowed.
-                // Low MAD = flat area → even moderate spikes get caught.
-                abs_devs.clear();
-                abs_devs.extend(neighbors.iter().map(|&v| (v - median).abs()));
-                let mad_mid = abs_devs.len() / 2;
-                abs_devs.select_nth_unstable_by(mad_mid, |a, b| a.partial_cmp(b).unwrap());
-                let mad = abs_devs[mad_mid];
-
-                let deviation = (center - median).abs();
-                // Flag as anomaly only if deviation exceeds BOTH:
-                // - An absolute floor (prevents fixing gentle slopes)
-                // - A multiple of local variation (preserves canyons, mountain ridges)
-                if deviation > ABS_THRESHOLD && deviation > RELATIVE_FACTOR * mad.max(1.0) {
-                    heights[y][x] = median;
-                    repaired += 1;
-                }
-            }
-        }
+                    row_repaired
+                },
+            )
+            .sum();
 
         if repaired == 0 {
             break;
@@ -187,20 +198,16 @@ pub fn apply_land_cover_repair(
         land_cover.refresh_water_blend_grid();
     }
 
-    if coastal_pull_distance_cells > 0 {
-        pull_coastal_builtup_toward_water(
-            heights,
-            &land_cover.grid,
-            &is_water_surface,
-            coastal_pull_distance_cells,
-        );
-    }
+    // Smooth before pull; otherwise the Gaussian raises pulled cells back up.
     smooth_built_up_gaussian(
         heights,
         &land_cover.grid,
         &is_water_surface,
         built_up_sigma_cells,
     );
+    if coastal_pull_distance_cells > 0 {
+        pull_coastal_land_toward_water(heights, &is_water_surface, coastal_pull_distance_cells);
+    }
 }
 
 /// Flatten the water surface of each connected `LC_WATER` component and
@@ -715,28 +722,9 @@ fn reclassify_non_surface_water_cells(
     n
 }
 
-/// Pull built-up cells near water down toward the local water surface.
-///
-/// DSMs (AWS Terrain Tiles, Copernicus DSM, SRTM) include buildings and
-/// waterfront structures in the elevation. In Minecraft that appears as a
-/// flat strip of "city" sitting ~10–30 m above the water it's right next to
-/// — a cliff at the shoreline. A plain Gaussian blur can't fix this
-/// cleanly: with water included in the source it creates a broad ramp
-/// instead of a cliff; with water excluded it keeps the cliff.
-///
-/// This pass walks outward from every water cell (4-connected multi-source
-/// BFS bounded at `max_distance`) and, for each built-up cell inside that
-/// distance, lerps its elevation toward the nearest water cell's surface
-/// level with a **linear distance falloff**:
-///
-///     weight = (max_distance − distance) / max_distance
-///     new    = (1 − weight) · original + weight · water_level
-///
-/// Net effect: a controlled, known-width ramp from water up to the city
-/// interior that replaces the uncontrolled Gaussian-induced ramp.
-fn pull_coastal_builtup_toward_water(
+// Linearly pull land cells within max_distance toward the local water surface; skip > MAX_PULL_DROP_M above water (real cliffs).
+fn pull_coastal_land_toward_water(
     heights: &mut [Vec<f64>],
-    lc_grid: &[Vec<u8>],
     is_water_surface: &[Vec<bool>],
     max_distance: u32,
 ) {
@@ -745,6 +733,9 @@ fn pull_coastal_builtup_toward_water(
     }
     let h = heights.len();
     let w = heights[0].len();
+
+    // Cells above this threshold are treated as real cliffs and not pulled.
+    const MAX_PULL_DROP_M: f64 = 15.0;
 
     // Multi-source BFS: seed with confirmed water-surface cells (not just
     // LC_WATER, so a canyon-wall cell misclassified as water doesn't
@@ -758,9 +749,6 @@ fn pull_coastal_builtup_toward_water(
         for x in 0..w {
             if is_water_surface[y][x] {
                 dist[y][x] = 0;
-                // Heights at water-surface cells have been flattened to the
-                // component water level, so this is the target we pull
-                // coastal built-up cells toward.
                 water_level[y][x] = heights[y][x];
                 queue.push_back((x, y));
             }
@@ -789,14 +777,11 @@ fn pull_coastal_builtup_toward_water(
         }
     }
 
-    // Apply the linear pull-down to built-up cells in range.
     let mut affected = 0usize;
+    let mut skipped_cliff = 0usize;
     let denom = max_distance as f64;
     for y in 0..h {
         for x in 0..w {
-            if lc_grid[y][x] != LC_BUILT_UP {
-                continue;
-            }
             let d = dist[y][x];
             if d == 0 || d > max_distance {
                 continue;
@@ -806,18 +791,20 @@ fn pull_coastal_builtup_toward_water(
             if !wl.is_finite() || !orig.is_finite() {
                 continue;
             }
-            // Linear falloff: weight ≈ 1 at d=1 (right next to water),
-            // weight → 0 as d → max_distance.
+            if orig - wl > MAX_PULL_DROP_M {
+                skipped_cliff += 1;
+                continue;
+            }
             let weight = ((max_distance - d) as f64 / denom).clamp(0.0, 1.0);
             heights[y][x] = orig * (1.0 - weight) + wl * weight;
             affected += 1;
         }
     }
 
-    if affected > 0 {
+    if affected > 0 || skipped_cliff > 0 {
         eprintln!(
-            "Land cover repair: pulled {} coastal built-up cells toward water (within {} cells)",
-            affected, max_distance
+            "Land cover repair: pulled {} coastal land cells toward water (within {} cells); kept {} cells above {} m as real cliffs",
+            affected, max_distance, skipped_cliff, MAX_PULL_DROP_M
         );
     }
 }
@@ -1031,6 +1018,10 @@ fn create_gaussian_kernel(size: usize, sigma: f64) -> Vec<f64> {
 
 /// Fill in any NaN values by iteratively interpolating from nearest valid neighbors.
 /// Uses a snapshot each iteration to avoid directional bias from scan order.
+///
+/// Within one iteration each row's writes only depend on the read-only snapshot,
+/// so the row sweep is parallelised. The convergence loop itself stays serial
+/// because each iteration's snapshot must include the previous iteration's fills.
 pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
     let height: usize = height_grid.len();
     if height == 0 {
@@ -1040,23 +1031,26 @@ pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
 
     let mut changes_made: bool = true;
     while changes_made {
-        changes_made = false;
         let snapshot: Vec<Vec<f64>> = height_grid.to_vec();
+        let snapshot_ref: &[Vec<f64>] = &snapshot;
 
-        #[allow(clippy::needless_range_loop)]
-        for y in 0..height {
-            for x in 0..width {
-                if height_grid[y][x].is_nan() {
+        let any_changed = height_grid
+            .par_iter_mut()
+            .enumerate()
+            .map(|(y, row)| {
+                let mut row_changed = false;
+                for (x, cell) in row.iter_mut().enumerate().take(width) {
+                    if !cell.is_nan() {
+                        continue;
+                    }
                     let mut sum: f64 = 0.0;
                     let mut count: i32 = 0;
-
                     for dy in -1..=1 {
                         for dx in -1..=1 {
                             let ny: i32 = y as i32 + dy;
                             let nx: i32 = x as i32 + dx;
-
                             if ny >= 0 && ny < height as i32 && nx >= 0 && nx < width as i32 {
-                                let val: f64 = snapshot[ny as usize][nx as usize];
+                                let val: f64 = snapshot_ref[ny as usize][nx as usize];
                                 if !val.is_nan() {
                                     sum += val;
                                     count += 1;
@@ -1064,14 +1058,16 @@ pub fn fill_nan_values(height_grid: &mut [Vec<f64>]) {
                             }
                         }
                     }
-
                     if count > 0 {
-                        height_grid[y][x] = sum / count as f64;
-                        changes_made = true;
+                        *cell = sum / count as f64;
+                        row_changed = true;
                     }
                 }
-            }
-        }
+                row_changed
+            })
+            .reduce(|| false, |a, b| a || b);
+
+        changes_made = any_changed;
     }
 }
 
@@ -1089,14 +1085,13 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
     }
     let width = height_grid[0].len();
 
-    let mut all_heights: Vec<f64> = Vec::new();
-    for row in height_grid.iter() {
-        for &h in row {
-            if !h.is_nan() && h.is_finite() {
-                all_heights.push(h);
-            }
-        }
-    }
+    // Collect finite heights in parallel — flat-mapping per row, each thread
+    // builds its own Vec, then rayon stitches the segments together. Avoids
+    // a single sequential sweep over the whole grid.
+    let mut all_heights: Vec<f64> = height_grid
+        .par_iter()
+        .flat_map_iter(|row| row.iter().filter(|h| !h.is_nan() && h.is_finite()).copied())
+        .collect();
 
     if all_heights.len() < 4 {
         return;
@@ -1120,8 +1115,10 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
 
     // Count guard: if >5% of values fall outside a bound, that tail represents
     // real terrain (e.g., canyon floor), not corrupted data — skip that bound.
-    let below_count = all_heights.iter().filter(|&&h| h < min_reasonable).count();
-    let above_count = all_heights.iter().filter(|&&h| h > max_reasonable).count();
+    let (below_count, above_count) = all_heights
+        .par_iter()
+        .map(|&h| ((h < min_reasonable) as usize, (h > max_reasonable) as usize))
+        .reduce(|| (0, 0), |a, b| (a.0 + b.0, a.1 + b.1));
     let threshold = (len as f64 * 0.05) as usize;
     let filter_lower = below_count > 0 && below_count <= threshold;
     let filter_upper = above_count > 0 && above_count <= threshold;
@@ -1130,20 +1127,26 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
         return;
     }
 
-    let mut outliers_filtered = 0;
-
-    for row in height_grid.iter_mut().take(height) {
-        for h in row.iter_mut().take(width) {
-            if !h.is_nan() {
-                let is_outlier =
-                    (filter_lower && *h < min_reasonable) || (filter_upper && *h > max_reasonable);
-                if is_outlier {
-                    *h = f64::NAN;
-                    outliers_filtered += 1;
+    // Per-row NaN-out, then sum the per-row counts back together. Each row
+    // is mutated independently so this is data-race-free.
+    let outliers_filtered: usize = height_grid
+        .par_iter_mut()
+        .take(height)
+        .map(|row| {
+            let mut row_count = 0usize;
+            for h in row.iter_mut().take(width) {
+                if !h.is_nan() {
+                    let is_outlier = (filter_lower && *h < min_reasonable)
+                        || (filter_upper && *h > max_reasonable);
+                    if is_outlier {
+                        *h = f64::NAN;
+                        row_count += 1;
+                    }
                 }
             }
-        }
-    }
+            row_count
+        })
+        .sum();
 
     if outliers_filtered > 0 {
         eprintln!(

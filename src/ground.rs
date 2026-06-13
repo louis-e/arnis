@@ -1,8 +1,12 @@
 use crate::args::Args;
-use crate::coordinate_system::{cartesian::XZPoint, geographic::LLBBox};
+use crate::coordinate_system::{
+    cartesian::{XZBBox, XZPoint},
+    geographic::LLBBox,
+};
 use crate::elevation::compute_grid_dims;
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
+use crate::osm_parser::ProcessedElement;
 use crate::progress::emit_gui_progress_update;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
@@ -55,12 +59,13 @@ impl Ground {
         fetch_land_cover: bool,
         disable_height_limit: bool,
         extended_max_y: i32,
+        aws_only_elevation: bool,
     ) -> Self {
         // Fetch land cover FIRST so we can feed it into the elevation
         // post-processing pipeline for land-cover-aware artifact repair.
         // The elevation grid is built from the same (bbox, scale) so both
         // grids share dimensions (both use compute_grid_dims).
-        let (_, _, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
         let mut land_cover = if fetch_land_cover {
             let lc = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
             if lc.is_some() {
@@ -73,17 +78,28 @@ impl Ground {
             None
         };
 
+        // Raise the floor for the deepest water carve (elevation path only).
+        let water_floor = match &land_cover {
+            Some(lc) => {
+                let max_depth =
+                    crate::water_depth::estimate_max_carve_depth(&lc.grid, world_w, world_h);
+                ground_level.max(crate::world_editor::MIN_Y + max_depth + 2)
+            }
+            None => ground_level,
+        };
+
         match fetch_elevation_data(
             bbox,
             scale,
-            ground_level,
+            water_floor,
             disable_height_limit,
             extended_max_y,
             land_cover.as_mut(),
+            aws_only_elevation,
         ) {
             Ok(elevation_data) => Self {
                 elevation_enabled: true,
-                ground_level,
+                ground_level: water_floor,
                 elevation_data: Some(elevation_data),
                 land_cover,
                 rotation_mask: None,
@@ -116,6 +132,77 @@ impl Ground {
     #[inline(always)]
     pub fn has_land_cover(&self) -> bool {
         self.land_cover.is_some()
+    }
+
+    /// Force LC_WATER for every cell inside an OSM water polygon or waterway.
+    pub fn apply_osm_water_override(&mut self, elements: &[ProcessedElement], xzbbox: &XZBBox) {
+        let Some(lc) = self.land_cover.as_mut() else {
+            return;
+        };
+        let Some(data) = self.elevation_data.as_ref() else {
+            return;
+        };
+        crate::land_cover_osm_water_override::apply_osm_water_override(
+            lc,
+            &data.heights,
+            data.world_width,
+            data.world_height,
+            elements,
+            xzbbox,
+        );
+    }
+
+    /// Reclassify cells under OSM-tagged bridges to the surrounding class.
+    pub fn apply_bridge_land_cover_repair(
+        &mut self,
+        elements: &[ProcessedElement],
+        xzbbox: &XZBBox,
+        scale: f64,
+    ) {
+        let Some(lc) = self.land_cover.as_mut() else {
+            return;
+        };
+        let Some(data) = self.elevation_data.as_ref() else {
+            return;
+        };
+        crate::land_cover_bridge_repair::apply_bridge_land_cover_repair(
+            lc,
+            data.world_width,
+            data.world_height,
+            elements,
+            xzbbox,
+            scale,
+        );
+    }
+
+    /// Local block bbox (min_x, min_z, max_x, max_z) covering all LC_WATER cells,
+    /// derived from the land-cover grid; None if no land cover or no water.
+    pub fn lc_water_block_bounds(&self) -> Option<(i32, i32, i32, i32)> {
+        let (lc, data) = match (&self.land_cover, &self.elevation_data) {
+            (Some(lc), Some(data)) => (lc, data),
+            _ => return None,
+        };
+        let (mut gx0, mut gz0, mut gx1, mut gz1) = (usize::MAX, usize::MAX, 0usize, 0usize);
+        let mut any = false;
+        for (z, row) in lc.grid.iter().enumerate() {
+            for (x, &c) in row.iter().enumerate() {
+                if c == land_cover::LC_WATER {
+                    gx0 = gx0.min(x);
+                    gx1 = gx1.max(x);
+                    gz0 = gz0.min(z);
+                    gz1 = gz1.max(z);
+                    any = true;
+                }
+            }
+        }
+        if !any {
+            return None;
+        }
+        let (x0, x1) =
+            crate::water_depth::grid_span_to_block_span(gx0, gx1, data.world_width, lc.width);
+        let (z0, z1) =
+            crate::water_depth::grid_span_to_block_span(gz0, gz1, data.world_height, lc.height);
+        Some((x0, z0, x1, z1))
     }
 
     /// Returns the ESA WorldCover land cover class at the given coordinates.
@@ -219,7 +306,9 @@ impl Ground {
 
         let max_val = east.max(west).max(north).max(south);
         let min_val = east.min(west).min(north).min(south);
-        max_val - min_val
+        // Saturate: pathological CLI input (e.g. very negative ground_level)
+        // can push max - min past i32::MAX.
+        max_val.saturating_sub(min_val)
     }
 
     /// Returns the ground level at the given coordinates
@@ -395,6 +484,44 @@ impl Ground {
             && orig_z <= mask.orig_max_z as f64 + EPSILON
     }
 
+    pub fn save_land_cover_debug_image(&self, filename: &str) {
+        let Some(ref lc) = self.land_cover else {
+            return;
+        };
+        if lc.height == 0 || lc.width == 0 {
+            return;
+        }
+        let mut img: image::ImageBuffer<Rgb<u8>, Vec<u8>> =
+            RgbImage::new(lc.width as u32, lc.height as u32);
+        for (y, row) in lc.grid.iter().enumerate() {
+            for (x, &class) in row.iter().enumerate() {
+                let color = match class {
+                    land_cover::LC_TREE_COVER => Rgb([0x00, 0x6e, 0x00]),
+                    land_cover::LC_SHRUBLAND => Rgb([0xff, 0xbb, 0x22]),
+                    land_cover::LC_GRASSLAND => Rgb([0xff, 0xff, 0x4c]),
+                    land_cover::LC_CROPLAND => Rgb([0xf0, 0x96, 0xff]),
+                    land_cover::LC_BUILT_UP => Rgb([0xfa, 0x00, 0x00]),
+                    land_cover::LC_BARE => Rgb([0xb4, 0xb4, 0xb4]),
+                    land_cover::LC_SNOW_ICE => Rgb([0xf0, 0xf0, 0xf0]),
+                    land_cover::LC_WATER => Rgb([0x00, 0x64, 0xc8]),
+                    land_cover::LC_WETLAND => Rgb([0x00, 0x96, 0xa0]),
+                    land_cover::LC_MANGROVES => Rgb([0x00, 0xcf, 0x75]),
+                    land_cover::LC_MOSS => Rgb([0xfa, 0xe6, 0xa0]),
+                    _ => Rgb([0x00, 0x00, 0x00]),
+                };
+                img.put_pixel(x as u32, y as u32, color);
+            }
+        }
+        let filename: String = if !filename.ends_with(".png") {
+            format!("{filename}.png")
+        } else {
+            filename.to_string()
+        };
+        if let Err(e) = img.save(&filename) {
+            eprintln!("Failed to save land cover debug image: {e}");
+        }
+    }
+
     fn save_debug_image(&self, filename: &str) {
         let heights = &self
             .elevation_data
@@ -462,9 +589,11 @@ pub fn generate_ground_data(args: &Args) -> Ground {
             args.land_cover,
             args.disable_height_limit,
             extended_max_y_for(args),
+            args.aws_only_elevation,
         );
         if args.debug {
             ground.save_debug_image("elevation_debug");
+            ground.save_land_cover_debug_image("landcover_debug");
         }
         return ground;
     }

@@ -13,7 +13,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             binary_name: arnis.exe
             asset_name: arnis-windows.exe
-          - os: ubuntu-latest
+          - os: ubuntu-22.04  # Oldest supported base for AppImage glibc/WebKitGTK compatibility
             target: x86_64-unknown-linux-gnu
             binary_name: arnis
             asset_name: arnis-linux
@@ -29,30 +29,29 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
+    - uses: actions/checkout@v6
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@v1
+    - uses: ./.github/actions/setup-arnis-linux
       with:
-        toolchain: stable
-        targets: ${{ matrix.target }}
-
-    - name: Install Linux dependencies
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt update
-        sudo apt install -y software-properties-common
-        sudo add-apt-repository universe
-        echo "deb http://archive.ubuntu.com/ubuntu $(lsb_release -sc)-backports main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list
-        sudo apt update
-        sudo apt install -y libgtk-3-dev build-essential pkg-config libglib2.0-dev libsoup-3.0-dev libwebkit2gtk-4.1-dev
-        echo "PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+        rust-targets: ${{ matrix.target }}
+        # Cold rebuild for release reproducibility.
+        cache: "false"
 
     - name: Install dependencies
       run: cargo fetch
 
+    - name: Install Tauri CLI
+      if: runner.os == 'Linux'
+      run: cargo install tauri-cli --version "^2.0" --locked
+
+    - name: Build with AppImage bundle (Linux)
+      if: runner.os == 'Linux'
+      env:
+        APPIMAGE_EXTRACT_AND_RUN: 1  # Avoids FUSE requirement on CI runners
+      run: cargo tauri build --target ${{ matrix.target }} --bundles appimage
+
     - name: Build
+      if: runner.os != 'Linux'
       run: cargo build --release --target ${{ matrix.target }}
 
     - name: Rename binary for release
@@ -65,6 +64,13 @@ jobs:
     - name: Package binary as tar.gz (preserves executable permission)
       if: matrix.os != 'windows-latest'
       run: tar -czf target/release/${{ matrix.asset_name }}.tar.gz -C target/release ${{ matrix.asset_name }}
+
+    - name: Package AppImage as tar.gz (Linux, preserves executable permission)
+      if: runner.os == 'Linux'
+      run: |
+        mv target/${{ matrix.target }}/release/bundle/appimage/*.AppImage target/release/arnis-linux.AppImage
+        chmod +x target/release/arnis-linux.AppImage
+        tar -czf target/release/arnis-linux-appimage.tar.gz -C target/release arnis-linux.AppImage
 
     - name: Install Windows SDK
       if: matrix.os == 'windows-latest'
@@ -99,6 +105,13 @@ jobs:
       with:
         name: ${{ matrix.os }}-${{ matrix.target }}-build
         path: target/release/${{ matrix.asset_name }}${{ matrix.os != 'windows-latest' && '.tar.gz' || '' }}
+
+    - name: Upload AppImage artifact
+      if: runner.os == 'Linux'
+      uses: actions/upload-artifact@v7
+      with:
+        name: linux-appimage-build
+        path: target/release/arnis-linux-appimage.tar.gz
 
   create-universal-macos:
     needs: build
@@ -149,7 +162,13 @@ jobs:
     - name: Download Linux build artifact
       uses: actions/download-artifact@v8
       with:
-        name: ubuntu-latest-x86_64-unknown-linux-gnu-build
+        name: ubuntu-22.04-x86_64-unknown-linux-gnu-build
+        path: ./builds/linux
+
+    - name: Download Linux AppImage artifact
+      uses: actions/download-artifact@v8
+      with:
+        name: linux-appimage-build
         path: ./builds/linux
 
     - name: Download macOS universal build artifact
@@ -159,11 +178,12 @@ jobs:
         path: ./builds/macos
 
     - name: Create GitHub Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       with:
         files: |
           builds/windows/arnis-windows.exe
           builds/linux/arnis-linux.tar.gz
+          builds/linux/arnis-linux-appimage.tar.gz
           builds/macos/arnis-mac-universal.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}

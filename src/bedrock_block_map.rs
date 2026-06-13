@@ -220,6 +220,33 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             ],
         ),
 
+        // Cherry leaves with persistence (1.20+)
+        "cherry_leaves" => BedrockBlock::with_states(
+            "cherry_leaves",
+            vec![
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+                ("update_bit", BedrockBlockStateValue::Bool(false)),
+            ],
+        ),
+
+        // Mangrove leaves with persistence (1.19+)
+        "mangrove_leaves" => BedrockBlock::with_states(
+            "mangrove_leaves",
+            vec![
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+                ("update_bit", BedrockBlockStateValue::Bool(false)),
+            ],
+        ),
+
+        // Azalea leaves with persistence (1.17+)
+        "azalea_leaves" => BedrockBlock::with_states(
+            "azalea_leaves",
+            vec![
+                ("persistent_bit", BedrockBlockStateValue::Bool(true)),
+                ("update_bit", BedrockBlockStateValue::Bool(false)),
+            ],
+        ),
+
         // Stone slab (bottom half by default)
         "stone_slab" => BedrockBlock::with_states(
             "stone_block_slab",
@@ -360,6 +387,10 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
         "gray_concrete_powder" => BedrockBlock::with_states(
             "concretePowder",
             vec![("color", BedrockBlockStateValue::String("gray".to_string()))],
+        ),
+        "brown_concrete_powder" => BedrockBlock::with_states(
+            "concretePowder",
+            vec![("color", BedrockBlockStateValue::String("brown".to_string()))],
         ),
         "light_gray_concrete" => BedrockBlock::with_states(
             "concrete",
@@ -1403,6 +1434,17 @@ mod tests {
         assert!(matches!(
             bedrock.states.get("color"),
             Some(BedrockBlockStateValue::String(s)) if s == "gray"
+        ));
+    }
+
+    #[test]
+    fn test_brown_concrete_powder_bedrock_mapping() {
+        use crate::block_definitions::BROWN_CONCRETE_POWDER;
+        let bedrock = to_bedrock_block(BROWN_CONCRETE_POWDER);
+        assert_eq!(bedrock.name, "minecraft:concretePowder");
+        assert!(matches!(
+            bedrock.states.get("color"),
+            Some(BedrockBlockStateValue::String(s)) if s == "brown"
         ));
     }
 

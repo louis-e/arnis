@@ -14,7 +14,7 @@
 <body>
   <main class="container">
     <div class="row">
-      <a href="https://arnismc.com" target="_blank">
+      <a href="https://arnismc.com" target="_blank" rel="noopener noreferrer">
         <img src="./images/logo.png" id="arnis-logo" class="logo arnis" alt="Arnis Logo" style="width: 30%; height: auto;">
       </a>
     </div>
@@ -46,6 +46,9 @@
                 </button>
                 <button type="button" id="format-bedrock" class="format-toggle-btn" onclick="setWorldFormat('bedrock')">
                   Bedrock
+                </button>
+                <button type="button" id="format-luanti" class="format-toggle-btn" onclick="setWorldFormat('luanti')" style="display: none;">
+                  Luanti
                 </button>
               </div>
             </div>
@@ -104,6 +107,28 @@
           </div>
         </div>
 
+        <!-- Land Cover Toggle Button -->
+        <div class="settings-row">
+          <label for="land-cover-toggle">
+            <span data-localize="land_cover">Land Cover</span>
+            <span class="tooltip-icon" data-tooltip="Fetch satellite land cover data to classify terrain type. Requires terrain to be enabled.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="land-cover-toggle" name="land-cover-toggle" checked>
+          </div>
+        </div>
+
+        <!-- 3D Models Toggle (3DMR + Wikimedia Commons via Wikidata) -->
+        <div class="settings-row">
+          <label for="use-3d-toggle">
+            <span data-localize="three_dmr">Use 3D Models</span>
+            <span class="tooltip-icon" data-tooltip="Substitute community-contributed 3D models (from the OpenStreetMap 3D Model Repository and Wikimedia Commons) for famous landmarks such as the Eiffel Tower, instead of generic building shapes.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="use-3d-toggle" name="use-3d-toggle" checked>
+          </div>
+        </div>
+
         <!-- Interior Toggle Button -->
         <div class="settings-row">
           <label for="interior-toggle">
@@ -126,17 +151,6 @@
           </div>
         </div>
 
-        <!-- Land Cover Toggle Button -->
-        <div class="settings-row">
-          <label for="land-cover-toggle">
-            <span data-localize="land_cover">Land Cover</span>
-            <span class="tooltip-icon" data-tooltip="Fetch satellite land cover data to classify terrain type. Requires terrain to be enabled.">?</span>
-          </label>
-          <div class="settings-control">
-            <input type="checkbox" id="land-cover-toggle" name="land-cover-toggle" checked>
-          </div>
-        </div>
-
         <!-- Section: World -->
         <div class="settings-section-header" data-localize="settings_section_world">World</div>
 
@@ -148,6 +162,28 @@
           </label>
           <div class="settings-control">
             <input type="checkbox" id="disable-height-limit-toggle" name="disable-height-limit-toggle">
+          </div>
+        </div>
+
+        <!-- AWS-only Elevation Toggle -->
+        <div class="settings-row">
+          <label for="aws-only-elevation-toggle">
+            <span data-localize="aws_only_elevation">Legacy Terrain</span>
+            <span class="tooltip-icon" data-tooltip="Skip the high-resolution regional elevation providers and use the legacy terrain. Faster generation, lower terrain detail.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="aws-only-elevation-toggle" name="aws-only-elevation-toggle">
+          </div>
+        </div>
+
+        <!-- Bake Lighting Toggle -->
+        <div class="settings-row">
+          <label for="bake-lighting-toggle">
+            <span data-localize="bake_lighting">Bake lighting</span>
+            <span class="tooltip-icon" data-tooltip="Precompute lighting so distant chunks render lit in LOD mods (Voxy/Chunky) without visiting them. Not needed for vanilla; slower generation.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="bake-lighting-toggle" name="bake-lighting-toggle">
           </div>
         </div>
 
@@ -175,13 +211,24 @@
           </div>
         </div>
 
+        <!-- Enable Luanti (experimental) -->
+        <div class="settings-row">
+          <label for="enable-luanti-toggle">
+            <span>Luanti (experimental)</span>
+            <span class="tooltip-icon" data-tooltip="Show Luanti (Mineclonia) as an output format. Experimental: block mappings and lighting may be imperfect.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="enable-luanti-toggle" name="enable-luanti-toggle">
+          </div>
+        </div>
+
         <!-- Section: Map & Input -->
         <div class="settings-section-header" data-localize="settings_section_map">Map & Input</div>
 
         <!-- Bounding Box Input -->
         <div class="settings-row">
           <label for="bbox-coords">
-            <span data-localize="custom_bounding_box">Custom Bounding Box</span>
+            <span data-localize="custom_bounding_box">Bounding Box</span>
             <span class="tooltip-icon" data-tooltip="Manually enter coordinates (lat,lng,lat,lng) or use map selection">?</span>
           </label>
           <div class="settings-control">
@@ -202,6 +249,7 @@
               <option value="opentopomap">Topographic</option>
               <option value="stadia-bright">Smooth Bright</option>
               <option value="stadia-dark">Smooth Dark</option>
+              <option value="openfreemap-liberty">Modern</option>
             </select>
           </div>
         </div>
@@ -279,19 +327,23 @@
         <!-- end settings-scrollable -->
 
         <div class="settings-footer">
-          <!-- License and Credits Button -->
+          <!-- License and Credits + Version Info buttons -->
           <div class="settings-row license-button-row">
             <button type="button" id="license-button" class="license-button" onclick="openLicense()" data-localize="license_and_credits">License and Credits</button>
+            <button type="button" id="version-info-button" class="license-button" onclick="openVersionInfoModal()" data-localize="version_info">Version Info</button>
           </div>
 
-          <!-- Buy Me a Coffee and Discord -->
+          <!-- GitHub, Buy Me a Coffee and Discord -->
           <div class="settings-row buymeacoffee-row">
-            <a href="https://buymeacoffee.com/louisdev" target="_blank" class="buymeacoffee-link">
+            <a href="https://github.com/louis-e/arnis" target="_blank" rel="noopener noreferrer" class="github-link">
+              <img src="./images/github.png" alt="GitHub" class="github-logo">
+            </a>
+            <a href="https://buymeacoffee.com/louisdev" target="_blank" rel="noopener noreferrer" class="buymeacoffee-link">
               <img src="./images/buymeacoffee.png" alt="Buy Me a Coffee" class="buymeacoffee-logo">
             </a>
-            <a href="https://discord.gg/mA2g69Fhxq" target="_blank" class="discord-link">
+            <a href="https://discord.gg/mA2g69Fhxq" target="_blank" rel="noopener noreferrer" class="discord-link">
               <img src="./images/discord.png" alt="Discord" class="discord-logo">
-          </a>
+            </a>
           </div>
         </div>
       </div>
@@ -306,7 +358,7 @@
         </div>
         <p style="text-align:left; margin-top:12px; margin-bottom: -5px;color:#ececec;">
           We’d like to collect anonymous usage data like crashes and performance to make Arnis more stable and faster.
-          <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank">No personal data or world contents are collected.</a>
+          <a href="https://arnismc.com/privacypolicy.html" style="color: inherit;" target="_blank" rel="noopener noreferrer">No personal data or world contents are collected.</a>
         </p>
         <div class="modal-actions" style="margin-top:14px;">
           <button type="button" class="btn-secondary" onclick="rejectTelemetry()">No thanks</button>
@@ -328,9 +380,29 @@
       </div>
     </div>
 
+    <!-- Update / Release Notes Modal -->
+    <div id="update-modal" class="modal" style="display: none;">
+      <div class="modal-content update-modal-content">
+        <div class="settings-header">
+          <h2 id="update-modal-title" data-localize="update_modal_title">What's new in Arnis</h2>
+          <span class="close-button" onclick="closeUpdateModal()">&times;</span>
+        </div>
+        <div id="update-modal-body" class="update-modal-body license-scrollable">
+          <span data-localize="loading">Loading...</span>
+        </div>
+        <div id="update-modal-download-note" class="update-modal-download-note" data-localize="update_modal_download_note">
+          Download opens in your browser. Close Arnis before running the new version.
+        </div>
+        <div class="modal-actions update-modal-actions">
+          <button type="button" id="update-download-button" class="btn-primary" onclick="downloadLatestRelease()" data-localize="update_download">Download</button>
+          <button type="button" class="btn-secondary" onclick="openUpdateInBrowser()" data-localize="update_view_on_github">View on GitHub</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Footer -->
     <footer class="footer">
-      <a href="https://github.com/louis-e/arnis" target="_blank" class="footer-link" data-localize="footer_text">
+      <a href="https://github.com/louis-e/arnis" target="_blank" rel="noopener noreferrer" class="footer-link" data-localize="footer_text">
         © {year} Arnis v{version} by louis-e
       </a>
     </footer>
