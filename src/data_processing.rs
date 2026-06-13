@@ -233,19 +233,18 @@ fn process_element(
     }
 }
 
-/// Whether to stream regions to disk (lower peak RAM) for a run of `num_regions` regions.
-/// Auto-enabled when the estimated resident world would crowd available system memory.
-/// Trades generation time for RAM and skips subways (their post-merge carve conflicts with
-/// eviction); 3D models are kept via region deferral. So on large areas subway presence
-/// depends on host RAM. `ARNIS_STREAM_TO_DISK=1/0` overrides. Constants are conservative/tunable.
+/// Whether to stream regions to disk (lower peak RAM) for `num_regions` regions. Auto-enabled
+/// when the estimated resident world would crowd available RAM; trades some time for RAM, output
+/// unchanged (3D models + subways preserved). `ARNIS_STREAM_TO_DISK=1/0` overrides; constants tunable.
 fn should_stream_to_disk(num_regions: usize) -> bool {
     match std::env::var("ARNIS_STREAM_TO_DISK").ok().as_deref() {
         Some("1") => return true,
         Some("0") => return false,
         _ => {}
     }
-    const BASE_MB: u64 = 800;
-    const PER_REGION_MB: u64 = 14;
+    // Calibrated on a dense full-feature run (terrain + land cover + Overture + 3D): ~26 MB/region.
+    const BASE_MB: u64 = 500;
+    const PER_REGION_MB: u64 = 26;
     let est_peak_mb = BASE_MB + PER_REGION_MB * num_regions as u64;
 
     let mut sys = sysinfo::System::new();
