@@ -64,7 +64,10 @@ pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool
             "streaming": streaming
         });
         if let Err(e) = window.emit("progress-update", payload) {
-            eprintln!("Failed to emit progress event: {}", e);
+            let error_msg = format!("Failed to emit progress event: {}", e);
+            eprintln!("{}", error_msg);
+            #[cfg(feature = "gui")]
+            send_log(LogLevel::Warning, &error_msg);
         }
     }
 }

@@ -460,7 +460,7 @@ pub fn generate_world_with_options(
         let mut merge_dur = std::time::Duration::ZERO;
         let total_tiles = indexed_tiles.len().max(1);
         let mut tiles_merged = 0usize;
-        let mut last_emitted_pct = 25.0_f64;
+        let mut last_emitted_pct = 20.0_f64;
         for batch in indexed_tiles.chunks(tile_batch_size) {
             // Phase 1: process this batch of tiles in parallel
             let place_start = std::time::Instant::now();

@@ -219,11 +219,14 @@ pub fn fetch_elevation_data(
     };
 
     if let Some(lc) = land_cover {
+        // The land-cover Gaussian is the slowest elevation step on big areas;
+        // animate the bar across 14->16% as it runs instead of freezing.
         apply_land_cover_repair(
             &mut height_grid,
             lc,
             built_up_sigma_cells,
             coastal_pull_cells,
+            &|f| emit_gui_progress_update(14.0 + f * 2.0, "Processing elevation..."),
         );
     }
     bench.mark("elev_landcover_repair");
