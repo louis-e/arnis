@@ -62,7 +62,7 @@ nbtx = { git = "https://github.com/bedrock-crustaceans/nbtx" }
 vek = "0.17"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 rusty-leveldb = "3"
-rusqlite = { version = "0.33", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 zstd = "0.13"
 
 [target.'cfg(windows)'.dependencies]
