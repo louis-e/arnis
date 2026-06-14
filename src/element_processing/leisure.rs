@@ -18,7 +18,7 @@ pub fn generate_leisure(
 ) {
     if let Some(leisure_type) = element.tags.get("leisure") {
         let mut previous_node: Option<(i32, i32)> = None;
-        let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
+        let mut corner_count: i32 = 0;
         let mut current_leisure: Vec<(i32, i32)> = vec![];
 
         // Determine block type based on leisure type
@@ -71,15 +71,13 @@ pub fn generate_leisure(
                 }
 
                 current_leisure.push((node.x, node.z));
-                corner_addup.0 += node.x;
-                corner_addup.1 += node.z;
-                corner_addup.2 += 1;
+                corner_count += 1;
             }
             previous_node = Some((node.x, node.z));
         }
 
         // Flood-fill the interior of the leisure area using cache
-        if corner_addup != (0, 0, 0) {
+        if corner_count > 0 {
             let filled_area = flood_fill_cache.get_or_compute(element, args.timeout.as_ref());
 
             // Use deterministic RNG seeded by element ID for consistent results across region boundaries
