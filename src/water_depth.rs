@@ -382,13 +382,37 @@ pub fn carve_lc_water_pass(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
 ) {
-    let off_x = xzbbox.min_x();
-    let off_z = xzbbox.min_z();
-    // Only the water sub-rect can hold LC_WATER cells; skip the rest of the world.
     let x1 = bwf.min_x + bwf.width as i32 - 1;
     let z1 = bwf.min_z + bwf.height as i32 - 1;
-    for z in bwf.min_z..=z1 {
-        for x in bwf.min_x..=x1 {
+    carve_lc_water_region(
+        editor, ground, xzbbox, bwf, road_mask, bwf.min_x, x1, bwf.min_z, z1,
+    );
+}
+
+/// `carve_lc_water_pass` restricted to the inclusive `[iter_min..=iter_max]` block
+/// range (intersected with the water sub-rect). Per-tile callers pass strict tile
+/// bounds; writes are vertical-only so output is identical regardless of tiling.
+#[allow(clippy::too_many_arguments)]
+pub fn carve_lc_water_region(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    xzbbox: &XZBBox,
+    bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
+    iter_min_x: i32,
+    iter_max_x: i32,
+    iter_min_z: i32,
+    iter_max_z: i32,
+) {
+    let off_x = xzbbox.min_x();
+    let off_z = xzbbox.min_z();
+    // Only the water sub-rect can hold LC_WATER cells; intersect it with the range.
+    let x0 = bwf.min_x.max(iter_min_x);
+    let x1 = (bwf.min_x + bwf.width as i32 - 1).min(iter_max_x);
+    let z0 = bwf.min_z.max(iter_min_z);
+    let z1 = (bwf.min_z + bwf.height as i32 - 1).min(iter_max_z);
+    for z in z0..=z1 {
+        for x in x0..=x1 {
             // Keep road/bridge surfaces (causeways, decks).
             if road_mask.contains(x, z) {
                 continue;

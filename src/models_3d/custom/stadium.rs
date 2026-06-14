@@ -60,6 +60,18 @@ impl PrescanResult {
     pub fn placement_count(&self) -> usize {
         self.placements.len()
     }
+
+    /// Regions each placement may write to (stream-to-disk deferral). The model is a
+    /// rotated long×short rectangle centred on the anchor, so its half-diagonal (+ ring) bounds it.
+    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+        self.placements
+            .iter()
+            .flat_map(|p| {
+                let r = (p.long_m.hypot(p.short_m) as f64 * 0.5 * scale).ceil() as i32;
+                crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r)
+            })
+            .collect()
+    }
 }
 
 pub fn prescan(
