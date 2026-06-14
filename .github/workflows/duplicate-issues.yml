@@ -1,0 +1,47 @@
+# Comments on newly opened issues with likely duplicates and/or a grounded resolution hint. Never closes or labels.
+name: Duplicate issue finder
+
+on:
+  issues:
+    types: [opened]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Existing issue number to check for duplicates"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  dedupe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_non_write_users: "*"
+          # Tools locked to the two wrapper scripts (read-only lookups + the comment poster) so a hijacked prompt can't run arbitrary commands or post outside this issue.
+          claude_args: "--model sonnet --allowedTools Bash(./.github/scripts/dedupe-gh.sh:*),Bash(./.github/scripts/comment-on-issue.sh:*)"
+          prompt: |
+            A new GitHub issue was opened in ${{ github.repository }}: issue number ${{ github.event.issue.number || inputs.issue_number }}.
+            Produce, in ONE comment, up to 3 genuine duplicates and/or a short grounded resolution note. Post nothing if you have neither.
+
+            Use ONLY these scripts (no raw gh, no other tools, no file edits):
+            - `./.github/scripts/dedupe-gh.sh issue view <n> --comments` — view an issue and its comments
+            - `./.github/scripts/dedupe-gh.sh search issues "<q>" --repo ${{ github.repository }}` — search issues
+            - `./.github/scripts/dedupe-gh.sh pr list/pr view <n>/search prs "<q>"/release list/release view <tag>` — find fixes and releases
+            - `./.github/scripts/comment-on-issue.sh [--resolution "<text>"] [--duplicates <n1> [n2] [n3]]` — post the comment
+
+            Steps:
+            1. View issue ${{ github.event.issue.number || inputs.issue_number }} with its comments. If it is not a specific bug report or feature request (vague/positive feedback, a question, spam), or it already has a comment from this bot, stop and do nothing.
+            2. Duplicates: run several searches (different keywords, open and closed). Keep only genuine same-problem issues; exclude this issue and drop loose matches.
+            3. Resolution (OPTIONAL, only with HIGH confidence and grounded in evidence): a 1-3 sentence note ONLY if the issue is clearly already answered by something concrete — an existing maintainer/collaborator comment stating the resolution, a closed/merged issue or PR that fixes it (cite the number), a release/changelog entry, or an obvious uncontroversial fix (e.g. update to the latest version for an already-fixed bug). Do NOT speculate, do NOT give generic troubleshooting, do NOT invent releases or PRs. If unsure, omit it.
+            4. If you have duplicates and/or a grounded resolution, run comment-on-issue.sh ONCE with the relevant flags; otherwise do nothing. The script appends the "please close it" line itself — don't add it. Never label, close, or react to issues.

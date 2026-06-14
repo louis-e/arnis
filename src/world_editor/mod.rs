@@ -10,13 +10,13 @@
 //! - `bedrock` - Bedrock Edition .mcworld format saving
 
 mod common;
-mod java;
+pub(crate) mod java;
 mod luanti;
 
 pub mod bedrock;
 
 pub(crate) use common::WorldToModify;
-pub use common::MIN_Y;
+pub use common::{MIN_SECTION_Y, MIN_Y};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
@@ -28,13 +28,13 @@ use crate::luanti_block_map::LuantiGame;
 use crate::progress::emit_gui_progress_update;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
-use fnv::FnvHashMap;
+use fnv::{FnvHashMap, FnvHashSet};
 use serde::Serialize;
 use std::collections::{hash_map::Entry, HashMap};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "gui")]
 use crate::progress::emit_gui_error;
@@ -108,6 +108,11 @@ pub(crate) struct WorldMetadata {
     pub max_geo_lat: f64,
     pub min_geo_lon: f64,
     pub max_geo_lon: f64,
+
+    /// Projection mode used for coordinate mapping ("local" or "web_mercator")
+    pub projection: String,
+    /// World scale in blocks per meter
+    pub scale: f64,
 }
 
 /// The main world editor struct for placing blocks and saving worlds.
@@ -131,6 +136,20 @@ pub struct WorldEditor<'a> {
     /// Uses FNV hashing (not SipHash): `get_ground_level` sits on a hot
     /// path (called per-block during placement), so the hash cost matters.
     road_surface_overrides: FnvHashMap<(i32, i32), i32>,
+    /// Regions already streamed to disk and evicted; writes to them are dropped
+    /// by the set_block guard so eviction can't be resurrected (stream-to-disk).
+    flushed_regions: FnvHashSet<(i32, i32)>,
+    /// Origin coordinates for ground-level elevation lookups. Defaults to
+    /// `xzbbox.min_x()/min_z()`. Tile editors used by the parallel
+    /// data-processing path override these to the *main* world's xzbbox
+    /// origin so the shared `Ground` elevation grid is indexed correctly
+    /// even though each tile has its own (haloed) xzbbox.
+    ground_origin_x: i32,
+    ground_origin_z: i32,
+    /// Projection mode used for this generation ("local" or "web_mercator").
+    projection: String,
+    /// World scale in blocks per meter.
+    scale: f64,
     bedrock_level_name: Option<String>,
     bedrock_spawn_point: Option<(i32, i32)>,
     bedrock_extend_height: bool,
@@ -160,6 +179,11 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
+            flushed_regions: FnvHashSet::default(),
+            ground_origin_x: xzbbox.min_x(),
+            ground_origin_z: xzbbox.min_z(),
+            projection: "local".to_string(),
+            scale: 1.0,
             bedrock_level_name: None,
             bedrock_spawn_point: None,
             bedrock_extend_height: false,
@@ -190,6 +214,11 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
+            flushed_regions: FnvHashSet::default(),
+            ground_origin_x: xzbbox.min_x(),
+            ground_origin_z: xzbbox.min_z(),
+            projection: "local".to_string(),
+            scale: 1.0,
             bedrock_level_name,
             bedrock_spawn_point,
             bedrock_extend_height,
@@ -220,6 +249,11 @@ impl<'a> WorldEditor<'a> {
             ground: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
+            flushed_regions: FnvHashSet::default(),
+            ground_origin_x: xzbbox.min_x(),
+            ground_origin_z: xzbbox.min_z(),
+            projection: "local".to_string(),
+            scale: 1.0,
             bedrock_level_name: None,
             bedrock_spawn_point: None,
             bedrock_extend_height: false,
@@ -229,6 +263,22 @@ impl<'a> WorldEditor<'a> {
             luanti_game: game,
             bake_lighting: false,
         }
+    }
+
+    /// Set the projection and scale metadata for this world.
+    pub fn set_projection_info(&mut self, projection: &str, scale: f64) {
+        self.projection = projection.to_string();
+        self.scale = scale;
+    }
+
+    /// Override the ground lookup origin for tile editors.
+    ///
+    /// By default, ground lookups subtract `xzbbox.min_x/z()`. Tile editors
+    /// must call this with the *main* world's xzbbox origin so the shared
+    /// elevation grid is indexed correctly.
+    pub fn set_ground_origin(&mut self, origin_x: i32, origin_z: i32) {
+        self.ground_origin_x = origin_x;
+        self.ground_origin_z = origin_z;
     }
 
     /// Sets the ground reference for elevation-based block placement
@@ -241,15 +291,85 @@ impl<'a> WorldEditor<'a> {
         self.bake_lighting = enabled;
     }
 
-    /// Gets a reference to the ground data if available
-    pub fn get_ground(&self) -> Option<&Ground> {
-        self.ground.as_deref()
-    }
-
     /// Returns the current world format
     #[allow(dead_code)]
     pub fn format(&self) -> WorldFormat {
         self.format
+    }
+
+    /// Consume the WorldEditor and return the underlying WorldToModify.
+    /// Used for tile-based parallel processing where tile results need to be merged.
+    pub(crate) fn into_world(self) -> WorldToModify {
+        self.world
+    }
+
+    /// Deterministic content hash of the world (see `WorldToModify::content_hash`).
+    pub fn content_hash(&self) -> u64 {
+        self.world.content_hash()
+    }
+
+    /// Deterministic hash of one region (see `WorldToModify::region_content_hash`).
+    pub fn region_content_hash(&self, rx: i32, rz: i32) -> u64 {
+        self.world.region_content_hash(rx, rz)
+    }
+
+    /// Region keys currently resident in memory (not yet flushed to disk).
+    pub(crate) fn resident_region_keys(&self) -> Vec<(i32, i32)> {
+        self.world.regions.keys().copied().collect()
+    }
+
+    /// Owned, `Send` context for writing regions off the merge thread.
+    pub(crate) fn region_write_ctx(&self) -> java::RegionWriteCtx {
+        java::RegionWriteCtx::new(
+            self.world_dir.clone(),
+            self.llbbox,
+            self.ground.clone(),
+            self.bake_lighting,
+        )
+    }
+
+    /// Evict one region (stream-to-disk): hand it to the background `worker` for
+    /// compaction + serialization, then record it so any later stray write is
+    /// dropped by the guard. Only marks the region flushed once the worker has
+    /// accepted it; if the handoff fails the region is restored to RAM and the
+    /// worker's real write error is surfaced. Java-only; `Ok(true)` if evicted.
+    pub(crate) fn flush_region_via(
+        &mut self,
+        worker: &FlushWorker,
+        rx: i32,
+        rz: i32,
+    ) -> Result<bool, String> {
+        if self.format != WorldFormat::JavaAnvil {
+            return Ok(false);
+        }
+        let Some(region) = self.world.regions.remove(&(rx, rz)) else {
+            return Ok(false);
+        };
+        match worker.send(rx, rz, region) {
+            Ok(()) => {
+                self.flushed_regions.insert((rx, rz));
+                Ok(true)
+            }
+            Err((region, err)) => {
+                self.world.regions.insert((rx, rz), region);
+                Err(err)
+            }
+        }
+    }
+
+    /// Merge another WorldToModify into this editor's world with authoritative bounds.
+    /// Blocks within the authoritative region always overwrite; blocks outside only
+    /// write if the target position is currently AIR (empty).
+    pub(crate) fn merge_world(
+        &mut self,
+        other: WorldToModify,
+        auth_min_x: i32,
+        auth_min_z: i32,
+        auth_max_x: i32,
+        auth_max_z: i32,
+    ) {
+        self.world
+            .merge(other, auth_min_x, auth_min_z, auth_max_x, auth_max_z);
     }
 
     /// Calculate the absolute Y position from a ground-relative offset
@@ -278,12 +398,22 @@ impl<'a> WorldEditor<'a> {
         }
         if let Some(ground) = &self.ground {
             ground.level(XZPoint::new(
-                x - self.xzbbox.min_x(),
-                z - self.xzbbox.min_z(),
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
             ))
         } else {
             0 // Default ground level if no terrain data
         }
+    }
+
+    /// Raw terrain elevation at world (x, z) via the ground origin (correct in tile editors, unlike get_min_coords); None without elevation data.
+    pub fn terrain_level(&self, x: i32, z: i32) -> Option<i32> {
+        self.ground.as_ref().map(|g| {
+            g.level(XZPoint::new(
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
+            ))
+        })
     }
 
     /// Register a flattened ground Y for a road cell. See
@@ -300,6 +430,30 @@ impl<'a> WorldEditor<'a> {
         self.road_surface_overrides.insert((x, z), y);
     }
 
+    /// Take this editor's road-surface overrides (tile editors hand theirs to the main editor).
+    pub(crate) fn take_road_surface_overrides(&mut self) -> FnvHashMap<(i32, i32), i32> {
+        std::mem::take(&mut self.road_surface_overrides)
+    }
+
+    /// Merge in road-surface overrides from a tile editor so post-merge passes stay road-aware.
+    pub(crate) fn merge_road_surface_overrides(&mut self, overrides: FnvHashMap<(i32, i32), i32>) {
+        self.road_surface_overrides.extend(overrides);
+    }
+
+    /// Merge only the overrides whose cell falls in `regions`. Under stream-to-disk, only the
+    /// deferred 3D regions need road-aware ground for the post-merge placement pass.
+    pub(crate) fn merge_road_surface_overrides_in_regions(
+        &mut self,
+        overrides: FnvHashMap<(i32, i32), i32>,
+        regions: &std::collections::HashSet<(i32, i32)>,
+    ) {
+        self.road_surface_overrides.extend(
+            overrides
+                .into_iter()
+                .filter(|((x, z), _)| regions.contains(&(x >> 9, z >> 9))),
+        );
+    }
+
     /// Get the water-appropriate Y level at a world coordinate.
     /// On steep terrain, snaps to the local minimum to compensate for
     /// spatial misalignment between water data and the elevation DEM.
@@ -307,8 +461,8 @@ impl<'a> WorldEditor<'a> {
     pub fn get_water_level(&self, x: i32, z: i32) -> i32 {
         if let Some(ground) = &self.ground {
             ground.water_level(XZPoint::new(
-                x - self.xzbbox.min_x(),
-                z - self.xzbbox.min_z(),
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
             ))
         } else {
             0
@@ -888,6 +1042,17 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
+        // Drop writes to regions already flushed to disk (stream-to-disk eviction).
+        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+            return;
+        }
+
+        // None/None is the dominant pattern; skip the redundant get_block() read.
+        if override_whitelist.is_none() && override_blacklist.is_none() {
+            self.world
+                .set_with_props_if_absent(x, absolute_y, z, block_with_props);
+            return;
+        }
 
         let should_insert = if let Some(existing_block) = self.world.get_block(x, absolute_y, z) {
             // Check against whitelist and blacklist
@@ -1047,6 +1212,9 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
+        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+            return;
+        }
         self.world.set_block_if_absent(x, absolute_y, z, block);
     }
 
@@ -1073,8 +1241,23 @@ impl<'a> WorldEditor<'a> {
         if !self.xzbbox.contains(&XZPoint::new(x, z)) {
             return;
         }
+        if !self.flushed_regions.is_empty() && self.flushed_regions.contains(&(x >> 9, z >> 9)) {
+            return;
+        }
         self.world
             .fill_column(x, z, y_min, y_max, block, skip_existing);
+    }
+
+    /// See [`WorldToModify::bulk_fill_chunk_sections_below`].
+    pub fn bulk_fill_chunk_sections_below(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        section_y_max: i8,
+        block: Block,
+    ) -> bool {
+        self.world
+            .bulk_fill_chunk_sections_below(chunk_x, chunk_z, section_y_max, block)
     }
 
     /// Saves all changes made to the world by writing to the appropriate format.
@@ -1171,6 +1354,8 @@ impl<'a> WorldEditor<'a> {
             self.bedrock_spawn_point,
             self.ground.clone(),
             self.bedrock_extend_height,
+            self.projection.clone(),
+            self.scale,
         )
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }
@@ -1197,6 +1382,9 @@ impl<'a> WorldEditor<'a> {
             max_geo_lat: self.llbbox.max().lat(),
             min_geo_lon: self.llbbox.min().lng(),
             max_geo_lon: self.llbbox.max().lng(),
+
+            projection: self.projection.clone(),
+            scale: self.scale,
         };
 
         let contents = serde_json::to_string(&metadata)
@@ -1225,6 +1413,97 @@ fn build_deterministic_uuid(id: &str, x: i32, y: i32, z: i32) -> IntArray {
         (seed_b >> 32) as i32,
         seed_b as i32,
     ])
+}
+
+// Compile-time assertions that WorldEditor is thread-safe for shared reads.
+// Needed for rayon-based parallel tile processing; the build fails here
+// if anyone adds a non-Send/Sync field to WorldEditor.
+#[allow(dead_code)]
+const _: () = {
+    fn assert_sync<T: Sync>() {}
+    fn assert_send<T: Send>() {}
+    fn check() {
+        assert_sync::<WorldEditor<'_>>();
+        assert_send::<WorldEditor<'_>>();
+    }
+};
+
+/// Background writer for stream-to-disk eviction. Regions taken off the merge
+/// thread are compacted + serialized + written on a separate thread, overlapping
+/// disk I/O with the next tile batch's compute. A bounded channel applies
+/// backpressure so at most `capacity` evicted regions sit in RAM awaiting write.
+pub(crate) struct FlushWorker {
+    tx: Option<std::sync::mpsc::SyncSender<(i32, i32, common::RegionToModify)>>,
+    handle: Option<std::thread::JoinHandle<Result<(), String>>>,
+    // Real write error from the worker, so a failed handoff surfaces the cause
+    // (disk full, permissions, ...) instead of a generic "terminated early".
+    error: Arc<Mutex<Option<String>>>,
+}
+
+impl FlushWorker {
+    pub(crate) fn spawn(ctx: java::RegionWriteCtx, capacity: usize) -> Self {
+        let (tx, rx) =
+            std::sync::mpsc::sync_channel::<(i32, i32, common::RegionToModify)>(capacity.max(1));
+        let error = Arc::new(Mutex::new(None));
+        let error_w = Arc::clone(&error);
+        let handle = std::thread::spawn(move || -> Result<(), String> {
+            while let Ok((rxx, rzz, mut region)) = rx.recv() {
+                for chunk in region.chunks.values_mut() {
+                    for section in chunk.sections.values_mut() {
+                        section.compact();
+                    }
+                }
+                if let Err(e) = ctx.write(rxx, rzz, &region) {
+                    let msg = e.to_string();
+                    if let Ok(mut slot) = error_w.lock() {
+                        *slot = Some(msg.clone());
+                    }
+                    return Err(msg);
+                }
+            }
+            Ok(())
+        });
+        Self {
+            tx: Some(tx),
+            handle: Some(handle),
+            error,
+        }
+    }
+
+    /// Enqueue a region; blocks when the channel is full (backpressure). On
+    /// failure the region is handed back unchanged (so the caller can keep it in
+    /// RAM) alongside the worker's real error.
+    fn send(
+        &self,
+        rx: i32,
+        rz: i32,
+        region: common::RegionToModify,
+    ) -> Result<(), (common::RegionToModify, String)> {
+        let Some(tx) = self.tx.as_ref() else {
+            return Err((region, "flush worker already finished".to_string()));
+        };
+        match tx.send((rx, rz, region)) {
+            Ok(()) => Ok(()),
+            Err(std::sync::mpsc::SendError((_, _, region))) => {
+                let err = self
+                    .error
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone())
+                    .unwrap_or_else(|| "flush worker terminated early".to_string());
+                Err((region, err))
+            }
+        }
+    }
+
+    /// Close the queue and wait for all pending writes; propagates the first error.
+    pub(crate) fn finish(mut self) -> Result<(), String> {
+        drop(self.tx.take());
+        match self.handle.take() {
+            Some(h) => h.join().map_err(|_| "flush worker panicked".to_string())?,
+            None => Ok(()),
+        }
+    }
 }
 
 #[allow(dead_code)]

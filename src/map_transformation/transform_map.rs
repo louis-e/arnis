@@ -11,7 +11,7 @@ pub fn transform_map(
     ground: &mut Ground,
 ) {
     println!("{} Transforming map...", "[4/7]".bold());
-    emit_gui_progress_update(20.0, "Transforming map...");
+    emit_gui_progress_update(19.0, "Transforming map...");
 
     let opjson_string = include_str!("../../tests/map_transformation/example_transformations.json");
     let opjson = serde_json::from_str(opjson_string)
@@ -24,17 +24,7 @@ pub fn transform_map(
             panic!();
         });
 
-    let nop: usize = ops.len();
-
-    let progress_increment_prcs: f64 = 5.0 / nop as f64;
-
-    for (iop, op) in (1..).zip(ops) {
-        let current_progress_prcs = 20.0 + (iop as f64 * progress_increment_prcs);
-        //let message = format!("Applying operation: {}, {}/{}", op.repr(), iop, nop);
-        emit_gui_progress_update(current_progress_prcs, "");
-
+    for op in ops {
         op.operate(elements, xzbbox, ground);
     }
-
-    emit_gui_progress_update(25.0, "");
 }

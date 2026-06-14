@@ -19,6 +19,7 @@ use bedrockrs_shared::world::dimension::Dimension;
 use byteorder::{LittleEndian, WriteBytesExt};
 use fastnbt::Value;
 use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 use rusty_leveldb::DB;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -86,6 +87,10 @@ impl From<serde_json::Error> for BedrockSaveError {
 
 const DEFAULT_BEDROCK_COMPRESSION_LEVEL: u8 = 6;
 
+/// A LevelDB (key, value) record, and all records for one chunk.
+type DbRecord = (Vec<u8>, Vec<u8>);
+type ChunkRecords = Vec<DbRecord>;
+
 /// Metadata for Bedrock worlds
 #[derive(Serialize)]
 struct BedrockMetadata {
@@ -129,16 +134,21 @@ pub struct BedrockWriter {
     spawn_point: Option<(i32, i32)>,
     ground: Option<Arc<Ground>>,
     extend_build_height: bool,
+    projection: String,
+    scale: f64,
 }
 
 impl BedrockWriter {
     /// Creates a new BedrockWriter
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         output_path: PathBuf,
         level_name: String,
         spawn_point: Option<(i32, i32)>,
         ground: Option<Arc<Ground>>,
         extend_build_height: bool,
+        projection: String,
+        scale: f64,
     ) -> Self {
         // If the path ends with .mcworld, use it as the final archive path
         // and create a temp directory without that extension for working files
@@ -154,6 +164,8 @@ impl BedrockWriter {
             spawn_point,
             ground,
             extend_build_height,
+            projection,
+            scale,
         }
     }
 
@@ -427,127 +439,138 @@ impl BedrockWriter {
         let mut db = DB::open(db_path.into_boxed_path(), opts)
             .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
 
-        // Count total chunks for progress
-        let total_chunks: usize = world
-            .regions
-            .values()
-            .map(|region| region.chunks.len())
-            .sum();
+        // Chunks per parallel-encode window. Bounds transient memory (only one window of encoded
+        // bytes is held at a time) while giving rayon plenty of work per batch.
+        const ENCODE_BATCH_CHUNKS: usize = 256;
 
+        // Flatten to absolute-coord chunk refs (cheap — references only). Iteration order matches
+        // the original nested loop, so LevelDB receives writes in the same order.
+        let chunks: Vec<(i32, i32, &ChunkToModify)> = world
+            .regions
+            .iter()
+            .flat_map(|((region_x, region_z), region)| {
+                region
+                    .chunks
+                    .iter()
+                    .map(move |((local_x, local_z), chunk)| {
+                        (region_x * 32 + local_x, region_z * 32 + local_z, chunk)
+                    })
+            })
+            .collect();
+
+        let total_chunks = chunks.len();
         if total_chunks == 0 {
             return Ok(());
         }
 
-        {
-            let progress_bar = ProgressBar::new(total_chunks as u64);
-            progress_bar.set_style(
-                ProgressStyle::default_bar()
-                    .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} chunks ({eta})")
-                    .unwrap()
-                    .progress_chars("█▓░"),
-            );
+        let progress_bar = ProgressBar::new(total_chunks as u64);
+        progress_bar.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:45.white/black}] {pos}/{len} chunks ({eta})")
+                .unwrap()
+                .progress_chars("█▓░"),
+        );
 
-            let mut chunks_processed: usize = 0;
+        // Encode each window's chunk records in parallel (CPU-bound), then write them to LevelDB
+        // sequentially — rusty_leveldb writes aren't concurrent-safe. Records are byte-identical
+        // to the previous serial path; only the encoding is now multi-threaded.
+        let mut chunks_processed: usize = 0;
+        for window in chunks.chunks(ENCODE_BATCH_CHUNKS) {
+            let encoded: Vec<ChunkRecords> = window
+                .par_iter()
+                .map(|&(abs_x, abs_z, chunk)| self.encode_chunk_records(abs_x, abs_z, chunk))
+                .collect::<Result<_, _>>()?;
 
-            // Process each region and chunk (blocks + entities in a single pass)
-            for ((region_x, region_z), region) in &world.regions {
-                for ((local_chunk_x, local_chunk_z), chunk) in &region.chunks {
-                    // Calculate absolute chunk coordinates
-                    let abs_chunk_x = region_x * 32 + local_chunk_x;
-                    let abs_chunk_z = region_z * 32 + local_chunk_z;
-                    let chunk_pos = Vec2::new(abs_chunk_x, abs_chunk_z);
-
-                    // Write chunk version marker (42 is current Bedrock version as of 1.21+)
-                    let version_key = build_chunk_key_bytes(
-                        chunk_pos,
-                        Dimension::Overworld,
-                        KeyTypeTag::Version,
-                        None,
-                    );
-                    db.put(&version_key, &[42])
+            for records in &encoded {
+                for (key, value) in records {
+                    db.put(key, value)
                         .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
-
-                    // Write Data3D (heightmap + biomes) - required for chunk to be valid
-                    let data3d_key = build_chunk_key_bytes(
-                        chunk_pos,
-                        Dimension::Overworld,
-                        KeyTypeTag::Data3D,
-                        None,
-                    );
-                    let data3d = self.create_data3d(chunk);
-                    db.put(&data3d_key, &data3d)
-                        .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
-
-                    // Process each section (subchunk)
-                    for (&section_y, section) in &chunk.sections {
-                        let subchunk_bytes = self.encode_subchunk(section, section_y)?;
-
-                        let subchunk_key = build_chunk_key_bytes(
-                            chunk_pos,
-                            Dimension::Overworld,
-                            KeyTypeTag::SubChunkPrefix,
-                            Some(section_y),
-                        );
-                        db.put(&subchunk_key, &subchunk_bytes)
-                            .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
-                    }
-
-                    // Write entities and block entities in the same pass
-                    self.write_compound_list_record(
-                        &mut db,
-                        chunk_pos,
-                        KeyTypeTag::BlockEntity,
-                        chunk.other.get("block_entities"),
-                    )?;
-                    self.write_compound_list_record(
-                        &mut db,
-                        chunk_pos,
-                        KeyTypeTag::Entity,
-                        chunk.other.get("entities"),
-                    )?;
-
-                    chunks_processed += 1;
-                    progress_bar.inc(1);
-
-                    // Update GUI progress (92% to 97% range for chunk writing)
-                    if chunks_processed.is_multiple_of(10) || chunks_processed == total_chunks {
-                        let chunk_progress = chunks_processed as f64 / total_chunks as f64;
-                        let gui_progress = 92.0 + (chunk_progress * 5.0); // 92% to 97%
-                        emit_gui_progress_update(gui_progress, "");
-                    }
+                }
+                chunks_processed += 1;
+                progress_bar.inc(1);
+                // GUI progress spans 92%..97% for chunk writing.
+                if chunks_processed.is_multiple_of(10) || chunks_processed == total_chunks {
+                    let chunk_progress = chunks_processed as f64 / total_chunks as f64;
+                    emit_gui_progress_update(92.0 + chunk_progress * 5.0, "");
                 }
             }
-
-            progress_bar.finish_with_message("Chunks written to LevelDB");
         }
 
+        progress_bar.finish_with_message("Chunks written to LevelDB");
         Ok(())
     }
 
-    fn write_compound_list_record(
+    /// Encodes every LevelDB record for one chunk: version, Data3D, subchunks, then entities.
+    fn encode_chunk_records(
         &self,
-        db: &mut DB,
+        abs_chunk_x: i32,
+        abs_chunk_z: i32,
+        chunk: &ChunkToModify,
+    ) -> Result<ChunkRecords, BedrockSaveError> {
+        let chunk_pos = Vec2::new(abs_chunk_x, abs_chunk_z);
+        let mut records: ChunkRecords = Vec::with_capacity(chunk.sections.len() + 4);
+
+        // Version marker (42 = Bedrock 1.21+).
+        records.push((
+            build_chunk_key_bytes(chunk_pos, Dimension::Overworld, KeyTypeTag::Version, None),
+            vec![42],
+        ));
+        // Data3D (heightmap + biomes), required for a valid chunk.
+        records.push((
+            build_chunk_key_bytes(chunk_pos, Dimension::Overworld, KeyTypeTag::Data3D, None),
+            self.create_data3d(chunk),
+        ));
+        // Subchunks.
+        for (&section_y, section) in &chunk.sections {
+            let bytes = self.encode_subchunk(section, section_y)?;
+            records.push((
+                build_chunk_key_bytes(
+                    chunk_pos,
+                    Dimension::Overworld,
+                    KeyTypeTag::SubChunkPrefix,
+                    Some(section_y),
+                ),
+                bytes,
+            ));
+        }
+        // Block entities and entities.
+        if let Some(record) = self.encode_compound_list_record(
+            chunk_pos,
+            KeyTypeTag::BlockEntity,
+            chunk.other.get("block_entities"),
+        )? {
+            records.push(record);
+        }
+        if let Some(record) = self.encode_compound_list_record(
+            chunk_pos,
+            KeyTypeTag::Entity,
+            chunk.other.get("entities"),
+        )? {
+            records.push(record);
+        }
+
+        Ok(records)
+    }
+
+    /// Encodes a block-entity / entity record as a (key, value) pair, or None if empty.
+    fn encode_compound_list_record(
+        &self,
         chunk_pos: Vec2<i32>,
         key_type: KeyTypeTag,
         value: Option<&Value>,
-    ) -> Result<(), BedrockSaveError> {
+    ) -> Result<Option<DbRecord>, BedrockSaveError> {
         let Some(Value::List(values)) = value else {
-            return Ok(());
+            return Ok(None);
         };
-
         if values.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
-
         let deduped = dedup_compound_list(values);
         if deduped.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
 
-        // Bedrock block entities and entities are stored as CONCATENATED individual
-        // NBT compounds — NOT as a single NBT list. Each compound is serialised
-        // back-to-back with no wrapper. nbtx::to_le_bytes() on a Vec would produce
-        // a TAG_List header, which Bedrock cannot parse.
+        // Bedrock stores these as concatenated individual NBT compounds (no TAG_List wrapper).
         let mut data: Vec<u8> = Vec::new();
         for compound in &deduped {
             let bytes = nbtx::to_le_bytes(compound)
@@ -556,10 +579,7 @@ impl BedrockWriter {
         }
 
         let key = build_chunk_key_bytes(chunk_pos, Dimension::Overworld, key_type, None);
-        db.put(&key, &data)
-            .map_err(|e| BedrockSaveError::Database(format!("{:?}", e)))?;
-
-        Ok(())
+        Ok(Some((key, data)))
     }
 
     /// Creates a Data3D record containing heightmap and biome data.
@@ -726,6 +746,8 @@ impl BedrockWriter {
                 max_geo_lat: llbbox.max().lat(),
                 min_geo_lon: llbbox.min().lng(),
                 max_geo_lon: llbbox.max().lng(),
+                projection: self.projection.clone(),
+                scale: self.scale,
             },
             format: "bedrock-mcworld",
             chunk_count,
@@ -1289,6 +1311,8 @@ mod tests {
             None,
             None,
             false,
+            "local".to_string(),
+            1.0,
         )
         .write_world(&world, &xzbbox, &llbbox)
         .expect("write_world");
@@ -1336,6 +1360,8 @@ mod tests {
             Some((42, 84)),
             None,
             false,
+            "local".to_string(),
+            1.0,
         )
         .write_world(&world, &xzbbox, &llbbox)
         .expect("write_world");
@@ -1360,6 +1386,8 @@ mod tests {
             None,
             None,
             true,
+            "local".to_string(),
+            1.0,
         )
         .write_world(&world, &xzbbox, &llbbox)
         .expect("write_world");
@@ -1413,5 +1441,74 @@ mod tests {
             header_uuid, listed_uuid,
             "BP header UUID must match world_behavior_packs.json pack_id"
         );
+    }
+
+    /// Multi-chunk, multi-section world: exercises the parallel encode path and verifies the
+    /// expected LevelDB records actually land (the empty-world tests above never reached encoding).
+    #[test]
+    fn parallel_chunk_encode_writes_expected_records() {
+        let mut world = WorldToModify::default();
+        // Blocks across several chunks spanning two regions, at three section heights (4, 0, -2).
+        let chunk_coords = [(0i32, 0i32), (1, 0), (0, 1), (33, 2)];
+        for &(cx, cz) in &chunk_coords {
+            for y in [70i32, 5, -20] {
+                world.set_block_if_absent(
+                    cx * 16 + 2,
+                    y,
+                    cz * 16 + 3,
+                    crate::block_definitions::STONE,
+                );
+            }
+        }
+
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let writer = BedrockWriter::new(
+            temp_dir.path().join("world"),
+            "Parallel Test".to_string(),
+            None,
+            None,
+            false,
+            "local".to_string(),
+            1.0,
+        );
+        writer.prepare_output_dir().expect("prepare dir");
+        writer.write_chunks_to_db(&world).expect("write chunks");
+
+        // Reopen the LevelDB and verify each populated chunk got version + Data3D + subchunk(4).
+        let mut opts = mcpe_options(DEFAULT_BEDROCK_COMPRESSION_LEVEL);
+        opts.create_if_missing = false;
+        let mut db =
+            DB::open(writer.output_dir.join("db").into_boxed_path(), opts).expect("reopen db");
+
+        for &(cx, cz) in &chunk_coords {
+            let pos = Vec2::new(cx, cz);
+            let version =
+                build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Version, None);
+            assert_eq!(
+                db.get(&version).as_deref(),
+                Some(&[42u8][..]),
+                "version record missing for chunk ({cx}, {cz})"
+            );
+
+            let data3d = build_chunk_key_bytes(pos, Dimension::Overworld, KeyTypeTag::Data3D, None);
+            assert!(
+                db.get(&data3d).is_some(),
+                "Data3D record missing for chunk ({cx}, {cz})"
+            );
+
+            // Every section we populated (positive, zero, negative index) must be written.
+            for section_y in [4i8, 0, -2] {
+                let subchunk = build_chunk_key_bytes(
+                    pos,
+                    Dimension::Overworld,
+                    KeyTypeTag::SubChunkPrefix,
+                    Some(section_y),
+                );
+                assert!(
+                    db.get(&subchunk).is_some_and(|b| !b.is_empty()),
+                    "subchunk {section_y} missing for chunk ({cx}, {cz})"
+                );
+            }
+        }
     }
 }

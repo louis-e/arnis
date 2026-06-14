@@ -6,4 +6,4 @@ mod placement;
 mod stl;
 
 pub use index::PERMISSIVE_ATTRIBUTIONS;
-pub use placement::{place_wikidata_models, prescan};
+pub use placement::{place_wikidata_models, prescan, PrescanResult};
