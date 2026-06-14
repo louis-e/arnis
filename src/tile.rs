@@ -6,6 +6,7 @@
 
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::osm_parser::{ProcessedElement, ProcessedRelation, ProcessedWay};
+use std::collections::HashMap;
 
 /// Bounds of a single tile within the world.
 #[derive(Clone, Debug)]
@@ -152,17 +153,22 @@ pub fn assign_elements_to_tiles(
     // strict bounds receive its blocks is assigned it (else per-tile ground overwrites).
     let linear_halo = TILE_EDITOR_HALO.max((MAX_LINEAR_HALF_WIDTH_M * scale).ceil() as i32);
 
+    // Region-coord -> tile index, for O(1) node assignment (tiles are 512-region-aligned).
+    let tile_grid: HashMap<(i32, i32), usize> = tiles
+        .iter()
+        .enumerate()
+        .map(|(i, t)| ((t.min_x >> 9, t.min_z >> 9), i))
+        .collect();
+
     for (elem_idx, element) in elements.iter().enumerate() {
         match element {
             ProcessedElement::Node(node) => {
-                // Assign to the strict containing tile so it is authoritative; the owning
-                // tile's editor halo renders any canopy overflow into neighbours. Assigning
-                // by an expanded halo could hand a node to a non-owner tile whose write is
-                // then dropped (write-if-AIR) by the owner's ground (seam drop).
-                for (tile_idx, tile) in tiles.iter().enumerate() {
-                    if tile.contains(node.x, node.z) {
+                // A node belongs to the strict tile whose region contains it; the owning
+                // tile's editor halo handles canopy overflow. (Strict + non-overlapping, so
+                // this matches scanning for the first containing tile, in O(1).)
+                if let Some(&tile_idx) = tile_grid.get(&(node.x >> 9, node.z >> 9)) {
+                    if tiles[tile_idx].contains(node.x, node.z) {
                         tile_elements[tile_idx].push(elem_idx);
-                        break; // Nodes go to exactly one tile
                     }
                 }
             }

@@ -121,9 +121,9 @@ fn process_element(
                 railways::generate_roller_coaster(editor, way);
             } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway") {
                 highways::generate_aeroway(editor, way, args);
-            } else if way.tags.get("service") == Some(&"siding".to_string()) {
+            } else if way.tags.get("service").map(String::as_str) == Some("siding") {
                 highways::generate_siding(editor, way, bridge_surface);
-            } else if way.tags.get("tomb") == Some(&"pyramid".to_string()) {
+            } else if way.tags.get("tomb").map(String::as_str) == Some("pyramid") {
                 historic::generate_pyramid(editor, way, args, flood_fill_cache);
             } else if way.tags.contains_key("man_made") {
                 man_made::generate_man_made(editor, element, args);
@@ -136,9 +136,7 @@ fn process_element(
         ProcessedElement::Node(node) => {
             if node.tags.contains_key("door") || node.tags.contains_key("entrance") {
                 doors::generate_doors(editor, node);
-            } else if node.tags.contains_key("natural")
-                && node.tags.get("natural") == Some(&"tree".to_string())
-            {
+            } else if node.tags.get("natural").map(String::as_str) == Some("tree") {
                 natural::generate_natural(
                     editor,
                     element,
@@ -218,7 +216,7 @@ fn process_element(
                     flood_fill_cache,
                     building_footprints,
                 );
-            } else if rel.tags.get("leisure") == Some(&"park".to_string()) {
+            } else if rel.tags.get("leisure").map(String::as_str) == Some("park") {
                 leisure::generate_leisure_from_relation(
                     editor,
                     rel,
