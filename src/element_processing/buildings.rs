@@ -1723,7 +1723,7 @@ fn build_wall_ring(
     building_passages: &CoordinateBitmap,
 ) -> (Vec<(i32, i32)>, i32) {
     let mut previous_node: Option<(i32, i32)> = None;
-    // Count of corner nodes added; the caller only needs to know the ring is non-empty.
+    // Count of generated wall coordinates; the caller only needs to know the ring is non-empty.
     let mut corner_count: i32 = 0;
     let mut current_building: Vec<(i32, i32)> = Vec::new();
 
