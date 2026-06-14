@@ -845,6 +845,7 @@ fn gui_start_generation(
     fillground_enabled: bool,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
     use_3d_enabled: bool,
+    catastro_enabled: bool,
     disable_height_limit: bool,
     aws_only_elevation: bool,
     bake_lighting_enabled: bool,
@@ -1091,6 +1092,7 @@ fn gui_start_generation(
                 fillground: fillground_enabled,
                 land_cover: land_cover_enabled,
                 use_3d: use_3d_enabled,
+                catastro: catastro_enabled,
                 debug: false,
                 timeout: Some(std::time::Duration::from_secs(40)),
                 spawn_lat: None,
@@ -1143,7 +1145,15 @@ fn gui_start_generation(
 
             // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
             match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
-                Ok(raw_data) => {
+                Ok(mut raw_data) => {
+                    // Enrich building heights with real floor counts from the Spanish Cadastre.
+                    if args.catastro {
+                        emit_gui_progress_update(
+                            1.0,
+                            "Fetching Catastro building heights (Spain)...",
+                        );
+                        crate::catastro::enrich_building_heights(&mut raw_data, args.bbox);
+                    }
                     let (mut parsed_elements, mut xzbbox, outline_suppression) =
                         osm_parser::parse_osm_data(
                             raw_data,

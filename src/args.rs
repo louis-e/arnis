@@ -77,6 +77,13 @@ pub struct Args {
     #[arg(long = "no-3d", default_value_t = true, action = ArgAction::SetFalse)]
     pub use_3d: bool,
 
+    /// Use real building heights from the Spanish Cadastre (Catastro).
+    /// Fetches the number of floors per building from the Catastro INSPIRE WFS
+    /// for the selected area and applies it to OSM buildings that lack a height.
+    /// Spain only (excludes the Basque Country and Navarra).
+    #[arg(long, default_value_t = false)]
+    pub catastro: bool,
+
     /// Enable debug mode (optional)
     #[arg(long)]
     pub debug: bool,

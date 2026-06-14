@@ -71,14 +71,14 @@ fn filter_tags(mut tags: HashMap<String, String>) -> HashMap<String, String> {
 // Raw data from OSM
 
 #[derive(Debug, Deserialize)]
-struct OsmMember {
+pub(crate) struct OsmMember {
     r#type: String,
     r#ref: u64,
     r#role: String,
 }
 
 #[derive(Debug, Deserialize)]
-struct OsmElement {
+pub(crate) struct OsmElement {
     pub r#type: String,
     pub id: u64,
     pub lat: Option<f64>,
@@ -91,7 +91,7 @@ struct OsmElement {
 
 #[derive(Debug, Deserialize)]
 pub struct OsmData {
-    elements: Vec<OsmElement>,
+    pub(crate) elements: Vec<OsmElement>,
     #[serde(default)]
     pub remark: Option<String>,
 }

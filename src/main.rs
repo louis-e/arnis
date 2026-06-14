@@ -6,6 +6,7 @@ mod bench;
 mod biome;
 mod block_definitions;
 mod bresenham;
+mod catastro;
 mod clipping;
 mod colors;
 mod coordinate_system;
@@ -206,7 +207,7 @@ fn run_cli() {
     let mut bench = bench::Bench::new(args.benchmark);
 
     // Fetch data
-    let raw_data = match &args.file {
+    let mut raw_data = match &args.file {
         Some(file) => retrieve_data::fetch_data_from_file(file),
         None => retrieve_data::fetch_data_from_overpass(
             args.bbox,
@@ -223,6 +224,11 @@ fn run_cli() {
     println!("{} Fetching Overture Maps data...", "  [+]".bold());
     let overture_elements = overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
     bench.mark("overture_fetch");
+
+    // Enrich building heights with real floor counts from the Spanish Cadastre.
+    if args.catastro {
+        catastro::enrich_building_heights(&mut raw_data, args.bbox);
+    }
 
     let mut ground = ground::generate_ground_data(&args);
     bench.mark("terrain_total");
