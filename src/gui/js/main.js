@@ -388,6 +388,199 @@ function registerMessageEvent() {
   });
 }
 
+// --- Self-calibrating, phase-aware ETA ------------------------------------
+// The single 0-100% progress is non-linear in time: it has fixed phase
+// breakpoints and the post-70% tail is ~instant under stream-to-disk but a real
+// save otherwise. So we model three time-bands, extrapolate the CURRENT band to
+// its own end from a least-squares rate, and budget the remaining bands via
+// per-regime time weights calibrated to this run. The backend tells us the
+// streaming regime via an optional `streaming` field (absent => non-streaming).
+// Starts once generation begins (progress >= ETA_START, downloads done) and
+// ticks down once a second so it reads like a live countdown.
+const ETA_START = 20; // generation/terrain begins here, downloads done
+const ETA_WINDOW_MS = 16000; // sliding window for the rate (wider = steadier)
+const ETA_MIN_MS = 700; // min window span before trusting a rate
+const ETA_MIN_SAMPLES = 4; // keep at least this many samples in the window
+const ETA_STALL_MS = 1500; // progress flat this long => freeze belief, keep ticking
+const ETA_MAX_S = 24 * 3600; // ignore absurd extrapolations
+const ETA_A_DOWN = 0.28; // smoothing when the estimate falls (gentle)
+const ETA_A_UP = 0.1; // smoothing when it rises (resist, stay calm)
+const ETA_RISE_ABS = 2; // shown rises by at most max(2s, 10%) per update
+const ETA_RISE_FRAC = 0.1; // => smooth, monotonic-feeling countdown
+
+// Progress bands [lo, hi) and per-regime RELATIVE time weights (not % widths).
+const ETA_PHASES = [
+  { id: "terrain", lo: 20, hi: 70 },
+  { id: "ground", lo: 70, hi: 90 },
+  { id: "save", lo: 90, hi: 100 },
+];
+const ETA_WPRIOR = { nonStreaming: [37, 2, 10], streaming: [60, 0.3, 0.2] };
+
+let eta = null;
+
+function etaPhaseIdx(p) {
+  for (let i = 0; i < ETA_PHASES.length; i++) if (p < ETA_PHASES[i].hi) return i;
+  return ETA_PHASES.length - 1;
+}
+
+// Least-squares slope of progress over the window -> %/sec (null if not rising).
+function etaLsRate(s) {
+  const n = s.length;
+  if (n < 2) return null;
+  let st = 0, sp = 0;
+  for (const x of s) { st += x.t; sp += x.p; }
+  const mt = st / n, mp = sp / n;
+  let num = 0, den = 0;
+  for (const x of s) { const d = x.t - mt; num += d * (x.p - mp); den += d * d; }
+  if (den <= 0) return null;
+  const slope = num / den;
+  return slope > 0 ? slope * 1000 : null;
+}
+
+function resetEta() {
+  if (eta && eta.tickHandle) clearInterval(eta.tickHandle);
+  eta = null;
+  const el = document.getElementById("progress-eta");
+  if (el) {
+    el.classList.remove("visible");
+    el.textContent = "";
+    el.removeAttribute("aria-label");
+  }
+}
+
+function formatEtaDuration(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+function renderEta() {
+  const el = document.getElementById("progress-eta");
+  if (!el) return;
+  // Show nothing until we actually have an estimate (no "…" placeholder).
+  if (!eta || eta.shown == null) {
+    el.classList.remove("visible");
+    el.textContent = "";
+    el.removeAttribute("aria-label");
+    return;
+  }
+  // Floor at 1s so it never reads "0s" before Done.
+  const value = formatEtaDuration(Math.max(1, eta.shown));
+  el.textContent = value; // duration only on the bar; no "~" prefix
+  // Screen-reader context (the visible pill is just the duration). Hardcoded
+  // English to match the rest of the progress messages, which aren't localized.
+  el.setAttribute("aria-label", `Time remaining: ${value}`);
+  el.classList.add("visible");
+}
+
+// Two-layer display: `est` is the belief, `shown` follows it but falls freely
+// and rises slowly, so the countdown never jumps upward jarringly.
+function etaReconcile() {
+  if (!eta || eta.est == null) return;
+  if (eta.shown == null || eta.est <= eta.shown) eta.shown = eta.est;
+  else
+    eta.shown = Math.min(
+      eta.est,
+      eta.shown + Math.max(ETA_RISE_ABS, eta.shown * ETA_RISE_FRAC)
+    );
+}
+
+// Counts the value down between progress events (and through the 70% stall).
+function etaTick() {
+  if (!eta || eta.est == null) return;
+  const now = performance.now();
+  const dt = (now - eta.lastTickAt) / 1000;
+  eta.lastTickAt = now;
+  eta.est = Math.max(0, eta.est - dt);
+  if (eta.shown != null) eta.shown = Math.max(0, eta.shown - dt);
+  etaReconcile();
+  renderEta();
+}
+
+function updateEta(progress, streaming) {
+  // Reset before the generation phases and once finished / on a new run.
+  if (progress < ETA_START || progress >= 100) {
+    resetEta();
+    return;
+  }
+  const now = performance.now();
+  if (!eta) {
+    eta = {
+      streamingKnown: false, wprior: ETA_WPRIOR.nonStreaming, phaseIdx: -1,
+      phaseStartT: now, phaseStartProgress: null, movedInPhase: false,
+      samples: [], doneSec: 0, doneWeight: 0, est: null, shown: null,
+      lastTickAt: now, lastProgress: null, lastIncreaseAt: now, tickHandle: null,
+    };
+  }
+  if (streaming != null && !eta.streamingKnown) {
+    eta.streamingKnown = true;
+    eta.wprior = streaming ? ETA_WPRIOR.streaming : ETA_WPRIOR.nonStreaming;
+  }
+
+  const idx = etaPhaseIdx(progress), ph = ETA_PHASES[idx];
+  if (idx !== eta.phaseIdx) {
+    // Bank the real duration (incl. any stall) of the phase we just left.
+    if (eta.phaseIdx >= 0) {
+      eta.doneSec += (now - eta.phaseStartT) / 1000;
+      eta.doneWeight += eta.wprior[eta.phaseIdx];
+      for (let k = eta.phaseIdx + 1; k < idx; k++) eta.doneWeight += eta.wprior[k];
+    }
+    eta.phaseIdx = idx;
+    eta.phaseStartT = now;
+    eta.samples = [];
+    eta.phaseStartProgress = progress;
+    eta.movedInPhase = false;
+  }
+
+  if (eta.lastProgress == null || progress > eta.lastProgress) eta.lastIncreaseAt = now;
+  eta.lastProgress = progress;
+  const stalled = now - eta.lastIncreaseAt > ETA_STALL_MS;
+
+  eta.samples.push({ t: now, p: progress });
+  // Drop the flat phase-start hold (e.g. precompute sitting at 25%) the first
+  // time progress actually moves, so the rate reflects real work, not setup.
+  if (!eta.movedInPhase && eta.phaseStartProgress != null && progress > eta.phaseStartProgress) {
+    eta.samples = [{ t: now, p: progress }];
+    eta.movedInPhase = true;
+  }
+  const cut = now - ETA_WINDOW_MS;
+  while (eta.samples.length > ETA_MIN_SAMPLES && eta.samples[0].t < cut) eta.samples.shift();
+  const span = now - eta.samples[0].t;
+  const rate = !stalled && span >= ETA_MIN_MS ? etaLsRate(eta.samples) : null;
+
+  const phaseElapsed = (now - eta.phaseStartT) / 1000;
+  let G = eta.doneWeight > 0 ? eta.doneSec / eta.doneWeight : null; // sec per prior-unit
+  let remCur = null;
+  if (rate) remCur = (ph.hi - progress) / rate;
+  else if (G != null) remCur = ((ph.hi - progress) / (ph.hi - ph.lo)) * eta.wprior[idx] * G;
+  if (G == null && remCur != null) G = (phaseElapsed + remCur) / eta.wprior[idx];
+  if (G != null) G = Math.min(1000, Math.max(0.02, G));
+
+  let raw = null;
+  if (ph.id === "save" && rate) {
+    raw = Math.max(0, remCur); // snap to the real region-write rate, no future term
+  } else if (remCur != null) {
+    raw = Math.max(0, remCur);
+    if (G != null) for (let j = idx + 1; j < ETA_PHASES.length; j++) raw += eta.wprior[j] * G;
+  }
+
+  if (!stalled && raw != null && isFinite(raw) && raw <= ETA_MAX_S) {
+    const a = eta.est == null || raw <= eta.est ? ETA_A_DOWN : ETA_A_UP;
+    eta.est = eta.est == null ? raw : a * raw + (1 - a) * eta.est;
+    eta.lastTickAt = now;
+  }
+  if (eta.est != null && !eta.tickHandle) {
+    eta.lastTickAt = now;
+    eta.tickHandle = setInterval(etaTick, 1000);
+  }
+  etaReconcile();
+  renderEta();
+}
+
 // Function to set up the progress bar listener
 function setupProgressListener() {
   const progressBar = document.getElementById("progress-bar");
@@ -395,11 +588,12 @@ function setupProgressListener() {
   const progressDetail = document.getElementById("progress-detail");
 
   window.__TAURI__.event.listen("progress-update", (event) => {
-    const { progress, message } = event.payload;
+    const { progress, message, streaming } = event.payload;
 
     if (progress != -1) {
       progressBar.style.width = `${progress}%`;
       progressDetail.textContent = `${Math.round(progress)}%`;
+      updateEta(progress, streaming);
     }
 
     if (message != "") {
@@ -409,9 +603,11 @@ function setupProgressListener() {
         progressInfo.style.color = "#fa7878";
         generationButtonEnabled = true;
         setWorldNameLabel("");
+        resetEta();
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
+        resetEta();
       } else {
         progressInfo.style.color = "#ececec";
       }
@@ -1418,6 +1614,7 @@ async function startGeneration() {
     });
 
     console.log("Generation process started.");
+    resetEta();
     generationButtonEnabled = false;
   } catch (error) {
     console.error("Error starting generation:", error);

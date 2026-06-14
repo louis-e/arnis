@@ -46,7 +46,6 @@
   "disable_height_limit": "Utöka byggnadshöjd",
   "aws_only_elevation": "Äldre terräng",
   "bake_lighting": "Förberäkna ljussättning",
-  "stream_to_disk": "Lågminnesläge",
   "bedrock_auto_generated": "Bedrock-världen genereras automatiskt",
   "save_path": "Sökväg",
   "rotation_angle": "Rotationsvinkel",

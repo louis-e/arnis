@@ -153,6 +153,7 @@ pub fn apply_land_cover_repair(
     land_cover: &mut LandCoverData,
     built_up_sigma_cells: f64,
     coastal_pull_distance_cells: u32,
+    report: &dyn Fn(f64),
 ) {
     let grid_h = heights.len();
     if grid_h == 0 {
@@ -199,11 +200,13 @@ pub fn apply_land_cover_repair(
     }
 
     // Smooth before pull; otherwise the Gaussian raises pulled cells back up.
+    // The Gaussian dominates this step's cost, so it drives the reported progress.
     smooth_built_up_gaussian(
         heights,
         &land_cover.grid,
         &is_water_surface,
         built_up_sigma_cells,
+        report,
     );
     if coastal_pull_distance_cells > 0 {
         pull_coastal_land_toward_water(heights, &is_water_surface, coastal_pull_distance_cells);
@@ -832,6 +835,7 @@ fn smooth_built_up_gaussian(
     lc_grid: &[Vec<u8>],
     is_water_surface: &[Vec<bool>],
     sigma_cells: f64,
+    report: &dyn Fn(f64),
 ) {
     const MIN_SIGMA: f64 = 1.5;
     if sigma_cells < MIN_SIGMA {
@@ -863,7 +867,8 @@ fn smooth_built_up_gaussian(
 
     // Blur the mask itself -> feathered weights with a smooth 0..1 falloff
     // across the built-up boundary. Without this we'd get a visible seam.
-    let feathered_mask = gaussian_blur_grid(&mask, sigma_cells);
+    // Mask blur is the first half of this step's progress, heights blur the second.
+    let feathered_mask = gaussian_blur_grid_reported(&mask, sigma_cells, &|f| report(0.5 * f));
     drop(mask);
 
     // Build the source for the heights blur with *water-surface* cells set
@@ -884,7 +889,8 @@ fn smooth_built_up_gaussian(
                 .collect()
         })
         .collect();
-    let blurred_heights = gaussian_blur_grid(&heights_for_blur, sigma_cells);
+    let blurred_heights =
+        gaussian_blur_grid_reported(&heights_for_blur, sigma_cells, &|f| report(0.5 + 0.5 * f));
     drop(heights_for_blur);
 
     // Blend through the feathered mask. Water-surface cells are skipped so
@@ -919,6 +925,20 @@ fn smooth_built_up_gaussian(
 /// Edges are handled by renormalizing weights over the valid samples so the
 /// blur doesn't darken the border of the grid.
 pub(crate) fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>> {
+    gaussian_blur_grid_reported(grid, sigma, &|_| {})
+}
+
+/// Same blur and output as `gaussian_blur_grid`, but calls `report(fraction)`
+/// (0.0..1.0) a handful of times from the calling thread as it works. On a
+/// city-sized grid each pass takes seconds, so this lets a progress bar advance
+/// instead of freezing. Rows/columns are processed in chunks purely so progress
+/// can be reported between them — both axes stay fully independent, so the
+/// result is identical to processing them all at once.
+fn gaussian_blur_grid_reported(
+    grid: &[Vec<f64>],
+    sigma: f64,
+    report: &dyn Fn(f64),
+) -> Vec<Vec<f64>> {
     let kernel_size: usize = (sigma * 3.0).ceil() as usize * 2 + 1;
     let kernel = create_gaussian_kernel(kernel_size, sigma);
     let half = kernel_size as i32 / 2;
@@ -932,72 +952,88 @@ pub(crate) fn gaussian_blur_grid(grid: &[Vec<f64>], sigma: f64) -> Vec<Vec<f64>>
         return vec![Vec::new(); h];
     }
 
+    // ~10 chunks per pass: enough to animate the bar, few enough that the extra
+    // rayon barriers cost nothing measurable.
+    const CHUNKS: usize = 10;
+
     // Horizontal pass — rows are independent.
-    let after_h: Vec<Vec<f64>> = grid
-        .par_iter()
-        .map(|row| {
-            let row_len = row.len() as i32;
-            (0..row.len())
-                .map(|i| {
-                    let mut sum = 0.0;
-                    let mut wsum = 0.0;
-                    for (j, &k) in kernel.iter().enumerate() {
-                        let idx = i as i32 + j as i32 - half;
-                        if idx >= 0 && idx < row_len {
-                            let v = row[idx as usize];
-                            if v.is_finite() {
-                                sum += v * k;
-                                wsum += k;
+    let row_chunk = h.div_ceil(CHUNKS);
+    let mut after_h: Vec<Vec<f64>> = Vec::with_capacity(h);
+    for rows in grid.chunks(row_chunk) {
+        let mut part: Vec<Vec<f64>> = rows
+            .par_iter()
+            .map(|row| {
+                let row_len = row.len() as i32;
+                (0..row.len())
+                    .map(|i| {
+                        let mut sum = 0.0;
+                        let mut wsum = 0.0;
+                        for (j, &k) in kernel.iter().enumerate() {
+                            let idx = i as i32 + j as i32 - half;
+                            if idx >= 0 && idx < row_len {
+                                let v = row[idx as usize];
+                                if v.is_finite() {
+                                    sum += v * k;
+                                    wsum += k;
+                                }
                             }
                         }
-                    }
-                    if wsum > 0.0 {
-                        sum / wsum
-                    } else {
-                        f64::NAN
-                    }
-                })
-                .collect()
-        })
-        .collect();
+                        if wsum > 0.0 {
+                            sum / wsum
+                        } else {
+                            f64::NAN
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+        after_h.append(&mut part);
+        report(0.5 * (after_h.len() as f64 / h as f64));
+    }
 
     // Vertical pass — columns are independent. Work column-at-a-time to keep
     // memory access sequential within each parallel task.
-    let blurred_columns: Vec<Vec<f64>> = (0..w)
-        .into_par_iter()
-        .map(|x| {
-            let column: Vec<f64> = after_h.iter().map(|row| row[x]).collect();
-            let col_len = column.len() as i32;
-            (0..column.len())
-                .map(|y| {
-                    let mut sum = 0.0;
-                    let mut wsum = 0.0;
-                    for (j, &k) in kernel.iter().enumerate() {
-                        let idx = y as i32 + j as i32 - half;
-                        if idx >= 0 && idx < col_len {
-                            let v = column[idx as usize];
-                            if v.is_finite() {
-                                sum += v * k;
-                                wsum += k;
+    let col_chunk = w.div_ceil(CHUNKS);
+    let mut out: Vec<Vec<f64>> = vec![vec![0.0; w]; h];
+    let mut x0 = 0usize;
+    while x0 < w {
+        let x1 = (x0 + col_chunk).min(w);
+        let blurred: Vec<(usize, Vec<f64>)> = (x0..x1)
+            .into_par_iter()
+            .map(|x| {
+                let column: Vec<f64> = after_h.iter().map(|row| row[x]).collect();
+                let col_len = column.len() as i32;
+                let col: Vec<f64> = (0..column.len())
+                    .map(|y| {
+                        let mut sum = 0.0;
+                        let mut wsum = 0.0;
+                        for (j, &k) in kernel.iter().enumerate() {
+                            let idx = y as i32 + j as i32 - half;
+                            if idx >= 0 && idx < col_len {
+                                let v = column[idx as usize];
+                                if v.is_finite() {
+                                    sum += v * k;
+                                    wsum += k;
+                                }
                             }
                         }
-                    }
-                    if wsum > 0.0 {
-                        sum / wsum
-                    } else {
-                        f64::NAN
-                    }
-                })
-                .collect()
-        })
-        .collect();
-
-    // Transpose columns back to row-major.
-    let mut out: Vec<Vec<f64>> = vec![vec![0.0; w]; h];
-    for (x, col) in blurred_columns.into_iter().enumerate() {
-        for (y, v) in col.into_iter().enumerate() {
-            out[y][x] = v;
+                        if wsum > 0.0 {
+                            sum / wsum
+                        } else {
+                            f64::NAN
+                        }
+                    })
+                    .collect();
+                (x, col)
+            })
+            .collect();
+        for (x, col) in blurred {
+            for (y, v) in col.into_iter().enumerate() {
+                out[y][x] = v;
+            }
         }
+        x0 = x1;
+        report(0.5 + 0.5 * (x0 as f64 / w as f64));
     }
     out
 }

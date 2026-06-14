@@ -62,6 +62,7 @@ mod gui;
 mod progress {
     pub fn emit_gui_error(_message: &str) {}
     pub fn emit_gui_progress_update(_progress: f64, _message: &str) {}
+    pub fn emit_gui_progress_update_ex(_progress: f64, _message: &str, _streaming: bool) {}
     pub fn emit_map_preview_ready() {}
     pub fn emit_show_in_folder(_path: &str) {}
     pub fn is_running_with_gui() -> bool {
@@ -200,6 +201,10 @@ fn run_cli() {
         (world_path, None)
     };
 
+    // Top-level phase timer (active only under --benchmark). generate_world has
+    // its own internal Bench for the block-placement phases.
+    let mut bench = bench::Bench::new(args.benchmark);
+
     // Fetch data
     let raw_data = match &args.file {
         Some(file) => retrieve_data::fetch_data_from_file(file),
@@ -211,35 +216,40 @@ fn run_cli() {
         ),
     }
     .expect("Failed to fetch data");
+    bench.mark("osm_fetch");
+
+    // Fetch supplementary Overture Maps buildings right after the OSM download
+    // (it only needs the bbox); the dedup against OSM runs after parsing below.
+    println!("{} Fetching Overture Maps data...", "  [+]".bold());
+    let overture_elements = overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+    bench.mark("overture_fetch");
 
     let mut ground = ground::generate_ground_data(&args);
+    bench.mark("terrain_total");
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox, outline_suppression) =
         osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.projection);
+    bench.mark("parse_osm");
 
-    // Fetch supplementary building data from Overture Maps
-    {
-        println!("{} Fetching Overture Maps data...", "  [+]".bold());
-        let overture_elements =
-            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
-        if !overture_elements.is_empty() {
-            let before_count = parsed_elements.len();
-            let unique_overture =
-                overture::deduplicate_against_osm(overture_elements, &parsed_elements);
-            parsed_elements.extend(unique_overture);
-            let added = parsed_elements.len() - before_count;
-            println!(
-                "  Added {} buildings from Overture Maps",
-                added.to_string().bright_white().bold()
-            );
-        } else {
-            println!("  No additional buildings from Overture Maps for this area");
-        }
+    // Merge the Overture buildings now that the OSM elements are parsed.
+    if !overture_elements.is_empty() {
+        let before_count = parsed_elements.len();
+        let unique_overture =
+            overture::deduplicate_against_osm(overture_elements, &parsed_elements);
+        parsed_elements.extend(unique_overture);
+        let added = parsed_elements.len() - before_count;
+        println!(
+            "  Added {} buildings from Overture Maps",
+            added.to_string().bright_white().bold()
+        );
+    } else {
+        println!("  No additional buildings from Overture Maps for this area");
     }
 
     parsed_elements
         .sort_by_key(|element: &osm_parser::ProcessedElement| osm_parser::get_priority(element));
+    bench.mark("sort_priority");
 
     // OSM water override first, then bridge repair handles remaining bridge-shadow cells.
     ground.apply_osm_water_override(&parsed_elements, &xzbbox);
@@ -250,6 +260,7 @@ fn run_cli() {
     if args.debug {
         ground.save_land_cover_debug_image("landcover_debug_post_bridge_repair");
     }
+    bench.mark("landcover_osm_repair");
 
     // Write the parsed OSM data to a file for inspection
     if args.debug {
@@ -270,6 +281,7 @@ fn run_cli() {
 
     // Transform map (parsed_elements). Operations are defined in a json file
     map_transformation::transform_map(&mut parsed_elements, &mut xzbbox, &mut ground);
+    bench.mark("transform_map");
 
     // Apply rotation if specified
     if args.rotation.abs() > f64::EPSILON {

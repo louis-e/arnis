@@ -46,7 +46,6 @@
   "disable_height_limit": "Étendre la hauteur de construction",
   "aws_only_elevation": "Terrain hérité",
   "bake_lighting": "Précalculer l'éclairage",
-  "stream_to_disk": "Mode mémoire réduite",
   "bedrock_auto_generated": "Le monde Bedrock est généré automatiquement",
   "save_path": "Chemin de sauvegarde",
   "rotation_angle": "Angle de Rotation",

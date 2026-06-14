@@ -46,7 +46,6 @@
   "disable_height_limit": "Praplėsti statybos aukštį",
   "aws_only_elevation": "Senasis reljefas",
   "bake_lighting": "Iš anksto apskaičiuoti apšvietimą",
-  "stream_to_disk": "Mažos atminties režimas",
   "bedrock_auto_generated": "Bedrock pasaulis generuojamas automatiškai",
   "save_path": "Išsaugojimo kelias",
   "rotation_angle": "Pasukimo Kampas",

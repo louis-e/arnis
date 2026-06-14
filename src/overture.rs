@@ -197,7 +197,7 @@ fn fetch_overture_buildings_inner(
         ))
         .build()?;
 
-    emit_gui_progress_update(14.5, "Fetching Overture Maps data...");
+    emit_gui_progress_update(6.0, "Adding extra buildings...");
 
     // List partition files whose geographic bounds overlap our bbox
     // (single ~230 KB STAC download instead of 512 HTTP requests)

@@ -46,7 +46,6 @@
   "disable_height_limit": "Bauhöhe erweitern",
   "aws_only_elevation": "Klassisches Terrain",
   "bake_lighting": "Licht vorberechnen",
-  "stream_to_disk": "Speichersparmodus",
   "bedrock_auto_generated": "Bedrock-Welt wird automatisch generiert",
   "save_path": "Speicherpfad",
   "rotation_angle": "Rotationswinkel",
