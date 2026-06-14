@@ -46,7 +46,6 @@
   "disable_height_limit": "Расширить высоту строительства",
   "aws_only_elevation": "Устаревший рельеф",
   "bake_lighting": "Предрасчёт освещения",
-  "stream_to_disk": "Режим экономии памяти",
   "bedrock_auto_generated": "Мир Bedrock генерируется автоматически",
   "save_path": "Путь сохранения",
   "rotation_angle": "Угол Поворота",

@@ -101,6 +101,7 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
 /// and coastal tile-boundary artifacts.
 ///
 /// The returned ElevationData contains heights in Minecraft Y coordinates.
+#[allow(clippy::too_many_arguments)]
 pub fn fetch_elevation_data(
     bbox: &LLBBox,
     scale: f64,
@@ -109,7 +110,9 @@ pub fn fetch_elevation_data(
     extended_max_y: i32,
     land_cover: Option<&mut LandCoverData>,
     aws_only: bool,
+    benchmark: bool,
 ) -> Result<ElevationData, Box<dyn std::error::Error>> {
+    let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
     // Select the best provider for this region. When `aws_only` is set the
@@ -119,7 +122,7 @@ pub fn fetch_elevation_data(
     let provider_name = provider.name();
     let is_fallback = provider_name == "aws";
 
-    emit_gui_progress_update(16.0, "Fetching elevation...");
+    emit_gui_progress_update(10.0, "Fetching elevation...");
 
     // Fetch raw elevation data in meters, falling back to AWS on regional provider failure
     let raw = match provider.fetch_raw(bbox, grid_width, grid_height) {
@@ -162,20 +165,25 @@ pub fn fetch_elevation_data(
                 ),
             );
             let fallback = providers::aws_terrain::AwsTerrain;
-            emit_gui_progress_update(16.0, "Regional provider failed, fetching from AWS...");
+            emit_gui_progress_update(10.0, "Regional provider failed, fetching from AWS...");
             fallback.fetch_raw(bbox, grid_width, grid_height)?
         }
         Err(e) => return Err(e),
     };
 
-    emit_gui_progress_update(17.0, "Processing elevation...");
+    bench.mark("elev_raw_fetch");
+    emit_gui_progress_update(12.0, "Processing elevation...");
 
     // Shared post-processing pipeline
     let mut height_grid = raw.heights_meters;
     filter_elevation_outliers(&mut height_grid);
+    bench.mark("elev_filter_outliers");
     repair_terrain_anomalies(&mut height_grid);
+    bench.mark("elev_repair_anomalies");
+    emit_gui_progress_update(14.0, "Processing elevation...");
     // Safety net: fill any remaining NaN from tile gaps or partial provider coverage
     fill_nan_values(&mut height_grid);
+    bench.mark("elev_fill_nan");
 
     // Land-cover-aware repair: built-up Gaussian smoothing targets urban
     // LiDAR/DSM classification errors, coastal pull-down flattens the
@@ -218,6 +226,8 @@ pub fn fetch_elevation_data(
             coastal_pull_cells,
         );
     }
+    bench.mark("elev_landcover_repair");
+    emit_gui_progress_update(16.0, "Processing elevation...");
 
     let mc_heights = scale_to_minecraft(
         &height_grid,
@@ -226,6 +236,7 @@ pub fn fetch_elevation_data(
         disable_height_limit,
         extended_max_y,
     );
+    bench.mark("elev_scale_to_mc");
 
     // Log min/max block heights
     let mut min_block_height = f64::MAX;
@@ -247,6 +258,8 @@ pub fn fetch_elevation_data(
         .into_iter()
         .map(|row| row.into_iter().map(|v| v as f32).collect())
         .collect();
+    bench.mark("elev_downcast");
+    emit_gui_progress_update(18.0, "Processing elevation...");
 
     Ok(ElevationData {
         heights: mc_heights_f32,

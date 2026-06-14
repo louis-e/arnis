@@ -239,7 +239,6 @@ pub fn parse_osm_data(
 ) -> (Vec<ProcessedElement>, XZBBox, OutlineSuppression) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
-    emit_gui_progress_update(5.0, "Parsing data...");
 
     // Deserialize the JSON data into the OSMData structure
     let data = SplitOsmData::from_raw_osm_data(osm_data);
@@ -437,7 +436,7 @@ pub fn parse_osm_data(
         }
     }
 
-    emit_gui_progress_update(14.0, "");
+    emit_gui_progress_update(18.5, "");
 
     drop(nodes_map);
     drop(ways_map);

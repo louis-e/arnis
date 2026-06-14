@@ -6,7 +6,7 @@ use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::ground::Ground;
 use crate::ground_generation;
 use crate::osm_parser::{OutlineSuppression, ProcessedElement};
-use crate::progress::{emit_gui_progress_update, emit_show_in_folder};
+use crate::progress::{emit_gui_progress_update, emit_gui_progress_update_ex, emit_show_in_folder};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::tile;
@@ -309,8 +309,8 @@ pub fn generate_world_with_options(
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(Arc::clone(&ground));
 
-    println!("{} Processing terrain...", "[5/7]".bold());
-    emit_gui_progress_update(25.0, "Processing terrain...");
+    println!("{} Generating area...", "[5/7]".bold());
+    emit_gui_progress_update(20.0, "Generating area...");
 
     // Pre-compute all flood fills in parallel for better CPU utilization
     let mut flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
@@ -624,11 +624,11 @@ pub fn generate_world_with_options(
 
                 subway_points.extend(tile_subway_pts);
 
-                // Step 25%->70% per merged tile, throttled to whole-percent steps.
+                // Step 20%->70% per merged tile, throttled to whole-percent steps.
                 tiles_merged += 1;
-                let pct = 25.0 + (tiles_merged as f64 / total_tiles as f64) * 45.0;
+                let pct = 20.0 + (tiles_merged as f64 / total_tiles as f64) * 50.0;
                 if pct - last_emitted_pct >= 1.0 {
-                    emit_gui_progress_update(pct, "Processing area...");
+                    emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
                     last_emitted_pct = pct;
                 }
             }
@@ -647,7 +647,7 @@ pub fn generate_world_with_options(
             );
         }
 
-        emit_gui_progress_update(70.0, "");
+        emit_gui_progress_update_ex(70.0, "", eviction_active);
     } else {
         // Small area: sequential processing along the original code path.
         let elements_count: usize = elements.len();
@@ -657,8 +657,8 @@ pub fn generate_world_with_options(
             .unwrap()
             .progress_chars("█▓░"));
 
-        let progress_increment_prcs: f64 = 45.0 / elements_count as f64;
-        let mut current_progress_prcs: f64 = 25.0;
+        let progress_increment_prcs: f64 = 50.0 / elements_count as f64;
+        let mut current_progress_prcs: f64 = 20.0;
         let mut last_emitted_progress: f64 = current_progress_prcs;
         let desired_updates: u64 = 500;
         let pb_batch_size: u64 = (elements_count as u64 / desired_updates).max(1);
