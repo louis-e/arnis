@@ -91,7 +91,7 @@ pub fn generate_natural(
             }
         } else {
             let mut previous_node: Option<(i32, i32)> = None;
-            let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
+            let mut corner_count: i32 = 0;
             let mut current_natural: Vec<(i32, i32)> = vec![];
             let binding: String = "".to_string();
 
@@ -171,14 +171,14 @@ pub fn generate_natural(
                     }
 
                     current_natural.push((x, z));
-                    corner_addup = (corner_addup.0 + x, corner_addup.1 + z, corner_addup.2 + 1);
+                    corner_count += 1;
                 }
 
                 previous_node = Some((x, z));
             }
 
             // If there are natural nodes, flood-fill the area using cache
-            if corner_addup != (0, 0, 0) {
+            if corner_count > 0 {
                 let filled_area = flood_fill_cache.get_or_compute(way, args.timeout.as_ref());
 
                 let trees_ok_to_generate: Vec<TreeType> = {
