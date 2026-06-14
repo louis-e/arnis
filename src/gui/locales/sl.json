@@ -46,6 +46,7 @@
   "disable_height_limit": "Razširi višino gradnje",
   "aws_only_elevation": "Starejši teren",
   "bake_lighting": "Predizračun osvetlitve",
+  "stream_to_disk": "Način nizke porabe pomnilnika",
   "bedrock_auto_generated": "Bedrock svet je samodejno ustvarjen",
   "save_path": "Pot shranjevanja",
   "rotation_angle": "Kot zasuka",

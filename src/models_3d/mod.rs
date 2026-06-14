@@ -47,6 +47,20 @@ pub(crate) fn lowest_ground_in_bbox(
     }
 }
 
+/// Region keys (x>>9, z>>9) overlapping [cx-r, cx+r]×[cz-r, cz+r] plus a 1-region
+/// safety ring; used to defer the regions a 3D placement may write to (stream-to-disk).
+pub(crate) fn region_keys_around(cx: i32, cz: i32, r: i32) -> Vec<(i32, i32)> {
+    let (rx0, rx1) = (((cx - r) >> 9) - 1, ((cx + r) >> 9) + 1);
+    let (rz0, rz1) = (((cz - r) >> 9) - 1, ((cz + r) >> 9) + 1);
+    let mut out = Vec::new();
+    for rx in rx0..=rx1 {
+        for rz in rz0..=rz1 {
+            out.push((rx, rz));
+        }
+    }
+    out
+}
+
 /// Clears on-disk caches for every 3D-model fetcher.
 pub fn clear_model_caches() -> CacheClearStats {
     clear_cache_dir(&three_dmr::client::cache_root())

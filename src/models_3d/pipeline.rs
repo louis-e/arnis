@@ -47,6 +47,18 @@ impl Models3dPipeline {
         &self.union_suppressed
     }
 
+    /// Union of regions every 3D placement may write to, so stream-to-disk can defer (keep
+    /// resident) those regions until the post-merge placement pass. wikidata/stadium/plane use
+    /// their size caps; 3DMR (uncapped) uses a generous assumed extent.
+    pub fn deferred_region_keys(&self, scale: f64) -> HashSet<(i32, i32)> {
+        let mut s: HashSet<(i32, i32)> = HashSet::new();
+        s.extend(self.three_dmr.deferred_region_keys(scale));
+        s.extend(self.wikidata.deferred_region_keys(scale));
+        s.extend(self.stadium.deferred_region_keys(scale));
+        s.extend(self.plane.deferred_region_keys(scale));
+        s
+    }
+
     pub fn place(&self, editor: &mut WorldEditor, args: &Args) {
         if self.three_dmr.placement_count() > 0 {
             three_dmr::place_three_dmr_models(editor, args, &self.three_dmr);

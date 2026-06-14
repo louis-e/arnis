@@ -235,6 +235,7 @@ pub fn parse_osm_data(
     bbox: LLBBox,
     scale: f64,
     debug: bool,
+    projection: crate::projection::ProjectionKind,
 ) -> (Vec<ProcessedElement>, XZBBox, OutlineSuppression) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
@@ -243,11 +244,21 @@ pub fn parse_osm_data(
     // Deserialize the JSON data into the OSMData structure
     let data = SplitOsmData::from_raw_osm_data(osm_data);
 
-    let (coord_transformer, xzbbox) = CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
-        .unwrap_or_else(|e| {
-            eprintln!("Error in defining coordinate transformation:\n{e}");
-            panic!();
-        });
+    let (coord_transformer, xzbbox) = match projection {
+        crate::projection::ProjectionKind::WebMercator => {
+            let origin_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+            let origin_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+            let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, scale);
+            CoordTransformer::with_projection(&bbox, scale, &proj)
+        }
+        crate::projection::ProjectionKind::Local => {
+            CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
+        }
+    }
+    .unwrap_or_else(|e| {
+        eprintln!("Error in defining coordinate transformation:\n{e}");
+        panic!();
+    });
 
     if debug {
         println!("Total elements: {}", data.total_count());

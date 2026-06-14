@@ -46,6 +46,7 @@
   "disable_height_limit": "扩展建造高度",
   "aws_only_elevation": "旧版地形",
   "bake_lighting": "烘焙光照",
+  "stream_to_disk": "低内存模式",
   "bedrock_auto_generated": "Bedrock 世界自动生成",
   "save_path": "存档路径",
   "rotation_angle": "旋转角度",

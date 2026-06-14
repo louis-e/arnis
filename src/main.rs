@@ -2,6 +2,7 @@
 
 mod args;
 mod bedrock_block_map;
+mod bench;
 mod biome;
 mod block_definitions;
 mod bresenham;
@@ -21,6 +22,7 @@ mod land_cover;
 mod land_cover_bridge_repair;
 mod land_cover_osm_water_override;
 mod luanti_block_map;
+mod map_preview;
 mod map_renderer;
 mod map_transformation;
 mod models_3d;
@@ -29,11 +31,13 @@ mod osm_parser;
 mod overture;
 #[cfg(feature = "gui")]
 mod progress;
+mod projection;
 mod retrieve_data;
 #[cfg(feature = "gui")]
 mod telemetry;
 #[cfg(test)]
 mod test_utilities;
+mod tile;
 mod version_check;
 mod water_depth;
 mod world_editor;
@@ -44,6 +48,11 @@ use clap::Parser;
 use colored::*;
 use std::path::PathBuf;
 use std::{env, fs, io::Write};
+
+// mimalloc scales far better than the system allocator under the concurrent
+// 4 KiB section-vec / hashmap churn of tile-parallel processing.
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[cfg(feature = "gui")]
 mod gui;
@@ -100,6 +109,26 @@ fn run_cli() {
     if let Err(e) = args::validate_args(&args) {
         eprintln!("{}: {}", "Error".red().bold(), e);
         std::process::exit(1);
+    }
+
+    // Heads-up for very large areas: generation is long and memory-heavy, and big
+    // requests load the public OpenStreetMap / elevation servers. Non-blocking.
+    {
+        const MAX_RECOMMENDED_AREA_KM2: f64 = 250.0;
+        let b = &args.bbox;
+        let mid_lat = ((b.min().lat() + b.max().lat()) / 2.0).to_radians();
+        let width_m = (b.max().lng() - b.min().lng()) * 111_320.0 * mid_lat.cos();
+        let height_m = (b.max().lat() - b.min().lat()) * 111_320.0;
+        let area_km2 = (width_m * height_m).abs() / 1_000_000.0;
+        if area_km2 > MAX_RECOMMENDED_AREA_KM2 {
+            eprintln!(
+                "{} Large area selected (~{:.0} km²). Generation may take a long time and \
+                 use many GB of memory, and places heavy load on public OpenStreetMap and \
+                 elevation servers. Use a smaller area if this was unintended.",
+                "Note:".yellow().bold(),
+                area_km2
+            );
+        }
     }
 
     // Determine world format and output path
@@ -187,7 +216,7 @@ fn run_cli() {
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox, outline_suppression) =
-        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug);
+        osm_parser::parse_osm_data(raw_data, args.bbox, args.scale, args.debug, args.projection);
 
     // Fetch supplementary building data from Overture Maps
     {
@@ -266,15 +295,26 @@ fn run_cli() {
                 std::process::exit(1);
             });
 
-            let (transformer, pre_rot_bbox) =
-                CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale).unwrap_or_else(|e| {
-                    eprintln!(
-                        "{} Failed to convert spawn point: {}",
-                        "Error:".red().bold(),
-                        e
-                    );
-                    std::process::exit(1);
-                });
+            let (transformer, pre_rot_bbox) = match args.projection {
+                projection::ProjectionKind::WebMercator => {
+                    let origin_lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
+                    let origin_lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
+                    let proj =
+                        projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
+                    CoordTransformer::with_projection(&args.bbox, args.scale, &proj)
+                }
+                projection::ProjectionKind::Local => {
+                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
+                }
+            }
+            .unwrap_or_else(|e| {
+                eprintln!(
+                    "{} Failed to convert spawn point: {}",
+                    "Error:".red().bold(),
+                    e
+                );
+                std::process::exit(1);
+            });
 
             let xzpoint = transformer.transform_point(llpoint);
             let (sx, sz) = map_transformation::rotate::rotate_xz_point(
