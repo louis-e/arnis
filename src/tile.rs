@@ -92,6 +92,64 @@ pub fn create_tiles(xzbbox: &XZBBox, tile_size: i32) -> Vec<TileBounds> {
     tiles
 }
 
+/// Axis-aligned bounding box of a way's nodes: (min_x, max_x, min_z, max_z).
+/// None when the way has no nodes.
+fn way_aabb(way: &ProcessedWay) -> Option<(i32, i32, i32, i32)> {
+    if way.nodes.is_empty() {
+        return None;
+    }
+    let mut min_x = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut min_z = i32::MAX;
+    let mut max_z = i32::MIN;
+    for node in &way.nodes {
+        min_x = min_x.min(node.x);
+        max_x = max_x.max(node.x);
+        min_z = min_z.min(node.z);
+        max_z = max_z.max(node.z);
+    }
+    Some((min_x, max_x, min_z, max_z))
+}
+
+/// Union AABB over a relation's member ways. None when no member has nodes.
+fn relation_aabb(rel: &ProcessedRelation) -> Option<(i32, i32, i32, i32)> {
+    let mut acc: Option<(i32, i32, i32, i32)> = None;
+    for member in &rel.members {
+        if let Some((nx, xx, nz, xz)) = way_aabb(&member.way) {
+            acc = Some(match acc {
+                None => (nx, xx, nz, xz),
+                Some((mn_x, mx_x, mn_z, mx_z)) => {
+                    (mn_x.min(nx), mx_x.max(xx), mn_z.min(nz), mx_z.max(xz))
+                }
+            });
+        }
+    }
+    acc
+}
+
+/// AABB-vs-bounds intersection (bounds' max edges are exclusive).
+#[inline]
+fn aabb_intersects(aabb: (i32, i32, i32, i32), bounds: &TileBounds) -> bool {
+    let (min_x, max_x, min_z, max_z) = aabb;
+    min_x < bounds.max_x && max_x >= bounds.min_x && min_z < bounds.max_z && max_z >= bounds.min_z
+}
+
+/// Inclusive region-cell range (rx0, rx1, rz0, rz1) whose halo-expanded tiles an
+/// AABB can intersect. Conservative superset of the matching tiles: for any tile
+/// in this range the AABB passes `aabb_intersects(.expanded(halo))`, and any tile
+/// outside it cannot. Lets element assignment touch only the relevant region
+/// cells instead of scanning every tile.
+#[inline]
+fn region_range(aabb: (i32, i32, i32, i32), halo: i32) -> (i32, i32, i32, i32) {
+    let (min_x, max_x, min_z, max_z) = aabb;
+    (
+        (min_x - halo) >> 9,
+        (max_x + halo) >> 9,
+        (min_z - halo) >> 9,
+        (max_z + halo) >> 9,
+    )
+}
+
 /// Check if any of a relation's member ways intersect the given bounds.
 fn relation_intersects_bounds(rel: &ProcessedRelation, bounds: &TileBounds) -> bool {
     rel.members
@@ -101,24 +159,7 @@ fn relation_intersects_bounds(rel: &ProcessedRelation, bounds: &TileBounds) -> b
 
 /// Check if a way's bounding box intersects with the given bounds.
 fn way_intersects_bounds(way: &ProcessedWay, bounds: &TileBounds) -> bool {
-    if way.nodes.is_empty() {
-        return false;
-    }
-    let mut way_min_x = i32::MAX;
-    let mut way_max_x = i32::MIN;
-    let mut way_min_z = i32::MAX;
-    let mut way_max_z = i32::MIN;
-    for node in &way.nodes {
-        way_min_x = way_min_x.min(node.x);
-        way_max_x = way_max_x.max(node.x);
-        way_min_z = way_min_z.min(node.z);
-        way_max_z = way_max_z.max(node.z);
-    }
-    // AABB intersection test
-    way_min_x < bounds.max_x
-        && way_max_x >= bounds.min_x
-        && way_min_z < bounds.max_z
-        && way_max_z >= bounds.min_z
+    way_aabb(way).is_some_and(|aabb| aabb_intersects(aabb, bounds))
 }
 
 /// Check if a way is a linear element (road, railway, barrier, etc.)
@@ -173,28 +214,42 @@ pub fn assign_elements_to_tiles(
                 }
             }
             ProcessedElement::Way(way) => {
-                if is_linear_element(way) {
-                    // Linear: every tile within the rendered half-width of the centerline.
-                    for (tile_idx, tile) in tiles.iter().enumerate() {
-                        if way_intersects_bounds(way, &tile.expanded(linear_halo)) {
-                            tile_elements[tile_idx].push(elem_idx);
-                        }
-                    }
+                // Linear elements render to their half-width; areas to the editor halo.
+                // Only the region cells the AABB+halo can reach are checked (vs all tiles).
+                let Some(aabb) = way_aabb(way) else { continue };
+                let halo = if is_linear_element(way) {
+                    linear_halo
                 } else {
-                    // Area: every tile its AABB+halo overlaps, so large polygons render
-                    // fully and per-tile ground sees complete neighbour data.
-                    for (tile_idx, tile) in tiles.iter().enumerate() {
-                        if way_intersects_bounds(way, &tile.expanded(TILE_EDITOR_HALO)) {
-                            tile_elements[tile_idx].push(elem_idx);
+                    TILE_EDITOR_HALO
+                };
+                let (rx0, rx1, rz0, rz1) = region_range(aabb, halo);
+                for rx in rx0..=rx1 {
+                    for rz in rz0..=rz1 {
+                        if let Some(&tile_idx) = tile_grid.get(&(rx, rz)) {
+                            if aabb_intersects(aabb, &tiles[tile_idx].expanded(halo)) {
+                                tile_elements[tile_idx].push(elem_idx);
+                            }
                         }
                     }
                 }
             }
             ProcessedElement::Relation(rel) => {
-                // Relations: every tile any member way's AABB+halo overlaps.
-                for (tile_idx, tile) in tiles.iter().enumerate() {
-                    if relation_intersects_bounds(rel, &tile.expanded(TILE_EDITOR_HALO)) {
-                        tile_elements[tile_idx].push(elem_idx);
+                // Every tile any member way's AABB+halo overlaps, restricted to the
+                // region cells the union AABB+halo can reach.
+                let Some(aabb) = relation_aabb(rel) else {
+                    continue;
+                };
+                let (rx0, rx1, rz0, rz1) = region_range(aabb, TILE_EDITOR_HALO);
+                for rx in rx0..=rx1 {
+                    for rz in rz0..=rz1 {
+                        if let Some(&tile_idx) = tile_grid.get(&(rx, rz)) {
+                            if relation_intersects_bounds(
+                                rel,
+                                &tiles[tile_idx].expanded(TILE_EDITOR_HALO),
+                            ) {
+                                tile_elements[tile_idx].push(elem_idx);
+                            }
+                        }
                     }
                 }
             }
@@ -202,4 +257,169 @@ pub fn assign_elements_to_tiles(
     }
 
     tile_elements
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::osm_parser::{ProcessedMember, ProcessedMemberRole, ProcessedNode};
+    use std::sync::Arc;
+
+    // Deterministic LCG so the fixture is reproducible without rand/Date.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next(&mut self) -> u64 {
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
+            self.0
+        }
+        fn coord(&mut self, lo: i32, hi: i32) -> i32 {
+            lo + (self.next() % ((hi - lo) as u64 + 1)) as i32
+        }
+    }
+
+    fn node(id: u64, x: i32, z: i32) -> ProcessedNode {
+        ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        }
+    }
+
+    fn way(id: u64, nodes: Vec<ProcessedNode>, linear: bool) -> ProcessedWay {
+        let mut tags = HashMap::new();
+        if linear {
+            tags.insert("highway".to_string(), "residential".to_string());
+        } else {
+            tags.insert("building".to_string(), "yes".to_string());
+        }
+        ProcessedWay { id, nodes, tags }
+    }
+
+    // Reference O(elements * tiles) assignment matching the original scan exactly.
+    fn brute_force(
+        elements: &[ProcessedElement],
+        tiles: &[TileBounds],
+        scale: f64,
+    ) -> Vec<Vec<usize>> {
+        let mut out: Vec<Vec<usize>> = vec![Vec::new(); tiles.len()];
+        let linear_halo = TILE_EDITOR_HALO.max((MAX_LINEAR_HALF_WIDTH_M * scale).ceil() as i32);
+        for (ei, e) in elements.iter().enumerate() {
+            match e {
+                ProcessedElement::Node(n) => {
+                    for (ti, t) in tiles.iter().enumerate() {
+                        if t.contains(n.x, n.z) {
+                            out[ti].push(ei);
+                            break;
+                        }
+                    }
+                }
+                ProcessedElement::Way(w) => {
+                    let halo = if is_linear_element(w) {
+                        linear_halo
+                    } else {
+                        TILE_EDITOR_HALO
+                    };
+                    for (ti, t) in tiles.iter().enumerate() {
+                        if way_intersects_bounds(w, &t.expanded(halo)) {
+                            out[ti].push(ei);
+                        }
+                    }
+                }
+                ProcessedElement::Relation(r) => {
+                    for (ti, t) in tiles.iter().enumerate() {
+                        if relation_intersects_bounds(r, &t.expanded(TILE_EDITOR_HALO)) {
+                            out[ti].push(ei);
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    // The fast region-range assignment must produce byte-identical output to the
+    // exhaustive scan, including per-tile element order, for arbitrary geometry.
+    #[test]
+    fn assignment_matches_brute_force_scan() {
+        let mut rng = Lcg(0x9E3779B97F4A7C15);
+        let bbox = XZBBox::rect_from_min_max(-700, -300, 1800, 1500).unwrap();
+        let tiles = create_tiles(&bbox, DEFAULT_TILE_SIZE);
+
+        let mut elements: Vec<ProcessedElement> = Vec::new();
+        let mut id = 0u64;
+
+        // Scattered nodes, incl. coords on region boundaries and outside the bbox.
+        for _ in 0..60 {
+            id += 1;
+            elements.push(ProcessedElement::Node(node(
+                id,
+                rng.coord(-900, 2000),
+                rng.coord(-500, 1700),
+            )));
+        }
+
+        // Ways of varied extent: tiny, boundary-hugging, and long multi-tile spans.
+        for _ in 0..40 {
+            id += 1;
+            let n = 2 + (rng.next() % 5) as usize;
+            let cx = rng.coord(-700, 1800);
+            let cz = rng.coord(-300, 1500);
+            let spread = rng.coord(2, 900);
+            let nodes: Vec<ProcessedNode> = (0..n)
+                .map(|k| {
+                    id += 1;
+                    node(
+                        id,
+                        cx + rng.coord(-spread, spread),
+                        cz + rng.coord(-spread, spread) + k as i32,
+                    )
+                })
+                .collect();
+            let linear = rng.next().is_multiple_of(2);
+            elements.push(ProcessedElement::Way(way(id, nodes, linear)));
+        }
+
+        // Relations with several member ways spread across the world.
+        for _ in 0..12 {
+            id += 1;
+            let m = 1 + (rng.next() % 3) as usize;
+            let members: Vec<ProcessedMember> = (0..m)
+                .map(|_| {
+                    id += 1;
+                    let cx = rng.coord(-700, 1800);
+                    let cz = rng.coord(-300, 1500);
+                    let spread = rng.coord(2, 600);
+                    let nodes: Vec<ProcessedNode> = (0..3)
+                        .map(|k| {
+                            id += 1;
+                            node(
+                                id,
+                                cx + rng.coord(-spread, spread),
+                                cz + rng.coord(-spread, spread) + k,
+                            )
+                        })
+                        .collect();
+                    ProcessedMember {
+                        role: ProcessedMemberRole::Outer,
+                        way: Arc::new(way(id, nodes, false)),
+                    }
+                })
+                .collect();
+            elements.push(ProcessedElement::Relation(ProcessedRelation {
+                id,
+                tags: HashMap::new(),
+                members,
+            }));
+        }
+
+        for &scale in &[1.0_f64, 2.5, 5.0] {
+            let fast = assign_elements_to_tiles(&elements, &tiles, scale);
+            let brute = brute_force(&elements, &tiles, scale);
+            assert_eq!(fast, brute, "mismatch at scale {scale}");
+        }
+    }
 }

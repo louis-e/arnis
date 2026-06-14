@@ -34,7 +34,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[cfg(feature = "gui")]
 use crate::progress::emit_gui_error;
@@ -328,9 +328,11 @@ impl<'a> WorldEditor<'a> {
         )
     }
 
-    /// Evict one region (stream-to-disk): remove it from RAM, record it so any
-    /// later stray write is dropped by the guard, then hand it to the background
-    /// `worker` for compaction + serialization. Java-only; `Ok(true)` if evicted.
+    /// Evict one region (stream-to-disk): hand it to the background `worker` for
+    /// compaction + serialization, then record it so any later stray write is
+    /// dropped by the guard. Only marks the region flushed once the worker has
+    /// accepted it; if the handoff fails the region is restored to RAM and the
+    /// worker's real write error is surfaced. Java-only; `Ok(true)` if evicted.
     pub(crate) fn flush_region_via(
         &mut self,
         worker: &FlushWorker,
@@ -343,9 +345,16 @@ impl<'a> WorldEditor<'a> {
         let Some(region) = self.world.regions.remove(&(rx, rz)) else {
             return Ok(false);
         };
-        self.flushed_regions.insert((rx, rz));
-        worker.send(rx, rz, region)?;
-        Ok(true)
+        match worker.send(rx, rz, region) {
+            Ok(()) => {
+                self.flushed_regions.insert((rx, rz));
+                Ok(true)
+            }
+            Err((region, err)) => {
+                self.world.regions.insert((rx, rz), region);
+                Err(err)
+            }
+        }
     }
 
     /// Merge another WorldToModify into this editor's world with authoritative bounds.
@@ -1426,12 +1435,17 @@ const _: () = {
 pub(crate) struct FlushWorker {
     tx: Option<std::sync::mpsc::SyncSender<(i32, i32, common::RegionToModify)>>,
     handle: Option<std::thread::JoinHandle<Result<(), String>>>,
+    // Real write error from the worker, so a failed handoff surfaces the cause
+    // (disk full, permissions, ...) instead of a generic "terminated early".
+    error: Arc<Mutex<Option<String>>>,
 }
 
 impl FlushWorker {
     pub(crate) fn spawn(ctx: java::RegionWriteCtx, capacity: usize) -> Self {
         let (tx, rx) =
             std::sync::mpsc::sync_channel::<(i32, i32, common::RegionToModify)>(capacity.max(1));
+        let error = Arc::new(Mutex::new(None));
+        let error_w = Arc::clone(&error);
         let handle = std::thread::spawn(move || -> Result<(), String> {
             while let Ok((rxx, rzz, mut region)) = rx.recv() {
                 for chunk in region.chunks.values_mut() {
@@ -1439,23 +1453,47 @@ impl FlushWorker {
                         section.compact();
                     }
                 }
-                ctx.write(rxx, rzz, &region).map_err(|e| e.to_string())?;
+                if let Err(e) = ctx.write(rxx, rzz, &region) {
+                    let msg = e.to_string();
+                    if let Ok(mut slot) = error_w.lock() {
+                        *slot = Some(msg.clone());
+                    }
+                    return Err(msg);
+                }
             }
             Ok(())
         });
         Self {
             tx: Some(tx),
             handle: Some(handle),
+            error,
         }
     }
 
-    /// Enqueue a region; blocks when the channel is full (backpressure).
-    fn send(&self, rx: i32, rz: i32, region: common::RegionToModify) -> Result<(), String> {
-        self.tx
-            .as_ref()
-            .ok_or_else(|| "flush worker already finished".to_string())?
-            .send((rx, rz, region))
-            .map_err(|_| "flush worker terminated early".to_string())
+    /// Enqueue a region; blocks when the channel is full (backpressure). On
+    /// failure the region is handed back unchanged (so the caller can keep it in
+    /// RAM) alongside the worker's real error.
+    fn send(
+        &self,
+        rx: i32,
+        rz: i32,
+        region: common::RegionToModify,
+    ) -> Result<(), (common::RegionToModify, String)> {
+        let Some(tx) = self.tx.as_ref() else {
+            return Err((region, "flush worker already finished".to_string()));
+        };
+        match tx.send((rx, rz, region)) {
+            Ok(()) => Ok(()),
+            Err(std::sync::mpsc::SendError((_, _, region))) => {
+                let err = self
+                    .error
+                    .lock()
+                    .ok()
+                    .and_then(|slot| slot.clone())
+                    .unwrap_or_else(|| "flush worker terminated early".to_string());
+                Err((region, err))
+            }
+        }
     }
 
     /// Close the queue and wait for all pending writes; propagates the first error.
