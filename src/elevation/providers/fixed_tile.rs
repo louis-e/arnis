@@ -426,7 +426,10 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
             env!("CARGO_PKG_VERSION"),
             " (+https://github.com/louis-e/arnis)"
         ))
-        .timeout(std::time::Duration::from_secs(180))
+        // A single tile is a few MB; a short connect timeout fails fast on a
+        // stalled link so the retry fires instead of hanging the full request.
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .timeout(std::time::Duration::from_secs(90))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
