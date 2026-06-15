@@ -478,6 +478,12 @@ impl Default for FloodFillCache {
 /// * `cpu_fraction` - Fraction of available cores to use (e.g., 0.9 for 90%).
 ///   Values are clamped to the range [0.1, 1.0].
 pub fn configure_rayon_thread_pool(cpu_fraction: f64) {
+    // Respect an explicit RAYON_NUM_THREADS override (benchmarking / power users);
+    // leaving the global pool unbuilt lets rayon honor the env var.
+    if std::env::var_os("RAYON_NUM_THREADS").is_some() {
+        return;
+    }
+
     // Clamp cpu_fraction to valid range
     let cpu_fraction = cpu_fraction.clamp(0.1, 1.0);
 

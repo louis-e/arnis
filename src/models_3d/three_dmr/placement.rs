@@ -38,9 +38,22 @@ pub struct PrescanResult {
     placements: Vec<Placement>,
 }
 
+/// Assumed max XZ half-extent (m) for the otherwise-uncapped 3DMR models, so their regions can
+/// be deferred under stream-to-disk. Generous; a model exceeding this (+512-block ring) truncates.
+const ASSUMED_HALF_EXTENT_M: f64 = 384.0;
+
 impl PrescanResult {
     pub fn placement_count(&self) -> usize {
         self.placements.len()
+    }
+
+    /// Regions each placement may write to (stream-to-disk deferral); see ASSUMED_HALF_EXTENT_M.
+    pub fn deferred_region_keys(&self, scale: f64) -> Vec<(i32, i32)> {
+        let r = (ASSUMED_HALF_EXTENT_M * scale).ceil() as i32;
+        self.placements
+            .iter()
+            .flat_map(|p| crate::models_3d::region_keys_around(p.anchor_x, p.anchor_z, r))
+            .collect()
     }
 }
 

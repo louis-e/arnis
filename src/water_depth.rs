@@ -1,6 +1,9 @@
 //! Per-cell water depth carving from a chamfer-3-4 distance transform over the LC_WATER mask.
 
-use crate::block_definitions::{GRAVEL, SAND, SANDSTONE, STONE, WATER};
+use crate::block_definitions::{
+    Block, AIR, CLAY, COARSE_DIRT, DIRT, GRAVEL, KELP, KELP_PLANT, MAGMA_BLOCK, SAND, SANDSTONE,
+    SEAGRASS, SEA_PICKLE, SOUL_SAND, STONE, TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER,
+};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
@@ -332,8 +335,15 @@ pub fn estimate_max_carve_depth(
     depth_from_dt(block_max_dt + 2.0, comp_max)
 }
 
-/// Place the underwater stack: WATER column, then a SAND/GRAVEL bed over SANDSTONE/STONE.
-pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32, depth: i32) {
+/// Place the underwater stack: water column, a layered bed, dunes and vegetation.
+pub fn carve_water_column(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    depth: i32,
+    road_mask: &RoadMaskBitmap,
+) {
     debug_assert!(
         depth <= MAX_WATER_DEPTH,
         "water carve depth {depth} exceeds the max tier {MAX_WATER_DEPTH}"
@@ -347,20 +357,54 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     }
     let bed_y = water_y - depth - 1;
 
-    // SAND share drifts down with depth; value_noise blends the boundary.
+    // Keep the bed plain near causeways so blobs/dunes/veg don't clutter piers.
+    let near_bridge = depth >= 2 && !road_mask.is_empty() && bridge_adjacent(road_mask, x, z);
+
+    // Layered bed: gravel base with noise-driven sand/clay/dirt patches over stone.
     let (top_block, under_block) = match depth {
         0..=1 => (SAND, SANDSTONE),
-        2..=4 => {
-            let sand_threshold = match depth {
-                2 => 0.70,
-                3 => 0.50,
-                _ => 0.30,
-            };
-            if crate::ground_generation::value_noise_01(x, z, 6) < sand_threshold {
-                (SAND, SANDSTONE)
+        2..=6 if near_bridge => {
+            if crate::ground_generation::value_noise_01(x, z, 6) < 0.4 && depth <= 3 {
+                (SAND, STONE)
             } else {
                 (GRAVEL, STONE)
             }
+        }
+        2..=6 => {
+            // Jitter the depth tier so patches don't ring the shore.
+            let h = crate::land_cover::coord_hash(x + 7, z + 13);
+            let d = (depth + (h % 3) as i32 - 1).max(1);
+            // Domain-warp the sample coords so patches read organic, not circular.
+            let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 40);
+            let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 40);
+            let wx = x + ((warp_x - 0.5) * 24.0) as i32;
+            let wz = z + ((warp_z - 0.5) * 24.0) as i32;
+            // Per-block noise, sampled lazily so most cells skip the rare tiers.
+            let vn = |dx, dz, s| crate::ground_generation::value_noise_01(wx + dx, wz + dz, s);
+            let top = if d <= 1 {
+                SAND
+            } else if d == 2 {
+                if vn(53, 97, 36) > 0.50 {
+                    SAND
+                } else {
+                    GRAVEL
+                }
+            } else if d >= 5 && vn(401, 503, 8) > 0.96 {
+                MAGMA_BLOCK
+            } else if d >= 5 && vn(727, 911, 8) > 0.96 {
+                SOUL_SAND
+            } else if vn(73, 109, 42) > 0.74 {
+                CLAY
+            } else if vn(53, 97, 36) > 0.81 {
+                SAND
+            } else if vn(211, 41, 26) > 0.88 {
+                DIRT
+            } else if vn(311, 17, 30) > 0.90 {
+                COARSE_DIRT
+            } else {
+                GRAVEL
+            };
+            (top, STONE)
         }
         _ => (GRAVEL, STONE),
     };
@@ -372,6 +416,153 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     if bed_y - 1 > MIN_Y {
         editor.set_block_absolute(under_block, x, bed_y - 1, z, None, Some(&[]));
     }
+    // Backfill stone so neighbour side-faces never expose air under varied beds.
+    let fill_to = (bed_y - 2).max(MIN_Y + 1);
+    let fill_from = (bed_y - 12).max(MIN_Y + 1);
+    if fill_from <= fill_to {
+        editor.fill_column_absolute(STONE, x, z, fill_from, fill_to, true);
+    }
+
+    // Dunes return their crest so veg plants on top instead of inside them.
+    let bump = if depth >= 1 && !near_bridge {
+        place_underwater_dunes(editor, x, z, water_y, bed_y, depth, top_block)
+    } else {
+        0
+    };
+    if depth >= 3 && !near_bridge {
+        place_underwater_vegetation(editor, x, z, water_y, bed_y + bump, depth);
+    }
+}
+
+/// True if any cell in the 5x5 area around (x, z), center excluded, carries a road/bridge.
+fn bridge_adjacent(road_mask: &RoadMaskBitmap, x: i32, z: i32) -> bool {
+    for dz in -2..=2 {
+        for dx in -2..=2 {
+            if (dx != 0 || dz != 0) && road_mask.contains(x + dx, z + dz) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Dune amplitude for a cell, capped so the crest stays below the surface.
+/// Depth stands in for body width: deeper cells only occur in wider water.
+fn dune_amp(depth: i32) -> i32 {
+    let target = match depth {
+        ..=3 => 2,
+        4 => 3,
+        _ => 4,
+    };
+    target.min(depth - 1)
+}
+
+/// Width-aware multi-octave dunes 1-4 blocks tall on the bed. Returns the
+/// placed crest height. Ported from the Teddy fork.
+fn place_underwater_dunes(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    bed_y: i32,
+    depth: i32,
+    bed_block: Block,
+) -> i32 {
+    let amp = dune_amp(depth);
+    if amp <= 0 {
+        return 0;
+    }
+    let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 50);
+    let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 50);
+    let wx = x + ((warp_x - 0.5) * 30.0) as i32;
+    let wz = z + ((warp_z - 0.5) * 30.0) as i32;
+    let n_large = crate::ground_generation::value_noise_01(wx + 113, wz + 257, 44) as f32;
+    let n_med = crate::ground_generation::value_noise_01(wx + 31, wz + 71, 18) as f32;
+    let n_sharp = crate::ground_generation::value_noise_01(wx + 7, wz + 11, 10) as f32;
+    let h_f = 0.40 * n_large + 0.30 * n_med + 0.30 * n_sharp;
+    if h_f < 0.28 {
+        return 0;
+    }
+    let t = (h_f - 0.28) / 0.72;
+    let bump = ((t.powf(0.45) * (amp as f32 + 0.99)).floor() as i32).clamp(1, amp);
+    for dy in 1..=bump {
+        let y = bed_y + dy;
+        if y >= water_y {
+            return dy - 1;
+        }
+        editor.set_block_absolute(bed_block, x, y, z, None, Some(&[]));
+    }
+    bump
+}
+
+/// Clumped underwater vegetation on a carved bed: SEAGRASS/TALL_SEAGRASS/SEA_PICKLE
+/// meadows, with rarer KELP columns in deeper water. Ported from the Teddy fork.
+fn place_underwater_vegetation(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    bed_top: i32,
+    depth: i32,
+) {
+    // Two decorrelated noise fields gate clumpy meadows instead of pepper-shot cells.
+    let field_noise = crate::ground_generation::value_noise_01(x + 53, z + 89, 30);
+    let cluster_noise = crate::ground_generation::value_noise_01(x + 401, z + 17, 10);
+    let combined = field_noise * cluster_noise;
+
+    // KELP: deep cells where both noises ring high; tip caps the column.
+    let kelp_pick = (crate::land_cover::coord_hash(x + 91, z + 41) % 100) as i32;
+    if depth >= 4 && field_noise > 0.78 && cluster_noise > 0.80 && kelp_pick < 25 {
+        let plant_top_full = water_y - 1;
+        let plant_bottom = bed_top + 1;
+        let avail = plant_top_full - plant_bottom;
+        if avail >= 3 {
+            let hgt_pick = (crate::land_cover::coord_hash(x + 211, z + 503) % 100) as i32;
+            let share = 30 + hgt_pick * 70 / 100;
+            let used = ((avail as i64 * share as i64) / 100) as i32;
+            let used = used.max(3).min(avail);
+            let plant_top = plant_bottom + used;
+            // Replace water, never air, so plants don't grow into the bed or float.
+            for y in plant_bottom..plant_top {
+                editor.set_block_absolute(KELP_PLANT, x, y, z, None, Some(&[AIR]));
+            }
+            editor.set_block_absolute(KELP, x, plant_top, z, None, Some(&[AIR]));
+        }
+        return;
+    }
+
+    // Seagrass meadow mix: 50% SEAGRASS, 35% TALL_SEAGRASS, 15% SEA_PICKLE.
+    if combined > 0.42 {
+        let dropout = crate::land_cover::coord_hash(x + 17, z + 31) % 10;
+        if dropout < 4 {
+            let plant_y = bed_top + 1;
+            if plant_y < water_y {
+                let pick = (crate::land_cover::coord_hash(x + 211, z + 73) % 100) as i32;
+                if pick < 50 {
+                    editor.set_block_absolute(SEAGRASS, x, plant_y, z, None, Some(&[AIR]));
+                } else if pick < 85 && plant_y + 1 < water_y {
+                    editor.set_block_absolute(
+                        TALL_SEAGRASS_BOTTOM,
+                        x,
+                        plant_y,
+                        z,
+                        None,
+                        Some(&[AIR]),
+                    );
+                    editor.set_block_absolute(
+                        TALL_SEAGRASS_TOP,
+                        x,
+                        plant_y + 1,
+                        z,
+                        None,
+                        Some(&[AIR]),
+                    );
+                } else {
+                    editor.set_block_absolute(SEA_PICKLE, x, plant_y, z, None, Some(&[AIR]));
+                }
+            }
+        }
+    }
 }
 
 /// Post-pass carving every LC_WATER cell, so ESA-only water gets depth too.
@@ -382,13 +573,37 @@ pub fn carve_lc_water_pass(
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
 ) {
-    let off_x = xzbbox.min_x();
-    let off_z = xzbbox.min_z();
-    // Only the water sub-rect can hold LC_WATER cells; skip the rest of the world.
     let x1 = bwf.min_x + bwf.width as i32 - 1;
     let z1 = bwf.min_z + bwf.height as i32 - 1;
-    for z in bwf.min_z..=z1 {
-        for x in bwf.min_x..=x1 {
+    carve_lc_water_region(
+        editor, ground, xzbbox, bwf, road_mask, bwf.min_x, x1, bwf.min_z, z1,
+    );
+}
+
+/// `carve_lc_water_pass` restricted to the inclusive `[iter_min..=iter_max]` block
+/// range (intersected with the water sub-rect). Per-tile callers pass strict tile
+/// bounds; writes are vertical-only so output is identical regardless of tiling.
+#[allow(clippy::too_many_arguments)]
+pub fn carve_lc_water_region(
+    editor: &mut WorldEditor,
+    ground: &Ground,
+    xzbbox: &XZBBox,
+    bwf: &BigWaterField,
+    road_mask: &RoadMaskBitmap,
+    iter_min_x: i32,
+    iter_max_x: i32,
+    iter_min_z: i32,
+    iter_max_z: i32,
+) {
+    let off_x = xzbbox.min_x();
+    let off_z = xzbbox.min_z();
+    // Only the water sub-rect can hold LC_WATER cells; intersect it with the range.
+    let x0 = bwf.min_x.max(iter_min_x);
+    let x1 = (bwf.min_x + bwf.width as i32 - 1).min(iter_max_x);
+    let z0 = bwf.min_z.max(iter_min_z);
+    let z1 = (bwf.min_z + bwf.height as i32 - 1).min(iter_max_z);
+    for z in z0..=z1 {
+        for x in x0..=x1 {
             // Keep road/bridge surfaces (causeways, decks).
             if road_mask.contains(x, z) {
                 continue;
@@ -402,7 +617,7 @@ pub fn carve_lc_water_pass(
             if editor.get_ground_level(x, z) > water_y {
                 continue;
             }
-            carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z));
+            carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask);
         }
     }
 }
@@ -468,6 +683,37 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn dune_amp_capped_by_depth() {
+        assert_eq!(dune_amp(1), 0);
+        assert_eq!(dune_amp(2), 1);
+        assert_eq!(dune_amp(3), 2);
+        assert_eq!(dune_amp(4), 3);
+        assert_eq!(dune_amp(5), 4);
+        assert_eq!(dune_amp(6), 4);
+    }
+
+    #[test]
+    fn bridge_adjacent_detects_neighborhood() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
+        let mut mask = RoadMaskBitmap::new(&bbox);
+        mask.set(12, 10);
+        assert!(
+            bridge_adjacent(&mask, 10, 10),
+            "two cells away is inside the 5x5 area"
+        );
+        assert!(
+            !bridge_adjacent(&mask, 15, 15),
+            "three cells away is outside"
+        );
+        assert!(
+            !bridge_adjacent(&mask, 12, 10),
+            "the road cell itself is excluded"
+        );
+        let empty = RoadMaskBitmap::new(&bbox);
+        assert!(!bridge_adjacent(&empty, 10, 10));
     }
 
     #[test]

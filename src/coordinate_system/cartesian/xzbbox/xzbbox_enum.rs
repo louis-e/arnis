@@ -50,6 +50,20 @@ impl XZBBox {
         )?))
     }
 
+    /// Construct rectangle shape bbox from explicit min and max coordinates.
+    /// Used by projections that don't originate at (0, 0).
+    pub fn rect_from_min_max(
+        min_x: i32,
+        min_z: i32,
+        max_x: i32,
+        max_z: i32,
+    ) -> Result<Self, String> {
+        Ok(Self::Rect(XZBBoxRect::new(
+            XZPoint { x: min_x, z: min_z },
+            XZPoint { x: max_x, z: max_z },
+        )?))
+    }
+
     /// Check whether an XZPoint is covered
     pub fn contains(&self, xzpoint: &XZPoint) -> bool {
         match self {
@@ -198,5 +212,21 @@ mod test {
 
         assert!(XZBBox::rect_from_xz_lengths(i32::MAX as f64 + 10.0, -0.5).is_err());
         assert!(XZBBox::rect_from_xz_lengths(0.2, i32::MAX as f64 + 10.0).is_err());
+    }
+
+    #[test]
+    fn test_rect_from_min_max() {
+        let obj = XZBBox::rect_from_min_max(-100, -200, 100, 200);
+        assert!(obj.is_ok());
+        let obj = obj.unwrap();
+        assert_eq!(obj.min_x(), -100);
+        assert_eq!(obj.max_x(), 100);
+        assert_eq!(obj.min_z(), -200);
+        assert_eq!(obj.max_z(), 200);
+        assert_eq!(obj.bounding_rect().total_blocks_x(), 201);
+        assert_eq!(obj.bounding_rect().total_blocks_z(), 401);
+
+        // Invalid: min > max
+        assert!(XZBBox::rect_from_min_max(100, 0, 50, 100).is_err());
     }
 }

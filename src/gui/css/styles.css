@@ -152,6 +152,29 @@ a:hover {
   margin-bottom: 5px;
 }
 
+/* Time-remaining centered on the bar. White to match the percentage label; a
+   text-shadow keeps it legible over the green fill and the lighter track. */
+.progress-eta-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1;
+  color: #ffffff;
+  font-size: 0.85em;
+  line-height: 1;
+  font-weight: 700;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.7);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.progress-eta-overlay.visible {
+  opacity: 1;
+}
+
 .world-name-label {
   font-size: 0.8em;
   color: #fecc44;
@@ -222,6 +245,7 @@ button:hover {
   background-color: #e0e0e0;
   border-radius: 10px;
   overflow: hidden;
+  position: relative;
 }
 
 #progress-detail {

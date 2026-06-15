@@ -290,9 +290,11 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         170 => "mcl_core:glass_silver",
         171 => "mcl_core:glass_brown",
         172 => "mcl_core:glass",
-        173 | 236 | 237 | 238 | 239 => {
+        173 | 236 | 237 => {
             return conv_trapdoor(props, "mcl_doors:trapdoor", "mcl_doors:trapdoor_open")
         }
+        238 => "mcl_ocean:seagrass", // SEAGRASS
+        239 => "mcl_ocean:kelp",     // KELP_PLANT
         174 => "mcl_colorblocks:concrete_brown",
         175 => "mcl_colorblocks:hardened_clay_black",
         176 => "mcl_colorblocks:hardened_clay_brown",
@@ -380,6 +382,12 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         253 => "mcl_colorblocks:hardened_clay_cyan",   // CYAN_TERRACOTTA
         254 => "mcl_wool:black",                       // BLACK_WOOL
         255 => "mcl_banners:hanging_banner_silver",    // LIGHT_GRAY_WALL_BANNER
+        256 => "mcl_nether:magma",                     // MAGMA_BLOCK
+        258 => "mcl_ocean:kelp",                       // KELP
+        259 => "mcl_ocean:tall_seagrass",              // TALL_SEAGRASS_BOTTOM
+        260 => "mcl_ocean:tall_seagrass",              // TALL_SEAGRASS_TOP
+        261 => "mcl_ocean:sea_pickle",                 // SEA_PICKLE
+        265 => "mcl_nether:soul_sand",                 // SOUL_SAND
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

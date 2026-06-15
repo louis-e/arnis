@@ -341,6 +341,12 @@ pub(super) trait FixedTileProvider: Send + Sync {
     /// flaky or strict services can lower it further.
     const MAX_CONCURRENT_DOWNLOADS: usize = 4;
 
+    /// Tiles per download batch before a pause; 0 disables. Paces strict upstreams (USGS ArcGIS) so large bboxes don't trip rate limiting.
+    const DOWNLOAD_BATCH_SIZE: usize = 256;
+
+    /// Pause between download batches, in ms (applied only between batches when batching is on).
+    const BATCH_PAUSE_MS: u64 = 1000;
+
     /// Resolution levels from finest (smallest m/px) to coarsest. The
     /// level-selection logic walks this list.
     fn resolution_levels(&self) -> &'static [Self::Level];
@@ -420,23 +426,52 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
             env!("CARGO_PKG_VERSION"),
             " (+https://github.com/louis-e/arnis)"
         ))
-        .timeout(std::time::Duration::from_secs(180))
+        // A single tile is a few MB; a short connect timeout fails fast on a
+        // stalled link so the retry fires instead of hanging the full request.
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .timeout(std::time::Duration::from_secs(90))
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
     type FetchResult<R> = (TileKey<R>, Result<Vec<Vec<f64>>, String>);
-    let tile_results: Vec<FetchResult<P::Level>> = pool.install(|| {
-        tile_keys
-            .par_iter()
-            .map(|key| {
-                let url = provider.tile_url(key);
-                let cache_path = key.cache_path(&cache_dir);
-                let res = fetch_tile_raster(&url, &cache_path, &client);
-                (*key, res)
-            })
-            .collect()
-    });
-
+    // Download in paced batches (cache hits short-circuit; result set unchanged) so large strict-upstream requests don't trip rate limiting.
+    let batch_size = if P::DOWNLOAD_BATCH_SIZE == 0 {
+        tile_keys.len().max(1)
+    } else {
+        P::DOWNLOAD_BATCH_SIZE
+    };
+    let total_batches = tile_keys.len().div_ceil(batch_size);
+    let mut tile_results: Vec<FetchResult<P::Level>> = Vec::with_capacity(tile_keys.len());
+    let mut prev_hit_network = false;
+    for (batch_idx, batch) in tile_keys.chunks(batch_size).enumerate() {
+        // Pause only between batches, and only after one that hit the network (warm-cache re-runs aren't slowed).
+        if batch_idx > 0 && prev_hit_network && P::BATCH_PAUSE_MS > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(P::BATCH_PAUSE_MS));
+        }
+        // A missing cache file means this batch will download.
+        prev_hit_network = batch.iter().any(|key| !key.cache_path(&cache_dir).exists());
+        if total_batches > 1 {
+            eprintln!(
+                "{}: downloading tile batch {}/{} ({} tiles)...",
+                provider.log_prefix(),
+                batch_idx + 1,
+                total_batches,
+                batch.len(),
+            );
+        }
+        let batch_results: Vec<FetchResult<P::Level>> = pool.install(|| {
+            batch
+                .par_iter()
+                .map(|key| {
+                    let url = provider.tile_url(key);
+                    let cache_path = key.cache_path(&cache_dir);
+                    let res = fetch_tile_raster(&url, &cache_path, &client);
+                    (*key, res)
+                })
+                .collect()
+        });
+        tile_results.extend(batch_results);
+    }
     let mut tile_cache: FnvHashMap<TileKey<P::Level>, Vec<Vec<f64>>> = FnvHashMap::default();
     let mut failed_keys: Vec<TileKey<P::Level>> = Vec::new();
     for (key, res) in tile_results {
