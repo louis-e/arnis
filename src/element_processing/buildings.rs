@@ -1721,9 +1721,10 @@ fn build_wall_ring(
     args: &Args,
     has_sloped_roof: bool,
     building_passages: &CoordinateBitmap,
-) -> (Vec<(i32, i32)>, (i32, i32, i32)) {
+) -> (Vec<(i32, i32)>, i32) {
     let mut previous_node: Option<(i32, i32)> = None;
-    let mut corner_addup: (i32, i32, i32) = (0, 0, 0);
+    // Count of generated wall coordinates; the caller only needs to know the ring is non-empty.
+    let mut corner_count: i32 = 0;
     let mut current_building: Vec<(i32, i32)> = Vec::new();
 
     let passage_height = BUILDING_PASSAGE_HEIGHT.min(config.building_height);
@@ -1834,14 +1835,14 @@ fn build_wall_ring(
                 }
 
                 current_building.push((bx, bz));
-                corner_addup = (corner_addup.0 + bx, corner_addup.1 + bz, corner_addup.2 + 1);
+                corner_count += 1;
             }
         }
 
         previous_node = Some((x, z));
     }
 
-    (current_building, corner_addup)
+    (current_building, corner_count)
 }
 
 /// Generates special doors for garages (double door) and sheds (single door)
@@ -4151,7 +4152,7 @@ pub fn generate_buildings(
             config.condition,
             BuildingCondition::Construction | BuildingCondition::Ruined
         );
-    let (wall_outline, corner_addup) = build_wall_ring(
+    let (wall_outline, corner_count) = build_wall_ring(
         editor,
         &element.nodes,
         &config,
@@ -4212,7 +4213,7 @@ pub fn generate_buildings(
     };
 
     // Generate floors and ceilings
-    if corner_addup != (0, 0, 0) {
+    if corner_count > 0 {
         generate_floors_and_ceilings(
             editor,
             &cached_floor_area,
