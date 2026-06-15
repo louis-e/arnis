@@ -30,9 +30,10 @@ pub fn generate_leisure(
             "playground" | "recreation_ground" | "pitch" | "beach_resort" | "dog_park" => {
                 GREEN_STAINED_HARDENED_CLAY
             }
-            "swimming_pool" | "swimming_area" => WATER, //Swimming area: Area in a larger body of water for swimming
-            "bathing_place" => SMOOTH_SANDSTONE,        // Could be sand or concrete
-            "outdoor_seating" => SMOOTH_STONE,          //Usually stone or stone bricks
+            "swimming_pool" | "swimming_area" => WATER, // Swimming area: Area in a larger body of water for swimming
+            "marina" => WATER, // A sort of parking lot for small watercraft
+            "bathing_place" => SMOOTH_SANDSTONE, // Could be sand or concrete
+            "outdoor_seating" => SMOOTH_STONE, //Usually stone or stone bricks
             "water_park" | "slipway" => LIGHT_GRAY_CONCRETE, // Water park area, not the pool. Usually is concrete
             "ice_rink" => PACKED_ICE, // TODO: Ice for Ice Rink, needs building defined
             _ => GRASS_BLOCK,
