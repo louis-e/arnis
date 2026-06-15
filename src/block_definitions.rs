@@ -366,8 +366,9 @@ impl Block {
             265 => "soul_sand",
             _ => panic!("Invalid id"),
         }
-        // Note: If you want to add more blocks, please find unused ID
-        // slots below 255 so we don't need to update to u16 or higher.
+        // Note: ids are u16. Prefer a free slot below 256 for commonly placed
+        // blocks: sections holding only sub-256 ids store one byte per cell,
+        // while any id >= 256 forces that section to the wider two-byte storage.
     }
 
     pub fn properties(&self) -> Option<Value> {
