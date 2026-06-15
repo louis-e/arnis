@@ -381,17 +381,9 @@ pub fn generate_amenities(
                                 ]),
                                 None,
                             );
-                        } else if local_z > space_length && local_z < space_length + lane_width {
-                            // Driving lane - darker asphalt over the speckled mix
-                            editor.set_block(
-                                BLACK_CONCRETE,
-                                x,
-                                0,
-                                z,
-                                Some(&[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA, GRAY_CONCRETE]),
-                                None,
-                            );
                         }
+                        // Driving lanes keep the base asphalt mix; the white edge
+                        // line above already separates them from the spaces.
 
                         // Add light posts at parking space outline corners
                         if local_x == 0 && local_z == 0 && zone_x % 3 == 0 && zone_z % 2 == 0 {
