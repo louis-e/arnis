@@ -58,7 +58,7 @@ type ColorBlockMapping = (ColorTuple, BlockOptions);
 
 #[derive(Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, Debug)]
 pub struct Block {
-    id: u8,
+    id: u16,
 }
 
 /// Block with NBT properties shared via Arc so identical compounds reuse one allocation.
@@ -90,12 +90,12 @@ impl BlockWithProperties {
 
 impl Block {
     #[inline(always)]
-    const fn new(id: u8) -> Self {
+    const fn new(id: u16) -> Self {
         Self { id }
     }
 
     #[inline(always)]
-    pub fn id(&self) -> u8 {
+    pub fn id(&self) -> u16 {
         self.id
     }
 
@@ -334,8 +334,8 @@ impl Block {
             235 => "potted_poppy",
             236 => "oak_trapdoor",
             237 => "oak_trapdoor",
-            238 => "oak_trapdoor",
-            239 => "oak_trapdoor",
+            238 => "seagrass",
+            239 => "kelp_plant",
             240 => "quartz_slab",
             241 => "dark_oak_trapdoor",
             242 => "spruce_trapdoor",
@@ -352,6 +352,12 @@ impl Block {
             253 => "cyan_terracotta",
             254 => "black_wool",
             255 => "light_gray_wall_banner",
+            256 => "magma_block",
+            258 => "kelp",
+            259 => "tall_seagrass",
+            260 => "tall_seagrass",
+            261 => "sea_pickle",
+            265 => "soul_sand",
             _ => panic!("Invalid id"),
         }
         // Note: If you want to add more blocks, please find unused ID
@@ -690,20 +696,22 @@ impl Block {
                 map.insert("half".to_string(), Value::String("top".to_string()));
                 map
             })),
-            // Open oak trapdoor facing east
-            238 => Some(Value::Compound({
+            // Tall seagrass lower/upper halves.
+            259 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("east".to_string()));
-                map.insert("open".to_string(), Value::String("true".to_string()));
-                map.insert("half".to_string(), Value::String("top".to_string()));
+                map.insert("half".to_string(), Value::String("lower".to_string()));
                 map
             })),
-            // Open oak trapdoor facing west
-            239 => Some(Value::Compound({
+            260 => Some(Value::Compound({
                 let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("west".to_string()));
-                map.insert("open".to_string(), Value::String("true".to_string()));
-                map.insert("half".to_string(), Value::String("top".to_string()));
+                map.insert("half".to_string(), Value::String("upper".to_string()));
+                map
+            })),
+            // Waterlogged sea pickle cluster.
+            261 => Some(Value::Compound({
+                let mut map = HashMap::new();
+                map.insert("pickles".to_string(), Value::String("2".to_string()));
+                map.insert("waterlogged".to_string(), Value::String("true".to_string()));
                 map
             })),
             _ => None,
@@ -715,7 +723,7 @@ impl Block {
 use std::sync::Mutex;
 
 #[allow(clippy::type_complexity)]
-static STAIR_CACHE: Lazy<Mutex<HashMap<(u8, StairFacing, StairShape), Arc<Value>>>> =
+static STAIR_CACHE: Lazy<Mutex<HashMap<(u16, StairFacing, StairShape), Arc<Value>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
 
 // General function to create any stair block with facing and shape properties
@@ -1042,6 +1050,16 @@ pub const AZALEA_LEAVES: Block = Block::new(234);
 pub const DIAMOND_ORE: Block = Block::new(249);
 pub const REDSTONE_ORE: Block = Block::new(250);
 pub const LAPIS_ORE: Block = Block::new(251);
+
+// Underwater bed palette + vegetation (ported from the Teddy fork; ids kept verbatim).
+pub const SEAGRASS: Block = Block::new(238);
+pub const KELP_PLANT: Block = Block::new(239);
+pub const MAGMA_BLOCK: Block = Block::new(256);
+pub const KELP: Block = Block::new(258);
+pub const TALL_SEAGRASS_BOTTOM: Block = Block::new(259);
+pub const TALL_SEAGRASS_TOP: Block = Block::new(260);
+pub const SEA_PICKLE: Block = Block::new(261);
+pub const SOUL_SAND: Block = Block::new(265);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

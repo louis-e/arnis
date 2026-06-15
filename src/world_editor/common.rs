@@ -257,11 +257,11 @@ impl SectionToModify {
         }
 
         // Medium path: Full storage with no per-index properties.
-        // Use Block (u8) directly as palette key; no string formatting needed.
+        // Use Block id directly as palette key; no string formatting needed.
         if self.properties.is_empty() {
             if let BlockStorage::Full(blocks) = &self.storage {
-                // Build palette from unique blocks using a small array (Block is u8, max 256 values)
-                let mut block_to_palette = [u16::MAX; 256];
+                // Build palette from unique blocks; array indexed by block id (u16, see block_definitions).
+                let mut block_to_palette = [u16::MAX; 512];
                 let mut palette_blocks: Vec<Block> = Vec::new();
 
                 for &block in blocks.iter() {

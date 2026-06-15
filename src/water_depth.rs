@@ -1,6 +1,9 @@
 //! Per-cell water depth carving from a chamfer-3-4 distance transform over the LC_WATER mask.
 
-use crate::block_definitions::{GRAVEL, SAND, SANDSTONE, STONE, WATER};
+use crate::block_definitions::{
+    AIR, CLAY, COARSE_DIRT, DIRT, GRAVEL, KELP, KELP_PLANT, MAGMA_BLOCK, SAND, SANDSTONE, SEAGRASS,
+    SEA_PICKLE, SOUL_SAND, STONE, TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER,
+};
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
@@ -347,20 +350,53 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     }
     let bed_y = water_y - depth - 1;
 
-    // SAND share drifts down with depth; value_noise blends the boundary.
+    // Vanilla-MC layered bed: GRAVEL background with domain-warped, per-block
+    // noise patches of SAND/CLAY/DIRT/COARSE_DIRT plus rare deep MAGMA/SOUL_SAND,
+    // over STONE. Ported from the Teddy fork.
     let (top_block, under_block) = match depth {
         0..=1 => (SAND, SANDSTONE),
-        2..=4 => {
-            let sand_threshold = match depth {
-                2 => 0.70,
-                3 => 0.50,
-                _ => 0.30,
-            };
-            if crate::ground_generation::value_noise_01(x, z, 6) < sand_threshold {
-                (SAND, SANDSTONE)
+        2..=6 => {
+            // Depth-tier jitter breaks concentric depth rings.
+            let h = crate::land_cover::coord_hash(x + 7, z + 13);
+            let jitter = (h % 3) as i32 - 1;
+            let d = (depth + jitter).max(1);
+            // Domain-warp the sample coords so patches are organic, not circular.
+            let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 40);
+            let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 40);
+            let wx = x + ((warp_x - 0.5) * 24.0) as i32;
+            let wz = z + ((warp_z - 0.5) * 24.0) as i32;
+            // Per-block independent noise; scale ~= patch radius in cells.
+            let n_sand = crate::ground_generation::value_noise_01(wx + 53, wz + 97, 36);
+            let n_clay = crate::ground_generation::value_noise_01(wx + 73, wz + 109, 42);
+            let n_dirt = crate::ground_generation::value_noise_01(wx + 211, wz + 41, 26);
+            let n_coarse = crate::ground_generation::value_noise_01(wx + 311, wz + 17, 30);
+            let n_magma = crate::ground_generation::value_noise_01(wx + 401, wz + 503, 8);
+            let n_soul = crate::ground_generation::value_noise_01(wx + 727, wz + 911, 8);
+            // First positive wins by depth priority, else GRAVEL background.
+            let top = if d <= 1 {
+                SAND
+            } else if d == 2 {
+                if n_sand > 0.50 {
+                    SAND
+                } else {
+                    GRAVEL
+                }
+            } else if d >= 5 && n_magma > 0.96 {
+                MAGMA_BLOCK
+            } else if d >= 5 && n_soul > 0.96 {
+                SOUL_SAND
+            } else if n_clay > 0.74 {
+                CLAY
+            } else if n_sand > 0.81 {
+                SAND
+            } else if n_dirt > 0.88 {
+                DIRT
+            } else if n_coarse > 0.90 {
+                COARSE_DIRT
             } else {
-                (GRAVEL, STONE)
-            }
+                GRAVEL
+            };
+            (top, STONE)
         }
         _ => (GRAVEL, STONE),
     };
@@ -371,6 +407,86 @@ pub fn carve_water_column(editor: &mut WorldEditor, x: i32, z: i32, water_y: i32
     // Supports the gravity-affected bed; dropped onto bedrock at the lowest carve.
     if bed_y - 1 > MIN_Y {
         editor.set_block_absolute(under_block, x, bed_y - 1, z, None, Some(&[]));
+    }
+    // STONE backfill so neighbour side-faces never expose AIR under varied beds.
+    let fill_to = (bed_y - 2).max(MIN_Y + 1);
+    let fill_from = (bed_y - 12).max(MIN_Y + 1);
+    if fill_from <= fill_to {
+        editor.fill_column_absolute(STONE, x, z, fill_from, fill_to, true);
+    }
+
+    if depth >= 3 {
+        place_underwater_vegetation(editor, x, z, water_y, bed_y, depth);
+    }
+}
+
+/// Clumped underwater vegetation on a carved bed: SEAGRASS/TALL_SEAGRASS/SEA_PICKLE
+/// meadows, with rarer KELP columns in deeper water. Ported from the Teddy fork.
+fn place_underwater_vegetation(
+    editor: &mut WorldEditor,
+    x: i32,
+    z: i32,
+    water_y: i32,
+    bed_y: i32,
+    depth: i32,
+) {
+    // Two decorrelated noise fields gate clumpy meadows instead of pepper-shot cells.
+    let field_noise = crate::ground_generation::value_noise_01(x + 53, z + 89, 30);
+    let cluster_noise = crate::ground_generation::value_noise_01(x + 401, z + 17, 10);
+    let combined = field_noise * cluster_noise;
+
+    // KELP: deep cells where both noises ring high; tip caps the column.
+    let kelp_pick = (crate::land_cover::coord_hash(x + 91, z + 41) % 100) as i32;
+    if depth >= 4 && field_noise > 0.78 && cluster_noise > 0.80 && kelp_pick < 25 {
+        let plant_top_full = water_y - 1;
+        let plant_bottom = bed_y + 1;
+        let avail = plant_top_full - plant_bottom;
+        if avail >= 3 {
+            let hgt_pick = (crate::land_cover::coord_hash(x + 211, z + 503) % 100) as i32;
+            let share = 30 + hgt_pick * 70 / 100;
+            let used = ((avail as i64 * share as i64) / 100) as i32;
+            let used = used.max(3).min(avail);
+            let plant_top = plant_bottom + used;
+            // Paint into AIR only so veg never overwrites the bed.
+            for y in plant_bottom..plant_top {
+                editor.set_block_absolute(KELP_PLANT, x, y, z, None, Some(&[AIR]));
+            }
+            editor.set_block_absolute(KELP, x, plant_top, z, None, Some(&[AIR]));
+        }
+        return;
+    }
+
+    // Seagrass meadow mix: 50% SEAGRASS, 35% TALL_SEAGRASS, 15% SEA_PICKLE.
+    if combined > 0.42 {
+        let dropout = crate::land_cover::coord_hash(x + 17, z + 31) % 10;
+        if dropout < 4 {
+            let plant_y = bed_y + 1;
+            if plant_y < water_y {
+                let pick = (crate::land_cover::coord_hash(x + 211, z + 73) % 100) as i32;
+                if pick < 50 {
+                    editor.set_block_absolute(SEAGRASS, x, plant_y, z, None, Some(&[AIR]));
+                } else if pick < 85 && plant_y + 1 < water_y {
+                    editor.set_block_absolute(
+                        TALL_SEAGRASS_BOTTOM,
+                        x,
+                        plant_y,
+                        z,
+                        None,
+                        Some(&[AIR]),
+                    );
+                    editor.set_block_absolute(
+                        TALL_SEAGRASS_TOP,
+                        x,
+                        plant_y + 1,
+                        z,
+                        None,
+                        Some(&[AIR]),
+                    );
+                } else {
+                    editor.set_block_absolute(SEA_PICKLE, x, plant_y, z, None, Some(&[AIR]));
+                }
+            }
+        }
     }
 }
 
