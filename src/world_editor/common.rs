@@ -69,16 +69,22 @@ pub(crate) struct PaletteItem {
 ///   This covers freshly-created (all-AIR) sections, and sections that were
 ///   entirely filled with one type (e.g. STONE underground with `--fillground`).
 ///
-/// * `Full(Vec<Block>)` – the general case, equivalent to the old `[Block; 4096]`
-///   but heap-allocated via `Vec` so the *inline* size inside the parent
-///   `FnvHashMap` entry is only 24 bytes (pointer + length + capacity) instead
-///   of 4 096 bytes.  This eliminates huge HashMap-slot waste from unused
-///   capacity slots.
+/// * `Full(Vec<u8>)` – the general case for sections whose block ids all
+///   fit in a byte (the overwhelming majority), one byte per cell.
+///
+/// * `FullWide(Vec<Block>)` – only for sections that contain a block id of
+///   256 or more (a handful of underwater blocks); two bytes per cell. Kept
+///   separate so the common case isn't paying for the wider id space.
+///
+/// Both are heap-allocated via `Vec`, so the inline size inside the parent
+/// `FnvHashMap` entry is only 24 bytes.
 pub(crate) enum BlockStorage {
     /// Every position is the same block (commonly AIR).
     Uniform(Block),
-    /// Mixed blocks – always exactly 4 096 entries.
-    Full(Vec<Block>),
+    /// Mixed blocks, all ids < 256 – always exactly 4 096 entries.
+    Full(Vec<u8>),
+    /// Mixed blocks with at least one id >= 256 – always 4 096 entries.
+    FullWide(Vec<Block>),
 }
 
 impl BlockStorage {
@@ -87,12 +93,14 @@ impl BlockStorage {
     pub fn get(&self, index: usize) -> Block {
         match self {
             BlockStorage::Uniform(b) => *b,
-            BlockStorage::Full(v) => v[index],
+            BlockStorage::Full(v) => Block::from_raw_id(u16::from(v[index])),
+            BlockStorage::FullWide(v) => v[index],
         }
     }
 
-    /// Write block at flat `index`.
-    /// Promotes `Uniform` → `Full` on the first differing write.
+    /// Write block at flat `index`. Promotes `Uniform` → `Full`/`FullWide`
+    /// on the first differing write, and `Full` → `FullWide` the first time
+    /// a wide id is written.
     #[inline]
     pub fn set(&mut self, index: usize, block: Block) {
         match self {
@@ -101,11 +109,29 @@ impl BlockStorage {
             }
             BlockStorage::Uniform(base) => {
                 let base = *base;
-                let mut v = vec![base; 4096];
-                v[index] = block;
-                *self = BlockStorage::Full(v);
+                if base.id() < 256 && block.id() < 256 {
+                    let mut v = vec![base.id() as u8; 4096];
+                    v[index] = block.id() as u8;
+                    *self = BlockStorage::Full(v);
+                } else {
+                    let mut v = vec![base; 4096];
+                    v[index] = block;
+                    *self = BlockStorage::FullWide(v);
+                }
             }
             BlockStorage::Full(v) => {
+                if block.id() < 256 {
+                    v[index] = block.id() as u8;
+                } else {
+                    let mut wide: Vec<Block> = v
+                        .iter()
+                        .map(|&id| Block::from_raw_id(u16::from(id)))
+                        .collect();
+                    wide[index] = block;
+                    *self = BlockStorage::FullWide(wide);
+                }
+            }
+            BlockStorage::FullWide(v) => {
                 v[index] = block;
             }
         }
@@ -117,18 +143,29 @@ impl BlockStorage {
         match self {
             BlockStorage::Uniform(b) => BlockStorageIter::Uniform(*b, 0),
             BlockStorage::Full(v) => BlockStorageIter::Full(v.iter()),
+            BlockStorage::FullWide(v) => BlockStorageIter::FullWide(v.iter()),
         }
     }
 
-    /// Try to collapse a `Full` vec back to `Uniform` if every entry
-    /// is the same block.  Frees the 4 KiB heap allocation.
+    /// Try to collapse a mixed section back to `Uniform` if every entry
+    /// is the same block. Frees the heap allocation.
     pub fn try_compact(&mut self) {
-        if let BlockStorage::Full(v) = self {
-            if let Some(&first) = v.first() {
-                if v.iter().all(|&b| b == first) {
-                    *self = BlockStorage::Uniform(first);
+        match self {
+            BlockStorage::Full(v) => {
+                if let Some(&first) = v.first() {
+                    if v.iter().all(|&b| b == first) {
+                        *self = BlockStorage::Uniform(Block::from_raw_id(u16::from(first)));
+                    }
                 }
             }
+            BlockStorage::FullWide(v) => {
+                if let Some(&first) = v.first() {
+                    if v.iter().all(|&b| b == first) {
+                        *self = BlockStorage::Uniform(first);
+                    }
+                }
+            }
+            BlockStorage::Uniform(_) => {}
         }
     }
 }
@@ -136,7 +173,8 @@ impl BlockStorage {
 /// Iterator returned by [`BlockStorage::iter`].
 pub(crate) enum BlockStorageIter<'a> {
     Uniform(Block, usize),
-    Full(std::slice::Iter<'a, Block>),
+    Full(std::slice::Iter<'a, u8>),
+    FullWide(std::slice::Iter<'a, Block>),
 }
 
 impl<'a> Iterator for BlockStorageIter<'a> {
@@ -153,7 +191,8 @@ impl<'a> Iterator for BlockStorageIter<'a> {
                     None
                 }
             }
-            BlockStorageIter::Full(it) => it.next().copied(),
+            BlockStorageIter::Full(it) => it.next().map(|&id| Block::from_raw_id(u16::from(id))),
+            BlockStorageIter::FullWide(it) => it.next().copied(),
         }
     }
 
@@ -162,6 +201,7 @@ impl<'a> Iterator for BlockStorageIter<'a> {
         let rem = match self {
             BlockStorageIter::Uniform(_, c) => 4096 - *c,
             BlockStorageIter::Full(it) => it.len(),
+            BlockStorageIter::FullWide(it) => it.len(),
         };
         (rem, Some(rem))
     }
@@ -258,64 +298,62 @@ impl SectionToModify {
 
         // Medium path: Full storage with no per-index properties.
         // Use Block id directly as palette key; no string formatting needed.
-        if self.properties.is_empty() {
-            if let BlockStorage::Full(blocks) = &self.storage {
-                // Build palette from unique blocks; array indexed by block id (u16, see block_definitions).
-                let mut block_to_palette = [u16::MAX; 512];
-                let mut palette_blocks: Vec<Block> = Vec::new();
+        if self.properties.is_empty() && !matches!(self.storage, BlockStorage::Uniform(_)) {
+            // Build palette from unique blocks; array indexed by block id (u16, see block_definitions).
+            let mut block_to_palette = [u16::MAX; 512];
+            let mut palette_blocks: Vec<Block> = Vec::new();
 
-                for &block in blocks.iter() {
-                    let id = block.id() as usize;
-                    if block_to_palette[id] == u16::MAX {
-                        block_to_palette[id] = palette_blocks.len() as u16;
-                        palette_blocks.push(block);
-                    }
+            for block in self.storage.iter() {
+                let id = block.id() as usize;
+                if block_to_palette[id] == u16::MAX {
+                    block_to_palette[id] = palette_blocks.len() as u16;
+                    palette_blocks.push(block);
                 }
-
-                let mut bits_per_block = 4;
-                while (1 << bits_per_block) < palette_blocks.len() {
-                    bits_per_block += 1;
-                }
-
-                let mut data = vec![];
-                let mut cur: i64 = 0;
-                let mut cur_idx = 0;
-
-                for &block in blocks.iter() {
-                    let p = block_to_palette[block.id() as usize] as i64;
-
-                    if cur_idx + bits_per_block > 64 {
-                        data.push(cur);
-                        cur = 0;
-                        cur_idx = 0;
-                    }
-
-                    cur |= p << cur_idx;
-                    cur_idx += bits_per_block;
-                }
-
-                if cur_idx > 0 {
-                    data.push(cur);
-                }
-
-                let palette = palette_blocks
-                    .iter()
-                    .map(|block| PaletteItem {
-                        name: format!("{}:{}", block.namespace(), block.name()),
-                        properties: block.properties(),
-                    })
-                    .collect();
-
-                return Section {
-                    block_states: Blockstates {
-                        palette,
-                        data: Some(LongArray::new(data)),
-                        other: FnvHashMap::default(),
-                    },
-                    y,
-                    other: FnvHashMap::default(),
-                };
             }
+
+            let mut bits_per_block = 4;
+            while (1 << bits_per_block) < palette_blocks.len() {
+                bits_per_block += 1;
+            }
+
+            let mut data = vec![];
+            let mut cur: i64 = 0;
+            let mut cur_idx = 0;
+
+            for block in self.storage.iter() {
+                let p = block_to_palette[block.id() as usize] as i64;
+
+                if cur_idx + bits_per_block > 64 {
+                    data.push(cur);
+                    cur = 0;
+                    cur_idx = 0;
+                }
+
+                cur |= p << cur_idx;
+                cur_idx += bits_per_block;
+            }
+
+            if cur_idx > 0 {
+                data.push(cur);
+            }
+
+            let palette = palette_blocks
+                .iter()
+                .map(|block| PaletteItem {
+                    name: format!("{}:{}", block.namespace(), block.name()),
+                    properties: block.properties(),
+                })
+                .collect();
+
+            return Section {
+                block_states: Blockstates {
+                    palette,
+                    data: Some(LongArray::new(data)),
+                    other: FnvHashMap::default(),
+                },
+                y,
+                other: FnvHashMap::default(),
+            };
         }
 
         // Slow path: mixed blocks with per-index properties.
@@ -500,14 +538,19 @@ impl WorldToModify {
             sec_keys.sort_unstable();
             for sk in sec_keys {
                 sk.hash(&mut h);
-                match &chunk.sections[sk].storage {
+                // Hash logical block ids, not the raw storage, so a section
+                // is hashed identically whether it ended up Full or FullWide.
+                let storage = &chunk.sections[sk].storage;
+                match storage {
                     BlockStorage::Uniform(b) => b.hash(&mut h),
-                    BlockStorage::Full(v) => {
-                        let first = v[0];
-                        if v.iter().all(|&x| x == first) {
+                    _ => {
+                        let first = storage.get(0);
+                        if storage.iter().all(|b| b == first) {
                             first.hash(&mut h);
                         } else {
-                            v.hash(&mut h);
+                            for b in storage.iter() {
+                                b.hash(&mut h);
+                            }
                         }
                     }
                 }
@@ -953,8 +996,8 @@ impl WorldToModify {
                     }
                 }
             }
-            BlockStorage::Full(blocks) => {
-                for (idx, &block) in blocks.iter().enumerate() {
+            _ => {
+                for (idx, block) in other_section.storage.iter().enumerate() {
                     if block == AIR {
                         continue;
                     }
@@ -996,8 +1039,8 @@ impl WorldToModify {
                     }
                 }
             }
-            BlockStorage::Full(blocks) => {
-                for (idx, &block) in blocks.iter().enumerate() {
+            _ => {
+                for (idx, block) in other_section.storage.iter().enumerate() {
                     if block == AIR {
                         // Auth tile placed nothing here; preserve halo data.
                         continue;
@@ -1050,8 +1093,8 @@ impl WorldToModify {
                     }
                 }
             }
-            BlockStorage::Full(blocks) => {
-                for (idx, &block) in blocks.iter().enumerate() {
+            _ => {
+                for (idx, block) in other_section.storage.iter().enumerate() {
                     if block == AIR {
                         continue;
                     }
@@ -1084,7 +1127,7 @@ impl WorldToModify {
         for region in self.regions.values_mut() {
             for chunk in region.chunks.values_mut() {
                 for section in chunk.sections.values_mut() {
-                    if matches!(&section.storage, BlockStorage::Full(_)) {
+                    if !matches!(&section.storage, BlockStorage::Uniform(_)) {
                         section.compact();
                     }
                 }

@@ -99,6 +99,12 @@ impl Block {
         self.id
     }
 
+    /// Rebuild a block from a raw id, for the packed section storage.
+    #[inline(always)]
+    pub(crate) const fn from_raw_id(id: u16) -> Self {
+        Self::new(id)
+    }
+
     #[inline(always)]
     pub fn namespace(&self) -> &str {
         "minecraft"

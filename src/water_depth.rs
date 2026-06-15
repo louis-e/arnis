@@ -434,7 +434,7 @@ pub fn carve_water_column(
     }
 }
 
-/// True if any cell in the 5x5 ring around (x, z) carries a road/bridge.
+/// True if any cell in the 5x5 area around (x, z), center excluded, carries a road/bridge.
 fn bridge_adjacent(road_mask: &RoadMaskBitmap, x: i32, z: i32) -> bool {
     for dz in -2..=2 {
         for dx in -2..=2 {
@@ -696,13 +696,13 @@ mod tests {
     }
 
     #[test]
-    fn bridge_adjacent_detects_ring_only() {
+    fn bridge_adjacent_detects_neighborhood() {
         let bbox = XZBBox::rect_from_min_max(0, 0, 31, 31).unwrap();
         let mut mask = RoadMaskBitmap::new(&bbox);
         mask.set(12, 10);
         assert!(
             bridge_adjacent(&mask, 10, 10),
-            "two cells away is inside the ring"
+            "two cells away is inside the 5x5 area"
         );
         assert!(
             !bridge_adjacent(&mask, 15, 15),
