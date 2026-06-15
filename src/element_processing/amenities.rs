@@ -4,6 +4,7 @@ use crate::bresenham::bresenham_line;
 use crate::coordinate_system::cartesian::XZPoint;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::get_nearest_road_block;
+use crate::element_processing::surfaces::{get_blocks_for_surface, semirandom_surface};
 use crate::floodfill_cache::{FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
@@ -268,7 +269,15 @@ pub fn generate_amenities(
                 // Process parking areas
                 let mut previous_node: Option<XZPoint> = None;
 
-                let block_type = GRAY_CONCRETE;
+                // Speckled asphalt mix like roads; honor an explicit surface=* tag.
+                let mut block_types: &[Block] = &[GRAY_CONCRETE_POWDER, CYAN_TERRACOTTA];
+                if let Some(blocks) = element
+                    .tags()
+                    .get("surface")
+                    .and_then(|s| get_blocks_for_surface(s))
+                {
+                    block_types = blocks;
+                }
 
                 for node in element.nodes() {
                     let pt: XZPoint = node.xz();
@@ -279,7 +288,7 @@ pub fn generate_amenities(
                             bresenham_line(prev.x, 0, prev.z, pt.x, 0, pt.z);
                         for (bx, _, bz) in bresenham_points {
                             editor.set_block(
-                                block_type,
+                                semirandom_surface(bx, bz, block_types),
                                 bx,
                                 0,
                                 bz,
@@ -297,7 +306,7 @@ pub fn generate_amenities(
 
                 for &(x, z) in flood_area.iter() {
                     editor.set_block(
-                        block_type,
+                        semirandom_surface(x, z, block_types),
                         x,
                         0,
                         z,
@@ -329,7 +338,7 @@ pub fn generate_amenities(
                             if local_x == 0 {
                                 // Vertical parking space lines (only on the left edge)
                                 editor.set_block(
-                                    LIGHT_GRAY_CONCRETE,
+                                    WHITE_CONCRETE,
                                     x,
                                     0,
                                     z,
@@ -344,7 +353,7 @@ pub fn generate_amenities(
                             } else if local_z == 0 {
                                 // Horizontal parking space lines (only on the top edge)
                                 editor.set_block(
-                                    LIGHT_GRAY_CONCRETE,
+                                    WHITE_CONCRETE,
                                     x,
                                     0,
                                     z,
@@ -360,7 +369,7 @@ pub fn generate_amenities(
                         } else if local_z == space_length {
                             // Bottom edge of parking spaces (border with driving lane)
                             editor.set_block(
-                                LIGHT_GRAY_CONCRETE,
+                                WHITE_CONCRETE,
                                 x,
                                 0,
                                 z,
@@ -372,19 +381,20 @@ pub fn generate_amenities(
                                 ]),
                                 None,
                             );
-                        } else if local_z > space_length && local_z < space_length + lane_width {
-                            // Driving lane - use darker concrete
-                            editor.set_block(BLACK_CONCRETE, x, 0, z, Some(&[GRAY_CONCRETE]), None);
                         }
+                        // Driving lanes keep the base asphalt mix; the white edge
+                        // line above already separates them from the spaces.
 
                         // Add light posts at parking space outline corners
                         if local_x == 0 && local_z == 0 && zone_x % 3 == 0 && zone_z % 2 == 0 {
-                            // Light posts at regular intervals on parking space corners
-                            editor.set_block(COBBLESTONE_WALL, x, 1, z, None, None);
-                            for dy in 2..=4 {
-                                editor.set_block(OAK_FENCE, x, dy, z, None, None);
+                            // Slim metal lamp with a cool-white head.
+                            editor.set_block(SMOOTH_STONE, x, 1, z, None, None);
+                            editor.set_block(ANDESITE_WALL, x, 2, z, None, None);
+                            for dy in 3..=5 {
+                                editor.set_block(IRON_BARS, x, dy, z, None, None);
                             }
-                            editor.set_block(GLOWSTONE, x, 5, z, None, None);
+                            editor.set_block(SEA_LANTERN, x, 6, z, None, None);
+                            editor.set_block(SMOOTH_STONE_SLAB, x, 7, z, None, None);
                         }
                     }
                 }
