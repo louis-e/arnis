@@ -449,7 +449,7 @@ fn scanline_fill_water(
                     continue;
                 }
                 // depth_at gives the carved depth (0 without land-cover water data).
-                carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z));
+                carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask);
             }
         }
     }
