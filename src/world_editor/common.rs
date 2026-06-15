@@ -14,6 +14,9 @@ pub const MIN_SECTION_Y: i8 = (MIN_Y / 16) as i8;
 /// The world editor supports the full range; the elevation system controls
 /// the actual heights used based on the disable_height_limit setting.
 const MAX_Y: i32 = 2031;
+/// Sizes the per-section palette lookup array. Block ids are u16 but stay well
+/// below this; raise it if block_definitions ever allocates an id this high.
+const MAX_BLOCK_ID: usize = 512;
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
@@ -299,12 +302,16 @@ impl SectionToModify {
         // Medium path: Full storage with no per-index properties.
         // Use Block id directly as palette key; no string formatting needed.
         if self.properties.is_empty() && !matches!(self.storage, BlockStorage::Uniform(_)) {
-            // Build palette from unique blocks; array indexed by block id (u16, see block_definitions).
-            let mut block_to_palette = [u16::MAX; 512];
+            // Build palette from unique blocks; array indexed by block id.
+            let mut block_to_palette = [u16::MAX; MAX_BLOCK_ID];
             let mut palette_blocks: Vec<Block> = Vec::new();
 
             for block in self.storage.iter() {
                 let id = block.id() as usize;
+                debug_assert!(
+                    id < MAX_BLOCK_ID,
+                    "block id {id} exceeds palette array size"
+                );
                 if block_to_palette[id] == u16::MAX {
                     block_to_palette[id] = palette_blocks.len() as u16;
                     palette_blocks.push(block);
@@ -1139,6 +1146,30 @@ impl WorldToModify {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wide_id_storage_round_trips() {
+        // Writing a wide (>= 256) id upgrades Full(u8) -> FullWide and round-trips exactly.
+        let mut s = BlockStorage::Uniform(AIR);
+        s.set(0, STONE);
+        assert!(matches!(s, BlockStorage::Full(_)));
+        s.set(1, KELP);
+        assert!(matches!(s, BlockStorage::FullWide(_)));
+        assert_eq!(s.get(0), STONE);
+        assert_eq!(s.get(1), KELP);
+        assert_eq!(s.iter().nth(1), Some(KELP));
+
+        // A wide block straight from Uniform, then a uniform fill, compacts back.
+        let mut w = BlockStorage::Uniform(AIR);
+        w.set(0, SOUL_SAND);
+        assert!(matches!(w, BlockStorage::FullWide(_)));
+        for i in 0..4096 {
+            w.set(i, SOUL_SAND);
+        }
+        w.try_compact();
+        assert!(matches!(w, BlockStorage::Uniform(_)));
+        assert_eq!(w.get(7), SOUL_SAND);
+    }
 
     #[test]
     fn bulk_fill_empty_chunk_all_clean() {
