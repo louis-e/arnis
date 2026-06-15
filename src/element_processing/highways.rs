@@ -546,6 +546,8 @@ fn generate_highways_internal(
             // center stripe; flipped to `lanes > 1` check below after we
             // resolve the lanes tag. Keeps the same visual default.
             let mut default_lanes: i32 = 1;
+            // Vehicular roads widen with lane count; footways/tracks don't.
+            let mut lanes_scale_width = false;
             let scale_factor = args.scale;
 
             // Reuse the function-level layer resolution (already normalised
@@ -572,13 +574,16 @@ fn generate_highways_internal(
                 "motorway" | "primary" | "trunk" => {
                     block_range = 5;
                     default_lanes = 2;
+                    lanes_scale_width = true;
                 }
                 "secondary" => {
                     block_range = 4;
                     default_lanes = 2;
+                    lanes_scale_width = true;
                 }
                 "tertiary" => {
                     default_lanes = 2;
+                    lanes_scale_width = true;
                 }
                 "track" => {
                     block_range = 1;
@@ -586,10 +591,12 @@ fn generate_highways_internal(
                 "service" => {
                     block_types = &[GRAY_CONCRETE];
                     block_range = 2;
+                    lanes_scale_width = true;
                 }
                 "secondary_link" | "tertiary_link" => {
                     //Exit ramps, sliproads
                     block_range = 1;
+                    lanes_scale_width = true;
                 }
                 "escape" => {
                     // Sand trap for vehicles on mountainous roads
@@ -603,15 +610,8 @@ fn generate_highways_internal(
                 }
 
                 _ => {
-                    if let Some(lanes) = element.tags().get("lanes") {
-                        if lanes == "2" {
-                            block_range = 3;
-                            default_lanes = 2;
-                        } else if lanes != "1" {
-                            block_range = 4;
-                            default_lanes = 2;
-                        }
-                    }
+                    // residential/unclassified/etc: width from lane count below.
+                    lanes_scale_width = true;
                 }
             }
 
@@ -659,33 +659,30 @@ fn generate_highways_internal(
                 block_types = &[SMOOTH_STONE];
             }
 
-            // Optional explicit width via `width=*` (meters ≈ blocks).
-            // Clamped to the terrain-flattening helper's sample-buffer cap.
+            // OSM lanes=* is the total for both directions; capped against junk values.
+            const MAX_LANES: i32 = 16;
+            let tagged_lanes = element
+                .tags()
+                .get("lanes")
+                .and_then(|l| l.parse::<i32>().ok())
+                .unwrap_or(default_lanes)
+                .clamp(1, MAX_LANES);
+
+            // Explicit width=* wins; else vehicular roads use 3.5 m/lane, never below the default.
             if let Some(w) = element
                 .tags()
                 .get("width")
                 .and_then(|w| w.parse::<f32>().ok())
             {
-                block_range = ((w / 2.0).round() as i32).clamp(1, MAX_BLOCK_RANGE as i32);
+                block_range = (w / 2.0).round() as i32;
+            } else if lanes_scale_width {
+                let lanes_based = ((tagged_lanes as f32 * 3.5 - 1.0) / 2.0).round() as i32;
+                block_range = block_range.max(lanes_based);
             }
+            block_range = block_range.clamp(1, MAX_BLOCK_RANGE as i32);
 
-            // Resolve lane-marking count. `lane_markings=no` disables them,
-            // `lanes=*` overrides the default for this highway type.
-            // Multi-lane inner dividers are drawn for lanes >= 2 (one line
-            // between every pair of adjacent lanes).
-            //
-            // Clamped to a realistic upper bound: the world's widest real
-            // roads have ~12 lanes, but an `i32` parse will accept
-            // arbitrary OSM values. Without the cap, a stray `lanes=999999`
-            // tag (typo or vandalism) would send the inner divider loop
-            // into millions of iterations per bresenham point.
-            const MAX_LANES: i32 = 16;
-            let mut lanes = element
-                .tags()
-                .get("lanes")
-                .and_then(|l| l.parse::<i32>().ok())
-                .unwrap_or(default_lanes)
-                .clamp(0, MAX_LANES);
+            // lane_markings=no drops the dividers but not the width.
+            let mut lanes = tagged_lanes;
             if element.tags().get("lane_markings").map(|s| s.as_str()) == Some("no") {
                 lanes = 1;
             }
