@@ -317,9 +317,9 @@ fn leaf_hash(x: i32, y: i32, z: i32) -> u64 {
         ^ (z as i64 as u64).wrapping_mul(83492791)
 }
 
-// ~4% organic leaf gap.
-fn is_leaf_gap(x: i32, y: i32, z: i32) -> bool {
-    leaf_hash(x, y, z) % 100 < 4
+// ~4% organic leaf gap, keyed on the position hash.
+fn leaf_gap_at(h: u64) -> bool {
+    h % 100 < 4
 }
 
 impl LeafPlacer<'_> {
@@ -346,10 +346,13 @@ impl LeafPlacer<'_> {
     }
 
     fn place_with(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32, allow_accent: bool) {
-        if self.blocked(x, z) || is_leaf_gap(x, y, z) {
+        if self.blocked(x, z) {
             return;
         }
         let h = leaf_hash(x, y, z);
+        if leaf_gap_at(h) {
+            return;
+        }
         let block = if allow_accent {
             if let Some(accent) = self.accent_block {
                 let r2 = h.wrapping_mul(2654435761) % 100;
@@ -1224,7 +1227,7 @@ mod tests {
         // Pick a gap cell via the same predicate place_with uses (no drift).
         let (gx, gz) = (0..64)
             .flat_map(|x| (0..64).map(move |z| (x, z)))
-            .find(|&(x, z)| is_leaf_gap(x, 10, z))
+            .find(|&(x, z)| leaf_gap_at(leaf_hash(x, 10, z)))
             .expect("a 4% gap cell exists in 64x64");
 
         placer.place_core(&mut editor, gx, 10, gz);
