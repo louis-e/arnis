@@ -966,7 +966,9 @@ fn gui_start_generation(
                         Some(parent) => p = parent,
                         // No existing ancestor (e.g. a bare relative path): probe
                         // the current dir so the query always hits a real path.
-                        None => break std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+                        None => {
+                            break std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                        }
                     }
                 }
             };
