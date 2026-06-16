@@ -287,11 +287,11 @@ button:hover {
 
 @keyframes progress-sheen {
   from { background-position: 0 0; }
-  to { background-position: 22.63px 0; }
+  to { background-position: 22.627px 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progress-bar::after { animation: none; }
+  .progress-bar::after { animation: none; will-change: auto; }
 }
 
 .footer {
