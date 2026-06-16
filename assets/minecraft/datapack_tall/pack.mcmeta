@@ -1,6 +1,9 @@
 {
   "pack": {
     "pack_format": 61,
-    "description": "Arnis extended build height (1.21.4)"
+    "description": "Arnis extended build height",
+    "supported_formats": { "min_inclusive": 61, "max_inclusive": 9999 },
+    "min_format": 61,
+    "max_format": 9999
   }
 }
