@@ -359,6 +359,7 @@ impl Block {
             254 => "black_wool",
             255 => "light_gray_wall_banner",
             256 => "magma_block",
+            257 => "snow",
             258 => "kelp",
             259 => "tall_seagrass",
             260 => "tall_seagrass",
@@ -1062,6 +1063,7 @@ pub const LAPIS_ORE: Block = Block::new(251);
 pub const SEAGRASS: Block = Block::new(238);
 pub const KELP_PLANT: Block = Block::new(239);
 pub const MAGMA_BLOCK: Block = Block::new(256);
+pub const SNOW_LAYER: Block = Block::new(257);
 pub const KELP: Block = Block::new(258);
 pub const TALL_SEAGRASS_BOTTOM: Block = Block::new(259);
 pub const TALL_SEAGRASS_TOP: Block = Block::new(260);

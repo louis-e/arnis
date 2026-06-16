@@ -383,6 +383,7 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         254 => "mcl_wool:black",                       // BLACK_WOOL
         255 => "mcl_banners:hanging_banner_silver",    // LIGHT_GRAY_WALL_BANNER
         256 => "mcl_nether:magma",                     // MAGMA_BLOCK
+        257 => "mcl_core:snow",                        // SNOW_LAYER
         258 => "mcl_ocean:kelp",                       // KELP
         259 => "mcl_ocean:tall_seagrass",              // TALL_SEAGRASS_BOTTOM
         260 => "mcl_ocean:tall_seagrass",              // TALL_SEAGRASS_TOP
