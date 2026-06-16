@@ -1,9 +1,25 @@
 {
   "pack": {
-    "pack_format": 61,
     "description": "Arnis extended build height",
-    "supported_formats": { "min_inclusive": 61, "max_inclusive": 88 },
-    "min_format": 61,
-    "max_format": 88
+    "pack_format": 61,
+    "supported_formats": { "min_inclusive": 61, "max_inclusive": 101 },
+    "min_format": [61, 0],
+    "max_format": [101, 2147483647]
+  },
+  "overlays": {
+    "entries": [
+      {
+        "formats": { "min_inclusive": 90, "max_inclusive": 100 },
+        "min_format": [90, 0],
+        "max_format": [100, 2147483647],
+        "directory": "overlay_attributes"
+      },
+      {
+        "formats": { "min_inclusive": 101, "max_inclusive": 101 },
+        "min_format": [101, 0],
+        "max_format": [101, 2147483647],
+        "directory": "overlay_2601"
+      }
+    ]
   }
 }
