@@ -350,7 +350,17 @@ fn level_water_surfaces(heights: &mut [Vec<f64>], lc_grid: &[Vec<u8>]) -> Vec<Ve
                 v[mid]
             };
 
-            if iqr > FLOWING_IQR_THRESHOLD_M {
+            // A body covering a large fraction of the grid is a sea/ocean/major
+            // lake: its high IQR comes from noisy bathymetry, not a real gradient,
+            // so force it still. Otherwise the flowing branch terraces it into the
+            // canyons/lines of #1066. Rivers cover a tiny fraction and stay flowing.
+            const STILL_MIN_AREA_CELLS: usize = 1024;
+            const STILL_GRID_FRACTION_PCT: usize = 5;
+            let total_cells = h * w;
+            let large_still_body = component.len() >= STILL_MIN_AREA_CELLS
+                && component.len() * 100 >= total_cells * STILL_GRID_FRACTION_PCT;
+
+            if !large_still_body && iqr > FLOWING_IQR_THRESHOLD_M {
                 // ── Flowing water (river-like) ─────────────────────────
                 // Use a per-cell local median surface so the gradient is
                 // preserved. Skip the adjacent-land clamp — that's meant
@@ -1310,6 +1320,22 @@ mod tests {
         assert_eq!(blocks_per_meter, 0.0);
         // Every cell flattens to ground level.
         assert!(mc.iter().flatten().all(|&y| (y - 64.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn large_noisy_water_body_levels_flat() {
+        // A water body covering the whole grid with a steep noisy gradient
+        // (IQR well above the flowing threshold) must be forced still and
+        // flattened to one surface, not terraced into the #1066 canyons.
+        let (w, h) = (40usize, 40usize);
+        let lc = vec![vec![LC_WATER; w]; h];
+        let mut heights: Vec<Vec<f64>> = (0..h).map(|y| vec![(y * 2) as f64; w]).collect();
+        level_water_surfaces(&mut heights, &lc);
+        let first = heights[0][0];
+        assert!(
+            heights.iter().flatten().all(|&v| v == first),
+            "a large noisy sea must flatten to a single level"
+        );
     }
 
     #[test]
