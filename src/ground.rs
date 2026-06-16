@@ -328,9 +328,11 @@ impl Ground {
     }
 
     /// Returns the appropriate Y level for water placement.
-    /// On steep terrain, snaps to the local minimum within a small radius
-    /// to compensate for spatial misalignment between water classification
-    /// data (OSM/ESA) and the elevation DEM.
+    /// On steep terrain, snaps to the local minimum within a small radius to
+    /// correct spatial misalignment between water classification (OSM/ESA) and
+    /// the elevation DEM. The snap is skipped across a real cliff/falls (a drop
+    /// larger than the snap radius), where the cell keeps its own level so the
+    /// waterfront isn't terraced into a step.
     pub fn water_level(&self, coord: XZPoint) -> i32 {
         let center = self.level(coord);
         if !self.elevation_enabled {
