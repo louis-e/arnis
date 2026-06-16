@@ -341,10 +341,11 @@ impl Ground {
         if slope <= 2 {
             return center;
         }
-        // On steep terrain, find the minimum elevation in a small radius
-        // to snap water to the canyon/valley floor
+        // On steep terrain, snap to the local minimum within SNAP_RADIUS to
+        // correct small DEM-vs-water misalignment.
+        const SNAP_RADIUS: i32 = 3;
         let mut min_y = center;
-        for r in 1..=3i32 {
+        for r in 1..=SNAP_RADIUS {
             for &(dx, dz) in &[
                 (-r, 0),
                 (r, 0),
@@ -359,10 +360,10 @@ impl Ground {
                 min_y = min_y.min(neighbor);
             }
         }
-        // A large gap to the local min is a real cliff/falls, not DEM
+        // A drop larger than the snap radius is a real cliff/falls, not
         // misalignment; snapping across it terraces the waterfront into a step.
-        const MAX_SNAP_DROP: i32 = 3;
-        if center - min_y > MAX_SNAP_DROP {
+        // saturating_sub guards against overflow on pathological elevations.
+        if center.saturating_sub(min_y) > SNAP_RADIUS {
             return center;
         }
         min_y
