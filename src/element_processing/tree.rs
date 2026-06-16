@@ -310,9 +310,35 @@ struct LeafPlacer<'a> {
     footprints: Option<&'a BuildingFootprintBitmap>,
 }
 
+// Deterministic per-position hash driving the organic gap and accent rolls.
+fn leaf_hash(x: i32, y: i32, z: i32) -> u64 {
+    (x as i64 as u64).wrapping_mul(73856093)
+        ^ (y as i64 as u64).wrapping_mul(19349663)
+        ^ (z as i64 as u64).wrapping_mul(83492791)
+}
+
+// ~4% organic leaf gap, keyed on the position hash.
+fn leaf_gap_at(h: u64) -> bool {
+    h % 100 < 4
+}
+
 impl LeafPlacer<'_> {
+    // Shared footprint gate: true if a building occupies (x, z).
+    fn blocked(&self, x: i32, z: i32) -> bool {
+        self.check_collision && self.footprints.is_some_and(|fp| fp.contains(x, z))
+    }
+
     fn place_core(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
         self.place_with(editor, x, y, z, false);
+    }
+
+    // Apex cap: the lone center-column cover over the trunk; skips the organic
+    // gap (but not the footprint gate) so the log is never left exposed.
+    fn place_apex_cap(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
+        if self.blocked(x, z) {
+            return;
+        }
+        editor.set_block_absolute(self.leaves_block, x, y, z, None, None);
     }
 
     fn place_surface(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
@@ -320,18 +346,11 @@ impl LeafPlacer<'_> {
     }
 
     fn place_with(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32, allow_accent: bool) {
-        if self.check_collision {
-            if let Some(fp) = self.footprints {
-                if fp.contains(x, z) {
-                    return;
-                }
-            }
+        if self.blocked(x, z) {
+            return;
         }
-        let h = (x as i64 as u64).wrapping_mul(73856093)
-            ^ (y as i64 as u64).wrapping_mul(19349663)
-            ^ (z as i64 as u64).wrapping_mul(83492791);
-        // ~4% organic leaf gap.
-        if h % 100 < 4 {
+        let h = leaf_hash(x, y, z);
+        if leaf_gap_at(h) {
             return;
         }
         let block = if allow_accent {
@@ -498,6 +517,9 @@ impl Tree {
                 }
             }
         }
+
+        // Force the apex so the organic gap never leaves the trunk top exposed.
+        placer.place_apex_cap(editor, x, base_y + canopy_top, z);
 
         // Only the outermost non-empty ring gets surface (accent-eligible) leaves.
         let outermost_ring_idx: Option<usize> = tree
@@ -1177,5 +1199,46 @@ impl Tree {
             SCAFFOLDING,
             BEDROCK,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+
+    // The apex cap must place even on a cell the ~4% organic gap skips.
+    #[test]
+    fn place_apex_cap_fills_the_organic_gap() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        // Editor is never saved here; a temp dir keeps the path valid + portable.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
+
+        let placer = LeafPlacer {
+            leaves_block: OAK_LEAVES,
+            accent_block: None,
+            accent_chance: 0,
+            check_collision: false,
+            footprints: None,
+        };
+
+        // Pick a gap cell via the same predicate place_with uses (no drift).
+        let (gx, gz) = (0..64)
+            .flat_map(|x| (0..64).map(move |z| (x, z)))
+            .find(|&(x, z)| leaf_gap_at(leaf_hash(x, 10, z)))
+            .expect("a 4% gap cell exists in 64x64");
+
+        placer.place_core(&mut editor, gx, 10, gz);
+        assert!(
+            !editor.check_for_block_absolute(gx, 10, gz, Some(&[OAK_LEAVES]), None),
+            "the organic gap should skip this cell"
+        );
+        placer.place_apex_cap(&mut editor, gx, 10, gz);
+        assert!(
+            editor.check_for_block_absolute(gx, 10, gz, Some(&[OAK_LEAVES]), None),
+            "apex cap must place despite the organic gap"
+        );
     }
 }
