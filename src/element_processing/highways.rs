@@ -1622,7 +1622,8 @@ pub(crate) fn highway_block_range(
     block_range = block_range.clamp(1, MAX_BLOCK_RANGE as i32);
 
     if scale < 1.0 {
-        block_range = ((block_range as f64) * scale).floor() as i32;
+        // max(1): scaling must never collapse a road to zero width.
+        block_range = (((block_range as f64) * scale).floor() as i32).max(1);
     }
 
     block_range
@@ -1813,6 +1814,9 @@ mod tests {
             ),
             4
         );
+        // Down-scaling never collapses a road to zero width.
+        assert_eq!(highway_block_range("footway", &tags(&[]), 0.4), 1);
+        assert_eq!(highway_block_range("residential", &tags(&[]), 0.4), 1);
     }
 
     #[test]
