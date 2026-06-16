@@ -958,13 +958,17 @@ fn gui_start_generation(
             // error or a 0/undeterminable result as "can't tell" and proceed (#824).
             let probe_path = {
                 let mut p = check_path.as_path();
-                while !p.exists() {
+                loop {
+                    if p.exists() {
+                        break p.to_path_buf();
+                    }
                     match p.parent() {
                         Some(parent) => p = parent,
-                        None => break,
+                        // No existing ancestor (e.g. a bare relative path): probe
+                        // the current dir so the query always hits a real path.
+                        None => break std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
                     }
                 }
-                p.to_path_buf()
             };
             match fs2::available_space(&probe_path) {
                 Ok(available) if available > 0 && available < MIN_DISK_SPACE_BYTES => {
