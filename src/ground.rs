@@ -170,7 +170,8 @@ impl Ground {
         }
     }
 
-    /// Minecraft Y at/above which terrain is snow-capped (`i32::MAX` = never).
+    /// Minecraft Y at/above which terrain is snow-capped (`i32::MAX` = never,
+    /// `i32::MIN` = always, e.g. a flat plateau above the snow line).
     #[inline(always)]
     pub fn snow_threshold_y(&self) -> i32 {
         self.snow_threshold_y

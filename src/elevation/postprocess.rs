@@ -1229,14 +1229,14 @@ pub fn scale_to_minecraft(
         if !min_height.is_finite() || !max_height.is_finite() || min_height >= max_height {
             // Zero-relief/degenerate: keep the real min height (the snow line
             // needs it) but flatten the range so every cell maps to ground_level.
-            (
-                if min_height.is_finite() {
-                    min_height
-                } else {
-                    0.0
-                },
-                0.0_f64,
-            )
+            // `min <= max` distinguishes true flat terrain from an all-NaN grid,
+            // whose reduce leaves min = f64::MAX (finite but bogus) -> use 0.
+            let real_min = if min_height.is_finite() && min_height <= max_height {
+                min_height
+            } else {
+                0.0
+            };
+            (real_min, 0.0_f64)
         } else {
             (min_height, max_height - min_height)
         };
@@ -1310,6 +1310,15 @@ mod tests {
         assert_eq!(blocks_per_meter, 0.0);
         // Every cell flattens to ground level.
         assert!(mc.iter().flatten().all(|&y| (y - 64.0).abs() < 1e-9));
+    }
+
+    #[test]
+    fn scale_all_nan_grid_min_height_zero() {
+        // No finite samples must not leak the f64::MAX reduce sentinel as min.
+        let grid = vec![vec![f64::NAN; 4]; 4];
+        let (_mc, min_m, blocks_per_meter) = scale_to_minecraft(&grid, 1.0, 64, false, 0);
+        assert_eq!(min_m, 0.0);
+        assert_eq!(blocks_per_meter, 0.0);
     }
 
     #[test]
