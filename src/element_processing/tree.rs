@@ -315,6 +315,18 @@ impl LeafPlacer<'_> {
         self.place_with(editor, x, y, z, false);
     }
 
+    // Apex cap: the lone center-column cover over the trunk; skip the organic gap so the log isn't exposed.
+    fn place_cap(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
+        if self.check_collision {
+            if let Some(fp) = self.footprints {
+                if fp.contains(x, z) {
+                    return;
+                }
+            }
+        }
+        editor.set_block_absolute(self.leaves_block, x, y, z, None, None);
+    }
+
     fn place_surface(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
         self.place_with(editor, x, y, z, true);
     }
@@ -498,6 +510,9 @@ impl Tree {
                 }
             }
         }
+
+        // Force the apex so the organic gap never leaves the trunk top exposed.
+        placer.place_cap(editor, x, base_y + canopy_top, z);
 
         // Only the outermost non-empty ring gets surface (accent-eligible) leaves.
         let outermost_ring_idx: Option<usize> = tree
@@ -1177,5 +1192,48 @@ impl Tree {
             SCAFFOLDING,
             BEDROCK,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+    use crate::coordinate_system::geographic::LLBBox;
+    use std::path::PathBuf;
+
+    // The apex cap must place even on a cell the ~4% organic gap skips.
+    #[test]
+    fn place_cap_fills_the_organic_gap() {
+        let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
+        let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
+        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
+
+        let placer = LeafPlacer {
+            leaves_block: OAK_LEAVES,
+            accent_block: None,
+            accent_chance: 0,
+            check_collision: false,
+            footprints: None,
+        };
+
+        // Probe place_core to find a cell the gap skips, then confirm place_cap fills it.
+        let mut gap = None;
+        'outer: for gx in 0..64 {
+            for gz in 0..64 {
+                placer.place_core(&mut editor, gx, 10, gz);
+                if !editor.check_for_block_absolute(gx, 10, gz, Some(&[OAK_LEAVES]), None) {
+                    gap = Some((gx, gz));
+                    break 'outer;
+                }
+            }
+        }
+        let (gx, gz) = gap.expect("the organic gap should skip at least one cell");
+
+        placer.place_cap(&mut editor, gx, 10, gz);
+        assert!(
+            editor.check_for_block_absolute(gx, 10, gz, Some(&[OAK_LEAVES]), None),
+            "apex cap must place despite the organic gap"
+        );
     }
 }
