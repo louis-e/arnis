@@ -541,11 +541,6 @@ fn generate_highways_internal(
             // Default surface mix. Overridden below based on highway_type or
             // an explicit surface=* tag via `get_blocks_for_surface`.
             let mut block_types: &[Block] = DEFAULT_ROAD_MIX;
-            let mut block_range: i32 = 2;
-            // default_lanes == 2 for highway types that historically had a
-            // center stripe; flipped to `lanes > 1` check below after we
-            // resolve the lanes tag. Keeps the same visual default.
-            let mut default_lanes: i32 = 1;
             let scale_factor = args.scale;
 
             // Reuse the function-level layer resolution (already normalised
@@ -559,60 +554,15 @@ fn generate_highways_internal(
                 }
             }
 
-            // Determine block type and range based on highway type
+            // Surface palette per highway type; width is resolved by
+            // highway_block_range below so renderer and prescan stay in sync.
             match highway_type.as_str() {
-                "footway" | "pedestrian" => {
+                "footway" | "pedestrian" | "service" | "steps" => {
                     block_types = &[GRAY_CONCRETE];
-                    block_range = 1;
                 }
-                "path" => {
-                    block_types = &[DIRT_PATH];
-                    block_range = 1;
-                }
-                "motorway" | "primary" | "trunk" => {
-                    block_range = 5;
-                    default_lanes = 2;
-                }
-                "secondary" => {
-                    block_range = 4;
-                    default_lanes = 2;
-                }
-                "tertiary" => {
-                    default_lanes = 2;
-                }
-                "track" => {
-                    block_range = 1;
-                }
-                "service" => {
-                    block_types = &[GRAY_CONCRETE];
-                    block_range = 2;
-                }
-                "secondary_link" | "tertiary_link" => {
-                    //Exit ramps, sliproads
-                    block_range = 1;
-                }
-                "escape" => {
-                    // Sand trap for vehicles on mountainous roads
-                    block_types = &[SAND];
-                    block_range = 1;
-                }
-                "steps" => {
-                    //TODO: Add correct stairs respecting height, step_count, etc.
-                    block_types = &[GRAY_CONCRETE];
-                    block_range = 1;
-                }
-
-                _ => {
-                    if let Some(lanes) = element.tags().get("lanes") {
-                        if lanes == "2" {
-                            block_range = 3;
-                            default_lanes = 2;
-                        } else if lanes != "1" {
-                            block_range = 4;
-                            default_lanes = 2;
-                        }
-                    }
-                }
+                "path" => block_types = &[DIRT_PATH],
+                "escape" => block_types = &[SAND], // sand trap for runaway vehicles
+                _ => {}
             }
 
             let ProcessedElement::Way(way) = element else {
@@ -659,39 +609,19 @@ fn generate_highways_internal(
                 block_types = &[SMOOTH_STONE];
             }
 
-            // Optional explicit width via `width=*` (meters ≈ blocks).
-            // Clamped to the terrain-flattening helper's sample-buffer cap.
-            if let Some(w) = element
-                .tags()
-                .get("width")
-                .and_then(|w| w.parse::<f32>().ok())
-            {
-                block_range = ((w / 2.0).round() as i32).clamp(1, MAX_BLOCK_RANGE as i32);
-            }
+            // Canonical width (shared with prescan/bridge consumers).
+            let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
 
-            // Resolve lane-marking count. `lane_markings=no` disables them,
-            // `lanes=*` overrides the default for this highway type.
-            // Multi-lane inner dividers are drawn for lanes >= 2 (one line
-            // between every pair of adjacent lanes).
-            //
-            // Clamped to a realistic upper bound: the world's widest real
-            // roads have ~12 lanes, but an `i32` parse will accept
-            // arbitrary OSM values. Without the cap, a stray `lanes=999999`
-            // tag (typo or vandalism) would send the inner divider loop
-            // into millions of iterations per bresenham point.
+            // Lane-marking count; lane_markings=no drops the dividers, not the width.
             const MAX_LANES: i32 = 16;
-            let mut lanes = element
-                .tags()
+            let mut lanes = way
+                .tags
                 .get("lanes")
                 .and_then(|l| l.parse::<i32>().ok())
-                .unwrap_or(default_lanes)
-                .clamp(0, MAX_LANES);
-            if element.tags().get("lane_markings").map(|s| s.as_str()) == Some("no") {
+                .unwrap_or_else(|| highway_default_lanes(highway_type))
+                .clamp(1, MAX_LANES);
+            if way.tags.get("lane_markings").map(|s| s.as_str()) == Some("no") {
                 lanes = 1;
-            }
-
-            if scale_factor < 1.0 {
-                block_range = ((block_range as f64) * scale_factor).floor() as i32;
             }
 
             // Elevation based on layer (already normalised; `LAYER_HEIGHT_STEP`
@@ -1547,7 +1477,8 @@ fn runway_centerline_dash_on(s: f32, scale: f64) -> bool {
 }
 
 /// Parses an OSM `width=*` value in metres (tolerates a trailing "m").
-fn parse_aeroway_width_m(tags: &HashMap<String, String>) -> Option<f64> {
+// Parse an OSM width=* tag in metres, tolerating a trailing "m"/" m".
+fn parse_width_tag_m(tags: &HashMap<String, String>) -> Option<f64> {
     let raw = tags.get("width")?;
     let s = raw.trim().trim_end_matches('m').trim();
     s.parse::<f64>().ok().filter(|v| v.is_finite() && *v > 0.0)
@@ -1569,7 +1500,7 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
     };
 
     // Half-width from the OSM `width=*` tag (metres, clamped to sane sizes); default when absent.
-    let half_m = parse_aeroway_width_m(&way.tags)
+    let half_m = parse_width_tag_m(&way.tags)
         .map(|w| (w * 0.5).clamp(AEROWAY_MIN_HALF_M, AEROWAY_MAX_HALF_M))
         .unwrap_or(AEROWAY_DEFAULT_HALF_M);
     let half_width: i32 = (half_m * args.scale).round().max(1.0) as i32;
@@ -1643,39 +1574,56 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
 /// This extracts the same logic used inside `generate_highways_internal` so
 /// that pre-scan passes (e.g. building-passage collection) can determine road
 /// width without generating any blocks.
+/// Default lane count per highway type when `lanes=*` is absent. OSM lanes
+/// are the total for both directions, so 2 is a normal two-way street.
+pub(crate) fn highway_default_lanes(highway_type: &str) -> i32 {
+    match highway_type {
+        "motorway" | "primary" | "trunk" | "secondary" | "tertiary" => 2,
+        _ => 1,
+    }
+}
+
+/// Canonical road half-width in blocks. Single source of truth shared by the
+/// renderer and the prescan/bitmap/bridge consumers, so they never disagree.
 pub(crate) fn highway_block_range(
     highway_type: &str,
     tags: &HashMap<String, String>,
     scale: f64,
 ) -> i32 {
-    let mut block_range: i32 = match highway_type {
-        "footway" | "pedestrian" => 1,
-        "path" => 1,
-        "motorway" | "primary" | "trunk" => 5,
-        "secondary" => 4,
-        "tertiary" => 2,
-        "track" => 1,
-        "service" => 2,
-        "secondary_link" | "tertiary_link" => 1,
-        "escape" => 1,
-        "steps" => 1,
-        _ => {
-            if let Some(lanes) = tags.get("lanes") {
-                if lanes == "2" {
-                    3
-                } else if lanes != "1" {
-                    4
-                } else {
-                    2
-                }
-            } else {
-                2
-            }
-        }
+    let (mut block_range, scales_with_lanes): (i32, bool) = match highway_type {
+        "footway" | "pedestrian" => (1, false),
+        "path" => (1, false),
+        "motorway" | "primary" | "trunk" => (5, true),
+        "secondary" => (4, true),
+        "tertiary" => (2, true),
+        "track" => (1, false),
+        "service" => (2, true),
+        "secondary_link" | "tertiary_link" => (1, true),
+        "escape" => (1, false),
+        "steps" => (1, false),
+        _ => (2, true),
     };
 
+    const MAX_LANES: i32 = 16;
+    let lanes = tags
+        .get("lanes")
+        .and_then(|l| l.parse::<i32>().ok())
+        .unwrap_or_else(|| highway_default_lanes(highway_type))
+        .clamp(1, MAX_LANES);
+
+    // Explicit width=* wins; else vehicular roads use 3.5 m/lane, never below
+    // the default. The -1 accounts for the centre block in 2*block_range+1.
+    if let Some(w) = parse_width_tag_m(tags) {
+        block_range = (w / 2.0).round() as i32;
+    } else if scales_with_lanes {
+        let lanes_based = ((lanes as f32 * 3.5 - 1.0) / 2.0).round() as i32;
+        block_range = block_range.max(lanes_based);
+    }
+    block_range = block_range.clamp(1, MAX_BLOCK_RANGE as i32);
+
     if scale < 1.0 {
-        block_range = ((block_range as f64) * scale).floor() as i32;
+        // max(1): scaling must never collapse a road to zero width.
+        block_range = (((block_range as f64) * scale).floor() as i32).max(1);
     }
 
     block_range
@@ -1820,6 +1768,56 @@ pub fn collect_building_passage_coords(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn highway_block_range_scales_with_lanes() {
+        let tags = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        // Untagged roads keep their per-type defaults...
+        assert_eq!(highway_block_range("residential", &tags(&[]), 1.0), 2);
+        assert_eq!(highway_block_range("motorway", &tags(&[]), 1.0), 5);
+        assert_eq!(highway_block_range("secondary", &tags(&[]), 1.0), 4);
+        // ...except tertiary, which widens to its two-lane default.
+        assert_eq!(highway_block_range("tertiary", &tags(&[]), 1.0), 3);
+        assert_eq!(
+            highway_block_range("tertiary", &tags(&[("lanes", "2")]), 1.0),
+            3
+        );
+        // More lanes widen, clamped to the cap.
+        assert_eq!(
+            highway_block_range("primary", &tags(&[("lanes", "4")]), 1.0),
+            7
+        );
+        assert_eq!(
+            highway_block_range("motorway", &tags(&[("lanes", "6")]), 1.0),
+            MAX_BLOCK_RANGE as i32
+        );
+        // Non-vehicular types never scale with lanes.
+        assert_eq!(
+            highway_block_range("footway", &tags(&[("lanes", "4")]), 1.0),
+            1
+        );
+        // Explicit width=* wins and tolerates a unit suffix.
+        assert_eq!(
+            highway_block_range("residential", &tags(&[("width", "8")]), 1.0),
+            4
+        );
+        assert_eq!(
+            highway_block_range(
+                "residential",
+                &tags(&[("width", "8 m"), ("lanes", "2")]),
+                1.0
+            ),
+            4
+        );
+        // Down-scaling never collapses a road to zero width.
+        assert_eq!(highway_block_range("footway", &tags(&[]), 0.4), 1);
+        assert_eq!(highway_block_range("residential", &tags(&[]), 0.4), 1);
+    }
 
     #[test]
     fn runway_dash_alternates_on_and_off() {
