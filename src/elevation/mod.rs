@@ -35,6 +35,11 @@ pub struct ElevationData {
     pub(crate) world_width: usize,
     /// Height of the world in blocks (used for coordinate mapping)
     pub(crate) world_height: usize,
+    /// Affine params of the metre->Minecraft-Y scaling: minimum source height
+    /// in metres and the blocks-per-metre slope. Used to map a real-world
+    /// elevation (e.g. the snow line) to a Minecraft Y threshold.
+    pub(crate) min_height_m: f64,
+    pub(crate) blocks_per_meter: f64,
 }
 
 /// Maximum elevation grid dimension requested from providers per axis.
@@ -232,7 +237,7 @@ pub fn fetch_elevation_data(
     bench.mark("elev_landcover_repair");
     emit_gui_progress_update(16.0, "Processing elevation...");
 
-    let mc_heights = scale_to_minecraft(
+    let (mc_heights, min_height_m, blocks_per_meter) = scale_to_minecraft(
         &height_grid,
         scale,
         ground_level,
@@ -270,6 +275,8 @@ pub fn fetch_elevation_data(
         height: grid_height,
         world_width,
         world_height,
+        min_height_m,
+        blocks_per_meter,
     })
 }
 

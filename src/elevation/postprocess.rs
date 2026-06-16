@@ -1196,13 +1196,16 @@ pub fn filter_elevation_outliers(height_grid: &mut [Vec<f64>]) {
 /// Scale raw elevation (meters) to Minecraft Y coordinates, keeping f64 precision.
 /// `extended_max_y` is the cap when `disable_height_limit` is on (Java datapack:
 /// 2031; Bedrock BP: 512); ignored otherwise.
+/// Scales real-world metre heights to Minecraft Y. Also returns the affine
+/// parameters `(min_height_m, blocks_per_meter)` so a real-world elevation can
+/// be converted back to a Minecraft Y threshold (e.g. for the snow line).
 pub fn scale_to_minecraft(
     blurred_heights: &[Vec<f64>],
     scale: f64,
     ground_level: i32,
     disable_height_limit: bool,
     extended_max_y: i32,
-) -> Vec<Vec<f64>> {
+) -> (Vec<Vec<f64>>, f64, f64) {
     // Derive min/max
     let (min_height, max_height) = blurred_heights
         .par_iter()
@@ -1276,7 +1279,12 @@ pub fn scale_to_minecraft(
         })
         .collect();
 
-    mc_heights
+    let blocks_per_meter = if height_range > 0.0 {
+        scaled_range / height_range
+    } else {
+        0.0
+    };
+    (mc_heights, min_height, blocks_per_meter)
 }
 
 #[cfg(test)]

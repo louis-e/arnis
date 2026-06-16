@@ -19,8 +19,8 @@ use crate::block_definitions::{
     COBBLED_DEEPSLATE, COBBLESTONE, CRACKED_STONE_BRICKS, CYAN_TERRACOTTA, DEAD_BUSH, DEEPSLATE,
     DIRT, DIRT_PATH, FARMLAND, GRASS, GRASS_BLOCK, GRAVEL, GRAY_CONCRETE, GRAY_CONCRETE_POWDER,
     HAY_BALE, LIGHT_GRAY_CONCRETE, MUD, OAK_LEAVES, OAK_PLANKS, POTATOES, RED_FLOWER, SAND,
-    SANDSTONE, SMOOTH_STONE, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP, TUFF, WATER,
-    WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
+    SANDSTONE, SMOOTH_STONE, SNOW_LAYER, STONE, STONE_BRICKS, TALL_GRASS_BOTTOM, TALL_GRASS_TOP,
+    TUFF, WATER, WHEAT, WHITE_CONCRETE, WHITE_FLOWER, YELLOW_FLOWER,
 };
 use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::tree;
@@ -187,6 +187,11 @@ pub fn generate_ground_region(
     let max_chunk_x = iter_max_x >> 4;
     let min_chunk_z = iter_min_z >> 4;
     let max_chunk_z = iter_max_z >> 4;
+
+    // Snow line as a Minecraft Y; i32::MAX disables snow (flat/low terrain).
+    let snow_threshold_y = ground.snow_threshold_y();
+    // Soften the snow edge so it isn't a perfect contour line.
+    const SNOW_EDGE_JITTER: f64 = 6.0;
 
     for chunk_x in min_chunk_x..=max_chunk_x {
         for chunk_z in min_chunk_z..=max_chunk_z {
@@ -688,6 +693,20 @@ pub fn generate_ground_region(
                                 Some(&[WATER]),
                                 None,
                             );
+
+                            // Snow-cap terrain above the climatic snow line (not on water).
+                            if snow_threshold_y != i32::MAX && !surface_is_water {
+                                let edge = (value_noise_01(x, z, 8) - 0.5) * SNOW_EDGE_JITTER;
+                                if ground_y as f64 >= snow_threshold_y as f64 + edge {
+                                    editor.set_block_if_absent_absolute(
+                                        SNOW_LAYER,
+                                        x,
+                                        ground_y + 1,
+                                        z,
+                                    );
+                                }
+                            }
+
                             if !surface_is_water {
                                 // Fill under-blocks deep enough to seal any visible
                                 // gap on cliff faces. Check all 8 neighbors (cardinal

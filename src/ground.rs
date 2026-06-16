@@ -38,6 +38,37 @@ pub struct Ground {
     land_cover: Option<LandCoverData>,
     /// When set, coordinates outside the rotated original bbox are skipped.
     rotation_mask: Option<RotationMask>,
+    /// Minecraft Y at/above which terrain is snow-capped; `i32::MAX` disables it.
+    snow_threshold_y: i32,
+}
+
+/// Climatic snow line in metres by absolute latitude, piecewise-linear through
+/// the cited anchors: equator 4500, subtropics (25 deg) 5700, mid-latitudes
+/// (46 deg) 3000, poles 0. Source: Wikipedia "Snow line".
+fn snow_line_meters(lat_deg: f64) -> f64 {
+    let a = lat_deg.abs().min(90.0);
+    if a <= 25.0 {
+        4500.0 + (5700.0 - 4500.0) * (a / 25.0)
+    } else if a <= 46.0 {
+        5700.0 + (3000.0 - 5700.0) * ((a - 25.0) / (46.0 - 25.0))
+    } else {
+        (3000.0 * (1.0 - (a - 46.0) / (90.0 - 46.0))).max(0.0)
+    }
+}
+
+/// Minecraft Y threshold for the snow line at this latitude, inverting the
+/// affine metre->Y scaling. Returns `i32::MAX` (never) / `i32::MIN` (always)
+/// for the flat-terrain extremes.
+fn snow_threshold_for(ed: &ElevationData, lat_deg: f64, ground_level: i32) -> i32 {
+    let snowline = snow_line_meters(lat_deg);
+    if ed.blocks_per_meter <= 0.0 {
+        return if ed.min_height_m >= snowline {
+            i32::MIN
+        } else {
+            i32::MAX
+        };
+    }
+    (ground_level as f64 + (snowline - ed.min_height_m) * ed.blocks_per_meter).round() as i32
 }
 
 impl Ground {
@@ -48,6 +79,7 @@ impl Ground {
             elevation_data: None,
             land_cover: None,
             rotation_mask: None,
+            snow_threshold_y: i32::MAX,
         }
     }
 
@@ -101,13 +133,18 @@ impl Ground {
             aws_only_elevation,
             benchmark,
         ) {
-            Ok(elevation_data) => Self {
-                elevation_enabled: true,
-                ground_level: water_floor,
-                elevation_data: Some(elevation_data),
-                land_cover,
-                rotation_mask: None,
-            },
+            Ok(elevation_data) => {
+                let lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+                let snow_threshold_y = snow_threshold_for(&elevation_data, lat, water_floor);
+                Self {
+                    elevation_enabled: true,
+                    ground_level: water_floor,
+                    elevation_data: Some(elevation_data),
+                    land_cover,
+                    rotation_mask: None,
+                    snow_threshold_y,
+                }
+            }
             Err(e) => {
                 eprintln!("Failed to fetch elevation data: {}", e);
                 #[cfg(feature = "gui")]
@@ -127,9 +164,16 @@ impl Ground {
                     elevation_data: None,
                     land_cover: None,
                     rotation_mask: None,
+                    snow_threshold_y: i32::MAX,
                 }
             }
         }
+    }
+
+    /// Minecraft Y at/above which terrain is snow-capped (`i32::MAX` = never).
+    #[inline(always)]
+    pub fn snow_threshold_y(&self) -> i32 {
+        self.snow_threshold_y
     }
 
     /// Returns whether land cover data is available
@@ -641,9 +685,12 @@ mod tests {
                 height: h,
                 world_width: w,
                 world_height: h,
+                min_height_m: 0.0,
+                blocks_per_meter: 1.0,
             }),
             land_cover: None,
             rotation_mask: None,
+            snow_threshold_y: i32::MAX,
         }
     }
 
@@ -669,5 +716,33 @@ mod tests {
                 .collect(),
         );
         assert_eq!(cliff.water_level(XZPoint::new(7, 8)), 30);
+    }
+
+    #[test]
+    fn snow_line_follows_latitude() {
+        assert!((snow_line_meters(0.0) - 4500.0).abs() < 1.0);
+        assert!((snow_line_meters(25.0) - 5700.0).abs() < 1.0);
+        assert!((snow_line_meters(46.0) - 3000.0).abs() < 1.0);
+        assert!(snow_line_meters(90.0).abs() < 1.0);
+        // Symmetric across the equator.
+        assert_eq!(snow_line_meters(-46.0), snow_line_meters(46.0));
+    }
+
+    #[test]
+    fn snow_threshold_inverts_the_scale() {
+        let ed = |min_m: f64, bpm: f64| ElevationData {
+            heights: vec![vec![0.0; 2]; 2],
+            width: 2,
+            height: 2,
+            world_width: 2,
+            world_height: 2,
+            min_height_m: min_m,
+            blocks_per_meter: bpm,
+        };
+        // 46 deg snow line is 3000 m; at 0.1 block/m from min 0 m, ground 64 => Y 364.
+        assert_eq!(snow_threshold_for(&ed(0.0, 0.1), 46.0, 64), 364);
+        // Flat terrain: never below the line, always above it.
+        assert_eq!(snow_threshold_for(&ed(100.0, 0.0), 46.0, 64), i32::MAX);
+        assert_eq!(snow_threshold_for(&ed(4000.0, 0.0), 46.0, 64), i32::MIN);
     }
 }
