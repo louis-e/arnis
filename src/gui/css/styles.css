@@ -260,6 +260,38 @@ button:hover {
   width: 0%;
   background-color: #4caf50;
   transition: width 0.4s;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle modern sheen: evenly-spaced soft diagonal highlights drifting across.
+   Period is 16px along the 45deg axis; the keyframe shifts by 16/cos45 so the
+   loop is seamless. Animates background-position only (width stays JS-driven). */
+.progress-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0,
+    transparent 6px,
+    rgba(255, 255, 255, 0.12) 8px,
+    rgba(255, 255, 255, 0.12) 11px,
+    transparent 13px,
+    transparent 16px
+  );
+  will-change: background-position;
+  animation: progress-sheen 2s linear infinite;
+}
+
+@keyframes progress-sheen {
+  from { background-position: 0 0; }
+  to { background-position: 22.627px 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-bar::after { animation: none; will-change: auto; }
 }
 
 .footer {
