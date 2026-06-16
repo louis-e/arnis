@@ -952,18 +952,38 @@ fn gui_start_generation(
                 // For Bedrock, check current directory where .mcworld will be created
                 std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
             };
-            match fs2::available_space(&check_path) {
-                Ok(available) if available < MIN_DISK_SPACE_BYTES => {
+            // Probe the nearest existing ancestor: a missing or space-containing
+            // path otherwise confuses the Windows volume lookup, which then reports
+            // 0 bytes free. Only block on a confident positive reading; treat an
+            // error or a 0/undeterminable result as "can't tell" and proceed (#824).
+            let probe_path = {
+                let mut p = check_path.as_path();
+                loop {
+                    if p.exists() {
+                        break p.to_path_buf();
+                    }
+                    match p.parent() {
+                        Some(parent) => p = parent,
+                        // No existing ancestor (e.g. a bare relative path): probe
+                        // the current dir so the query always hits a real path.
+                        None => {
+                            break std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+                        }
+                    }
+                }
+            };
+            match fs2::available_space(&probe_path) {
+                Ok(available) if available > 0 && available < MIN_DISK_SPACE_BYTES => {
                     let error_msg = "Not enough disk space available.".to_string();
                     eprintln!("{error_msg}");
                     emit_gui_error(&error_msg);
                     return Err(error_msg);
                 }
+                Ok(_) => {} // Sufficient, or 0/undeterminable: don't false-block
                 Err(e) => {
                     // Log warning but don't block generation if we can't check space
                     eprintln!("Warning: Could not check disk space: {e}");
                 }
-                _ => {} // Sufficient space available
             }
 
             // Acquire session lock for Java worlds only
