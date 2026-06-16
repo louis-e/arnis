@@ -310,19 +310,33 @@ struct LeafPlacer<'a> {
     footprints: Option<&'a BuildingFootprintBitmap>,
 }
 
+// Deterministic per-position hash driving the organic gap and accent rolls.
+fn leaf_hash(x: i32, y: i32, z: i32) -> u64 {
+    (x as i64 as u64).wrapping_mul(73856093)
+        ^ (y as i64 as u64).wrapping_mul(19349663)
+        ^ (z as i64 as u64).wrapping_mul(83492791)
+}
+
+// ~4% organic leaf gap.
+fn is_leaf_gap(x: i32, y: i32, z: i32) -> bool {
+    leaf_hash(x, y, z) % 100 < 4
+}
+
 impl LeafPlacer<'_> {
+    // Shared footprint gate: true if a building occupies (x, z).
+    fn blocked(&self, x: i32, z: i32) -> bool {
+        self.check_collision && self.footprints.is_some_and(|fp| fp.contains(x, z))
+    }
+
     fn place_core(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
         self.place_with(editor, x, y, z, false);
     }
 
-    // Apex cap: the lone center-column cover over the trunk; skip the organic gap so the log isn't exposed.
-    fn place_cap(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
-        if self.check_collision {
-            if let Some(fp) = self.footprints {
-                if fp.contains(x, z) {
-                    return;
-                }
-            }
+    // Apex cap: the lone center-column cover over the trunk; skips the organic
+    // gap (but not the footprint gate) so the log is never left exposed.
+    fn place_apex_cap(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32) {
+        if self.blocked(x, z) {
+            return;
         }
         editor.set_block_absolute(self.leaves_block, x, y, z, None, None);
     }
@@ -332,20 +346,10 @@ impl LeafPlacer<'_> {
     }
 
     fn place_with(&self, editor: &mut WorldEditor, x: i32, y: i32, z: i32, allow_accent: bool) {
-        if self.check_collision {
-            if let Some(fp) = self.footprints {
-                if fp.contains(x, z) {
-                    return;
-                }
-            }
-        }
-        let h = (x as i64 as u64).wrapping_mul(73856093)
-            ^ (y as i64 as u64).wrapping_mul(19349663)
-            ^ (z as i64 as u64).wrapping_mul(83492791);
-        // ~4% organic leaf gap.
-        if h % 100 < 4 {
+        if self.blocked(x, z) || is_leaf_gap(x, y, z) {
             return;
         }
+        let h = leaf_hash(x, y, z);
         let block = if allow_accent {
             if let Some(accent) = self.accent_block {
                 let r2 = h.wrapping_mul(2654435761) % 100;
@@ -512,7 +516,7 @@ impl Tree {
         }
 
         // Force the apex so the organic gap never leaves the trunk top exposed.
-        placer.place_cap(editor, x, base_y + canopy_top, z);
+        placer.place_apex_cap(editor, x, base_y + canopy_top, z);
 
         // Only the outermost non-empty ring gets surface (accent-eligible) leaves.
         let outermost_ring_idx: Option<usize> = tree
@@ -1200,14 +1204,14 @@ mod tests {
     use super::*;
     use crate::coordinate_system::cartesian::XZBBox;
     use crate::coordinate_system::geographic::LLBBox;
-    use std::path::PathBuf;
 
     // The apex cap must place even on a cell the ~4% organic gap skips.
     #[test]
-    fn place_cap_fills_the_organic_gap() {
+    fn place_apex_cap_fills_the_organic_gap() {
         let xzbbox = XZBBox::rect_from_min_max(0, 0, 63, 63).unwrap();
         let llbbox = LLBBox::new(54.6, 9.9, 54.61, 9.91).unwrap();
-        let mut editor = WorldEditor::new(PathBuf::from("/dev/null/unused"), &xzbbox, llbbox);
+        // Editor is never saved here; a temp dir keeps the path valid + portable.
+        let mut editor = WorldEditor::new(std::env::temp_dir(), &xzbbox, llbbox);
 
         let placer = LeafPlacer {
             leaves_block: OAK_LEAVES,
@@ -1217,20 +1221,18 @@ mod tests {
             footprints: None,
         };
 
-        // Probe place_core to find a cell the gap skips, then confirm place_cap fills it.
-        let mut gap = None;
-        'outer: for gx in 0..64 {
-            for gz in 0..64 {
-                placer.place_core(&mut editor, gx, 10, gz);
-                if !editor.check_for_block_absolute(gx, 10, gz, Some(&[OAK_LEAVES]), None) {
-                    gap = Some((gx, gz));
-                    break 'outer;
-                }
-            }
-        }
-        let (gx, gz) = gap.expect("the organic gap should skip at least one cell");
+        // Pick a gap cell via the same predicate place_with uses (no drift).
+        let (gx, gz) = (0..64)
+            .flat_map(|x| (0..64).map(move |z| (x, z)))
+            .find(|&(x, z)| is_leaf_gap(x, 10, z))
+            .expect("a 4% gap cell exists in 64x64");
 
-        placer.place_cap(&mut editor, gx, 10, gz);
+        placer.place_core(&mut editor, gx, 10, gz);
+        assert!(
+            !editor.check_for_block_absolute(gx, 10, gz, Some(&[OAK_LEAVES]), None),
+            "the organic gap should skip this cell"
+        );
+        placer.place_apex_cap(&mut editor, gx, 10, gz);
         assert!(
             editor.check_for_block_absolute(gx, 10, gz, Some(&[OAK_LEAVES]), None),
             "apex cap must place despite the organic gap"
