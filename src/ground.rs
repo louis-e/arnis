@@ -328,9 +328,11 @@ impl Ground {
     }
 
     /// Returns the appropriate Y level for water placement.
-    /// On steep terrain, snaps to the local minimum within a small radius
-    /// to compensate for spatial misalignment between water classification
-    /// data (OSM/ESA) and the elevation DEM.
+    /// On steep terrain, snaps to the local minimum within a small radius to
+    /// correct spatial misalignment between water classification (OSM/ESA) and
+    /// the elevation DEM. The snap is skipped across a real cliff/falls (a drop
+    /// larger than the snap radius), where the cell keeps its own level so the
+    /// waterfront isn't terraced into a step.
     pub fn water_level(&self, coord: XZPoint) -> i32 {
         let center = self.level(coord);
         if !self.elevation_enabled {
@@ -341,10 +343,11 @@ impl Ground {
         if slope <= 2 {
             return center;
         }
-        // On steep terrain, find the minimum elevation in a small radius
-        // to snap water to the canyon/valley floor
+        // On steep terrain, snap to the local minimum within SNAP_RADIUS to
+        // correct small DEM-vs-water misalignment.
+        const SNAP_RADIUS: i32 = 3;
         let mut min_y = center;
-        for r in 1..=3i32 {
+        for r in 1..=SNAP_RADIUS {
             for &(dx, dz) in &[
                 (-r, 0),
                 (r, 0),
@@ -358,6 +361,12 @@ impl Ground {
                 let neighbor = self.level(XZPoint::new(coord.x + dx, coord.z + dz));
                 min_y = min_y.min(neighbor);
             }
+        }
+        // A drop larger than the snap radius is a real cliff/falls, not
+        // misalignment; snapping across it terraces the waterfront into a step.
+        // saturating_sub guards against overflow on pathological elevations.
+        if center.saturating_sub(min_y) > SNAP_RADIUS {
+            return center;
         }
         min_y
     }
@@ -611,5 +620,54 @@ pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
         512
     } else {
         2031
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZPoint;
+    use crate::elevation_data::ElevationData;
+
+    fn ground_with(heights: Vec<Vec<f32>>) -> Ground {
+        let h = heights.len();
+        let w = heights[0].len();
+        Ground {
+            elevation_enabled: true,
+            ground_level: 0,
+            elevation_data: Some(ElevationData {
+                heights,
+                width: w,
+                height: h,
+                world_width: w,
+                world_height: h,
+            }),
+            land_cover: None,
+            rotation_mask: None,
+        }
+    }
+
+    // Water snaps to the local floor over small DEM steps, but not across a real cliff.
+    #[test]
+    fn water_level_snaps_small_steps_not_cliffs() {
+        // Flat terrain: no snap, returns the cell's own level.
+        let flat = ground_with(vec![vec![5.0; 16]; 16]);
+        assert_eq!(flat.water_level(XZPoint::new(8, 8)), 5);
+
+        // 3-block step: snaps down to the nearby floor.
+        let step = ground_with(
+            (0..16)
+                .map(|_| (0..16).map(|x| if x <= 7 { 10.0 } else { 7.0 }).collect())
+                .collect(),
+        );
+        assert_eq!(step.water_level(XZPoint::new(7, 8)), 7);
+
+        // Real cliff (30-block drop): keeps its own level, no terracing.
+        let cliff = ground_with(
+            (0..16)
+                .map(|_| (0..16).map(|x| if x <= 7 { 30.0 } else { 0.0 }).collect())
+                .collect(),
+        );
+        assert_eq!(cliff.water_level(XZPoint::new(7, 8)), 30);
     }
 }
