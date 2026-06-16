@@ -1225,11 +1225,20 @@ pub fn scale_to_minecraft(
             |(lo1, hi1), (lo2, hi2)| (lo1.min(lo2), hi1.max(hi2)),
         );
 
-    let (min_height, _max_height, height_range) =
+    let (min_height, height_range) =
         if !min_height.is_finite() || !max_height.is_finite() || min_height >= max_height {
-            (0.0_f64, 0.0_f64, 0.0_f64)
+            // Zero-relief/degenerate: keep the real min height (the snow line
+            // needs it) but flatten the range so every cell maps to ground_level.
+            (
+                if min_height.is_finite() {
+                    min_height
+                } else {
+                    0.0
+                },
+                0.0_f64,
+            )
         } else {
-            (min_height, max_height, max_height - min_height)
+            (min_height, max_height - min_height)
         };
 
     let effective_max_y = if disable_height_limit {
@@ -1290,6 +1299,18 @@ pub fn scale_to_minecraft(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scale_flat_terrain_keeps_real_min_height() {
+        // Zero-relief terrain must still report its true elevation so the snow
+        // line can tell a high plateau from a low one.
+        let grid = vec![vec![4500.0_f64; 4]; 4];
+        let (mc, min_m, blocks_per_meter) = scale_to_minecraft(&grid, 1.0, 64, false, 0);
+        assert_eq!(min_m, 4500.0);
+        assert_eq!(blocks_per_meter, 0.0);
+        // Every cell flattens to ground level.
+        assert!(mc.iter().flatten().all(|&y| (y - 64.0).abs() < 1e-9));
+    }
 
     #[test]
     fn test_fill_nan_values() {

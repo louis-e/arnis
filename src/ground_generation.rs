@@ -694,8 +694,14 @@ pub fn generate_ground_region(
                                 None,
                             );
 
-                            // Snow-cap terrain above the climatic snow line (not on water).
-                            if snow_threshold_y != i32::MAX && !surface_is_water {
+                            // Snow-cap terrain above the climatic snow line. Skip
+                            // water (placed block or ESA-classified, e.g. a steep
+                            // lake edge where rock sits at ground_y). Pre-existing
+                            // flat OSM stone is intentionally left uncapped here.
+                            if snow_threshold_y != i32::MAX
+                                && !surface_is_water
+                                && water_blend <= 0.5
+                            {
                                 let edge = (value_noise_01(x, z, 8) - 0.5) * SNOW_EDGE_JITTER;
                                 if ground_y as f64 >= snow_threshold_y as f64 + edge {
                                     editor.set_block_if_absent_absolute(
