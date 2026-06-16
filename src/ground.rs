@@ -359,6 +359,12 @@ impl Ground {
                 min_y = min_y.min(neighbor);
             }
         }
+        // A large gap to the local min is a real cliff/falls, not DEM
+        // misalignment; snapping across it terraces the waterfront into a step.
+        const MAX_SNAP_DROP: i32 = 3;
+        if center - min_y > MAX_SNAP_DROP {
+            return center;
+        }
         min_y
     }
 
@@ -611,5 +617,54 @@ pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
         512
     } else {
         2031
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZPoint;
+    use crate::elevation_data::ElevationData;
+
+    fn ground_with(heights: Vec<Vec<f32>>) -> Ground {
+        let h = heights.len();
+        let w = heights[0].len();
+        Ground {
+            elevation_enabled: true,
+            ground_level: 0,
+            elevation_data: Some(ElevationData {
+                heights,
+                width: w,
+                height: h,
+                world_width: w,
+                world_height: h,
+            }),
+            land_cover: None,
+            rotation_mask: None,
+        }
+    }
+
+    // Water snaps to the local floor over small DEM steps, but not across a real cliff.
+    #[test]
+    fn water_level_snaps_small_steps_not_cliffs() {
+        // Flat terrain: no snap, returns the cell's own level.
+        let flat = ground_with(vec![vec![5.0; 16]; 16]);
+        assert_eq!(flat.water_level(XZPoint::new(8, 8)), 5);
+
+        // 3-block step: snaps down to the nearby floor.
+        let step = ground_with(
+            (0..16)
+                .map(|_| (0..16).map(|x| if x <= 7 { 10.0 } else { 7.0 }).collect())
+                .collect(),
+        );
+        assert_eq!(step.water_level(XZPoint::new(7, 8)), 7);
+
+        // Real cliff (30-block drop): keeps its own level, no terracing.
+        let cliff = ground_with(
+            (0..16)
+                .map(|_| (0..16).map(|x| if x <= 7 { 30.0 } else { 0.0 }).collect())
+                .collect(),
+        );
+        assert_eq!(cliff.water_level(XZPoint::new(7, 8)), 30);
     }
 }
