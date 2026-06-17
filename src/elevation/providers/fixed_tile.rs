@@ -363,6 +363,12 @@ pub(super) trait FixedTileProvider: Send + Sync {
     fn log_prefix(&self) -> &'static str {
         Self::CACHE_NAME
     }
+
+    /// Optional post-processing of a successfully decoded tile.
+    /// By default, returns the raster unchanged.
+    fn process_tile(&self, raster: Vec<Vec<f64>>) -> Result<Vec<Vec<f64>>, String> {
+        Ok(raster)
+    }
 }
 
 /// End-to-end fetch: pick resolution → enumerate covering tiles →
@@ -465,7 +471,7 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
                 .map(|key| {
                     let url = provider.tile_url(key);
                     let cache_path = key.cache_path(&cache_dir);
-                    let res = fetch_tile_raster(&url, &cache_path, &client);
+                    let res = fetch_tile_raster(provider, &url, &cache_path, &client);
                     (*key, res)
                 })
                 .collect()
@@ -622,7 +628,8 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
 
 // ─── Tile fetch + TIFF decode ──────────────────────────────────────────
 
-fn fetch_tile_raster(
+fn fetch_tile_raster<P: FixedTileProvider>(
+    provider: &P,
     url: &str,
     cache_path: &Path,
     client: &reqwest::blocking::Client,
@@ -634,7 +641,7 @@ fn fetch_tile_raster(
         .map_err(|e| e.to_string())?;
     let raw = super::regional::decode_geotiff_f32(&bytes, TILE_PIXELS, TILE_PIXELS)
         .map_err(|e| e.to_string())?;
-    Ok(raw.heights_meters)
+    provider.process_tile(raw.heights_meters)
 }
 
 /// Fill one fixed-grid tile from AWS Terrarium as a last-resort

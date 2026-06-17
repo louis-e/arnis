@@ -2,6 +2,7 @@ use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
 use crate::elevation::providers::ign_france::IgnFrance;
+use crate::elevation::providers::ign_poland::IgnPoland;
 use crate::elevation::providers::ign_spain::IgnSpain;
 use crate::elevation::providers::regional::JapanGsi;
 use crate::elevation::providers::usgs_3dep::Usgs3dep;
@@ -57,6 +58,7 @@ fn build_provider_list() -> Vec<Box<dyn ElevationProvider>> {
     vec![
         Box::new(Usgs3dep),  // 1.0m — ArcGIS REST, verified float32
         Box::new(IgnFrance), // 1.0m — WMS GeoTIFF, verified float32
+        Box::new(IgnPoland), // 1.0m — WCS GeoTIFF, verified uint16/float32
         Box::new(IgnSpain),  // 5.0m — WCS, verified int16
         Box::new(JapanGsi),  // 5.0m — XYZ PNG tiles, custom encoding
     ]
