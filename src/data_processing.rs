@@ -10,7 +10,7 @@ use crate::progress::{emit_gui_progress_update, emit_gui_progress_update_ex, emi
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::tile;
-use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat};
+use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat, WorldToModify};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -531,10 +531,12 @@ fn generate_world_inner(
         let total_tiles = indexed_tiles.len().max(1);
         let mut tiles_merged = 0usize;
         let mut last_emitted_pct = 20.0_f64;
-        for batch in indexed_tiles.chunks(tile_batch_size) {
-            // Phase 1: process this batch of tiles in parallel
-            let place_start = std::time::Instant::now();
-            let batch_results: Vec<_> = batch
+
+        // Phase 1 (parallel): place one batch of tiles into independent tile editors.
+        // Pure function of immutable inputs — never touches the shared `editor`, so it
+        // can run concurrently with a Phase-2 merge of an earlier batch.
+        let place_batch = |batch: &[(usize, &tile::TileBounds)]| {
+            batch
                 .par_iter()
                 .map(|&(tile_idx, tile_bounds)| {
                     // max_* are exclusive; rect_from_min_max treats max as inclusive,
@@ -638,71 +640,112 @@ fn generate_world_inner(
                         tile_road_overrides,
                     )
                 })
-                .collect();
-            place_dur += place_start.elapsed();
+                .collect::<Vec<_>>()
+        };
 
-            let merge_start = std::time::Instant::now();
-            // Phase 2: merge this batch's results into the main editor (sequential).
-            // batch_results is dropped after this loop, freeing memory before next batch.
-            for (tile_idx, tile_world, tile_subway_pts, tile_road_overrides) in batch_results {
-                editor.merge_world(
-                    tile_world,
-                    tiles[tile_idx].min_x,
-                    tiles[tile_idx].min_z,
-                    tiles[tile_idx].max_x - 1,
-                    tiles[tile_idx].max_z - 1,
-                );
-                // Carry road-surface overrides to the main editor so the post-merge 3D-model
-                // pass stays road-aware. Under eviction keep only the deferred 3D regions'
-                // overrides (the rest are evicted; this caps the extra resident RAM).
-                if eviction_active {
-                    editor.merge_road_surface_overrides_in_regions(
-                        tile_road_overrides,
-                        &model_regions,
+        // Phase 2 (sequential): merge a batch's tile results into the shared `editor`,
+        // in the batch's authoritative order. This is the only writer of `editor` and
+        // the eviction bookkeeping, so the merge order is fixed regardless of whether a
+        // placement is overlapping — output stays bit-exact.
+        let mut merge_batch =
+            |batch_results: Vec<(usize, WorldToModify, Vec<(i32, i32)>, fnv::FnvHashMap<(i32, i32), i32>)>|
+             -> Result<(), String> {
+                for (tile_idx, tile_world, tile_subway_pts, tile_road_overrides) in batch_results {
+                    editor.merge_world(
+                        tile_world,
+                        tiles[tile_idx].min_x,
+                        tiles[tile_idx].min_z,
+                        tiles[tile_idx].max_x - 1,
+                        tiles[tile_idx].max_z - 1,
                     );
-                } else {
-                    editor.merge_road_surface_overrides(tile_road_overrides);
-                }
+                    // Carry road-surface overrides to the main editor so the post-merge 3D-model
+                    // pass stays road-aware. Under eviction keep only the deferred 3D regions'
+                    // overrides (the rest are evicted; this caps the extra resident RAM).
+                    if eviction_active {
+                        editor.merge_road_surface_overrides_in_regions(
+                            tile_road_overrides,
+                            &model_regions,
+                        );
+                    } else {
+                        editor.merge_road_surface_overrides(tile_road_overrides);
+                    }
 
-                if eviction_active {
-                    // This tile contributes to its own region and its 8 neighbours;
-                    // flush each non-deferred region whose contributors are all merged.
-                    // (Subways are carved in-tile above, so they don't defer regions.)
-                    let rt = region_of_tile[tile_idx];
-                    for dz in -1..=1 {
-                        for dx in -1..=1 {
-                            let d = (rt.0 + dx, rt.1 + dz);
-                            if let Some(c) = remaining.get_mut(&d) {
-                                *c -= 1;
-                                if *c == 0
-                                    && !evicted_regions.contains(&d)
-                                    && !model_regions.contains(&d)
-                                {
-                                    if hash_check {
-                                        hash_acc = hash_acc
-                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
+                    if eviction_active {
+                        // This tile contributes to its own region and its 8 neighbours;
+                        // flush each non-deferred region whose contributors are all merged.
+                        // (Subways are carved in-tile above, so they don't defer regions.)
+                        let rt = region_of_tile[tile_idx];
+                        for dz in -1..=1 {
+                            for dx in -1..=1 {
+                                let d = (rt.0 + dx, rt.1 + dz);
+                                if let Some(c) = remaining.get_mut(&d) {
+                                    *c -= 1;
+                                    if *c == 0
+                                        && !evicted_regions.contains(&d)
+                                        && !model_regions.contains(&d)
+                                    {
+                                        if hash_check {
+                                            hash_acc = hash_acc.wrapping_add(
+                                                editor.region_content_hash(d.0, d.1),
+                                            );
+                                        }
+                                        if let Some(w) = flush_worker.as_ref() {
+                                            editor.flush_region_via(w, d.0, d.1)?;
+                                        }
+                                        evicted_regions.insert(d);
                                     }
-                                    if let Some(w) = flush_worker.as_ref() {
-                                        editor.flush_region_via(w, d.0, d.1)?;
-                                    }
-                                    evicted_regions.insert(d);
                                 }
                             }
                         }
                     }
+
+                    subway_points.extend(tile_subway_pts);
+
+                    // Step 20%->70% per merged tile, throttled to whole-percent steps.
+                    tiles_merged += 1;
+                    let pct = 20.0 + (tiles_merged as f64 / total_tiles as f64) * 50.0;
+                    if pct - last_emitted_pct >= 1.0 {
+                        emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
+                        last_emitted_pct = pct;
+                    }
                 }
+                Ok(())
+            };
 
-                subway_points.extend(tile_subway_pts);
-
-                // Step 20%->70% per merged tile, throttled to whole-percent steps.
-                tiles_merged += 1;
-                let pct = 20.0 + (tiles_merged as f64 / total_tiles as f64) * 50.0;
-                if pct - last_emitted_pct >= 1.0 {
-                    emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
-                    last_emitted_pct = pct;
+        // Opt-in (ARNIS_PIPELINE_MERGE): overlap the serial merge of batch N with the
+        // parallel placement of batch N+1 via rayon::join, so worker cores aren't idle
+        // during merges. Merge order is unchanged (in-order, batch by batch), so output
+        // is bit-exact vs. the default path — verify with --benchmark + ARNIS_BLOCK_HASH.
+        if std::env::var_os("ARNIS_PIPELINE_MERGE").is_some() {
+            let loop_start = std::time::Instant::now();
+            let mut pending: Option<Vec<_>> = None;
+            for batch in indexed_tiles.chunks(tile_batch_size) {
+                if let Some(prev) = pending.take() {
+                    // Place this batch while the previous batch merges.
+                    let (this_results, merge_res) =
+                        rayon::join(|| place_batch(batch), || merge_batch(prev));
+                    merge_res?;
+                    pending = Some(this_results);
+                } else {
+                    pending = Some(place_batch(batch));
                 }
             }
-            merge_dur += merge_start.elapsed();
+            if let Some(prev) = pending.take() {
+                merge_batch(prev)?;
+            }
+            // Overlapped: report wall-clock as placement, merge folded in.
+            place_dur = loop_start.elapsed();
+        } else {
+            // Default: place a batch, then merge it, repeat (cores idle during merge).
+            for batch in indexed_tiles.chunks(tile_batch_size) {
+                let place_start = std::time::Instant::now();
+                let batch_results = place_batch(batch);
+                place_dur += place_start.elapsed();
+
+                let merge_start = std::time::Instant::now();
+                merge_batch(batch_results)?;
+                merge_dur += merge_start.elapsed();
+            }
         }
         bench.report("element_placement", place_dur);
         bench.report("tile_merge", merge_dur);
