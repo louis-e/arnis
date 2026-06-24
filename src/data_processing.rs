@@ -253,7 +253,77 @@ fn should_stream_to_disk(num_regions: usize) -> bool {
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
+/// Public entry point. Runs the whole generation inside a dedicated rayon
+/// thread pool sized to the user's CPU budget (`args.cpu_percent`).
+///
+/// A *scoped* pool is used instead of reconfiguring the global one because
+/// rayon's global pool can only be built once per process (it's already built
+/// at startup), so a per-run scoped pool is the only way to let the setting
+/// take effect on every generation without restarting the app. Every nested
+/// `par_iter` inside `generate_world_inner` (tile placement, region saving,
+/// flood-fill precompute, …) automatically runs on this pool via `install`.
+///
+/// `RAYON_NUM_THREADS`, if set, wins (power-user / benchmark override). If the
+/// pool can't be built we fall back to running on the global pool.
 pub fn generate_world_with_options(
+    elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
+    llbbox: LLBBox,
+    ground: Ground,
+    args: &Args,
+    options: GenerationOptions,
+    outline_suppression: OutlineSuppression,
+) -> Result<PathBuf, String> {
+    let target_threads = generation_thread_count(args.cpu_percent);
+
+    match rayon::ThreadPoolBuilder::new()
+        .num_threads(target_threads)
+        .thread_name(|i| format!("arnis-gen-{i}"))
+        .build()
+    {
+        Ok(pool) => pool.install(move || {
+            generate_world_inner(
+                elements,
+                xzbbox,
+                llbbox,
+                ground,
+                args,
+                options,
+                outline_suppression,
+            )
+        }),
+        Err(_) => generate_world_inner(
+            elements,
+            xzbbox,
+            llbbox,
+            ground,
+            args,
+            options,
+            outline_suppression,
+        ),
+    }
+}
+
+/// Resolve the worker-thread count for generation from a CPU percentage.
+/// `RAYON_NUM_THREADS` overrides the percentage when set; otherwise the count
+/// is `round(cores * percent/100)`, clamped to at least 1.
+fn generation_thread_count(cpu_percent: u8) -> usize {
+    if let Some(n) = std::env::var("RAYON_NUM_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+    {
+        return n;
+    }
+
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let fraction = f64::from(cpu_percent.clamp(10, 100)) / 100.0;
+    ((cores as f64 * fraction).round() as usize).max(1)
+}
+
+fn generate_world_inner(
     elements: Vec<ProcessedElement>,
     xzbbox: XZBBox,
     llbbox: LLBBox,

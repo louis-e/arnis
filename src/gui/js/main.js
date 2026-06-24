@@ -104,6 +104,7 @@ async function applyLocalization(localization) {
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
+    "span[data-localize='cpu_usage']": "cpu_usage",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
@@ -715,6 +716,28 @@ function initSettings() {
     slider.value = 1;
     sliderValue.textContent = "1.00";
   });
+
+  // CPU usage slider: percentage of CPU cores used for world generation.
+  // Persisted to localStorage so the choice survives restarts.
+  const cpuSlider = document.getElementById("cpu-usage-slider");
+  const cpuValue = document.getElementById("cpu-usage-value");
+  if (cpuSlider && cpuValue) {
+    const savedCpu = localStorage.getItem("arnis-cpu-percent");
+    if (savedCpu !== null && !isNaN(parseInt(savedCpu, 10))) {
+      cpuSlider.value = Math.min(Math.max(parseInt(savedCpu, 10), 10), 100);
+    }
+    cpuValue.textContent = `${parseInt(cpuSlider.value, 10)}%`;
+    cpuSlider.addEventListener("input", () => {
+      cpuValue.textContent = `${parseInt(cpuSlider.value, 10)}%`;
+      localStorage.setItem("arnis-cpu-percent", cpuSlider.value);
+    });
+    // Double-click to reset CPU usage to default (90%)
+    cpuSlider.addEventListener("dblclick", () => {
+      cpuSlider.value = 90;
+      cpuValue.textContent = "90%";
+      localStorage.setItem("arnis-cpu-percent", "90");
+    });
+  }
 
   // Rotation angle input
   const rotationInput = document.getElementById("rotation-angle-input");
@@ -1577,6 +1600,7 @@ async function startGeneration() {
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
+    var cpuPercent = parseInt(document.getElementById("cpu-usage-slider").value, 10) || 90;
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
     var ground_level = -62;
@@ -1610,7 +1634,8 @@ async function startGeneration() {
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
-        rotationAngle: rotationAngle
+        rotationAngle: rotationAngle,
+        cpuPercent: cpuPercent
     });
 
     console.log("Generation process started.");

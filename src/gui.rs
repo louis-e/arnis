@@ -853,6 +853,7 @@ fn gui_start_generation(
     telemetry_consent: bool,
     world_format: String,
     rotation_angle: f64,
+    cpu_percent: u8,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -1103,6 +1104,7 @@ fn gui_start_generation(
                 luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
+                cpu_percent: cpu_percent.clamp(10, 100),
                 projection: crate::projection::ProjectionKind::Local,
                 ground_level,
                 terrain: terrain_enabled,
