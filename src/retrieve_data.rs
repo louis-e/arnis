@@ -175,7 +175,6 @@ pub fn fetch_data_from_overpass(
         nwr["aeroway"];
         nwr["3dmr"];
         way["place"]["place"!~"^(ocean|sea|bay|strait|sound|fjord)$"];
-        way;
     )->.relsinbbox;
     (
         way(r.relsinbbox);
