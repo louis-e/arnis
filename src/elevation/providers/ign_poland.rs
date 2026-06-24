@@ -114,8 +114,23 @@ impl ElevationProvider for IgnPoland {
 
     fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
         Some(vec![
-            // Poland bounding box
-            LLBBox::new(48.8, 13.8, 55.0, 24.5).unwrap(),
+            //North West: Szczecin, Koszalin, Gorzów Wielkopolski, Piła
+            LLBBox::new(14.12, 52.00, 18.00, 54.60).unwrap(),
+
+            //North Center: Gdańsk/Gdynia/Sopot (Trójmiasto), Olsztyn, Toruń, Bydgoszcz, Grudziądz, Elbląg
+            LLBBox::new(18.00, 52.00, 21.50, 54.84).unwrap(),
+
+            //North East: Białystok, Suwałki, Łomża, Ostrołęka
+            LLBBox::new(21.50, 52.00, 24.16, 54.40).unwrap(),
+
+            //South West: Wrocław, Poznań, Zielona Góra, Legnica, Jelenia Góra, Leszno, Kalisz
+            LLBBox::new(14.12, 49.60, 18.00, 52.00).unwrap(),
+
+            //South Center: Warszawa, Łódź, Kraków, Katowice (GOP / Upper Silesia), Częstochowa, Radom, Kielce, Opole
+            LLBBox::new(18.00, 49.15, 21.50, 52.00).unwrap(),
+
+            //South East: Lublin, Rzeszów, Tarnów, Przemyśl, Zamość, Chełm
+            LLBBox::new(21.50, 49.00, 24.16, 52.00).unwrap(),
         ])
     }
 
