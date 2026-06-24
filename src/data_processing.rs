@@ -647,70 +647,74 @@ fn generate_world_inner(
         // in the batch's authoritative order. This is the only writer of `editor` and
         // the eviction bookkeeping, so the merge order is fixed regardless of whether a
         // placement is overlapping — output stays bit-exact.
-        let mut merge_batch =
-            |batch_results: Vec<(usize, WorldToModify, Vec<(i32, i32)>, fnv::FnvHashMap<(i32, i32), i32>)>|
-             -> Result<(), String> {
-                for (tile_idx, tile_world, tile_subway_pts, tile_road_overrides) in batch_results {
-                    editor.merge_world(
-                        tile_world,
-                        tiles[tile_idx].min_x,
-                        tiles[tile_idx].min_z,
-                        tiles[tile_idx].max_x - 1,
-                        tiles[tile_idx].max_z - 1,
+        #[allow(clippy::type_complexity)]
+        let mut merge_batch = |batch_results: Vec<(
+            usize,
+            WorldToModify,
+            Vec<(i32, i32)>,
+            fnv::FnvHashMap<(i32, i32), i32>,
+        )>|
+         -> Result<(), String> {
+            for (tile_idx, tile_world, tile_subway_pts, tile_road_overrides) in batch_results {
+                editor.merge_world(
+                    tile_world,
+                    tiles[tile_idx].min_x,
+                    tiles[tile_idx].min_z,
+                    tiles[tile_idx].max_x - 1,
+                    tiles[tile_idx].max_z - 1,
+                );
+                // Carry road-surface overrides to the main editor so the post-merge 3D-model
+                // pass stays road-aware. Under eviction keep only the deferred 3D regions'
+                // overrides (the rest are evicted; this caps the extra resident RAM).
+                if eviction_active {
+                    editor.merge_road_surface_overrides_in_regions(
+                        tile_road_overrides,
+                        &model_regions,
                     );
-                    // Carry road-surface overrides to the main editor so the post-merge 3D-model
-                    // pass stays road-aware. Under eviction keep only the deferred 3D regions'
-                    // overrides (the rest are evicted; this caps the extra resident RAM).
-                    if eviction_active {
-                        editor.merge_road_surface_overrides_in_regions(
-                            tile_road_overrides,
-                            &model_regions,
-                        );
-                    } else {
-                        editor.merge_road_surface_overrides(tile_road_overrides);
-                    }
+                } else {
+                    editor.merge_road_surface_overrides(tile_road_overrides);
+                }
 
-                    if eviction_active {
-                        // This tile contributes to its own region and its 8 neighbours;
-                        // flush each non-deferred region whose contributors are all merged.
-                        // (Subways are carved in-tile above, so they don't defer regions.)
-                        let rt = region_of_tile[tile_idx];
-                        for dz in -1..=1 {
-                            for dx in -1..=1 {
-                                let d = (rt.0 + dx, rt.1 + dz);
-                                if let Some(c) = remaining.get_mut(&d) {
-                                    *c -= 1;
-                                    if *c == 0
-                                        && !evicted_regions.contains(&d)
-                                        && !model_regions.contains(&d)
-                                    {
-                                        if hash_check {
-                                            hash_acc = hash_acc.wrapping_add(
-                                                editor.region_content_hash(d.0, d.1),
-                                            );
-                                        }
-                                        if let Some(w) = flush_worker.as_ref() {
-                                            editor.flush_region_via(w, d.0, d.1)?;
-                                        }
-                                        evicted_regions.insert(d);
+                if eviction_active {
+                    // This tile contributes to its own region and its 8 neighbours;
+                    // flush each non-deferred region whose contributors are all merged.
+                    // (Subways are carved in-tile above, so they don't defer regions.)
+                    let rt = region_of_tile[tile_idx];
+                    for dz in -1..=1 {
+                        for dx in -1..=1 {
+                            let d = (rt.0 + dx, rt.1 + dz);
+                            if let Some(c) = remaining.get_mut(&d) {
+                                *c -= 1;
+                                if *c == 0
+                                    && !evicted_regions.contains(&d)
+                                    && !model_regions.contains(&d)
+                                {
+                                    if hash_check {
+                                        hash_acc = hash_acc
+                                            .wrapping_add(editor.region_content_hash(d.0, d.1));
                                     }
+                                    if let Some(w) = flush_worker.as_ref() {
+                                        editor.flush_region_via(w, d.0, d.1)?;
+                                    }
+                                    evicted_regions.insert(d);
                                 }
                             }
                         }
                     }
-
-                    subway_points.extend(tile_subway_pts);
-
-                    // Step 20%->70% per merged tile, throttled to whole-percent steps.
-                    tiles_merged += 1;
-                    let pct = 20.0 + (tiles_merged as f64 / total_tiles as f64) * 50.0;
-                    if pct - last_emitted_pct >= 1.0 {
-                        emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
-                        last_emitted_pct = pct;
-                    }
                 }
-                Ok(())
-            };
+
+                subway_points.extend(tile_subway_pts);
+
+                // Step 20%->70% per merged tile, throttled to whole-percent steps.
+                tiles_merged += 1;
+                let pct = 20.0 + (tiles_merged as f64 / total_tiles as f64) * 50.0;
+                if pct - last_emitted_pct >= 1.0 {
+                    emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
+                    last_emitted_pct = pct;
+                }
+            }
+            Ok(())
+        };
 
         // Opt-in (ARNIS_PIPELINE_MERGE): overlap the serial merge of batch N with the
         // parallel placement of batch N+1 via rayon::join, so worker cores aren't idle
