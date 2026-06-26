@@ -79,6 +79,30 @@
         </div>
 
         <div class="settings-scrollable">
+        <!-- Performance (top-level, not in a section) -->
+        <!-- CPU Usage Slider -->
+        <div class="settings-row">
+          <label for="cpu-usage-slider">
+            <span data-localize="cpu_usage">CPU Usage</span>
+            <span class="tooltip-icon" data-tooltip="Percentage of CPU cores used during world generation. Higher = more worker threads and faster generation, but a less responsive system. Double-click to reset.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="range" id="cpu-usage-slider" name="cpu-usage-slider" min="10" max="100" step="1" value="90">
+            <span id="cpu-usage-value">90%</span>
+          </div>
+        </div>
+
+        <!-- Faster Merge (pipelined) Toggle -->
+        <div class="settings-row">
+          <label for="pipeline-merge-toggle">
+            <span data-localize="pipeline_merge">Faster merge (beta)</span>
+            <span class="tooltip-icon" data-tooltip="Overlap each tile batch's merge with the next batch's placement so CPU cores aren't idle during merges. Faster on large areas; output is identical. Experimental.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="pipeline-merge-toggle" name="pipeline-merge-toggle">
+          </div>
+        </div>
+
         <!-- Section: Generation -->
         <div class="settings-section-header" data-localize="settings_section_generation">Generation</div>
 
@@ -188,17 +212,6 @@
           </div>
         </div>
 
-        <!-- Faster Merge (pipelined) Toggle -->
-        <div class="settings-row">
-          <label for="pipeline-merge-toggle">
-            <span data-localize="pipeline_merge">Faster merge (beta)</span>
-            <span class="tooltip-icon" data-tooltip="Overlap each tile batch's merge with the next batch's placement so CPU cores aren't idle during merges. Faster on large areas; output is identical. Experimental.">?</span>
-          </label>
-          <div class="settings-control">
-            <input type="checkbox" id="pipeline-merge-toggle" name="pipeline-merge-toggle">
-          </div>
-        </div>
-
         <!-- World Scale Slider -->
         <div class="settings-row">
           <label for="scale-value-slider">
@@ -208,18 +221,6 @@
           <div class="settings-control">
             <input type="range" id="scale-value-slider" name="scale-value-slider" min="0.30" max="2.5" step="0.1" value="1">
             <span id="slider-value">1.00</span>
-          </div>
-        </div>
-
-        <!-- CPU Usage Slider -->
-        <div class="settings-row">
-          <label for="cpu-usage-slider">
-            <span data-localize="cpu_usage">CPU Usage</span>
-            <span class="tooltip-icon" data-tooltip="Percentage of CPU cores used during world generation. Higher = more worker threads and faster generation, but a less responsive system. Double-click to reset.">?</span>
-          </label>
-          <div class="settings-control">
-            <input type="range" id="cpu-usage-slider" name="cpu-usage-slider" min="10" max="100" step="1" value="90">
-            <span id="cpu-usage-value">90%</span>
           </div>
         </div>
 
