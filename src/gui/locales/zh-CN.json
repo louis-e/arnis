@@ -10,6 +10,7 @@
   "winter_mode": "冬季模式",
   "world_scale": "世界比例",
   "cpu_usage": "CPU 占用率",
+  "pipeline_merge": "加速合并（实验）",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "填充超时（秒）",
   "ground_level": "地面高度",

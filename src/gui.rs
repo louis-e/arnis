@@ -854,6 +854,7 @@ fn gui_start_generation(
     world_format: String,
     rotation_angle: f64,
     cpu_percent: u8,
+    pipeline_merge: bool,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -1105,6 +1106,7 @@ fn gui_start_generation(
                 downloader: "requests".to_string(),
                 scale: world_scale,
                 cpu_percent: cpu_percent.clamp(10, 100),
+                pipeline_merge,
                 projection: crate::projection::ProjectionKind::Local,
                 ground_level,
                 terrain: terrain_enabled,

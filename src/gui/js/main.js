@@ -122,6 +122,7 @@ async function applyLocalization(localization) {
     "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
     "span[data-localize='bake_lighting']": "bake_lighting",
+    "span[data-localize='pipeline_merge']": "pipeline_merge",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
@@ -736,6 +737,15 @@ function initSettings() {
       cpuSlider.value = 90;
       cpuValue.textContent = "90%";
       localStorage.setItem("arnis-cpu-percent", "90");
+    });
+  }
+
+  // "Faster merge" toggle: persisted so the choice sticks across launches.
+  const pipelineToggle = document.getElementById("pipeline-merge-toggle");
+  if (pipelineToggle) {
+    pipelineToggle.checked = localStorage.getItem("arnis-pipeline-merge") === "1";
+    pipelineToggle.addEventListener("change", () => {
+      localStorage.setItem("arnis-pipeline-merge", pipelineToggle.checked ? "1" : "0");
     });
   }
 
@@ -1599,6 +1609,7 @@ async function startGeneration() {
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
+    var pipeline_merge = document.getElementById("pipeline-merge-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
     var cpuPercent = parseInt(document.getElementById("cpu-usage-slider").value, 10) || 90;
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
@@ -1635,7 +1646,8 @@ async function startGeneration() {
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
         rotationAngle: rotationAngle,
-        cpuPercent: cpuPercent
+        cpuPercent: cpuPercent,
+        pipelineMerge: pipeline_merge
     });
 
     console.log("Generation process started.");

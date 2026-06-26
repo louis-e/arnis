@@ -716,11 +716,14 @@ fn generate_world_inner(
             Ok(())
         };
 
-        // Opt-in (ARNIS_PIPELINE_MERGE): overlap the serial merge of batch N with the
-        // parallel placement of batch N+1 via rayon::join, so worker cores aren't idle
-        // during merges. Merge order is unchanged (in-order, batch by batch), so output
-        // is bit-exact vs. the default path — verify with --benchmark + ARNIS_BLOCK_HASH.
-        if std::env::var_os("ARNIS_PIPELINE_MERGE").is_some() {
+        // Opt-in (GUI "Faster merge" toggle / --pipeline-merge / ARNIS_PIPELINE_MERGE env):
+        // overlap the serial merge of batch N with the parallel placement of batch N+1 via
+        // rayon::join, so worker cores aren't idle during merges. Merge order is unchanged
+        // (in-order, batch by batch), so output is bit-exact vs. the default path — verify
+        // with --benchmark + ARNIS_BLOCK_HASH.
+        let pipeline_merge =
+            args.pipeline_merge || std::env::var_os("ARNIS_PIPELINE_MERGE").is_some();
+        if pipeline_merge {
             let loop_start = std::time::Instant::now();
             let mut pending: Option<Vec<_>> = None;
             for batch in indexed_tiles.chunks(tile_batch_size) {

@@ -188,6 +188,17 @@
           </div>
         </div>
 
+        <!-- Faster Merge (pipelined) Toggle -->
+        <div class="settings-row">
+          <label for="pipeline-merge-toggle">
+            <span data-localize="pipeline_merge">Faster merge (beta)</span>
+            <span class="tooltip-icon" data-tooltip="Overlap each tile batch's merge with the next batch's placement so CPU cores aren't idle during merges. Faster on large areas; output is identical. Experimental.">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="pipeline-merge-toggle" name="pipeline-merge-toggle">
+          </div>
+        </div>
+
         <!-- World Scale Slider -->
         <div class="settings-row">
           <label for="scale-value-slider">

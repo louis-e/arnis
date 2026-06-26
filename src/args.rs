@@ -46,6 +46,12 @@ pub struct Args {
     #[arg(long, default_value_t = 90)]
     pub cpu_percent: u8,
 
+    /// Overlap each tile batch's merge with the next batch's placement so worker
+    /// cores aren't idle during merges (faster on large areas; output unchanged).
+    /// Also enabled by the ARNIS_PIPELINE_MERGE env var.
+    #[arg(long, default_value_t = false)]
+    pub pipeline_merge: bool,
+
     /// Projection mode for coordinate mapping
     /// local: each generation starts at Minecraft (0,0) (default)
     /// web_mercator: global projection for multi-generation worlds
