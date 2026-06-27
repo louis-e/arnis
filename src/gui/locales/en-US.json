@@ -9,6 +9,8 @@
   "generation_process_started": "Generation process started.",
   "winter_mode": "Winter Mode",
   "world_scale": "World Scale",
+  "cpu_usage": "CPU Usage",
+  "pipeline_merge": "Faster merge (beta)",
   "custom_bounding_box": "Bounding Box",
   "floodfill_timeout": "Floodfill Timeout (sec)",
   "ground_level": "Ground Level",

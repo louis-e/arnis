@@ -10,7 +10,7 @@ use crate::progress::{emit_gui_progress_update, emit_gui_progress_update_ex, emi
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::tile;
-use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat};
+use crate::world_editor::{FlushWorker, WorldEditor, WorldFormat, WorldToModify};
 use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -253,7 +253,77 @@ fn should_stream_to_disk(num_regions: usize) -> bool {
 }
 
 /// Generate world with explicit format options (used by GUI for Bedrock support)
+/// Public entry point. Runs the whole generation inside a dedicated rayon
+/// thread pool sized to the user's CPU budget (`args.cpu_percent`).
+///
+/// A *scoped* pool is used instead of reconfiguring the global one because
+/// rayon's global pool can only be built once per process (it's already built
+/// at startup), so a per-run scoped pool is the only way to let the setting
+/// take effect on every generation without restarting the app. Every nested
+/// `par_iter` inside `generate_world_inner` (tile placement, region saving,
+/// flood-fill precompute, …) automatically runs on this pool via `install`.
+///
+/// `RAYON_NUM_THREADS`, if set, wins (power-user / benchmark override). If the
+/// pool can't be built we fall back to running on the global pool.
 pub fn generate_world_with_options(
+    elements: Vec<ProcessedElement>,
+    xzbbox: XZBBox,
+    llbbox: LLBBox,
+    ground: Ground,
+    args: &Args,
+    options: GenerationOptions,
+    outline_suppression: OutlineSuppression,
+) -> Result<PathBuf, String> {
+    let target_threads = generation_thread_count(args.cpu_percent);
+
+    match rayon::ThreadPoolBuilder::new()
+        .num_threads(target_threads)
+        .thread_name(|i| format!("arnis-gen-{i}"))
+        .build()
+    {
+        Ok(pool) => pool.install(move || {
+            generate_world_inner(
+                elements,
+                xzbbox,
+                llbbox,
+                ground,
+                args,
+                options,
+                outline_suppression,
+            )
+        }),
+        Err(_) => generate_world_inner(
+            elements,
+            xzbbox,
+            llbbox,
+            ground,
+            args,
+            options,
+            outline_suppression,
+        ),
+    }
+}
+
+/// Resolve the worker-thread count for generation from a CPU percentage.
+/// `RAYON_NUM_THREADS` overrides the percentage when set; otherwise the count
+/// is `round(cores * percent/100)`, clamped to at least 1.
+fn generation_thread_count(cpu_percent: u8) -> usize {
+    if let Some(n) = std::env::var("RAYON_NUM_THREADS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+    {
+        return n;
+    }
+
+    let cores = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(4);
+    let fraction = f64::from(cpu_percent.clamp(10, 100)) / 100.0;
+    ((cores as f64 * fraction).round() as usize).max(1)
+}
+
+fn generate_world_inner(
     elements: Vec<ProcessedElement>,
     xzbbox: XZBBox,
     llbbox: LLBBox,
@@ -461,10 +531,12 @@ pub fn generate_world_with_options(
         let total_tiles = indexed_tiles.len().max(1);
         let mut tiles_merged = 0usize;
         let mut last_emitted_pct = 20.0_f64;
-        for batch in indexed_tiles.chunks(tile_batch_size) {
-            // Phase 1: process this batch of tiles in parallel
-            let place_start = std::time::Instant::now();
-            let batch_results: Vec<_> = batch
+
+        // Phase 1 (parallel): place one batch of tiles into independent tile editors.
+        // Pure function of immutable inputs — never touches the shared `editor`, so it
+        // can run concurrently with a Phase-2 merge of an earlier batch.
+        let place_batch = |batch: &[(usize, &tile::TileBounds)]| {
+            batch
                 .par_iter()
                 .map(|&(tile_idx, tile_bounds)| {
                     // max_* are exclusive; rect_from_min_max treats max as inclusive,
@@ -568,12 +640,21 @@ pub fn generate_world_with_options(
                         tile_road_overrides,
                     )
                 })
-                .collect();
-            place_dur += place_start.elapsed();
+                .collect::<Vec<_>>()
+        };
 
-            let merge_start = std::time::Instant::now();
-            // Phase 2: merge this batch's results into the main editor (sequential).
-            // batch_results is dropped after this loop, freeing memory before next batch.
+        // Phase 2 (sequential): merge a batch's tile results into the shared `editor`,
+        // in the batch's authoritative order. This is the only writer of `editor` and
+        // the eviction bookkeeping, so the merge order is fixed regardless of whether a
+        // placement is overlapping — output stays bit-exact.
+        #[allow(clippy::type_complexity)]
+        let mut merge_batch = |batch_results: Vec<(
+            usize,
+            WorldToModify,
+            Vec<(i32, i32)>,
+            fnv::FnvHashMap<(i32, i32), i32>,
+        )>|
+         -> Result<(), String> {
             for (tile_idx, tile_world, tile_subway_pts, tile_road_overrides) in batch_results {
                 editor.merge_world(
                     tile_world,
@@ -632,7 +713,46 @@ pub fn generate_world_with_options(
                     last_emitted_pct = pct;
                 }
             }
-            merge_dur += merge_start.elapsed();
+            Ok(())
+        };
+
+        // Opt-in (GUI "Faster merge" toggle / --pipeline-merge / ARNIS_PIPELINE_MERGE env):
+        // overlap the serial merge of batch N with the parallel placement of batch N+1 via
+        // rayon::join, so worker cores aren't idle during merges. Merge order is unchanged
+        // (in-order, batch by batch), so output is bit-exact vs. the default path — verify
+        // with --benchmark + ARNIS_BLOCK_HASH.
+        let pipeline_merge =
+            args.pipeline_merge || std::env::var_os("ARNIS_PIPELINE_MERGE").is_some();
+        if pipeline_merge {
+            let loop_start = std::time::Instant::now();
+            let mut pending: Option<Vec<_>> = None;
+            for batch in indexed_tiles.chunks(tile_batch_size) {
+                if let Some(prev) = pending.take() {
+                    // Place this batch while the previous batch merges.
+                    let (this_results, merge_res) =
+                        rayon::join(|| place_batch(batch), || merge_batch(prev));
+                    merge_res?;
+                    pending = Some(this_results);
+                } else {
+                    pending = Some(place_batch(batch));
+                }
+            }
+            if let Some(prev) = pending.take() {
+                merge_batch(prev)?;
+            }
+            // Overlapped: report wall-clock as placement, merge folded in.
+            place_dur = loop_start.elapsed();
+        } else {
+            // Default: place a batch, then merge it, repeat (cores idle during merge).
+            for batch in indexed_tiles.chunks(tile_batch_size) {
+                let place_start = std::time::Instant::now();
+                let batch_results = place_batch(batch);
+                place_dur += place_start.elapsed();
+
+                let merge_start = std::time::Instant::now();
+                merge_batch(batch_results)?;
+                merge_dur += merge_start.elapsed();
+            }
         }
         bench.report("element_placement", place_dur);
         bench.report("tile_merge", merge_dur);
