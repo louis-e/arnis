@@ -1,0 +1,1652 @@
+{
+ "realm": "aus",
+ "default_community": "AUS - Tasmanian Lowland Temperate Rainforest",
+ "communities": [
+  {
+   "name": "AUS - Central Desert",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Acacia_papyrocarpa",
+     "w1": [],
+     "w2": [
+      "Acacia_papyrocarpa1.schem",
+      "Acacia_papyrocarpa2.schem"
+     ],
+     "w3": [
+      "Acacia_papyrocarpa3.schem"
+     ]
+    },
+    {
+     "name": "Allocasuarina_decaiseneana",
+     "w1": [
+      "Allocasuarina_decaiseneana1.schem",
+      "Allocasuarina_decaiseneana2.schem",
+      "Allocasuarina_decaiseneana3.schem",
+      "Allocasuarina_decaiseneana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corymbia_aparrerinja",
+     "w1": [
+      "Corymbia_aparrerinja1.schem",
+      "Corymbia_aparrerinja2.schem"
+     ],
+     "w2": [
+      "Corymbia_aparrerinja3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Livistona_mariae",
+     "w1": [
+      "Livistona_mariae1.schem",
+      "Livistona_mariae2.schem"
+     ],
+     "w2": [
+      "Livistona_mariae3.schem",
+      "Livistona_mariae4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Santalum_acuminatum",
+     "w1": [
+      "Santalum_acuminatum1.schem",
+      "Santalum_acuminatum2.schem",
+      "Santalum_acuminatum3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Coconut Palms",
+   "habitat": "wet",
+   "density": 35,
+   "species": [
+    {
+     "name": "Cocos_nucifera",
+     "w1": [
+      "Cocos_nucifera1.schem",
+      "Cocos_nucifera3.schem",
+      "Cocos_nucifera4.schem",
+      "Cocos_nucifera5.schem",
+      "Cocos_nucifera6.schem",
+      "Cocos_nucifera7.schem"
+     ],
+     "w2": [
+      "Cocos_nucifera2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Fiji",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Aleurites_moluccanus",
+     "w1": [
+      "Aleurites_moluccanus1.schem",
+      "Aleurites_moluccanus2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Casuarina_cunninghamiana",
+     "w1": [
+      "Casuarina_cunninghamiana1.schem",
+      "Casuarina_cunninghamiana2.schem",
+      "Casuarina_cunninghamiana3.schem",
+      "Casuarina_cunninghamiana4.schem",
+      "Casuarina_cunninghamiana5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cyathea_medullaris",
+     "w1": [
+      "Cyathea_medullaris1.schem",
+      "Cyathea_medullaris2.schem",
+      "Cyathea_medullaris3.schem",
+      "Cyathea_medullaris4.schem",
+      "Cyathea_medullaris5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pandanus_tectorius",
+     "w1": [
+      "Pandanus_tectorius1.schem",
+      "Pandanus_tectorius2.schem",
+      "Pandanus_tectorius3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Grey Mangroves",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Avicennia_marina",
+     "w1": [
+      "Avicennia_marina2.schem",
+      "Avicennia_marina3.schem",
+      "Avicennia_marina4.schem"
+     ],
+     "w2": [
+      "Avicennia_marina1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Casuarina_equisetifolia",
+     "w1": [
+      "Casuarina_equisetifolia1.schem",
+      "Casuarina_equisetifolia2.schem"
+     ],
+     "w2": [
+      "Casuarina_equisetifolia3.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Hawaiian Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acacia_koa",
+     "w1": [
+      "Acacia_koa1.schem",
+      "Acacia_koa2.schem",
+      "Acacia_koa3.schem",
+      "Acacia_koa4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Aleurites_moluccanus",
+     "w1": [
+      "Aleurites_moluccanus1.schem",
+      "Aleurites_moluccanus2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Metrosideros_polymorpha",
+     "w1": [
+      "Metrosideros_polymorpha1.schem",
+      "Metrosideros_polymorpha2.schem",
+      "Metrosideros_polymorpha3.schem",
+      "Metrosideros_polymorpha4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pandanus_tectorius",
+     "w1": [
+      "Pandanus_tectorius1.schem",
+      "Pandanus_tectorius2.schem",
+      "Pandanus_tectorius3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Jarrah-Karri Temperate Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Allocasuarina_fraseriana",
+     "w1": [
+      "Allocasuarina_fraseriana1.schem",
+      "Allocasuarina_fraseriana2.schem",
+      "Allocasuarina_fraseriana3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Banksia_grandis",
+     "w1": [
+      "Banksia_grandis1.schem",
+      "Banksia_grandis2.schem",
+      "Banksia_grandis3.schem",
+      "Banksia_grandis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Banksia_menziesii",
+     "w1": [
+      "Banksia_menziesii1.schem",
+      "Banksia_menziesii2.schem",
+      "Banksia_menziesii3.schem",
+      "Banksia_menziesii4.schem",
+      "Banksia_menziesii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corymbia_calophylla",
+     "w1": [
+      "Corymbia_calophylla3.schem",
+      "Corymbia_calophylla4.schem",
+      "Corymbia_calophylla5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_diversicolor",
+     "w1": [
+      "Eucalyptus_diversicolor4.schem",
+      "Eucalyptus_diversicolor5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_marginata",
+     "w1": [
+      "Eucalyptus_marginata3.schem",
+      "Eucalyptus_marginata4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Eucalyptus_marginata2.schem"
+     ]
+    },
+    {
+     "name": "Kingia_australis",
+     "w1": [
+      "Kingia_australis1.schem",
+      "Kingia_australis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Mallee and Scrub",
+   "habitat": "dry",
+   "density": 20,
+   "species": [
+    {
+     "name": "Eucalyptus_dumosa",
+     "w1": [
+      "Eucalyptus_dumosa1.schem",
+      "Eucalyptus_dumosa2.schem",
+      "Eucalyptus_dumosa3.schem",
+      "Eucalyptus_dumosa4.schem",
+      "Eucalyptus_dumosa5.schem",
+      "Eucalyptus_dumosa6.schem",
+      "Eucalyptus_dumosa7.schem",
+      "Eucalyptus_dumosa8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Mountain Ash Temperate Rainforest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acacia_dealbata",
+     "w1": [
+      "Acacia_dealbata1.schem",
+      "Acacia_dealbata2.schem",
+      "Acacia_dealbata4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Acacia_dealbata3.schem"
+     ]
+    },
+    {
+     "name": "Anodopetalum_biglandulosum",
+     "w1": [
+      "Anodopetalum_biglandulosum1.schem",
+      "Anodopetalum_biglandulosum3.schem",
+      "Anodopetalum_biglandulosum4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Anodopetalum_biglandulosum2.schem"
+     ]
+    },
+    {
+     "name": "Atherosperma_moschatum",
+     "w1": [
+      "Atherosperma_moschatum1.schem",
+      "Atherosperma_moschatum2.schem",
+      "Atherosperma_moschatum3.schem",
+      "Atherosperma_moschatum4.schem",
+      "Atherosperma_moschatum5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dicksonia_antarctica",
+     "w1": [
+      "Dicksonia_antarctica1.schem",
+      "Dicksonia_antarctica2.schem",
+      "Dicksonia_antarctica3.schem",
+      "Dicksonia_antarctica4.schem",
+      "Dicksonia_antarctica6.schem"
+     ],
+     "w2": [
+      "Dicksonia_antarctica5.schem",
+      "Dicksonia_antarctica7.schem",
+      "Dicksonia_antarctica8.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_obliqua",
+     "w1": [
+      "Eucalyptus_obliqua1.schem",
+      "Eucalyptus_obliqua3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_viminalis",
+     "w1": [
+      "Eucalyptus_viminalis1.schem",
+      "Eucalyptus_viminalis2.schem",
+      "Eucalyptus_viminalis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Nothofagus_cunninghamii",
+     "w1": [
+      "Nothofagus_cunninghamii3.schem",
+      "Nothofagus_cunninghamii4.schem",
+      "Nothofagus_cunninghamii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Mulga Shrubland",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Acacia_aneura",
+     "w1": [
+      "Acacia_aneura1.schem"
+     ],
+     "w2": [
+      "Acacia_aneura3.schem"
+     ],
+     "w3": [
+      "Acacia_aneura2.schem"
+     ]
+    },
+    {
+     "name": "Corymbia_aparrerinja",
+     "w1": [
+      "Corymbia_aparrerinja1.schem",
+      "Corymbia_aparrerinja2.schem"
+     ],
+     "w2": [
+      "Corymbia_aparrerinja3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_melanophloia",
+     "w1": [
+      "Eucalyptus_melanophloia1.schem",
+      "Eucalyptus_melanophloia2.schem",
+      "Eucalyptus_melanophloia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Santalum_acuminatum",
+     "w1": [
+      "Santalum_acuminatum1.schem",
+      "Santalum_acuminatum2.schem",
+      "Santalum_acuminatum3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - New Zealand Kauri Forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Agathis_australis",
+     "w1": [
+      "Agathis_australis4.schem",
+      "Agathis_australis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Beilschmiedia_tawa",
+     "w1": [
+      "Beilschmiedia_tawa1.schem",
+      "Beilschmiedia_tawa2.schem",
+      "Beilschmiedia_tawa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cyathea_medullaris",
+     "w1": [
+      "Cyathea_medullaris1.schem",
+      "Cyathea_medullaris2.schem",
+      "Cyathea_medullaris3.schem",
+      "Cyathea_medullaris4.schem",
+      "Cyathea_medullaris5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dicksonia_squarrosa",
+     "w1": [
+      "Dicksonia_squarrosa1.schem",
+      "Dicksonia_squarrosa2.schem",
+      "Dicksonia_squarrosa3.schem",
+      "Dicksonia_squarrosa4.schem",
+      "Dicksonia_squarrosa5.schem",
+      "Dicksonia_squarrosa6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rhopalostylis_sapida",
+     "w1": [
+      "Rhopalostylis_sapida1.schem",
+      "Rhopalostylis_sapida2.schem",
+      "Rhopalostylis_sapida3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Schefflera_digitata",
+     "w1": [
+      "Schefflera_digitata1.schem",
+      "Schefflera_digitata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - New Zealand North Island",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Beilschmiedia_tawa",
+     "w1": [
+      "Beilschmiedia_tawa1.schem",
+      "Beilschmiedia_tawa2.schem",
+      "Beilschmiedia_tawa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cyathea_medullaris",
+     "w1": [
+      "Cyathea_medullaris1.schem",
+      "Cyathea_medullaris2.schem",
+      "Cyathea_medullaris3.schem",
+      "Cyathea_medullaris4.schem",
+      "Cyathea_medullaris5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dacrycarpus_dacryoides",
+     "w1": [
+      "Dacrycarpus_dacryoides3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dacrydium_cupressinum",
+     "w1": [
+      "Dacrydium_cupressinum3.schem",
+      "Dacrydium_cupressinum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dicksonia_squarrosa",
+     "w1": [
+      "Dicksonia_squarrosa1.schem",
+      "Dicksonia_squarrosa2.schem",
+      "Dicksonia_squarrosa3.schem",
+      "Dicksonia_squarrosa4.schem",
+      "Dicksonia_squarrosa5.schem",
+      "Dicksonia_squarrosa6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Laurelia_nova-zelandiae",
+     "w1": [
+      "Laurelia_nova-zelandiae1.schem",
+      "Laurelia_nova-zelandiae2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Leptospermum_scoparium",
+     "w1": [
+      "Leptospermum_scoparium2.schem",
+      "Leptospermum_scoparium3.schem",
+      "Leptospermum_scoparium4.schem"
+     ],
+     "w2": [
+      "Leptospermum_scoparium1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Metrosideros_excelsa",
+     "w1": [
+      "Metrosideros_excelsa2.schem",
+      "Metrosideros_excelsa3.schem"
+     ],
+     "w2": [
+      "Metrosideros_excelsa1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Podocarpus_totara",
+     "w1": [
+      "Podocarpus_totara2.schem",
+      "Podocarpus_totara3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Podocarpus_totara1.schem"
+     ]
+    },
+    {
+     "name": "Prumnopitys_taxifolia",
+     "w1": [
+      "Prumnopitys_taxifolia1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Schefflera_digitata",
+     "w1": [
+      "Schefflera_digitata1.schem",
+      "Schefflera_digitata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - New Zealand South Island",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Dacrydium_cupressinum",
+     "w1": [
+      "Dacrydium_cupressinum3.schem",
+      "Dacrydium_cupressinum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dicksonia_squarrosa",
+     "w1": [
+      "Dicksonia_squarrosa1.schem",
+      "Dicksonia_squarrosa2.schem",
+      "Dicksonia_squarrosa3.schem",
+      "Dicksonia_squarrosa4.schem",
+      "Dicksonia_squarrosa5.schem",
+      "Dicksonia_squarrosa6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Leptospermum_scoparium",
+     "w1": [
+      "Leptospermum_scoparium2.schem",
+      "Leptospermum_scoparium3.schem",
+      "Leptospermum_scoparium4.schem"
+     ],
+     "w2": [
+      "Leptospermum_scoparium1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Libocedrus_bidwillii",
+     "w1": [
+      "Libocedrus_bidwillii2.schem",
+      "Libocedrus_bidwillii3.schem",
+      "Libocedrus_bidwillii4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Libocedrus_bidwillii1.schem",
+      "Libocedrus_bidwillii5.schem"
+     ]
+    },
+    {
+     "name": "Metrosideros_excelsa",
+     "w1": [
+      "Metrosideros_excelsa2.schem",
+      "Metrosideros_excelsa3.schem"
+     ],
+     "w2": [
+      "Metrosideros_excelsa1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Nothofagus_menziesii",
+     "w1": [
+      "Nothofagus_menziesii1.schem",
+      "Nothofagus_menziesii2.schem",
+      "Nothofagus_menziesii3.schem",
+      "Nothofagus_menziesii4.schem",
+      "Nothofagus_menziesii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Podocarpus_totara",
+     "w1": [
+      "Podocarpus_totara2.schem",
+      "Podocarpus_totara3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Podocarpus_totara1.schem"
+     ]
+    },
+    {
+     "name": "Pterophylla_racemosa",
+     "w1": [
+      "Pterophylla_racemosa1.schem",
+      "Pterophylla_racemosa2.schem",
+      "Pterophylla_racemosa3.schem",
+      "Pterophylla_racemosa4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Schefflera_digitata",
+     "w1": [
+      "Schefflera_digitata1.schem",
+      "Schefflera_digitata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Northern Territory Savanna",
+   "habitat": "dry",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acacia_aneura",
+     "w1": [
+      "Acacia_aneura1.schem"
+     ],
+     "w2": [
+      "Acacia_aneura3.schem"
+     ],
+     "w3": [
+      "Acacia_aneura2.schem"
+     ]
+    },
+    {
+     "name": "Adansonia_gregorii",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_gregorii1.schem",
+      "Adansonia_gregorii2.schem",
+      "Adansonia_gregorii3.schem"
+     ]
+    },
+    {
+     "name": "Eucalyptus_miniata",
+     "w1": [
+      "Eucalyptus_miniata1.schem",
+      "Eucalyptus_miniata3.schem",
+      "Eucalyptus_miniata4.schem"
+     ],
+     "w2": [
+      "Eucalyptus_miniata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_tetrodonta",
+     "w1": [
+      "Eucalyptus_tetrodonta1.schem",
+      "Eucalyptus_tetrodonta2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melaleuca_viminea",
+     "w1": [
+      "Melaleuca_viminea1.schem",
+      "Melaleuca_viminea2.schem",
+      "Melaleuca_viminea3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Pacific Island Beach Forest",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Casuarina_equisetifolia",
+     "w1": [
+      "Casuarina_equisetifolia1.schem",
+      "Casuarina_equisetifolia2.schem"
+     ],
+     "w2": [
+      "Casuarina_equisetifolia3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Hibiscus_tiliaceus",
+     "w1": [
+      "Hibiscus_tiliaceus1.schem",
+      "Hibiscus_tiliaceus2.schem",
+      "Hibiscus_tiliaceus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pandanus_tectorius",
+     "w1": [
+      "Pandanus_tectorius1.schem",
+      "Pandanus_tectorius2.schem",
+      "Pandanus_tectorius3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pisonia_grandis",
+     "w1": [
+      "Pisonia_grandis1.schem",
+      "Pisonia_grandis3.schem"
+     ],
+     "w2": [
+      "Pisonia_grandis2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Queensland Brigalow Savanna",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Acacia_harpophylla",
+     "w1": [
+      "Acacia_harpophylla1.schem"
+     ],
+     "w2": [
+      "Acacia_harpophylla2.schem",
+      "Acacia_harpophylla4.schem"
+     ],
+     "w3": [
+      "Acacia_harpophylla3.schem"
+     ]
+    },
+    {
+     "name": "Brachychiton_rupestris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Brachychiton_rupestris1.schem",
+      "Brachychiton_rupestris2.schem",
+      "Brachychiton_rupestris3.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "AUS - Queensland Wet Tropics Rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Agathis_robusta",
+     "w1": [
+      "Agathis_robusta4.schem",
+      "Agathis_robusta5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Araucaria_bidwilli",
+     "w1": [
+      "Araucaria_bidwilli2.schem",
+      "Araucaria_bidwilli4.schem",
+      "Araucaria_bidwilli5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Araucaria_cunninghamii",
+     "w1": [
+      "Araucaria_cunninghamii3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Argyrodendron_trifoliolatum",
+     "w1": [
+      "Argyrodendron_trifoliolatum1.schem"
+     ],
+     "w2": [
+      "Argyrodendron_trifoliolatum2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Cyathea_medullaris",
+     "w1": [
+      "Cyathea_medullaris1.schem",
+      "Cyathea_medullaris2.schem",
+      "Cyathea_medullaris3.schem",
+      "Cyathea_medullaris4.schem",
+      "Cyathea_medullaris5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Macrozamia_moorei",
+     "w1": [
+      "Macrozamia_moorei1.schem",
+      "Macrozamia_moorei2.schem",
+      "Macrozamia_moorei3.schem",
+      "Macrozamia_moorei4.schem",
+      "Macrozamia_moorei5.schem",
+      "Macrozamia_moorei6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Riverside trees",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Casuarina_cunninghamiana",
+     "w1": [
+      "Casuarina_cunninghamiana1.schem",
+      "Casuarina_cunninghamiana2.schem",
+      "Casuarina_cunninghamiana3.schem",
+      "Casuarina_cunninghamiana4.schem",
+      "Casuarina_cunninghamiana5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_camaldulensis",
+     "w1": [
+      "Eucalyptus_camaldulensis1.schem",
+      "Eucalyptus_camaldulensis3.schem",
+      "Eucalyptus_camaldulensis5.schem"
+     ],
+     "w2": [
+      "Eucalyptus_camaldulensis2.schem",
+      "Eucalyptus_camaldulensis7.schem"
+     ],
+     "w3": [
+      "Eucalyptus_camaldulensis4.schem",
+      "Eucalyptus_camaldulensis6.schem"
+     ]
+    },
+    {
+     "name": "Eucalyptus_coolibah",
+     "w1": [
+      "Eucalyptus_coolibah2.schem",
+      "Eucalyptus_coolibah3.schem"
+     ],
+     "w2": [
+      "Eucalyptus_coolibah1.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Subtropical Coastal Rainforest",
+   "habitat": "wet",
+   "density": 10,
+   "species": [
+    {
+     "name": "Archontophoenix_cunninghamiana",
+     "w1": [
+      "Archontophoenix_cunninghamiana1.schem",
+      "Archontophoenix_cunninghamiana2.schem",
+      "Archontophoenix_cunninghamiana3.schem",
+      "Archontophoenix_cunninghamiana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_macrophylla",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_macrophylla1.schem",
+      "Ficus_macrophylla2.schem"
+     ]
+    },
+    {
+     "name": "Grevillea_robusta",
+     "w1": [
+      "Grevillea_robusta1.schem",
+      "Grevillea_robusta2.schem",
+      "Grevillea_robusta3.schem",
+      "Grevillea_robusta4.schem",
+      "Grevillea_robusta5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Macadamia_integrifolia",
+     "w1": [
+      "Macadamia_integrifolia2.schem",
+      "Macadamia_integrifolia3.schem"
+     ],
+     "w2": [
+      "Macadamia_integrifolia1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Macrozamia_moorei",
+     "w1": [
+      "Macrozamia_moorei1.schem",
+      "Macrozamia_moorei2.schem",
+      "Macrozamia_moorei3.schem",
+      "Macrozamia_moorei4.schem",
+      "Macrozamia_moorei5.schem",
+      "Macrozamia_moorei6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melaleuca_quinquenervia",
+     "w1": [
+      "Melaleuca_quinquenervia4.schem"
+     ],
+     "w2": [
+      "Melaleuca_quinquenervia3.schem"
+     ],
+     "w3": [
+      "Melaleuca_quinquenervia1.schem",
+      "Melaleuca_quinquenervia2.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "AUS - Swan Coast Scrublands",
+   "habitat": "dry",
+   "density": 20,
+   "species": [
+    {
+     "name": "Allocasuarina_fraseriana",
+     "w1": [
+      "Allocasuarina_fraseriana1.schem",
+      "Allocasuarina_fraseriana2.schem",
+      "Allocasuarina_fraseriana3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Banksia_grandis",
+     "w1": [
+      "Banksia_grandis1.schem",
+      "Banksia_grandis2.schem",
+      "Banksia_grandis3.schem",
+      "Banksia_grandis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Banksia_menziesii",
+     "w1": [
+      "Banksia_menziesii1.schem",
+      "Banksia_menziesii2.schem",
+      "Banksia_menziesii3.schem",
+      "Banksia_menziesii4.schem",
+      "Banksia_menziesii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Callitris_columellaris",
+     "w1": [
+      "Callitris_columellaris1.schem",
+      "Callitris_columellaris2.schem",
+      "Callitris_columellaris3.schem",
+      "Callitris_columellaris4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corymbia_calophylla",
+     "w1": [
+      "Corymbia_calophylla3.schem",
+      "Corymbia_calophylla4.schem",
+      "Corymbia_calophylla5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Kingia_australis",
+     "w1": [
+      "Kingia_australis1.schem",
+      "Kingia_australis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melaleuca_viminea",
+     "w1": [
+      "Melaleuca_viminea1.schem",
+      "Melaleuca_viminea2.schem",
+      "Melaleuca_viminea3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Nuytsia_floribunda",
+     "w1": [
+      "Nuytsia_floribunda4.schem"
+     ],
+     "w2": [
+      "Nuytsia_floribunda1.schem",
+      "Nuytsia_floribunda2.schem",
+      "Nuytsia_floribunda3.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Sydney-area Subtropical Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acacia_melanoxylon",
+     "w1": [
+      "Acacia_melanoxylon1.schem",
+      "Acacia_melanoxylon2.schem",
+      "Acacia_melanoxylon3.schem",
+      "Acacia_melanoxylon4.schem",
+      "Acacia_melanoxylon5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Acacia_pycnantha",
+     "w1": [
+      "Acacia_pycnantha1.schem",
+      "Acacia_pycnantha2.schem",
+      "Acacia_pycnantha3.schem",
+      "Acacia_pycnantha5.schem"
+     ],
+     "w2": [
+      "Acacia_pycnantha4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Angophora_costata",
+     "w1": [
+      "Angophora_costata1.schem",
+      "Angophora_costata2.schem",
+      "Angophora_costata3.schem",
+      "Angophora_costata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Banksia_integrifolia",
+     "w1": [
+      "Banksia_integrifolia1.schem",
+      "Banksia_integrifolia3.schem"
+     ],
+     "w2": [
+      "Banksia_integrifolia2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Callitris_columellaris",
+     "w1": [
+      "Callitris_columellaris1.schem",
+      "Callitris_columellaris2.schem",
+      "Callitris_columellaris3.schem",
+      "Callitris_columellaris4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Casuarina_cunninghamiana",
+     "w1": [
+      "Casuarina_cunninghamiana1.schem",
+      "Casuarina_cunninghamiana2.schem",
+      "Casuarina_cunninghamiana3.schem",
+      "Casuarina_cunninghamiana5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corymbia_gummifera",
+     "w1": [
+      "Corymbia_gummifera1.schem",
+      "Corymbia_gummifera2.schem",
+      "Corymbia_gummifera3.schem",
+      "Corymbia_gummifera5.schem"
+     ],
+     "w2": [
+      "Corymbia_gummifera4.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Tasmanian Highlands",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Atherosperma_moschatum",
+     "w1": [
+      "Atherosperma_moschatum4.schem",
+      "Atherosperma_moschatum5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Athrotaxis_cupressoides",
+     "w1": [
+      "Athrotaxis_cupressoides1.schem",
+      "Athrotaxis_cupressoides2.schem",
+      "Athrotaxis_cupressoides4.schem"
+     ],
+     "w2": [
+      "Athrotaxis_cupressoides3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Nothofagus_cunninghamii",
+     "w1": [
+      "Nothofagus_cunninghamii4.schem",
+      "Nothofagus_cunninghamii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Phyllocladus_aspleniifolius",
+     "w1": [
+      "Phyllocladus_aspleniifolius1.schem",
+      "Phyllocladus_aspleniifolius2.schem",
+      "Phyllocladus_aspleniifolius3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Tasmanian Lowland Temperate Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acacia_melanoxylon",
+     "w1": [
+      "Acacia_melanoxylon1.schem",
+      "Acacia_melanoxylon2.schem",
+      "Acacia_melanoxylon3.schem",
+      "Acacia_melanoxylon4.schem",
+      "Acacia_melanoxylon5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anodopetalum_biglandulosum",
+     "w1": [
+      "Anodopetalum_biglandulosum1.schem",
+      "Anodopetalum_biglandulosum3.schem",
+      "Anodopetalum_biglandulosum4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Anodopetalum_biglandulosum2.schem"
+     ]
+    },
+    {
+     "name": "Atherosperma_moschatum",
+     "w1": [
+      "Atherosperma_moschatum1.schem",
+      "Atherosperma_moschatum2.schem",
+      "Atherosperma_moschatum3.schem",
+      "Atherosperma_moschatum4.schem",
+      "Atherosperma_moschatum5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dicksonia_antarctica",
+     "w1": [
+      "Dicksonia_antarctica1.schem",
+      "Dicksonia_antarctica2.schem",
+      "Dicksonia_antarctica3.schem",
+      "Dicksonia_antarctica4.schem",
+      "Dicksonia_antarctica6.schem"
+     ],
+     "w2": [
+      "Dicksonia_antarctica5.schem",
+      "Dicksonia_antarctica7.schem",
+      "Dicksonia_antarctica8.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_globulus",
+     "w1": [
+      "Eucalyptus_globulus3.schem",
+      "Eucalyptus_globulus4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_viminalis",
+     "w1": [
+      "Eucalyptus_viminalis1.schem",
+      "Eucalyptus_viminalis2.schem",
+      "Eucalyptus_viminalis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Leptospermum_scoparium",
+     "w1": [
+      "Leptospermum_scoparium2.schem",
+      "Leptospermum_scoparium3.schem",
+      "Leptospermum_scoparium4.schem"
+     ],
+     "w2": [
+      "Leptospermum_scoparium1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Nothofagus_cunninghamii",
+     "w1": [
+      "Nothofagus_cunninghamii3.schem",
+      "Nothofagus_cunninghamii4.schem",
+      "Nothofagus_cunninghamii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Temperate Eucalypt Forest (New South Wales)",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acacia_melanoxylon",
+     "w1": [
+      "Acacia_melanoxylon1.schem",
+      "Acacia_melanoxylon2.schem",
+      "Acacia_melanoxylon3.schem",
+      "Acacia_melanoxylon4.schem",
+      "Acacia_melanoxylon5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Acacia_pycnantha",
+     "w1": [
+      "Acacia_pycnantha1.schem",
+      "Acacia_pycnantha2.schem",
+      "Acacia_pycnantha3.schem",
+      "Acacia_pycnantha5.schem"
+     ],
+     "w2": [
+      "Acacia_pycnantha4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Callitris_columellaris",
+     "w1": [
+      "Callitris_columellaris1.schem",
+      "Callitris_columellaris2.schem",
+      "Callitris_columellaris3.schem",
+      "Callitris_columellaris4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corymbia_gummifera",
+     "w1": [
+      "Corymbia_gummifera1.schem",
+      "Corymbia_gummifera2.schem",
+      "Corymbia_gummifera3.schem",
+      "Corymbia_gummifera5.schem"
+     ],
+     "w2": [
+      "Corymbia_gummifera4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_obliqua",
+     "w1": [
+      "Eucalyptus_obliqua1.schem",
+      "Eucalyptus_obliqua3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_paniculata",
+     "w1": [
+      "Eucalyptus_paniculata1.schem",
+      "Eucalyptus_paniculata2.schem"
+     ],
+     "w2": [
+      "Eucalyptus_paniculata3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_pilularis",
+     "w1": [
+      "Eucalyptus_pilularis1.schem",
+      "Eucalyptus_pilularis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_saligna",
+     "w1": [
+      "Eucalyptus_saligna3.schem",
+      "Eucalyptus_saligna4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Leptospermum_scoparium",
+     "w1": [
+      "Leptospermum_scoparium2.schem",
+      "Leptospermum_scoparium3.schem",
+      "Leptospermum_scoparium4.schem"
+     ],
+     "w2": [
+      "Leptospermum_scoparium1.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AUS - Temperate Eucalypt Forest (Victoria)",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acacia_melanoxylon",
+     "w1": [
+      "Acacia_melanoxylon1.schem",
+      "Acacia_melanoxylon2.schem",
+      "Acacia_melanoxylon3.schem",
+      "Acacia_melanoxylon4.schem",
+      "Acacia_melanoxylon5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Acacia_pycnantha",
+     "w1": [
+      "Acacia_pycnantha1.schem",
+      "Acacia_pycnantha2.schem",
+      "Acacia_pycnantha3.schem",
+      "Acacia_pycnantha5.schem"
+     ],
+     "w2": [
+      "Acacia_pycnantha4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Callitris_columellaris",
+     "w1": [
+      "Callitris_columellaris1.schem",
+      "Callitris_columellaris2.schem",
+      "Callitris_columellaris3.schem",
+      "Callitris_columellaris4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corymbia_gummifera",
+     "w1": [
+      "Corymbia_gummifera1.schem",
+      "Corymbia_gummifera2.schem",
+      "Corymbia_gummifera3.schem",
+      "Corymbia_gummifera5.schem"
+     ],
+     "w2": [
+      "Corymbia_gummifera4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_globulus",
+     "w1": [
+      "Eucalyptus_globulus3.schem",
+      "Eucalyptus_globulus4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_obliqua",
+     "w1": [
+      "Eucalyptus_obliqua1.schem",
+      "Eucalyptus_obliqua3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_viminalis",
+     "w1": [
+      "Eucalyptus_viminalis1.schem",
+      "Eucalyptus_viminalis2.schem",
+      "Eucalyptus_viminalis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Leptospermum_scoparium",
+     "w1": [
+      "Leptospermum_scoparium2.schem",
+      "Leptospermum_scoparium3.schem",
+      "Leptospermum_scoparium4.schem"
+     ],
+     "w2": [
+      "Leptospermum_scoparium1.schem"
+     ],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}

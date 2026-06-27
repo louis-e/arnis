@@ -843,6 +843,8 @@ fn gui_start_generation(
     interior_enabled: bool,
     roof_enabled: bool,
     fillground_enabled: bool,
+    legacy_trees_enabled: bool,
+    tree_size_tiers: Option<String>,
     land_cover_enabled: bool, // renamed from city_boundaries_enabled
     use_3d_enabled: bool,
     disable_height_limit: bool,
@@ -1109,6 +1111,8 @@ fn gui_start_generation(
                 interior: interior_enabled,
                 roof: roof_enabled,
                 fillground: fillground_enabled,
+                legacy_trees: legacy_trees_enabled,
+                tree_sizes: tree_size_tiers,
                 land_cover: land_cover_enabled,
                 use_3d: use_3d_enabled,
                 debug: false,

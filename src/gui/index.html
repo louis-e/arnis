@@ -152,6 +152,32 @@
           </div>
         </div>
 
+        <!-- Legacy Trees Toggle -->
+        <div class="settings-row">
+          <label for="legacy-trees-toggle">
+            <span data-localize="legacy_trees">Legacy trees</span>
+            <span class="tooltip-icon" data-tooltip="Use the simple procedural trees instead of the detailed region-aware schematic tree models (on by default).">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="legacy-trees-toggle" name="legacy-trees-toggle">
+          </div>
+        </div>
+
+        <!-- Schematic Tree Size Tiers (hidden when legacy trees are on) -->
+        <div class="settings-row" id="tree-sizes-row">
+          <label>
+            <span data-localize="tree_sizes">Tree sizes</span>
+            <span class="tooltip-icon" data-tooltip="Which tree height tiers may place. Giant only renders at 1:1 scale.">?</span>
+          </label>
+          <div class="settings-control tree-sizes-control" style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <label><input type="checkbox" id="tree-size-small" checked> S</label>
+            <label><input type="checkbox" id="tree-size-medium" checked> M</label>
+            <label><input type="checkbox" id="tree-size-big" checked> B</label>
+            <label><input type="checkbox" id="tree-size-tall" checked> T</label>
+            <label><input type="checkbox" id="tree-size-giant"> G</label>
+          </div>
+        </div>
+
         <!-- Section: World -->
         <div class="settings-section-header" data-localize="settings_section_world">World</div>
 

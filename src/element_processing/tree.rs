@@ -371,6 +371,17 @@ impl LeafPlacer<'_> {
     }
 }
 
+/// Map a chosen `TreeType` to a habitat hint that steers region community selection.
+fn habitat_for_tree_type(t: TreeType) -> crate::region::Habitat {
+    use crate::region::Habitat;
+    match t {
+        TreeType::Spruce | TreeType::Pine => Habitat::Conifer,
+        TreeType::Willow | TreeType::Mangrove => Habitat::Wet,
+        TreeType::Acacia => Habitat::Dry,
+        _ => Habitat::Lowland,
+    }
+}
+
 impl Tree {
     fn canopy_might_intersect_building(
         x: i32,
@@ -470,6 +481,63 @@ impl Tree {
 
         // One base_y for the whole tree so the canopy doesn't warp to follow terrain.
         let base_y = editor.get_absolute_y(x, y, z);
+
+        // Schematic tree pack active: stamp a model instead of the procedural tree. The
+        // footprint/road/water checks and density above already ran, so schematic trees inherit
+        // Arnis's coverage and avoidance; the blacklist keeps them off buildings/water.
+        if let Some(region) = editor.tree_pack() {
+            let road_water = [
+                BLACK_CONCRETE,
+                GRAY_CONCRETE_POWDER,
+                CYAN_TERRACOTTA,
+                GRAY_CONCRETE,
+                LIGHT_GRAY_CONCRETE,
+                DIRT_PATH,
+                SMOOTH_STONE,
+                WATER,
+            ];
+            let hint = habitat_for_tree_type(tree_type);
+            let elev_y = editor.terrain_level(x, z).unwrap_or(base_y);
+            if let Some((sx, sz, idx, rot)) = region.pick_slot(x, z, hint, elev_y) {
+                // The slot can be a few blocks off (x,z); re-check it isn't road/water.
+                if editor.is_lc_water(sx, sz)
+                    || editor.check_for_block(sx, 0, sz, Some(&road_water))
+                {
+                    return;
+                }
+                // Clamp the base to at most 2 above the lowest footprint ground so a tree on a
+                // cliff edge doesn't hover; the root pass bridges the rest.
+                let schem = region.schem(idx);
+                let half = (schem.width.max(schem.length) / 2).clamp(1, 6);
+                let center = editor.get_absolute_y(sx, y, sz);
+                let mut fpmin = center;
+                for (dx, dz) in [
+                    (-half, 0),
+                    (half, 0),
+                    (0, -half),
+                    (0, half),
+                    (-half, -half),
+                    (half, half),
+                    (-half, half),
+                    (half, -half),
+                ] {
+                    fpmin = fpmin.min(editor.get_absolute_y(sx + dx, y, sz + dz));
+                }
+                let slot_base_y = center.min(fpmin + 2);
+                crate::schematic::place_schematic_tree(
+                    editor,
+                    schem,
+                    sx,
+                    sz,
+                    slot_base_y,
+                    rot,
+                    &blacklist,
+                    building_footprints,
+                    y,
+                );
+            }
+            return;
+        }
 
         // Trunk jitter clamped so the canopy cap always sits above the trunk top.
         let height_jitter = ((variant_idx >> 8) & 0x3) as i32 - 1;

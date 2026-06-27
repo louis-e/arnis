@@ -1,0 +1,1576 @@
+{
+ "realm": "asn",
+ "default_community": "ASN - Honshu Broadleaf Forest",
+ "communities": [
+  {
+   "name": "ASN - Birch Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "Betula_pendula1.schem",
+      "Betula_pendula2.schem",
+      "Betula_pendula3.schem",
+      "Betula_pendula4.schem",
+      "Betula_pendula5.schem",
+      "Betula_pendula6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremula",
+     "w1": [
+      "Populus_tremula1.schem",
+      "Populus_tremula2.schem",
+      "Populus_tremula3.schem",
+      "Populus_tremula4.schem",
+      "Populus_tremula5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Bonsai-esque weathered trees",
+   "habitat": "conifer",
+   "density": 50,
+   "species": [
+    {
+     "name": "Pinus_hwangshanensis",
+     "w1": [
+      "Pinus_hwangshanensis1.schem",
+      "Pinus_hwangshanensis3.schem",
+      "Pinus_hwangshanensis6.schem",
+      "Pinus_hwangshanensis8.schem"
+     ],
+     "w2": [
+      "Pinus_hwangshanensis2.schem",
+      "Pinus_hwangshanensis4.schem",
+      "Pinus_hwangshanensis5.schem"
+     ],
+     "w3": [
+      "Pinus_hwangshanensis7.schem"
+     ]
+    },
+    {
+     "name": "Pinus_pumila",
+     "w1": [
+      "Pinus_pumila1.schem",
+      "Pinus_pumila2.schem",
+      "Pinus_pumila3.schem",
+      "Pinus_pumila4.schem",
+      "Pinus_pumila5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_thunbergii",
+     "w1": [
+      "Pinus_thunbergii3.schem"
+     ],
+     "w2": [
+      "Pinus_thunbergii1.schem",
+      "Pinus_thunbergii2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Podocarpus_macrophyllus",
+     "w1": [
+      "Podocarpus_macrophyllus2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Podocarpus_macrophyllus1.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "ASN - Central Chinese Mountain Forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "Betula_pendula1.schem",
+      "Betula_pendula2.schem",
+      "Betula_pendula3.schem",
+      "Betula_pendula4.schem",
+      "Betula_pendula5.schem",
+      "Betula_pendula6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cercidophyllum_japonicum",
+     "w1": [
+      "Cercidophyllum_japonicum1.schem",
+      "Cercidophyllum_japonicum2.schem",
+      "Cercidophyllum_japonicum3.schem",
+      "Cercidophyllum_japonicum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cunninghamia_lanceolata",
+     "w1": [
+      "Cunninghamia_lanceolata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ginkgo_biloba",
+     "w1": [
+      "Ginkgo_biloba1.schem",
+      "Ginkgo_biloba2.schem",
+      "Ginkgo_biloba3.schem",
+      "Ginkgo_biloba4.schem",
+      "Ginkgo_biloba5.schem",
+      "Ginkgo_biloba6.schem",
+      "Ginkgo_biloba7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Metasequoia_glyptostroboides",
+     "w1": [
+      "Metasequoia_glyptostroboides1.schem",
+      "Metasequoia_glyptostroboides4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_armandii",
+     "w1": [
+      "Pinus_armandii (1).schem",
+      "Pinus_armandii (2).schem",
+      "Pinus_armandii (3).schem",
+      "Pinus_armandii (4).schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremula",
+     "w1": [
+      "Populus_tremula1.schem",
+      "Populus_tremula2.schem",
+      "Populus_tremula3.schem",
+      "Populus_tremula4.schem",
+      "Populus_tremula5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Central-Asian Riverside Tugay Forest",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Elaeagnus_angustifolia",
+     "w1": [
+      "Elaeagnus_angustifolia1.schem",
+      "Elaeagnus_angustifolia2.schem",
+      "Elaeagnus_angustifolia3.schem",
+      "Elaeagnus_angustifolia4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_euphratica",
+     "w1": [
+      "Populus_euphratica5.schem"
+     ],
+     "w2": [
+      "Populus_euphratica1.schem",
+      "Populus_euphratica3.schem",
+      "Populus_euphratica4.schem"
+     ],
+     "w3": [
+      "Populus_euphratica2.schem"
+     ]
+    },
+    {
+     "name": "Salix_babylonica",
+     "w1": [
+      "Salix_babylonica1.schem",
+      "Salix_babylonica2.schem",
+      "Salix_babylonica3.schem",
+      "Salix_babylonica5.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Salix_babylonica4.schem"
+     ]
+    },
+    {
+     "name": "Tamarix_ramosissima",
+     "w1": [
+      "Tamarix_ramosissima1.schem",
+      "Tamarix_ramosissima2.schem",
+      "Tamarix_ramosissima3.schem",
+      "Tamarix_ramosissima4.schem",
+      "Tamarix_ramosissima5.schem",
+      "Tamarix_ramosissima6.schem",
+      "Tamarix_ramosissima7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_pumila",
+     "w1": [
+      "Ulmus_pumila2.schem",
+      "Ulmus_pumila3.schem"
+     ],
+     "w2": [
+      "Ulmus_pumila1.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Cherry Grove",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Prunus_nipponica",
+     "w1": [
+      "Prunus_nipponica3.schem"
+     ],
+     "w2": [
+      "Prunus_nipponica1.schem"
+     ],
+     "w3": [
+      "Prunus_nipponica2.schem"
+     ]
+    },
+    {
+     "name": "Prunus_serrulata",
+     "w1": [
+      "Prunus_serrulata1.schem",
+      "Prunus_serrulata2.schem",
+      "Prunus_serrulata3.schem",
+      "Prunus_serrulata5.schem",
+      "Prunus_serrulata6.schem",
+      "Prunus_serrulata7.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Prunus_serrulata4.schem"
+     ]
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Far Eastern Taiga",
+   "habitat": "conifer",
+   "density": 15,
+   "species": [
+    {
+     "name": "Larix_gmelinii",
+     "w1": [
+      "Larix_gmelinii1.schem",
+      "Larix_gmelinii2.schem",
+      "Larix_gmelinii3.schem",
+      "Larix_gmelinii4.schem",
+      "Larix_gmelinii5.schem",
+      "Larix_gmelinii6.schem",
+      "Larix_gmelinii7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_obovata",
+     "w1": [
+      "Picea_obovata1.schem",
+      "Picea_obovata2.schem",
+      "Picea_obovata3.schem",
+      "Picea_obovata4.schem",
+      "Picea_obovata5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_koraiensis",
+     "w1": [
+      "Pinus_koraiensis1.schem",
+      "Pinus_koraiensis2.schem",
+      "Pinus_koraiensis3.schem",
+      "Pinus_koraiensis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_pumila",
+     "w1": [
+      "Pinus_pumila1.schem",
+      "Pinus_pumila2.schem",
+      "Pinus_pumila3.schem",
+      "Pinus_pumila4.schem",
+      "Pinus_pumila5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_sibirica",
+     "w1": [
+      "Pinus_sibirica2.schem",
+      "Pinus_sibirica3.schem",
+      "Pinus_sibirica4.schem",
+      "Pinus_sibirica5.schem",
+      "Pinus_sibirica6.schem",
+      "Pinus_sibirica7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Gobi Desert Shrubs",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Elaeagnus_angustifolia",
+     "w1": [
+      "Elaeagnus_angustifolia3.schem",
+      "Elaeagnus_angustifolia4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Haloxylon_ammodendron",
+     "w1": [
+      "Haloxylon_ammodendron1.schem",
+      "Haloxylon_ammodendron2.schem",
+      "Haloxylon_ammodendron3.schem",
+      "Haloxylon_ammodendron5.schem",
+      "Haloxylon_ammodendron6.schem",
+      "Haloxylon_ammodendron7.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Haloxylon_ammodendron4.schem"
+     ]
+    },
+    {
+     "name": "Quercus_mongolica",
+     "w1": [
+      "Quercus_mongolica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tamarix_ramosissima",
+     "w1": [
+      "Tamarix_ramosissima1.schem",
+      "Tamarix_ramosissima2.schem",
+      "Tamarix_ramosissima3.schem",
+      "Tamarix_ramosissima4.schem",
+      "Tamarix_ramosissima5.schem",
+      "Tamarix_ramosissima6.schem",
+      "Tamarix_ramosissima7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_pumila",
+     "w1": [],
+     "w2": [
+      "Ulmus_pumila1.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - High Mountain Krummholz",
+   "habitat": "conifer",
+   "density": 50,
+   "species": [
+    {
+     "name": "Juniperus_tibetica",
+     "w1": [
+      "Juniperus_tibetica1.schem",
+      "Juniperus_tibetica2.schem",
+      "Juniperus_tibetica3.schem",
+      "Juniperus_tibetica4.schem",
+      "Juniperus_tibetica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_hwangshanensis",
+     "w1": [
+      "Pinus_hwangshanensis1.schem",
+      "Pinus_hwangshanensis3.schem",
+      "Pinus_hwangshanensis6.schem",
+      "Pinus_hwangshanensis8.schem"
+     ],
+     "w2": [
+      "Pinus_hwangshanensis2.schem",
+      "Pinus_hwangshanensis4.schem",
+      "Pinus_hwangshanensis5.schem"
+     ],
+     "w3": [
+      "Pinus_hwangshanensis7.schem"
+     ]
+    },
+    {
+     "name": "Taxus_sumatrana",
+     "w1": [
+      "Taxus_sumatrana1.schem",
+      "Taxus_sumatrana2.schem",
+      "Taxus_sumatrana3.schem",
+      "Taxus_sumatrana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Hokkaido Mixed Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "Betula_pendula1.schem",
+      "Betula_pendula2.schem",
+      "Betula_pendula3.schem",
+      "Betula_pendula4.schem",
+      "Betula_pendula5.schem",
+      "Betula_pendula6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_jezoensis",
+     "w1": [
+      "Picea_jezoensis2.schem",
+      "Picea_jezoensis3.schem",
+      "Picea_jezoensis4.schem",
+      "Picea_jezoensis5.schem",
+      "Picea_jezoensis6.schem",
+      "Picea_jezoensis7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_pumila",
+     "w1": [
+      "Pinus_pumila1.schem",
+      "Pinus_pumila2.schem",
+      "Pinus_pumila3.schem",
+      "Pinus_pumila4.schem",
+      "Pinus_pumila5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremula",
+     "w1": [
+      "Populus_tremula1.schem",
+      "Populus_tremula2.schem",
+      "Populus_tremula3.schem",
+      "Populus_tremula4.schem",
+      "Populus_tremula5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prunus_nipponica",
+     "w1": [
+      "Prunus_nipponica3.schem"
+     ],
+     "w2": [
+      "Prunus_nipponica1.schem"
+     ],
+     "w3": [
+      "Prunus_nipponica2.schem"
+     ]
+    },
+    {
+     "name": "Quercus_mongolica",
+     "w1": [
+      "Quercus_mongolica1.schem",
+      "Quercus_mongolica2.schem",
+      "Quercus_mongolica3.schem",
+      "Quercus_mongolica4.schem",
+      "Quercus_mongolica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tilia_amurensis",
+     "w1": [
+      "Tilia_amurensis1.schem",
+      "Tilia_amurensis2.schem",
+      "Tilia_amurensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Honshu Broadleaf Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acer_palmatum",
+     "w1": [
+      "Acer_palmatum4.schem"
+     ],
+     "w2": [
+      "Acer_palmatum1.schem",
+      "Acer_palmatum3.schem"
+     ],
+     "w3": [
+      "Acer_palmatum2.schem"
+     ]
+    },
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "Betula_pendula1.schem",
+      "Betula_pendula2.schem",
+      "Betula_pendula3.schem",
+      "Betula_pendula4.schem",
+      "Betula_pendula5.schem",
+      "Betula_pendula6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Carpinus_laxiflora",
+     "w1": [
+      "Carpinus_laxiflora1.schem",
+      "Carpinus_laxiflora2.schem",
+      "Carpinus_laxiflora3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Fagus_crenata",
+     "w1": [
+      "Fagus_crenata1.schem",
+      "Fagus_crenata2.schem",
+      "Fagus_crenata3.schem",
+      "Fagus_crenata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_pumila",
+     "w1": [
+      "Pinus_pumila1.schem",
+      "Pinus_pumila2.schem",
+      "Pinus_pumila3.schem",
+      "Pinus_pumila4.schem",
+      "Pinus_pumila5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_mongolica",
+     "w1": [
+      "Quercus_mongolica1.schem",
+      "Quercus_mongolica2.schem",
+      "Quercus_mongolica3.schem",
+      "Quercus_mongolica4.schem",
+      "Quercus_mongolica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tilia_amurensis",
+     "w1": [
+      "Tilia_amurensis1.schem",
+      "Tilia_amurensis2.schem",
+      "Tilia_amurensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_davidiana",
+     "w1": [
+      "Ulmus_davidiana2.schem",
+      "Ulmus_davidiana3.schem",
+      "Ulmus_davidiana4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Ulmus_davidiana1.schem"
+     ]
+    },
+    {
+     "name": "Ulmus_pumila",
+     "w1": [
+      "Ulmus_pumila2.schem",
+      "Ulmus_pumila3.schem"
+     ],
+     "w2": [
+      "Ulmus_pumila1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Japanese Temperate Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Camphora_officinarium",
+     "w1": [],
+     "w2": [
+      "Camphora_officinarium3.schem",
+      "Camphora_officinarium4.schem"
+     ],
+     "w3": [
+      "Camphora_officinarium1.schem",
+      "Camphora_officinarium2.schem"
+     ]
+    },
+    {
+     "name": "Castanopsis_sieboldii",
+     "w1": [
+      "Castanopsis_sieboldii2.schem",
+      "Castanopsis_sieboldii4.schem"
+     ],
+     "w2": [
+      "Castanopsis_sieboldii1.schem",
+      "Castanopsis_sieboldii3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Cercidophyllum_japonicum",
+     "w1": [
+      "Cercidophyllum_japonicum1.schem",
+      "Cercidophyllum_japonicum2.schem",
+      "Cercidophyllum_japonicum3.schem",
+      "Cercidophyllum_japonicum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cryptomeria_japonica",
+     "w1": [
+      "Cryptomeria_japonica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_thunbergii",
+     "w1": [
+      "Pinus_thunbergii3.schem"
+     ],
+     "w2": [
+      "Pinus_thunbergii1.schem",
+      "Pinus_thunbergii2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Podocarpus_macrophyllus",
+     "w1": [
+      "Podocarpus_macrophyllus2.schem",
+      "Podocarpus_macrophyllus3.schem",
+      "Podocarpus_macrophyllus4.schem",
+      "Podocarpus_macrophyllus5.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Podocarpus_macrophyllus1.schem"
+     ]
+    },
+    {
+     "name": "Quercus_acutissima",
+     "w1": [
+      "Quercus_acutissima1.schem",
+      "Quercus_acutissima2.schem",
+      "Quercus_acutissima3.schem",
+      "Quercus_acutissima4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sciadopitys_verticillata",
+     "w1": [
+      "Sciadopitys_verticillata1.schem",
+      "Sciadopitys_verticillata2.schem",
+      "Sciadopitys_verticillata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Korean Deciduous Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acer_palmatum",
+     "w1": [
+      "Acer_palmatum4.schem"
+     ],
+     "w2": [
+      "Acer_palmatum1.schem",
+      "Acer_palmatum3.schem"
+     ],
+     "w3": [
+      "Acer_palmatum2.schem"
+     ]
+    },
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "Betula_pendula1.schem",
+      "Betula_pendula2.schem",
+      "Betula_pendula3.schem",
+      "Betula_pendula4.schem",
+      "Betula_pendula5.schem",
+      "Betula_pendula6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Carpinus_laxiflora",
+     "w1": [
+      "Carpinus_laxiflora1.schem",
+      "Carpinus_laxiflora2.schem",
+      "Carpinus_laxiflora3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremula",
+     "w1": [
+      "Populus_tremula1.schem",
+      "Populus_tremula2.schem",
+      "Populus_tremula3.schem",
+      "Populus_tremula4.schem",
+      "Populus_tremula5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_mongolica",
+     "w1": [
+      "Quercus_mongolica1.schem",
+      "Quercus_mongolica2.schem",
+      "Quercus_mongolica3.schem",
+      "Quercus_mongolica4.schem",
+      "Quercus_mongolica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tilia_amurensis",
+     "w1": [
+      "Tilia_amurensis1.schem",
+      "Tilia_amurensis2.schem",
+      "Tilia_amurensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_davidiana",
+     "w1": [
+      "Ulmus_davidiana2.schem",
+      "Ulmus_davidiana3.schem",
+      "Ulmus_davidiana4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Ulmus_davidiana1.schem"
+     ]
+    },
+    {
+     "name": "Ulmus_pumila",
+     "w1": [
+      "Ulmus_pumila2.schem",
+      "Ulmus_pumila3.schem"
+     ],
+     "w2": [
+      "Ulmus_pumila1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Manchu-Ussur-Korean Mixed Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "Betula_pendula1.schem",
+      "Betula_pendula2.schem",
+      "Betula_pendula3.schem",
+      "Betula_pendula4.schem",
+      "Betula_pendula5.schem",
+      "Betula_pendula6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_koraiensis",
+     "w1": [
+      "Pinus_koraiensis1.schem",
+      "Pinus_koraiensis2.schem",
+      "Pinus_koraiensis3.schem",
+      "Pinus_koraiensis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremula",
+     "w1": [
+      "Populus_tremula1.schem",
+      "Populus_tremula2.schem",
+      "Populus_tremula3.schem",
+      "Populus_tremula4.schem",
+      "Populus_tremula5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_mongolica",
+     "w1": [
+      "Quercus_mongolica1.schem",
+      "Quercus_mongolica2.schem",
+      "Quercus_mongolica3.schem",
+      "Quercus_mongolica4.schem",
+      "Quercus_mongolica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tilia_amurensis",
+     "w1": [
+      "Tilia_amurensis1.schem",
+      "Tilia_amurensis2.schem",
+      "Tilia_amurensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_pumila",
+     "w1": [
+      "Ulmus_pumila2.schem",
+      "Ulmus_pumila3.schem"
+     ],
+     "w2": [
+      "Ulmus_pumila1.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Mesopotamian river and wetland forest",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Populus_euphratica",
+     "w1": [
+      "Populus_euphratica5.schem"
+     ],
+     "w2": [
+      "Populus_euphratica1.schem",
+      "Populus_euphratica3.schem",
+      "Populus_euphratica4.schem"
+     ],
+     "w3": [
+      "Populus_euphratica2.schem"
+     ]
+    },
+    {
+     "name": "Tamarix_ramosissima",
+     "w1": [
+      "Tamarix_ramosissima1.schem",
+      "Tamarix_ramosissima2.schem",
+      "Tamarix_ramosissima3.schem",
+      "Tamarix_ramosissima4.schem",
+      "Tamarix_ramosissima5.schem",
+      "Tamarix_ramosissima6.schem",
+      "Tamarix_ramosissima7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Siberian Taiga",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Abies_sibirica",
+     "w1": [
+      "Abies_sibirica1.schem",
+      "Abies_sibirica2.schem",
+      "Abies_sibirica3.schem",
+      "Abies_sibirica4.schem",
+      "Abies_sibirica5.schem",
+      "Abies_sibirica6.schem",
+      "Abies_sibirica7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Larix_sibirica",
+     "w1": [
+      "Larix_sibirica2.schem",
+      "Larix_sibirica4.schem",
+      "Larix_sibirica5.schem",
+      "Larix_sibirica6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_obovata",
+     "w1": [
+      "Picea_obovata1.schem",
+      "Picea_obovata2.schem",
+      "Picea_obovata3.schem",
+      "Picea_obovata4.schem",
+      "Picea_obovata5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_sibirica",
+     "w1": [
+      "Pinus_sibirica2.schem",
+      "Pinus_sibirica3.schem",
+      "Pinus_sibirica4.schem",
+      "Pinus_sibirica5.schem",
+      "Pinus_sibirica6.schem",
+      "Pinus_sibirica7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Southern Japanese Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acer_palmatum",
+     "w1": [
+      "Acer_palmatum4.schem"
+     ],
+     "w2": [
+      "Acer_palmatum1.schem",
+      "Acer_palmatum3.schem"
+     ],
+     "w3": [
+      "Acer_palmatum2.schem"
+     ]
+    },
+    {
+     "name": "Camphora_officinarium",
+     "w1": [],
+     "w2": [
+      "Camphora_officinarium3.schem",
+      "Camphora_officinarium4.schem"
+     ],
+     "w3": [
+      "Camphora_officinarium1.schem",
+      "Camphora_officinarium2.schem"
+     ]
+    },
+    {
+     "name": "Castanopsis_cuspidata",
+     "w1": [
+      "Castanopsis_cuspidata1.schem",
+      "Castanopsis_cuspidata2.schem",
+      "Castanopsis_cuspidata4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Castanopsis_cuspidata3.schem"
+     ]
+    },
+    {
+     "name": "Castanopsis_sieboldii",
+     "w1": [
+      "Castanopsis_sieboldii2.schem",
+      "Castanopsis_sieboldii4.schem"
+     ],
+     "w2": [
+      "Castanopsis_sieboldii1.schem",
+      "Castanopsis_sieboldii3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Cercidophyllum_japonicum",
+     "w1": [
+      "Cercidophyllum_japonicum1.schem",
+      "Cercidophyllum_japonicum2.schem",
+      "Cercidophyllum_japonicum3.schem",
+      "Cercidophyllum_japonicum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prunus_serrulata",
+     "w1": [
+      "Prunus_serrulata1.schem",
+      "Prunus_serrulata2.schem",
+      "Prunus_serrulata3.schem",
+      "Prunus_serrulata5.schem",
+      "Prunus_serrulata6.schem",
+      "Prunus_serrulata7.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Prunus_serrulata4.schem"
+     ]
+    },
+    {
+     "name": "Quercus_acutissima",
+     "w1": [
+      "Quercus_acutissima1.schem",
+      "Quercus_acutissima2.schem",
+      "Quercus_acutissima3.schem",
+      "Quercus_acutissima4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_glauca",
+     "w1": [
+      "Quercus_glauca1.schem",
+      "Quercus_glauca2.schem",
+      "Quercus_glauca3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Wisteria",
+   "habitat": "lowland",
+   "density": 35,
+   "species": [
+    {
+     "name": "Wisteria_sinensis",
+     "w1": [
+      "Wisteria_sinensis4.schem"
+     ],
+     "w2": [
+      "Wisteria_sinensis1.schem",
+      "Wisteria_sinensis2.schem",
+      "Wisteria_sinensis3.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Yangtze River Plain",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Camphora_officinarium",
+     "w1": [],
+     "w2": [
+      "Camphora_officinarium3.schem",
+      "Camphora_officinarium4.schem"
+     ],
+     "w3": [
+      "Camphora_officinarium1.schem",
+      "Camphora_officinarium2.schem"
+     ]
+    },
+    {
+     "name": "Castanea_mollisima",
+     "w1": [
+      "Castanea_mollisima1.schem",
+      "Castanea_mollisima2.schem",
+      "Castanea_mollisima3.schem",
+      "Castanea_mollisima4.schem",
+      "Castanea_mollisima5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Castanopsis_sieboldii",
+     "w1": [
+      "Castanopsis_sieboldii2.schem",
+      "Castanopsis_sieboldii4.schem"
+     ],
+     "w2": [
+      "Castanopsis_sieboldii1.schem",
+      "Castanopsis_sieboldii3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ginkgo_biloba",
+     "w1": [
+      "Ginkgo_biloba1.schem",
+      "Ginkgo_biloba2.schem",
+      "Ginkgo_biloba3.schem",
+      "Ginkgo_biloba4.schem",
+      "Ginkgo_biloba5.schem",
+      "Ginkgo_biloba6.schem",
+      "Ginkgo_biloba7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prunus_serrulata",
+     "w1": [
+      "Prunus_serrulata1.schem",
+      "Prunus_serrulata2.schem",
+      "Prunus_serrulata3.schem",
+      "Prunus_serrulata5.schem",
+      "Prunus_serrulata6.schem",
+      "Prunus_serrulata7.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Prunus_serrulata4.schem"
+     ]
+    },
+    {
+     "name": "Quercus_acutissima",
+     "w1": [
+      "Quercus_acutissima1.schem",
+      "Quercus_acutissima2.schem",
+      "Quercus_acutissima3.schem",
+      "Quercus_acutissima4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_glauca",
+     "w1": [
+      "Quercus_glauca1.schem",
+      "Quercus_glauca2.schem",
+      "Quercus_glauca3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Yellow River Plain",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "Betula_pendula1.schem",
+      "Betula_pendula2.schem",
+      "Betula_pendula3.schem",
+      "Betula_pendula4.schem",
+      "Betula_pendula5.schem",
+      "Betula_pendula6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Castanea_mollisima",
+     "w1": [
+      "Castanea_mollisima1.schem",
+      "Castanea_mollisima2.schem",
+      "Castanea_mollisima3.schem",
+      "Castanea_mollisima4.schem",
+      "Castanea_mollisima5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Juglans_regia",
+     "w1": [
+      "Juglans_regia1.schem",
+      "Juglans_regia2.schem",
+      "Juglans_regia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremula",
+     "w1": [
+      "Populus_tremula1.schem",
+      "Populus_tremula2.schem",
+      "Populus_tremula3.schem",
+      "Populus_tremula4.schem",
+      "Populus_tremula5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_mongolica",
+     "w1": [
+      "Quercus_mongolica1.schem",
+      "Quercus_mongolica2.schem",
+      "Quercus_mongolica3.schem",
+      "Quercus_mongolica4.schem",
+      "Quercus_mongolica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tilia_amurensis",
+     "w1": [
+      "Tilia_amurensis1.schem",
+      "Tilia_amurensis2.schem",
+      "Tilia_amurensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_davidiana",
+     "w1": [
+      "Ulmus_davidiana2.schem",
+      "Ulmus_davidiana3.schem",
+      "Ulmus_davidiana4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Ulmus_davidiana1.schem"
+     ]
+    },
+    {
+     "name": "Ulmus_pumila",
+     "w1": [
+      "Ulmus_pumila2.schem",
+      "Ulmus_pumila3.schem"
+     ],
+     "w2": [
+      "Ulmus_pumila1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN - Zagros Mountain forest-steppe",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Berberis_vulgaris",
+     "w1": [
+      "Berberis_vulgaris1.schem",
+      "Berberis_vulgaris2.schem",
+      "Berberis_vulgaris3.schem",
+      "Berberis_vulgaris4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cupressus_sempervirens",
+     "w1": [
+      "Cupressus_sempervirens1.schem",
+      "Cupressus_sempervirens2.schem",
+      "Cupressus_sempervirens4.schem",
+      "Cupressus_sempervirens6.schem",
+      "Cupressus_sempervirens7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Juniperus_seravschina",
+     "w1": [
+      "Juniperus_seravschina1.schem",
+      "Juniperus_seravschina2.schem",
+      "Juniperus_seravschina3.schem",
+      "Juniperus_seravschina4.schem",
+      "Juniperus_seravschina5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pistacia_atlantica",
+     "w1": [
+      "Pistacia_atlantica1.schem",
+      "Pistacia_atlantica4.schem"
+     ],
+     "w2": [
+      "Pistacia_atlantica2.schem",
+      "Pistacia_atlantica3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Prunus_amygdalus",
+     "w1": [
+      "Prunus_amygdalus1.schem",
+      "Prunus_amygdalus2.schem",
+      "Prunus_amygdalus3.schem",
+      "Prunus_amygdalus4.schem",
+      "Prunus_amygdalus5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN- Balochistan Xeric woodland",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Berberis_vulgaris",
+     "w1": [
+      "Berberis_vulgaris1.schem",
+      "Berberis_vulgaris2.schem",
+      "Berberis_vulgaris3.schem",
+      "Berberis_vulgaris4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Juniperus_seravschina",
+     "w1": [
+      "Juniperus_seravschina1.schem",
+      "Juniperus_seravschina2.schem",
+      "Juniperus_seravschina3.schem",
+      "Juniperus_seravschina4.schem",
+      "Juniperus_seravschina5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pistacia_atlantica",
+     "w1": [
+      "Pistacia_atlantica1.schem",
+      "Pistacia_atlantica4.schem"
+     ],
+     "w2": [
+      "Pistacia_atlantica2.schem",
+      "Pistacia_atlantica3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Prunus_amygdalus",
+     "w1": [
+      "Prunus_amygdalus1.schem",
+      "Prunus_amygdalus2.schem",
+      "Prunus_amygdalus3.schem",
+      "Prunus_amygdalus4.schem",
+      "Prunus_amygdalus5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "ASN- Weeping Willows",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Salix_babylonica",
+     "w1": [
+      "Salix_babylonica1.schem",
+      "Salix_babylonica2.schem",
+      "Salix_babylonica3.schem",
+      "Salix_babylonica5.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Salix_babylonica4.schem"
+     ]
+    }
+   ]
+  }
+ ]
+}

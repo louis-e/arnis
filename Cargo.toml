@@ -35,6 +35,7 @@ fs2 = "0.4"
 geo = "0.33.1"
 gltf = { version = "1", default-features = false, features = ["import", "names", "utils", "KHR_materials_unlit"] }
 image = "0.25"
+include_dir = "0.7"
 indicatif = "0.18.4"
 itertools = "0.14.0"
 jsonwebtoken = "10.3.0"

@@ -66,6 +66,16 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub fillground: bool,
 
+    /// Use the legacy procedural trees instead of the bundled schematic tree pack.
+    /// Schematic trees are on by default; this flag opts out.
+    #[arg(long, default_value_t = false)]
+    pub legacy_trees: bool,
+
+    /// Enabled schematic tree size tiers, comma-separated: small,medium,big,tall,giant.
+    /// Unset = small,medium,big,tall (giant off).
+    #[arg(long = "tree-sizes")]
+    pub tree_sizes: Option<String>,
+
     /// Enable land cover classification (optional)
     /// When enabled, fetches ESA WorldCover satellite data to classify terrain
     /// (forests, deserts, wetlands, built-up areas, etc.) and select appropriate

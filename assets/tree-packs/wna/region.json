@@ -1,0 +1,460 @@
+{
+ "realm": "wna",
+ "default_community": "WNA - temperate rainforest",
+ "communities": [
+  {
+   "name": "WNA - Fremont's cottonwood",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Populus_fremontii",
+     "w1": [
+      "NAwest/Populus_fremontii1.schem",
+      "NAwest/Populus_fremontii2.schem",
+      "NAwest/Populus_fremontii3.schem",
+      "NAwest/Populus_fremontii4.schem",
+      "NAwest/Populus_fremontii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - baja california",
+   "habitat": "lowland",
+   "density": 50,
+   "species": [
+    {
+     "name": "Bursera_microphylla",
+     "w1": [
+      "NAwest/Bursera_microphylla2.schem",
+      "NAwest/Bursera_microphylla3.schem",
+      "NAwest/Bursera_microphylla4.schem"
+     ],
+     "w2": [
+      "NAwest/Bursera_microphylla1.schem",
+      "NAwest/Bursera_microphylla5.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Foqueria_columnaris",
+     "w1": [
+      "NAwest/Foqueria_columnaris1.schem",
+      "NAwest/Foqueria_columnaris2.schem",
+      "NAwest/Foqueria_columnaris3.schem",
+      "NAwest/Foqueria_columnaris4.schem",
+      "NAwest/Foqueria_columnaris5.schem",
+      "NAwest/Foqueria_columnaris6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pachycereus_pringlei",
+     "w1": [
+      "NAwest/Pachycereus_pringlei1.schem",
+      "NAwest/Pachycereus_pringlei2.schem",
+      "NAwest/Pachycereus_pringlei3.schem",
+      "NAwest/Pachycereus_pringlei4.schem",
+      "NAwest/Pachycereus_pringlei5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopsis_glandulosa",
+     "w1": [
+      "NAwest/Prosopsis_glandulosa4.schem"
+     ],
+     "w2": [
+      "NAwest/Prosopsis_glandulosa3.schem"
+     ],
+     "w3": [
+      "NAwest/Prosopsis_glandulosa1.schem",
+      "NAwest/Prosopsis_glandulosa2.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "WNA - birch-aspen",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Betula_papyrifera",
+     "w1": [
+      "NAwest/Betula_papyrifera1.schem",
+      "NAwest/Betula_papyrifera2.schem",
+      "NAwest/Betula_papyrifera3.schem",
+      "NAwest/Betula_papyrifera4.schem",
+      "NAwest/Betula_papyrifera5.schem",
+      "NAwest/Betula_papyrifera6.schem",
+      "NAwest/Betula_papyrifera7.schem",
+      "NAwest/Betula_papyrifera8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremuloides",
+     "w1": [
+      "NAwest/Populus_tremuloides1.schem",
+      "NAwest/Populus_tremuloides2.schem",
+      "NAwest/Populus_tremuloides3.schem",
+      "NAwest/Populus_tremuloides5.schem"
+     ],
+     "w2": [
+      "NAwest/Populus_tremuloides4.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - bristlecone pine",
+   "habitat": "conifer",
+   "density": 50,
+   "species": [
+    {
+     "name": "Pinus_longaeva",
+     "w1": [
+      "NAwest/Pinus_longaeva2.schem",
+      "NAwest/Pinus_longaeva6.schem"
+     ],
+     "w2": [
+      "NAwest/Pinus_longaeva1.schem",
+      "NAwest/Pinus_longaeva3.schem",
+      "NAwest/Pinus_longaeva4.schem",
+      "NAwest/Pinus_longaeva5.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - california broadleaf forest",
+   "habitat": "lowland",
+   "density": 50,
+   "species": [
+    {
+     "name": "Arctostaphylos_manzanita",
+     "w1": [
+      "NAwest/Arctostaphylos_manzanita3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "NAwest/Arctostaphylos_manzanita1.schem",
+      "NAwest/Arctostaphylos_manzanita2.schem"
+     ]
+    },
+    {
+     "name": "Quercus_agrifolia",
+     "w1": [
+      "NAwest/Quercus_agrifolia (1).schem",
+      "NAwest/Quercus_agrifolia (3).schem",
+      "NAwest/Quercus_agrifolia (5).schem",
+      "NAwest/Quercus_agrifolia (6).schem"
+     ],
+     "w2": [
+      "NAwest/Quercus_agrifolia (4).schem"
+     ],
+     "w3": [
+      "NAwest/Quercus_agrifolia (2).schem"
+     ]
+    },
+    {
+     "name": "Quercus_kelloggi",
+     "w1": [
+      "NAwest/Quercus_kelloggi3.schem",
+      "NAwest/Quercus_kelloggi4.schem",
+      "NAwest/Quercus_kelloggi5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_kelloggii",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "NAwest/Quercus_kelloggii1.schem",
+      "NAwest/Quercus_kelloggii2.schem"
+     ]
+    },
+    {
+     "name": "Umbellularia_californica",
+     "w1": [
+      "NAwest/Umbellularia_californica2.schem",
+      "NAwest/Umbellularia_californica3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "NAwest/Umbellularia_californica1.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "WNA - canadian taiga",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Larix_laricina",
+     "w1": [
+      "NAwest/Larix_laricina1.schem",
+      "NAwest/Larix_laricina2.schem",
+      "NAwest/Larix_laricina3.schem",
+      "NAwest/Larix_laricina4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_glauca",
+     "w1": [
+      "NAwest/Picea_glauca1.schem",
+      "NAwest/Picea_glauca2.schem",
+      "NAwest/Picea_glauca3.schem",
+      "NAwest/Picea_glauca4.schem",
+      "NAwest/Picea_glauca5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_mariana",
+     "w1": [
+      "NAwest/Picea_mariana1.schem",
+      "NAwest/Picea_mariana2.schem",
+      "NAwest/Picea_mariana3.schem",
+      "NAwest/Picea_mariana4.schem",
+      "NAwest/Picea_mariana5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - desert",
+   "habitat": "dry",
+   "density": 40,
+   "species": [
+    {
+     "name": "Carnegiea_gigantea",
+     "w1": [
+      "NAwest/Carnegiea_gigantea1.schem",
+      "NAwest/Carnegiea_gigantea2.schem",
+      "NAwest/Carnegiea_gigantea3.schem",
+      "NAwest/Carnegiea_gigantea4.schem",
+      "NAwest/Carnegiea_gigantea5.schem",
+      "NAwest/Carnegiea_gigantea6.schem",
+      "NAwest/Carnegiea_gigantea7.schem",
+      "NAwest/Carnegiea_gigantea8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Parkinsonia_florida",
+     "w1": [
+      "NAwest/Parkinsonia_florida1.schem",
+      "NAwest/Parkinsonia_florida2.schem",
+      "NAwest/Parkinsonia_florida3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopsis_glandulosa",
+     "w1": [
+      "NAwest/Prosopsis_glandulosa4.schem"
+     ],
+     "w2": [
+      "NAwest/Prosopsis_glandulosa3.schem"
+     ],
+     "w3": [
+      "NAwest/Prosopsis_glandulosa1.schem",
+      "NAwest/Prosopsis_glandulosa2.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "WNA - giant sequoia",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Pinus_jeffreyi",
+     "w1": [
+      "NAwest/Pinus_jeffreyi1.schem",
+      "NAwest/Pinus_jeffreyi2.schem",
+      "NAwest/Pinus_jeffreyi3.schem",
+      "NAwest/Pinus_jeffreyi4.schem",
+      "NAwest/Pinus_jeffreyi5.schem",
+      "NAwest/Pinus_jeffreyi6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - joshua trees",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Yucca_brevifolia",
+     "w1": [
+      "NAwest/Yucca_brevifolia1.schem",
+      "NAwest/Yucca_brevifolia2.schem",
+      "NAwest/Yucca_brevifolia3.schem",
+      "NAwest/Yucca_brevifolia4.schem",
+      "NAwest/Yucca_brevifolia5.schem",
+      "NAwest/Yucca_brevifolia6.schem"
+     ],
+     "w2": [
+      "NAwest/Yucca_brevifolia7.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - mexican fan palms",
+   "habitat": "wet",
+   "density": 30,
+   "species": [
+    {
+     "name": "Washingtonia_robusta",
+     "w1": [
+      "NAwest/Washingtonia_robusta1.schem",
+      "NAwest/Washingtonia_robusta2.schem",
+      "NAwest/Washingtonia_robusta3.schem",
+      "NAwest/Washingtonia_robusta4.schem",
+      "NAwest/Washingtonia_robusta5.schem",
+      "NAwest/Washingtonia_robusta6.schem",
+      "NAwest/Washingtonia_robusta7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - pinyon pine",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Pinus_monophylla",
+     "w1": [
+      "NAwest/Pinus_monophylla1.schem",
+      "NAwest/Pinus_monophylla2.schem",
+      "NAwest/Pinus_monophylla3.schem",
+      "NAwest/Pinus_monophylla4.schem",
+      "NAwest/Pinus_monophylla5.schem",
+      "NAwest/Pinus_monophylla6.schem",
+      "NAwest/Pinus_monophylla7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "WNA - temperate rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acer_macrophyllum",
+     "w1": [
+      "NAwest/Acer_macrophyllum1.schem",
+      "NAwest/Acer_macrophyllum2.schem",
+      "NAwest/Acer_macrophyllum3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Alnus_rubra",
+     "w1": [
+      "NAwest/Alnus_rubra1.schem",
+      "NAwest/Alnus_rubra2.schem",
+      "NAwest/Alnus_rubra3.schem",
+      "NAwest/Alnus_rubra4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Arbutus_menziesii",
+     "w1": [
+      "NAwest/Arbutus_menziesii1.schem",
+      "NAwest/Arbutus_menziesii2.schem",
+      "NAwest/Arbutus_menziesii3.schem",
+      "NAwest/Arbutus_menziesii4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Fraxinus_latifolia",
+     "w1": [
+      "NAwest/Fraxinus_latifolia1.schem",
+      "NAwest/Fraxinus_latifolia2.schem",
+      "NAwest/Fraxinus_latifolia3.schem",
+      "NAwest/Fraxinus_latifolia4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_sitchensis",
+     "w1": [
+      "NAwest/Picea_sitchensis4.schem",
+      "NAwest/Picea_sitchensis5.schem",
+      "NAwest/Picea_sitchensis6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_trichocarpa",
+     "w1": [
+      "NAwest/Populus_trichocarpa1.schem",
+      "NAwest/Populus_trichocarpa2.schem",
+      "NAwest/Populus_trichocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pseudotsuga_menziesii",
+     "w1": [
+      "NAwest/Pseudotsuga_menziesii5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Thuja_plicata",
+     "w1": [
+      "NAwest/Thuja_plicata3.schem",
+      "NAwest/Thuja_plicata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}

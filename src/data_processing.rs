@@ -293,6 +293,8 @@ pub fn generate_world_with_options(
     editor.set_bake_lighting(args.bake_lighting);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     let ground = Arc::new(ground);
+    // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
+    let tree_pack = crate::tree_pack::load(args, args.scale, args.ground_level).map(Arc::new);
     let mut bench = crate::bench::Bench::new(args.benchmark);
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.
@@ -308,6 +310,9 @@ pub fn generate_world_with_options(
 
     // Set ground reference in the editor to enable elevation-aware block placement
     editor.set_ground(Arc::clone(&ground));
+    if let Some(ref tp) = tree_pack {
+        editor.set_tree_pack(Arc::clone(tp));
+    }
 
     println!("{} Generating area...", "[5/7]".bold());
     emit_gui_progress_update(20.0, "Generating area...");
@@ -481,6 +486,9 @@ pub fn generate_world_with_options(
                     let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
                     tile_editor.set_ground(Arc::clone(&ground));
                     tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
+                    if let Some(ref tp) = tree_pack {
+                        tile_editor.set_tree_pack(Arc::clone(tp));
+                    }
 
                     let mut tile_subway_points: Vec<(i32, i32)> = Vec::new();
 

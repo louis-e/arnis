@@ -1,0 +1,1062 @@
+{
+ "realm": "eur",
+ "default_community": "EUR - Misc. Deciduous forest",
+ "communities": [
+  {
+   "name": "EUR - Alpine forest (mature)",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Abies_alba",
+     "w1": [
+      "4. europe/Abies_alba1.schem",
+      "4. europe/Abies_alba3.schem",
+      "4. europe/Abies_alba4.schem",
+      "4. europe/Abies_alba5.schem",
+      "4. europe/Abies_alba6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Larix_decidua",
+     "w1": [
+      "4. europe/Larix_decidua1.schem",
+      "4. europe/Larix_decidua3.schem",
+      "4. europe/Larix_decidua4.schem",
+      "4. europe/Larix_decidua5.schem",
+      "4. europe/Larix_decidua6.schem",
+      "4. europe/Larix_decidua7.schem",
+      "4. europe/Larix_decidua8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Larix_decidua2.schem"
+     ]
+    },
+    {
+     "name": "Pinus_cembra",
+     "w1": [
+      "4. europe/Pinus_cembra4.schem",
+      "4. europe/Pinus_cembra5.schem",
+      "4. europe/Pinus_cembra6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_mugo",
+     "w1": [
+      "4. europe/Pinus_mugo1.schem",
+      "4. europe/Pinus_mugo2.schem",
+      "4. europe/Pinus_mugo3.schem",
+      "4. europe/Pinus_mugo4.schem",
+      "4. europe/Pinus_mugo5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_sylvestris",
+     "w1": [
+      "4. europe/Pinus_sylvestris1.schem",
+      "4. europe/Pinus_sylvestris3.schem",
+      "4. europe/Pinus_sylvestris4.schem",
+      "4. europe/Pinus_sylvestris5.schem",
+      "4. europe/Pinus_sylvestris6.schem",
+      "4. europe/Pinus_sylvestris7.schem",
+      "4. europe/Pinus_sylvestris8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Pinus_sylvestris2.schem"
+     ]
+    },
+    {
+     "name": "Taxus_baccata",
+     "w1": [
+      "4. europe/Taxus_baccata1.schem",
+      "4. europe/Taxus_baccata2.schem",
+      "4. europe/Taxus_baccata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Alpine forest (short)",
+   "habitat": "conifer",
+   "density": 30,
+   "species": [
+    {
+     "name": "Abies_alba",
+     "w1": [
+      "4. europe/Abies_alba5.schem",
+      "4. europe/Abies_alba6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Larix_decidua",
+     "w1": [
+      "4. europe/Larix_decidua6.schem",
+      "4. europe/Larix_decidua7.schem",
+      "4. europe/Larix_decidua8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_cembra",
+     "w1": [
+      "4. europe/Pinus_cembra4.schem",
+      "4. europe/Pinus_cembra6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_mugo",
+     "w1": [
+      "4. europe/Pinus_mugo1.schem",
+      "4. europe/Pinus_mugo2.schem",
+      "4. europe/Pinus_mugo3.schem",
+      "4. europe/Pinus_mugo4.schem",
+      "4. europe/Pinus_mugo5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_sylvestris",
+     "w1": [
+      "4. europe/Pinus_sylvestris6.schem",
+      "4. europe/Pinus_sylvestris7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Balkan coniferous forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Abies_alba",
+     "w1": [
+      "4. europe/Abies_alba1.schem",
+      "4. europe/Abies_alba3.schem",
+      "4. europe/Abies_alba4.schem",
+      "4. europe/Abies_alba5.schem",
+      "4. europe/Abies_alba6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_omorika",
+     "w1": [
+      "4. europe/Picea_omorika1.schem",
+      "4. europe/Picea_omorika2.schem",
+      "4. europe/Picea_omorika3.schem",
+      "4. europe/Picea_omorika4.schem",
+      "4. europe/Picea_omorika5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_mugo",
+     "w1": [
+      "4. europe/Pinus_mugo1.schem",
+      "4. europe/Pinus_mugo2.schem",
+      "4. europe/Pinus_mugo3.schem",
+      "4. europe/Pinus_mugo4.schem",
+      "4. europe/Pinus_mugo5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_nigra",
+     "w1": [
+      "4. europe/Pinus_nigra1.schem",
+      "4. europe/Pinus_nigra2.schem",
+      "4. europe/Pinus_nigra4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Pinus_nigra3.schem"
+     ]
+    },
+    {
+     "name": "Pinus_sylvestris",
+     "w1": [
+      "4. europe/Pinus_sylvestris1.schem",
+      "4. europe/Pinus_sylvestris3.schem",
+      "4. europe/Pinus_sylvestris4.schem",
+      "4. europe/Pinus_sylvestris5.schem",
+      "4. europe/Pinus_sylvestris6.schem",
+      "4. europe/Pinus_sylvestris7.schem",
+      "4. europe/Pinus_sylvestris8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Pinus_sylvestris2.schem"
+     ]
+    },
+    {
+     "name": "Taxus_baccata",
+     "w1": [
+      "4. europe/Taxus_baccata1.schem",
+      "4. europe/Taxus_baccata2.schem",
+      "4. europe/Taxus_baccata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Beech-yew Alpine foothills",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Fagus_sylvatica",
+     "w1": [
+      "4. europe/Fagus_sylvatica1.schem",
+      "4. europe/Fagus_sylvatica2.schem",
+      "4. europe/Fagus_sylvatica3.schem",
+      "4. europe/Fagus_sylvatica4.schem",
+      "4. europe/Fagus_sylvatica6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Taxus_baccata",
+     "w1": [
+      "4. europe/Taxus_baccata1.schem",
+      "4. europe/Taxus_baccata2.schem",
+      "4. europe/Taxus_baccata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Bialowieza forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acer_pseudoplatanus",
+     "w1": [
+      "4. europe/Acer_pseudoplatanus1.schem",
+      "4. europe/Acer_pseudoplatanus2.schem",
+      "4. europe/Acer_pseudoplatanus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Betula_pubescens",
+     "w1": [
+      "4. europe/Betula_pubescens1.schem",
+      "4. europe/Betula_pubescens2.schem",
+      "4. europe/Betula_pubescens3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_abies",
+     "w1": [
+      "4. europe/Picea_abies1.schem",
+      "4. europe/Picea_abies2.schem",
+      "4. europe/Picea_abies3.schem",
+      "4. europe/Picea_abies4.schem",
+      "4. europe/Picea_abies5.schem",
+      "4. europe/Picea_abies6.schem",
+      "4. europe/Picea_abies7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_sylvestris",
+     "w1": [
+      "4. europe/Pinus_sylvestris1.schem",
+      "4. europe/Pinus_sylvestris3.schem",
+      "4. europe/Pinus_sylvestris4.schem",
+      "4. europe/Pinus_sylvestris5.schem",
+      "4. europe/Pinus_sylvestris6.schem",
+      "4. europe/Pinus_sylvestris7.schem",
+      "4. europe/Pinus_sylvestris8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Pinus_sylvestris2.schem"
+     ]
+    },
+    {
+     "name": "Quercus_robur",
+     "w1": [
+      "4. europe/Quercus_robur1.schem",
+      "4. europe/Quercus_robur2.schem",
+      "4. europe/Quercus_robur3.schem",
+      "4. europe/Quercus_robur6.schem"
+     ],
+     "w2": [
+      "4. europe/Quercus_robur4.schem",
+      "4. europe/Quercus_robur5.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Birch and aspen",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Betula_celtiberica",
+     "w1": [
+      "4. europe/Betula_celtiberica1.schem",
+      "4. europe/Betula_celtiberica2.schem",
+      "4. europe/Betula_celtiberica3.schem"
+     ],
+     "w2": [
+      "4. europe/Betula_celtiberica4.schem"
+     ],
+     "w3": [
+      "4. europe/Betula_celtiberica5.schem"
+     ]
+    },
+    {
+     "name": "Betula_pendula",
+     "w1": [
+      "4. europe/Betula_pendula1.schem",
+      "4. europe/Betula_pendula2.schem",
+      "4. europe/Betula_pendula3.schem",
+      "4. europe/Betula_pendula4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Betula_pubescens",
+     "w1": [
+      "4. europe/Betula_pubescens1.schem",
+      "4. europe/Betula_pubescens2.schem",
+      "4. europe/Betula_pubescens3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Populus_tremula",
+     "w1": [
+      "4. europe/Populus_tremula1.schem",
+      "4. europe/Populus_tremula2.schem",
+      "4. europe/Populus_tremula3.schem",
+      "4. europe/Populus_tremula4.schem",
+      "4. europe/Populus_tremula5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Dark oak or walnut",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Juglans_regia",
+     "w1": [
+      "4. europe/Juglans_regia1.schem",
+      "4. europe/Juglans_regia2.schem",
+      "4. europe/Juglans_regia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Malus_sylvestris",
+     "w1": [
+      "4. europe/Malus_sylvestris1.schem"
+     ],
+     "w2": [
+      "4. europe/Malus_sylvestris2.schem",
+      "4. europe/Malus_sylvestris3.schem",
+      "4. europe/Malus_sylvestris4.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Eastern Mediterranean",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Arbutus_unedo",
+     "w1": [
+      "4. europe/Arbutus_unedo1.schem",
+      "4. europe/Arbutus_unedo2.schem",
+      "4. europe/Arbutus_unedo3.schem",
+      "4. europe/Arbutus_unedo4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ceratonia_siliqua",
+     "w1": [
+      "4. europe/Ceratonia_siliqua1.schem",
+      "4. europe/Ceratonia_siliqua2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Ceratonia_siliqua3.schem"
+     ]
+    },
+    {
+     "name": "Cupressus_sempervirens",
+     "w1": [
+      "4. europe/Cupressus_sempervirens1.schem",
+      "4. europe/Cupressus_sempervirens2.schem",
+      "4. europe/Cupressus_sempervirens3.schem",
+      "4. europe/Cupressus_sempervirens4.schem",
+      "4. europe/Cupressus_sempervirens5.schem",
+      "4. europe/Cupressus_sempervirens6.schem",
+      "4. europe/Cupressus_sempervirens7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Olea_europaea",
+     "w1": [
+      "4. europe/Olea_europaea3.schem",
+      "4. europe/Olea_europaea4.schem",
+      "4. europe/Olea_europaea5.schem",
+      "4. europe/Olea_europaea6.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Olea_europaea1.schem",
+      "4. europe/Olea_europaea2.schem"
+     ]
+    },
+    {
+     "name": "Prunus_amygdalus",
+     "w1": [
+      "4. europe/Prunus_amygdalus1.schem",
+      "4. europe/Prunus_amygdalus2.schem",
+      "4. europe/Prunus_amygdalus3.schem",
+      "4. europe/Prunus_amygdalus4.schem",
+      "4. europe/Prunus_amygdalus5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_coccifera",
+     "w1": [
+      "4. europe/Quercus_coccifera1.schem",
+      "4. europe/Quercus_coccifera3.schem",
+      "4. europe/Quercus_coccifera4.schem",
+      "4. europe/Quercus_coccifera5.schem",
+      "4. europe/Quercus_coccifera6.schem"
+     ],
+     "w2": [
+      "4. europe/Quercus_coccifera2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Quercus_suber",
+     "w1": [
+      "4. europe/Quercus_suber1.schem",
+      "4. europe/Quercus_suber2.schem",
+      "4. europe/Quercus_suber3.schem",
+      "4. europe/Quercus_suber4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tetraclinis_articulata",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "4. europe/Tetraclinis_articulata1.schem",
+      "4. europe/Tetraclinis_articulata2.schem",
+      "4. europe/Tetraclinis_articulata3.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "EUR - Middle East montane conifer forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Cedrus_libani",
+     "w1": [
+      "4. europe/Cedrus_libani1.schem",
+      "4. europe/Cedrus_libani2.schem",
+      "4. europe/Cedrus_libani5.schem",
+      "4. europe/Cedrus_libani6.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Cedrus_libani3.schem",
+      "4. europe/Cedrus_libani4.schem"
+     ]
+    },
+    {
+     "name": "Cupressus_sempervirens",
+     "w1": [
+      "4. europe/Cupressus_sempervirens1.schem",
+      "4. europe/Cupressus_sempervirens2.schem",
+      "4. europe/Cupressus_sempervirens3.schem",
+      "4. europe/Cupressus_sempervirens4.schem",
+      "4. europe/Cupressus_sempervirens5.schem",
+      "4. europe/Cupressus_sempervirens6.schem",
+      "4. europe/Cupressus_sempervirens7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_nigra",
+     "w1": [
+      "4. europe/Pinus_nigra1.schem",
+      "4. europe/Pinus_nigra2.schem",
+      "4. europe/Pinus_nigra4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Pinus_nigra3.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "EUR - Misc. Deciduous forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acer_pseudoplatanus",
+     "w1": [
+      "4. europe/Acer_pseudoplatanus1.schem",
+      "4. europe/Acer_pseudoplatanus2.schem",
+      "4. europe/Acer_pseudoplatanus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Aesculus_hippocastanum",
+     "w1": [
+      "4. europe/Aesculus_hippocastanum1.schem",
+      "4. europe/Aesculus_hippocastanum2.schem",
+      "4. europe/Aesculus_hippocastanum3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corylus_avellana",
+     "w1": [
+      "4. europe/Corylus_avellana1.schem",
+      "4. europe/Corylus_avellana2.schem",
+      "4. europe/Corylus_avellana3.schem",
+      "4. europe/Corylus_avellana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Fagus_sylvatica",
+     "w1": [
+      "4. europe/Fagus_sylvatica1.schem",
+      "4. europe/Fagus_sylvatica2.schem",
+      "4. europe/Fagus_sylvatica3.schem",
+      "4. europe/Fagus_sylvatica4.schem",
+      "4. europe/Fagus_sylvatica6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Fraxinus_excelsior",
+     "w1": [
+      "4. europe/Fraxinus_excelsior1.schem",
+      "4. europe/Fraxinus_excelsior2.schem",
+      "4. europe/Fraxinus_excelsior4.schem"
+     ],
+     "w2": [
+      "4. europe/Fraxinus_excelsior3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Tilia_cordata",
+     "w1": [
+      "4. europe/Tilia_cordata1.schem",
+      "4. europe/Tilia_cordata2.schem",
+      "4. europe/Tilia_cordata3.schem",
+      "4. europe/Tilia_cordata4.schem",
+      "4. europe/Tilia_cordata5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_glabra",
+     "w1": [
+      "4. europe/Ulmus_glabra1.schem",
+      "4. europe/Ulmus_glabra2.schem",
+      "4. europe/Ulmus_glabra3.schem",
+      "4. europe/Ulmus_glabra4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Viburnum_lantana",
+     "w1": [
+      "4. europe/Viburnum_lantana1.schem",
+      "4. europe/Viburnum_lantana2.schem",
+      "4. europe/Viburnum_lantana3.schem",
+      "4. europe/Viburnum_lantana4.schem",
+      "4. europe/Viburnum_lantana5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Oak forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Quercus_coccifera",
+     "w1": [
+      "4. europe/Quercus_coccifera1.schem",
+      "4. europe/Quercus_coccifera3.schem",
+      "4. europe/Quercus_coccifera4.schem",
+      "4. europe/Quercus_coccifera5.schem",
+      "4. europe/Quercus_coccifera6.schem"
+     ],
+     "w2": [
+      "4. europe/Quercus_coccifera2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Quercus_robur",
+     "w1": [
+      "4. europe/Quercus_robur1.schem",
+      "4. europe/Quercus_robur2.schem",
+      "4. europe/Quercus_robur3.schem",
+      "4. europe/Quercus_robur6.schem"
+     ],
+     "w2": [
+      "4. europe/Quercus_robur4.schem",
+      "4. europe/Quercus_robur5.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Quercus_suber",
+     "w1": [
+      "4. europe/Quercus_suber1.schem",
+      "4. europe/Quercus_suber2.schem",
+      "4. europe/Quercus_suber3.schem",
+      "4. europe/Quercus_suber4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Open woodlands",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Alnus_glutinosa",
+     "w1": [
+      "4. europe/Alnus_glutinosa1.schem",
+      "4. europe/Alnus_glutinosa2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Corylus_avellana",
+     "w1": [
+      "4. europe/Corylus_avellana1.schem",
+      "4. europe/Corylus_avellana2.schem",
+      "4. europe/Corylus_avellana3.schem",
+      "4. europe/Corylus_avellana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Fraxinus_excelsior",
+     "w1": [],
+     "w2": [
+      "4. europe/Fraxinus_excelsior3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Malus_sylvestris",
+     "w1": [
+      "4. europe/Malus_sylvestris1.schem"
+     ],
+     "w2": [
+      "4. europe/Malus_sylvestris2.schem",
+      "4. europe/Malus_sylvestris3.schem",
+      "4. europe/Malus_sylvestris4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Quercus_coccifera",
+     "w1": [
+      "4. europe/Quercus_coccifera1.schem",
+      "4. europe/Quercus_coccifera3.schem",
+      "4. europe/Quercus_coccifera4.schem",
+      "4. europe/Quercus_coccifera5.schem",
+      "4. europe/Quercus_coccifera6.schem"
+     ],
+     "w2": [
+      "4. europe/Quercus_coccifera2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Quercus_robur",
+     "w1": [
+      "4. europe/Quercus_robur1.schem",
+      "4. europe/Quercus_robur6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rhamnus_cathartica",
+     "w1": [],
+     "w2": [
+      "4. europe/Rhamnus_cathartica2.schem",
+      "4. europe/Rhamnus_cathartica3.schem"
+     ],
+     "w3": [
+      "4. europe/Rhamnus_cathartica1.schem",
+      "4. europe/Rhamnus_cathartica4.schem"
+     ]
+    },
+    {
+     "name": "Tilia_cordata",
+     "w1": [
+      "4. europe/Tilia_cordata1.schem",
+      "4. europe/Tilia_cordata5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ulmus_glabra",
+     "w1": [
+      "4. europe/Ulmus_glabra1.schem",
+      "4. europe/Ulmus_glabra2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Viburnum_lantana",
+     "w1": [
+      "4. europe/Viburnum_lantana1.schem",
+      "4. europe/Viburnum_lantana2.schem",
+      "4. europe/Viburnum_lantana3.schem",
+      "4. europe/Viburnum_lantana4.schem",
+      "4. europe/Viburnum_lantana5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Scandinavian taiga (mature)",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Larix_decidua",
+     "w1": [
+      "4. europe/Larix_decidua1.schem",
+      "4. europe/Larix_decidua3.schem",
+      "4. europe/Larix_decidua4.schem",
+      "4. europe/Larix_decidua5.schem",
+      "4. europe/Larix_decidua6.schem",
+      "4. europe/Larix_decidua7.schem",
+      "4. europe/Larix_decidua8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Larix_decidua2.schem"
+     ]
+    },
+    {
+     "name": "Picea_abies",
+     "w1": [
+      "4. europe/Picea_abies1.schem",
+      "4. europe/Picea_abies2.schem",
+      "4. europe/Picea_abies3.schem",
+      "4. europe/Picea_abies4.schem",
+      "4. europe/Picea_abies5.schem",
+      "4. europe/Picea_abies6.schem",
+      "4. europe/Picea_abies7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_sylvestris",
+     "w1": [
+      "4. europe/Pinus_sylvestris1.schem",
+      "4. europe/Pinus_sylvestris3.schem",
+      "4. europe/Pinus_sylvestris4.schem",
+      "4. europe/Pinus_sylvestris5.schem",
+      "4. europe/Pinus_sylvestris6.schem",
+      "4. europe/Pinus_sylvestris7.schem",
+      "4. europe/Pinus_sylvestris8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Pinus_sylvestris2.schem"
+     ]
+    },
+    {
+     "name": "Rhamnus_cathartica",
+     "w1": [],
+     "w2": [
+      "4. europe/Rhamnus_cathartica2.schem",
+      "4. europe/Rhamnus_cathartica3.schem"
+     ],
+     "w3": [
+      "4. europe/Rhamnus_cathartica1.schem",
+      "4. europe/Rhamnus_cathartica4.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "EUR - Scandinavian taiga (short)",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Larix_decidua",
+     "w1": [
+      "4. europe/Larix_decidua7.schem",
+      "4. europe/Larix_decidua8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Picea_abies",
+     "w1": [
+      "4. europe/Picea_abies5.schem",
+      "4. europe/Picea_abies6.schem",
+      "4. europe/Picea_abies7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_sylvestris",
+     "w1": [
+      "4. europe/Pinus_sylvestris6.schem",
+      "4. europe/Pinus_sylvestris7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Swamp and riparian forest",
+   "habitat": "wet",
+   "density": 40,
+   "species": [
+    {
+     "name": "Alnus_glutinosa",
+     "w1": [
+      "4. europe/Alnus_glutinosa1.schem",
+      "4. europe/Alnus_glutinosa2.schem"
+     ],
+     "w2": [
+      "4. europe/Alnus_glutinosa3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Populus_nigra",
+     "w1": [
+      "4. europe/Populus_nigra1.schem",
+      "4. europe/Populus_nigra2.schem",
+      "4. europe/Populus_nigra3.schem",
+      "4. europe/Populus_nigra4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Salix_alba",
+     "w1": [
+      "4. europe/Salix_alba1.schem",
+      "4. europe/Salix_alba2.schem",
+      "4. europe/Salix_alba3.schem",
+      "4. europe/Salix_alba4.schem",
+      "4. europe/Salix_alba5.schem",
+      "4. europe/Salix_alba6.schem",
+      "4. europe/Salix_alba7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "EUR - Western Mediterranean",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Arbutus_unedo",
+     "w1": [
+      "4. europe/Arbutus_unedo1.schem",
+      "4. europe/Arbutus_unedo2.schem",
+      "4. europe/Arbutus_unedo3.schem",
+      "4. europe/Arbutus_unedo4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Betula_celtiberica",
+     "w1": [
+      "4. europe/Betula_celtiberica1.schem",
+      "4. europe/Betula_celtiberica2.schem",
+      "4. europe/Betula_celtiberica3.schem"
+     ],
+     "w2": [
+      "4. europe/Betula_celtiberica4.schem"
+     ],
+     "w3": [
+      "4. europe/Betula_celtiberica5.schem"
+     ]
+    },
+    {
+     "name": "Ceratonia_siliqua",
+     "w1": [
+      "4. europe/Ceratonia_siliqua1.schem",
+      "4. europe/Ceratonia_siliqua2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Ceratonia_siliqua3.schem"
+     ]
+    },
+    {
+     "name": "Laurus_nobilis",
+     "w1": [
+      "4. europe/Laurus_nobilis1.schem",
+      "4. europe/Laurus_nobilis2.schem",
+      "4. europe/Laurus_nobilis3.schem",
+      "4. europe/Laurus_nobilis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Olea_europaea",
+     "w1": [
+      "4. europe/Olea_europaea3.schem",
+      "4. europe/Olea_europaea4.schem",
+      "4. europe/Olea_europaea5.schem",
+      "4. europe/Olea_europaea6.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "4. europe/Olea_europaea1.schem",
+      "4. europe/Olea_europaea2.schem"
+     ]
+    },
+    {
+     "name": "Pinus_pinea",
+     "w1": [
+      "4. europe/Pinus_pinea1.schem",
+      "4. europe/Pinus_pinea2.schem",
+      "4. europe/Pinus_pinea3.schem",
+      "4. europe/Pinus_pinea4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_coccifera",
+     "w1": [
+      "4. europe/Quercus_coccifera1.schem",
+      "4. europe/Quercus_coccifera3.schem",
+      "4. europe/Quercus_coccifera4.schem",
+      "4. europe/Quercus_coccifera5.schem",
+      "4. europe/Quercus_coccifera6.schem"
+     ],
+     "w2": [
+      "4. europe/Quercus_coccifera2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Quercus_suber",
+     "w1": [
+      "4. europe/Quercus_suber1.schem",
+      "4. europe/Quercus_suber2.schem",
+      "4. europe/Quercus_suber3.schem",
+      "4. europe/Quercus_suber4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}

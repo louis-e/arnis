@@ -1,0 +1,1095 @@
+{
+ "realm": "afr",
+ "default_community": "AFR - Congo Basin Rainforest",
+ "communities": [
+  {
+   "name": "AFR - African Fan Palms",
+   "habitat": "wet",
+   "density": 40,
+   "species": [
+    {
+     "name": "Borassus_aethiopum",
+     "w1": [
+      "Borassus_aethiopum (1).schem",
+      "Borassus_aethiopum (5).schem",
+      "Borassus_aethiopum (6).schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Raphia_farinifera",
+     "w1": [
+      "Raphia_farinifera1.schem",
+      "Raphia_farinifera2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Canary Island Date Palms",
+   "habitat": "wet",
+   "density": 50,
+   "species": [
+    {
+     "name": "Phoenix_canariensis",
+     "w1": [
+      "Phoenix_canariensis1.schem",
+      "Phoenix_canariensis2.schem",
+      "Phoenix_canariensis3.schem",
+      "Phoenix_canariensis4.schem",
+      "Phoenix_canariensis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Central-Southern African Miombo Woodlands",
+   "habitat": "dry",
+   "density": 20,
+   "species": [
+    {
+     "name": "Brachystegia_spiciformis",
+     "w1": [
+      "Brachystegia_spiciformis1.schem",
+      "Brachystegia_spiciformis2.schem",
+      "Brachystegia_spiciformis3.schem",
+      "Brachystegia_spiciformis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Colophospermum_mopane",
+     "w1": [
+      "Colophospermum_mopane2.schem",
+      "Colophospermum_mopane3.schem",
+      "Colophospermum_mopane4.schem",
+      "Colophospermum_mopane5.schem"
+     ],
+     "w2": [
+      "Colophospermum_mopane1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Julbernardia_globiflora",
+     "w1": [
+      "Julbernardia_globiflora1.schem",
+      "Julbernardia_globiflora3.schem",
+      "Julbernardia_globiflora4.schem"
+     ],
+     "w2": [
+      "Julbernardia_globiflora2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Kigelia_africana",
+     "w1": [
+      "Kigelia_africana1.schem",
+      "Kigelia_africana2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prunus_africana",
+     "w1": [
+      "Prunus_africana3.schem",
+      "Prunus_africana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sclerocarya_birrea",
+     "w1": [],
+     "w2": [
+      "Sclerocarya_birrea1.schem",
+      "Sclerocarya_birrea2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Congo Basin Rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Afzelia_africana",
+     "w1": [
+      "Afzelia_africana2.schem"
+     ],
+     "w2": [
+      "Afzelia_africana1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ceiba_pentandra",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ceiba_pentandra4.schem"
+     ]
+    },
+    {
+     "name": "Coffea_liberica",
+     "w1": [
+      "Coffea_liberica1.schem",
+      "Coffea_liberica2.schem",
+      "Coffea_liberica3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_crassiflora",
+     "w1": [
+      "Diospyros_crassiflora2.schem",
+      "Diospyros_crassiflora3.schem",
+      "Diospyros_crassiflora4.schem",
+      "Diospyros_crassiflora5.schem"
+     ],
+     "w2": [
+      "Diospyros_crassiflora1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Encephalartos_laurentianus",
+     "w1": [
+      "Encephalartos_laurentianus1.schem",
+      "Encephalartos_laurentianus2.schem",
+      "Encephalartos_laurentianus3.schem",
+      "Encephalartos_laurentianus4.schem",
+      "Encephalartos_laurentianus5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Kigelia_africana",
+     "w1": [
+      "Kigelia_africana1.schem",
+      "Kigelia_africana2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Milicia_excelsa",
+     "w1": [
+      "Milicia_excelsa4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pericopsis_elata",
+     "w1": [
+      "Pericopsis_elata2.schem",
+      "Pericopsis_elata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prunus_africana",
+     "w1": [
+      "Prunus_africana3.schem",
+      "Prunus_africana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_soyauxii",
+     "w1": [
+      "Pterocarpus_soyauxii1.schem",
+      "Pterocarpus_soyauxii2.schem",
+      "Pterocarpus_soyauxii3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Raphia_farinifera",
+     "w1": [
+      "Raphia_farinifera1.schem",
+      "Raphia_farinifera2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Vitellaria_paradoxa",
+     "w1": [
+      "Vitellaria_paradoxa1.schem",
+      "Vitellaria_paradoxa2.schem",
+      "Vitellaria_paradoxa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - East African Savanna",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Adansonia_digitata",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_digitata1.schem",
+      "Adansonia_digitata2.schem",
+      "Adansonia_digitata3.schem",
+      "Adansonia_digitata4.schem",
+      "Adansonia_digitata5.schem"
+     ]
+    },
+    {
+     "name": "Afzelia_africana",
+     "w1": [
+      "Afzelia_africana2.schem"
+     ],
+     "w2": [
+      "Afzelia_africana1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Balanites_aegyptiaca",
+     "w1": [
+      "Balanites_aegyptiaca1.schem",
+      "Balanites_aegyptiaca3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Balanites_aegyptiaca2.schem"
+     ]
+    },
+    {
+     "name": "Borassus_aethiopum",
+     "w1": [
+      "Borassus_aethiopum (1).schem",
+      "Borassus_aethiopum (5).schem",
+      "Borassus_aethiopum (6).schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Hyphaene_compressa",
+     "w1": [
+      "Hyphaene_compressa1.schem",
+      "Hyphaene_compressa2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Hyphaene_compressa3.schem",
+      "Hyphaene_compressa4.schem"
+     ]
+    },
+    {
+     "name": "Kigelia_africana",
+     "w1": [
+      "Kigelia_africana1.schem",
+      "Kigelia_africana2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sclerocarya_birrea",
+     "w1": [],
+     "w2": [
+      "Sclerocarya_birrea1.schem",
+      "Sclerocarya_birrea2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_tortilis",
+     "w1": [
+      "Vachellia_tortilis1.schem",
+      "Vachellia_tortilis2.schem",
+      "Vachellia_tortilis4.schem",
+      "Vachellia_tortilis6.schem",
+      "Vachellia_tortilis7.schem",
+      "Vachellia_tortilis8.schem"
+     ],
+     "w2": [
+      "Vachellia_tortilis5.schem"
+     ],
+     "w3": [
+      "Vachellia_tortilis3.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "AFR - Fevertree Acacias",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Vachellia_xanthophloea",
+     "w1": [
+      "Vachellia_xanthophloea1.schem",
+      "Vachellia_xanthophloea2.schem",
+      "Vachellia_xanthophloea4.schem"
+     ],
+     "w2": [
+      "Vachellia_xanthophloea3.schem",
+      "Vachellia_xanthophloea5.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Guinean West African Rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Afzelia_africana",
+     "w1": [
+      "Afzelia_africana2.schem"
+     ],
+     "w2": [
+      "Afzelia_africana1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Borassus_aethiopum",
+     "w1": [
+      "Borassus_aethiopum (1).schem",
+      "Borassus_aethiopum (5).schem",
+      "Borassus_aethiopum (6).schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ceiba_pentandra",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ceiba_pentandra4.schem"
+     ]
+    },
+    {
+     "name": "Chrysobalanus_icaco",
+     "w1": [
+      "Chrysobalanus_icaco1.schem",
+      "Chrysobalanus_icaco2.schem",
+      "Chrysobalanus_icaco3.schem",
+      "Chrysobalanus_icaco4.schem",
+      "Chrysobalanus_icaco5.schem",
+      "Chrysobalanus_icaco6.schem",
+      "Chrysobalanus_icaco7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Coffea_liberica",
+     "w1": [
+      "Coffea_liberica1.schem",
+      "Coffea_liberica2.schem",
+      "Coffea_liberica3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cola_nitida",
+     "w1": [
+      "Cola_nitida1.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Cola_nitida2.schem"
+     ]
+    },
+    {
+     "name": "Khaya_ivoriensis",
+     "w1": [
+      "Khaya_ivoriensis (2).schem",
+      "Khaya_ivoriensis (4).schem",
+      "Khaya_ivoriensis (5).schem"
+     ],
+     "w2": [
+      "Khaya_ivoriensis (3).schem",
+      "Khaya_ivoriensis (6).schem"
+     ],
+     "w3": [
+      "Khaya_ivoriensis (1).schem"
+     ]
+    },
+    {
+     "name": "Milicia_excelsa",
+     "w1": [
+      "Milicia_excelsa4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pericopsis_elata",
+     "w1": [
+      "Pericopsis_elata2.schem",
+      "Pericopsis_elata3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Raphia_farinifera",
+     "w1": [
+      "Raphia_farinifera1.schem",
+      "Raphia_farinifera2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Maghreb Mediterranean",
+   "habitat": "lowland",
+   "density": 35,
+   "species": [
+    {
+     "name": "Balanites_aegyptiaca",
+     "w1": [
+      "Balanites_aegyptiaca1.schem",
+      "Balanites_aegyptiaca3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Balanites_aegyptiaca2.schem"
+     ]
+    },
+    {
+     "name": "Phoenix_canariensis",
+     "w1": [
+      "Phoenix_canariensis1.schem",
+      "Phoenix_canariensis2.schem",
+      "Phoenix_canariensis3.schem",
+      "Phoenix_canariensis4.schem",
+      "Phoenix_canariensis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Salvadora_persica",
+     "w1": [],
+     "w2": [
+      "Salvadora_persica1.schem",
+      "Salvadora_persica2.schem",
+      "Salvadora_persica3.schem",
+      "Salvadora_persica4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Sideroxylon_spinosum",
+     "w1": [
+      "Sideroxylon_spinosum2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Sideroxylon_spinosum1.schem"
+     ]
+    },
+    {
+     "name": "Vachellia_tortilis",
+     "w1": [
+      "Vachellia_tortilis1.schem",
+      "Vachellia_tortilis6.schem",
+      "Vachellia_tortilis7.schem",
+      "Vachellia_tortilis8.schem"
+     ],
+     "w2": [
+      "Vachellia_tortilis5.schem"
+     ],
+     "w3": [
+      "Vachellia_tortilis3.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "AFR - Malagasy Dry Forest",
+   "habitat": "dry",
+   "density": 35,
+   "species": [
+    {
+     "name": "Adansonia_grandidieri",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_grandidieri1.schem",
+      "Adansonia_grandidieri2.schem",
+      "Adansonia_grandidieri3.schem",
+      "Adansonia_grandidieri4.schem",
+      "Adansonia_grandidieri5.schem",
+      "Adansonia_grandidieri6.schem"
+     ]
+    },
+    {
+     "name": "Adansonia_suarezensis",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_suarezensis1.schem",
+      "Adansonia_suarezensis2.schem",
+      "Adansonia_suarezensis3.schem",
+      "Adansonia_suarezensis4.schem"
+     ]
+    },
+    {
+     "name": "Adansonia_za",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_za1.schem",
+      "Adansonia_za2.schem",
+      "Adansonia_za3.schem",
+      "Adansonia_za4.schem",
+      "Adansonia_za5.schem"
+     ]
+    },
+    {
+     "name": "Bismarckia_nobilis",
+     "w1": [
+      "Bismarckia_nobilis1.schem",
+      "Bismarckia_nobilis2.schem",
+      "Bismarckia_nobilis3.schem",
+      "Bismarckia_nobilis4.schem",
+      "Bismarckia_nobilis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Borassus_aethiopum",
+     "w1": [
+      "Borassus_aethiopum (1).schem",
+      "Borassus_aethiopum (5).schem",
+      "Borassus_aethiopum (6).schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Delonix_regia",
+     "w1": [
+      "Delonix_regia3.schem",
+      "Delonix_regia5.schem"
+     ],
+     "w2": [
+      "Delonix_regia1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Sclerocarya_birrea",
+     "w1": [],
+     "w2": [
+      "Sclerocarya_birrea1.schem",
+      "Sclerocarya_birrea2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Malagasy Highlands",
+   "habitat": "conifer",
+   "density": 35,
+   "species": [
+    {
+     "name": "Beccariophoenix_alfredii",
+     "w1": [
+      "Beccariophoenix_alfredii1.schem",
+      "Beccariophoenix_alfredii2.schem",
+      "Beccariophoenix_alfredii3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Bismarckia_nobilis",
+     "w1": [
+      "Bismarckia_nobilis1.schem",
+      "Bismarckia_nobilis2.schem",
+      "Bismarckia_nobilis3.schem",
+      "Bismarckia_nobilis4.schem",
+      "Bismarckia_nobilis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cycas_thouarsii",
+     "w1": [
+      "Cycas_thouarsii1.schem",
+      "Cycas_thouarsii2.schem",
+      "Cycas_thouarsii3.schem",
+      "Cycas_thouarsii4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Uapaca_bojeri",
+     "w1": [
+      "Uapaca_bojeri1.schem",
+      "Uapaca_bojeri2.schem",
+      "Uapaca_bojeri3.schem",
+      "Uapaca_bojeri4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Malagasy Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Cycas_thouarsii",
+     "w1": [
+      "Cycas_thouarsii1.schem",
+      "Cycas_thouarsii2.schem",
+      "Cycas_thouarsii3.schem",
+      "Cycas_thouarsii4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dalbergia_baronii",
+     "w1": [
+      "Dalbergia_baronii1.schem",
+      "Dalbergia_baronii2.schem",
+      "Dalbergia_baronii3.schem",
+      "Dalbergia_baronii4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_crassiflora",
+     "w1": [
+      "Diospyros_crassiflora2.schem",
+      "Diospyros_crassiflora3.schem",
+      "Diospyros_crassiflora4.schem",
+      "Diospyros_crassiflora5.schem"
+     ],
+     "w2": [
+      "Diospyros_crassiflora1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Prunus_africana",
+     "w1": [
+      "Prunus_africana3.schem",
+      "Prunus_africana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Raphia_farinifera",
+     "w1": [
+      "Raphia_farinifera1.schem",
+      "Raphia_farinifera2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ravenala_madagascariensis",
+     "w1": [
+      "Ravenala_madagascariensis1.schem",
+      "Ravenala_madagascariensis2.schem",
+      "Ravenala_madagascariensis3.schem",
+      "Ravenala_madagascariensis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Malagasy Spiny Forest",
+   "habitat": "dry",
+   "density": 35,
+   "species": [
+    {
+     "name": "Adansonia_grandidieri",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_grandidieri1.schem",
+      "Adansonia_grandidieri2.schem",
+      "Adansonia_grandidieri3.schem",
+      "Adansonia_grandidieri4.schem",
+      "Adansonia_grandidieri5.schem",
+      "Adansonia_grandidieri6.schem"
+     ]
+    },
+    {
+     "name": "Adansonia_suarezensis",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_suarezensis1.schem",
+      "Adansonia_suarezensis2.schem",
+      "Adansonia_suarezensis3.schem",
+      "Adansonia_suarezensis4.schem"
+     ]
+    },
+    {
+     "name": "Adansonia_za",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_za1.schem",
+      "Adansonia_za2.schem",
+      "Adansonia_za3.schem",
+      "Adansonia_za4.schem",
+      "Adansonia_za5.schem"
+     ]
+    },
+    {
+     "name": "Bismarckia_nobilis",
+     "w1": [
+      "Bismarckia_nobilis1.schem",
+      "Bismarckia_nobilis2.schem",
+      "Bismarckia_nobilis3.schem",
+      "Bismarckia_nobilis4.schem",
+      "Bismarckia_nobilis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Borassus_aethiopum",
+     "w1": [
+      "Borassus_aethiopum (1).schem",
+      "Borassus_aethiopum (5).schem",
+      "Borassus_aethiopum (6).schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Delonix_regia",
+     "w1": [
+      "Delonix_regia3.schem",
+      "Delonix_regia5.schem"
+     ],
+     "w2": [
+      "Delonix_regia1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Sclerocarya_birrea",
+     "w1": [],
+     "w2": [
+      "Sclerocarya_birrea1.schem",
+      "Sclerocarya_birrea2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Mountain Rainforest",
+   "habitat": "conifer",
+   "density": 15,
+   "species": [
+    {
+     "name": "Podocarpus_milanjianus",
+     "w1": [
+      "Podocarpus_milanjianus1.schem",
+      "Podocarpus_milanjianus2.schem",
+      "Podocarpus_milanjianus3.schem",
+      "Podocarpus_milanjianus4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prunus_africana",
+     "w1": [
+      "Prunus_africana3.schem",
+      "Prunus_africana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Sahelian Scrub and Semidesert",
+   "habitat": "dry",
+   "density": 100,
+   "species": [
+    {
+     "name": "Adansonia_digitata",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_digitata4.schem",
+      "Adansonia_digitata5.schem"
+     ]
+    },
+    {
+     "name": "Balanites_aegyptiaca",
+     "w1": [
+      "Balanites_aegyptiaca1.schem",
+      "Balanites_aegyptiaca3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Balanites_aegyptiaca2.schem"
+     ]
+    },
+    {
+     "name": "Salvadora_persica",
+     "w1": [],
+     "w2": [
+      "Salvadora_persica1.schem",
+      "Salvadora_persica2.schem",
+      "Salvadora_persica3.schem",
+      "Salvadora_persica4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_senegal",
+     "w1": [
+      "Senegalia_senegal1.schem",
+      "Senegalia_senegal2.schem",
+      "Senegalia_senegal3.schem",
+      "Senegalia_senegal5.schem"
+     ],
+     "w2": [
+      "Senegalia_senegal4.schem",
+      "Senegalia_senegal6.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_tortilis",
+     "w1": [
+      "Vachellia_tortilis1.schem",
+      "Vachellia_tortilis6.schem",
+      "Vachellia_tortilis7.schem",
+      "Vachellia_tortilis8.schem"
+     ],
+     "w2": [
+      "Vachellia_tortilis5.schem"
+     ],
+     "w3": [
+      "Vachellia_tortilis3.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "AFR - South African Veld",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Adansonia_digitata",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_digitata1.schem",
+      "Adansonia_digitata2.schem",
+      "Adansonia_digitata3.schem",
+      "Adansonia_digitata4.schem",
+      "Adansonia_digitata5.schem"
+     ]
+    },
+    {
+     "name": "Colophospermum_mopane",
+     "w1": [
+      "Colophospermum_mopane2.schem",
+      "Colophospermum_mopane3.schem",
+      "Colophospermum_mopane4.schem",
+      "Colophospermum_mopane5.schem"
+     ],
+     "w2": [
+      "Colophospermum_mopane1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Combretum_imberbe",
+     "w1": [
+      "Combretum_imberbe1.schem"
+     ],
+     "w2": [
+      "Combretum_imberbe2.schem",
+      "Combretum_imberbe3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Sclerocarya_birrea",
+     "w1": [],
+     "w2": [
+      "Sclerocarya_birrea1.schem",
+      "Sclerocarya_birrea2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_erioloba",
+     "w1": [
+      "Vachellia_erioloba1.schem",
+      "Vachellia_erioloba2.schem",
+      "Vachellia_erioloba3.schem",
+      "Vachellia_erioloba4.schem",
+      "Vachellia_erioloba8.schem"
+     ],
+     "w2": [
+      "Vachellia_erioloba10.schem",
+      "Vachellia_erioloba5.schem",
+      "Vachellia_erioloba6.schem",
+      "Vachellia_erioloba7.schem",
+      "Vachellia_erioloba9.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_tortilis",
+     "w1": [
+      "Vachellia_tortilis2.schem",
+      "Vachellia_tortilis6.schem",
+      "Vachellia_tortilis7.schem",
+      "Vachellia_tortilis8.schem"
+     ],
+     "w2": [
+      "Vachellia_tortilis5.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "AFR - Sudanian Savanna",
+   "habitat": "dry",
+   "density": 80,
+   "species": [
+    {
+     "name": "Adansonia_digitata",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Adansonia_digitata1.schem",
+      "Adansonia_digitata2.schem",
+      "Adansonia_digitata3.schem",
+      "Adansonia_digitata4.schem",
+      "Adansonia_digitata5.schem"
+     ]
+    },
+    {
+     "name": "Borassus_aethiopum",
+     "w1": [
+      "Borassus_aethiopum (1).schem",
+      "Borassus_aethiopum (5).schem",
+      "Borassus_aethiopum (6).schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Kigelia_africana",
+     "w1": [
+      "Kigelia_africana1.schem",
+      "Kigelia_africana2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sclerocarya_birrea",
+     "w1": [],
+     "w2": [
+      "Sclerocarya_birrea1.schem",
+      "Sclerocarya_birrea2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_senegal",
+     "w1": [
+      "Senegalia_senegal1.schem",
+      "Senegalia_senegal2.schem",
+      "Senegalia_senegal3.schem",
+      "Senegalia_senegal5.schem"
+     ],
+     "w2": [
+      "Senegalia_senegal4.schem",
+      "Senegalia_senegal6.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_tortilis",
+     "w1": [
+      "Vachellia_tortilis1.schem",
+      "Vachellia_tortilis2.schem",
+      "Vachellia_tortilis4.schem",
+      "Vachellia_tortilis6.schem",
+      "Vachellia_tortilis7.schem",
+      "Vachellia_tortilis8.schem"
+     ],
+     "w2": [
+      "Vachellia_tortilis5.schem"
+     ],
+     "w3": [
+      "Vachellia_tortilis3.schem"
+     ]
+    },
+    {
+     "name": "Vitellaria_paradoxa",
+     "w1": [
+      "Vitellaria_paradoxa1.schem",
+      "Vitellaria_paradoxa2.schem",
+      "Vitellaria_paradoxa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}
