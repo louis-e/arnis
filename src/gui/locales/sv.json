@@ -41,6 +41,7 @@
   "interior": "Interiörgenerering",
   "roof": "Takgenerering",
   "fillground": "Fyll mark",
+  "legacy_trees": "Klassiska träd",
   "land_cover": "Marktäcke",
   "three_dmr": "Använd 3D-modeller",
   "disable_height_limit": "Utöka byggnadshöjd",

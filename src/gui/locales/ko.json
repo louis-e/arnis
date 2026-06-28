@@ -41,6 +41,7 @@
   "interior": "내부 생성",
   "roof": "지붕 생성",
   "fillground": "지면 채우기",
+  "legacy_trees": "기존 나무",
   "land_cover": "토지 피복",
   "three_dmr": "3D 모델 사용",
   "disable_height_limit": "건축 높이 확장",

@@ -41,6 +41,7 @@
   "interior": "Geração do interior",
   "roof": "Geração do telhado",
   "fillground": "Preencher solo",
+  "legacy_trees": "Árvores clássicas",
   "land_cover": "Cobertura do solo",
   "three_dmr": "Usar modelos 3D",
   "disable_height_limit": "Ampliar altura de construção",

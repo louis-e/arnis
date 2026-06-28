@@ -41,6 +41,7 @@
   "interior": "Innenraum Generierung",
   "roof": "Dach Generierung",
   "fillground": "Boden füllen",
+  "legacy_trees": "Klassische Bäume",
   "land_cover": "Landbedeckung",
   "three_dmr": "3D-Modelle verwenden",
   "disable_height_limit": "Bauhöhe erweitern",

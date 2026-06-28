@@ -41,6 +41,7 @@
   "interior": "Génération d'intérieur",
   "roof": "Génération de toit",
   "fillground": "Remplir le sol",
+  "legacy_trees": "Arbres classiques",
   "land_cover": "Couverture du sol",
   "three_dmr": "Utiliser les modèles 3D",
   "disable_height_limit": "Étendre la hauteur de construction",

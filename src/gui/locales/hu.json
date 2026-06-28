@@ -41,6 +41,7 @@
   "interior": "Belső generálás",
   "roof": "Tető generálás",
   "fillground": "Talaj feltöltése",
+  "legacy_trees": "Klasszikus fák",
   "land_cover": "Felszínborítás",
   "three_dmr": "3D modellek használata",
   "disable_height_limit": "Építési magasság kiterjesztése",

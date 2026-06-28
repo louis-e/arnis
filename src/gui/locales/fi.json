@@ -41,6 +41,7 @@
   "interior": "Sisätilan luonti",
   "roof": "Katon luonti",
   "fillground": "Täytä maa",
+  "legacy_trees": "Perinteiset puut",
   "land_cover": "Maanpeite",
   "three_dmr": "Käytä 3D-malleja",
   "disable_height_limit": "Laajenna rakennuskorkeutta",
