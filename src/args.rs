@@ -76,11 +76,8 @@ pub struct Args {
     #[arg(long = "tree-sizes")]
     pub tree_sizes: Option<String>,
 
-    /// Enable land cover classification (optional)
-    /// When enabled, fetches ESA WorldCover satellite data to classify terrain
-    /// (forests, deserts, wetlands, built-up areas, etc.) and select appropriate
-    /// surface blocks. Requires --terrain to be enabled.
-    #[arg(long = "land-cover", alias = "city-boundaries", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    /// ESA WorldCover land cover classification, always on (no CLI flag).
+    #[arg(skip = true)]
     pub land_cover: bool,
 
     /// Disable fetching 3D models from external sources (3DMR + Wikimedia).
@@ -253,7 +250,7 @@ mod tests {
         let tmpdir = tempfile::tempdir().unwrap();
         let tmp_path = tmpdir.path().to_str().unwrap();
 
-        // Test disabling interior/roof/land-cover with =false
+        // Test disabling interior/roof with =false
         let cmd = [
             "arnis",
             "--output-dir",
@@ -262,12 +259,12 @@ mod tests {
             "1,2,3,4",
             "--interior=false",
             "--roof=false",
-            "--land-cover=false",
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(!args.interior);
         assert!(!args.roof);
-        assert!(!args.land_cover);
+        // land cover is always on (no flag)
+        assert!(args.land_cover);
 
         // Test enabling with bare flag (no value)
         let cmd = [
@@ -278,24 +275,10 @@ mod tests {
             "1,2,3,4",
             "--interior",
             "--roof",
-            "--land-cover",
         ];
         let args = Args::parse_from(cmd.iter());
         assert!(args.interior);
         assert!(args.roof);
-        assert!(args.land_cover);
-
-        // Test backwards compatibility with old --city-boundaries alias
-        let cmd = [
-            "arnis",
-            "--output-dir",
-            tmp_path,
-            "--bbox",
-            "1,2,3,4",
-            "--city-boundaries=false",
-        ];
-        let args = Args::parse_from(cmd.iter());
-        assert!(!args.land_cover);
     }
 
     #[test]
