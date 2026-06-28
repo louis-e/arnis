@@ -29,8 +29,25 @@ pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, a
                 generate_tank_structure(editor, element, args);
             }
             "mast" => generate_antenna(editor, element),
+            "lighthouse" => place_lighthouse_way(editor, element),
             _ => {} // Unknown man_made type, ignore
         }
+    }
+}
+
+/// Stamp the bundled lighthouse at the centroid of a lighthouse way/footprint.
+fn place_lighthouse_way(editor: &mut WorldEditor, element: &ProcessedElement) {
+    if let ProcessedElement::Way(way) = element {
+        if way.nodes.is_empty() {
+            return;
+        }
+        let (mut sx, mut sz) = (0i64, 0i64);
+        for nd in &way.nodes {
+            sx += nd.x as i64;
+            sz += nd.z as i64;
+        }
+        let n = way.nodes.len() as i64;
+        crate::structures::lighthouse::place(editor, (sx / n) as i32, (sz / n) as i32);
     }
 }
 
@@ -518,6 +535,7 @@ pub fn generate_man_made_nodes(editor: &mut WorldEditor, node: &ProcessedNode, a
                 generate_tank_structure(editor, &element, args);
             }
             "mast" => generate_antenna(editor, &element),
+            "lighthouse" => crate::structures::lighthouse::place(editor, node.x, node.z),
             _ => {} // Unknown man_made type, ignore
         }
     }

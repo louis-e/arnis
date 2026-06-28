@@ -121,52 +121,11 @@ pub fn generate_leisure(
                         _ => {}
                     }
                 }
+            }
 
-                // Add playground or recreation ground features
-                if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
-                    let random_choice: i32 = rng.random_range(0..5000);
-
-                    match random_choice {
-                        0..10 => {
-                            // Swing set
-                            for y in 1..=3 {
-                                editor.set_block(OAK_FENCE, x - 1, y, z, None, None);
-                                editor.set_block(OAK_FENCE, x + 1, y, z, None, None);
-                            }
-                            editor.set_block(OAK_PLANKS, x - 1, 4, z, None, None);
-                            editor.set_block(OAK_SLAB, x, 4, z, None, None);
-                            editor.set_block(OAK_PLANKS, x + 1, 4, z, None, None);
-                            editor.set_block(STONE_BLOCK_SLAB, x, 2, z, None, None);
-                        }
-                        10..20 => {
-                            // Slide
-                            editor.set_block(OAK_SLAB, x, 1, z, None, None);
-                            editor.set_block(OAK_SLAB, x + 1, 2, z, None, None);
-                            editor.set_block(OAK_SLAB, x + 2, 3, z, None, None);
-
-                            editor.set_block(OAK_PLANKS, x + 2, 2, z, None, None);
-                            editor.set_block(OAK_PLANKS, x + 2, 1, z, None, None);
-
-                            editor.set_block(LADDER, x + 2, 2, z - 1, None, None);
-                            editor.set_block(LADDER, x + 2, 1, z - 1, None, None);
-                        }
-                        20..30 => {
-                            // Sandpit
-                            editor.fill_blocks(
-                                SAND,
-                                x - 3,
-                                0,
-                                z - 3,
-                                x + 3,
-                                0,
-                                z + 3,
-                                Some(&[GREEN_STAINED_HARDENED_CLAY]),
-                                None,
-                            );
-                        }
-                        _ => {}
-                    }
-                }
+            // Stamp bundled playground structures (replaces the old procedural props).
+            if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
+                crate::structures::playground::scatter_playgrounds(editor, filled_area.as_slice());
             }
         }
     }

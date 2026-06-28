@@ -311,6 +311,18 @@ impl<'a> WorldEditor<'a> {
         })
     }
 
+    /// Distance (cells, capped) from (x, z) to the nearest shore per the ESA water
+    /// field: 0 at land/shore, larger over open water. Lets callers tell a wide
+    /// ocean/lake from a narrow river.
+    pub fn water_distance(&self, x: i32, z: i32) -> u8 {
+        self.ground.as_ref().map_or(0, |g| {
+            g.water_distance(crate::coordinate_system::cartesian::XZPoint::new(
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
+            ))
+        })
+    }
+
     /// Enables baking per-chunk lighting into Java chunks.
     pub fn set_bake_lighting(&mut self, enabled: bool) {
         self.bake_lighting = enabled;

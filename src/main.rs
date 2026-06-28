@@ -32,6 +32,7 @@ mod overture;
 mod progress;
 mod projection;
 mod retrieve_data;
+mod structures;
 #[cfg(feature = "gui")]
 mod telemetry;
 #[cfg(test)]
