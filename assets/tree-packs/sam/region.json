@@ -1,0 +1,1943 @@
+{
+ "realm": "sam",
+ "default_community": "SAM - Colombia-Panamanian Lowland Rainforest",
+ "communities": [
+  {
+   "name": "SAM - Amazonian Dry-ground Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anacardium_occidentale",
+     "w1": [
+      "Anacardium_occidentale1.schem",
+      "Anacardium_occidentale2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astrocarym_jauari",
+     "w1": [
+      "Astrocarym_jauari1.schem",
+      "Astrocarym_jauari2.schem",
+      "Astrocarym_jauari3.schem",
+      "Astrocarym_jauari4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astronium_fraxinifolium",
+     "w1": [
+      "Astronium_fraxinifolium1.schem",
+      "Astronium_fraxinifolium2.schem",
+      "Astronium_fraxinifolium3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Calophyllum_brasiliense",
+     "w1": [
+      "Calophyllum_brasiliense3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cedrela_odorata",
+     "w1": [
+      "Cedrela_odorata1.schem",
+      "Cedrela_odorata2.schem",
+      "Cedrela_odorata3.schem"
+     ],
+     "w2": [
+      "Cedrela_odorata4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ceiba_pentandra",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ceiba_pentandra4.schem"
+     ]
+    },
+    {
+     "name": "Ficus_insipida",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_insipida2.schem",
+      "Ficus_insipida3.schem"
+     ]
+    },
+    {
+     "name": "Hevea_brasiliensis",
+     "w1": [
+      "Hevea_brasiliensis1.schem",
+      "Hevea_brasiliensis3.schem",
+      "Hevea_brasiliensis4.schem",
+      "Hevea_brasiliensis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Amazonian River & Swamp",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Annona_glabra",
+     "w1": [
+      "Annona_glabra1.schem",
+      "Annona_glabra2.schem",
+      "Annona_glabra3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astrocarym_jauari",
+     "w1": [
+      "Astrocarym_jauari1.schem",
+      "Astrocarym_jauari2.schem",
+      "Astrocarym_jauari3.schem",
+      "Astrocarym_jauari4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ceiba_pentandra",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ceiba_pentandra4.schem"
+     ]
+    },
+    {
+     "name": "Euterpe_oleracea",
+     "w1": [
+      "Euterpe_oleracea1.schem",
+      "Euterpe_oleracea2.schem",
+      "Euterpe_oleracea3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_citrifolia",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_citrifolia (1).schem",
+      "Ficus_citrifolia (2).schem"
+     ]
+    },
+    {
+     "name": "Pachira_aquatica",
+     "w1": [
+      "Pachira_aquatica1.schem",
+      "Pachira_aquatica3.schem"
+     ],
+     "w2": [
+      "Pachira_aquatica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_officinalis",
+     "w1": [
+      "Pterocarpus_officinalis1.schem",
+      "Pterocarpus_officinalis2.schem",
+      "Pterocarpus_officinalis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Socratea_exorrhiza",
+     "w1": [
+      "Socratea_exorrhiza1.schem",
+      "Socratea_exorrhiza2.schem",
+      "Socratea_exorrhiza3.schem",
+      "Socratea_exorrhiza4.schem",
+      "Socratea_exorrhiza5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Caatinga",
+   "habitat": "dry",
+   "density": 30,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astronium_fraxinifolium",
+     "w1": [
+      "Astronium_fraxinifolium1.schem",
+      "Astronium_fraxinifolium2.schem",
+      "Astronium_fraxinifolium3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cereus_jamacaru",
+     "w1": [
+      "Cereus_jamacaru1.schem",
+      "Cereus_jamacaru2.schem",
+      "Cereus_jamacaru3.schem",
+      "Cereus_jamacaru4.schem",
+      "Cereus_jamacaru5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Myracrodruon_urundeuva",
+     "w1": [
+      "Myracrodruon_urundeuva1.schem",
+      "Myracrodruon_urundeuva2.schem",
+      "Myracrodruon_urundeuva3.schem",
+      "Myracrodruon_urundeuva4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Parapiptadenia_rigida",
+     "w1": [
+      "Parapiptadenia_rigida1.schem",
+      "Parapiptadenia_rigida2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Schinopsis_brasiliensis",
+     "w1": [
+      "Schinopsis_brasiliensis1.schem",
+      "Schinopsis_brasiliensis2.schem",
+      "Schinopsis_brasiliensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_farnesiana",
+     "w1": [
+      "Vachellia_farnesiana1.schem",
+      "Vachellia_farnesiana2.schem"
+     ],
+     "w2": [
+      "Vachellia_farnesiana3.schem"
+     ],
+     "w3": [
+      "Vachellia_farnesiana4.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SAM - Cerrado",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anacardium_occidentale",
+     "w1": [
+      "Anacardium_occidentale1.schem",
+      "Anacardium_occidentale2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anadenanthera_colubrina",
+     "w1": [
+      "Anadenanthera_colubrina2.schem",
+      "Anadenanthera_colubrina3.schem"
+     ],
+     "w2": [
+      "Anadenanthera_colubrina1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Astronium_fraxinifolium",
+     "w1": [
+      "Astronium_fraxinifolium1.schem",
+      "Astronium_fraxinifolium2.schem",
+      "Astronium_fraxinifolium3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Caryocar_brasiliense",
+     "w1": [
+      "Caryocar_brasiliense1.schem",
+      "Caryocar_brasiliense2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_citrifolia",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_citrifolia (1).schem",
+      "Ficus_citrifolia (2).schem"
+     ]
+    },
+    {
+     "name": "Handroanthus_impetiginosus",
+     "w1": [
+      "Handroanthus_impetiginosus1.schem",
+      "Handroanthus_impetiginosus2.schem"
+     ],
+     "w2": [
+      "Handroanthus_impetiginosus3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Mauritia_flexuosa",
+     "w1": [
+      "Mauritia_flexuosa1.schem",
+      "Mauritia_flexuosa2.schem",
+      "Mauritia_flexuosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Parapiptadenia_rigida",
+     "w1": [
+      "Parapiptadenia_rigida1.schem",
+      "Parapiptadenia_rigida2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopis_affinis",
+     "w1": [
+      "Prosopis_affinis1.schem",
+      "Prosopis_affinis2.schem",
+      "Prosopis_affinis3.schem",
+      "Prosopis_affinis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Schinopsis_brasiliensis",
+     "w1": [
+      "Schinopsis_brasiliensis1.schem",
+      "Schinopsis_brasiliensis2.schem",
+      "Schinopsis_brasiliensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Chilean Araucaria-Nothofagus Forest",
+   "habitat": "conifer",
+   "density": 25,
+   "species": [
+    {
+     "name": "Araucaria_araucana",
+     "w1": [
+      "Araucaria_araucana2.schem",
+      "Araucaria_araucana4.schem",
+      "Araucaria_araucana5.schem",
+      "Araucaria_araucana6.schem",
+      "Araucaria_araucana7.schem",
+      "Araucaria_araucana8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Nothofagus_antarctica",
+     "w1": [
+      "Nothofagus_antarctica1.schem",
+      "Nothofagus_antarctica2.schem",
+      "Nothofagus_antarctica3.schem",
+      "Nothofagus_antarctica4.schem",
+      "Nothofagus_antarctica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Chilean Cypresses",
+   "habitat": "conifer",
+   "density": 25,
+   "species": [
+    {
+     "name": "Fitzroya_cupressoides",
+     "w1": [
+      "Fitzroya_cupressoides4.schem",
+      "Fitzroya_cupressoides5.schem",
+      "Fitzroya_cupressoides6.schem",
+      "Fitzroya_cupressoides7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pilgerodendron_uviferum",
+     "w1": [
+      "Pilgerodendron_uviferum1.schem",
+      "Pilgerodendron_uviferum2.schem",
+      "Pilgerodendron_uviferum3.schem",
+      "Pilgerodendron_uviferum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Saxegothea_conspicua",
+     "w1": [
+      "Saxegothea_conspicua1.schem",
+      "Saxegothea_conspicua2.schem",
+      "Saxegothea_conspicua3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Chilean Matorral",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Jubaea_chilensis",
+     "w1": [
+      "Jubaea_chilensis1.schem",
+      "Jubaea_chilensis2.schem"
+     ],
+     "w2": [
+      "Jubaea_chilensis3.schem",
+      "Jubaea_chilensis4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lithraea_caustica",
+     "w1": [
+      "Lithraea_caustica2.schem",
+      "Lithraea_caustica3.schem"
+     ],
+     "w2": [
+      "Lithraea_caustica1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Prosopis_chilensis",
+     "w1": [
+      "Prosopis_chilensis1.schem",
+      "Prosopis_chilensis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quillaja_saponaria",
+     "w1": [
+      "Quillaja_saponaria2.schem",
+      "Quillaja_saponaria3.schem"
+     ],
+     "w2": [
+      "Quillaja_saponaria1.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Colombia-Panamanian Lowland Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Calophyllum_brasiliense",
+     "w1": [
+      "Calophyllum_brasiliense3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cedrela_odorata",
+     "w1": [
+      "Cedrela_odorata1.schem",
+      "Cedrela_odorata2.schem",
+      "Cedrela_odorata3.schem"
+     ],
+     "w2": [
+      "Cedrela_odorata4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ceiba_pentandra",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ceiba_pentandra4.schem"
+     ]
+    },
+    {
+     "name": "Enterolobium_cyclocarpum",
+     "w1": [],
+     "w2": [
+      "Enterolobium_cyclocarpum1.schem"
+     ],
+     "w3": [
+      "Enterolobium_cyclocarpum2.schem",
+      "Enterolobium_cyclocarpum3.schem"
+     ]
+    },
+    {
+     "name": "Ficus_citrifolia",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_citrifolia (1).schem",
+      "Ficus_citrifolia (2).schem"
+     ]
+    },
+    {
+     "name": "Ficus_insipida",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_insipida2.schem",
+      "Ficus_insipida3.schem"
+     ]
+    },
+    {
+     "name": "Ochroma_pyrimidale",
+     "w1": [
+      "Ochroma_pyrimidale1.schem",
+      "Ochroma_pyrimidale2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pentaclethra_macroloba",
+     "w1": [
+      "Pentaclethra_macroloba1.schem",
+      "Pentaclethra_macroloba2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sterculia_apetala",
+     "w1": [],
+     "w2": [
+      "Sterculia_apetala1.schem",
+      "Sterculia_apetala3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Swietenia_macrophylla",
+     "w1": [
+      "Swietenia_macrophylla1.schem",
+      "Swietenia_macrophylla2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Terminalia_buceras",
+     "w1": [
+      "Terminalia_buceras2.schem"
+     ],
+     "w2": [
+      "Terminalia_buceras1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Theobroma_cacao",
+     "w1": [
+      "Theobroma_cacao2.schem",
+      "Theobroma_cacao3.schem",
+      "Theobroma_cacao4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Theobroma_cacao1.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SAM - Colombia-Venezuelan Llanos",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Cedrela_odorata",
+     "w1": [
+      "Cedrela_odorata3.schem"
+     ],
+     "w2": [
+      "Cedrela_odorata4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Celtis_tala",
+     "w1": [
+      "Celtis_tala1.schem",
+      "Celtis_tala3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Celtis_tala2.schem"
+     ]
+    },
+    {
+     "name": "Erythrina_fusca",
+     "w1": [
+      "Erythrina_fusca1.schem",
+      "Erythrina_fusca2.schem"
+     ],
+     "w2": [
+      "Erythrina_fusca3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Mauritia_flexuosa",
+     "w1": [
+      "Mauritia_flexuosa1.schem",
+      "Mauritia_flexuosa2.schem",
+      "Mauritia_flexuosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_farnesiana",
+     "w1": [
+      "Vachellia_farnesiana1.schem",
+      "Vachellia_farnesiana2.schem"
+     ],
+     "w2": [
+      "Vachellia_farnesiana3.schem"
+     ],
+     "w3": [
+      "Vachellia_farnesiana4.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SAM - Gran Chaco",
+   "habitat": "dry",
+   "density": 50,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anadenanthera_colubrina",
+     "w1": [
+      "Anadenanthera_colubrina2.schem",
+      "Anadenanthera_colubrina3.schem"
+     ],
+     "w2": [
+      "Anadenanthera_colubrina1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Celtis_tala",
+     "w1": [
+      "Celtis_tala1.schem",
+      "Celtis_tala3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Celtis_tala2.schem"
+     ]
+    },
+    {
+     "name": "Handroanthus_impetiginosus",
+     "w1": [
+      "Handroanthus_impetiginosus1.schem",
+      "Handroanthus_impetiginosus2.schem"
+     ],
+     "w2": [
+      "Handroanthus_impetiginosus3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Leucostele_terscheckii",
+     "w1": [
+      "Leucostele_terscheckii1.schem",
+      "Leucostele_terscheckii2.schem",
+      "Leucostele_terscheckii3.schem",
+      "Leucostele_terscheckii4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopis_affinis",
+     "w1": [
+      "Prosopis_affinis1.schem",
+      "Prosopis_affinis2.schem",
+      "Prosopis_affinis3.schem",
+      "Prosopis_affinis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopis_alba",
+     "w1": [
+      "Prosopis_alba1.schem",
+      "Prosopis_alba2.schem",
+      "Prosopis_alba4.schem"
+     ],
+     "w2": [
+      "Prosopis_alba3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Schinopsis_lorentzii",
+     "w1": [
+      "Schinopsis_lorentzii1.schem",
+      "Schinopsis_lorentzii2.schem",
+      "Schinopsis_lorentzii3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Guyanan Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Calophyllum_brasiliense",
+     "w1": [
+      "Calophyllum_brasiliense3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Caropa_guianensis",
+     "w1": [
+      "Caropa_guianensis1.schem",
+      "Caropa_guianensis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cedrela_odorata",
+     "w1": [
+      "Cedrela_odorata1.schem",
+      "Cedrela_odorata2.schem",
+      "Cedrela_odorata3.schem"
+     ],
+     "w2": [
+      "Cedrela_odorata4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ceiba_pentandra",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ceiba_pentandra4.schem"
+     ]
+    },
+    {
+     "name": "Enterolobium_cyclocarpum",
+     "w1": [],
+     "w2": [
+      "Enterolobium_cyclocarpum1.schem"
+     ],
+     "w3": [
+      "Enterolobium_cyclocarpum2.schem",
+      "Enterolobium_cyclocarpum3.schem"
+     ]
+    },
+    {
+     "name": "Ficus_citrifolia",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_citrifolia (1).schem",
+      "Ficus_citrifolia (2).schem"
+     ]
+    },
+    {
+     "name": "Ficus_insipida",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_insipida2.schem",
+      "Ficus_insipida3.schem"
+     ]
+    },
+    {
+     "name": "Ochroma_pyrimidale",
+     "w1": [
+      "Ochroma_pyrimidale1.schem",
+      "Ochroma_pyrimidale2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pentaclethra_macroloba",
+     "w1": [
+      "Pentaclethra_macroloba1.schem",
+      "Pentaclethra_macroloba2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sterculia_apetala",
+     "w1": [],
+     "w2": [
+      "Sterculia_apetala1.schem",
+      "Sterculia_apetala3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Swietenia_macrophylla",
+     "w1": [
+      "Swietenia_macrophylla1.schem",
+      "Swietenia_macrophylla2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Humid Chaco",
+   "habitat": "dry",
+   "density": 70,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anadenanthera_colubrina",
+     "w1": [
+      "Anadenanthera_colubrina2.schem",
+      "Anadenanthera_colubrina3.schem"
+     ],
+     "w2": [
+      "Anadenanthera_colubrina1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Feijoa_sellowiana",
+     "w1": [
+      "Feijoa_sellowiana1.schem",
+      "Feijoa_sellowiana2.schem",
+      "Feijoa_sellowiana3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Handroanthus_impetiginosus",
+     "w1": [
+      "Handroanthus_impetiginosus1.schem",
+      "Handroanthus_impetiginosus2.schem"
+     ],
+     "w2": [
+      "Handroanthus_impetiginosus3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Mauritia_flexuosa",
+     "w1": [
+      "Mauritia_flexuosa1.schem",
+      "Mauritia_flexuosa2.schem",
+      "Mauritia_flexuosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Myracrodruon_urundeuva",
+     "w1": [
+      "Myracrodruon_urundeuva1.schem",
+      "Myracrodruon_urundeuva2.schem",
+      "Myracrodruon_urundeuva3.schem",
+      "Myracrodruon_urundeuva4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopis_affinis",
+     "w1": [
+      "Prosopis_affinis1.schem",
+      "Prosopis_affinis2.schem",
+      "Prosopis_affinis3.schem",
+      "Prosopis_affinis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Schinopsis_balansae",
+     "w1": [
+      "Schinopsis_balansae1.schem",
+      "Schinopsis_balansae2.schem",
+      "Schinopsis_balansae3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Mangroves",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Avicennia_germinans",
+     "w1": [
+      "Avicennia_germinans2.schem",
+      "Avicennia_germinans4.schem",
+      "Avicennia_germinans5.schem",
+      "Avicennia_germinans6.schem",
+      "Avicennia_germinans7.schem"
+     ],
+     "w2": [
+      "Avicennia_germinans1.schem",
+      "Avicennia_germinans3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Conocarpus_erectus",
+     "w1": [
+      "Conocarpus_erectus1.schem"
+     ],
+     "w2": [
+      "Conocarpus_erectus3.schem"
+     ],
+     "w3": [
+      "Conocarpus_erectus2.schem"
+     ]
+    },
+    {
+     "name": "Laguncularia_racemosa",
+     "w1": [
+      "Laguncularia_racemosa1.schem",
+      "Laguncularia_racemosa2.schem",
+      "Laguncularia_racemosa3.schem",
+      "Laguncularia_racemosa4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_officinalis",
+     "w1": [
+      "Pterocarpus_officinalis1.schem",
+      "Pterocarpus_officinalis2.schem",
+      "Pterocarpus_officinalis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rhizopora_mangle",
+     "w1": [
+      "Rhizopora_mangle10.schem",
+      "Rhizopora_mangle11.schem",
+      "Rhizopora_mangle12.schem",
+      "Rhizopora_mangle13.schem",
+      "Rhizopora_mangle14.schem",
+      "Rhizopora_mangle15.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Rhizopora_mangle16.schem"
+     ]
+    },
+    {
+     "name": "Schinus_terebinthifolia",
+     "w1": [
+      "Schinus_terebinthifolia3.schem"
+     ],
+     "w2": [
+      "Schinus_terebinthifolia1.schem",
+      "Schinus_terebinthifolia2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Mata Atlantica",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anacardium_occidentale",
+     "w1": [
+      "Anacardium_occidentale1.schem",
+      "Anacardium_occidentale2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Anadenanthera_colubrina",
+     "w1": [
+      "Anadenanthera_colubrina2.schem",
+      "Anadenanthera_colubrina3.schem"
+     ],
+     "w2": [
+      "Anadenanthera_colubrina1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Astronium_fraxinifolium",
+     "w1": [
+      "Astronium_fraxinifolium1.schem",
+      "Astronium_fraxinifolium2.schem",
+      "Astronium_fraxinifolium3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dalbergia_nigra",
+     "w1": [
+      "Dalbergia_nigra1.schem",
+      "Dalbergia_nigra2.schem",
+      "Dalbergia_nigra3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Erythrina_fusca",
+     "w1": [
+      "Erythrina_fusca1.schem",
+      "Erythrina_fusca2.schem"
+     ],
+     "w2": [
+      "Erythrina_fusca3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ocotea_porosa",
+     "w1": [
+      "Ocotea_porosa1.schem",
+      "Ocotea_porosa3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Ocotea_porosa2.schem"
+     ]
+    },
+    {
+     "name": "Paubrasilia_echinata",
+     "w1": [
+      "Paubrasilia_echinata2.schem",
+      "Paubrasilia_echinata4.schem",
+      "Paubrasilia_echinata5.schem"
+     ],
+     "w2": [
+      "Paubrasilia_echinata1.schem"
+     ],
+     "w3": [
+      "Paubrasilia_echinata3.schem"
+     ]
+    },
+    {
+     "name": "Schinus_terebinthifolia",
+     "w1": [
+      "Schinus_terebinthifolia3.schem"
+     ],
+     "w2": [
+      "Schinus_terebinthifolia1.schem",
+      "Schinus_terebinthifolia2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Northern Andean Mountain Forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Cedrela_montana",
+     "w1": [
+      "Cedrela_montana2.schem",
+      "Cedrela_montana3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Cedrela_montana1.schem"
+     ]
+    },
+    {
+     "name": "Duranta_mutisii",
+     "w1": [
+      "Duranta_mutisii1.schem",
+      "Duranta_mutisii2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Duranta_mutisii3.schem",
+      "Duranta_mutisii4.schem"
+     ]
+    },
+    {
+     "name": "Quercus_humboldtii",
+     "w1": [
+      "Quercus_humboldtii1.schem",
+      "Quercus_humboldtii2.schem",
+      "Quercus_humboldtii3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Palm Trees",
+   "habitat": "wet",
+   "density": 50,
+   "species": [
+    {
+     "name": "Acrocomia_aculeata",
+     "w1": [
+      "Acrocomia_aculeata1.schem",
+      "Acrocomia_aculeata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Mauritia_flexuosa",
+     "w1": [
+      "Mauritia_flexuosa1.schem",
+      "Mauritia_flexuosa2.schem",
+      "Mauritia_flexuosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Pampas",
+   "habitat": "dry",
+   "density": 100,
+   "species": [
+    {
+     "name": "Celtis_tala",
+     "w1": [
+      "Celtis_tala1.schem",
+      "Celtis_tala3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Celtis_tala2.schem"
+     ]
+    },
+    {
+     "name": "Erythrina_crista-galli",
+     "w1": [
+      "Erythrina_crista-galli2.schem",
+      "Erythrina_crista-galli3.schem"
+     ],
+     "w2": [
+      "Erythrina_crista-galli1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Handroanthus_impetiginosus",
+     "w1": [
+      "Handroanthus_impetiginosus1.schem",
+      "Handroanthus_impetiginosus2.schem"
+     ],
+     "w2": [
+      "Handroanthus_impetiginosus3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ilex_paraguariensis",
+     "w1": [
+      "Ilex_paraguariensis3.schem"
+     ],
+     "w2": [
+      "Ilex_paraguariensis1.schem",
+      "Ilex_paraguariensis2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Jacaranda_mimosifolia",
+     "w1": [
+      "Jacaranda_mimosifolia1.schem"
+     ],
+     "w2": [
+      "Jacaranda_mimosifolia2.schem",
+      "Jacaranda_mimosifolia3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Myracrodruon_urundeuva",
+     "w1": [
+      "Myracrodruon_urundeuva1.schem",
+      "Myracrodruon_urundeuva2.schem",
+      "Myracrodruon_urundeuva3.schem",
+      "Myracrodruon_urundeuva4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Parapiptadenia_rigida",
+     "w1": [
+      "Parapiptadenia_rigida1.schem",
+      "Parapiptadenia_rigida2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Phytolacca_dioica",
+     "w1": [
+      "Phytolacca_dioica2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Phytolacca_dioica1.schem",
+      "Phytolacca_dioica3.schem"
+     ]
+    },
+    {
+     "name": "Schinus_terebinthifolia",
+     "w1": [
+      "Schinus_terebinthifolia3.schem"
+     ],
+     "w2": [
+      "Schinus_terebinthifolia1.schem",
+      "Schinus_terebinthifolia2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Pantanal",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Annona_glabra",
+     "w1": [
+      "Annona_glabra1.schem",
+      "Annona_glabra2.schem",
+      "Annona_glabra3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astrocarym_jauari",
+     "w1": [
+      "Astrocarym_jauari1.schem",
+      "Astrocarym_jauari2.schem",
+      "Astrocarym_jauari3.schem",
+      "Astrocarym_jauari4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Erythrina_crista-galli",
+     "w1": [
+      "Erythrina_crista-galli2.schem",
+      "Erythrina_crista-galli3.schem"
+     ],
+     "w2": [
+      "Erythrina_crista-galli1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Jacaranda_mimosifolia",
+     "w1": [
+      "Jacaranda_mimosifolia1.schem"
+     ],
+     "w2": [
+      "Jacaranda_mimosifolia2.schem",
+      "Jacaranda_mimosifolia3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Myracrodruon_urundeuva",
+     "w1": [
+      "Myracrodruon_urundeuva1.schem",
+      "Myracrodruon_urundeuva2.schem",
+      "Myracrodruon_urundeuva3.schem",
+      "Myracrodruon_urundeuva4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ochroma_pyrimidale",
+     "w1": [
+      "Ochroma_pyrimidale1.schem",
+      "Ochroma_pyrimidale2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pachira_aquatica",
+     "w1": [
+      "Pachira_aquatica1.schem",
+      "Pachira_aquatica3.schem"
+     ],
+     "w2": [
+      "Pachira_aquatica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Salix_humboldtiana",
+     "w1": [
+      "Salix_humboldtiana1.schem",
+      "Salix_humboldtiana2.schem",
+      "Salix_humboldtiana3.schem",
+      "Salix_humboldtiana4.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Salix_humboldtiana5.schem"
+     ]
+    },
+    {
+     "name": "Schinopsis_balansae",
+     "w1": [
+      "Schinopsis_balansae1.schem",
+      "Schinopsis_balansae2.schem",
+      "Schinopsis_balansae3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Socratea_exorrhiza",
+     "w1": [
+      "Socratea_exorrhiza1.schem",
+      "Socratea_exorrhiza2.schem",
+      "Socratea_exorrhiza3.schem",
+      "Socratea_exorrhiza4.schem",
+      "Socratea_exorrhiza5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sterculia_apetala",
+     "w1": [],
+     "w2": [
+      "Sterculia_apetala1.schem",
+      "Sterculia_apetala3.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Parana Araucaria Forest",
+   "habitat": "conifer",
+   "density": 35,
+   "species": [
+    {
+     "name": "Araucaria_angustifolia",
+     "w1": [
+      "Araucaria_angustifolia2.schem",
+      "Araucaria_angustifolia3.schem",
+      "Araucaria_angustifolia4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Feijoa_sellowiana",
+     "w1": [
+      "Feijoa_sellowiana1.schem",
+      "Feijoa_sellowiana2.schem",
+      "Feijoa_sellowiana3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ilex_paraguariensis",
+     "w1": [
+      "Ilex_paraguariensis3.schem"
+     ],
+     "w2": [
+      "Ilex_paraguariensis1.schem",
+      "Ilex_paraguariensis2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ocotea_porosa",
+     "w1": [
+      "Ocotea_porosa1.schem",
+      "Ocotea_porosa3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Ocotea_porosa2.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SAM - Quindio Wax Palms",
+   "habitat": "wet",
+   "density": 45,
+   "species": [
+    {
+     "name": "Ceroxylon_quindiuense",
+     "w1": [
+      "Ceroxylon_quindiuense2.schem",
+      "Ceroxylon_quindiuense3.schem",
+      "Ceroxylon_quindiuense4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Restinga",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Anacardium_occidentale",
+     "w1": [
+      "Anacardium_occidentale1.schem",
+      "Anacardium_occidentale2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Astronium_fraxinifolium",
+     "w1": [
+      "Astronium_fraxinifolium1.schem",
+      "Astronium_fraxinifolium2.schem",
+      "Astronium_fraxinifolium3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Attalea_speciosa",
+     "w1": [
+      "Attalea_speciosa1.schem",
+      "Attalea_speciosa2.schem",
+      "Attalea_speciosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Avicennia_germinans",
+     "w1": [
+      "Avicennia_germinans2.schem",
+      "Avicennia_germinans4.schem",
+      "Avicennia_germinans6.schem",
+      "Avicennia_germinans7.schem"
+     ],
+     "w2": [
+      "Avicennia_germinans1.schem",
+      "Avicennia_germinans3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Cedrela_odorata",
+     "w1": [
+      "Cedrela_odorata1.schem",
+      "Cedrela_odorata2.schem",
+      "Cedrela_odorata3.schem"
+     ],
+     "w2": [
+      "Cedrela_odorata4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Cereus_jamacaru",
+     "w1": [
+      "Cereus_jamacaru1.schem",
+      "Cereus_jamacaru2.schem",
+      "Cereus_jamacaru3.schem",
+      "Cereus_jamacaru4.schem",
+      "Cereus_jamacaru5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Conocarpus_erectus",
+     "w1": [
+      "Conocarpus_erectus1.schem",
+      "Conocarpus_erectus4.schem"
+     ],
+     "w2": [
+      "Conocarpus_erectus3.schem",
+      "Conocarpus_erectus6.schem"
+     ],
+     "w3": [
+      "Conocarpus_erectus2.schem",
+      "Conocarpus_erectus5.schem"
+     ]
+    },
+    {
+     "name": "Handroanthus_impetiginosus",
+     "w1": [
+      "Handroanthus_impetiginosus1.schem",
+      "Handroanthus_impetiginosus2.schem"
+     ],
+     "w2": [
+      "Handroanthus_impetiginosus3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Mauritia_flexuosa",
+     "w1": [
+      "Mauritia_flexuosa1.schem",
+      "Mauritia_flexuosa2.schem",
+      "Mauritia_flexuosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pachira_aquatica",
+     "w1": [
+      "Pachira_aquatica1.schem",
+      "Pachira_aquatica3.schem"
+     ],
+     "w2": [
+      "Pachira_aquatica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Schinus_terebinthifolia",
+     "w1": [
+      "Schinus_terebinthifolia3.schem"
+     ],
+     "w2": [
+      "Schinus_terebinthifolia1.schem",
+      "Schinus_terebinthifolia2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_farnesiana",
+     "w1": [
+      "Vachellia_farnesiana1.schem",
+      "Vachellia_farnesiana2.schem"
+     ],
+     "w2": [
+      "Vachellia_farnesiana3.schem"
+     ],
+     "w3": [
+      "Vachellia_farnesiana4.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "SAM - Southern Caribbean Thorn Scrub",
+   "habitat": "dry",
+   "density": 30,
+   "species": [
+    {
+     "name": "Vachellia_farnesiana",
+     "w1": [
+      "Vachellia_farnesiana1.schem",
+      "Vachellia_farnesiana2.schem"
+     ],
+     "w2": [
+      "Vachellia_farnesiana3.schem"
+     ],
+     "w3": [
+      "Vachellia_farnesiana4.schem"
+     ]
+    },
+    {
+     "name": "Xylosma_flexuosa",
+     "w1": [
+      "Xylosma_flexuosa1.schem",
+      "Xylosma_flexuosa2.schem",
+      "Xylosma_flexuosa3.schem",
+      "Xylosma_flexuosa4.schem",
+      "Xylosma_flexuosa5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Tierra del Fuego",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Nothofagus_betuloides",
+     "w1": [
+      "Nothofagus_betuloides4.schem",
+      "Nothofagus_betuloides5.schem",
+      "Nothofagus_betuloides6.schem",
+      "Nothofagus_betuloides7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pilgerodendron_uviferum",
+     "w1": [
+      "Pilgerodendron_uviferum1.schem",
+      "Pilgerodendron_uviferum2.schem",
+      "Pilgerodendron_uviferum3.schem",
+      "Pilgerodendron_uviferum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Saxegothea_conspicua",
+     "w1": [
+      "Saxegothea_conspicua1.schem",
+      "Saxegothea_conspicua2.schem",
+      "Saxegothea_conspicua3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Tierra del Fuego Krummholz",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Nothofagus_antarctica",
+     "w1": [
+      "Nothofagus_antarctica2.schem",
+      "Nothofagus_antarctica3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Nothofagus_betuloides",
+     "w1": [
+      "Nothofagus_betuloides1.schem",
+      "Nothofagus_betuloides2.schem",
+      "Nothofagus_betuloides3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "SAM - Valdivian Laurel-leaf Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Aextoxicon_punctatum",
+     "w1": [
+      "Aextoxicon_punctatum1.schem",
+      "Aextoxicon_punctatum3.schem",
+      "Aextoxicon_punctatum4.schem"
+     ],
+     "w2": [
+      "Aextoxicon_punctatum2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Drimys_winteri",
+     "w1": [
+      "Drimys_winteri1.schem",
+      "Drimys_winteri2.schem",
+      "Drimys_winteri3.schem",
+      "Drimys_winteri4.schem",
+      "Drimys_winteri5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Laurelia_sempervirens",
+     "w1": [
+      "Laurelia_sempervirens1.schem",
+      "Laurelia_sempervirens2.schem",
+      "Laurelia_sempervirens3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Luma_apiculata",
+     "w1": [
+      "Luma_apiculata1.schem",
+      "Luma_apiculata3.schem"
+     ],
+     "w2": [
+      "Luma_apiculata4.schem"
+     ],
+     "w3": [
+      "Luma_apiculata2.schem"
+     ]
+    },
+    {
+     "name": "Nothofagus_antarctica",
+     "w1": [
+      "Nothofagus_antarctica1.schem",
+      "Nothofagus_antarctica2.schem",
+      "Nothofagus_antarctica3.schem",
+      "Nothofagus_antarctica4.schem",
+      "Nothofagus_antarctica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Nothofagus_obliqua",
+     "w1": [
+      "Nothofagus_obliqua1.schem",
+      "Nothofagus_obliqua2.schem"
+     ],
+     "w2": [
+      "Nothofagus_obliqua3.schem"
+     ],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}

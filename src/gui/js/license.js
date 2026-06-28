@@ -47,6 +47,14 @@ Elevation data provided by the <a href="https://maps.gsi.go.jp/" style="color: i
 Land cover classification data provided by the <a href="https://esa-worldcover.org/en" style="color: inherit;" target="_blank">ESA WorldCover</a> project (10m resolution, v200). Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC-BY 4.0</a>. &copy; ESA WorldCover project 2021.
 <br><br>
 
+<b>Koppen-Geiger Climate Data:</b><br>
+Climate-based biome and surface selection uses the Koppen-Geiger climate classification by <a href="https://www.gloh2o.org/koppen/" style="color: inherit;" target="_blank">Beck et al. (2023)</a>, Scientific Data 10, 724. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a>.
+<br><br>
+
+<b>Schematic Tree Models:</b><br>
+The bundled region tree pack used by the optional "Schematic Trees" feature was created by <a href="https://www.planetminecraft.com/member/paleozoey/" style="color: inherit;" target="_blank">paleozoey</a>. Arnis bundles and places them; the artistry is theirs.
+<br><br>
+
 <b>bedrock-rs:</b><br>
 Bedrock Edition world format support uses the <a href="https://github.com/bedrock-crustaceans/bedrock-rs" style="color: inherit;" target="_blank">bedrock-rs</a> library, licensed under the Apache License 2.0.
 <br><br>

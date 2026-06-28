@@ -1571,6 +1571,7 @@ async function startGeneration() {
     var interior = document.getElementById("interior-toggle").checked;
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
+    var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
     var land_cover = document.getElementById("land-cover-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
@@ -1601,6 +1602,7 @@ async function startGeneration() {
         interiorEnabled: interior,
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
+        legacyTreesEnabled: legacy_trees,
         landCoverEnabled: land_cover,
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,

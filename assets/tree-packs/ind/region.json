@@ -1,0 +1,2990 @@
+{
+ "realm": "ind",
+ "default_community": "IND - Sumatra-Java-Lesser Sunda Islands Forests",
+ "communities": [
+  {
+   "name": "IND - Banana Trees",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Musa_acuminata",
+     "w1": [
+      "Musa_acuminata1.schem",
+      "Musa_acuminata2.schem",
+      "Musa_acuminata3.schem",
+      "Musa_acuminata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Betel Nut Palms",
+   "habitat": "wet",
+   "density": 25,
+   "species": [
+    {
+     "name": "Areca_catechu",
+     "w1": [
+      "Areca_catechu1.schem",
+      "Areca_catechu2.schem",
+      "Areca_catechu3.schem",
+      "Areca_catechu4.schem",
+      "Areca_catechu5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Borassus Palms",
+   "habitat": "wet",
+   "density": 30,
+   "species": [
+    {
+     "name": "Borassus_flabellifer",
+     "w1": [
+      "Borassus_flabellifer1.schem",
+      "Borassus_flabellifer2.schem",
+      "Borassus_flabellifer3.schem",
+      "Borassus_flabellifer4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Borneo Rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Aleurites_moluccanus",
+     "w1": [
+      "Aleurites_moluccanus1.schem",
+      "Aleurites_moluccanus2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Areca_catechu",
+     "w1": [
+      "Areca_catechu1.schem",
+      "Areca_catechu2.schem",
+      "Areca_catechu3.schem",
+      "Areca_catechu4.schem",
+      "Areca_catechu5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_melanoxylon",
+     "w1": [
+      "Diospyros_melanoxylon1.schem",
+      "Diospyros_melanoxylon2.schem",
+      "Diospyros_melanoxylon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Durio_zibethinus",
+     "w1": [
+      "Durio_zibethinus1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Garcinia_mangostana",
+     "w1": [
+      "Garcinia_mangostana.schem",
+      "Garcinia_mangostana2.schem",
+      "Garcinia_mangostana3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Gnetum_gnemon",
+     "w1": [
+      "Gnetum_gnemon1.schem",
+      "Gnetum_gnemon2.schem",
+      "Gnetum_gnemon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Hopea_beccariana",
+     "w1": [
+      "Hopea_beccariana1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rafflesia_arnoldii",
+     "w1": [
+      "Rafflesia_arnoldii1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis11.schem",
+      "Tectona_grandis5.schem",
+      "Tectona_grandis6.schem",
+      "Tectona_grandis7.schem",
+      "Tectona_grandis8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Tectona_grandis10.schem"
+     ]
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Xylia_xylocarpa",
+     "w1": [
+      "Xylia_xylocarpa1.schem",
+      "Xylia_xylocarpa2.schem",
+      "Xylia_xylocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Chinese Water Cypress",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Glyptostrobus_pensilis",
+     "w1": [
+      "Glyptostrobus_pensilis1.schem",
+      "Glyptostrobus_pensilis2.schem",
+      "Glyptostrobus_pensilis3.schem",
+      "Glyptostrobus_pensilis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Deccan Plateau Thornscrub",
+   "habitat": "dry",
+   "density": 30,
+   "species": [
+    {
+     "name": "Albizia_amara",
+     "w1": [
+      "Albizia_amara3.schem"
+     ],
+     "w2": [
+      "Albizia_amara1.schem",
+      "Albizia_amara2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Hardwickia_binata",
+     "w1": [
+      "Hardwickia_binata1.schem",
+      "Hardwickia_binata3.schem",
+      "Hardwickia_binata4.schem"
+     ],
+     "w2": [
+      "Hardwickia_binata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lagerstroemia_parviflora",
+     "w1": [
+      "Lagerstroemia_parviflora1.schem",
+      "Lagerstroemia_parviflora2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopis_cineraria",
+     "w1": [
+      "Prosopis_cineraria1.schem",
+      "Prosopis_cineraria2.schem",
+      "Prosopis_cineraria3.schem",
+      "Prosopis_cineraria4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_flava",
+     "w1": [
+      "Vachellia_flava1.schem",
+      "Vachellia_flava3.schem"
+     ],
+     "w2": [
+      "Vachellia_flava2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Deccan Plateau Tropical Dry Forest",
+   "habitat": "dry",
+   "density": 30,
+   "species": [
+    {
+     "name": "Albizia_amara",
+     "w1": [
+      "Albizia_amara3.schem"
+     ],
+     "w2": [
+      "Albizia_amara1.schem",
+      "Albizia_amara2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Borassus_flabellifer",
+     "w1": [
+      "Borassus_flabellifer1.schem",
+      "Borassus_flabellifer2.schem",
+      "Borassus_flabellifer3.schem",
+      "Borassus_flabellifer4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_melanoxylon",
+     "w1": [
+      "Diospyros_melanoxylon4.schem",
+      "Diospyros_melanoxylon5.schem",
+      "Diospyros_melanoxylon6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_benghalensis",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_benghalensis1.schem",
+      "Ficus_benghalensis2.schem",
+      "Ficus_benghalensis3.schem"
+     ]
+    },
+    {
+     "name": "Hardwickia_binata",
+     "w1": [
+      "Hardwickia_binata1.schem",
+      "Hardwickia_binata3.schem",
+      "Hardwickia_binata4.schem"
+     ],
+     "w2": [
+      "Hardwickia_binata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lagerstroemia_parviflora",
+     "w1": [
+      "Lagerstroemia_parviflora1.schem",
+      "Lagerstroemia_parviflora2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Manilkara_hexandra",
+     "w1": [
+      "Manilkara_hexandra1.schem",
+      "Manilkara_hexandra2.schem",
+      "Manilkara_hexandra3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis1.schem",
+      "Tectona_grandis2.schem",
+      "Tectona_grandis3.schem",
+      "Tectona_grandis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Ganges River area rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Bombax_ceiba",
+     "w1": [
+      "Bombax_ceiba1.schem",
+      "Bombax_ceiba2.schem",
+      "Bombax_ceiba4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dipterocarpus_turbinatus",
+     "w1": [
+      "Dipterocarpus_turbinatus3.schem",
+      "Dipterocarpus_turbinatus4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_benghalensis",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_benghalensis1.schem",
+      "Ficus_benghalensis2.schem",
+      "Ficus_benghalensis3.schem"
+     ]
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Lagerstroemia_parviflora",
+     "w1": [
+      "Lagerstroemia_parviflora1.schem",
+      "Lagerstroemia_parviflora2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Madhuca_longifolia",
+     "w1": [
+      "Madhuca_longifolia2.schem",
+      "Madhuca_longifolia4.schem"
+     ],
+     "w2": [
+      "Madhuca_longifolia1.schem"
+     ],
+     "w3": [
+      "Madhuca_longifolia3.schem"
+     ]
+    },
+    {
+     "name": "Musa_acuminata",
+     "w1": [
+      "Musa_acuminata1.schem",
+      "Musa_acuminata2.schem",
+      "Musa_acuminata3.schem",
+      "Musa_acuminata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_indicus",
+     "w1": [
+      "Pterocarpus_indicus1.schem",
+      "Pterocarpus_indicus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Shorea_robusta",
+     "w1": [
+      "Shorea_robusta1.schem",
+      "Shorea_robusta2.schem",
+      "Shorea_robusta3.schem",
+      "Shorea_robusta6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Terminalia_elliptica",
+     "w1": [
+      "Terminalia_elliptica1.schem",
+      "Terminalia_elliptica2.schem",
+      "Terminalia_elliptica3.schem",
+      "Terminalia_elliptica4.schem",
+      "Terminalia_elliptica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Xylia_xylocarpa",
+     "w1": [
+      "Xylia_xylocarpa1.schem",
+      "Xylia_xylocarpa2.schem",
+      "Xylia_xylocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Himalayan Broadleaf and Pine Forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Lagerstroemia_indica",
+     "w1": [
+      "Lagerstroemia_indica1.schem",
+      "Lagerstroemia_indica2.schem",
+      "Lagerstroemia_indica3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pinus_roxburghii",
+     "w1": [
+      "Pinus_roxburghii1.schem",
+      "Pinus_roxburghii2.schem",
+      "Pinus_roxburghii3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Himalayan Coniferous Forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Abies_spectabilis",
+     "w1": [
+      "Abies_spectabilis1.schem",
+      "Abies_spectabilis2.schem",
+      "Abies_spectabilis3.schem",
+      "Abies_spectabilis4.schem",
+      "Abies_spectabilis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Betula_utilis",
+     "w1": [
+      "Betula_utilis1.schem",
+      "Betula_utilis2.schem",
+      "Betula_utilis3.schem"
+     ],
+     "w2": [
+      "Betula_utilis4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Taxus_wallichiana",
+     "w1": [
+      "Taxus_wallichiana1.schem",
+      "Taxus_wallichiana2.schem",
+      "Taxus_wallichiana3.schem",
+      "Taxus_wallichiana4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Irrawaddy Valley Tropical Deciduous Forest",
+   "habitat": "lowland",
+   "density": 30,
+   "species": [
+    {
+     "name": "Lannea_coromandelica",
+     "w1": [
+      "Lannea_coromandelica1.schem",
+      "Lannea_coromandelica3.schem"
+     ],
+     "w2": [
+      "Lannea_coromandelica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Mangifera_indica",
+     "w1": [
+      "Mangifera_indica1.schem",
+      "Mangifera_indica2.schem",
+      "Mangifera_indica3.schem"
+     ],
+     "w2": [
+      "Mangifera_indica4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis1.schem",
+      "Tectona_grandis2.schem",
+      "Tectona_grandis3.schem",
+      "Tectona_grandis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Terminalia_elliptica",
+     "w1": [
+      "Terminalia_elliptica10.schem",
+      "Terminalia_elliptica6.schem",
+      "Terminalia_elliptica7.schem",
+      "Terminalia_elliptica8.schem",
+      "Terminalia_elliptica9.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Xylia_xylocarpa",
+     "w1": [
+      "Xylia_xylocarpa1.schem",
+      "Xylia_xylocarpa2.schem",
+      "Xylia_xylocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ziziphus_mauritiana",
+     "w1": [
+      "Ziziphus_mauritiana1.schem",
+      "Ziziphus_mauritiana2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Jiangnan Subtropical Laurel Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Castanopsis_hystrix",
+     "w1": [
+      "Castanopsis_hystrix1.schem",
+      "Castanopsis_hystrix2.schem",
+      "Castanopsis_hystrix3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cinnamomum_cassia",
+     "w1": [
+      "Cinnamomum_cassia1.schem",
+      "Cinnamomum_cassia2.schem",
+      "Cinnamomum_cassia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eriobotrya_japonica",
+     "w1": [
+      "Eriobotrya_japonica1.schem",
+      "Eriobotrya_japonica3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Eriobotrya_japonica2.schem"
+     ]
+    },
+    {
+     "name": "Magnolia_doltsopa",
+     "w1": [
+      "Magnolia_doltsopa1.schem",
+      "Magnolia_doltsopa2.schem",
+      "Magnolia_doltsopa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_hodgsonii",
+     "w1": [
+      "Magnolia_hodgsonii1.schem",
+      "Magnolia_hodgsonii2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sassafras_tzumu",
+     "w1": [
+      "Sassafras_tzumu1.schem",
+      "Sassafras_tzumu2.schem",
+      "Sassafras_tzumu3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Toona_sinensis",
+     "w1": [
+      "Toona_sinensis1.schem",
+      "Toona_sinensis2.schem",
+      "Toona_sinensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Malabar Coast Moist Tropical Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Artocarpus_heterophyllus",
+     "w1": [
+      "Artocarpus_heterophyllus1.schem"
+     ],
+     "w2": [
+      "Artocarpus_heterophyllus2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Bombax_ceiba",
+     "w1": [
+      "Bombax_ceiba1.schem",
+      "Bombax_ceiba2.schem",
+      "Bombax_ceiba4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Erythrina_fusca",
+     "w1": [
+      "Erythrina_fusca1.schem",
+      "Erythrina_fusca2.schem"
+     ],
+     "w2": [
+      "Erythrina_fusca3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ficus_elastica",
+     "w1": [],
+     "w2": [
+      "Ficus_elastica1.schem",
+      "Ficus_elastica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lagerstroemia_parviflora",
+     "w1": [
+      "Lagerstroemia_parviflora1.schem",
+      "Lagerstroemia_parviflora2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Madhuca_longifolia",
+     "w1": [
+      "Madhuca_longifolia2.schem",
+      "Madhuca_longifolia4.schem"
+     ],
+     "w2": [
+      "Madhuca_longifolia1.schem"
+     ],
+     "w3": [
+      "Madhuca_longifolia3.schem"
+     ]
+    },
+    {
+     "name": "Shorea_robusta",
+     "w1": [
+      "Shorea_robusta1.schem",
+      "Shorea_robusta2.schem",
+      "Shorea_robusta3.schem",
+      "Shorea_robusta6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis11.schem",
+      "Tectona_grandis5.schem",
+      "Tectona_grandis6.schem",
+      "Tectona_grandis7.schem",
+      "Tectona_grandis8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Tectona_grandis10.schem"
+     ]
+    },
+    {
+     "name": "Terminalia_elliptica",
+     "w1": [
+      "Terminalia_elliptica1.schem",
+      "Terminalia_elliptica2.schem",
+      "Terminalia_elliptica3.schem",
+      "Terminalia_elliptica4.schem",
+      "Terminalia_elliptica5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Malay Peninsula Rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Bombax_ceiba",
+     "w1": [
+      "Bombax_ceiba1.schem",
+      "Bombax_ceiba2.schem",
+      "Bombax_ceiba4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cyrtostachys_renda",
+     "w1": [
+      "Cyrtostachys_renda1.schem",
+      "Cyrtostachys_renda2.schem",
+      "Cyrtostachys_renda3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dipterocarpus_turbinatus",
+     "w1": [
+      "Dipterocarpus_turbinatus3.schem",
+      "Dipterocarpus_turbinatus4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Gnetum_gnemon",
+     "w1": [
+      "Gnetum_gnemon1.schem",
+      "Gnetum_gnemon2.schem",
+      "Gnetum_gnemon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Hopea_beccariana",
+     "w1": [
+      "Hopea_beccariana1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Musa_acuminata",
+     "w1": [
+      "Musa_acuminata1.schem",
+      "Musa_acuminata2.schem",
+      "Musa_acuminata3.schem",
+      "Musa_acuminata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_indicus",
+     "w1": [
+      "Pterocarpus_indicus1.schem",
+      "Pterocarpus_indicus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rafflesia_arnoldii",
+     "w1": [
+      "Rafflesia_arnoldii1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis11.schem",
+      "Tectona_grandis5.schem",
+      "Tectona_grandis6.schem",
+      "Tectona_grandis7.schem",
+      "Tectona_grandis8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Tectona_grandis10.schem"
+     ]
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - New Guinea Lowland Rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Aleurites_moluccanus",
+     "w1": [
+      "Aleurites_moluccanus1.schem",
+      "Aleurites_moluccanus2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Areca_catechu",
+     "w1": [
+      "Areca_catechu1.schem",
+      "Areca_catechu2.schem",
+      "Areca_catechu3.schem",
+      "Areca_catechu4.schem",
+      "Areca_catechu5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Durio_zibethinus",
+     "w1": [
+      "Durio_zibethinus1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Epicharis_parasitica",
+     "w1": [
+      "Epicharis_parasitica1.schem",
+      "Epicharis_parasitica2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_deglupta",
+     "w1": [
+      "Eucalyptus_deglupta1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Gnetum_gnemon",
+     "w1": [
+      "Gnetum_gnemon1.schem",
+      "Gnetum_gnemon2.schem",
+      "Gnetum_gnemon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_indicus",
+     "w1": [
+      "Pterocarpus_indicus1.schem",
+      "Pterocarpus_indicus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Santalum_album",
+     "w1": [
+      "Santalum_album1.schem",
+      "Santalum_album2.schem",
+      "Santalum_album3.schem",
+      "Santalum_album4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - North-Central Indian Tropical Dry Forest",
+   "habitat": "dry",
+   "density": 30,
+   "species": [
+    {
+     "name": "Borassus_flabellifer",
+     "w1": [
+      "Borassus_flabellifer1.schem",
+      "Borassus_flabellifer2.schem",
+      "Borassus_flabellifer3.schem",
+      "Borassus_flabellifer4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_melanoxylon",
+     "w1": [
+      "Diospyros_melanoxylon4.schem",
+      "Diospyros_melanoxylon5.schem",
+      "Diospyros_melanoxylon6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Drypetes_sepiaria",
+     "w1": [
+      "Drypetes_sepiaria2.schem"
+     ],
+     "w2": [
+      "Drypetes_sepiaria1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Hardwickia_binata",
+     "w1": [
+      "Hardwickia_binata1.schem",
+      "Hardwickia_binata3.schem",
+      "Hardwickia_binata4.schem"
+     ],
+     "w2": [
+      "Hardwickia_binata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lagerstroemia_parviflora",
+     "w1": [
+      "Lagerstroemia_parviflora1.schem",
+      "Lagerstroemia_parviflora2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Madhuca_longifolia",
+     "w1": [
+      "Madhuca_longifolia2.schem",
+      "Madhuca_longifolia4.schem"
+     ],
+     "w2": [
+      "Madhuca_longifolia1.schem"
+     ],
+     "w3": [
+      "Madhuca_longifolia3.schem"
+     ]
+    },
+    {
+     "name": "Mangifera_indica",
+     "w1": [
+      "Mangifera_indica1.schem",
+      "Mangifera_indica2.schem",
+      "Mangifera_indica3.schem"
+     ],
+     "w2": [
+      "Mangifera_indica4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis1.schem",
+      "Tectona_grandis2.schem",
+      "Tectona_grandis3.schem",
+      "Tectona_grandis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Terminalia_elliptica",
+     "w1": [
+      "Terminalia_elliptica10.schem",
+      "Terminalia_elliptica6.schem",
+      "Terminalia_elliptica7.schem",
+      "Terminalia_elliptica8.schem",
+      "Terminalia_elliptica9.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ziziphus_mauritiana",
+     "w1": [
+      "Ziziphus_mauritiana1.schem",
+      "Ziziphus_mauritiana2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Philippines and Maluku Islands Forest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Agathis_dammara",
+     "w1": [
+      "Agathis_dammara2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Aleurites_moluccanus",
+     "w1": [
+      "Aleurites_moluccanus1.schem",
+      "Aleurites_moluccanus2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Areca_catechu",
+     "w1": [
+      "Areca_catechu1.schem",
+      "Areca_catechu2.schem",
+      "Areca_catechu3.schem",
+      "Areca_catechu4.schem",
+      "Areca_catechu5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Durio_zibethinus",
+     "w1": [
+      "Durio_zibethinus1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Epicharis_parasitica",
+     "w1": [
+      "Epicharis_parasitica1.schem",
+      "Epicharis_parasitica2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eucalyptus_deglupta",
+     "w1": [
+      "Eucalyptus_deglupta1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Gnetum_gnemon",
+     "w1": [
+      "Gnetum_gnemon1.schem",
+      "Gnetum_gnemon2.schem",
+      "Gnetum_gnemon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Litchi_sinensis",
+     "w1": [
+      "Litchi_sinensis1.schem",
+      "Litchi_sinensis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_indicus",
+     "w1": [
+      "Pterocarpus_indicus1.schem",
+      "Pterocarpus_indicus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rafflesia_arnoldii",
+     "w1": [
+      "Rafflesia_arnoldii1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Santalum_album",
+     "w1": [
+      "Santalum_album1.schem",
+      "Santalum_album2.schem",
+      "Santalum_album3.schem",
+      "Santalum_album4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis11.schem",
+      "Tectona_grandis5.schem",
+      "Tectona_grandis6.schem",
+      "Tectona_grandis7.schem",
+      "Tectona_grandis8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Tectona_grandis10.schem"
+     ]
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Xylia_xylocarpa",
+     "w1": [
+      "Xylia_xylocarpa1.schem",
+      "Xylia_xylocarpa2.schem",
+      "Xylia_xylocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - South China Montane Laurel Forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Castanopsis_hystrix",
+     "w1": [
+      "Castanopsis_hystrix1.schem",
+      "Castanopsis_hystrix2.schem",
+      "Castanopsis_hystrix3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cinnamomum_cassia",
+     "w1": [
+      "Cinnamomum_cassia1.schem",
+      "Cinnamomum_cassia2.schem",
+      "Cinnamomum_cassia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_doltsopa",
+     "w1": [
+      "Magnolia_doltsopa1.schem",
+      "Magnolia_doltsopa2.schem",
+      "Magnolia_doltsopa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_hodgsonii",
+     "w1": [
+      "Magnolia_hodgsonii1.schem",
+      "Magnolia_hodgsonii2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_liliflora",
+     "w1": [
+      "Magnolia_liliflora1.schem",
+      "Magnolia_liliflora2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sassafras_tzumu",
+     "w1": [
+      "Sassafras_tzumu1.schem",
+      "Sassafras_tzumu2.schem",
+      "Sassafras_tzumu3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - South China and Vietnam Subtropical Rainforest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Bombax_ceiba",
+     "w1": [
+      "Bombax_ceiba1.schem",
+      "Bombax_ceiba2.schem",
+      "Bombax_ceiba4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Castanopsis_hystrix",
+     "w1": [
+      "Castanopsis_hystrix1.schem",
+      "Castanopsis_hystrix2.schem",
+      "Castanopsis_hystrix3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cinnamomum_cassia",
+     "w1": [
+      "Cinnamomum_cassia1.schem",
+      "Cinnamomum_cassia2.schem",
+      "Cinnamomum_cassia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dalbergia_tonkinensis",
+     "w1": [
+      "Dalbergia_tonkinensis1.schem",
+      "Dalbergia_tonkinensis2.schem",
+      "Dalbergia_tonkinensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Eriobotrya_japonica",
+     "w1": [
+      "Eriobotrya_japonica1.schem",
+      "Eriobotrya_japonica3.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Eriobotrya_japonica2.schem"
+     ]
+    },
+    {
+     "name": "Ficus_elastica",
+     "w1": [],
+     "w2": [
+      "Ficus_elastica1.schem",
+      "Ficus_elastica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lannea_coromandelica",
+     "w1": [
+      "Lannea_coromandelica1.schem",
+      "Lannea_coromandelica3.schem"
+     ],
+     "w2": [
+      "Lannea_coromandelica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Litchi_sinensis",
+     "w1": [
+      "Litchi_sinensis1.schem",
+      "Litchi_sinensis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_indicus",
+     "w1": [
+      "Pterocarpus_indicus1.schem",
+      "Pterocarpus_indicus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sassafras_tzumu",
+     "w1": [
+      "Sassafras_tzumu1.schem",
+      "Sassafras_tzumu2.schem",
+      "Sassafras_tzumu3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Toona_sinensis",
+     "w1": [
+      "Toona_sinensis1.schem",
+      "Toona_sinensis2.schem",
+      "Toona_sinensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Xylia_xylocarpa",
+     "w1": [
+      "Xylia_xylocarpa1.schem",
+      "Xylia_xylocarpa2.schem",
+      "Xylia_xylocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Southeast Asia Rainforest",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Bombax_ceiba",
+     "w1": [
+      "Bombax_ceiba1.schem",
+      "Bombax_ceiba2.schem",
+      "Bombax_ceiba4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cinnamomum_cassia",
+     "w1": [
+      "Cinnamomum_cassia1.schem",
+      "Cinnamomum_cassia2.schem",
+      "Cinnamomum_cassia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dalbergia_cochinchinensis",
+     "w1": [
+      "Dalbergia_cochinchinensis1.schem",
+      "Dalbergia_cochinchinensis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dipterocarpus_turbinatus",
+     "w1": [
+      "Dipterocarpus_turbinatus3.schem",
+      "Dipterocarpus_turbinatus4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Gnetum_gnemon",
+     "w1": [
+      "Gnetum_gnemon1.schem",
+      "Gnetum_gnemon2.schem",
+      "Gnetum_gnemon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Musa_acuminata",
+     "w1": [
+      "Musa_acuminata1.schem",
+      "Musa_acuminata2.schem",
+      "Musa_acuminata3.schem",
+      "Musa_acuminata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Pterocarpus_indicus",
+     "w1": [
+      "Pterocarpus_indicus1.schem",
+      "Pterocarpus_indicus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis11.schem",
+      "Tectona_grandis5.schem",
+      "Tectona_grandis6.schem",
+      "Tectona_grandis7.schem",
+      "Tectona_grandis8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Tectona_grandis10.schem"
+     ]
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Southeast Asia Tropical Dry Forest",
+   "habitat": "dry",
+   "density": 20,
+   "species": [
+    {
+     "name": "Borassus_flabellifer",
+     "w1": [
+      "Borassus_flabellifer1.schem",
+      "Borassus_flabellifer2.schem",
+      "Borassus_flabellifer3.schem",
+      "Borassus_flabellifer4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Dalbergia_cochinchinensis",
+     "w1": [
+      "Dalbergia_cochinchinensis1.schem",
+      "Dalbergia_cochinchinensis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Lannea_coromandelica",
+     "w1": [
+      "Lannea_coromandelica1.schem",
+      "Lannea_coromandelica3.schem"
+     ],
+     "w2": [
+      "Lannea_coromandelica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Madhuca_longifolia",
+     "w1": [
+      "Madhuca_longifolia2.schem",
+      "Madhuca_longifolia4.schem"
+     ],
+     "w2": [
+      "Madhuca_longifolia1.schem"
+     ],
+     "w3": [
+      "Madhuca_longifolia3.schem"
+     ]
+    },
+    {
+     "name": "Manilkara_hexandra",
+     "w1": [
+      "Manilkara_hexandra1.schem",
+      "Manilkara_hexandra2.schem",
+      "Manilkara_hexandra3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis1.schem",
+      "Tectona_grandis2.schem",
+      "Tectona_grandis3.schem",
+      "Tectona_grandis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Terminalia_elliptica",
+     "w1": [
+      "Terminalia_elliptica10.schem",
+      "Terminalia_elliptica6.schem",
+      "Terminalia_elliptica7.schem",
+      "Terminalia_elliptica8.schem",
+      "Terminalia_elliptica9.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Xylia_xylocarpa",
+     "w1": [
+      "Xylia_xylocarpa1.schem",
+      "Xylia_xylocarpa2.schem",
+      "Xylia_xylocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Southeast Asian Mangroves",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Avicennia_marina",
+     "w1": [
+      "Avicennia_marina2.schem",
+      "Avicennia_marina3.schem",
+      "Avicennia_marina4.schem"
+     ],
+     "w2": [
+      "Avicennia_marina1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Bruguiera_parviflora",
+     "w1": [
+      "Bruguiera_parviflora2.schem",
+      "Bruguiera_parviflora4.schem",
+      "Bruguiera_parviflora5.schem"
+     ],
+     "w2": [
+      "Bruguiera_parviflora1.schem",
+      "Bruguiera_parviflora3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Nypa_fruticans",
+     "w1": [
+      "Nypa_fruticans1.schem",
+      "Nypa_fruticans2.schem",
+      "Nypa_fruticans3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Phoenix_paludosa",
+     "w1": [
+      "Phoenix_paludosa1.schem",
+      "Phoenix_paludosa2.schem",
+      "Phoenix_paludosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rhizopora_apiculata",
+     "w1": [
+      "Rhizopora_apiculata1.schem",
+      "Rhizopora_apiculata2.schem",
+      "Rhizopora_apiculata3.schem",
+      "Rhizopora_apiculata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Southeast Asian Riparian & Wetland Flora",
+   "habitat": "wet",
+   "density": 20,
+   "species": [
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Areca_catechu",
+     "w1": [
+      "Areca_catechu1.schem",
+      "Areca_catechu2.schem",
+      "Areca_catechu3.schem",
+      "Areca_catechu4.schem",
+      "Areca_catechu5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Borassus_flabellifer",
+     "w1": [
+      "Borassus_flabellifer1.schem",
+      "Borassus_flabellifer2.schem",
+      "Borassus_flabellifer3.schem",
+      "Borassus_flabellifer4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Erythrina_fusca",
+     "w1": [
+      "Erythrina_fusca1.schem",
+      "Erythrina_fusca2.schem"
+     ],
+     "w2": [
+      "Erythrina_fusca3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ficus_benghalensis",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_benghalensis1.schem",
+      "Ficus_benghalensis2.schem",
+      "Ficus_benghalensis3.schem"
+     ]
+    },
+    {
+     "name": "Ficus_elastica",
+     "w1": [],
+     "w2": [
+      "Ficus_elastica1.schem",
+      "Ficus_elastica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Phoenix_paludosa",
+     "w1": [
+      "Phoenix_paludosa1.schem",
+      "Phoenix_paludosa2.schem",
+      "Phoenix_paludosa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Southeast Asian Subtropical Mountain Forest",
+   "habitat": "conifer",
+   "density": 20,
+   "species": [
+    {
+     "name": "Castanopsis_hystrix",
+     "w1": [
+      "Castanopsis_hystrix1.schem",
+      "Castanopsis_hystrix2.schem",
+      "Castanopsis_hystrix3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cinnamomum_cassia",
+     "w1": [
+      "Cinnamomum_cassia1.schem",
+      "Cinnamomum_cassia2.schem",
+      "Cinnamomum_cassia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_doltsopa",
+     "w1": [
+      "Magnolia_doltsopa1.schem",
+      "Magnolia_doltsopa2.schem",
+      "Magnolia_doltsopa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_hodgsonii",
+     "w1": [
+      "Magnolia_hodgsonii1.schem",
+      "Magnolia_hodgsonii2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sassafras_tzumu",
+     "w1": [
+      "Sassafras_tzumu1.schem",
+      "Sassafras_tzumu2.schem",
+      "Sassafras_tzumu3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Toona_sinensis",
+     "w1": [
+      "Toona_sinensis1.schem",
+      "Toona_sinensis2.schem",
+      "Toona_sinensis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Sri Lanka-Tamil Nadu Tropical Dry Forest",
+   "habitat": "dry",
+   "density": 30,
+   "species": [
+    {
+     "name": "Albizia_amara",
+     "w1": [
+      "Albizia_amara3.schem"
+     ],
+     "w2": [
+      "Albizia_amara1.schem",
+      "Albizia_amara2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Artocarpus_heterophyllus",
+     "w1": [
+      "Artocarpus_heterophyllus1.schem"
+     ],
+     "w2": [
+      "Artocarpus_heterophyllus2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Chloroxylon_swietenia",
+     "w1": [
+      "Chloroxylon_swietenia1.schem",
+      "Chloroxylon_swietenia2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Cycas_circinalis",
+     "w1": [
+      "Cycas_circinalis1.schem",
+      "Cycas_circinalis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_melanoxylon",
+     "w1": [
+      "Diospyros_melanoxylon4.schem",
+      "Diospyros_melanoxylon5.schem",
+      "Diospyros_melanoxylon6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Drypetes_sepiaria",
+     "w1": [
+      "Drypetes_sepiaria2.schem"
+     ],
+     "w2": [
+      "Drypetes_sepiaria1.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Ficus_elastica",
+     "w1": [],
+     "w2": [
+      "Ficus_elastica1.schem",
+      "Ficus_elastica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lannea_coromandelica",
+     "w1": [
+      "Lannea_coromandelica1.schem",
+      "Lannea_coromandelica3.schem"
+     ],
+     "w2": [
+      "Lannea_coromandelica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Manilkara_hexandra",
+     "w1": [
+      "Manilkara_hexandra1.schem",
+      "Manilkara_hexandra2.schem",
+      "Manilkara_hexandra3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Senegalia_catechu",
+     "w1": [
+      "Senegalia_catechu1.schem",
+      "Senegalia_catechu2.schem"
+     ],
+     "w2": [
+      "Senegalia_catechu3.schem",
+      "Senegalia_catechu4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis1.schem",
+      "Tectona_grandis2.schem",
+      "Tectona_grandis3.schem",
+      "Tectona_grandis4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Sumatra-Java-Lesser Sunda Islands Forests",
+   "habitat": "lowland",
+   "density": 15,
+   "species": [
+    {
+     "name": "Aleurites_moluccanus",
+     "w1": [
+      "Aleurites_moluccanus1.schem",
+      "Aleurites_moluccanus2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Alstonia_scholaris",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Alstonia_scholaris1.schem",
+      "Alstonia_scholaris2.schem"
+     ]
+    },
+    {
+     "name": "Areca_catechu",
+     "w1": [
+      "Areca_catechu1.schem",
+      "Areca_catechu2.schem",
+      "Areca_catechu3.schem",
+      "Areca_catechu4.schem",
+      "Areca_catechu5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Artocarpus_heterophyllus",
+     "w1": [
+      "Artocarpus_heterophyllus1.schem"
+     ],
+     "w2": [
+      "Artocarpus_heterophyllus2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Cyrtostachys_renda",
+     "w1": [
+      "Cyrtostachys_renda1.schem",
+      "Cyrtostachys_renda2.schem",
+      "Cyrtostachys_renda3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Diospyros_melanoxylon",
+     "w1": [
+      "Diospyros_melanoxylon1.schem",
+      "Diospyros_melanoxylon2.schem",
+      "Diospyros_melanoxylon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Durio_zibethinus",
+     "w1": [
+      "Durio_zibethinus1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Epicharis_parasitica",
+     "w1": [
+      "Epicharis_parasitica1.schem",
+      "Epicharis_parasitica2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_virens",
+     "w1": [],
+     "w2": [],
+     "w3": [
+      "Ficus_virens1.schem",
+      "Ficus_virens2.schem"
+     ]
+    },
+    {
+     "name": "Gnetum_gnemon",
+     "w1": [
+      "Gnetum_gnemon1.schem",
+      "Gnetum_gnemon2.schem",
+      "Gnetum_gnemon3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Hopea_beccariana",
+     "w1": [
+      "Hopea_beccariana1.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Intsia_biguja",
+     "w1": [
+      "Intsia_biguja1.schem",
+      "Intsia_biguja2.schem",
+      "Intsia_biguja3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Musa_acuminata",
+     "w1": [
+      "Musa_acuminata1.schem",
+      "Musa_acuminata2.schem",
+      "Musa_acuminata3.schem",
+      "Musa_acuminata4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Santalum_album",
+     "w1": [
+      "Santalum_album1.schem",
+      "Santalum_album2.schem",
+      "Santalum_album3.schem",
+      "Santalum_album4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tectona_grandis",
+     "w1": [
+      "Tectona_grandis11.schem",
+      "Tectona_grandis5.schem",
+      "Tectona_grandis6.schem",
+      "Tectona_grandis7.schem",
+      "Tectona_grandis8.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Tectona_grandis10.schem"
+     ]
+    },
+    {
+     "name": "Toona_ciliata",
+     "w1": [],
+     "w2": [
+      "Toona_ciliata1.schem",
+      "Toona_ciliata2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vitex_altissima",
+     "w1": [
+      "Vitex_altissima1.schem",
+      "Vitex_altissima2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Xylia_xylocarpa",
+     "w1": [
+      "Xylia_xylocarpa1.schem",
+      "Xylia_xylocarpa2.schem",
+      "Xylia_xylocarpa3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Thar Desert Scrub",
+   "habitat": "dry",
+   "density": 30,
+   "species": [
+    {
+     "name": "Capparis_decidua",
+     "w1": [
+      "Capparis_decidua1.schem",
+      "Capparis_decidua2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Prosopis_cineraria",
+     "w1": [
+      "Prosopis_cineraria1.schem",
+      "Prosopis_cineraria2.schem",
+      "Prosopis_cineraria3.schem",
+      "Prosopis_cineraria4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Tamarix_aphylla",
+     "w1": [
+      "Tamarix_aphylla1.schem",
+      "Tamarix_aphylla2.schem",
+      "Tamarix_aphylla4.schem",
+      "Tamarix_aphylla5.schem"
+     ],
+     "w2": [
+      "Tamarix_aphylla3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Vachellia_flava",
+     "w1": [
+      "Vachellia_flava1.schem",
+      "Vachellia_flava3.schem"
+     ],
+     "w2": [
+      "Vachellia_flava2.schem"
+     ],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "IND - Yunnanese Lowland Subtropical Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Castanopsis_hystrix",
+     "w1": [
+      "Castanopsis_hystrix1.schem",
+      "Castanopsis_hystrix2.schem",
+      "Castanopsis_hystrix3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Ficus_elastica",
+     "w1": [],
+     "w2": [
+      "Ficus_elastica1.schem",
+      "Ficus_elastica2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Lagerstroemia_indica",
+     "w1": [
+      "Lagerstroemia_indica1.schem",
+      "Lagerstroemia_indica2.schem",
+      "Lagerstroemia_indica3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Litchi_sinensis",
+     "w1": [
+      "Litchi_sinensis1.schem",
+      "Litchi_sinensis2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Livistona_saribus",
+     "w1": [
+      "Livistona_saribus1.schem",
+      "Livistona_saribus2.schem",
+      "Livistona_saribus3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_hodgsonii",
+     "w1": [
+      "Magnolia_hodgsonii1.schem",
+      "Magnolia_hodgsonii2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_liliflora",
+     "w1": [
+      "Magnolia_liliflora1.schem",
+      "Magnolia_liliflora2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Melia_azaderach",
+     "w1": [
+      "Melia_azaderach1.schem",
+      "Melia_azaderach2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sassafras_tzumu",
+     "w1": [
+      "Sassafras_tzumu1.schem",
+      "Sassafras_tzumu2.schem",
+      "Sassafras_tzumu3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "bamboo_cluster",
+     "w1": [
+      "bamboo_cluster1.schem",
+      "bamboo_cluster2.schem",
+      "bamboo_cluster3.schem",
+      "bamboo_cluster4.schem",
+      "bamboo_cluster5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}

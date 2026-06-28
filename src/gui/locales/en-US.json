@@ -48,6 +48,7 @@
   "interior": "Interior Generation",
   "roof": "Roof Generation",
   "fillground": "Fill Ground",
+  "legacy_trees": "Legacy Trees",
   "land_cover": "Land Cover",
   "three_dmr": "Use 3D Models",
   "disable_height_limit": "Extend build height",

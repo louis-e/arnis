@@ -41,6 +41,7 @@
   "interior": "内装生成",
   "roof": "屋根生成",
   "fillground": "地面を埋める",
+  "legacy_trees": "従来の木",
   "land_cover": "土地被覆",
   "three_dmr": "3Dモデルを使用",
   "disable_height_limit": "建築高さを拡張",

@@ -125,6 +125,8 @@ pub struct WorldEditor<'a> {
     xzbbox: &'a XZBBox,
     llbbox: LLBBox,
     ground: Option<Arc<Ground>>,
+    /// Loaded region tree pack (None = procedural); shared via Arc across main + tile editors.
+    tree_pack: Option<Arc<crate::trees::region::RegionLibrary>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -177,6 +179,7 @@ impl<'a> WorldEditor<'a> {
             xzbbox,
             llbbox,
             ground: None,
+            tree_pack: None,
             format: WorldFormat::JavaAnvil,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -212,6 +215,7 @@ impl<'a> WorldEditor<'a> {
             xzbbox,
             llbbox,
             ground: None,
+            tree_pack: None,
             format,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -247,6 +251,7 @@ impl<'a> WorldEditor<'a> {
             xzbbox,
             llbbox,
             ground: None,
+            tree_pack: None,
             format: WorldFormat::LuantiWorld,
             road_surface_overrides: FnvHashMap::default(),
             flushed_regions: FnvHashSet::default(),
@@ -284,6 +289,26 @@ impl<'a> WorldEditor<'a> {
     /// Sets the ground reference for elevation-based block placement
     pub fn set_ground(&mut self, ground: Arc<Ground>) {
         self.ground = Some(ground);
+    }
+
+    /// Sets the loaded region tree pack (shared across the main and tile editors).
+    pub fn set_tree_pack(&mut self, pack: Arc<crate::trees::region::RegionLibrary>) {
+        self.tree_pack = Some(pack);
+    }
+
+    /// The loaded region tree pack, if any (a cheap Arc clone so the editor borrow is freed).
+    pub fn tree_pack(&self) -> Option<Arc<crate::trees::region::RegionLibrary>> {
+        self.tree_pack.clone()
+    }
+
+    /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
+    pub fn is_lc_water(&self, x: i32, z: i32) -> bool {
+        self.ground.as_ref().is_some_and(|g| {
+            g.cover_class(crate::coordinate_system::cartesian::XZPoint::new(
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
+            )) == crate::land_cover::LC_WATER
+        })
     }
 
     /// Enables baking per-chunk lighting into Java chunks.

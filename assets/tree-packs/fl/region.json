@@ -1,0 +1,381 @@
+{
+ "realm": "fl",
+ "default_community": "FL - Broadleaf Forest",
+ "communities": [
+  {
+   "name": "FL - Broadleaf Forest",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Acer_rubrum",
+     "w1": [
+      "Acer_rubrum1.schem",
+      "Acer_rubrum2.schem",
+      "Acer_rubrum3.schem",
+      "Acer_rubrum4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Annona_glabra",
+     "w1": [
+      "Annona_glabra1.schem"
+     ],
+     "w2": [
+      "Annona_glabra2.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Asimina_triloba",
+     "w1": [
+      "Asimina_triloba1.schem",
+      "Asimina_triloba2.schem",
+      "Asimina_triloba3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Bursera_simaruba",
+     "w1": [],
+     "w2": [
+      "Bursera_simaruba1.schem",
+      "Bursera_simaruba2.schem"
+     ],
+     "w3": [
+      "Bursera_simaruba3.schem"
+     ]
+    },
+    {
+     "name": "Chrysobalanus_icaco",
+     "w1": [
+      "Chrysobalanus_icaco1.schem",
+      "Chrysobalanus_icaco2.schem",
+      "Chrysobalanus_icaco3.schem",
+      "Chrysobalanus_icaco4.schem",
+      "Chrysobalanus_icaco5.schem",
+      "Chrysobalanus_icaco6.schem",
+      "Chrysobalanus_icaco7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Coccoloba_uvifera",
+     "w1": [
+      "Coccoloba_uvifera12.schem",
+      "Coccoloba_uvifera2.schem",
+      "Coccoloba_uvifera4.schem",
+      "Coccoloba_uvifera5.schem"
+     ],
+     "w2": [
+      "Coccoloba_uvifera1.schem",
+      "Coccoloba_uvifera10.schem",
+      "Coccoloba_uvifera11.schem",
+      "Coccoloba_uvifera3.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Cornus_florida",
+     "w1": [
+      "Cornus_florida2.schem",
+      "Cornus_florida4.schem"
+     ],
+     "w2": [
+      "Cornus_florida5.schem"
+     ],
+     "w3": [
+      "Cornus_florida1.schem",
+      "Cornus_florida3.schem"
+     ]
+    },
+    {
+     "name": "Ficus_aurea",
+     "w1": [],
+     "w2": [
+      "Ficus_aurea3.schem"
+     ],
+     "w3": [
+      "Ficus_aurea1.schem",
+      "Ficus_aurea2.schem"
+     ]
+    },
+    {
+     "name": "Liquidambar_styraciflua",
+     "w1": [
+      "Liquidambar_styraciflua1.schem",
+      "Liquidambar_styraciflua2.schem",
+      "Liquidambar_styraciflua3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Magnolia_grandiflora",
+     "w1": [
+      "Magnolia_grandiflora1.schem",
+      "Magnolia_grandiflora3.schem",
+      "Magnolia_grandiflora4.schem",
+      "Magnolia_grandiflora5.schem",
+      "Magnolia_grandiflora6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Metopium_toxiferum",
+     "w1": [
+      "Metopium_toxiferum1.schem",
+      "Metopium_toxiferum2.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Metopium_toxiferum3.schem"
+     ]
+    },
+    {
+     "name": "Phoenix_canariensis",
+     "w1": [
+      "Phoenix_canariensis1.schem",
+      "Phoenix_canariensis2.schem",
+      "Phoenix_canariensis3.schem",
+      "Phoenix_canariensis4.schem",
+      "Phoenix_canariensis5.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Platanus_occidentalis",
+     "w1": [
+      "Platanus_occidentalis1.schem",
+      "Platanus_occidentalis2.schem",
+      "Platanus_occidentalis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_laevis",
+     "w1": [
+      "Quercus_laevis1.schem",
+      "Quercus_laevis2.schem",
+      "Quercus_laevis3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_shumardii",
+     "w1": [
+      "Quercus_shumardii1.schem",
+      "Quercus_shumardii2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_stellata",
+     "w1": [
+      "Quercus_stellata1.schem",
+      "Quercus_stellata2.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Quercus_virginiana",
+     "w1": [
+      "Quercus_virginiana1.schem",
+      "Quercus_virginiana3.schem",
+      "Quercus_virginiana5.schem",
+      "Quercus_virginiana6.schem"
+     ],
+     "w2": [
+      "Quercus_virginiana4.schem"
+     ],
+     "w3": [
+      "Quercus_virginiana2.schem"
+     ]
+    },
+    {
+     "name": "Swietenia_mahagoni",
+     "w1": [
+      "Swietenia_mahagoni2.schem",
+      "Swietenia_mahagoni3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "FL - Wetland & Coastal",
+   "habitat": "wet",
+   "density": 25,
+   "species": [
+    {
+     "name": "Avicennia_germinans",
+     "w1": [
+      "Avicennia_germinans1.schem",
+      "Avicennia_germinans3.schem",
+      "Avicennia_germinans4.schem",
+      "Avicennia_germinans5.schem",
+      "Avicennia_germinans6.schem",
+      "Avicennia_germinans7.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Avicennia_germinans2.schem"
+     ]
+    },
+    {
+     "name": "Cocos_nucifera",
+     "w1": [
+      "Cocos_nucifera1.schem",
+      "Cocos_nucifera2.schem",
+      "Cocos_nucifera3.schem",
+      "Cocos_nucifera4.schem",
+      "Cocos_nucifera5.schem",
+      "Cocos_nucifera6.schem",
+      "Cocos_nucifera7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Rhizopora_mangle",
+     "w1": [
+      "Rhizopora_mangle1.schem",
+      "Rhizopora_mangle10.schem",
+      "Rhizopora_mangle11.schem",
+      "Rhizopora_mangle12.schem",
+      "Rhizopora_mangle13.schem",
+      "Rhizopora_mangle14.schem",
+      "Rhizopora_mangle15.schem",
+      "Rhizopora_mangle2.schem",
+      "Rhizopora_mangle3.schem",
+      "Rhizopora_mangle4.schem",
+      "Rhizopora_mangle5.schem",
+      "Rhizopora_mangle6.schem",
+      "Rhizopora_mangle7.schem",
+      "Rhizopora_mangle8.schem",
+      "Rhizopora_mangle9.schem"
+     ],
+     "w2": [],
+     "w3": [
+      "Rhizopora_mangle16.schem"
+     ]
+    },
+    {
+     "name": "Roystonea_regia",
+     "w1": [
+      "Roystonea_regia1.schem",
+      "Roystonea_regia2.schem",
+      "Roystonea_regia3.schem",
+      "Roystonea_regia4.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Sabal_palmetto",
+     "w1": [
+      "Sabal_palmetto1.schem",
+      "Sabal_palmetto2.schem",
+      "Sabal_palmetto3.schem",
+      "Sabal_palmetto4.schem",
+      "Sabal_palmetto7.schem"
+     ],
+     "w2": [
+      "Sabal_palmetto5.schem",
+      "Sabal_palmetto6.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Serenoa_repens",
+     "w1": [
+      "Serenoa_repens1.schem",
+      "Serenoa_repens2.schem",
+      "Serenoa_repens3.schem",
+      "Serenoa_repens4.schem",
+      "Serenoa_repens5.schem",
+      "Serenoa_repens6.schem",
+      "Serenoa_repens7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Taxodium_ascendens",
+     "w1": [
+      "Taxodium_ascendens1.schem",
+      "Taxodium_ascendens2.schem",
+      "Taxodium_ascendens3.schem",
+      "Taxodium_ascendens4.schem",
+      "Taxodium_ascendens5.schem",
+      "Taxodium_ascendens6.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Taxodium_distichum",
+     "w1": [
+      "Taxodium_distichum3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "FL - Pine & Conifer",
+   "habitat": "conifer",
+   "density": 30,
+   "species": [
+    {
+     "name": "Pinus_clausa",
+     "w1": [
+      "Pinus_clausa1.schem",
+      "Pinus_clausa2.schem",
+      "Pinus_clausa3.schem"
+     ],
+     "w2": [
+      "Pinus_clausa4.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Pinus_elliotii",
+     "w1": [
+      "Pinus_elliotii1.schem",
+      "Pinus_elliotii2.schem",
+      "Pinus_elliotii3.schem",
+      "Pinus_elliotii4.schem",
+      "Pinus_elliotii5.schem",
+      "Pinus_elliotii6.schem",
+      "Pinus_elliotii7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "Torreya_taxifolia",
+     "w1": [
+      "Torreya_taxifolia1.schem",
+      "Torreya_taxifolia2.schem",
+      "Torreya_taxifolia3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}

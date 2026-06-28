@@ -40,6 +40,8 @@ pub struct Ground {
     rotation_mask: Option<RotationMask>,
     /// Minecraft Y at/above which terrain is snow-capped; `i32::MAX` disables it.
     snow_threshold_y: i32,
+    /// Climate at the bbox center, driving arid/polar surface palettes and biomes.
+    climate: crate::climate::Climate,
 }
 
 /// Climatic snow line in metres by absolute latitude, piecewise-linear through
@@ -80,6 +82,7 @@ impl Ground {
             land_cover: None,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
+            climate: crate::climate::Climate::Temperate,
         }
     }
 
@@ -143,6 +146,7 @@ impl Ground {
                     land_cover,
                     rotation_mask: None,
                     snow_threshold_y,
+                    climate: crate::climate::Climate::classify(bbox),
                 }
             }
             Err(e) => {
@@ -165,6 +169,7 @@ impl Ground {
                     land_cover: None,
                     rotation_mask: None,
                     snow_threshold_y: i32::MAX,
+                    climate: crate::climate::Climate::classify(bbox),
                 }
             }
         }
@@ -175,6 +180,12 @@ impl Ground {
     #[inline(always)]
     pub fn snow_threshold_y(&self) -> i32 {
         self.snow_threshold_y
+    }
+
+    /// Climate at the bbox center (Temperate keeps the existing surface/biome behaviour).
+    #[inline(always)]
+    pub fn climate(&self) -> crate::climate::Climate {
+        self.climate
     }
 
     /// Returns whether land cover data is available
@@ -191,7 +202,7 @@ impl Ground {
         let Some(data) = self.elevation_data.as_ref() else {
             return;
         };
-        crate::land_cover_osm_water_override::apply_osm_water_override(
+        crate::land_cover::osm_water_override::apply_osm_water_override(
             lc,
             &data.heights,
             data.world_width,
@@ -214,7 +225,7 @@ impl Ground {
         let Some(data) = self.elevation_data.as_ref() else {
             return;
         };
-        crate::land_cover_bridge_repair::apply_bridge_land_cover_repair(
+        crate::land_cover::bridge_repair::apply_bridge_land_cover_repair(
             lc,
             data.world_width,
             data.world_height,
@@ -692,6 +703,7 @@ mod tests {
             land_cover: None,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
+            climate: crate::climate::Climate::Temperate,
         }
     }
 

@@ -668,64 +668,18 @@ button:hover {
   cursor: not-allowed;
 }
 
-#terrain-toggle {
+/* Shared accent for all checkboxes and sliders so new toggles need no per-id CSS. */
+input[type="checkbox"],
+input[type="range"] {
   accent-color: #fecc44;
 }
 
-.terrain-toggle-container, .scale-slider-container {
+.terrain-toggle-container,
+.fillground-toggle-container,
+.interior-toggle-container,
+.roof-toggle-container,
+.scale-slider-container {
   margin: 15px 0;
-}
-
-#fillground-toggle {
-  accent-color: #fecc44;
-}
-
-.fillground-toggle-container, .scale-slider-container {
-  margin: 15px 0;
-}
-
-#interior-toggle {
-  accent-color: #fecc44;
-}
-
-.interior-toggle-container, .scale-slider-container {
-  margin: 15px 0;
-}
-
-#roof-toggle {
-  accent-color: #fecc44;
-}
-
-.roof-toggle-container, .scale-slider-container {
-  margin: 15px 0;
-}
-
-#land-cover-toggle {
-  accent-color: #fecc44;
-}
-
-#use-3d-toggle {
-  accent-color: #fecc44;
-}
-
-#disable-height-limit-toggle {
-  accent-color: #fecc44;
-}
-
-#aws-only-elevation-toggle {
-  accent-color: #fecc44;
-}
-
-#bake-lighting-toggle {
-  accent-color: #fecc44;
-}
-
-#enable-luanti-toggle {
-  accent-color: #fecc44;
-}
-
-#telemetry-toggle {
-  accent-color: #fecc44;
 }
 
 .scale-slider-container label {

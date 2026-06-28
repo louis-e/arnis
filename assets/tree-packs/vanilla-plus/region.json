@@ -1,0 +1,349 @@
+{
+ "realm": "vnplus",
+ "default_community": "VN+ Oaks",
+ "communities": [
+  {
+   "name": "VN+ Acacia",
+   "habitat": "lowland",
+   "density": 150,
+   "species": [
+    {
+     "name": "Vachellia_generica",
+     "w1": [
+      "acacia/Vachellia_generica1.schem",
+      "acacia/Vachellia_generica4.schem",
+      "acacia/Vachellia_generica6.schem"
+     ],
+     "w2": [
+      "acacia/Vachellia_generica2.schem",
+      "acacia/Vachellia_generica5.schem",
+      "acacia/Vachellia_generica7.schem",
+      "acacia/Vachellia_generica8.schem"
+     ],
+     "w3": [
+      "acacia/Vachellia_generica3.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "VN+ Azalea",
+   "habitat": "lowland",
+   "density": 20,
+   "species": [
+    {
+     "name": "Rhododendon_spelaea",
+     "w1": [
+      "azalea/Rhododendon_spelaea1.schem",
+      "azalea/Rhododendon_spelaea3.schem",
+      "azalea/Rhododendon_spelaea4.schem",
+      "azalea/Rhododendon_spelaea6.schem"
+     ],
+     "w2": [
+      "azalea/Rhododendon_spelaea5.schem"
+     ],
+     "w3": [
+      "azalea/Rhododendon_spelaea2.schem",
+      "azalea/Rhododendon_spelaea7.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "VN+ Birches",
+   "habitat": "lowland",
+   "density": 35,
+   "species": [
+    {
+     "name": "Betula_generica",
+     "w1": [
+      "birch/Betula_generica1.schem",
+      "birch/Betula_generica2.schem",
+      "birch/Betula_generica3.schem",
+      "birch/Betula_generica4.schem",
+      "birch/Betula_generica5.schem",
+      "birch/Betula_generica6.schem",
+      "birch/Betula_generica7.schem",
+      "birch/Betula_generica8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Dark Oaks",
+   "habitat": "lowland",
+   "density": 25,
+   "species": [
+    {
+     "name": "Quercus_obscura",
+     "w1": [
+      "dark oak/Quercus_obscura11.schem"
+     ],
+     "w2": [
+      "dark oak/Quercus_obscura12.schem"
+     ],
+     "w3": [
+      "dark oak/Quercus_obscura1.schem",
+      "dark oak/Quercus_obscura10.schem",
+      "dark oak/Quercus_obscura2.schem",
+      "dark oak/Quercus_obscura3.schem",
+      "dark oak/Quercus_obscura4.schem",
+      "dark oak/Quercus_obscura5.schem",
+      "dark oak/Quercus_obscura6.schem",
+      "dark oak/Quercus_obscura7.schem",
+      "dark oak/Quercus_obscura8.schem",
+      "dark oak/Quercus_obscura9.schem"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "VN+ Jungle Sparse",
+   "habitat": "tropical",
+   "density": 20,
+   "species": [
+    {
+     "name": "Cocos_caduca",
+     "w1": [
+      "jungle/Cocos_caduca1.schem",
+      "jungle/Cocos_caduca2.schem",
+      "jungle/Cocos_caduca4.schem"
+     ],
+     "w2": [
+      "jungle/Cocos_caduca3.schem",
+      "jungle/Cocos_caduca5.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Swietenia_generica",
+     "w1": [
+      "jungle/Swietenia_generica1.schem",
+      "jungle/Swietenia_generica2.schem",
+      "jungle/Swietenia_generica3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "junglebush",
+     "w1": [
+      "jungle/junglebush1.schem",
+      "jungle/junglebush2.schem",
+      "jungle/junglebush3.schem",
+      "jungle/junglebush4.schem",
+      "jungle/junglebush5.schem",
+      "jungle/junglebush6.schem",
+      "jungle/junglebush7.schem",
+      "jungle/junglebush8.schem",
+      "jungle/junglebush9.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Jungle Tall",
+   "habitat": "tropical",
+   "density": 20,
+   "species": [
+    {
+     "name": "Cocos_caduca",
+     "w1": [
+      "jungle/Cocos_caduca1.schem",
+      "jungle/Cocos_caduca2.schem",
+      "jungle/Cocos_caduca4.schem"
+     ],
+     "w2": [
+      "jungle/Cocos_caduca3.schem",
+      "jungle/Cocos_caduca5.schem"
+     ],
+     "w3": []
+    },
+    {
+     "name": "Swietenia_generica",
+     "w1": [
+      "jungle/Swietenia_generica1.schem",
+      "jungle/Swietenia_generica2.schem",
+      "jungle/Swietenia_generica3.schem"
+     ],
+     "w2": [],
+     "w3": []
+    },
+    {
+     "name": "junglebush",
+     "w1": [
+      "jungle/junglebush1.schem",
+      "jungle/junglebush2.schem",
+      "jungle/junglebush3.schem",
+      "jungle/junglebush4.schem",
+      "jungle/junglebush5.schem",
+      "jungle/junglebush6.schem",
+      "jungle/junglebush7.schem",
+      "jungle/junglebush8.schem",
+      "jungle/junglebush9.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Oaks",
+   "habitat": "lowland",
+   "density": 35,
+   "species": [
+    {
+     "name": "Quercus_generica",
+     "w1": [
+      "oak/Quercus_generica1.schem",
+      "oak/Quercus_generica2.schem",
+      "oak/Quercus_generica3.schem",
+      "oak/Quercus_generica4.schem",
+      "oak/Quercus_generica5.schem",
+      "oak/Quercus_generica6.schem",
+      "oak/Quercus_generica7.schem",
+      "oak/Quercus_generica8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Old Growth Birches",
+   "habitat": "lowland",
+   "density": 35,
+   "species": [
+    {
+     "name": "Betula_generica",
+     "w1": [
+      "birch/Betula_generica1.schem",
+      "birch/Betula_generica2.schem",
+      "birch/Betula_generica3.schem",
+      "birch/Betula_generica4.schem",
+      "birch/Betula_generica5.schem",
+      "birch/Betula_generica6.schem",
+      "birch/Betula_generica7.schem",
+      "birch/Betula_generica8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Old Growth Pines",
+   "habitat": "conifer",
+   "density": 25,
+   "species": [
+    {
+     "name": "Pinus_piceoides",
+     "w1": [
+      "taiga/Pinus_piceoides1.schem",
+      "taiga/Pinus_piceoides2.schem",
+      "taiga/Pinus_piceoides3.schem",
+      "taiga/Pinus_piceoides4.schem",
+      "taiga/Pinus_piceoides5.schem",
+      "taiga/Pinus_piceoides6.schem",
+      "taiga/Pinus_piceoides7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Old Growth Spruces",
+   "habitat": "conifer",
+   "density": 30,
+   "species": [
+    {
+     "name": "Picea_generica",
+     "w1": [
+      "taiga/Picea_generica1.schem",
+      "taiga/Picea_generica2.schem",
+      "taiga/Picea_generica3.schem",
+      "taiga/Picea_generica4.schem",
+      "taiga/Picea_generica5.schem",
+      "taiga/Picea_generica6.schem",
+      "taiga/Picea_generica7.schem",
+      "taiga/Picea_generica8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Pine",
+   "habitat": "conifer",
+   "density": 25,
+   "species": [
+    {
+     "name": "Pinus_piceoides",
+     "w1": [
+      "taiga/Pinus_piceoides1.schem",
+      "taiga/Pinus_piceoides2.schem",
+      "taiga/Pinus_piceoides3.schem",
+      "taiga/Pinus_piceoides4.schem",
+      "taiga/Pinus_piceoides5.schem",
+      "taiga/Pinus_piceoides6.schem",
+      "taiga/Pinus_piceoides7.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Spruce",
+   "habitat": "conifer",
+   "density": 30,
+   "species": [
+    {
+     "name": "Picea_generica",
+     "w1": [
+      "taiga/Picea_generica1.schem",
+      "taiga/Picea_generica2.schem",
+      "taiga/Picea_generica3.schem",
+      "taiga/Picea_generica4.schem",
+      "taiga/Picea_generica5.schem",
+      "taiga/Picea_generica6.schem",
+      "taiga/Picea_generica7.schem",
+      "taiga/Picea_generica8.schem"
+     ],
+     "w2": [],
+     "w3": []
+    }
+   ]
+  },
+  {
+   "name": "VN+ Swamp Oaks",
+   "habitat": "wet",
+   "density": 75,
+   "species": [
+    {
+     "name": "Quercus_vinifera",
+     "w1": [
+      "swamp/Quercus_vinifera1.schem",
+      "swamp/Quercus_vinifera2.schem",
+      "swamp/Quercus_vinifera3.schem",
+      "swamp/Quercus_vinifera4.schem",
+      "swamp/Quercus_vinifera5.schem",
+      "swamp/Quercus_vinifera9.schem"
+     ],
+     "w2": [
+      "swamp/Quercus_vinifera6.schem",
+      "swamp/Quercus_vinifera7.schem",
+      "swamp/Quercus_vinifera8.schem"
+     ],
+     "w3": []
+    }
+   ]
+  }
+ ]
+}
