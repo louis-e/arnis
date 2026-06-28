@@ -90,6 +90,8 @@ impl FixedTileProvider for IgnPoland {
                     // completely outside its coverage or missing data areas.
                     if *v != 0.0 {
                         all_zero = false;
+                    } else {
+                        *v = f64::NAN;
                     }
                 }
             }
@@ -115,22 +117,22 @@ impl ElevationProvider for IgnPoland {
     fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
         Some(vec![
             //North West: Szczecin, Koszalin, Gorzów Wielkopolski, Piła
-            LLBBox::new(14.12, 52.00, 18.00, 54.60).unwrap(),
+            LLBBox::new(52.00, 14.12, 54.60, 18.00).unwrap(),
 
             //North Center: Gdańsk/Gdynia/Sopot (Trójmiasto), Olsztyn, Toruń, Bydgoszcz, Grudziądz, Elbląg
-            LLBBox::new(18.00, 52.00, 21.50, 54.84).unwrap(),
+            LLBBox::new(52.00, 18.00, 54.84, 21.50).unwrap(),
 
             //North East: Białystok, Suwałki, Łomża, Ostrołęka
-            LLBBox::new(21.50, 52.00, 24.16, 54.40).unwrap(),
+            LLBBox::new(52.00, 21.50, 54.40, 24.16).unwrap(),
 
             //South West: Wrocław, Poznań, Zielona Góra, Legnica, Jelenia Góra, Leszno, Kalisz
-            LLBBox::new(14.12, 49.60, 18.00, 52.00).unwrap(),
+            LLBBox::new(49.60, 14.12, 52.00, 18.00).unwrap(),
 
             //South Center: Warszawa, Łódź, Kraków, Katowice (GOP / Upper Silesia), Częstochowa, Radom, Kielce, Opole
-            LLBBox::new(18.00, 49.15, 21.50, 52.00).unwrap(),
+            LLBBox::new(49.15, 18.00, 52.00, 21.50).unwrap(),
 
             //South East: Lublin, Rzeszów, Tarnów, Przemyśl, Zamość, Chełm
-            LLBBox::new(21.50, 49.00, 24.16, 52.00).unwrap(),
+            LLBBox::new(49.00, 21.50, 52.00, 24.16).unwrap(),
         ])
     }
 
