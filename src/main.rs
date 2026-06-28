@@ -6,6 +6,7 @@ mod bench;
 mod biome;
 mod block_definitions;
 mod bresenham;
+mod climate;
 mod clipping;
 mod colors;
 mod coordinate_system;

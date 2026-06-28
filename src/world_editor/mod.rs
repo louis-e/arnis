@@ -125,8 +125,7 @@ pub struct WorldEditor<'a> {
     xzbbox: &'a XZBBox,
     llbbox: LLBBox,
     ground: Option<Arc<Ground>>,
-    /// Loaded region tree pack for this generation; None keeps procedural trees.
-    /// Shared (Arc) across the main editor and all tile editors.
+    /// Loaded region tree pack (None = procedural); shared via Arc across main + tile editors.
     tree_pack: Option<Arc<crate::region::RegionLibrary>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
@@ -302,8 +301,7 @@ impl<'a> WorldEditor<'a> {
         self.tree_pack.clone()
     }
 
-    /// True if `(x, z)` is an ESA land-cover water cell, predicting water carved after trees.
-    /// Reuses the editor's ground + origin, so it needs no extra state.
+    /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
     pub fn is_lc_water(&self, x: i32, z: i32) -> bool {
         self.ground.as_ref().is_some_and(|g| {
             g.cover_class(crate::coordinate_system::cartesian::XZPoint::new(

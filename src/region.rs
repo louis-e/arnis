@@ -1,7 +1,4 @@
-//! Region-aware tree library. Loads a realm's `region.json` (communities grouped by habitat,
-//! each community a set of species, each species a set of size-bucketed `.schem`) plus the
-//! vanilla-plus pack, and picks a schematic per cell with a realm/vanilla/exotic blend.
-//! Every pick is a pure function of the (slot) coordinate, so it is identical from any tile.
+//! Region-aware tree library: loads a realm pack + vanilla-plus and picks a schematic per cell. Seam-safe.
 
 use std::collections::HashMap;
 
@@ -46,8 +43,7 @@ struct MSpecies {
     w3: Vec<String>,
 }
 
-/// Palm genera excluded outside the subtropics so e.g. New York (realm `ena`, which also spans the
-/// Caribbean) never sprouts coconut/royal palms.
+/// Palm genera, excluded outside the subtropics (so e.g. New York gets no palms).
 fn is_palm(name: &str) -> bool {
     let n = name.to_ascii_lowercase();
     [
@@ -141,7 +137,7 @@ fn load_pack(
                         continue;
                     };
                     if let Ok(schem) = load_schem(&bytes) {
-                        if !schem.voxels.is_empty() {
+                        if schem.has_leaves() {
                             let size = size_for_height(schem.height);
                             entries.push((schem, size, wclass));
                             idxs.push(entries.len() - 1);
@@ -297,8 +293,7 @@ impl RegionLibrary {
         }
     }
 
-    /// Pick one variant entry index from a community. Honors the size filter, except a community
-    /// with no allowed-size variant falls back to any size (avoids a forest gap) rather than None.
+    /// Pick one variant from a community, honoring the size filter (falls back to any size if none fit).
     fn pick_in_community(&self, c: &Community, x: i32, z: i32) -> Option<usize> {
         let allowed_count = |sp: &Vec<usize>| {
             sp.iter()

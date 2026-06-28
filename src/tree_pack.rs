@@ -1,5 +1,4 @@
-//! Schematic tree pack: the bundled `.schem` assets, a source abstraction, and the
-//! realm-by-location pick. The pack is compiled into the binary; trees are on by default.
+//! Schematic tree pack: bundled assets, a source abstraction, and the realm-by-location pick.
 
 use std::borrow::Cow;
 
@@ -45,8 +44,7 @@ impl TreePackSource {
     }
 }
 
-/// Realm directory id for a point; "vanilla-plus" if no box matches.
-/// Bounds inclusive; first match wins (order is significant: finer subsets first).
+/// Realm id for a point ("vanilla-plus" if none match); bounds inclusive, first match wins.
 pub fn realm_for_latlon(lat: f64, lon: f64) -> &'static str {
     // (code, lat_min, lat_max, lon_min, lon_max)
     const BOXES: &[(&str, f64, f64, f64, f64)] = &[
@@ -69,8 +67,7 @@ pub fn realm_for_latlon(lat: f64, lon: f64) -> &'static str {
     "vanilla-plus"
 }
 
-/// Load the region tree pack for this run, or None when legacy (procedural) trees are selected.
-/// The realm is picked from the bbox center.
+/// Load the region tree pack (realm from bbox center), or None for legacy procedural trees.
 pub fn load(args: &Args, scale: f64, ground_level: i32) -> Option<RegionLibrary> {
     if args.legacy_trees {
         return None;

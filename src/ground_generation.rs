@@ -150,6 +150,7 @@ pub fn generate_ground_region(
 ) {
     let has_land_cover = ground.has_land_cover();
     let terrain_enabled = ground.elevation_enabled;
+    let climate = ground.climate();
 
     let total_blocks: u64 =
         (iter_max_x - iter_min_x + 1).max(0) as u64 * (iter_max_z - iter_min_z + 1).max(0) as u64;
@@ -426,42 +427,49 @@ pub fn generate_ground_region(
                                 // We don't force rock materials onto 21–27° slopes
                                 // any more — that's a normal hiking incline where
                                 // grass and trees belong.
-                                if slope > 8 {
-                                    // Sheer cliff: each column is 100% one material
-                                    // so the downward under-fill matches the surface,
-                                    // producing vertical stripes of cobbled/deepslate.
-                                    let h = land_cover::coord_hash(x, z);
-                                    if h.is_multiple_of(2) {
-                                        (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
+                                if slope > 4 {
+                                    if let Some(p) = climate.slope_palette(x, z) {
+                                        // Arid canyon/mesa walls: tan/orange rock, not grey.
+                                        p
+                                    } else if slope > 8 {
+                                        // Sheer cliff: each column is 100% one material
+                                        // so the downward under-fill matches the surface,
+                                        // producing vertical stripes of cobbled/deepslate.
+                                        let h = land_cover::coord_hash(x, z);
+                                        if h.is_multiple_of(2) {
+                                            (COBBLED_DEEPSLATE, COBBLED_DEEPSLATE)
+                                        } else {
+                                            (DEEPSLATE, DEEPSLATE)
+                                        }
+                                    } else if slope > 6 {
+                                        // Very steep rock face: stone-dominant with
+                                        // weathered cobblestone chunks and occasional
+                                        // andesite banding. Deepslate stays below-surface
+                                        // only — it would read as "cliff" if exposed here.
+                                        let h = land_cover::coord_hash(x, z) % 20;
+                                        if h < 12 {
+                                            (STONE, DEEPSLATE) // 60%
+                                        } else if h < 17 {
+                                            (COBBLESTONE, DEEPSLATE) // 25%
+                                        } else {
+                                            (ANDESITE, DEEPSLATE) // 15%
+                                        }
                                     } else {
-                                        (DEEPSLATE, DEEPSLATE)
+                                        // Steep slope with natural scree: rocky mix where
+                                        // the gravel is a minority patch (not the whole
+                                        // surface) so it looks like real scree rather
+                                        // than a grey slope.
+                                        let h = land_cover::coord_hash(x, z) % 12;
+                                        match h {
+                                            0..=3 => (ANDESITE, STONE),    // 33%
+                                            4..=5 => (TUFF, STONE),        // 17%
+                                            6..=7 => (STONE, STONE),       // 17%
+                                            8..=9 => (COBBLESTONE, STONE), // 17%
+                                            _ => (GRAVEL, STONE),          // 17% scree
+                                        }
                                     }
-                                } else if slope > 6 {
-                                    // Very steep rock face: stone-dominant with
-                                    // weathered cobblestone chunks and occasional
-                                    // andesite banding. Deepslate stays below-surface
-                                    // only — it would read as "cliff" if exposed here.
-                                    let h = land_cover::coord_hash(x, z) % 20;
-                                    if h < 12 {
-                                        (STONE, DEEPSLATE) // 60%
-                                    } else if h < 17 {
-                                        (COBBLESTONE, DEEPSLATE) // 25%
-                                    } else {
-                                        (ANDESITE, DEEPSLATE) // 15%
-                                    }
-                                } else if slope > 4 {
-                                    // Steep slope with natural scree: rocky mix where
-                                    // the gravel is a minority patch (not the whole
-                                    // surface) so it looks like real scree rather
-                                    // than a grey slope.
-                                    let h = land_cover::coord_hash(x, z) % 12;
-                                    match h {
-                                        0..=3 => (ANDESITE, STONE),    // 33%
-                                        4..=5 => (TUFF, STONE),        // 17%
-                                        6..=7 => (STONE, STONE),       // 17%
-                                        8..=9 => (COBBLESTONE, STONE), // 17%
-                                        _ => (GRAVEL, STONE),          // 17% scree
-                                    }
+                                } else if let Some(p) = climate.surface_palette(cover, x, z) {
+                                    p
                                 } else {
                                     // Select surface block based on ESA land cover class
                                     match cover {

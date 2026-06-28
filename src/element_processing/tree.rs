@@ -482,9 +482,7 @@ impl Tree {
         // One base_y for the whole tree so the canopy doesn't warp to follow terrain.
         let base_y = editor.get_absolute_y(x, y, z);
 
-        // Schematic tree pack active: stamp a model instead of the procedural tree. The
-        // footprint/road/water checks and density above already ran, so schematic trees inherit
-        // Arnis's coverage and avoidance; the blacklist keeps them off buildings/water.
+        // Schematic pack active: stamp a model instead of the procedural tree (checks above still apply).
         if let Some(region) = editor.tree_pack() {
             let road_water = [
                 BLACK_CONCRETE,
@@ -505,8 +503,7 @@ impl Tree {
                 {
                     return;
                 }
-                // Clamp the base to at most 2 above the lowest footprint ground so a tree on a
-                // cliff edge doesn't hover; the root pass bridges the rest.
+                // Clamp the base to <=2 above the lowest footprint ground so it doesn't hover on a cliff.
                 let schem = region.schem(idx);
                 let half = (schem.width.max(schem.length) / 2).clamp(1, 6);
                 let center = editor.get_absolute_y(sx, y, sz);

@@ -1,7 +1,4 @@
-//! Sponge `.schem` loader. Parses a gzipped WorldEdit/Sponge schematic (v2 or v3)
-//! into a list of `(dx, dy, dz, Block)` voxels for stamping trees. Only logs and
-//! leaves are kept; ground cover, vines, cocoa, pale-garden blocks, air, and unknown
-//! blocks are dropped.
+//! Sponge .schem loader: parses a gzipped v2/v3 schematic into log/leaf voxels for tree stamping.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -52,8 +49,7 @@ pub fn map_block(name: &str) -> Option<Block> {
         "cherry_leaves" => CHERRY_LEAVES,
         "mangrove_leaves" => MANGROVE_LEAVES,
         "azalea_leaves" | "flowering_azalea_leaves" => AZALEA_LEAVES,
-        // Foliage some models use as canopy (e.g. red alder builds its crown from vine);
-        // rendered as oak-green leaves so the canopy isn't dropped.
+        // Canopy foliage some models use (e.g. red alder's crown); kept as oak leaves.
         "vine" | "moss_block" | "moss_carpet" => OAK_LEAVES,
         // Stripped logs: no stripped block ids, so use the matching base log.
         "stripped_oak_log" | "stripped_oak_wood" => OAK_LOG,
@@ -90,8 +86,7 @@ fn decode_varints(data: &[u8]) -> Vec<i32> {
         loop {
             let byte = data[i];
             i += 1;
-            // Guard the shift so an over-long/corrupt varint can't panic (shift >= 32);
-            // we keep consuming continuation bytes to stay aligned, just stop accumulating.
+            // Guard the shift so a corrupt over-long varint can't panic.
             if shift < 32 {
                 val |= i32::from(byte & 0x7F) << shift;
             }
@@ -182,8 +177,7 @@ pub fn load_schem(gz_bytes: &[u8]) -> Result<Schematic, String> {
         }
     }
 
-    // Normalise so the lowest log/leaf sits at y=0 (schems often pad air below the trunk;
-    // without this the tree floats above the ground).
+    // Normalise so the lowest log/leaf sits at y=0 (schems pad air below the trunk).
     if let Some(min_y) = voxels.iter().map(|v| v.1).min() {
         if min_y != 0 {
             for v in &mut voxels {
@@ -231,6 +225,29 @@ pub fn trunk_slot_s(x: i32, z: i32, s: i32) -> (i32, i32) {
     (cx * s + jx, cz * s + jz)
 }
 
+/// One of the nine leaf types `map_block` can emit (vine/moss map to OAK_LEAVES).
+fn is_leaf(b: Block) -> bool {
+    matches!(
+        b,
+        OAK_LEAVES
+            | BIRCH_LEAVES
+            | SPRUCE_LEAVES
+            | DARK_OAK_LEAVES
+            | JUNGLE_LEAVES
+            | ACACIA_LEAVES
+            | CHERRY_LEAVES
+            | MANGROVE_LEAVES
+            | AZALEA_LEAVES
+    )
+}
+
+impl Schematic {
+    /// True if the model has any leaf voxel. Log-only models (cacti, snags) are skipped at load.
+    pub fn has_leaves(&self) -> bool {
+        self.voxels.iter().any(|&(_, _, _, b)| is_leaf(b))
+    }
+}
+
 /// One of the eight trunk log types `map_block` can emit.
 fn is_log(b: Block) -> bool {
     matches!(
@@ -246,15 +263,12 @@ fn is_log(b: Block) -> bool {
     )
 }
 
-/// A log column counts as a ground-rooted trunk base only if its lowest log is within this
-/// many blocks of the schem floor; higher columns are branch tips and are never rooted.
+/// Max blocks above the schem floor for a log column to count as a ground-rooted trunk base.
 const ROOT_BASE_VY: i32 = 2;
 /// Safety bound on how far a real trunk root may reach down (only bites tile-seam deltas).
 const ROOT_MAX: i32 = 64;
 
-/// Stamp a schematic into the world with its footprint centred on `(anchor_x, anchor_z)`,
-/// the base row (`y = 0`) at `base_y`, rotated by `rot` quarter-turns. Never overwrites the
-/// blacklist (buildings, water). Pure function of its inputs, so it is seam-safe.
+/// Stamp a schematic centred on (anchor_x, anchor_z), base row at base_y, rotated by rot. Seam-safe.
 #[allow(clippy::too_many_arguments)]
 pub fn place_schematic_tree(
     editor: &mut WorldEditor,
@@ -284,9 +298,7 @@ pub fn place_schematic_tree(
         if footprints.is_some_and(|f| f.contains(wx, wz)) {
             continue;
         }
-        // Logs over placed water are always skipped; for predicted ESA water only a low
-        // root-level log is skipped (high trunk/canopy logs crossing a water cell are kept so
-        // bank/mangrove trunks keep no holes). Leaves always overhang.
+        // Logs over water are skipped (only root-level logs for predicted ESA water); leaves overhang.
         if is_log(block) {
             let root_level = vy <= min_log_vy + ROOT_BASE_VY;
             let over_water = editor.check_for_block(wx, 0, wz, Some(&[WATER]))
@@ -308,9 +320,7 @@ pub fn place_schematic_tree(
                 .or_insert((wy, block));
         }
     }
-    // Root pass: anchor genuine ground-rooted trunk columns straight down to their own local
-    // ground so off-center trunks / buttress legs / prop-roots on a slope do not float. Branch
-    // tips are skipped. The range is empty on flat/uphill ground.
+    // Root pass: extend ground-rooted trunk columns down to local ground so they don't float on slopes.
     let min_log_vy = trunk_bottom
         .values()
         .map(|(top, _)| top - base_y)
@@ -371,6 +381,26 @@ mod tests {
         assert!(map_block("minecraft:mangrove_roots").is_some());
         assert!(map_block("minecraft:bamboo_block").is_some());
         assert!(map_block("minecraft:vine").is_some()); // canopy foliage, kept as leaves
+    }
+
+    #[test]
+    fn has_leaves_rejects_logs_only() {
+        let cactus = Schematic {
+            width: 1,
+            height: 3,
+            length: 1,
+            voxels: vec![(0, 0, 0, JUNGLE_LOG), (0, 1, 0, JUNGLE_LOG)],
+            min_log_vy: 0,
+        };
+        assert!(!cactus.has_leaves());
+        let tree = Schematic {
+            width: 1,
+            height: 2,
+            length: 1,
+            voxels: vec![(0, 0, 0, OAK_LOG), (0, 1, 0, OAK_LEAVES)],
+            min_log_vy: 0,
+        };
+        assert!(tree.has_leaves());
     }
 
     #[test]
