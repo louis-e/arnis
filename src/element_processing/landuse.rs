@@ -40,6 +40,10 @@ pub fn generate_landuse(
         "railway" => GRAVEL,
         "vineyard" => COARSE_DIRT,
         "brownfield" => COARSE_DIRT,
+        "farmyard" => COARSE_DIRT,
+        "winter_sports" => SNOW_BLOCK,
+        "salt_pond" => WHITE_CONCRETE,
+        "clearing" => DIRT,
         "landfill" => {
             // Gravel if man_made = spoil_heap or heap, coarse dirt else
             let manmade_tag = element.tags.get("man_made").unwrap_or(&binding);
