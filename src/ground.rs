@@ -202,7 +202,7 @@ impl Ground {
         let Some(data) = self.elevation_data.as_ref() else {
             return;
         };
-        crate::land_cover_osm_water_override::apply_osm_water_override(
+        crate::land_cover::osm_water_override::apply_osm_water_override(
             lc,
             &data.heights,
             data.world_width,
@@ -225,7 +225,7 @@ impl Ground {
         let Some(data) = self.elevation_data.as_ref() else {
             return;
         };
-        crate::land_cover_bridge_repair::apply_bridge_land_cover_repair(
+        crate::land_cover::bridge_repair::apply_bridge_land_cover_repair(
             lc,
             data.world_width,
             data.world_height,

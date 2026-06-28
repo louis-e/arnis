@@ -740,17 +740,6 @@ function initSettings() {
   });
   window.updateRotation = updateRotation;
 
-  // Hide the tree-size tiers when legacy (procedural) trees are selected.
-  var legacyTreesToggle = document.getElementById("legacy-trees-toggle");
-  var treeSizesRow = document.getElementById("tree-sizes-row");
-  if (legacyTreesToggle && treeSizesRow) {
-    var syncTreeSizes = function () {
-      treeSizesRow.style.display = legacyTreesToggle.checked ? "none" : "";
-    };
-    legacyTreesToggle.addEventListener("change", syncTreeSizes);
-    syncTreeSizes();
-  }
-
   // World format toggle (Java/Bedrock/Luanti)
   initWorldFormatToggle();
 
@@ -1583,14 +1572,6 @@ async function startGeneration() {
     var roof = document.getElementById("roof-toggle").checked;
     var fill_ground = document.getElementById("fillground-toggle").checked;
     var legacy_trees = document.getElementById("legacy-trees-toggle").checked;
-    var tree_sizes = null;
-    if (!legacy_trees) {
-      var tiers = [];
-      ["small", "medium", "big", "tall", "giant"].forEach(function (s) {
-        if (document.getElementById("tree-size-" + s).checked) tiers.push(s);
-      });
-      tree_sizes = tiers.join(",");
-    }
     var land_cover = document.getElementById("land-cover-toggle").checked;
     var use_3d = document.getElementById("use-3d-toggle").checked;
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
@@ -1622,7 +1603,6 @@ async function startGeneration() {
         roofEnabled: roof,
         fillgroundEnabled: fill_ground,
         legacyTreesEnabled: legacy_trees,
-        treeSizeTiers: tree_sizes,
         landCoverEnabled: land_cover,
         use3dEnabled: use_3d,
         disableHeightLimit: disable_height_limit,

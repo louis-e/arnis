@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 use crate::land_cover::coord_hash;
-use crate::schematic::{load_schem, Schematic};
-use crate::tree_library::{size_for_height, SizeFilter, TreeSize};
-use crate::tree_pack::TreePackSource;
+use crate::trees::schematic::{load_schem, Schematic};
+use crate::trees::tree_library::{size_for_height, SizeFilter, TreeSize};
+use crate::trees::tree_pack::TreePackSource;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Habitat {
@@ -426,7 +426,7 @@ impl RegionLibrary {
         elev_y: i32,
     ) -> Option<(i32, i32, usize, u8)> {
         let s = self.base_spacing();
-        let (sx, sz) = crate::schematic::trunk_slot_s(x, z, s);
+        let (sx, sz) = crate::trees::schematic::trunk_slot_s(x, z, s);
         let montane =
             self.is_montane(elev_y) && crate::ground_generation::value_noise_01(sx, sz, 64) < 0.6;
         let blend = coord_hash(sx + 7, sz + 13) % 100;

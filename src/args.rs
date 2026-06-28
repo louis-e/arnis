@@ -71,11 +71,6 @@ pub struct Args {
     #[arg(long, default_value_t = false)]
     pub legacy_trees: bool,
 
-    /// Enabled schematic tree size tiers, comma-separated: small,medium,big,tall,giant.
-    /// Unset = small,medium,big,tall (giant off).
-    #[arg(long = "tree-sizes")]
-    pub tree_sizes: Option<String>,
-
     /// ESA WorldCover land cover classification, always on (no CLI flag).
     #[arg(skip = true)]
     pub land_cover: bool,

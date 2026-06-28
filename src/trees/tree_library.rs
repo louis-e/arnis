@@ -29,7 +29,7 @@ pub fn size_for_height(height: i32) -> TreeSize {
     }
 }
 
-/// The five size tiers + which are enabled. Default: all but Giant.
+/// The five size tiers + which are enabled. Default: all (giant stays 1:1-gated in the engine).
 #[derive(Clone, Copy, Debug)]
 pub struct SizeFilter {
     pub small: bool,
@@ -46,7 +46,7 @@ impl Default for SizeFilter {
             medium: true,
             big: true,
             tall: true,
-            giant: false,
+            giant: true,
         }
     }
 }
@@ -59,48 +59,6 @@ impl SizeFilter {
             TreeSize::Big => self.big,
             TreeSize::Tall => self.tall,
             TreeSize::Giant => self.giant,
-        }
-    }
-
-    /// Parse a comma list of enabled tiers. An empty/all-unknown list falls back to the default.
-    pub fn parse(list: &str) -> SizeFilter {
-        let mut f = SizeFilter {
-            small: false,
-            medium: false,
-            big: false,
-            tall: false,
-            giant: false,
-        };
-        let mut any = false;
-        for tok in list.split(',') {
-            match tok.trim().to_ascii_lowercase().as_str() {
-                "small" | "s" => {
-                    f.small = true;
-                    any = true;
-                }
-                "medium" | "m" => {
-                    f.medium = true;
-                    any = true;
-                }
-                "big" | "b" => {
-                    f.big = true;
-                    any = true;
-                }
-                "tall" | "t" => {
-                    f.tall = true;
-                    any = true;
-                }
-                "giant" | "g" | "huge" => {
-                    f.giant = true;
-                    any = true;
-                }
-                _ => {}
-            }
-        }
-        if any {
-            f
-        } else {
-            SizeFilter::default()
         }
     }
 }
@@ -119,10 +77,8 @@ mod tests {
     }
 
     #[test]
-    fn size_filter_parse() {
-        let f = SizeFilter::parse("small,big");
-        assert!(f.small && f.big && !f.medium && !f.giant);
-        let d = SizeFilter::parse("");
-        assert!(d.small && d.tall && !d.giant);
+    fn default_enables_all_sizes() {
+        let d = SizeFilter::default();
+        assert!(d.small && d.medium && d.big && d.tall && d.giant);
     }
 }

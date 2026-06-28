@@ -294,7 +294,8 @@ pub fn generate_world_with_options(
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     let ground = Arc::new(ground);
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
-    let tree_pack = crate::tree_pack::load(args, args.scale, args.ground_level).map(Arc::new);
+    let tree_pack =
+        crate::trees::tree_pack::load(args, args.scale, args.ground_level).map(Arc::new);
     let mut bench = crate::bench::Bench::new(args.benchmark);
 
     // Per-cell water depth field from the LC_WATER mask; empty without land cover.

@@ -5,8 +5,8 @@ use std::borrow::Cow;
 use include_dir::{include_dir, Dir};
 
 use crate::args::Args;
-use crate::region::RegionLibrary;
-use crate::tree_library::SizeFilter;
+use crate::trees::region::RegionLibrary;
+use crate::trees::tree_library::SizeFilter;
 
 // The bundled region tree packs (gzipped Sponge .schem grouped by realm/community).
 static EMBEDDED: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/assets/tree-packs");
@@ -72,10 +72,7 @@ pub fn load(args: &Args, scale: f64, ground_level: i32) -> Option<RegionLibrary>
     if args.legacy_trees {
         return None;
     }
-    let sizes = match &args.tree_sizes {
-        Some(list) => SizeFilter::parse(list),
-        None => SizeFilter::default(),
-    };
+    let sizes = SizeFilter::default();
     let lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
     let lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
     let realm = realm_for_latlon(lat, lon);

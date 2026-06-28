@@ -372,8 +372,8 @@ impl LeafPlacer<'_> {
 }
 
 /// Map a chosen `TreeType` to a habitat hint that steers region community selection.
-fn habitat_for_tree_type(t: TreeType) -> crate::region::Habitat {
-    use crate::region::Habitat;
+fn habitat_for_tree_type(t: TreeType) -> crate::trees::region::Habitat {
+    use crate::trees::region::Habitat;
     match t {
         TreeType::Spruce | TreeType::Pine => Habitat::Conifer,
         TreeType::Willow | TreeType::Mangrove => Habitat::Wet,
@@ -521,7 +521,7 @@ impl Tree {
                     fpmin = fpmin.min(editor.get_absolute_y(sx + dx, y, sz + dz));
                 }
                 let slot_base_y = center.min(fpmin + 2);
-                crate::schematic::place_schematic_tree(
+                crate::trees::schematic::place_schematic_tree(
                     editor,
                     schem,
                     sx,

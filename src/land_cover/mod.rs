@@ -9,6 +9,9 @@
 //! areas. We use HTTP Range requests to read only the portions we need, avoiding
 //! downloading the full ~500MB tiles.
 
+pub mod bridge_repair;
+pub mod osm_water_override;
+
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::{coordinate_system::geographic::LLBBox, progress::emit_gui_progress_update};

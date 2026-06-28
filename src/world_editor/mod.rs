@@ -126,7 +126,7 @@ pub struct WorldEditor<'a> {
     llbbox: LLBBox,
     ground: Option<Arc<Ground>>,
     /// Loaded region tree pack (None = procedural); shared via Arc across main + tile editors.
-    tree_pack: Option<Arc<crate::region::RegionLibrary>>,
+    tree_pack: Option<Arc<crate::trees::region::RegionLibrary>>,
     format: WorldFormat,
     /// Per-cell overrides for the effective "ground surface" Y returned by
     /// `get_ground_level` / `get_absolute_y`. Roads that flatten their
@@ -292,12 +292,12 @@ impl<'a> WorldEditor<'a> {
     }
 
     /// Sets the loaded region tree pack (shared across the main and tile editors).
-    pub fn set_tree_pack(&mut self, pack: Arc<crate::region::RegionLibrary>) {
+    pub fn set_tree_pack(&mut self, pack: Arc<crate::trees::region::RegionLibrary>) {
         self.tree_pack = Some(pack);
     }
 
     /// The loaded region tree pack, if any (a cheap Arc clone so the editor borrow is freed).
-    pub fn tree_pack(&self) -> Option<Arc<crate::region::RegionLibrary>> {
+    pub fn tree_pack(&self) -> Option<Arc<crate::trees::region::RegionLibrary>> {
         self.tree_pack.clone()
     }
 
