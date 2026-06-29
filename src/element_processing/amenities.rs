@@ -430,8 +430,17 @@ fn generate_fountain(
         (sx + x as i64, sz + z as i64)
     });
     let n = floor_area.len();
-    let cx = (sum_x / n as i64) as i32;
-    let cz = (sum_z / n as i64) as i32;
+    let cx0 = (sum_x / n as i64) as i32;
+    let cz0 = (sum_z / n as i64) as i32;
+    // Snap to the nearest filled cell so concave shapes still place inside.
+    let (cx, cz) = floor_area
+        .iter()
+        .copied()
+        .min_by_key(|&(x, z)| {
+            let (dx, dz) = ((x - cx0) as i64, (z - cz0) as i64);
+            dx * dx + dz * dz
+        })
+        .unwrap_or((cx0, cz0));
     // Footprint size decides small (1-3) vs large (fountain 4).
     crate::structures::fountain::place(editor, cx, cz, n);
 }

@@ -439,9 +439,10 @@ pub fn place_structure(
                 .map(|p| Arc::new(rotate_props(p, k)));
             BlockWithProperties::from_arc(bwp.block, props)
         };
-        editor.set_block_with_properties_absolute(placed, wx, base_y + vy, wz, None, None);
+        // Empty blacklist forces overwrites so blocks land over water/terrain too.
+        editor.set_block_with_properties_absolute(placed, wx, base_y + vy, wz, None, Some(&[]));
         if let Some(g) = ground {
-            editor.set_block_absolute(g, wx, base_y - 1, wz, None, None);
+            editor.set_block_absolute(g, wx, base_y - 1, wz, None, Some(&[]));
         }
     }
 }
