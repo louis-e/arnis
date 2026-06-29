@@ -68,12 +68,36 @@ pub fn clip_way_to_bbox(nodes: &[ProcessedNode], xzbbox: &XZBBox) -> Vec<Process
     assign_node_ids_preserving_endpoints(nodes, polygon, way_id)
 }
 
+/// Whether a water ring is a closed, fillable loop. A loop needs at least three
+/// points, and closure is tested the same way as ring merging: the first and last
+/// node share an id, or their endpoints are within one block of each other.
+fn ring_is_closed(ring: &[ProcessedNode]) -> bool {
+    if ring.len() < 3 {
+        return false;
+    }
+    let first = &ring[0];
+    let last = &ring[ring.len() - 1];
+    first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1)
+}
+
 /// Clips a water polygon ring to bbox using Sutherland-Hodgman (post-ring-merge).
 pub fn clip_water_ring_to_bbox(
     ring: &[ProcessedNode],
     xzbbox: &XZBBox,
 ) -> Option<Vec<ProcessedNode>> {
     if ring.is_empty() {
+        return None;
+    }
+
+    // A water ring must be a closed loop before it can be filled. A fragment left
+    // open by ring assembly (for example a multipolygon relation whose member way
+    // was not loaded) must be dropped here. The "ensure closed" step further down
+    // connects the last point back to the first with a straight chord, so
+    // Sutherland-Hodgman would turn the broken fragment into a chord-closed polygon.
+    // The downstream closure checks then accept it and flood it as a straight-edged
+    // water wedge. Dropping the open fragment instead keeps any sibling rings that
+    // are closed, so the result is partial water rather than a wedge.
+    if !ring_is_closed(ring) {
         return None;
     }
 
@@ -590,4 +614,46 @@ fn assign_node_ids_preserving_endpoints(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(id: u64, x: i32, z: i32) -> ProcessedNode {
+        ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        }
+    }
+
+    #[test]
+    fn open_fragment_is_not_closed() {
+        // Distinct endpoint ids, far apart: an open fragment that must be dropped.
+        let ring = vec![node(1, 0, 0), node(2, 100, 0), node(3, 100, 100)];
+        assert!(!ring_is_closed(&ring));
+    }
+
+    #[test]
+    fn shared_endpoint_id_is_closed() {
+        // First and last node share an id: a properly closed ring.
+        let ring = vec![node(1, 0, 0), node(2, 100, 0), node(1, 0, 0)];
+        assert!(ring_is_closed(&ring));
+    }
+
+    #[test]
+    fn coincident_endpoints_are_closed() {
+        // Different ids but endpoints within one block: still closed.
+        let ring = vec![node(1, 0, 0), node(2, 100, 0), node(3, 1, 0)];
+        assert!(ring_is_closed(&ring));
+    }
+
+    #[test]
+    fn degenerate_ring_is_not_closed() {
+        // Fewer than three points can never form a fillable loop.
+        assert!(!ring_is_closed(&[node(1, 0, 0)]));
+        assert!(!ring_is_closed(&[]));
+    }
 }
