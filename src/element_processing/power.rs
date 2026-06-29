@@ -107,10 +107,10 @@ pub fn generate_power_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
         match power_type.as_str() {
             "tower" => generate_power_tower_from_node(editor, node),
             "pole" => generate_power_pole_from_node(editor, node),
-            "generator" => {
-                if node.tags.get("generator:source").map(|s| s.as_str()) == Some("wind") {
-                    crate::structures::windturbine::place(editor, node.x, node.z);
-                }
+            "generator"
+                if node.tags.get("generator:source").map(|s| s.as_str()) == Some("wind") =>
+            {
+                crate::structures::windturbine::place(editor, node.x, node.z);
             }
             _ => {}
         }
