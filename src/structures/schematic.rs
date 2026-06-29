@@ -17,6 +17,45 @@ pub struct StructureSchematic {
     pub voxels: Vec<(i32, i32, i32, BlockWithProperties)>,
     pub anchor_x: i32,
     pub anchor_z: i32,
+    // Max horizontal distance from the anchor to any voxel, precomputed for the halo guard.
+    pub max_extent: i32,
+}
+
+// Max Chebyshev distance from (ax, az) to any voxel. Rotation-invariant, so it holds for any rot.
+fn extent_from_anchor(voxels: &[(i32, i32, i32, BlockWithProperties)], ax: i32, az: i32) -> i32 {
+    voxels
+        .iter()
+        .map(|&(vx, _, vz, _)| (vx - ax).abs().max((vz - az).abs()))
+        .max()
+        .unwrap_or(0)
+}
+
+impl StructureSchematic {
+    /// Re-anchor on the footprint centre, for models whose base fills the full footprint.
+    pub fn centered(mut self) -> Self {
+        self.anchor_x = self.width / 2;
+        self.anchor_z = self.length / 2;
+        self.max_extent = extent_from_anchor(&self.voxels, self.anchor_x, self.anchor_z);
+        self
+    }
+
+    /// Re-anchor on the centroid of the lowest layer, for tall models with a wide top.
+    pub fn base_anchored(mut self) -> Self {
+        let (mut sx, mut sz, mut n) = (0i64, 0i64, 0i64);
+        for &(vx, vy, vz, _) in &self.voxels {
+            if vy == 0 {
+                sx += vx as i64;
+                sz += vz as i64;
+                n += 1;
+            }
+        }
+        if n > 0 {
+            self.anchor_x = (sx / n) as i32;
+            self.anchor_z = (sz / n) as i32;
+        }
+        self.max_extent = extent_from_anchor(&self.voxels, self.anchor_x, self.anchor_z);
+        self
+    }
 }
 
 /// Map a Minecraft block-state string to a block + parsed properties; None for air/unmodeled.
@@ -184,6 +223,34 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "red_tulip" => RED_FLOWER,
         "dandelion" => YELLOW_FLOWER,
         "potted_azalea_bush" | "potted_flowering_azalea_bush" => FLOWER_POT,
+        // Tombstone blocks. Skeleton skulls are dropped by the no-match arm.
+        "gravel" => GRAVEL,
+        "podzol" => PODZOL,
+        "dirt" => DIRT,
+        "potted_allium" | "potted_cornflower" => FLOWER_POT,
+        "spruce_wall_sign" => SPRUCE_WALL_SIGN,
+        "mossy_cobblestone_stairs" => MOSSY_COBBLESTONE_STAIRS,
+        "mossy_stone_brick_stairs" => MOSSY_STONE_BRICK_STAIRS,
+        "granite_stairs" => GRANITE_STAIRS,
+        "diorite_stairs" => DIORITE_STAIRS,
+        "cobbled_deepslate" => COBBLED_DEEPSLATE,
+        "deepslate_tiles" => DEEPSLATE_TILES,
+        "deepslate_tile_slab" => DEEPSLATE_TILE_SLAB,
+        "deepslate_tile_wall" => DEEPSLATE_TILE_WALL,
+        "polished_blackstone" => POLISHED_BLACKSTONE,
+        "polished_blackstone_slab" => POLISHED_BLACKSTONE_SLAB,
+        "polished_deepslate" => POLISHED_DEEPSLATE,
+        "polished_diorite" => POLISHED_DIORITE,
+        "polished_diorite_slab" => POLISHED_DIORITE_SLAB,
+        "soul_lantern" => SOUL_LANTERN,
+        "chiseled_quartz_block" => CHISELED_QUARTZ_BLOCK,
+        // Wind-turbine blocks.
+        "quartz_block" => QUARTZ_BLOCK,
+        "quartz_pillar" => QUARTZ_PILLAR,
+        "quartz_slab" => QUARTZ_SLAB_TOP,
+        "quartz_stairs" => QUARTZ_STAIRS,
+        "red_concrete" => RED_CONCRETE,
+        "redstone_wall_torch" => REDSTONE_WALL_TORCH,
         _ => return None,
     };
     Some(BlockWithProperties::new(block, parse_state(name)))
@@ -325,12 +392,14 @@ pub fn load_structure(gz_bytes: &[u8]) -> Result<StructureSchematic, String> {
         }
     }
 
+    let max_extent = extent_from_anchor(&voxels, anchor.0, anchor.1);
     Ok(StructureSchematic {
         width,
         length,
         voxels,
         anchor_x: anchor.0,
         anchor_z: anchor.1,
+        max_extent,
     })
 }
 
@@ -421,10 +490,15 @@ pub fn place_structure(
 ) {
     let k = rot & 3;
     let (w, l) = (schem.width, schem.length);
-    debug_assert!(
-        w.max(l) <= 64,
-        "structure exceeds tile halo; clips at seams"
-    );
+    // Skip if any voxel sits farther from the anchor than the tile halo, else it clips at seams.
+    if schem.max_extent > crate::tile::TILE_EDITOR_HALO {
+        eprintln!(
+            "structure extent {} exceeds tile halo {}; skipping to avoid seam clipping",
+            schem.max_extent,
+            crate::tile::TILE_EDITOR_HALO
+        );
+        return;
+    }
     let (ax, az) = rotate_xz(schem.anchor_x, schem.anchor_z, w, l, k);
     for (vx, vy, vz, bwp) in &schem.voxels {
         let (rx, rz) = rotate_xz(*vx, *vz, w, l, k);

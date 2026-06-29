@@ -445,6 +445,18 @@ impl Block {
             344 => "prismarine",
             345 => "stone_stairs",
             346 => "tripwire_hook",
+            347 => "spruce_wall_sign",
+            348 => "granite_stairs",
+            349 => "diorite_stairs",
+            350 => "deepslate_tiles",
+            351 => "deepslate_tile_slab",
+            352 => "deepslate_tile_wall",
+            353 => "polished_blackstone_slab",
+            354 => "polished_diorite_slab",
+            355 => "soul_lantern",
+            356 => "chiseled_quartz_block",
+            357 => "quartz_pillar",
+            358 => "redstone_wall_torch",
             _ => panic!("Invalid id"),
         }
         // Note: ids are u16. Prefer a free slot below 256 for commonly placed
@@ -1230,6 +1242,19 @@ pub const MOSSY_STONE_BRICK_SLAB: Block = Block::new(343);
 pub const PRISMARINE: Block = Block::new(344);
 pub const STONE_STAIRS: Block = Block::new(345);
 pub const TRIPWIRE_HOOK: Block = Block::new(346);
+// Tombstone and wind-turbine schematic blocks.
+pub const SPRUCE_WALL_SIGN: Block = Block::new(347);
+pub const GRANITE_STAIRS: Block = Block::new(348);
+pub const DIORITE_STAIRS: Block = Block::new(349);
+pub const DEEPSLATE_TILES: Block = Block::new(350);
+pub const DEEPSLATE_TILE_SLAB: Block = Block::new(351);
+pub const DEEPSLATE_TILE_WALL: Block = Block::new(352);
+pub const POLISHED_BLACKSTONE_SLAB: Block = Block::new(353);
+pub const POLISHED_DIORITE_SLAB: Block = Block::new(354);
+pub const SOUL_LANTERN: Block = Block::new(355);
+pub const CHISELED_QUARTZ_BLOCK: Block = Block::new(356);
+pub const QUARTZ_PILLAR: Block = Block::new(357);
+pub const REDSTONE_WALL_TORCH: Block = Block::new(358);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

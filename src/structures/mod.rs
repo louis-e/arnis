@@ -7,4 +7,6 @@ pub mod fountain;
 pub mod lighthouse;
 pub mod playground;
 pub mod schematic;
+pub mod tombstone;
 pub mod tractor;
+pub mod windturbine;
