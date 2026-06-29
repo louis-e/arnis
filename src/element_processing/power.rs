@@ -52,9 +52,27 @@ pub fn generate_power(editor: &mut WorldEditor, element: &ProcessedElement) {
             }
             "tower" => generate_power_tower(editor, element),
             "pole" => generate_power_pole(editor, element),
+            "generator" => generate_generator(editor, element),
             _ => {}
         }
     }
+}
+
+/// Place a wind turbine for generator:source=wind. Ways/areas use the centroid.
+fn generate_generator(editor: &mut WorldEditor, element: &ProcessedElement) {
+    if element.tags().get("generator:source").map(|s| s.as_str()) != Some("wind") {
+        return;
+    }
+    let (mut sx, mut sz, mut n) = (0i64, 0i64, 0i64);
+    for node in element.nodes() {
+        sx += node.x as i64;
+        sz += node.z as i64;
+        n += 1;
+    }
+    if n == 0 {
+        return;
+    }
+    crate::structures::windturbine::place(editor, (sx / n) as i32, (sz / n) as i32);
 }
 
 /// Generate power infrastructure from node elements
@@ -89,6 +107,11 @@ pub fn generate_power_nodes(editor: &mut WorldEditor, node: &ProcessedNode) {
         match power_type.as_str() {
             "tower" => generate_power_tower_from_node(editor, node),
             "pole" => generate_power_pole_from_node(editor, node),
+            "generator" => {
+                if node.tags.get("generator:source").map(|s| s.as_str()) == Some("wind") {
+                    crate::structures::windturbine::place(editor, node.x, node.z);
+                }
+            }
             _ => {}
         }
     }

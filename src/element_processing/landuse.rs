@@ -3,7 +3,7 @@ use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
 use crate::deterministic_rng::element_rng;
 use crate::element_processing::tree::{Tree, TreeType};
-use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
+use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use rand::prelude::IndexedRandom;
@@ -15,6 +15,7 @@ pub fn generate_landuse(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
 ) {
     // Determine block type based on landuse tag
     let binding: String = "".to_string();
@@ -162,33 +163,20 @@ pub fn generate_landuse(
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
             "cemetery" if (x % 3 == 0) && (z % 3 == 0) => {
+                // Flowers and ground cover only; tombstones are stamped in a separate pass below.
+                // 0..15 left empty to keep the original flower rates.
                 let random_choice: i32 = rng.random_range(0..100);
-                if random_choice < 15 {
-                    // Place graves
-                    if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
-                        if rng.random_bool(0.5) {
-                            editor.set_block(COBBLESTONE, x - 1, 1, z, None, None);
-                            editor.set_block(STONE_BRICK_SLAB, x - 1, 2, z, None, None);
-                            editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
-                            editor.set_block(STONE_BRICK_SLAB, x + 1, 1, z, None, None);
-                        } else {
-                            editor.set_block(COBBLESTONE, x, 1, z - 1, None, None);
-                            editor.set_block(STONE_BRICK_SLAB, x, 2, z - 1, None, None);
-                            editor.set_block(STONE_BRICK_SLAB, x, 1, z, None, None);
-                            editor.set_block(STONE_BRICK_SLAB, x, 1, z + 1, None, None);
-                        }
-                    }
-                } else if random_choice < 30 {
+                if (15..30).contains(&random_choice) {
                     if editor.check_for_block(x, 0, z, Some(&[PODZOL])) {
                         editor.set_block(RED_FLOWER, x, 1, z, None, None);
                     }
-                } else if random_choice < 33 {
+                } else if (30..33).contains(&random_choice) {
                     Tree::create(editor, (x, 1, z), Some(building_footprints));
-                } else if !is_protected && random_choice < 35 {
+                } else if !is_protected && (33..35).contains(&random_choice) {
                     editor.set_block(OAK_LEAVES, x, 1, z, None, None);
-                } else if !is_protected && random_choice < 37 {
+                } else if !is_protected && (35..37).contains(&random_choice) {
                     editor.set_block(FERN, x, 1, z, None, None);
-                } else if !is_protected && random_choice < 41 {
+                } else if !is_protected && (37..41).contains(&random_choice) {
                     editor.set_block(LARGE_FERN_LOWER, x, 1, z, None, None);
                     editor.set_block(LARGE_FERN_UPPER, x, 2, z, None, None);
                 }
@@ -404,6 +392,10 @@ pub fn generate_landuse(
     // Generate a stone brick wall fence around cemeteries
     if landuse_tag == "cemetery" {
         generate_cemetery_fence(editor, element);
+        // Separate pass so each tombstone overwrites vegetation cleanly.
+        for &(x, z) in floor_area.as_slice() {
+            crate::structures::tombstone::maybe_place(editor, x, z, road_mask);
+        }
     }
 
     // Large construction sites get a centre crane plus scattered excavators.
@@ -439,6 +431,7 @@ pub fn generate_landuse_from_relation(
     args: &Args,
     flood_fill_cache: &FloodFillCache,
     building_footprints: &BuildingFootprintBitmap,
+    road_mask: &RoadMaskBitmap,
 ) {
     if rel.tags.contains_key("landuse") {
         // Process each outer member way individually using cached flood fill.
@@ -459,6 +452,7 @@ pub fn generate_landuse_from_relation(
                     args,
                     flood_fill_cache,
                     building_footprints,
+                    road_mask,
                 );
             }
         }
