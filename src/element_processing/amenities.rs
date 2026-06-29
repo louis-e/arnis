@@ -404,15 +404,8 @@ pub fn generate_amenities(
     }
 }
 
-/// Generates a 3D fountain that adapts to the polygon shape of the element.
-///
-/// Layout (inside→out):
-///   - Smooth stone interior floor with stone brick wall rim at polygon edge (2 blocks tall)
-///   - Water fills the interior at y=1
-///   - Central pillar of chiseled stone bricks + sea lantern at base
-///   - Water basin (Wasserbecken) on top of the pillar
-///
-/// For node-based fountains (single point) a compact 3×3 basin is built.
+/// Stamp a bundled fountain at the element; footprint size picks the variant
+/// (node/small way gets a small fountain, a large polygon gets the big one).
 fn generate_fountain(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
@@ -423,118 +416,33 @@ fn generate_fountain(
     let nodes: Vec<_> = element.nodes().collect();
     if nodes.len() < 3 {
         if let Some(node) = nodes.first() {
-            let cx = node.x;
-            let cz = node.z;
-            // 3×3 basin with rim + central pillar + raised basin
-            for dx in -1i32..=1 {
-                for dz in -1i32..=1 {
-                    let is_rim = dx.abs() == 1 || dz.abs() == 1;
-                    if is_rim {
-                        editor.set_block(STONE_BRICK_WALL, cx + dx, 1, cz + dz, None, None);
-                    }
-                }
-            }
-            // Central pillar with small basin on top
-            editor.set_block(SEA_LANTERN, cx, 1, cz, None, None);
-            editor.set_block(CHISELED_STONE_BRICKS, cx, 2, cz, None, None);
-            // Basin at y=3: cardinal walls + water center
-            editor.set_block(WATER, cx, 3, cz, None, None);
-            editor.set_block(STONE_BRICK_WALL, cx - 1, 3, cz, None, None);
-            editor.set_block(STONE_BRICK_WALL, cx + 1, 3, cz, None, None);
-            editor.set_block(STONE_BRICK_WALL, cx, 3, cz - 1, None, None);
-            editor.set_block(STONE_BRICK_WALL, cx, 3, cz + 1, None, None);
+            crate::structures::fountain::place(editor, node.x, node.z, 0);
         }
         return;
     }
 
     // ── Way fountain (polygon) ─────────────────────────────────────
     let floor_area = flood_fill_cache.get_or_compute_element(element, args.timeout.as_ref());
-
     if floor_area.is_empty() {
         return;
     }
-
-    // Compute centroid
     let (sum_x, sum_z) = floor_area.iter().fold((0i64, 0i64), |(sx, sz), &(x, z)| {
         (sx + x as i64, sz + z as i64)
     });
-    let count = floor_area.len() as i64;
-    let cx = (sum_x / count) as i32;
-    let cz = (sum_z / count) as i32;
-
-    // Compute approximate radius (average distance from centroid)
-    let avg_dist: f64 = floor_area
+    let n = floor_area.len();
+    let cx0 = (sum_x / n as i64) as i32;
+    let cz0 = (sum_z / n as i64) as i32;
+    // Snap to the nearest filled cell so concave shapes still place inside.
+    let (cx, cz) = floor_area
         .iter()
-        .map(|&(x, z)| {
-            let dx = (x - cx) as f64;
-            let dz = (z - cz) as f64;
-            (dx * dx + dz * dz).sqrt()
-        })
-        .sum::<f64>()
-        / floor_area.len() as f64;
-
-    // Pillar height scales with fountain size (min 2, max 5)
-    let pillar_height = (avg_dist as i32).clamp(2, 5);
-
-    // Collect edge outline via Bresenham
-    let mut edge_set: HashSet<(i32, i32)> = HashSet::new();
-    let mut prev: Option<(i32, i32)> = None;
-    for node in element.nodes() {
-        if let Some((px, pz)) = prev {
-            for (bx, _, bz) in bresenham_line(px, 0, pz, node.x, 0, node.z) {
-                edge_set.insert((bx, bz));
-            }
-        }
-        prev = Some((node.x, node.z));
-    }
-
-    // Place rim (stone brick wall, 2 blocks high) along the edge
-    for &(ex, ez) in &edge_set {
-        editor.set_block(STONE_BRICKS, ex, 0, ez, None, None);
-        editor.set_block(STONE_BRICK_WALL, ex, 1, ez, None, None);
-    }
-
-    // Fill interior with water at y=1 (and a stone floor at y=0)
-    for &(x, z) in floor_area.iter() {
-        if !edge_set.contains(&(x, z)) {
-            editor.set_block(SMOOTH_STONE, x, 0, z, None, None);
-            editor.set_block(WATER, x, 1, z, None, None);
-        }
-    }
-
-    // Central pillar — find closest interior point to centroid
-    let pillar_pos = floor_area
-        .iter()
-        .filter(|&&(x, z)| !edge_set.contains(&(x, z)))
-        .min_by_key(|&&(x, z)| {
-            let dx = (x - cx) as i64;
-            let dz = (z - cz) as i64;
+        .copied()
+        .min_by_key(|&(x, z)| {
+            let (dx, dz) = ((x - cx0) as i64, (z - cz0) as i64);
             dx * dx + dz * dz
         })
-        .copied()
-        .unwrap_or((cx, cz));
-
-    let (px, pz) = pillar_pos;
-
-    // Build pillar: sea lantern at base, chiseled stone bricks upward
-    editor.set_block(SEA_LANTERN, px, 1, pz, None, None);
-    for h in 2..=pillar_height {
-        editor.set_block(CHISELED_STONE_BRICKS, px, h, pz, None, None);
-    }
-
-    // Basin (Wasserbecken) on top: stone brick wall ring with water inside
-    let basin_y = pillar_height + 1;
-    for dx in -1i32..=1 {
-        for dz in -1i32..=1 {
-            if dx == 0 && dz == 0 {
-                // Centre of basin: water
-                editor.set_block(WATER, px, basin_y, pz, None, None);
-            } else if dx.abs() + dz.abs() <= 1 {
-                // Cardinal neighbours: stone brick wall rim
-                editor.set_block(STONE_BRICK_WALL, px + dx, basin_y, pz + dz, None, None);
-            }
-        }
-    }
+        .unwrap_or((cx0, cz0));
+    // Footprint size decides small (1-3) vs large (fountain 4).
+    crate::structures::fountain::place(editor, cx, cz, n);
 }
 
 #[derive(Clone, Copy)]

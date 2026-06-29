@@ -311,6 +311,18 @@ impl<'a> WorldEditor<'a> {
         })
     }
 
+    /// ESA distance-to-shore (BFS capped at 15): 0 = non-water or open water past the
+    /// cap, 1 = shore, 2..=15 = inward. So `is_lc_water && distance == 0` is the deep
+    /// interior of a large body, never a narrow river.
+    pub fn water_distance(&self, x: i32, z: i32) -> u8 {
+        self.ground.as_ref().map_or(0, |g| {
+            g.water_distance(crate::coordinate_system::cartesian::XZPoint::new(
+                x - self.ground_origin_x,
+                z - self.ground_origin_z,
+            ))
+        })
+    }
+
     /// Enables baking per-chunk lighting into Java chunks.
     pub fn set_bake_lighting(&mut self, enabled: bool) {
         self.bake_lighting = enabled;

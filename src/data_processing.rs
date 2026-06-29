@@ -82,7 +82,10 @@ fn process_element(
                 );
             } else if way.tags.contains_key("landuse") {
                 landuse::generate_landuse(editor, way, args, flood_fill_cache, building_footprints);
-            } else if way.tags.contains_key("natural") {
+            } else if way.tags.contains_key("natural")
+                && way.tags.get("amenity").map(String::as_str) != Some("fountain")
+            {
+                // natural=water + amenity=fountain falls through to the fountain handler, not filled as water.
                 natural::generate_natural(
                     editor,
                     element,
