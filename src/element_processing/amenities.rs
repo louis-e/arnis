@@ -404,15 +404,8 @@ pub fn generate_amenities(
     }
 }
 
-/// Generates a 3D fountain that adapts to the polygon shape of the element.
-///
-/// Layout (inside→out):
-///   - Smooth stone interior floor with stone brick wall rim at polygon edge (2 blocks tall)
-///   - Water fills the interior at y=1
-///   - Central pillar of chiseled stone bricks + sea lantern at base
-///   - Water basin (Wasserbecken) on top of the pillar
-///
-/// For node-based fountains (single point) a compact 3×3 basin is built.
+/// Stamp a bundled fountain at the element; footprint size picks the variant
+/// (node/small way gets a small fountain, a large polygon gets the big one).
 fn generate_fountain(
     editor: &mut WorldEditor,
     element: &ProcessedElement,
