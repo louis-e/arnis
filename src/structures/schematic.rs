@@ -17,6 +17,17 @@ pub struct StructureSchematic {
     pub voxels: Vec<(i32, i32, i32, BlockWithProperties)>,
     pub anchor_x: i32,
     pub anchor_z: i32,
+    // Max horizontal distance from the anchor to any voxel, precomputed for the halo guard.
+    pub max_extent: i32,
+}
+
+// Max Chebyshev distance from (ax, az) to any voxel. Rotation-invariant, so it holds for any rot.
+fn extent_from_anchor(voxels: &[(i32, i32, i32, BlockWithProperties)], ax: i32, az: i32) -> i32 {
+    voxels
+        .iter()
+        .map(|&(vx, _, vz, _)| (vx - ax).abs().max((vz - az).abs()))
+        .max()
+        .unwrap_or(0)
 }
 
 impl StructureSchematic {
@@ -24,6 +35,7 @@ impl StructureSchematic {
     pub fn centered(mut self) -> Self {
         self.anchor_x = self.width / 2;
         self.anchor_z = self.length / 2;
+        self.max_extent = extent_from_anchor(&self.voxels, self.anchor_x, self.anchor_z);
         self
     }
 
@@ -41,6 +53,7 @@ impl StructureSchematic {
             self.anchor_x = (sx / n) as i32;
             self.anchor_z = (sz / n) as i32;
         }
+        self.max_extent = extent_from_anchor(&self.voxels, self.anchor_x, self.anchor_z);
         self
     }
 }
@@ -379,12 +392,14 @@ pub fn load_structure(gz_bytes: &[u8]) -> Result<StructureSchematic, String> {
         }
     }
 
+    let max_extent = extent_from_anchor(&voxels, anchor.0, anchor.1);
     Ok(StructureSchematic {
         width,
         length,
         voxels,
         anchor_x: anchor.0,
         anchor_z: anchor.1,
+        max_extent,
     })
 }
 
@@ -476,15 +491,10 @@ pub fn place_structure(
     let k = rot & 3;
     let (w, l) = (schem.width, schem.length);
     // Skip if any voxel sits farther from the anchor than the tile halo, else it clips at seams.
-    let max_extent = schem
-        .voxels
-        .iter()
-        .map(|&(vx, _, vz, _)| (vx - schem.anchor_x).abs().max((vz - schem.anchor_z).abs()))
-        .max()
-        .unwrap_or(0);
-    if max_extent > crate::tile::TILE_EDITOR_HALO {
+    if schem.max_extent > crate::tile::TILE_EDITOR_HALO {
         eprintln!(
-            "structure extent {max_extent} exceeds tile halo {}; skipping to avoid seam clipping",
+            "structure extent {} exceeds tile halo {}; skipping to avoid seam clipping",
+            schem.max_extent,
             crate::tile::TILE_EDITOR_HALO
         );
         return;

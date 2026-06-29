@@ -96,6 +96,8 @@ pub fn generate_landuse(
         trees
     };
 
+    let is_cemetery = landuse_tag == "cemetery";
+
     for &(x, z) in floor_area.iter() {
         // Apply per-block randomness for certain landuse types
         let actual_block = if landuse_tag == "industrial" {
@@ -163,7 +165,7 @@ pub fn generate_landuse(
         // Add specific features for different landuse types
         match landuse_tag.as_str() {
             "cemetery" if (x % 3 == 0) && (z % 3 == 0) => {
-                // Flowers and ground cover only; tombstones are stamped in a separate pass below.
+                // Flowers and ground cover only; tombstones are stamped below in this loop.
                 // 0..15 left empty to keep the original flower rates.
                 let random_choice: i32 = rng.random_range(0..100);
                 if (15..30).contains(&random_choice) {
@@ -387,15 +389,15 @@ pub fn generate_landuse(
             }
             _ => {}
         }
+
+        if is_cemetery {
+            crate::structures::tombstone::maybe_place(editor, x, z, road_mask);
+        }
     }
 
     // Generate a stone brick wall fence around cemeteries
     if landuse_tag == "cemetery" {
         generate_cemetery_fence(editor, element);
-        // Separate pass so each tombstone overwrites vegetation cleanly.
-        for &(x, z) in floor_area.as_slice() {
-            crate::structures::tombstone::maybe_place(editor, x, z, road_mask);
-        }
     }
 
     // Large construction sites get a centre crane plus scattered excavators.

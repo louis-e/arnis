@@ -33,6 +33,8 @@ const LARGE_PERCENT: u64 = 5;
 // Headstone grid spacing equals their max footprint, so neighbours touch but don't overlap.
 const SMALL_GRID: i32 = 4;
 const SMALL_PERCENT: u64 = 28;
+// Crypt cells must be a subset of headstone cells so the grid-alignment early-return is sound.
+const _: () = assert!(LARGE_GRID % SMALL_GRID == 0);
 
 fn parse_all(raw: &'static [&'static [u8]]) -> Vec<StructureSchematic> {
     raw.iter()
@@ -58,6 +60,10 @@ fn large() -> &'static [StructureSchematic] {
 
 /// Stamp at most one tombstone at cemetery cell (x, z), keyed on coord_hash for seam stability.
 pub fn maybe_place(editor: &mut WorldEditor, x: i32, z: i32, road_mask: &RoadMaskBitmap) {
+    // Only grid-aligned cells can host a tombstone; check first to skip the rest cheaply.
+    if x.rem_euclid(SMALL_GRID) != 0 || z.rem_euclid(SMALL_GRID) != 0 {
+        return;
+    }
     // Skip water and roads; both reuse existing data, no extra memory.
     if editor.is_lc_water(x, z) || road_mask.contains(x, z) {
         return;
@@ -75,8 +81,8 @@ pub fn maybe_place(editor: &mut WorldEditor, x: i32, z: i32, road_mask: &RoadMas
         }
     }
 
-    // Headstones on the fine grid, skipping any cell a crypt already occupies.
-    if x.rem_euclid(SMALL_GRID) == 0 && z.rem_euclid(SMALL_GRID) == 0 && !near_large_crypt(x, z) {
+    // Headstones, skipping any cell a crypt already occupies.
+    if !near_large_crypt(x, z) {
         let h = coord_hash(x.wrapping_add(0x5f5f), z.wrapping_add(0x3c3c));
         if h % 100 < SMALL_PERCENT {
             if let Some(schem) = pick(small(), h) {
