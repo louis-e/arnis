@@ -104,6 +104,7 @@ async function applyLocalization(localization) {
     "#world-name-label[data-placeholder]": "no_world_generated_yet",
     "h2[data-localize='customization_settings']": "customization_settings",
     "span[data-localize='world_scale']": "world_scale",
+    "span[data-localize='cpu_usage']": "cpu_usage",
     "span[data-localize='custom_bounding_box']": "custom_bounding_box",
     // DEPRECATED: Ground level localization removed
     // "label[data-localize='ground_level']": "ground_level",
@@ -121,6 +122,7 @@ async function applyLocalization(localization) {
     "span[data-localize='disable_height_limit']": "disable_height_limit",
     "span[data-localize='aws_only_elevation']": "aws_only_elevation",
     "span[data-localize='bake_lighting']": "bake_lighting",
+    "span[data-localize='pipeline_merge']": "pipeline_merge",
     "span[data-localize='anonymous_crash_reports']": "anonymous_crash_reports",
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
@@ -715,6 +717,37 @@ function initSettings() {
     slider.value = 1;
     sliderValue.textContent = "1.00";
   });
+
+  // CPU usage slider: percentage of CPU cores used for world generation.
+  // Persisted to localStorage so the choice survives restarts.
+  const cpuSlider = document.getElementById("cpu-usage-slider");
+  const cpuValue = document.getElementById("cpu-usage-value");
+  if (cpuSlider && cpuValue) {
+    const savedCpu = localStorage.getItem("arnis-cpu-percent");
+    if (savedCpu !== null && !isNaN(parseInt(savedCpu, 10))) {
+      cpuSlider.value = Math.min(Math.max(parseInt(savedCpu, 10), 10), 100);
+    }
+    cpuValue.textContent = `${parseInt(cpuSlider.value, 10)}%`;
+    cpuSlider.addEventListener("input", () => {
+      cpuValue.textContent = `${parseInt(cpuSlider.value, 10)}%`;
+      localStorage.setItem("arnis-cpu-percent", cpuSlider.value);
+    });
+    // Double-click to reset CPU usage to default (90%)
+    cpuSlider.addEventListener("dblclick", () => {
+      cpuSlider.value = 90;
+      cpuValue.textContent = "90%";
+      localStorage.setItem("arnis-cpu-percent", "90");
+    });
+  }
+
+  // "Faster merge" toggle: persisted so the choice sticks across launches.
+  const pipelineToggle = document.getElementById("pipeline-merge-toggle");
+  if (pipelineToggle) {
+    pipelineToggle.checked = localStorage.getItem("arnis-pipeline-merge") === "1";
+    pipelineToggle.addEventListener("change", () => {
+      localStorage.setItem("arnis-pipeline-merge", pipelineToggle.checked ? "1" : "0");
+    });
+  }
 
   // Rotation angle input
   const rotationInput = document.getElementById("rotation-angle-input");
@@ -1577,7 +1610,9 @@ async function startGeneration() {
     var disable_height_limit = document.getElementById("disable-height-limit-toggle").checked;
     var aws_only_elevation = document.getElementById("aws-only-elevation-toggle").checked;
     var bake_lighting = document.getElementById("bake-lighting-toggle").checked;
+    var pipeline_merge = document.getElementById("pipeline-merge-toggle").checked;
     var scale = parseFloat(document.getElementById("scale-value-slider").value);
+    var cpuPercent = parseInt(document.getElementById("cpu-usage-slider").value, 10) || 90;
     // var ground_level = parseInt(document.getElementById("ground-level").value, 10);
     // DEPRECATED: Ground level input removed from UI
     var ground_level = -62;
@@ -1612,7 +1647,9 @@ async function startGeneration() {
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
-        rotationAngle: rotationAngle
+        rotationAngle: rotationAngle,
+        cpuPercent: cpuPercent,
+        pipelineMerge: pipeline_merge
     });
 
     console.log("Generation process started.");
