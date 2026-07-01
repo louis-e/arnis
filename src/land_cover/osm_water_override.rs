@@ -2,12 +2,12 @@
 //! the shoreline, overriding ESA's noisy 10 m classification.
 use std::collections::{HashMap, VecDeque};
 
-use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::XZBBox;
 use crate::land_cover::{compute_water_distance, LandCoverData, LC_WATER};
 use crate::osm_parser::{
     ProcessedElement, ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay,
 };
+use arnis_math::bresenham::bresenham_line;
+use arnis_math::coordinate_system::cartesian::XZBBox;
 
 const ELEVATION_TOLERANCE_BLOCKS: f32 = 1.5;
 const PROTECTED_LAND_AREA_M2: f64 = 4000.0;

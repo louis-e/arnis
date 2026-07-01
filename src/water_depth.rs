@@ -4,11 +4,11 @@ use crate::block_definitions::{
     Block, AIR, CLAY, COARSE_DIRT, DIRT, GRAVEL, KELP, KELP_PLANT, MAGMA_BLOCK, SAND, SANDSTONE,
     SEAGRASS, SEA_PICKLE, SOUL_SAND, STONE, TALL_SEAGRASS_BOTTOM, TALL_SEAGRASS_TOP, WATER,
 };
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::ground::Ground;
 use crate::land_cover::LC_WATER;
 use crate::world_editor::{WorldEditor, MIN_Y};
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
 
 /// Flat shoal width in chamfer-DT units; slope only starts past it.
 const SHOAL_DT_UNITS: u16 = 9;

@@ -1,8 +1,8 @@
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::element_processing::bridges::BridgeSurfaceMap;
 use crate::osm_parser::{ProcessedElement, ProcessedNode};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 
 const BRIDGE_BARRIER_NEARBY_RADIUS: i32 = 2;
 

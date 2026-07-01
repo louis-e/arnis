@@ -1,7 +1,5 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
 use crate::element_processing::bridge_styles::{
     decorate_bridge_above_deck, place_bridge_support_below_deck, BridgePathSample, BridgeStyle,
 };
@@ -13,6 +11,8 @@ use crate::element_processing::surfaces::{
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
 use std::collections::HashMap;
 
 /// Upper bound on `block_range` used by wide-road width flattening. The
@@ -1845,10 +1845,10 @@ mod tests {
 
     // --- Rendering regression tests: markings must actually overwrite the base surface. ---
 
-    use crate::coordinate_system::cartesian::XZBBox;
-    use crate::coordinate_system::geographic::LLBBox;
     use crate::osm_parser::ProcessedNode;
     use crate::world_editor::WorldEditor;
+    use arnis_math::coordinate_system::cartesian::XZBBox;
+    use arnis_math::coordinate_system::geographic::LLBBox;
     use clap::Parser as _;
     use std::collections::HashMap as StdMap;
     use std::path::PathBuf;

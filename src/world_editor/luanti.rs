@@ -1,9 +1,9 @@
 use crate::block_definitions::AIR;
-use crate::coordinate_system::cartesian::XZBBox;
-use crate::coordinate_system::geographic::LLBBox;
 use crate::luanti_block_map::{to_luanti_node, LuantiGame};
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::common::{WorldToModify, MIN_Y};
+use arnis_math::coordinate_system::cartesian::XZBBox;
+use arnis_math::coordinate_system::geographic::LLBBox;
 use colored::Colorize;
 use fastnbt::Value;
 use rayon::prelude::*;

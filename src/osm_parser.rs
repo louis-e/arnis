@@ -1,8 +1,9 @@
 use crate::clipping::clip_way_to_bbox;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::progress::emit_gui_progress_update;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::coordinate_system::geographic::{LLBBox, LLPoint};
+use arnis_math::coordinate_system::transformation::CoordTransformer;
+use arnis_math::projection::{ProjectionKind, WebMercatorProjection};
 use colored::Colorize;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
@@ -235,7 +236,7 @@ pub fn parse_osm_data(
     bbox: LLBBox,
     scale: f64,
     debug: bool,
-    projection: crate::projection::ProjectionKind,
+    projection: ProjectionKind,
 ) -> (Vec<ProcessedElement>, XZBBox, OutlineSuppression) {
     println!("{} Parsing data...", "[2/7]".bold());
     println!("Bounding box: {bbox:?}");
@@ -244,15 +245,13 @@ pub fn parse_osm_data(
     let data = SplitOsmData::from_raw_osm_data(osm_data);
 
     let (coord_transformer, xzbbox) = match projection {
-        crate::projection::ProjectionKind::WebMercator => {
+        ProjectionKind::WebMercator => {
             let origin_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
             let origin_lon = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-            let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, scale);
+            let proj = WebMercatorProjection::new(origin_lat, origin_lon, scale);
             CoordTransformer::with_projection(&bbox, scale, &proj)
         }
-        crate::projection::ProjectionKind::Local => {
-            CoordTransformer::llbbox_to_xzbbox(&bbox, scale)
-        }
+        ProjectionKind::Local => CoordTransformer::llbbox_to_xzbbox(&bbox, scale),
     }
     .unwrap_or_else(|e| {
         eprintln!("Error in defining coordinate transformation:\n{e}");

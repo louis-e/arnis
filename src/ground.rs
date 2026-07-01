@@ -1,14 +1,14 @@
 use crate::args::Args;
-use crate::coordinate_system::{
-    cartesian::{XZBBox, XZPoint},
-    geographic::LLBBox,
-};
 use crate::elevation::compute_grid_dims;
 use crate::elevation_data::{fetch_elevation_data, ElevationData};
 use crate::land_cover::{self, LandCoverData};
 use crate::osm_parser::ProcessedElement;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
+use arnis_math::coordinate_system::{
+    cartesian::{XZBBox, XZPoint},
+    geographic::LLBBox,
+};
 use colored::Colorize;
 use image::{Rgb, RgbImage};
 
@@ -682,8 +682,8 @@ pub(crate) fn extended_max_y_for(args: &Args) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coordinate_system::cartesian::XZPoint;
     use crate::elevation_data::ElevationData;
+    use arnis_math::coordinate_system::cartesian::XZPoint;
 
     fn ground_with(heights: Vec<Vec<f32>>) -> Ground {
         let h = heights.len();

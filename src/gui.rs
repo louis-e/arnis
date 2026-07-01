@@ -1,7 +1,4 @@
 use crate::args::Args;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::data_processing::{self, GenerationOptions};
 use crate::ground::{self, Ground};
 use crate::map_preview;
@@ -13,6 +10,10 @@ use crate::retrieve_data;
 use crate::telemetry::{self, send_log, LogLevel};
 use crate::version_check;
 use crate::world_editor::WorldFormat;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::coordinate_system::geographic::{LLBBox, LLPoint};
+use arnis_math::coordinate_system::transformation::CoordTransformer;
+use arnis_math::projection::ProjectionKind;
 use colored::Colorize;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
@@ -21,6 +22,7 @@ use log::LevelFilter;
 use rfd::FileDialog;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::{env, fs, io::Write};
 use tauri_plugin_log::{Builder as LogBuilder, Target, TargetKind};
 
@@ -515,7 +517,7 @@ pub fn update_player_spawn_y_after_generation(
     scale: f64,
     ground: &Ground,
 ) -> Result<(), String> {
-    use crate::coordinate_system::transformation::CoordTransformer;
+    use arnis_math::coordinate_system::transformation::CoordTransformer;
 
     // Read the current level.dat file to get existing spawn coordinates
     let level_path = PathBuf::from(world_path).join("level.dat");
@@ -1104,7 +1106,7 @@ fn gui_start_generation(
                 luanti: world_format == WorldFormat::LuantiWorld,
                 downloader: "requests".to_string(),
                 scale: world_scale,
-                projection: crate::projection::ProjectionKind::Local,
+                projection: ProjectionKind::Local,
                 ground_level,
                 terrain: terrain_enabled,
                 interior: interior_enabled,
@@ -1172,7 +1174,7 @@ fn gui_start_generation(
                             args.bbox,
                             args.scale,
                             args.debug,
-                            crate::projection::ProjectionKind::Local,
+                            ProjectionKind::Local,
                         );
 
                     // Fetch supplementary building data from Overture Maps

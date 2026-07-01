@@ -26,7 +26,7 @@ jobs:
         run: cargo fmt -- --check
 
       - name: Check clippy lints
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   build:
     runs-on: ubuntu-latest
@@ -34,8 +34,9 @@ jobs:
       - uses: actions/checkout@v6
       - uses: ./.github/actions/setup-arnis-linux
 
-      - name: Build (all targets, all features)
-        run: cargo build --all-targets --all-features --release
-
       - name: Run unit tests
-        run: cargo test --all-targets --all-features
+        run: cargo test --workspace --all-targets --all-features
+
+      - name: Build (all targets, all features)
+        run: cargo build --workspace --all-targets --all-features --release
+

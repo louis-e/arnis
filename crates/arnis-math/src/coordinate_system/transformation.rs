@@ -228,14 +228,13 @@ pub fn lat_lon_to_minecraft_coords(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::test_utilities::get_llbbox_arnis;
 
     fn test_llxztransform_one_scale_one_factor(
         scale: f64,
         test_latfactor: f64,
         test_lngfactor: f64,
     ) {
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let llpoint = LLPoint::new(
             llbbox.min().lat() + (llbbox.max().lat() - llbbox.min().lat()) * test_latfactor,
             llbbox.min().lng() + (llbbox.max().lng() - llbbox.min().lng()) * test_lngfactor,
@@ -281,7 +280,7 @@ mod test {
     // this ensures that invalid inputs can be handled correctly
     #[test]
     pub fn test_invalid_construct() {
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let obj = CoordTransformer::llbbox_to_xzbbox(&llbbox, 0.0);
         assert!(obj.is_err());
 
@@ -293,7 +292,7 @@ mod test {
 
     #[test]
     fn test_with_projection_constructs_successfully() {
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let proj = crate::projection::WebMercatorProjection::new(
             (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
             (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
@@ -305,7 +304,7 @@ mod test {
 
     #[test]
     fn test_with_projection_invalid_scale() {
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let proj = crate::projection::WebMercatorProjection::new(54.63, 9.93, 1.0);
 
         assert!(CoordTransformer::with_projection(&llbbox, 0.0, &proj).is_err());
@@ -314,7 +313,7 @@ mod test {
 
     #[test]
     fn test_with_projection_xzbbox_contains_projected_corners() {
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let proj = crate::projection::WebMercatorProjection::new(
             (llbbox.min().lat() + llbbox.max().lat()) / 2.0,
             (llbbox.min().lng() + llbbox.max().lng()) / 2.0,
@@ -357,7 +356,7 @@ mod test {
     fn test_with_projection_matches_standalone_projection() {
         // Verify that CoordTransformer in WebMercator mode produces the same
         // result as calling WebMercatorProjection::forward directly.
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let origin_lat = (llbbox.min().lat() + llbbox.max().lat()) / 2.0;
         let origin_lon = (llbbox.min().lng() + llbbox.max().lng()) / 2.0;
         let proj = crate::projection::WebMercatorProjection::new(origin_lat, origin_lon, 1.0);
@@ -380,7 +379,7 @@ mod test {
 
     #[test]
     fn test_with_projection_east_increases_x() {
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let proj = crate::projection::WebMercatorProjection::new(54.63, 9.93, 1.0);
         let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
 
@@ -399,7 +398,7 @@ mod test {
 
     #[test]
     fn test_with_projection_north_decreases_z() {
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let proj = crate::projection::WebMercatorProjection::new(54.63, 9.93, 1.0);
         let (transformer, _) = CoordTransformer::with_projection(&llbbox, 1.0, &proj).unwrap();
 
@@ -419,7 +418,7 @@ mod test {
     #[test]
     fn test_local_mode_unaffected_by_projection_addition() {
         // Double-check that the Local path is bit-identical to pre-change behavior.
-        let llbbox = get_llbbox_arnis();
+        let llbbox = LLBBox::default();
         let (transformer, _) = CoordTransformer::llbbox_to_xzbbox(&llbbox, 1.0).unwrap();
 
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());

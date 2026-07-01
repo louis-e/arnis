@@ -1,8 +1,8 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 use std::collections::HashSet;
 
 pub fn generate_man_made(editor: &mut WorldEditor, element: &ProcessedElement, args: &Args) {

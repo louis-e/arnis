@@ -4,11 +4,9 @@ pub mod provider;
 pub mod providers;
 pub mod selector;
 
-use crate::{
-    coordinate_system::{geographic::LLBBox, transformation::geo_distance},
-    land_cover::LandCoverData,
-    progress::emit_gui_progress_update,
-};
+use crate::{land_cover::LandCoverData, progress::emit_gui_progress_update};
+use arnis_math::coordinate_system::geographic::LLBBox;
+use arnis_math::coordinate_system::transformation::geo_distance;
 use postprocess::{
     apply_land_cover_repair, fill_nan_values, filter_elevation_outliers, repair_terrain_anomalies,
     scale_to_minecraft,

@@ -4,8 +4,8 @@
 //! aligned with Minecraft region boundaries). Each tile can be processed independently
 //! on a separate CPU core.
 
-use crate::coordinate_system::cartesian::XZBBox;
 use crate::osm_parser::{ProcessedElement, ProcessedRelation, ProcessedWay};
+use arnis_math::coordinate_system::cartesian::XZBBox;
 use std::collections::HashMap;
 
 /// Bounds of a single tile within the world.

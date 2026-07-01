@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
-use crate::deterministic_rng::coord_rng;
 use crate::floodfill_cache::BuildingFootprintBitmap;
 use crate::world_editor::WorldEditor;
+use arnis_math::deterministic_rng::coord_rng;
 use rand::Rng;
 
 type Coord = (i32, i32, i32);
@@ -1270,8 +1270,8 @@ impl Tree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coordinate_system::cartesian::XZBBox;
-    use crate::coordinate_system::geographic::LLBBox;
+    use arnis_math::coordinate_system::cartesian::XZBBox;
+    use arnis_math::coordinate_system::geographic::LLBBox;
 
     // The apex cap must place even on a cell the ~4% organic gap skips.
     #[test]

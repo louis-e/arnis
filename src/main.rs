@@ -5,17 +5,13 @@ mod bedrock_block_map;
 mod bench;
 mod biome;
 mod block_definitions;
-mod bresenham;
 mod climate;
 mod clipping;
 mod colors;
-mod coordinate_system;
 mod data_processing;
-mod deterministic_rng;
 mod element_processing;
 mod elevation;
 mod elevation_data;
-mod floodfill;
 mod floodfill_cache;
 mod ground;
 mod ground_generation;
@@ -30,7 +26,6 @@ mod osm_parser;
 mod overture;
 #[cfg(feature = "gui")]
 mod progress;
-mod projection;
 mod retrieve_data;
 mod structures;
 #[cfg(feature = "gui")]
@@ -45,6 +40,10 @@ mod world_editor;
 mod world_utils;
 
 use args::Args;
+use arnis_math::coordinate_system::cartesian::XZPoint;
+use arnis_math::coordinate_system::geographic::LLPoint;
+use arnis_math::coordinate_system::transformation::CoordTransformer;
+use arnis_math::projection::{ProjectionKind, WebMercatorProjection};
 use clap::Parser;
 use colored::*;
 use std::path::PathBuf;
@@ -300,25 +299,19 @@ fn run_cli() {
     // Convert spawn lat/lng to Minecraft XZ coordinates if provided
     let spawn_point: Option<(i32, i32)> = match (args.spawn_lat, args.spawn_lng) {
         (Some(lat), Some(lng)) => {
-            use coordinate_system::geographic::LLPoint;
-            use coordinate_system::transformation::CoordTransformer;
-
             let llpoint = LLPoint::new(lat, lng).unwrap_or_else(|e| {
                 eprintln!("{} Invalid spawn coordinates: {}", "Error:".red().bold(), e);
                 std::process::exit(1);
             });
 
             let (transformer, pre_rot_bbox) = match args.projection {
-                projection::ProjectionKind::WebMercator => {
+                ProjectionKind::WebMercator => {
                     let origin_lat = (args.bbox.min().lat() + args.bbox.max().lat()) / 2.0;
                     let origin_lon = (args.bbox.min().lng() + args.bbox.max().lng()) / 2.0;
-                    let proj =
-                        projection::WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
+                    let proj = WebMercatorProjection::new(origin_lat, origin_lon, args.scale);
                     CoordTransformer::with_projection(&args.bbox, args.scale, &proj)
                 }
-                projection::ProjectionKind::Local => {
-                    CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale)
-                }
+                ProjectionKind::Local => CoordTransformer::llbbox_to_xzbbox(&args.bbox, args.scale),
             }
             .unwrap_or_else(|e| {
                 eprintln!(
@@ -347,7 +340,6 @@ fn run_cli() {
     // post-generation `set_spawn_in_level_dat` call — Bedrock derives spawn Y
     // independently inside `BedrockWriter::write_level_dat`.
     let spawn_y_for_java = spawn_point.map(|(sx, sz)| {
-        use coordinate_system::cartesian::XZPoint;
         let rel = XZPoint::new(sx - xzbbox.min_x(), sz - xzbbox.min_z());
         ground.level(rel) + 3
     });
