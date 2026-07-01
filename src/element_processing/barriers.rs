@@ -17,14 +17,17 @@ enum Axis {
 
 enum BarrierMaterial {
     Simple(BlockWithProperties),
-    Axial { x: BlockWithProperties, z: BlockWithProperties },
+    Axial {
+        x: BlockWithProperties,
+        z: BlockWithProperties,
+    },
 }
 
 impl BarrierMaterial {
     fn simple(block: Block) -> Self {
         Self::Simple(BlockWithProperties::simple(block))
     }
-    
+
     fn simple_with_properties(block: BlockWithProperties) -> Self {
         Self::Simple(block)
     }
@@ -104,12 +107,17 @@ fn chain_y_properties() -> Value {
 }
 
 fn get_setting_for_barrier(element: &ProcessedElement) -> Option<BarrierSetting> {
-    let iron_bars_x: BlockWithProperties = BlockWithProperties::new(IRON_BARS, Some(fence_axis_properties(Axis::X)));
-    let iron_bars_z: BlockWithProperties = BlockWithProperties::new(IRON_BARS, Some(fence_axis_properties(Axis::Z)));
-    let chain_y: BlockWithProperties = BlockWithProperties::new(CHAIN_Z, Some(chain_y_properties()));
+    let iron_bars_x: BlockWithProperties =
+        BlockWithProperties::new(IRON_BARS, Some(fence_axis_properties(Axis::X)));
+    let iron_bars_z: BlockWithProperties =
+        BlockWithProperties::new(IRON_BARS, Some(fence_axis_properties(Axis::Z)));
+    let chain_y: BlockWithProperties =
+        BlockWithProperties::new(CHAIN_Z, Some(chain_y_properties()));
 
-    let oak_fence_x: BlockWithProperties = BlockWithProperties::new(OAK_FENCE, Some(fence_axis_properties(Axis::X)));
-    let oak_fence_z: BlockWithProperties = BlockWithProperties::new(OAK_FENCE, Some(fence_axis_properties(Axis::Z)));
+    let oak_fence_x: BlockWithProperties =
+        BlockWithProperties::new(OAK_FENCE, Some(fence_axis_properties(Axis::X)));
+    let oak_fence_z: BlockWithProperties =
+        BlockWithProperties::new(OAK_FENCE, Some(fence_axis_properties(Axis::Z)));
 
     // Determine the base settinguration from tags.
     // https://wiki.openstreetmap.org/wiki/Key:barrier
@@ -128,39 +136,64 @@ fn get_setting_for_barrier(element: &ProcessedElement) -> Option<BarrierSetting>
                 Some("concrete") => Some(BarrierSetting::solid(ANDESITE_WALL, 2)),
                 Some("stone") => Some(BarrierSetting::solid(STONE_BRICK_WALL, 2)),
                 Some("glass") => Some(BarrierSetting::solid(GLASS, 1)),
-                Some("panel" | "slatted") => Some(BarrierSetting { // TODO: spruce trapdoors or shelves.
+                Some("panel" | "slatted") => Some(BarrierSetting {
+                    // TODO: spruce trapdoors or shelves.
                     style: BarrierStyle::Solid {
-                        material: BarrierMaterial::axial_with_properties(oak_fence_x.clone(), oak_fence_z.clone()),
+                        material: BarrierMaterial::axial_with_properties(
+                            oak_fence_x.clone(),
+                            oak_fence_z.clone(),
+                        ),
                         top_material: None,
                     },
-                    height: 2
+                    height: 2,
                 }),
-                Some("paling" | "pole" | "post_and_rail" | "roundpole" | "split_rail" | "wood") => Some(BarrierSetting {
-                    style: BarrierStyle::Solid {
-                        material: BarrierMaterial::axial_with_properties(oak_fence_x.clone(), oak_fence_z.clone()),
-                        top_material: None,
-                    },
-                    height: 1
-                }),
-                Some("bars" | "railing" | "krest" | "metal" | "chain_link" | "metal_bars" | "temporary" | "welded_diamond_mesh" | "wire") => Some(BarrierSetting {
+                Some("paling" | "pole" | "post_and_rail" | "roundpole" | "split_rail" | "wood") => {
+                    Some(BarrierSetting {
+                        style: BarrierStyle::Solid {
+                            material: BarrierMaterial::axial_with_properties(
+                                oak_fence_x.clone(),
+                                oak_fence_z.clone(),
+                            ),
+                            top_material: None,
+                        },
+                        height: 1,
+                    })
+                }
+                Some(
+                    "bars"
+                    | "railing"
+                    | "krest"
+                    | "metal"
+                    | "chain_link"
+                    | "metal_bars"
+                    | "temporary"
+                    | "welded_diamond_mesh"
+                    | "wire",
+                ) => Some(BarrierSetting {
                     style: BarrierStyle::Alternating {
                         post_material: BarrierMaterial::simple_with_properties(chain_y.clone()),
-                        link_material: BarrierMaterial::axial_with_properties(iron_bars_x.clone(), iron_bars_z.clone()),
+                        link_material: BarrierMaterial::axial_with_properties(
+                            iron_bars_x.clone(),
+                            iron_bars_z.clone(),
+                        ),
                         top_material: None,
                         spacing: 2,
                         use_post_on_edge: true,
                     },
-                    height: 2
+                    height: 2,
                 }),
                 Some("barbed_wire") => Some(BarrierSetting {
                     style: BarrierStyle::Alternating {
                         post_material: BarrierMaterial::simple(ANDESITE_WALL),
-                        link_material: BarrierMaterial::axial_with_properties(iron_bars_x.clone(), iron_bars_z.clone()),
+                        link_material: BarrierMaterial::axial_with_properties(
+                            iron_bars_x.clone(),
+                            iron_bars_z.clone(),
+                        ),
                         top_material: Some(BarrierMaterial::simple(COBWEB)),
                         spacing: 3,
                         use_post_on_edge: true,
                     },
-                    height: 2
+                    height: 2,
                 }),
                 Some("electric") => Some(BarrierSetting {
                     style: BarrierStyle::Alternating {
@@ -170,12 +203,12 @@ fn get_setting_for_barrier(element: &ProcessedElement) -> Option<BarrierSetting>
                         spacing: 2,
                         use_post_on_edge: true,
                     },
-                    height: 1
+                    height: 1,
                 }),
-                _ => None
+                _ => None,
             }
         }
-        _ => None
+        _ => None,
     };
 
     let Some(mut setting) = setting else {
@@ -184,7 +217,10 @@ fn get_setting_for_barrier(element: &ProcessedElement) -> Option<BarrierSetting>
 
     // Apply tag overrides for the material.
     if let Some(barrier_mat) = element.tags().get("material") {
-        if let BarrierStyle::Solid { ref mut material, .. } = setting.style {
+        if let BarrierStyle::Solid {
+            ref mut material, ..
+        } = setting.style
+        {
             match barrier_mat.as_str() {
                 "brick" => *material = BarrierMaterial::simple(BRICK),
                 "concrete" => *material = BarrierMaterial::simple(LIGHT_GRAY_CONCRETE),
@@ -193,7 +229,7 @@ fn get_setting_for_barrier(element: &ProcessedElement) -> Option<BarrierSetting>
             }
         }
     }
-    
+
     // Apply tag overrides for the height.
     if let Some(h_str) = element.tags().get("height") {
         if let Ok(h_f32) = h_str.parse::<f32>() {
@@ -248,7 +284,7 @@ pub fn generate_barrier_nodes(
         Some(deck_y) => editor.set_block_absolute(block, node.x, deck_y + dy, node.z, None, None),
         None => editor.set_block(block, node.x, dy, node.z, None, None),
     };
-    
+
     match node.tags.get("barrier").map(|s| s.as_str()) {
         Some("bollard") => place_block(editor, COBBLESTONE_WALL, 1),
         Some("stile" | "gate" | "swing_gate" | "lift_gate") => {
@@ -302,10 +338,10 @@ pub fn generate_barrier_nodes(
 }
 
 fn place_barrier(
-    setting: &BarrierSetting, 
-    editor: &mut WorldEditor, 
-    bx: i32, 
-    bz: i32, 
+    setting: &BarrierSetting,
+    editor: &mut WorldEditor,
+    bx: i32,
+    bz: i32,
     deck_y: Option<i32>,
     counter: usize,
     axis: Axis,
@@ -317,7 +353,10 @@ fn place_barrier(
     };
 
     match &setting.style {
-        BarrierStyle::Solid { material, top_material } => {
+        BarrierStyle::Solid {
+            material,
+            top_material,
+        } => {
             for y in 1..=setting.height {
                 place_block(editor, material.get(axis).clone(), y);
             }
@@ -327,11 +366,19 @@ fn place_barrier(
                 }
             }
         }
-        BarrierStyle::Alternating { post_material, link_material, top_material, spacing, use_post_on_edge } => {
-            let is_post = (edge && *use_post_on_edge) || counter % (spacing+1) == 0;
-            let material =
-                if is_post { post_material.get(axis).clone() }
-                else { link_material.get(axis).clone() };
+        BarrierStyle::Alternating {
+            post_material,
+            link_material,
+            top_material,
+            spacing,
+            use_post_on_edge,
+        } => {
+            let is_post = (edge && *use_post_on_edge) || counter % (spacing + 1) == 0;
+            let material = if is_post {
+                post_material.get(axis).clone()
+            } else {
+                link_material.get(axis).clone()
+            };
 
             for y in 1..=setting.height {
                 place_block(editor, material.clone(), y);

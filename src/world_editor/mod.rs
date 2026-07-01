@@ -838,7 +838,7 @@ impl<'a> WorldEditor<'a> {
             override_blacklist,
         );
     }
-    
+
     /// Sets a block with properties of the specified type at the given coordinates.
     ///
     /// Y value is interpreted as an offset from ground level.
