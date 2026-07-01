@@ -1,11 +1,11 @@
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::element_processing::bridge_styles::{
     decorate_bridge_above_deck, place_bridge_support_below_deck, resolve_bridge_style_with_outline,
     BridgeOutlineIndex, BridgePathSample, BridgeStyle,
 };
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 use std::collections::{HashMap, HashSet};
 
 /// Vertical offset in blocks from the terrain surface to the tunnel ceiling.

@@ -1,10 +1,10 @@
-use crate::bresenham::bresenham_line;
 use crate::element_processing::bridge_styles::{
     resolve_bridge_style_with_outline, BridgeOutlineIndex, BridgeStyle,
 };
 use crate::element_processing::highways::highway_block_range;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 use std::collections::{HashMap, HashSet};
 
 const LAYER_HEIGHT_STEP: i32 = 6;

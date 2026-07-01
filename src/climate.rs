@@ -1,11 +1,11 @@
 //! Climate axis: a bundled Koppen grid, sampled once per generation, drives arid/polar surfaces and biomes; temperate is unchanged.
 
 use crate::block_definitions::*;
-use crate::coordinate_system::geographic::LLBBox;
 use crate::land_cover::{
     coord_hash, LC_BARE, LC_CROPLAND, LC_GRASSLAND, LC_MOSS, LC_SHRUBLAND, LC_SNOW_ICE,
     LC_TREE_COVER,
 };
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 // Global Koppen-Geiger grid, 0.1 deg, 1 byte/cell (class 1..30, 0 = ocean/nodata).
 static KOPPEN: &[u8] = include_bytes!("../assets/climate/koppen_0p1.bin");
@@ -167,6 +167,7 @@ impl Climate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::str::FromStr;
 
     #[test]
     fn class_groups() {
@@ -200,7 +201,7 @@ mod tests {
 
     #[test]
     fn classify_real_locations() {
-        use crate::coordinate_system::geographic::LLBBox;
+        use arnis_math::coordinate_system::geographic::LLBBox;
         let cases = [
             ("22.9,12.9,23.1,13.1", Climate::HotDesert),   // Sahara
             ("48.1,8.1,48.3,8.3", Climate::Temperate),     // Black Forest

@@ -9,10 +9,10 @@
 //! HTTP Range requests (same pattern as land_cover.rs COG reading).
 
 use crate::clipping::clip_way_to_bbox;
-use crate::coordinate_system::geographic::{LLBBox, LLPoint};
-use crate::coordinate_system::transformation::CoordTransformer;
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::progress::emit_gui_progress_update;
+use arnis_math::coordinate_system::geographic::{LLBBox, LLPoint};
+use arnis_math::coordinate_system::transformation::CoordTransformer;
 use colored::Colorize;
 use parquet::file::metadata::ParquetMetaData;
 use parquet::file::reader::{ChunkReader, FileReader, Length};

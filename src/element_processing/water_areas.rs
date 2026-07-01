@@ -2,10 +2,10 @@ use crate::clipping::clip_water_ring_to_bbox;
 use crate::floodfill_cache::RoadMaskBitmap;
 use crate::water_depth::{carve_water_column, BigWaterField};
 use crate::{
-    coordinate_system::cartesian::{XZBBox, XZPoint},
     osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, ProcessedWay},
     world_editor::WorldEditor,
 };
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
 
 pub fn generate_water_area_from_way(
     editor: &mut WorldEditor,

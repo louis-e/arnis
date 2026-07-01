@@ -1,4 +1,4 @@
-use crate::coordinate_system::geographic::LLBBox;
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 /// Raw elevation grid in meters, before any Minecraft-specific processing.
 /// NaN values indicate missing data that will be filled by post-processing.

@@ -21,11 +21,11 @@ pub use common::{MIN_SECTION_Y, MIN_Y};
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
 
 use crate::block_definitions::*;
-use crate::coordinate_system::cartesian::{XZBBox, XZPoint};
-use crate::coordinate_system::geographic::LLBBox;
 use crate::ground::Ground;
 use crate::luanti_block_map::LuantiGame;
 use crate::progress::emit_gui_progress_update;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZPoint};
+use arnis_math::coordinate_system::geographic::LLBBox;
 use colored::Colorize;
 use fastnbt::{IntArray, Value};
 use fnv::{FnvHashMap, FnvHashSet};
@@ -304,7 +304,7 @@ impl<'a> WorldEditor<'a> {
     /// True if (x, z) is an ESA land-cover water cell (predicts water carved after trees).
     pub fn is_lc_water(&self, x: i32, z: i32) -> bool {
         self.ground.as_ref().is_some_and(|g| {
-            g.cover_class(crate::coordinate_system::cartesian::XZPoint::new(
+            g.cover_class(arnis_math::coordinate_system::cartesian::XZPoint::new(
                 x - self.ground_origin_x,
                 z - self.ground_origin_z,
             )) == crate::land_cover::LC_WATER
@@ -316,7 +316,7 @@ impl<'a> WorldEditor<'a> {
     /// interior of a large body, never a narrow river.
     pub fn water_distance(&self, x: i32, z: i32) -> u8 {
         self.ground.as_ref().map_or(0, |g| {
-            g.water_distance(crate::coordinate_system::cartesian::XZPoint::new(
+            g.water_distance(arnis_math::coordinate_system::cartesian::XZPoint::new(
                 x - self.ground_origin_x,
                 z - self.ground_origin_z,
             ))

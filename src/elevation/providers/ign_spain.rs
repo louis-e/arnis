@@ -30,8 +30,8 @@
 //! contributes the WCS URL template, the Spain coverage list and the
 //! `ElevationProvider` impl.
 
-use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 use super::fixed_tile::{
     fetch_fixed_tile_grid, mercator_x_to_lon, mercator_y_to_lat, FixedTileProvider,

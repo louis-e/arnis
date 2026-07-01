@@ -1,12 +1,12 @@
 use crate::args::Args;
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
-use crate::deterministic_rng::element_rng;
 use crate::element_processing::surfaces::get_blocks_for_surface;
 use crate::element_processing::tree::Tree;
 use crate::floodfill_cache::{BuildingFootprintBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedMemberRole, ProcessedRelation, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
+use arnis_math::deterministic_rng::element_rng;
 use rand::Rng;
 
 pub fn generate_leisure(

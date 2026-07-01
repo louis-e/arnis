@@ -1,8 +1,8 @@
-use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
 use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
+use arnis_math::coordinate_system::geographic::LLBBox;
 use rayon::prelude::*;
 use std::path::Path;
 

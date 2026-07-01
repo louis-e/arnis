@@ -3,10 +3,10 @@
 use crate::block_definitions::{
     Block, COAL_ORE, DIAMOND_ORE, GOLD_ORE, IRON_ORE, LAPIS_ORE, REDSTONE_ORE, STONE,
 };
-use crate::coordinate_system::cartesian::XZBBox;
-use crate::deterministic_rng::coord_rng;
 use crate::progress::emit_gui_progress_update;
 use crate::world_editor::{WorldEditor, MIN_Y};
+use arnis_math::coordinate_system::cartesian::XZBBox;
+use arnis_math::deterministic_rng::coord_rng;
 use colored::Colorize;
 use rand::Rng;
 

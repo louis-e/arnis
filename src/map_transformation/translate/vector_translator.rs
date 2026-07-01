@@ -1,8 +1,8 @@
 use super::translator::translate_by_vector;
 use super::Operator;
-use crate::coordinate_system::cartesian::{XZBBox, XZVector};
 use crate::ground::Ground;
 use crate::osm_parser::ProcessedElement;
+use arnis_math::coordinate_system::cartesian::{XZBBox, XZVector};
 use serde::Deserialize;
 
 /// Translate by directly specifying displacement on x, z directions

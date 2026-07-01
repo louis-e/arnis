@@ -3,12 +3,12 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 
-use crate::bresenham::bresenham_line;
-use crate::coordinate_system::cartesian::XZBBox;
 use crate::element_processing::bridges::is_bridge_way;
 use crate::element_processing::highways::highway_block_range;
 use crate::land_cover::{compute_water_distance, LandCoverData, LC_BUILT_UP, LC_WATER};
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
+use arnis_math::bresenham::bresenham_line;
+use arnis_math::coordinate_system::cartesian::XZBBox;
 
 const MAX_BFS_RINGS: usize = 64;
 const DEFAULT_RAIL_HALF_WIDTH: i32 = 1;

@@ -1,8 +1,8 @@
 //! Post-generation map preview rendering (runs in a background thread).
 
-use crate::coordinate_system::cartesian::XZBBox;
 use crate::map_renderer;
 use crate::progress::emit_map_preview_ready;
+use arnis_math::coordinate_system::cartesian::XZBBox;
 use std::path::PathBuf;
 
 /// Information needed to generate a map preview after world generation is complete

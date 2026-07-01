@@ -223,7 +223,7 @@ fn create_region_file(
 /// path and the background flush worker (hence free-standing, not `&self`).
 fn write_region_to_disk(
     world_dir: &std::path::Path,
-    llbbox: &crate::coordinate_system::geographic::LLBBox,
+    llbbox: &arnis_math::coordinate_system::geographic::LLBBox,
     ground: Option<&crate::ground::Ground>,
     bake_lighting: bool,
     region_x: i32,
@@ -292,7 +292,7 @@ fn write_region_to_disk(
 /// Mirrors the fields `write_region_to_disk` needs from a `WorldEditor`.
 pub(crate) struct RegionWriteCtx {
     world_dir: std::path::PathBuf,
-    llbbox: crate::coordinate_system::geographic::LLBBox,
+    llbbox: arnis_math::coordinate_system::geographic::LLBBox,
     ground: Option<std::sync::Arc<crate::ground::Ground>>,
     bake_lighting: bool,
 }
@@ -300,7 +300,7 @@ pub(crate) struct RegionWriteCtx {
 impl RegionWriteCtx {
     pub(crate) fn new(
         world_dir: std::path::PathBuf,
-        llbbox: crate::coordinate_system::geographic::LLBBox,
+        llbbox: arnis_math::coordinate_system::geographic::LLBBox,
         ground: Option<std::sync::Arc<crate::ground::Ground>>,
         bake_lighting: bool,
     ) -> Self {

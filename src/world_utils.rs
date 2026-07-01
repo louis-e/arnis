@@ -1,5 +1,5 @@
-use crate::coordinate_system::geographic::LLBBox;
 use crate::retrieve_data;
+use arnis_math::coordinate_system::geographic::LLBBox;
 use fastnbt::Value;
 use flate2::read::GzDecoder;
 use std::io::Read;

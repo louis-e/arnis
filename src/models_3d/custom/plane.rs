@@ -7,11 +7,11 @@
 //! polygons, not centerlines, so taxiway parking on straight runs is the next-best proxy.
 
 use crate::args::Args;
-use crate::deterministic_rng::element_rng;
 use crate::models_3d::custom::client;
 use crate::models_3d::voxelize::{glb_model_bbox, voxelize_glb, WorldTransform};
 use crate::osm_parser::ProcessedElement;
 use crate::world_editor::WorldEditor;
+use arnis_math::deterministic_rng::element_rng;
 use colored::Colorize;
 use rand::Rng;
 use std::collections::HashMap;

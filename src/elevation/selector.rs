@@ -1,10 +1,10 @@
-use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
 use crate::elevation::providers::ign_france::IgnFrance;
 use crate::elevation::providers::ign_spain::IgnSpain;
 use crate::elevation::providers::regional::JapanGsi;
 use crate::elevation::providers::usgs_3dep::Usgs3dep;
+use arnis_math::coordinate_system::geographic::LLBBox;
 
 /// Check if two EPSG:4326 bounding boxes overlap.
 pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {

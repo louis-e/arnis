@@ -1,12 +1,12 @@
 //! Land-cover-driven biome assignment for Java Anvil chunks (1.18+).
 
 use crate::climate::Climate;
-use crate::coordinate_system::cartesian::XZPoint;
 use crate::ground::Ground;
 use crate::land_cover::{
     LC_BARE, LC_BUILT_UP, LC_CROPLAND, LC_GRASSLAND, LC_MANGROVES, LC_MOSS, LC_SHRUBLAND,
     LC_SNOW_ICE, LC_TREE_COVER, LC_WATER, LC_WETLAND,
 };
+use arnis_math::coordinate_system::cartesian::XZPoint;
 use fastnbt::{LongArray, Value};
 use std::collections::HashMap;
 

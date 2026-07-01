@@ -1,7 +1,7 @@
 use crate::block_definitions::*;
-use crate::bresenham::bresenham_line;
 use crate::osm_parser::{ProcessedElement, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use arnis_math::bresenham::bresenham_line;
 use std::collections::HashMap;
 
 /// Visual style for a bridge. Beam is the legacy/default rendering.

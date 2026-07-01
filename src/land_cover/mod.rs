@@ -12,9 +12,10 @@
 pub mod bridge_repair;
 pub mod osm_water_override;
 
+use crate::progress::emit_gui_progress_update;
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
-use crate::{coordinate_system::geographic::LLBBox, progress::emit_gui_progress_update};
+use arnis_math::coordinate_system::geographic::LLBBox;
 use flate2::read::DeflateDecoder;
 use rayon::prelude::*;
 use std::collections::VecDeque;
