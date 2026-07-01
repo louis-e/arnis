@@ -263,12 +263,10 @@ pub fn generate_barriers(
                 Axis::Z
             };
 
-            let mut counter = 0;
-            for (bx, _, bz) in bresenham_points {
+            for (counter, (bx, _, bz)) in bresenham_points.into_iter().enumerate() {
                 let edge = (bx, bz) == (prev.x, prev.z) || (bx, bz) == (cur.x, cur.z);
                 let deck_y = bridge_surface.nearby_deck_y(bx, bz, BRIDGE_BARRIER_NEARBY_RADIUS);
                 place_barrier(&setting, editor, bx, bz, deck_y, counter, axis, edge);
-                counter += 1;
             }
         }
     }
@@ -337,6 +335,7 @@ pub fn generate_barrier_nodes(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn place_barrier(
     setting: &BarrierSetting,
     editor: &mut WorldEditor,
@@ -373,7 +372,7 @@ fn place_barrier(
             spacing,
             use_post_on_edge,
         } => {
-            let is_post = (edge && *use_post_on_edge) || counter % (spacing + 1) == 0;
+            let is_post = (edge && *use_post_on_edge) || counter.is_multiple_of(spacing + 1);
             let material = if is_post {
                 post_material.get(axis).clone()
             } else {
