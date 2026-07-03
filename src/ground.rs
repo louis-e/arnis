@@ -36,6 +36,9 @@ pub struct Ground {
     ground_level: i32,
     elevation_data: Option<ElevationData>,
     land_cover: Option<LandCoverData>,
+    /// World size in blocks, used to map coords onto the land-cover grid when elevation data is absent (flat mode).
+    world_width: usize,
+    world_height: usize,
     /// When set, coordinates outside the rotated original bbox are skipped.
     rotation_mask: Option<RotationMask>,
     /// Minecraft Y at/above which terrain is snow-capped; `i32::MAX` disables it.
@@ -80,9 +83,31 @@ impl Ground {
             ground_level,
             elevation_data: None,
             land_cover: None,
+            world_width: 0,
+            world_height: 0,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
+        }
+    }
+
+    /// Flat ground (no elevation) that still carries land cover, so water bodies and land-cover surfaces render at the flat surface level.
+    pub fn new_flat_with_land_cover(bbox: &LLBBox, scale: f64, ground_level: i32) -> Self {
+        let (world_w, world_h, grid_w, grid_h) = compute_grid_dims(bbox, scale);
+        let land_cover = land_cover::fetch_land_cover_data(bbox, grid_w, grid_h);
+        if land_cover.is_none() {
+            eprintln!("Land cover fetch failed; generating flat ground without it.");
+        }
+        Self {
+            elevation_enabled: false,
+            ground_level,
+            elevation_data: None,
+            land_cover,
+            world_width: world_w,
+            world_height: world_h,
+            rotation_mask: None,
+            snow_threshold_y: i32::MAX,
+            climate: crate::climate::Climate::classify(bbox),
         }
     }
 
@@ -144,6 +169,8 @@ impl Ground {
                     ground_level: water_floor,
                     elevation_data: Some(elevation_data),
                     land_cover,
+                    world_width: world_w,
+                    world_height: world_h,
                     rotation_mask: None,
                     snow_threshold_y,
                     climate: crate::climate::Climate::classify(bbox),
@@ -167,6 +194,8 @@ impl Ground {
                     ground_level,
                     elevation_data: None,
                     land_cover: None,
+                    world_width: 0,
+                    world_height: 0,
                     rotation_mask: None,
                     snow_threshold_y: i32::MAX,
                     climate: crate::climate::Climate::classify(bbox),
@@ -265,13 +294,23 @@ impl Ground {
         Some((x0, z0, x1, z1))
     }
 
+    /// World size in blocks for land-cover mapping: from elevation data when present, else the stored flat-mode dims.
+    #[inline(always)]
+    fn world_dims(&self) -> (usize, usize) {
+        match &self.elevation_data {
+            Some(d) => (d.world_width, d.world_height),
+            None => (self.world_width, self.world_height),
+        }
+    }
+
     /// Returns the ESA WorldCover land cover class at the given coordinates.
     /// Returns 0 if land cover data is not available.
     #[inline(always)]
     pub fn cover_class(&self, coord: XZPoint) -> u8 {
-        if let (Some(ref lc), Some(ref data)) = (&self.land_cover, &self.elevation_data) {
-            let x_ratio = (coord.x as f64 / (data.world_width - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (data.world_height - 1).max(1) as f64).clamp(0.0, 1.0);
+        if let Some(ref lc) = self.land_cover {
+            let (world_w, world_h) = self.world_dims();
+            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
             let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
             let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
             lc.grid[z][x]
@@ -284,9 +323,10 @@ impl Ground {
     /// 0 = non-water, 1 = shore, 2+ = progressively deeper water.
     #[inline(always)]
     pub fn water_distance(&self, coord: XZPoint) -> u8 {
-        if let (Some(ref lc), Some(ref data)) = (&self.land_cover, &self.elevation_data) {
-            let x_ratio = (coord.x as f64 / (data.world_width - 1).max(1) as f64).clamp(0.0, 1.0);
-            let z_ratio = (coord.z as f64 / (data.world_height - 1).max(1) as f64).clamp(0.0, 1.0);
+        if let Some(ref lc) = self.land_cover {
+            let (world_w, world_h) = self.world_dims();
+            let x_ratio = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0);
+            let z_ratio = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0);
             let x = ((x_ratio * (lc.width - 1) as f64).round() as usize).min(lc.width - 1);
             let z = ((z_ratio * (lc.height - 1) as f64).round() as usize).min(lc.height - 1);
             lc.water_distance[z][x]
@@ -304,12 +344,13 @@ impl Ground {
     /// allowing noise-based thresholding to create organic shorelines.
     #[inline(always)]
     pub fn water_blend(&self, coord: XZPoint) -> f64 {
-        if let (Some(ref lc), Some(ref data)) = (&self.land_cover, &self.elevation_data) {
+        if let Some(ref lc) = self.land_cover {
+            let (world_w, world_h) = self.world_dims();
             // Continuous grid coordinates (no rounding — that's the key difference
             // from cover_class which uses .round())
-            let fx = (coord.x as f64 / (data.world_width - 1).max(1) as f64).clamp(0.0, 1.0)
+            let fx = (coord.x as f64 / (world_w - 1).max(1) as f64).clamp(0.0, 1.0)
                 * (lc.width - 1) as f64;
-            let fz = (coord.z as f64 / (data.world_height - 1).max(1) as f64).clamp(0.0, 1.0)
+            let fz = (coord.z as f64 / (world_h - 1).max(1) as f64).clamp(0.0, 1.0)
                 * (lc.height - 1) as f64;
 
             let x0 = (fx.floor() as usize).min(lc.width - 1);
@@ -526,6 +567,12 @@ impl Ground {
         }
     }
 
+    /// Update the stored world size after a rotation resizes the bbox, so flat-mode land-cover lookups stay aligned.
+    pub fn set_world_dims(&mut self, world_width: usize, world_height: usize) {
+        self.world_width = world_width;
+        self.world_height = world_height;
+    }
+
     /// Store rotation parameters so we can mask out-of-bounds blocks later.
     pub fn set_rotation_mask(&mut self, mask: RotationMask) {
         self.rotation_mask = Some(mask);
@@ -666,6 +713,10 @@ pub fn generate_ground_data(args: &Args) -> Ground {
         }
         return ground;
     }
+    if args.land_cover {
+        println!("{} Fetching land cover...", "[3/7]".bold());
+        return Ground::new_flat_with_land_cover(&args.bbox, args.scale, args.ground_level);
+    }
     Ground::new_flat(args.ground_level)
 }
 
@@ -701,6 +752,8 @@ mod tests {
                 blocks_per_meter: 1.0,
             }),
             land_cover: None,
+            world_width: w,
+            world_height: h,
             rotation_mask: None,
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,

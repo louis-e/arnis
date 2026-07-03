@@ -216,8 +216,9 @@ fn rotate_ground_data(
     sin_r: f64,
     cos_r: f64,
 ) {
-    // Check elevation_enabled BEFORE cloning to avoid unnecessary allocation
-    if !ground.elevation_enabled {
+    // Nothing to rotate without elevation or land cover; bail before cloning.
+    // Flat land-cover mode still needs its grid rotated so the sea stays aligned.
+    if !ground.elevation_enabled && !ground.has_land_cover() {
         return;
     }
 
@@ -338,6 +339,9 @@ fn rotate_ground_data(
 
     // Update ground with rotated elevation (grid may be smaller than world)
     ground.set_elevation_data(new_heights, new_w, new_h, new_world_w, new_world_h);
+
+    // Keep the flat-mode world dims in sync; set_elevation_data is a no-op without elevation data.
+    ground.set_world_dims(new_world_w, new_world_h);
 
     // Update land cover with rotated data
     if let (Some(cover_grid), Some(water_dist)) = (new_cover, new_water) {

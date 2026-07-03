@@ -214,9 +214,8 @@ pub fn generate_landuse(
                 }
             }
             "farmland" if !editor.check_for_block(x, 0, z, Some(&[WATER])) => {
-                // Check if the current block is not water or another undesired block
-                if x % 9 == 0 && z % 9 == 0 {
-                    // Place water in dot pattern
+                // Irrigation dots, but only where boxed in so they can't flow downhill and wash out crops.
+                if x % 9 == 0 && z % 9 == 0 && editor.water_source_is_enclosed(x, z) {
                     editor.set_block(WATER, x, 0, z, Some(&[FARMLAND]), None);
                 } else if rng.random_range(0..76) == 0 {
                     let special_choice: i32 = rng.random_range(1..=10);
