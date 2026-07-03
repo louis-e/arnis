@@ -237,7 +237,7 @@ fn rotate_ground_data(
 
     // For each cell in the new grid, inverse-rotate to find the source cell
     let neg_sin_r = -sin_r; // Inverse rotation
-    // Flat land-cover mode has no elevation, so skip the height grids to avoid a large wasted allocation.
+                            // Flat land-cover mode has no elevation, so skip the height grids to avoid a large wasted allocation.
     let elevation_enabled = ground.elevation_enabled;
     let cap = if elevation_enabled { new_h } else { 0 };
     let mut new_heights: Vec<Vec<f64>> = Vec::with_capacity(cap);
@@ -426,7 +426,10 @@ mod tests {
                 }
             }
         }
-        assert!(saw_water, "rotated flat land cover should still contain water");
+        assert!(
+            saw_water,
+            "rotated flat land cover should still contain water"
+        );
     }
 
     #[test]

@@ -55,6 +55,19 @@ Climate-based biome and surface selection uses the Koppen-Geiger climate classif
 The bundled region tree pack used by the optional "Schematic Trees" feature was created by <a href="https://www.planetminecraft.com/member/paleozoey/" style="color: inherit;" target="_blank">paleozoey</a>. Arnis bundles and places them; the artistry is theirs.
 <br><br>
 
+<b>Schematic Structures:</b><br>
+Bundled structures placed by Arnis; the artistry is the authors':<br>
+Boat by <a href="https://www.planetminecraft.com/member/_malta_/" style="color: inherit;" target="_blank">_malta_</a><br>
+Fountains by <a href="https://www.planetminecraft.com/member/jamesbuildsmc/" style="color: inherit;" target="_blank">jamesbuildsmc</a>, <a href="https://www.planetminecraft.com/member/the_only_masked/" style="color: inherit;" target="_blank">the_only_masked</a>, <a href="https://www.planetminecraft.com/member/lorenz185/" style="color: inherit;" target="_blank">lorenz185</a><br>
+Playground by <a href="https://www.planetminecraft.com/project/medieval-style-playground/" style="color: inherit;" target="_blank">Medieval Style Playground</a><br>
+Crane by <a href="https://www.planetminecraft.com/member/fedotir/" style="color: inherit;" target="_blank">fedotir</a><br>
+Lighthouse by <a href="https://www.minecraft-schematics.com/user/arkyouz/" style="color: inherit;" target="_blank">arkyouz</a><br>
+Tractor by <a href="https://www.planetminecraft.com/member/captain_jek/" style="color: inherit;" target="_blank">captain_jek</a><br>
+Excavator by <a href="https://www.planetminecraft.com/member/yobi_wan/" style="color: inherit;" target="_blank">yobi_wan</a><br>
+Tombstones by <a href="https://www.planetminecraft.com/member/bendeeee/" style="color: inherit;" target="_blank">bendeeee</a><br>
+Wind turbine by <a href="https://www.planetminecraft.com/member/zaevyy/" style="color: inherit;" target="_blank">zaevyy</a>
+<br><br>
+
 <b>bedrock-rs:</b><br>
 Bedrock Edition world format support uses the <a href="https://github.com/bedrock-crustaceans/bedrock-rs" style="color: inherit;" target="_blank">bedrock-rs</a> library, licensed under the Apache License 2.0.
 <br><br>
