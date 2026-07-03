@@ -111,6 +111,25 @@ impl Ground {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_flat_land_cover_test(
+        land_cover: LandCoverData,
+        world_width: usize,
+        world_height: usize,
+    ) -> Self {
+        Self {
+            elevation_enabled: false,
+            ground_level: 0,
+            elevation_data: None,
+            land_cover: Some(land_cover),
+            world_width,
+            world_height,
+            rotation_mask: None,
+            snow_threshold_y: i32::MAX,
+            climate: crate::climate::Climate::Temperate,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_enabled(
         bbox: &LLBBox,
@@ -296,7 +315,7 @@ impl Ground {
 
     /// World size in blocks for land-cover mapping: from elevation data when present, else the stored flat-mode dims.
     #[inline(always)]
-    fn world_dims(&self) -> (usize, usize) {
+    pub(crate) fn world_dims(&self) -> (usize, usize) {
         match &self.elevation_data {
             Some(d) => (d.world_width, d.world_height),
             None => (self.world_width, self.world_height),
@@ -758,6 +777,27 @@ mod tests {
             snow_threshold_y: i32::MAX,
             climate: crate::climate::Climate::Temperate,
         }
+    }
+
+    // Flat mode (no elevation) still maps land-cover lookups via the stored world dims, with edge clamping.
+    #[test]
+    fn flat_land_cover_maps_and_clamps() {
+        use crate::land_cover::{LandCoverData, LC_WATER};
+        let lc = LandCoverData {
+            grid: vec![vec![LC_WATER, 10], vec![10, 10]],
+            water_distance: vec![vec![1, 0], vec![0, 0]],
+            water_blend_grid: vec![vec![1.0, 0.0], vec![0.0, 0.0]],
+            width: 2,
+            height: 2,
+        };
+        // world 4x4 over a 2x2 grid: x<=1 samples column 0, x>=2 samples column 1.
+        let ground = Ground::new_flat_land_cover_test(lc, 4, 4);
+        assert_eq!(ground.cover_class(XZPoint::new(0, 0)), LC_WATER);
+        assert_eq!(ground.cover_class(XZPoint::new(3, 0)), 10);
+        assert_eq!(ground.water_distance(XZPoint::new(0, 0)), 1);
+        // Out-of-range coords clamp to the last grid cell instead of panicking.
+        assert_eq!(ground.cover_class(XZPoint::new(1000, 1000)), 10);
+        assert_eq!(ground.water_distance(XZPoint::new(1000, 1000)), 0);
     }
 
     // Water snaps to the local floor over small DEM steps, but not across a real cliff.
