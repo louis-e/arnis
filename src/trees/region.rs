@@ -401,12 +401,13 @@ impl RegionLibrary {
     }
 
     fn base_spacing(&self) -> i32 {
+        // Wider schem-pack canopies need more spacing to avoid overcrowded forests.
         if self.scale < 0.3 {
-            6
+            7
         } else if self.scale < 0.7 {
-            5
+            6
         } else {
-            4
+            5
         }
     }
 
