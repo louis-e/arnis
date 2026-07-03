@@ -940,7 +940,11 @@ pub fn generate_ground_region(
                                             None,
                                         ) =>
                                     {
-                                        if x % 9 == 0 && z % 9 == 0 {
+                                        // Irrigation dots, but only where boxed in so they can't flow downhill and wash out crops.
+                                        if x % 9 == 0
+                                            && z % 9 == 0
+                                            && editor.water_source_is_enclosed(x, z)
+                                        {
                                             editor.set_block_absolute(
                                                 WATER,
                                                 x,

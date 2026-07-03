@@ -443,6 +443,15 @@ impl<'a> WorldEditor<'a> {
         }
     }
 
+    /// True if no orthogonal neighbour sits lower, so a surface water source here stays boxed in and can't flow downhill.
+    pub fn water_source_is_enclosed(&self, x: i32, z: i32) -> bool {
+        let base = self.get_ground_level(x, z);
+        self.get_ground_level(x + 1, z) >= base
+            && self.get_ground_level(x - 1, z) >= base
+            && self.get_ground_level(x, z + 1) >= base
+            && self.get_ground_level(x, z - 1) >= base
+    }
+
     /// Raw terrain elevation at world (x, z) via the ground origin (correct in tile editors, unlike get_min_coords); None without elevation data.
     pub fn terrain_level(&self, x: i32, z: i32) -> Option<i32> {
         self.ground.as_ref().map(|g| {

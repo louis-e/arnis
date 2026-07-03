@@ -216,8 +216,9 @@ fn rotate_ground_data(
     sin_r: f64,
     cos_r: f64,
 ) {
-    // Check elevation_enabled BEFORE cloning to avoid unnecessary allocation
-    if !ground.elevation_enabled {
+    // Nothing to rotate without elevation or land cover; bail before cloning.
+    // Flat land-cover mode still needs its grid rotated so the sea stays aligned.
+    if !ground.elevation_enabled && !ground.has_land_cover() {
         return;
     }
 
@@ -236,8 +237,11 @@ fn rotate_ground_data(
 
     // For each cell in the new grid, inverse-rotate to find the source cell
     let neg_sin_r = -sin_r; // Inverse rotation
-    let mut new_heights: Vec<Vec<f64>> = Vec::with_capacity(new_h);
-    let mut has_data: Vec<Vec<bool>> = Vec::with_capacity(new_h);
+    // Flat land-cover mode has no elevation, so skip the height grids to avoid a large wasted allocation.
+    let elevation_enabled = ground.elevation_enabled;
+    let cap = if elevation_enabled { new_h } else { 0 };
+    let mut new_heights: Vec<Vec<f64>> = Vec::with_capacity(cap);
+    let mut has_data: Vec<Vec<bool>> = Vec::with_capacity(cap);
 
     // Also rotate land-cover grids if present
     let has_land_cover = original_ground.has_land_cover();
@@ -245,8 +249,8 @@ fn rotate_ground_data(
     let mut new_water: Option<Vec<Vec<u8>>> = has_land_cover.then(|| Vec::with_capacity(new_h));
 
     for z_idx in 0..new_h {
-        let mut height_row = Vec::with_capacity(new_w);
-        let mut data_row = Vec::with_capacity(new_w);
+        let mut height_row: Option<Vec<f64>> = elevation_enabled.then(|| Vec::with_capacity(new_w));
+        let mut data_row: Option<Vec<bool>> = elevation_enabled.then(|| Vec::with_capacity(new_w));
         let mut cover_row: Option<Vec<u8>> = has_land_cover.then(|| Vec::with_capacity(new_w));
         let mut water_row: Option<Vec<u8>> = has_land_cover.then(|| Vec::with_capacity(new_w));
 
@@ -275,8 +279,12 @@ fn rotate_ground_data(
                 && (rel_z as usize) < orig_height;
 
             let coord = XZPoint::new(rel_x, rel_z);
-            height_row.push(original_ground.level(coord) as f64);
-            data_row.push(in_original);
+            if let Some(ref mut hr) = height_row {
+                hr.push(original_ground.level(coord) as f64);
+            }
+            if let Some(ref mut dr) = data_row {
+                dr.push(in_original);
+            }
 
             if let Some(ref mut cr) = cover_row {
                 cr.push(original_ground.cover_class(coord));
@@ -285,8 +293,12 @@ fn rotate_ground_data(
                 wr.push(original_ground.water_distance(coord));
             }
         }
-        new_heights.push(height_row);
-        has_data.push(data_row);
+        if let Some(hr) = height_row {
+            new_heights.push(hr);
+        }
+        if let Some(dr) = data_row {
+            has_data.push(dr);
+        }
         if let Some(ref mut cg) = new_cover {
             cg.push(cover_row.unwrap());
         }
@@ -304,8 +316,9 @@ fn rotate_ground_data(
     // rounded rim at every rotated coastline. The `new_cover` grid was
     // populated in the main loop above with the rotated land-cover
     // classification, so we can check water-adjacency per cell.
-    const SMOOTH_ITERATIONS: usize = 3;
-    for _ in 0..SMOOTH_ITERATIONS {
+    // Smoothing only shapes elevation; skip it in flat land-cover mode where the height grid is empty.
+    let smooth_iterations = if elevation_enabled { 3 } else { 0 };
+    for _ in 0..smooth_iterations {
         let prev = new_heights.clone();
         for z_idx in 1..new_h.saturating_sub(1) {
             for x_idx in 1..new_w.saturating_sub(1) {
@@ -339,6 +352,9 @@ fn rotate_ground_data(
     // Update ground with rotated elevation (grid may be smaller than world)
     ground.set_elevation_data(new_heights, new_w, new_h, new_world_w, new_world_h);
 
+    // Keep the flat-mode world dims in sync; set_elevation_data is a no-op without elevation data.
+    ground.set_world_dims(new_world_w, new_world_h);
+
     // Update land cover with rotated data
     if let (Some(cover_grid), Some(water_dist)) = (new_cover, new_water) {
         ground.set_land_cover_data(cover_grid, water_dist, new_w, new_h);
@@ -360,6 +376,57 @@ mod tests {
 
         assert_eq!(xzbbox.min_x(), original_bbox.min_x());
         assert_eq!(xzbbox.max_x(), original_bbox.max_x());
+    }
+
+    // Flat mode with land cover but no elevation must still rotate its grid and resync world dims.
+    #[test]
+    fn flat_land_cover_rotation_rotates_grid_and_syncs_dims() {
+        use crate::land_cover::{LandCoverData, LC_WATER};
+
+        let mut xzbbox = XZBBox::rect_from_xz_lengths(6.0, 2.0).unwrap();
+        let w = (xzbbox.max_x() - xzbbox.min_x() + 1) as usize;
+        let h = (xzbbox.max_z() - xzbbox.min_z() + 1) as usize;
+        // West half water, east half land, with a 1:1 grid-to-world mapping.
+        let row = |water: u8, land: u8| {
+            (0..w)
+                .map(|x| if x < w / 2 { water } else { land })
+                .collect::<Vec<u8>>()
+        };
+        let lc = LandCoverData {
+            grid: (0..h).map(|_| row(LC_WATER, 10)).collect(),
+            water_distance: (0..h).map(|_| row(1, 0)).collect(),
+            water_blend_grid: (0..h)
+                .map(|_| {
+                    (0..w)
+                        .map(|x| if x < w / 2 { 1.0f32 } else { 0.0 })
+                        .collect()
+                })
+                .collect(),
+            width: w,
+            height: h,
+        };
+        let mut ground = Ground::new_flat_land_cover_test(lc, w, h);
+        let mut elements = Vec::new();
+
+        rotate_world(90.0, &mut elements, &mut xzbbox, &mut ground).unwrap();
+
+        // set_world_dims kept the stored dims aligned with the enlarged rotated bbox.
+        let (ww, wh) = ground.world_dims();
+        assert_eq!(ww, (xzbbox.max_x() - xzbbox.min_x() + 1) as usize);
+        assert_eq!(wh, (xzbbox.max_z() - xzbbox.min_z() + 1) as usize);
+
+        // The grid was actually rotated (not skipped by the early return): water survives.
+        let mut saw_water = false;
+        for x in xzbbox.min_x()..=xzbbox.max_x() {
+            for z in xzbbox.min_z()..=xzbbox.max_z() {
+                if ground.cover_class(XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z()))
+                    == LC_WATER
+                {
+                    saw_water = true;
+                }
+            }
+        }
+        assert!(saw_water, "rotated flat land cover should still contain water");
     }
 
     #[test]
