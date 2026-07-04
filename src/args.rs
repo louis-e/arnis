@@ -75,7 +75,8 @@ pub struct Args {
     #[arg(skip = true)]
     pub land_cover: bool,
 
-    /// Disable fetching 3D models from external sources (3DMR + Wikimedia).
+    /// Disable both external 3D models (3DMR + Wikimedia) and bundled schematic
+    /// props (cars, boats, cranes, ...) with a single toggle.
     #[arg(long = "no-3d", default_value_t = true, action = ArgAction::SetFalse)]
     pub use_3d: bool,
 

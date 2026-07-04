@@ -165,6 +165,9 @@ pub struct WorldEditor<'a> {
     luanti_game: LuantiGame,
     /// Bake per-chunk lighting (Java) for off-disk LOD renderers; off by default.
     bake_lighting: bool,
+    /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
+    /// Driven by the same toggle as external 3D models (`args.use_3d`).
+    place_schematics: bool,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -195,6 +198,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
+            place_schematics: true,
         }
     }
 
@@ -231,6 +235,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: -62,
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
+            place_schematics: true,
         }
     }
 
@@ -267,6 +272,7 @@ impl<'a> WorldEditor<'a> {
             luanti_ground_level: ground_level,
             luanti_game: game,
             bake_lighting: false,
+            place_schematics: true,
         }
     }
 
@@ -326,6 +332,16 @@ impl<'a> WorldEditor<'a> {
     /// Enables baking per-chunk lighting into Java chunks.
     pub fn set_bake_lighting(&mut self, enabled: bool) {
         self.bake_lighting = enabled;
+    }
+
+    /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
+    pub fn set_place_schematics(&mut self, enabled: bool) {
+        self.place_schematics = enabled;
+    }
+
+    /// True if bundled schematic props should be placed (see `set_place_schematics`).
+    pub fn place_schematics(&self) -> bool {
+        self.place_schematics
     }
 
     /// Returns the current world format

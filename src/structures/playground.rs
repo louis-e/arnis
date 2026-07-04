@@ -34,6 +34,9 @@ fn variants() -> &'static [Option<StructureSchematic>; 3] {
 
 /// Stamp random playgrounds into a leisure area, each on a sand pad at a random rotation; anchors sampled from cells for tile-seam determinism.
 pub fn scatter_playgrounds(editor: &mut WorldEditor, cells: &[(i32, i32)]) {
+    if !editor.place_schematics() {
+        return;
+    }
     let n = cells.len();
     if n < MIN_CELLS {
         return;

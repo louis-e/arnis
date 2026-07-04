@@ -324,6 +324,7 @@ pub fn generate_world_with_options(
         )
     };
     editor.set_bake_lighting(args.bake_lighting);
+    editor.set_place_schematics(args.use_3d);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
     let ground = Arc::new(ground);
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
@@ -520,6 +521,7 @@ pub fn generate_world_with_options(
                     let mut tile_editor = WorldEditor::new(PathBuf::new(), &tile_xzbbox, llbbox);
                     tile_editor.set_ground(Arc::clone(&ground));
                     tile_editor.set_ground_origin(xzbbox.min_x(), xzbbox.min_z());
+                    tile_editor.set_place_schematics(args.use_3d);
                     if let Some(ref tp) = tree_pack {
                         tile_editor.set_tree_pack(Arc::clone(tp));
                     }
