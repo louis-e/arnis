@@ -333,7 +333,7 @@ pub fn generate_world_with_options(
     editor.set_projection_info(&args.projection.to_string(), args.scale);
 
     // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
-    map_preview::clear_preview_result();
+    let preview_epoch = map_preview::begin_preview_epoch();
     let preview = (args.map_preview && world_format != WorldFormat::LuantiWorld)
         .then(|| Arc::new(PreviewAccumulator::new(&xzbbox)));
     if let Some(p) = &preview {
@@ -893,13 +893,20 @@ pub fn generate_world_with_options(
             min_mc_z: xzbbox.min_z(),
             max_mc_z: xzbbox.max_z(),
         };
-        let finalize = move || match p.finalize(&png_path) {
-            Ok(path) => {
-                println!("Map preview saved to: {}", path.display());
-                map_preview::record_preview_result(result);
-                emit_map_preview_ready();
+        let finalize = move || {
+            // Skip if a newer generation already started.
+            if !map_preview::epoch_is_current(preview_epoch) {
+                return;
             }
-            Err(e) => eprintln!("Warning: Failed to generate map preview: {e}"),
+            match p.finalize(&png_path) {
+                Ok(path) => {
+                    if map_preview::record_preview_result(preview_epoch, result) {
+                        println!("Map preview saved to: {}", path.display());
+                        emit_map_preview_ready();
+                    }
+                }
+                Err(e) => eprintln!("Warning: Failed to generate map preview: {e}"),
+            }
         };
         if crate::progress::is_running_with_gui() {
             std::thread::spawn(finalize);

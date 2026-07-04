@@ -18,19 +18,34 @@ pub struct PreviewResult {
     pub max_mc_z: i32,
 }
 
-static LAST_PREVIEW: Mutex<Option<PreviewResult>> = Mutex::new(None);
+// (epoch, result); the epoch discards stale results from a previous run's finalize thread.
+static PREVIEW_STATE: Mutex<(u64, Option<PreviewResult>)> = Mutex::new((0, None));
 
-pub fn record_preview_result(result: PreviewResult) {
-    *LAST_PREVIEW.lock().unwrap() = Some(result);
+/// Invalidates any previous or in-flight preview and returns the new epoch.
+pub fn begin_preview_epoch() -> u64 {
+    let mut state = PREVIEW_STATE.lock().unwrap();
+    state.0 += 1;
+    state.1 = None;
+    state.0
 }
 
-pub fn clear_preview_result() {
-    *LAST_PREVIEW.lock().unwrap() = None;
+pub fn epoch_is_current(epoch: u64) -> bool {
+    PREVIEW_STATE.lock().unwrap().0 == epoch
+}
+
+/// Stores the result unless a newer generation started meanwhile.
+pub fn record_preview_result(epoch: u64, result: PreviewResult) -> bool {
+    let mut state = PREVIEW_STATE.lock().unwrap();
+    if state.0 != epoch {
+        return false;
+    }
+    state.1 = Some(result);
+    true
 }
 
 #[cfg(feature = "gui")]
 pub fn last_preview_result() -> Option<PreviewResult> {
-    LAST_PREVIEW.lock().unwrap().clone()
+    PREVIEW_STATE.lock().unwrap().1.clone()
 }
 
 /// Java: inside the world dir; Bedrock: "<name> map.png" next to the .mcworld.

@@ -730,6 +730,11 @@ fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, St
         }
     }
 
+    // Empty for Bedrock; don't fall back to reading files from the CWD.
+    if world_path.is_empty() {
+        return Ok(None);
+    }
+
     let world_dir = PathBuf::from(&world_path);
     let map_path = world_dir.join("arnis_world_map.png");
     let metadata_path = world_dir.join("metadata.json");
