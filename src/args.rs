@@ -40,6 +40,18 @@ pub struct Args {
     #[arg(long, default_value_t = 1.0)]
     pub scale: f64,
 
+    /// Percentage of CPU cores to use for world generation (10-100).
+    /// Higher values spawn more worker threads: faster generation, but the
+    /// system stays less responsive. Overridden by the RAYON_NUM_THREADS env var.
+    #[arg(long, default_value_t = 90)]
+    pub cpu_percent: u8,
+
+    /// Overlap each tile batch's merge with the next batch's placement so worker
+    /// cores aren't idle during merges (faster on large areas; output unchanged).
+    /// Also enabled by the ARNIS_PIPELINE_MERGE env var.
+    #[arg(long, default_value_t = false)]
+    pub pipeline_merge: bool,
+
     /// Projection mode for coordinate mapping
     /// local: each generation starts at Minecraft (0,0) (default)
     /// web_mercator: global projection for multi-generation worlds
@@ -194,6 +206,11 @@ pub fn validate_args(args: &Args) -> Result<(), String> {
     // Validate rotation angle range (also rejects NaN and infinity)
     if !args.rotation.is_finite() || args.rotation < -90.0 || args.rotation > 90.0 {
         return Err("Rotation angle must be between -90 and 90 degrees.".to_string());
+    }
+
+    // Validate CPU usage percentage
+    if args.cpu_percent < 10 || args.cpu_percent > 100 {
+        return Err("CPU usage percent (--cpu-percent) must be between 10 and 100.".to_string());
     }
 
     Ok(())

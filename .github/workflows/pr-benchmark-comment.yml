@@ -1,0 +1,38 @@
+name: PR Benchmark Comment
+
+on:
+  workflow_run:
+    workflows: ["PR Benchmark"]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download benchmark result
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-result
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read PR number and body
+        id: data
+        run: |
+          echo "pr=$(cat pr-number.txt)" >> "$GITHUB_OUTPUT"
+          {
+            echo "body<<EOF"
+            cat benchmark-comment.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment on PR
+        uses: thollander/actions-comment-pull-request@v3
+        with:
+          pr-number: ${{ steps.data.outputs.pr }}
+          message: ${{ steps.data.outputs.body }}
+          comment-tag: benchmark-report
