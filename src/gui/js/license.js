@@ -63,9 +63,11 @@ Playground by <a href="https://www.planetminecraft.com/project/medieval-style-pl
 Crane by <a href="https://www.planetminecraft.com/member/fedotir/" style="color: inherit;" target="_blank">fedotir</a><br>
 Lighthouse by <a href="https://www.minecraft-schematics.com/user/arkyouz/" style="color: inherit;" target="_blank">arkyouz</a><br>
 Tractor by <a href="https://www.planetminecraft.com/member/captain_jek/" style="color: inherit;" target="_blank">captain_jek</a><br>
-Excavator by <a href="https://www.planetminecraft.com/member/yobi_wan/" style="color: inherit;" target="_blank">yobi_wan</a><br>
+Excavator and cars by <a href="https://www.planetminecraft.com/member/yobi_wan/" style="color: inherit;" target="_blank">yobi_wan</a><br>
+Starship by <a href="https://www.planetminecraft.com/member/skyblocksquad/" style="color: inherit;" target="_blank">skyblocksquad</a><br>
 Tombstones by <a href="https://www.planetminecraft.com/member/bendeeee/" style="color: inherit;" target="_blank">bendeeee</a><br>
-Wind turbine by <a href="https://www.planetminecraft.com/member/zaevyy/" style="color: inherit;" target="_blank">zaevyy</a>
+Wind turbine by <a href="https://www.planetminecraft.com/member/zaevyy/" style="color: inherit;" target="_blank">zaevyy</a><br>
+Helicopter by the Arnis project
 <br><br>
 
 <b>bedrock-rs:</b><br>

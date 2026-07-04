@@ -204,6 +204,28 @@ pub fn assign_elements_to_tiles(
     for (elem_idx, element) in elements.iter().enumerate() {
         match element {
             ProcessedElement::Node(node) => {
+                // Helipad node discs must be authoritative in every tile they touch.
+                if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
+                    let radius_m = crate::element_processing::highways::HELIPAD_NODE_RADIUS_M;
+                    let reach = ((radius_m * scale).round() as i32).max(4) + 12;
+                    let aabb = (
+                        node.x - reach,
+                        node.x + reach,
+                        node.z - reach,
+                        node.z + reach,
+                    );
+                    let (rx0, rx1, rz0, rz1) = region_range(aabb, 0);
+                    for rx in rx0..=rx1 {
+                        for rz in rz0..=rz1 {
+                            if let Some(&tile_idx) = tile_grid.get(&(rx, rz)) {
+                                if aabb_intersects(aabb, &tiles[tile_idx]) {
+                                    tile_elements[tile_idx].push(elem_idx);
+                                }
+                            }
+                        }
+                    }
+                    continue;
+                }
                 // A node belongs to the strict tile whose region contains it; the owning
                 // tile's editor halo handles canopy overflow. (Strict + non-overlapping, so
                 // this matches scanning for the first containing tile, in O(1).)

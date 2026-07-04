@@ -323,7 +323,7 @@ pub fn generate_amenities(
                     if amenity_type == "parking" {
                         // Create defined parking spaces with realistic layout
                         let space_width = 4; // Width of each parking space
-                        let space_length = 6; // Length of each parking space
+                        let space_length = 8; // Length of each parking space, fits the bundled cars
                         let lane_width = 5; // Width of driving lanes
 
                         // Calculate which "zone" this coordinate falls into
@@ -395,6 +395,42 @@ pub fn generate_amenities(
                             }
                             editor.set_block(SEA_LANTERN, x, 6, z, None, None);
                             editor.set_block(SMOOTH_STONE_SLAB, x, 7, z, None, None);
+                        }
+                    }
+                }
+
+                // Park cars on some fully-inside spaces, leaving plenty empty.
+                if amenity_type == "parking" {
+                    let space_width = 4;
+                    let space_length = 8;
+                    let period_z = space_length + 5;
+                    // Sorted copy + binary search keeps this light on huge lots.
+                    let mut lot: Vec<(i32, i32)> = flood_area.iter().copied().collect();
+                    lot.sort_unstable();
+                    let in_lot = |x: i32, z: i32| lot.binary_search(&(x, z)).is_ok();
+                    if let (Some(&min_x), Some(&max_x), Some(&min_z), Some(&max_z)) = (
+                        flood_area.iter().map(|(x, _)| x).min(),
+                        flood_area.iter().map(|(x, _)| x).max(),
+                        flood_area.iter().map(|(_, z)| z).min(),
+                        flood_area.iter().map(|(_, z)| z).max(),
+                    ) {
+                        // Truncating division to match the striping grid above.
+                        for zx in (min_x / space_width)..=(max_x / space_width) {
+                            for zz in (min_z / period_z)..=(max_z / period_z) {
+                                let x0 = zx * space_width;
+                                let z0 = zz * period_z;
+                                let inside = (0..=space_width).all(|dx| {
+                                    (0..=space_length).all(|dz| in_lot(x0 + dx, z0 + dz))
+                                });
+                                if inside {
+                                    crate::structures::car::maybe_place_car(
+                                        editor,
+                                        x0 + 2,
+                                        z0 + 4,
+                                        0,
+                                    );
+                                }
+                            }
                         }
                     }
                 }

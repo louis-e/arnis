@@ -10,8 +10,9 @@ use crate::element_processing::get_nearest_non_road_block;
 use crate::element_processing::surfaces::{
     get_blocks_for_surface, get_blocks_for_surface_way, semirandom_surface,
 };
+use crate::floodfill::flood_fill_area;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache, RoadMaskBitmap};
-use crate::osm_parser::{ProcessedElement, ProcessedWay};
+use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
 use std::collections::HashMap;
 
@@ -1488,10 +1489,20 @@ fn parse_width_tag_m(tags: &HashMap<String, String>) -> Option<f64> {
 /// white centerline + white edge stripes, taxiways a lighter surface with a yellow centerline.
 /// No threshold "piano keys" — OSM splits runways into segments, so a per-way renderer can't tell
 /// a real end from an internal split.
-pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Args) {
+pub fn generate_aeroway(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    args: &Args,
+    building_footprints: &CoordinateBitmap,
+) {
     let aeroway = way.tags.get("aeroway").map(String::as_str);
     let is_runway = aeroway == Some("runway");
     let is_taxiway = aeroway == Some("taxiway");
+
+    if aeroway == Some("helipad") {
+        generate_helipad_way(editor, way, args, building_footprints);
+        return;
+    }
 
     let base_block = if is_runway {
         GRAY_CONCRETE
@@ -1567,6 +1578,130 @@ pub fn generate_aeroway(editor: &mut WorldEditor, way: &ProcessedWay, args: &Arg
             editor.set_block(YELLOW_CONCRETE, cp.x, 0, cp.z, over_base, None);
         }
     }
+}
+
+/// Default helipad radius (metres) for node helipads without geometry.
+pub(crate) const HELIPAD_NODE_RADIUS_M: f64 = 8.0;
+/// Ring diameter as a fraction of the pad's equivalent-area radius.
+const HELIPAD_RING_FRACTION: f64 = 0.85;
+
+/// Helipad surface: light-gray pad, white ring + "H", sometimes a parked helicopter.
+fn paint_helipad(
+    editor: &mut WorldEditor,
+    cells: &[(i32, i32)],
+    cx: i32,
+    cz: i32,
+    building_footprints: &CoordinateBitmap,
+) {
+    if cells.is_empty() {
+        return;
+    }
+    // Mostly-rooftop pads are left to the building module.
+    let covered = cells
+        .iter()
+        .filter(|&&(x, z)| building_footprints.contains(x, z))
+        .count();
+    if covered * 2 > cells.len() {
+        return;
+    }
+    let r = ((cells.len() as f64) / std::f64::consts::PI).sqrt();
+    let ring_r = (r * HELIPAD_RING_FRACTION).max(2.5);
+    let bar_half_h = ((r * 0.45) as i32).clamp(2, 6);
+    let bar_half_w = ((r * 0.30) as i32).clamp(1, 4);
+
+    for &(x, z) in cells {
+        if building_footprints.contains(x, z) {
+            continue;
+        }
+        editor.set_block(LIGHT_GRAY_CONCRETE, x, 0, z, None, None);
+    }
+
+    let over_base = [LIGHT_GRAY_CONCRETE];
+    for &(x, z) in cells {
+        if building_footprints.contains(x, z) {
+            continue;
+        }
+        let (dx, dz) = (x - cx, z - cz);
+        let dist = ((dx * dx + dz * dz) as f64).sqrt();
+        let on_ring = dist >= ring_r - 1.2 && dist < ring_r;
+        let on_h = (dx.abs() == bar_half_w && dz.abs() <= bar_half_h)
+            || (dz == 0 && dx.abs() <= bar_half_w);
+        if on_ring || on_h {
+            editor.set_block(WHITE_CONCRETE, x, 0, z, Some(&over_base), None);
+        }
+    }
+
+    // Only pads with room for the skids get a helicopter.
+    if r >= 5.0 && !building_footprints.contains(cx, cz) {
+        crate::structures::helicopter::maybe_place_helicopter(editor, cx, cz);
+    }
+}
+
+/// Renders an `aeroway=helipad` way as a filled pad with markings.
+fn generate_helipad_way(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    args: &Args,
+    building_footprints: &CoordinateBitmap,
+) {
+    let outline: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
+    let cells = flood_fill_area(&outline, None);
+    if cells.is_empty() {
+        // Open or degenerate geometry: fall back to a disc at the first node.
+        if let Some(n) = way.nodes.first() {
+            paint_helipad_disc(editor, n.x, n.z, args, building_footprints);
+        }
+        return;
+    }
+    let (mut sx, mut sz) = (0i64, 0i64);
+    for &(x, z) in &cells {
+        sx += x as i64;
+        sz += z as i64;
+    }
+    let cx = (sx / cells.len() as i64) as i32;
+    let cz = (sz / cells.len() as i64) as i32;
+    // Concave pads can put the mean outside the polygon; snap to the nearest cell.
+    let (cx, cz) = if cells.contains(&(cx, cz)) {
+        (cx, cz)
+    } else {
+        *cells
+            .iter()
+            .min_by_key(|&&(x, z)| {
+                let (dx, dz) = ((x - cx) as i64, (z - cz) as i64);
+                dx * dx + dz * dz
+            })
+            .unwrap()
+    };
+    paint_helipad(editor, &cells, cx, cz, building_footprints);
+}
+
+/// Renders an `aeroway=helipad` node as a default-size disc pad.
+pub fn generate_helipad_node(
+    editor: &mut WorldEditor,
+    node: &ProcessedNode,
+    args: &Args,
+    building_footprints: &CoordinateBitmap,
+) {
+    paint_helipad_disc(editor, node.x, node.z, args, building_footprints);
+}
+
+fn paint_helipad_disc(
+    editor: &mut WorldEditor,
+    cx: i32,
+    cz: i32,
+    args: &Args,
+    building_footprints: &CoordinateBitmap,
+) {
+    let radius = ((HELIPAD_NODE_RADIUS_M * args.scale).round() as i32).max(4);
+    let mut cells = Vec::new();
+    for dx in -radius..=radius {
+        for dz in -radius..=radius {
+            if dx * dx + dz * dz <= radius * radius {
+                cells.push((cx + dx, cz + dz));
+            }
+        }
+    }
+    paint_helipad(editor, &cells, cx, cz, building_footprints);
 }
 
 /// Returns the half-width (block_range) for a highway type.
@@ -1888,7 +2023,12 @@ mod tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
         let mut editor = test_editor(&xzbbox);
 
-        generate_aeroway(&mut editor, &straight_aeroway("runway"), &args);
+        generate_aeroway(
+            &mut editor,
+            &straight_aeroway("runway"),
+            &args,
+            &CoordinateBitmap::new_empty(),
+        );
 
         // Centerline at the way start (s=0, dash on) is white; a dash-gap cell stays gray.
         assert!(
@@ -1921,7 +2061,12 @@ mod tests {
         let xzbbox = XZBBox::rect_from_xz_lengths(400.0, 100.0).unwrap();
         let mut editor = test_editor(&xzbbox);
 
-        generate_aeroway(&mut editor, &straight_aeroway("taxiway"), &args);
+        generate_aeroway(
+            &mut editor,
+            &straight_aeroway("taxiway"),
+            &args,
+            &CoordinateBitmap::new_empty(),
+        );
 
         assert!(
             editor.check_for_block(10, 0, 50, Some(&[YELLOW_CONCRETE])),
@@ -1946,7 +2091,7 @@ mod tests {
 
         let mut way = straight_aeroway("runway");
         way.tags.insert("width".to_string(), "60".to_string());
-        generate_aeroway(&mut editor, &way, &args);
+        generate_aeroway(&mut editor, &way, &args, &CoordinateBitmap::new_empty());
 
         // 60 m wide ⇒ half-width 30: asphalt reaches z=70 and the edge stripe sits at z=50+29.
         assert!(
@@ -1986,8 +2131,13 @@ mod tests {
             ],
             tags,
         };
-        generate_aeroway(&mut editor, &taxiway, &args);
-        generate_aeroway(&mut editor, &straight_aeroway("runway"), &args);
+        generate_aeroway(&mut editor, &taxiway, &args, &CoordinateBitmap::new_empty());
+        generate_aeroway(
+            &mut editor,
+            &straight_aeroway("runway"),
+            &args,
+            &CoordinateBitmap::new_empty(),
+        );
 
         // The crossing cell belongs to the runway, not the taxiway.
         assert!(

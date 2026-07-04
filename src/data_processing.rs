@@ -59,6 +59,20 @@ fn process_element(
 ) {
     match element {
         ProcessedElement::Way(way) => {
+            // Fenced solar farms carry barrier=fence, which would shadow the generator below.
+            if way.tags.contains_key("barrier")
+                && !way.tags.contains_key("building")
+                && way.tags.get("power").map(String::as_str) == Some("generator")
+            {
+                power::generate_power(
+                    editor,
+                    element,
+                    building_footprints,
+                    flood_fill_cache,
+                    args.timeout.as_ref(),
+                );
+            }
+
             if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                 buildings::generate_buildings(
                     editor,
@@ -130,7 +144,7 @@ fn process_element(
             } else if way.tags.contains_key("roller_coaster") {
                 railways::generate_roller_coaster(editor, way);
             } else if way.tags.contains_key("aeroway") || way.tags.contains_key("area:aeroway") {
-                highways::generate_aeroway(editor, way, args);
+                highways::generate_aeroway(editor, way, args, building_footprints);
             } else if way.tags.get("service").map(String::as_str) == Some("siding") {
                 highways::generate_siding(editor, way, bridge_surface);
             } else if way.tags.get("tomb").map(String::as_str) == Some("pyramid") {
@@ -138,7 +152,13 @@ fn process_element(
             } else if way.tags.contains_key("man_made") {
                 man_made::generate_man_made(editor, element, args);
             } else if way.tags.contains_key("power") {
-                power::generate_power(editor, element);
+                power::generate_power(
+                    editor,
+                    element,
+                    building_footprints,
+                    flood_fill_cache,
+                    args.timeout.as_ref(),
+                );
             } else if way.tags.contains_key("place") {
                 landuse::generate_place(editor, way, args, flood_fill_cache);
             }
@@ -169,6 +189,8 @@ fn process_element(
                     bridge_structures,
                     bridge_surface,
                 );
+            } else if node.tags.get("aeroway").map(String::as_str) == Some("helipad") {
+                highways::generate_helipad_node(editor, node, args, building_footprints);
             } else if node.tags.contains_key("tourism") {
                 tourisms::generate_tourisms(editor, node);
             } else if node.tags.contains_key("man_made") {

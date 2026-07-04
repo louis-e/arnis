@@ -800,6 +800,7 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
 
         // Potted plants (Bedrock uses "flower_pot" for all variants;
         // the contained plant is a block entity, not a block state)
+        "flower_pot" => BedrockBlock::simple("flower_pot"),
         "potted_poppy" => BedrockBlock::simple("flower_pot"),
         "potted_red_tulip" => BedrockBlock::simple("flower_pot"),
         "potted_dandelion" => BedrockBlock::simple("flower_pot"),

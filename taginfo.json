@@ -1107,7 +1107,7 @@
         },
         {
             "key": "aeroway",
-            "description": "Used to generate airport infrastructure including runways and taxiways."
+            "description": "Used to generate airport infrastructure including runways, taxiways and helipads (with occasional parked helicopters)."
         },
         {
             "key": "area:aeroway",
