@@ -7,11 +7,19 @@
 
 use crate::block_definitions::*;
 use crate::bresenham::bresenham_line;
+use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::osm_parser::{ProcessedElement, ProcessedNode, ProcessedWay};
 use crate::world_editor::WorldEditor;
+use std::time::Duration;
 
 /// Generate power infrastructure from way elements (power lines)
-pub fn generate_power(editor: &mut WorldEditor, element: &ProcessedElement) {
+pub fn generate_power(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    building_footprints: &CoordinateBitmap,
+    flood_fill_cache: &FloodFillCache,
+    timeout: Option<&Duration>,
+) {
     // Skip if 'layer' or 'level' is negative in the tags
     if let Some(layer) = element.tags().get("layer") {
         if layer.parse::<i32>().unwrap_or(0) < 0 {
@@ -52,27 +60,95 @@ pub fn generate_power(editor: &mut WorldEditor, element: &ProcessedElement) {
             }
             "tower" => generate_power_tower(editor, element),
             "pole" => generate_power_pole(editor, element),
-            "generator" => generate_generator(editor, element),
+            "generator" => generate_generator(
+                editor,
+                element,
+                building_footprints,
+                flood_fill_cache,
+                timeout,
+            ),
             _ => {}
         }
     }
 }
 
-/// Place a wind turbine for generator:source=wind. Ways/areas use the centroid.
-fn generate_generator(editor: &mut WorldEditor, element: &ProcessedElement) {
-    if element.tags().get("generator:source").map(|s| s.as_str()) != Some("wind") {
+/// Place a wind turbine or solar farm depending on generator:source.
+fn generate_generator(
+    editor: &mut WorldEditor,
+    element: &ProcessedElement,
+    building_footprints: &CoordinateBitmap,
+    flood_fill_cache: &FloodFillCache,
+    timeout: Option<&Duration>,
+) {
+    match element.tags().get("generator:source").map(|s| s.as_str()) {
+        Some("wind") => {
+            let (mut sx, mut sz, mut n) = (0i64, 0i64, 0i64);
+            for node in element.nodes() {
+                sx += node.x as i64;
+                sz += node.z as i64;
+                n += 1;
+            }
+            if n == 0 {
+                return;
+            }
+            crate::structures::windturbine::place(editor, (sx / n) as i32, (sz / n) as i32);
+        }
+        Some("solar") => {
+            if let ProcessedElement::Way(way) = element {
+                generate_solar_farm(editor, way, building_footprints, flood_fill_cache, timeout);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Minimum filled cells before a solar way is rendered as a panel farm.
+const SOLAR_FARM_MIN_CELLS: usize = 60;
+
+/// Solar farm: panel rows along the longer axis with gravel paths; rooftop cells are skipped.
+fn generate_solar_farm(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    building_footprints: &CoordinateBitmap,
+    flood_fill_cache: &FloodFillCache,
+    timeout: Option<&Duration>,
+) {
+    // Roof-mounted arrays are the building module's job.
+    if way.tags.get("location").map(String::as_str) == Some("roof") {
         return;
     }
-    let (mut sx, mut sz, mut n) = (0i64, 0i64, 0i64);
-    for node in element.nodes() {
-        sx += node.x as i64;
-        sz += node.z as i64;
-        n += 1;
-    }
-    if n == 0 {
+    let cells = flood_fill_cache.get_or_compute(way, timeout);
+    if cells.len() < SOLAR_FARM_MIN_CELLS {
         return;
     }
-    crate::structures::windturbine::place(editor, (sx / n) as i32, (sz / n) as i32);
+
+    let (min_x, max_x) = cells
+        .iter()
+        .fold((i32::MAX, i32::MIN), |(lo, hi), &(x, _)| {
+            (lo.min(x), hi.max(x))
+        });
+    let (min_z, max_z) = cells
+        .iter()
+        .fold((i32::MAX, i32::MIN), |(lo, hi), &(_, z)| {
+            (lo.min(z), hi.max(z))
+        });
+    let rows_along_x = (max_x - min_x) >= (max_z - min_z);
+
+    for &(x, z) in cells.iter() {
+        if building_footprints.contains(x, z) || editor.is_lc_water(x, z) {
+            continue;
+        }
+        let lane = if rows_along_x {
+            (z - min_z).rem_euclid(4)
+        } else {
+            (x - min_x).rem_euclid(4)
+        };
+        if lane < 3 {
+            editor.set_block(DAYLIGHT_DETECTOR, x, 1, z, None, None);
+        } else {
+            editor.set_block(GRAVEL, x, 0, z, None, None);
+        }
+    }
 }
 
 /// Generate power infrastructure from node elements

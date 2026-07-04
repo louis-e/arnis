@@ -11,7 +11,7 @@ use crate::osm_parser::{ProcessedMemberRole, ProcessedNode, ProcessedRelation, P
 use crate::world_editor::WorldEditor;
 use fastnbt::Value;
 use rand::Rng;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
 /// Lifecycle / damage state derived from OSM tags.
@@ -1065,6 +1065,134 @@ struct BuildingConfig {
     has_lobby_base: bool,
     condition: BuildingCondition,
     element_id: u64,
+    /// Per-building offset of the window rhythm so facades don't align citywide.
+    window_phase: i32,
+    /// Darker plinth block for the bottom wall rows, None to skip.
+    base_course_block: Option<Block>,
+    /// Wider, taller glass on the ground floor of commercial buildings.
+    has_storefront: bool,
+    /// Per-building window dressing style, derived from hand-built reference frames.
+    window_frame: Option<WindowFrameStyle>,
+}
+
+/// Window frame styles distilled from the reference schematics, one per building.
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum WindowFrameStyle {
+    SpruceCottage,
+    DarkTimber,
+    StoneOrnate,
+    Blackstone,
+    RusticMossy,
+    TerracottaCopper,
+    QuartzModern,
+}
+
+impl WindowFrameStyle {
+    /// Post block at flanking columns, None when the style uses shutters there.
+    fn post_block(self) -> Option<Block> {
+        match self {
+            Self::SpruceCottage | Self::TerracottaCopper => None,
+            Self::DarkTimber => Some(DARK_OAK_PLANKS),
+            Self::StoneOrnate => Some(POLISHED_DIORITE),
+            Self::Blackstone => Some(POLISHED_BLACKSTONE),
+            Self::RusticMossy => Some(MOSSY_COBBLESTONE),
+            Self::QuartzModern => Some(QUARTZ_BLOCK),
+        }
+    }
+
+    /// Trapdoor shutters at flanking columns.
+    fn shutter_block(self) -> Option<Block> {
+        match self {
+            Self::SpruceCottage => Some(SPRUCE_TRAPDOOR),
+            Self::TerracottaCopper => Some(JUNGLE_TRAPDOOR),
+            _ => None,
+        }
+    }
+
+    /// Material for the upside-down stair band over each window.
+    fn band_material(self) -> Block {
+        match self {
+            Self::SpruceCottage => SPRUCE_PLANKS,
+            Self::DarkTimber => DARK_OAK_PLANKS,
+            Self::StoneOrnate => STONE_BRICKS,
+            Self::Blackstone => BLACKSTONE,
+            Self::RusticMossy => COBBLESTONE,
+            Self::TerracottaCopper => WAXED_COPPER_BLOCK,
+            Self::QuartzModern => QUARTZ_BLOCK,
+        }
+    }
+
+    fn has_lanterns(self) -> bool {
+        matches!(self, Self::SpruceCottage | Self::TerracottaCopper)
+    }
+
+    /// Trapdoor material for shelves, canopies and aprons.
+    fn detail_trapdoor(self) -> Block {
+        match self {
+            Self::DarkTimber => DARK_OAK_TRAPDOOR,
+            Self::Blackstone => WARPED_TRAPDOOR,
+            Self::QuartzModern => IRON_TRAPDOOR,
+            Self::TerracottaCopper => JUNGLE_TRAPDOOR,
+            _ => SPRUCE_TRAPDOOR,
+        }
+    }
+
+    /// Lantern hung under the band beside a window top.
+    fn hanging_lantern(self) -> Option<Block> {
+        match self {
+            Self::SpruceCottage | Self::TerracottaCopper | Self::StoneOrnate => Some(LANTERN),
+            Self::Blackstone => Some(SOUL_LANTERN),
+            _ => None,
+        }
+    }
+
+    /// Open fence gate as a French-balcony rail in front of the window.
+    fn balconette_gate(self) -> Option<Block> {
+        match self {
+            Self::SpruceCottage => Some(SPRUCE_FENCE_GATE),
+            Self::DarkTimber => Some(DARK_OAK_FENCE_GATE),
+            Self::TerracottaCopper => Some(OAK_FENCE_GATE),
+            _ => None,
+        }
+    }
+
+    /// Button studs on the band front.
+    fn stud_button(self) -> Option<Block> {
+        match self {
+            Self::RusticMossy | Self::StoneOrnate => Some(STONE_BUTTON),
+            Self::Blackstone => Some(POLISHED_BLACKSTONE_BUTTON),
+            _ => None,
+        }
+    }
+
+    fn has_azalea_box(self) -> bool {
+        matches!(
+            self,
+            Self::SpruceCottage | Self::TerracottaCopper | Self::RusticMossy
+        )
+    }
+}
+
+/// Picks a per-building frame style suited to the category; 55% of eligible buildings.
+fn pick_window_frame(category: BuildingCategory, element_id: u64) -> Option<WindowFrameStyle> {
+    use WindowFrameStyle::*;
+    let pool: &[WindowFrameStyle] = match category {
+        BuildingCategory::House | BuildingCategory::Residential => &[
+            SpruceCottage,
+            DarkTimber,
+            StoneOrnate,
+            RusticMossy,
+            TerracottaCopper,
+        ],
+        BuildingCategory::Commercial | BuildingCategory::Hotel => {
+            &[QuartzModern, Blackstone, StoneOrnate]
+        }
+        BuildingCategory::Historic => &[RusticMossy, StoneOrnate, Blackstone],
+        _ => return None,
+    };
+    let mut rng = element_rng(element_id ^ 0xF7A3_E001_57BD_2210);
+    rng.random_bool(0.55)
+        .then(|| pool[rng.random_range(0..pool.len())])
 }
 
 impl BuildingConfig {
@@ -1074,6 +1202,34 @@ impl BuildingConfig {
     #[inline]
     fn floor_row(&self, h: i32) -> i32 {
         ((h - self.start_y_offset - 2) % 4 + 4) % 4
+    }
+
+    /// Position within the 6-block window cycle (0-2 = window strip, 3-5 = wall pier).
+    #[inline]
+    fn window_col(&self, bx: i32, bz: i32) -> i32 {
+        (bx + bz + self.window_phase).rem_euclid(6)
+    }
+
+    /// Number of darker plinth rows at the wall base.
+    #[inline]
+    fn base_course_rows(&self) -> i32 {
+        if self.building_height >= 12 {
+            2
+        } else {
+            1
+        }
+    }
+}
+
+// Never render as buildings: Eiffel Tower, London Eye, Utah Capitol, Starbase Pad 2 trench + mount ring.
+const SKIP_WAY_IDS: &[u64] = &[5013364, 204068874, 32920861, 1352374225, 1486731987];
+
+/// Darker stone family plinth matching the wall material tone.
+fn base_course_for_wall(wall: Block) -> Block {
+    match wall {
+        OAK_PLANKS | SPRUCE_PLANKS | OAK_LOG | SPRUCE_LOG => COBBLESTONE,
+        ANDESITE | GRAY_CONCRETE | LIGHT_GRAY_CONCRETE => POLISHED_ANDESITE,
+        _ => STONE_BRICKS,
     }
 }
 
@@ -2004,7 +2160,7 @@ fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &Buildin
         }
     }
 
-    // 10% stays single, 90% picks uniformly from {primary} ∪ substitutes.
+    // 10% stays single; the rest keeps a clean primary field with ~20% same-family texture.
     let mut variety_mode_rng = element_rng(config.element_id ^ 0xBABE_F1A1_2222_8888);
     if !variety_mode_rng.random_bool(0.90) {
         return chosen;
@@ -2015,12 +2171,10 @@ fn apply_block_variety(chosen: Block, bx: i32, h: i32, bz: i32, config: &Buildin
         bz,
         config.element_id ^ 0x5050_3030_AAFF_BBCC ^ ((h as u64) << 12),
     );
-    let total = pool.len() + 1;
-    let pick = pos_rng.random_range(0..total);
-    if pick == 0 {
-        chosen
+    if pos_rng.random_range(0u32..100) < 20 {
+        pool[pos_rng.random_range(0..pool.len())]
     } else {
-        pool[pick - 1]
+        chosen
     }
 }
 
@@ -2278,6 +2432,13 @@ fn determine_wall_block_at_position_pristine(
     bz: i32,
     config: &BuildingConfig,
 ) -> Block {
+    // Darker plinth rows ground the building visually.
+    if let Some(base) = config.base_course_block {
+        if h <= config.start_y_offset + config.base_course_rows() {
+            return base;
+        }
+    }
+
     let floor_row = config.floor_row(h);
 
     // If windows are disabled, always use wall block (with possible accent)
@@ -2310,8 +2471,9 @@ fn determine_wall_block_at_position_pristine(
     } else if config.category == BuildingCategory::Tower {
         // Tower pattern: glass windows every 4 blocks along the wall,
         // only in the middle two rows of each 4-row floor
-        let is_slit =
-            above_floor && (floor_row == 1 || floor_row == 2) && ((bx + bz) % 4 + 4) % 4 == 1;
+        let is_slit = above_floor
+            && (floor_row == 1 || floor_row == 2)
+            && (bx + bz + config.window_phase).rem_euclid(4) == 1;
 
         if is_slit {
             config.window_block
@@ -2325,23 +2487,33 @@ fn determine_wall_block_at_position_pristine(
         }
     } else if config.is_tall_building && config.use_vertical_windows {
         // Tall building pattern, vertical window strips alternating with wall columns
-        if above_floor && (bx + bz) % 2 == 0 {
+        if above_floor && (bx + bz + config.window_phase).rem_euclid(2) == 0 {
             config.window_block
         } else {
             config.wall_block
         }
     } else {
         // Regular building pattern
-        let is_window_position = above_floor && floor_row != 0 && (bx + bz).rem_euclid(6) < 3;
+        let window_col = config.window_col(bx, bz);
+
+        // Storefront glazing: wider full-glass bays across the whole ground floor.
+        if config.has_storefront
+            && above_floor
+            && h <= config.start_y_offset + 5
+            && floor_row != 0
+            && window_col < 4
+        {
+            return GLASS;
+        }
+
+        let is_window_position = above_floor && floor_row != 0 && window_col < 3;
 
         if is_window_position {
             config.window_block
         } else {
             let use_accent_line = config.use_accent_lines && above_floor && floor_row == 0;
-            let use_vertical_accent_here = config.use_vertical_accent
-                && above_floor
-                && floor_row == 0
-                && (bx + bz).rem_euclid(6) < 3;
+            let use_vertical_accent_here =
+                config.use_vertical_accent && above_floor && floor_row == 0 && window_col < 3;
 
             if use_accent_line || use_vertical_accent_here {
                 config.accent_block
@@ -2395,6 +2567,24 @@ fn make_open_trapdoor(base: Block, facing: &str) -> BlockWithProperties {
 fn make_top_slab(base: Block) -> BlockWithProperties {
     let mut map: HashMap<String, Value> = HashMap::new();
     map.insert("type".to_string(), Value::String("top".to_string()));
+    BlockWithProperties::new(base, Some(Value::Compound(map)))
+}
+
+/// Closed trapdoor pinned flat against the wall face, top or bottom half.
+fn make_closed_trapdoor(base: Block, facing: &str, half: &str) -> BlockWithProperties {
+    let mut map: HashMap<String, Value> = HashMap::new();
+    map.insert("facing".to_string(), Value::String(facing.to_string()));
+    map.insert("open".to_string(), Value::String("false".to_string()));
+    map.insert("half".to_string(), Value::String(half.to_string()));
+    BlockWithProperties::new(base, Some(Value::Compound(map)))
+}
+
+/// Block with arbitrary string properties, for one-off decorated placements.
+fn make_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
+    let mut map: HashMap<String, Value> = HashMap::new();
+    for (k, v) in props {
+        map.insert((*k).to_string(), Value::String((*v).to_string()));
+    }
     BlockWithProperties::new(base, Some(Value::Compound(map)))
 }
 
@@ -2556,12 +2746,13 @@ fn generate_residential_window_decorations(
                     continue;
                 }
 
-                let mod6 = ((bx + bz) % 6 + 6) % 6; // always 0..5
+                let mod6 = config.window_col(bx, bz); // always 0..5
 
                 // --- Shutters ---
                 // mod6 == 3 or 5 are the wall blocks flanking a window strip.
                 // Both sides share the same roll (seeded on window centre).
-                if mod6 == 3 || mod6 == 5 {
+                // Frame styles bring their own flank treatment, so skip these.
+                if (mod6 == 3 || mod6 == 5) && config.window_frame.is_none() {
                     let centre_sum = if mod6 == 3 { bx + bz - 2 } else { bx + bz + 2 };
                     let shutter_roll =
                         coord_rng(centre_sum, centre_sum, element.id).random_range(0u32..100);
@@ -2614,7 +2805,7 @@ fn generate_residential_window_decorations(
 
                             let abs_y = h + config.abs_terrain_offset;
 
-                            if decoration_roll < 15 {
+                            if decoration_roll < 15 && config.window_frame.is_none() {
                                 // ── Window sill ──
                                 let lx = bx + out_nx;
                                 let lz = bz + out_nz;
@@ -2864,6 +3055,10 @@ fn generate_corner_quoins(
     let top_h = config.start_y_offset + config.building_height;
     let passage_h = config.start_y_offset + BUILDING_PASSAGE_HEIGHT.min(config.building_height);
 
+    // Whitelist the whole substitute family, otherwise variety-substituted wall blocks break the columns.
+    let mut wall_family: Vec<Block> = vec![config.wall_block];
+    wall_family.extend_from_slice(substitute_pool_only(config.wall_block));
+
     for &(cx, cz) in &corners {
         let is_passage = building_passages.contains(cx, cz);
         let start_h = if is_passage {
@@ -2877,7 +3072,7 @@ fn generate_corner_quoins(
                 cx,
                 h + config.abs_terrain_offset,
                 cz,
-                Some(&[config.wall_block]),
+                Some(&wall_family),
                 None,
             );
         }
@@ -2975,7 +3170,7 @@ fn generate_wall_depth_features(
                     continue;
                 }
 
-                let mod6 = ((bx + bz) % 6 + 6) % 6;
+                let mod6 = config.window_col(bx, bz);
 
                 match config.wall_depth_style {
                     WallDepthStyle::SubtlePilasters => {
@@ -3089,6 +3284,408 @@ fn generate_wall_depth_features(
         }
 
         previous_node = Some((x2, z2));
+    }
+}
+
+/// Per-building window frames: flank posts or shutters, band stairs, occasional dressing.
+fn generate_window_frames(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    building_passages: &CoordinateBitmap,
+) {
+    let Some(style) = config.window_frame else {
+        return;
+    };
+    if config.use_horizontal_windows || config.category == BuildingCategory::Tower {
+        return;
+    }
+    let (cx, cz) = match compute_building_centroid(&element.nodes) {
+        Some(c) => c,
+        None => return,
+    };
+
+    let top_h = config.start_y_offset + config.building_height;
+    let post_block = style.post_block();
+    let shutter_block = style.shutter_block();
+
+    let mut previous_node: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            if out_nx == 0 && out_nz == 0 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+            let facing = facing_for_normal(out_nx, out_nz);
+            let inward_facing = facing_for_normal(-out_nx, -out_nz);
+            let band_stair = make_upside_down_stair(style.band_material(), facing);
+            let shutter = shutter_block.map(|b| make_open_trapdoor(b, facing));
+
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+            for (bx, _, bz) in &points {
+                let (bx, bz) = (*bx, *bz);
+                if building_passages.contains(bx, bz) {
+                    continue;
+                }
+                let col = config.window_col(bx, bz);
+                let lx = bx + out_nx;
+                let lz = bz + out_nz;
+
+                if col < 3 {
+                    // Band stair over each window at every floor line, plus occasional dressing.
+                    for h in (config.start_y_offset + 5)..=(top_h - 1) {
+                        if config.floor_row(h) != 0 {
+                            continue;
+                        }
+                        editor.set_block_with_properties_absolute(
+                            band_stair.clone(),
+                            lx,
+                            h + config.abs_terrain_offset,
+                            lz,
+                            Some(&[AIR]),
+                            None,
+                        );
+
+                        if col == 1 {
+                            // One partitioned roll decides the centre dressing on the band.
+                            let roll = coord_rng(
+                                bx,
+                                bz.wrapping_add(h),
+                                config.element_id ^ 0x00F7_A3E0_D411_0001,
+                            )
+                            .random_range(0u32..100);
+                            let above = h + 1 + config.abs_terrain_offset;
+                            if h + 1 < top_h {
+                                if roll < 15 {
+                                    if style.has_lanterns() {
+                                        editor.set_block_absolute(
+                                            LANTERN,
+                                            lx,
+                                            above,
+                                            lz,
+                                            Some(&[AIR]),
+                                            None,
+                                        );
+                                    }
+                                } else if roll < 32 {
+                                    let mut pot_rng =
+                                        coord_rng(bx, bz.wrapping_add(h * 7), config.element_id);
+                                    let pot = POTTED_PLANT_OPTIONS
+                                        [pot_rng.random_range(0..POTTED_PLANT_OPTIONS.len())];
+                                    editor.set_block_absolute(
+                                        pot,
+                                        lx,
+                                        above,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                } else if roll < 40 {
+                                    editor.set_block_with_properties_absolute(
+                                        make_closed_trapdoor(
+                                            style.detail_trapdoor(),
+                                            facing,
+                                            "bottom",
+                                        ),
+                                        lx,
+                                        above,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                } else if roll < 46 && style.has_azalea_box() {
+                                    editor.set_block_with_properties_absolute(
+                                        make_prop_block(AZALEA_LEAVES, &[("persistent", "true")]),
+                                        lx,
+                                        above,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                    if h + 2 < top_h && roll % 5 < 2 {
+                                        editor.set_block_absolute(
+                                            FLOWER_POT,
+                                            lx,
+                                            above + 1,
+                                            lz,
+                                            Some(&[AIR]),
+                                            None,
+                                        );
+                                    }
+                                } else if roll < 54 {
+                                    if let Some(gate) = style.balconette_gate() {
+                                        editor.set_block_with_properties_absolute(
+                                            make_prop_block(
+                                                gate,
+                                                &[("facing", inward_facing), ("open", "true")],
+                                            ),
+                                            lx,
+                                            above,
+                                            lz,
+                                            Some(&[AIR]),
+                                            None,
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Under-band corbel shelf under the sill of the window above.
+                            if h - 1 > config.start_y_offset + 2 {
+                                let shelf_roll = coord_rng(
+                                    bx,
+                                    bz.wrapping_add(h * 3),
+                                    config.element_id ^ 0x0000_5E1F_0000_0002,
+                                )
+                                .random_range(0u32..100);
+                                if shelf_roll < 15 {
+                                    editor.set_block_with_properties_absolute(
+                                        make_closed_trapdoor(
+                                            style.detail_trapdoor(),
+                                            facing,
+                                            "top",
+                                        ),
+                                        lx,
+                                        h - 1 + config.abs_terrain_offset,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+                            }
+                        } else if let Some(button) = style.stud_button() {
+                            // Button studs on the band front at the window edges.
+                            let centre = bx + bz + if col == 0 { 1 } else { -1 };
+                            let stud_roll = coord_rng(
+                                centre,
+                                centre.wrapping_add(h),
+                                config.element_id ^ 0x0000_B417_0000_0004,
+                            )
+                            .random_range(0u32..100);
+                            if stud_roll < 8 {
+                                editor.set_block_with_properties_absolute(
+                                    make_prop_block(
+                                        button,
+                                        &[("face", "wall"), ("facing", facing)],
+                                    ),
+                                    bx + 2 * out_nx,
+                                    h + config.abs_terrain_offset,
+                                    bz + 2 * out_nz,
+                                    Some(&[AIR]),
+                                    None,
+                                );
+                            }
+                        }
+                    }
+
+                    // Hanging lantern under a band, beside the window top; one side per window.
+                    if col != 1 {
+                        if let Some(lantern) = style.hanging_lantern() {
+                            for h in (config.start_y_offset + 3)..=(top_h - 2) {
+                                if config.floor_row(h) != 3 {
+                                    continue;
+                                }
+                                let centre = bx + bz + if col == 0 { 1 } else { -1 };
+                                let roll = coord_rng(
+                                    centre,
+                                    centre.wrapping_add(h),
+                                    config.element_id ^ 0x0000_7A96_0000_0005,
+                                )
+                                .random_range(0u32..100);
+                                if roll < 12 && (roll % 2 == 0) == (col == 0) {
+                                    editor.set_block_with_properties_absolute(
+                                        make_prop_block(lantern, &[("hanging", "true")]),
+                                        lx,
+                                        h + config.abs_terrain_offset,
+                                        lz,
+                                        Some(&[AIR]),
+                                        None,
+                                    );
+                                }
+                            }
+                        }
+                    }
+                } else if col == 3 || col == 5 {
+                    // Flank treatment on window rows: posts or shutters.
+                    for h in (config.start_y_offset + 2)..=(top_h - 1) {
+                        if config.floor_row(h) == 0 {
+                            continue;
+                        }
+                        let abs_y = h + config.abs_terrain_offset;
+                        if let Some(post) = post_block {
+                            editor.set_block_absolute(post, lx, abs_y, lz, Some(&[AIR]), None);
+                        } else if let Some(ref trapdoor) = shutter {
+                            editor.set_block_with_properties_absolute(
+                                trapdoor.clone(),
+                                lx,
+                                abs_y,
+                                lz,
+                                Some(&[AIR]),
+                                None,
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
+/// String courses, crown cornice or window header trim, for styles without their own banding.
+fn generate_facade_cornices(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    has_sloped_roof: bool,
+    building_passages: &CoordinateBitmap,
+) {
+    if !matches!(
+        config.wall_depth_style,
+        WallDepthStyle::SubtlePilasters | WallDepthStyle::None
+    ) {
+        return;
+    }
+    // Buildings with a window frame style already get banding from it.
+    if config.window_frame.is_some() {
+        return;
+    }
+    if config.condition != BuildingCondition::Normal
+        || !config.has_windows
+        || config.building_height < 8
+    {
+        return;
+    }
+    let bounds = BuildingBounds::from_nodes(&element.nodes);
+    if bounds.width() < 4 || bounds.length() < 4 {
+        return;
+    }
+    let (cx, cz) = match compute_building_centroid(&element.nodes) {
+        Some(c) => c,
+        None => return,
+    };
+
+    // 40% string courses, 35% window header trim, 25% plain.
+    let roll: u32 = element_rng(config.element_id ^ 0xC0A2_11CE_0000_77AB).random_range(0..100);
+    let string_courses = roll < 40;
+    let window_trim = (40..75).contains(&roll);
+    if !string_courses && !window_trim {
+        return;
+    }
+
+    let top_h = config.start_y_offset + config.building_height;
+
+    let mut previous_node: Option<(i32, i32)> = None;
+    for node in &element.nodes {
+        let (x2, z2) = (node.x, node.z);
+        if let Some((x1, z1)) = previous_node {
+            let (out_nx, out_nz) = compute_outward_normal(x1, z1, x2, z2, cx, cz);
+            if out_nx == 0 && out_nz == 0 {
+                previous_node = Some((x2, z2));
+                continue;
+            }
+            let facing = facing_for_normal(out_nx, out_nz);
+            let cornice_stair = make_upside_down_stair(config.accent_block, facing);
+
+            let points =
+                bresenham_line(x1, config.start_y_offset, z1, x2, config.start_y_offset, z2);
+            for (bx, _, bz) in &points {
+                let (bx, bz) = (*bx, *bz);
+                if building_passages.contains(bx, bz) {
+                    continue;
+                }
+                if window_trim && config.window_col(bx, bz) >= 3 {
+                    continue;
+                }
+                let lx = bx + out_nx;
+                let lz = bz + out_nz;
+                for h in (config.start_y_offset + 5)..=top_h {
+                    // Band rows double as window headers and sills of the floor above.
+                    let is_band = config.floor_row(h) == 0 && h < top_h - 1;
+                    let is_crown = string_courses && !has_sloped_roof && h == top_h;
+                    if is_band || is_crown {
+                        editor.set_block_with_properties_absolute(
+                            cornice_stair.clone(),
+                            lx,
+                            h + config.abs_terrain_offset,
+                            lz,
+                            Some(&[AIR]),
+                            None,
+                        );
+                    }
+                }
+            }
+        }
+        previous_node = Some((x2, z2));
+    }
+}
+
+/// Vertical drainpipe runs hugging two facade corners, a staple of hand-built city blocks.
+fn generate_corner_downpipes(
+    editor: &mut WorldEditor,
+    element: &ProcessedWay,
+    config: &BuildingConfig,
+    building_passages: &CoordinateBitmap,
+) {
+    if config.building_height < 10
+        || config.condition != BuildingCondition::Normal
+        || !config.has_windows
+    {
+        return;
+    }
+    if !matches!(
+        config.category,
+        BuildingCategory::Residential
+            | BuildingCategory::House
+            | BuildingCategory::Commercial
+            | BuildingCategory::Hotel
+            | BuildingCategory::Historic
+    ) {
+        return;
+    }
+    let mut rng = element_rng(config.element_id ^ 0xD0DA_1290_D0FF_AA01);
+    if !rng.random_bool(0.35) {
+        return;
+    }
+    let (cx, cz) = match compute_building_centroid(&element.nodes) {
+        Some(c) => c,
+        None => return,
+    };
+
+    let mut corners: Vec<(i32, i32)> = Vec::new();
+    for node in &element.nodes {
+        let pos = (node.x, node.z);
+        if corners.last() != Some(&pos) && corners.first() != Some(&pos) {
+            corners.push(pos);
+        }
+    }
+    if corners.len() < 2 {
+        return;
+    }
+
+    let pipe = get_wall_piece_for_material(config.wall_block);
+    let start_idx = rng.random_range(0..corners.len());
+    for k in 0..2usize {
+        let (px, pz) = corners[(start_idx + k * corners.len() / 2) % corners.len()];
+        // Diagonal outward offset so the pipe hugs the corner edge.
+        let dx = (px - cx).signum();
+        let dz = (pz - cz).signum();
+        if (dx == 0 && dz == 0) || building_passages.contains(px, pz) {
+            continue;
+        }
+        let (ox, oz) = (px + dx, pz + dz);
+        for h in (config.start_y_offset + 1)..=(config.start_y_offset + config.building_height) {
+            editor.set_block_absolute(
+                pipe,
+                ox,
+                h + config.abs_terrain_offset,
+                oz,
+                Some(&[AIR]),
+                None,
+            );
+        }
     }
 }
 
@@ -3882,10 +4479,6 @@ pub fn generate_buildings(
         return;
     }
 
-    // Skip structures that cannot be represented as conventional buildings.
-    // building:part elements at that location add the correct details
-    // Eiffel Tower, London Eye, Utah State Capitol
-    const SKIP_WAY_IDS: &[u64] = &[5013364, 204068874, 32920861];
     if SKIP_WAY_IDS.contains(&element.id) {
         return;
     }
@@ -4132,6 +4725,39 @@ pub fn generate_buildings(
         },
         condition,
         element_id: element.id,
+        // Parts of one building must share a phase, so they stay world-coord aligned.
+        window_phase: if element.tags.contains_key("building:part") {
+            0
+        } else {
+            element_rng(element.id ^ 0x77D0_A3E1_9B1C_5544).random_range(0..6)
+        },
+        base_course_block: {
+            let eligible = min_level_offset == 0
+                && has_windows
+                && condition == BuildingCondition::Normal
+                && !matches!(
+                    category,
+                    BuildingCategory::Greenhouse
+                        | BuildingCategory::Shed
+                        | BuildingCategory::Garage
+                        | BuildingCategory::GlassySkyscraper
+                );
+            let base = base_course_for_wall(wall_block);
+            (eligible
+                && base != wall_block
+                && element_rng(element.id ^ 0xBA5E_C0A2_5E11_0001).random_bool(0.70))
+            .then_some(base)
+        },
+        has_storefront: matches!(
+            category,
+            BuildingCategory::Commercial | BuildingCategory::Hotel
+        ) && has_windows
+            && condition == BuildingCondition::Normal
+            && min_level_offset == 0
+            && element_rng(element.id ^ 0x5709_EF90_0000_0002).random_bool(0.60),
+        window_frame: (has_windows && condition == BuildingCondition::Normal && !is_tall_building)
+            .then(|| pick_window_frame(category, element.id))
+            .flatten(),
     };
 
     // Passages only apply to ground-level buildings. Elevated building:part
@@ -4181,7 +4807,10 @@ pub fn generate_buildings(
         generate_special_doors(editor, element, &config, &wall_outline, effective_passages);
     }
 
-    // Add shutters and window boxes to small residential buildings
+    // Per-building window frame dressing, then shutters/window boxes for the rest
+    if !element.tags.contains_key("building:part") {
+        generate_window_frames(editor, element, &config, effective_passages);
+    }
     generate_residential_window_decorations(editor, element, &config, effective_passages);
 
     // Add wall depth features (pilasters, columns, ledges, cornices, buttresses)
@@ -4200,6 +4829,14 @@ pub fn generate_buildings(
     // Add corner quoins (accent-block columns at building corners)
     if !element.tags.contains_key("building:part") {
         generate_corner_quoins(editor, element, &config, effective_passages);
+        generate_facade_cornices(
+            editor,
+            element,
+            &config,
+            has_sloped_roof,
+            effective_passages,
+        );
+        generate_corner_downpipes(editor, element, &config, effective_passages);
     }
 
     // Create roof area = floor area + wall outline (so roof covers the walls too)
@@ -4455,6 +5092,15 @@ fn generate_building_roof(
         generate_flat_roof_edge_variation(editor, element, config);
     }
 
+    // Stepped setback crowns and wooden water towers on flat roofs
+    let mut has_crown = false;
+    if style.roof_type == RoofType::Flat && !element.tags.contains_key("building:part") {
+        has_crown = generate_setback_crown(editor, config, roof_area);
+        if !has_crown {
+            generate_water_tower(editor, config, roof_area, category);
+        }
+    }
+
     // Add chimney if style says so
     if style.has_chimney {
         let roof_peak_height =
@@ -4485,14 +5131,15 @@ fn generate_building_roof(
         );
     }
 
-    if should_generate_rooftop_equipment(config, style.roof_type, category)
-        || short_flat_rooftop_bits_for(
-            element.id,
-            style.roof_type,
-            config.building_height,
-            category,
-            config.condition,
-        )
+    if !has_crown
+        && (should_generate_rooftop_equipment(config, style.roof_type, category)
+            || short_flat_rooftop_bits_for(
+                element.id,
+                style.roof_type,
+                config.building_height,
+                category,
+                config.condition,
+            ))
     {
         let roof_y = config.start_y_offset + config.building_height;
         generate_rooftop_equipment(
@@ -4524,6 +5171,187 @@ fn generate_building_roof(
     if category == BuildingCategory::Hospital {
         generate_hospital_green_cross(editor, element, config);
     }
+}
+
+/// Per-cell BFS distance to the nearest roof edge.
+fn roof_edge_distances(roof_area: &[(i32, i32)]) -> HashMap<(i32, i32), i32> {
+    let cells: HashSet<(i32, i32)> = roof_area.iter().copied().collect();
+    let mut dist: HashMap<(i32, i32), i32> = HashMap::new();
+    let mut queue = VecDeque::new();
+    for &(x, z) in roof_area {
+        let on_edge = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+            .iter()
+            .any(|&(dx, dz)| !cells.contains(&(x + dx, z + dz)));
+        if on_edge {
+            dist.insert((x, z), 0);
+            queue.push_back((x, z));
+        }
+    }
+    while let Some((x, z)) = queue.pop_front() {
+        let d = dist[&(x, z)];
+        for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let n = (x + dx, z + dz);
+            if cells.contains(&n) && !dist.contains_key(&n) {
+                dist.insert(n, d + 1);
+                queue.push_back(n);
+            }
+        }
+    }
+    dist
+}
+
+/// Stepped setback crown on 35% of tall flat-roofed towers, the classic art deco silhouette.
+fn generate_setback_crown(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    roof_area: &[(i32, i32)],
+) -> bool {
+    if !config.is_tall_building
+        || config.condition != BuildingCondition::Normal
+        || roof_area.len() < 300
+    {
+        return false;
+    }
+    let mut rng = element_rng(config.element_id ^ 0x5E7B_AC4C_0000_0001);
+    if !rng.random_bool(0.35) {
+        return false;
+    }
+
+    let dist = roof_edge_distances(roof_area);
+    let roof_rel = config.start_y_offset + config.building_height + 1;
+    let tier_height = 4;
+    let mut placed = false;
+
+    for tier in 0..2i32 {
+        let inset = 3 + tier * 3;
+        let tier_cells: Vec<(i32, i32)> = roof_area
+            .iter()
+            .copied()
+            .filter(|c| dist.get(c).copied().unwrap_or(0) >= inset)
+            .collect();
+        if tier_cells.len() < 30 {
+            break;
+        }
+        placed = true;
+        let tier_set: HashSet<(i32, i32)> = tier_cells.iter().copied().collect();
+        let base = roof_rel + tier * tier_height;
+
+        for &(x, z) in &tier_cells {
+            let is_wall = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                .iter()
+                .any(|&(dx, dz)| !tier_set.contains(&(x + dx, z + dz)));
+            if is_wall {
+                // Same wall and window logic as the facade, so bands continue upward.
+                for h in 0..tier_height {
+                    let block = determine_wall_block_at_position(x, base + h, z, config);
+                    editor.set_block_absolute(
+                        block,
+                        x,
+                        base + h + config.abs_terrain_offset,
+                        z,
+                        None,
+                        Some(&[]),
+                    );
+                }
+            }
+            editor.set_block_absolute(
+                config.floor_block,
+                x,
+                base + tier_height + config.abs_terrain_offset,
+                z,
+                None,
+                Some(&[]),
+            );
+        }
+    }
+
+    // Small mast on the crown centre, on the deepest cell.
+    if placed {
+        if let Some((&(mx, mz), &d)) = dist.iter().max_by_key(|(_, &d)| d) {
+            if d >= 6 {
+                let top = roof_rel + 2 * tier_height + 1 + config.abs_terrain_offset;
+                for h in 0..3 {
+                    editor.set_block_absolute(IRON_BARS, mx, top + h, mz, None, Some(&[]));
+                }
+                editor.set_block_absolute(LIGHTNING_ROD, mx, top + 3, mz, None, Some(&[]));
+            }
+        }
+    }
+    placed
+}
+
+/// Wooden rooftop water tank on legs, a staple of brick mid-rises. 18% of eligible flat roofs.
+fn generate_water_tower(
+    editor: &mut WorldEditor,
+    config: &BuildingConfig,
+    roof_area: &[(i32, i32)],
+    category: BuildingCategory,
+) {
+    // Only mid-rises with a real base: 4+ levels and a decent roof area.
+    if config.building_height < 16
+        || roof_area.len() < 300
+        || config.condition != BuildingCondition::Normal
+    {
+        return;
+    }
+    if matches!(
+        category,
+        BuildingCategory::GlassySkyscraper
+            | BuildingCategory::ModernSkyscraper
+            | BuildingCategory::Religious
+            | BuildingCategory::Hospital
+    ) {
+        return;
+    }
+    let mut rng = element_rng(config.element_id ^ 0x3A7E_12F0_0000_0002);
+    if !rng.random_bool(0.18) {
+        return;
+    }
+
+    let cells: HashSet<(i32, i32)> = roof_area.iter().copied().collect();
+    let spots: Vec<(i32, i32)> = roof_area
+        .iter()
+        .copied()
+        .filter(|&(x, z)| (-2..=2).all(|dx| (-2..=2).all(|dz| cells.contains(&(x + dx, z + dz)))))
+        .collect();
+    if spots.is_empty() {
+        return;
+    }
+    let (cx, cz) = spots[rng.random_range(0..spots.len())];
+    let base = config.start_y_offset + config.building_height + 2 + config.abs_terrain_offset;
+    let replace_any: &[Block] = &[];
+
+    for (lx, lz) in [
+        (cx - 1, cz - 1),
+        (cx + 1, cz - 1),
+        (cx - 1, cz + 1),
+        (cx + 1, cz + 1),
+    ] {
+        for h in 0..2 {
+            editor.set_block_absolute(SPRUCE_FENCE, lx, base + h, lz, None, Some(replace_any));
+        }
+    }
+    for dx in -1..=1 {
+        for dz in -1..=1 {
+            for h in 2..5 {
+                editor.set_block_absolute(
+                    SPRUCE_PLANKS,
+                    cx + dx,
+                    base + h,
+                    cz + dz,
+                    None,
+                    Some(replace_any),
+                );
+            }
+            let cap = if dx == 0 && dz == 0 {
+                SPRUCE_PLANKS
+            } else {
+                SPRUCE_SLAB
+            };
+            editor.set_block_absolute(cap, cx + dx, base + 5, cz + dz, None, Some(replace_any));
+        }
+    }
+    editor.set_block_absolute(SPRUCE_SLAB, cx, base + 6, cz, None, Some(replace_any));
 }
 
 fn multiply_scale(value: i32, scale_factor: f64) -> i32 {
@@ -4633,15 +5461,27 @@ fn generate_chimney(
         );
     }
 
-    // Add stone brick slab cap on top
-    editor.set_block_absolute(
-        STONE_BRICK_SLAB,
-        chimney_x,
-        chimney_base + chimney_height + abs_terrain_offset,
-        chimney_z,
-        None,
-        Some(replace_any), // Empty blacklist = replace any block
-    );
+    // Cap: 40% get an empty flower pot as a chimney pot, the rest a stone brick slab.
+    let cap_y = chimney_base + chimney_height + abs_terrain_offset;
+    if rng.random_bool(0.4) {
+        editor.set_block_absolute(
+            EMPTY_FLOWER_POT,
+            chimney_x,
+            cap_y,
+            chimney_z,
+            None,
+            Some(replace_any),
+        );
+    } else {
+        editor.set_block_absolute(
+            STONE_BRICK_SLAB,
+            chimney_x,
+            cap_y,
+            chimney_z,
+            None,
+            Some(replace_any), // Empty blacklist = replace any block
+        );
+    }
 }
 
 // ============================================================================
@@ -6266,18 +7106,76 @@ fn generate_hipped_roof_inner(
     }
 }
 
-/// Generates a skillion (mono-pitch) roof
+/// Parses `roof:direction` (compass point or degrees) to the nearest cardinal.
+fn parse_roof_direction(value: &str) -> Option<StairFacing> {
+    let deg = match value.trim().to_ascii_lowercase().as_str() {
+        "n" | "north" => 0.0,
+        "ne" => 45.0,
+        "e" | "east" => 90.0,
+        "se" => 135.0,
+        "s" | "south" => 180.0,
+        "sw" => 225.0,
+        "w" | "west" => 270.0,
+        "nw" => 315.0,
+        other => other.parse::<f64>().ok()?,
+    };
+    if !deg.is_finite() {
+        return None;
+    }
+    Some(match ((deg / 90.0).round() as i64).rem_euclid(4) {
+        0 => StairFacing::North,
+        1 => StairFacing::East,
+        2 => StairFacing::South,
+        _ => StairFacing::West,
+    })
+}
+
+/// Skillion (mono-pitch) roof descending toward `roof:direction`, or across the shorter axis.
 fn generate_skillion_roof(
     editor: &mut WorldEditor,
     floor_area: &[(i32, i32)],
     config: &RoofConfig,
+    roof_direction: Option<&str>,
 ) {
-    let width = config.width().max(1);
     let max_roof_height = (config.building_size() / 3).clamp(4, 10);
+
+    let downhill = roof_direction
+        .and_then(parse_roof_direction)
+        .unwrap_or_else(|| {
+            let mut rng = element_rng(config.element_id_for_decor ^ 0x5C11_1104_D129_0000);
+            let flip = rng.random_bool(0.5);
+            if config.width() <= config.length() {
+                if flip {
+                    StairFacing::West
+                } else {
+                    StairFacing::East
+                }
+            } else if flip {
+                StairFacing::North
+            } else {
+                StairFacing::South
+            }
+        });
+
+    let width = config.width().max(1);
+    let length = config.length().max(1);
+
+    // Stairs face uphill, opposite the downhill direction.
+    let stair_facing = match downhill {
+        StairFacing::West => StairFacing::East,
+        StairFacing::East => StairFacing::West,
+        StairFacing::North => StairFacing::South,
+        StairFacing::South => StairFacing::North,
+    };
 
     let mut roof_heights = HashMap::new();
     for &(x, z) in floor_area {
-        let slope_progress = (x - config.min_x) as f64 / width as f64;
+        let slope_progress = match downhill {
+            StairFacing::West => (x - config.min_x) as f64 / width as f64,
+            StairFacing::East => (config.max_x - x) as f64 / width as f64,
+            StairFacing::North => (z - config.min_z) as f64 / length as f64,
+            StairFacing::South => (config.max_z - z) as f64 / length as f64,
+        };
         let roof_height = config.base_height + (slope_progress * max_roof_height as f64) as i32;
         roof_heights.insert((x, z), roof_height);
     }
@@ -6290,11 +7188,7 @@ fn generate_skillion_roof(
         &roof_heights,
         config,
         |_, _, _| {
-            create_stair_with_properties(
-                stair_block_material,
-                StairFacing::East,
-                StairShape::Straight,
-            )
+            create_stair_with_properties(stair_block_material, stair_facing, StairShape::Straight)
         },
         None,
     );
@@ -6636,7 +7530,8 @@ fn generate_roof(
         }
 
         RoofType::Skillion => {
-            generate_skillion_roof(editor, roof_area, &config);
+            let roof_direction = element.tags.get("roof:direction").map(|s| s.as_str());
+            generate_skillion_roof(editor, roof_area, &config, roof_direction);
         }
 
         RoofType::Pyramidal => {
@@ -6691,6 +7586,15 @@ pub fn generate_building_from_relation(
         return;
     }
 
+    // Landmark: a Starship parked on the Starbase Pad 2 launch mount.
+    for member in &relation.members {
+        if member.way.id == crate::structures::starship::STARBASE_PAD2_INNER_RING_WAY
+            && member.role == ProcessedMemberRole::Inner
+        {
+            crate::structures::starship::place_on_launch_mount(editor, &member.way);
+        }
+    }
+
     // Extract levels from relation tags
     let relation_levels = relation
         .tags
@@ -6717,7 +7621,7 @@ pub fn generate_building_from_relation(
         let mut outer_rings: Vec<Vec<ProcessedNode>> = relation
             .members
             .iter()
-            .filter(|m| m.role == ProcessedMemberRole::Outer)
+            .filter(|m| m.role == ProcessedMemberRole::Outer && !SKIP_WAY_IDS.contains(&m.way.id))
             .map(|m| m.way.nodes.clone())
             .collect();
 

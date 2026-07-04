@@ -126,6 +126,19 @@ impl CoordinateBitmap {
         }
     }
 
+    /// Clears a coordinate.
+    #[inline]
+    pub fn clear(&mut self, x: i32, z: i32) {
+        if let Some(bit_index) = self.coord_to_index(x, z) {
+            let byte_index = bit_index / 8;
+            let mask = 1u8 << (bit_index % 8);
+            if self.bits[byte_index] & mask != 0 {
+                self.bits[byte_index] &= !mask;
+                self.count -= 1;
+            }
+        }
+    }
+
     /// Checks if a coordinate is set.
     #[inline]
     pub fn contains(&self, x: i32, z: i32) -> bool {
@@ -394,6 +407,9 @@ impl FloodFillCache {
                 && way.tags.get("area").map(|v| v == "yes").unwrap_or(false))
             // Historic tomb polygons (e.g. tomb=pyramid)
             || way.tags.get("tomb").map(|v| v == "pyramid").unwrap_or(false)
+            // Solar farm areas -> power::generate_solar_farm
+            || (way.tags.get("power").map(String::as_str) == Some("generator")
+                && way.tags.get("generator:source").map(String::as_str) == Some("solar"))
     }
 
     /// Collects all building footprint coordinates from the pre-computed cache.
@@ -410,37 +426,33 @@ impl FloodFillCache {
     ) -> BuildingFootprintBitmap {
         let mut footprints = BuildingFootprintBitmap::new(xzbbox);
 
+        // Relations first (outer fills, courtyards clear), ways second so courtyard buildings re-mark.
         for element in elements {
-            match element {
-                ProcessedElement::Way(way)
-                    if way.tags.contains_key("building")
-                        || way.tags.contains_key("building:part") =>
-                {
+            if let ProcessedElement::Relation(rel) = element {
+                let is_building = rel.tags.contains_key("building")
+                    || rel.tags.contains_key("building:part")
+                    || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
+                if !is_building {
+                    continue;
+                }
+                for (x, z) in relation_ring_cells(rel, ProcessedMemberRole::Outer, xzbbox) {
+                    footprints.set(x, z);
+                }
+                for (x, z) in relation_ring_cells(rel, ProcessedMemberRole::Inner, xzbbox) {
+                    footprints.clear(x, z);
+                }
+            }
+        }
+
+        for element in elements {
+            if let ProcessedElement::Way(way) = element {
+                if way.tags.contains_key("building") || way.tags.contains_key("building:part") {
                     if let Some(cached) = self.way_cache.get(&way.id) {
                         for &(x, z) in cached.iter() {
                             footprints.set(x, z);
                         }
                     }
                 }
-                ProcessedElement::Relation(rel) => {
-                    let is_building = rel.tags.contains_key("building")
-                        || rel.tags.contains_key("building:part")
-                        || rel.tags.get("type").map(|t| t.as_str()) == Some("building");
-                    if is_building {
-                        for member in &rel.members {
-                            // Only treat outer members as building footprints.
-                            // Inner members represent courtyards/holes where trees can spawn.
-                            if member.role == ProcessedMemberRole::Outer {
-                                if let Some(cached) = self.way_cache.get(&member.way.id) {
-                                    for &(x, z) in cached.iter() {
-                                        footprints.set(x, z);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
             }
         }
 
@@ -468,6 +480,41 @@ impl Default for FloodFillCache {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Flood-filled cells of a relation's merged, clipped and closed rings of the given role.
+fn relation_ring_cells(
+    rel: &crate::osm_parser::ProcessedRelation,
+    role: ProcessedMemberRole,
+    xzbbox: &XZBBox,
+) -> Vec<(i32, i32)> {
+    let mut rings: Vec<Vec<crate::osm_parser::ProcessedNode>> = rel
+        .members
+        .iter()
+        .filter(|m| m.role == role)
+        .map(|m| m.way.nodes.clone())
+        .collect();
+    crate::element_processing::merge_way_segments(&mut rings);
+
+    let mut cells = Vec::new();
+    for ring in rings {
+        let ring = crate::clipping::clip_way_to_bbox(&ring, xzbbox);
+        if ring.len() < 4 {
+            continue;
+        }
+        let mut coords: Vec<(i32, i32)> = ring.iter().map(|n| (n.x, n.z)).collect();
+        if coords.first() != coords.last() {
+            let (fx, fz) = coords[0];
+            let (lx, lz) = *coords.last().unwrap();
+            if (fx - lx).abs() <= 1 && (fz - lz).abs() <= 1 {
+                coords.push((fx, fz));
+            } else {
+                continue;
+            }
+        }
+        cells.extend(flood_fill_area(&coords, None));
+    }
+    cells
 }
 
 /// Configures the global Rayon thread pool with a CPU usage cap.

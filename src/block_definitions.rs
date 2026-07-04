@@ -457,6 +457,11 @@ impl Block {
             356 => "chiseled_quartz_block",
             357 => "quartz_pillar",
             358 => "redstone_wall_torch",
+            359 => "flower_pot",
+            360 => "warped_slab",
+            361 => "warped_stairs",
+            362 => "warped_trapdoor",
+            363 => "orange_concrete",
             _ => panic!("Invalid id"),
         }
         // Note: ids are u16. Prefer a free slot below 256 for commonly placed
@@ -1255,6 +1260,11 @@ pub const SOUL_LANTERN: Block = Block::new(355);
 pub const CHISELED_QUARTZ_BLOCK: Block = Block::new(356);
 pub const QUARTZ_PILLAR: Block = Block::new(357);
 pub const REDSTONE_WALL_TORCH: Block = Block::new(358);
+pub const EMPTY_FLOWER_POT: Block = Block::new(359);
+pub const WARPED_SLAB: Block = Block::new(360);
+pub const WARPED_STAIRS: Block = Block::new(361);
+pub const WARPED_TRAPDOOR: Block = Block::new(362);
+pub const ORANGE_CONCRETE: Block = Block::new(363);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]
@@ -1394,7 +1404,7 @@ pub fn get_wall_piece_for_material(material: Block) -> Block {
 }
 
 // Window variations for different building types
-pub static WINDOW_VARIATIONS: [Block; 7] = [
+pub static WINDOW_VARIATIONS: [Block; 9] = [
     GLASS,
     GRAY_STAINED_GLASS,
     LIGHT_GRAY_STAINED_GLASS,
@@ -1402,6 +1412,8 @@ pub static WINDOW_VARIATIONS: [Block; 7] = [
     BROWN_STAINED_GLASS,
     WHITE_STAINED_GLASS,
     TINTED_GLASS,
+    LIGHT_BLUE_STAINED_GLASS,
+    CYAN_STAINED_GLASS,
 ];
 
 // Residential window options
