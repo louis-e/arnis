@@ -473,10 +473,10 @@ body,
   opacity: 0;
 }
 
-/* Always-on bbox drag handles: plain rectangles in the arnis yellow */
+/* Always-on bbox drag handles: plain white rectangles with a thin dark outline */
 .bbox-handle {
-  background: #fecc44;
-  border: 2px solid #333333;
+  background: #ffffff;
+  border: 1px solid #333333;
   border-radius: 2px;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
   user-select: none;
@@ -494,10 +494,10 @@ body,
   cursor: move;
 }
 
-/* Rectangle tool icon: bold selection box outline with corner and centre handles */
+/* Rectangle tool icon: thin selection-box outline with small monochrome corner handles */
 .leaflet-draw-toolbar a.leaflet-draw-draw-rectangle {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='4' y='4' width='16' height='16' fill='none' stroke='%23333333' stroke-width='2.4'/%3E%3Cg fill='%23fecc44' stroke='%23333333' stroke-width='1.6'%3E%3Crect x='1' y='1' width='6' height='6'/%3E%3Crect x='17' y='1' width='6' height='6'/%3E%3Crect x='1' y='17' width='6' height='6'/%3E%3Crect x='17' y='17' width='6' height='6'/%3E%3Crect x='9' y='9' width='6' height='6'/%3E%3C/g%3E%3C/svg%3E") !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='5' y='5' width='14' height='14' fill='none' stroke='%23555555' stroke-width='1.4'/%3E%3Cg fill='%23555555'%3E%3Crect x='3' y='3' width='4' height='4'/%3E%3Crect x='17' y='3' width='4' height='4'/%3E%3Crect x='3' y='17' width='4' height='4'/%3E%3Crect x='17' y='17' width='4' height='4'/%3E%3C/g%3E%3C/svg%3E") !important;
   background-position: center !important;
-  background-size: 19px 19px !important;
+  background-size: 16px 16px !important;
   background-repeat: no-repeat !important;
 }

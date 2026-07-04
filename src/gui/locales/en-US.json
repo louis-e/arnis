@@ -50,7 +50,7 @@
   "fillground": "Fill Ground",
   "legacy_trees": "Legacy Trees",
   "land_cover": "Land Cover",
-  "three_dmr": "Use 3D Models",
+  "three_dmr": "3D Models & Props",
   "disable_height_limit": "Extend build height",
   "aws_only_elevation": "Legacy terrain",
   "bake_lighting": "Bake lighting",

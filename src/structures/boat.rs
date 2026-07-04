@@ -29,6 +29,9 @@ fn boat() -> Option<&'static StructureSchematic> {
 
 /// Scatter boats over open water in a bbox, one below surface, random rotation; grid on a global lattice so tiles agree.
 pub fn scatter_boats(editor: &mut WorldEditor, min_x: i32, min_z: i32, max_x: i32, max_z: i32) {
+    if !editor.place_schematics() {
+        return;
+    }
     let Some(schem) = boat() else {
         return;
     };

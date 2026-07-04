@@ -51,6 +51,9 @@ fn cars() -> &'static [(StructureSchematic, u8)] {
 
 /// Sometimes parks a random car at a space centre, aligned via `rot_base` with a random nose flip.
 pub fn maybe_place_car(editor: &mut WorldEditor, cx: i32, cz: i32, rot_base: u8) {
+    if !editor.place_schematics() {
+        return;
+    }
     let pool = cars();
     if pool.is_empty() {
         return;

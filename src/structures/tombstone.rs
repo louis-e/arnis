@@ -60,6 +60,9 @@ fn large() -> &'static [StructureSchematic] {
 
 /// Stamp at most one tombstone at cemetery cell (x, z), keyed on coord_hash for seam stability.
 pub fn maybe_place(editor: &mut WorldEditor, x: i32, z: i32, road_mask: &RoadMaskBitmap) {
+    if !editor.place_schematics() {
+        return;
+    }
     // Only grid-aligned cells can host a tombstone; check first to skip the rest cheaply.
     if x.rem_euclid(SMALL_GRID) != 0 || z.rem_euclid(SMALL_GRID) != 0 {
         return;

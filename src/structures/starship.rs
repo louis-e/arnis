@@ -26,6 +26,9 @@ fn starship() -> Option<&'static StructureSchematic> {
 
 /// Stamps the Starship upright at the launch mount ring centroid.
 pub fn place_on_launch_mount(editor: &mut WorldEditor, ring: &ProcessedWay) {
+    if !editor.place_schematics() {
+        return;
+    }
     let Some(schem) = starship() else {
         return;
     };
