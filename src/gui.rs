@@ -709,6 +709,27 @@ fn gui_clear_tile_caches() -> Result<String, String> {
 /// Returns None if the map image or metadata doesn't exist.
 #[tauri::command]
 fn gui_get_world_map_data(world_path: String) -> Result<Option<WorldMapData>, String> {
+    // Prefer the just-finished generation's preview; Bedrock has no world dir.
+    if let Some(r) = map_preview::last_preview_result() {
+        if r.png_path.exists() {
+            let image_data =
+                fs::read(&r.png_path).map_err(|e| format!("Failed to read map image: {e}"))?;
+            let base64_image =
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &image_data);
+            return Ok(Some(WorldMapData {
+                image_base64: format!("data:image/png;base64,{}", base64_image),
+                min_lat: r.min_lat,
+                max_lat: r.max_lat,
+                min_lon: r.min_lon,
+                max_lon: r.max_lon,
+                min_mc_x: r.min_mc_x,
+                max_mc_x: r.max_mc_x,
+                min_mc_z: r.min_mc_z,
+                max_mc_z: r.max_mc_z,
+            }));
+        }
+    }
+
     let world_dir = PathBuf::from(&world_path);
     let map_path = world_dir.join("arnis_world_map.png");
     let metadata_path = world_dir.join("metadata.json");
@@ -1122,6 +1143,9 @@ fn gui_start_generation(
                 aws_only_elevation,
                 benchmark: false,
                 bake_lighting: bake_lighting_enabled,
+                // Frontend refuses previews for rotated worlds, skip the work there.
+                map_preview: world_format != WorldFormat::LuantiWorld
+                    && rotation_angle.abs() <= f64::EPSILON,
             };
 
             // If skip_osm_objects is true (terrain-only mode), skip fetching and processing OSM data
@@ -1137,7 +1161,7 @@ fn gui_start_generation(
 
                 let _ = data_processing::generate_world_with_options(
                     parsed_elements,
-                    xzbbox.clone(),
+                    xzbbox,
                     args.bbox,
                     ground,
                     &args,
@@ -1152,13 +1176,6 @@ fn gui_start_generation(
                 drop(_session_lock);
                 emit_gui_progress_update(100.0, "Done! World generation completed.");
                 println!("{}", "Done! World generation completed.".green().bold());
-
-                // Start map preview generation silently in background (Java only)
-                if world_format == WorldFormat::JavaAnvil {
-                    let preview_info =
-                        map_preview::MapPreviewInfo::new(generation_options.path.clone(), &xzbbox);
-                    map_preview::start_map_preview_generation(preview_info);
-                }
 
                 return Ok(());
             }
@@ -1227,7 +1244,7 @@ fn gui_start_generation(
 
                     let _ = data_processing::generate_world_with_options(
                         parsed_elements,
-                        xzbbox.clone(),
+                        xzbbox,
                         args.bbox,
                         ground,
                         &args,
@@ -1242,15 +1259,6 @@ fn gui_start_generation(
                     drop(_session_lock);
                     emit_gui_progress_update(100.0, "Done! World generation completed.");
                     println!("{}", "Done! World generation completed.".green().bold());
-
-                    // Start map preview generation silently in background (Java only)
-                    if world_format == WorldFormat::JavaAnvil {
-                        let preview_info = map_preview::MapPreviewInfo::new(
-                            generation_options.path.clone(),
-                            &xzbbox,
-                        );
-                        map_preview::start_map_preview_generation(preview_info);
-                    }
 
                     Ok(())
                 }

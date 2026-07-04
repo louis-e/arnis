@@ -111,7 +111,12 @@ impl Block {
     }
 
     pub fn name(&self) -> &str {
-        match self.id {
+        self.try_name().expect("Invalid id")
+    }
+
+    /// Non-panicking variant of `name` (None for unassigned ids).
+    pub fn try_name(&self) -> Option<&str> {
+        Some(match self.id {
             0 => "mangrove_log",
             1 => "air",
             2 => "andesite",
@@ -464,8 +469,8 @@ impl Block {
             363 => "orange_concrete",
             364 => "stripped_warped_stem",
             365 => "stripped_warped_hyphae",
-            _ => panic!("Invalid id"),
-        }
+            _ => return None,
+        })
         // Note: ids are u16. Prefer a free slot below 256 for commonly placed
         // blocks: sections holding only sub-256 ids store one byte per cell,
         // while any id >= 256 forces that section to the wider two-byte storage.

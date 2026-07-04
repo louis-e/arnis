@@ -1668,8 +1668,6 @@ function notifyWorldChanged() {
  * Loads the world map data from the backend
  */
 async function loadWorldMapData() {
-  if (!worldPath) return;
-  
   try {
     const mapData = await invoke('gui_get_world_map_data', { worldPath: worldPath });
     if (mapData) {

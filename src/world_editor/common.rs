@@ -16,7 +16,7 @@ pub const MIN_SECTION_Y: i8 = (MIN_Y / 16) as i8;
 const MAX_Y: i32 = 2031;
 /// Sizes the per-section palette lookup array. Block ids are u16 but stay well
 /// below this; raise it if block_definitions ever allocates an id this high.
-const MAX_BLOCK_ID: usize = 512;
+pub(crate) const MAX_BLOCK_ID: usize = 512;
 use fastnbt::{LongArray, Value};
 use fnv::FnvHashMap;
 use serde::{Deserialize, Serialize};
