@@ -435,12 +435,12 @@ impl FloodFillCache {
                 if !is_building {
                     continue;
                 }
-                for (x, z) in relation_ring_cells(rel, ProcessedMemberRole::Outer, xzbbox) {
-                    footprints.set(x, z);
-                }
-                for (x, z) in relation_ring_cells(rel, ProcessedMemberRole::Inner, xzbbox) {
-                    footprints.clear(x, z);
-                }
+                for_relation_ring_cells(rel, ProcessedMemberRole::Outer, xzbbox, |x, z| {
+                    footprints.set(x, z)
+                });
+                for_relation_ring_cells(rel, ProcessedMemberRole::Inner, xzbbox, |x, z| {
+                    footprints.clear(x, z)
+                });
             }
         }
 
@@ -482,12 +482,13 @@ impl Default for FloodFillCache {
     }
 }
 
-/// Flood-filled cells of a relation's merged, clipped and closed rings of the given role.
-fn relation_ring_cells(
+/// Applies a callback to the flood-filled cells of a relation's merged, clipped, closed rings.
+fn for_relation_ring_cells(
     rel: &crate::osm_parser::ProcessedRelation,
     role: ProcessedMemberRole,
     xzbbox: &XZBBox,
-) -> Vec<(i32, i32)> {
+    mut apply: impl FnMut(i32, i32),
+) {
     let mut rings: Vec<Vec<crate::osm_parser::ProcessedNode>> = rel
         .members
         .iter()
@@ -496,7 +497,6 @@ fn relation_ring_cells(
         .collect();
     crate::element_processing::merge_way_segments(&mut rings);
 
-    let mut cells = Vec::new();
     for ring in rings {
         let ring = crate::clipping::clip_way_to_bbox(&ring, xzbbox);
         if ring.len() < 4 {
@@ -512,9 +512,10 @@ fn relation_ring_cells(
                 continue;
             }
         }
-        cells.extend(flood_fill_area(&coords, None));
+        for (x, z) in flood_fill_area(&coords, None) {
+            apply(x, z);
+        }
     }
-    cells
 }
 
 /// Configures the global Rayon thread pool with a CPU usage cap.

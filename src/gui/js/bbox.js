@@ -1398,8 +1398,11 @@ $(document).ready(function () {
     }
 
     map.on('draw:created', function (e) {
+        // instanceof, not layerType: restore paths fire rectangles as "polygon"
+        var isRectangle = e.layer instanceof L.Rectangle;
+
         // Hide the hint overlay when a bbox area is drawn
-        if (e.layerType === 'rectangle') {
+        if (isRectangle) {
             var hint = document.querySelector('.bbox-hint-overlay');
             if (hint) hint.style.display = 'none';
         }
@@ -1415,7 +1418,7 @@ $(document).ready(function () {
         }
 
         // If it's a rectangle, remove any existing rectangles first
-        if (e.layerType === 'rectangle') {
+        if (isRectangle) {
             drawnItems.eachLayer(function(layer) {
                 if (layer instanceof L.Rectangle) {
                     drawnItems.removeLayer(layer);
@@ -1424,7 +1427,7 @@ $(document).ready(function () {
         }
 
         // Check if it's a rectangle and set proper styles before adding it to the layer
-        if (e.layerType === 'rectangle') {
+        if (isRectangle) {
             e.layer.setStyle({
                 color: '#fecc44',
                 opacity: 1.0,

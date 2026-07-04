@@ -163,7 +163,7 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "spruce_button" => SPRUCE_BUTTON,
         "spruce_fence_gate" => SPRUCE_FENCE_GATE,
         "end_rod" => END_ROD,
-        "flower_pot" => FLOWER_POT,
+        "flower_pot" => EMPTY_FLOWER_POT,
         "sea_pickle" => SEA_PICKLE,
         "gray_concrete_powder" => GRAY_CONCRETE_POWDER,
         "gray_stained_glass_pane" => GRAY_STAINED_GLASS_PANE,

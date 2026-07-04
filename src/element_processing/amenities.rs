@@ -404,20 +404,23 @@ pub fn generate_amenities(
                     let space_width = 4;
                     let space_length = 8;
                     let period_z = space_length + 5;
-                    let lot: std::collections::HashSet<(i32, i32)> =
-                        flood_area.iter().copied().collect();
+                    // Sorted copy + binary search keeps this light on huge lots.
+                    let mut lot: Vec<(i32, i32)> = flood_area.iter().copied().collect();
+                    lot.sort_unstable();
+                    let in_lot = |x: i32, z: i32| lot.binary_search(&(x, z)).is_ok();
                     if let (Some(&min_x), Some(&max_x), Some(&min_z), Some(&max_z)) = (
                         flood_area.iter().map(|(x, _)| x).min(),
                         flood_area.iter().map(|(x, _)| x).max(),
                         flood_area.iter().map(|(_, z)| z).min(),
                         flood_area.iter().map(|(_, z)| z).max(),
                     ) {
-                        for zx in min_x.div_euclid(space_width)..=max_x.div_euclid(space_width) {
-                            for zz in min_z.div_euclid(period_z)..=max_z.div_euclid(period_z) {
+                        // Truncating division to match the striping grid above.
+                        for zx in (min_x / space_width)..=(max_x / space_width) {
+                            for zz in (min_z / period_z)..=(max_z / period_z) {
                                 let x0 = zx * space_width;
                                 let z0 = zz * period_z;
                                 let inside = (0..=space_width).all(|dx| {
-                                    (0..=space_length).all(|dz| lot.contains(&(x0 + dx, z0 + dz)))
+                                    (0..=space_length).all(|dz| in_lot(x0 + dx, z0 + dz))
                                 });
                                 if inside {
                                     crate::structures::car::maybe_place_car(

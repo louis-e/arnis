@@ -5173,31 +5173,75 @@ fn generate_building_roof(
     }
 }
 
+/// Compact bbox-indexed distance grid, 4 bytes per cell instead of a hash map.
+struct RoofDistanceGrid {
+    min_x: i32,
+    min_z: i32,
+    width: i32,
+    height: i32,
+    dist: Vec<i32>,
+}
+
+impl RoofDistanceGrid {
+    /// Distance to the nearest roof edge, -1 outside the roof.
+    fn get(&self, x: i32, z: i32) -> i32 {
+        let (lx, lz) = (x - self.min_x, z - self.min_z);
+        if lx < 0 || lz < 0 || lx >= self.width || lz >= self.height {
+            return -1;
+        }
+        self.dist[(lz * self.width + lx) as usize]
+    }
+}
+
 /// Per-cell BFS distance to the nearest roof edge.
-fn roof_edge_distances(roof_area: &[(i32, i32)]) -> HashMap<(i32, i32), i32> {
-    let cells: HashSet<(i32, i32)> = roof_area.iter().copied().collect();
-    let mut dist: HashMap<(i32, i32), i32> = HashMap::new();
-    let mut queue = VecDeque::new();
+fn roof_edge_distances(roof_area: &[(i32, i32)]) -> RoofDistanceGrid {
+    let (mut min_x, mut max_x, mut min_z, mut max_z) = (i32::MAX, i32::MIN, i32::MAX, i32::MIN);
     for &(x, z) in roof_area {
-        let on_edge = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-            .iter()
-            .any(|&(dx, dz)| !cells.contains(&(x + dx, z + dz)));
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_z = min_z.min(z);
+        max_z = max_z.max(z);
+    }
+    let width = max_x - min_x + 1;
+    let height = max_z - min_z + 1;
+    let mut dist = vec![-1i32; (width * height) as usize];
+    let idx = |x: i32, z: i32| ((z - min_z) * width + (x - min_x)) as usize;
+
+    for &(x, z) in roof_area {
+        dist[idx(x, z)] = i32::MAX;
+    }
+    let mut queue: VecDeque<(i32, i32)> = VecDeque::new();
+    for &(x, z) in roof_area {
+        let on_edge = [(1, 0), (-1, 0), (0, 1), (0, -1)].iter().any(|&(dx, dz)| {
+            let (nx, nz) = (x + dx, z + dz);
+            nx < min_x || nx > max_x || nz < min_z || nz > max_z || dist[idx(nx, nz)] == -1
+        });
         if on_edge {
-            dist.insert((x, z), 0);
+            dist[idx(x, z)] = 0;
             queue.push_back((x, z));
         }
     }
     while let Some((x, z)) = queue.pop_front() {
-        let d = dist[&(x, z)];
+        let d = dist[idx(x, z)];
         for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-            let n = (x + dx, z + dz);
-            if cells.contains(&n) && !dist.contains_key(&n) {
-                dist.insert(n, d + 1);
-                queue.push_back(n);
+            let (nx, nz) = (x + dx, z + dz);
+            if nx < min_x || nx > max_x || nz < min_z || nz > max_z {
+                continue;
+            }
+            let i = idx(nx, nz);
+            if dist[i] == i32::MAX {
+                dist[i] = d + 1;
+                queue.push_back((nx, nz));
             }
         }
     }
-    dist
+    RoofDistanceGrid {
+        min_x,
+        min_z,
+        width,
+        height,
+        dist,
+    }
 }
 
 /// Stepped setback crown on 35% of tall flat-roofed towers, the classic art deco silhouette.
@@ -5227,19 +5271,18 @@ fn generate_setback_crown(
         let tier_cells: Vec<(i32, i32)> = roof_area
             .iter()
             .copied()
-            .filter(|c| dist.get(c).copied().unwrap_or(0) >= inset)
+            .filter(|&(x, z)| dist.get(x, z) >= inset)
             .collect();
         if tier_cells.len() < 30 {
             break;
         }
         placed = true;
-        let tier_set: HashSet<(i32, i32)> = tier_cells.iter().copied().collect();
         let base = roof_rel + tier * tier_height;
 
         for &(x, z) in &tier_cells {
             let is_wall = [(1, 0), (-1, 0), (0, 1), (0, -1)]
                 .iter()
-                .any(|&(dx, dz)| !tier_set.contains(&(x + dx, z + dz)));
+                .any(|&(dx, dz)| dist.get(x + dx, z + dz) < inset);
             if is_wall {
                 // Same wall and window logic as the facade, so bands continue upward.
                 for h in 0..tier_height {
@@ -5267,8 +5310,8 @@ fn generate_setback_crown(
 
     // Small mast on the crown centre, on the deepest cell.
     if placed {
-        if let Some((&(mx, mz), &d)) = dist.iter().max_by_key(|(_, &d)| d) {
-            if d >= 6 {
+        if let Some(&(mx, mz)) = roof_area.iter().max_by_key(|&&(x, z)| dist.get(x, z)) {
+            if dist.get(mx, mz) >= 6 {
                 let top = roof_rel + 2 * tier_height + 1 + config.abs_terrain_offset;
                 for h in 0..3 {
                     editor.set_block_absolute(IRON_BARS, mx, top + h, mz, None, Some(&[]));
@@ -5308,11 +5351,12 @@ fn generate_water_tower(
         return;
     }
 
-    let cells: HashSet<(i32, i32)> = roof_area.iter().copied().collect();
+    // roof_area is sorted at construction, so membership is a binary search.
+    let on_roof = |x: i32, z: i32| roof_area.binary_search(&(x, z)).is_ok();
     let spots: Vec<(i32, i32)> = roof_area
         .iter()
         .copied()
-        .filter(|&(x, z)| (-2..=2).all(|dx| (-2..=2).all(|dz| cells.contains(&(x + dx, z + dz)))))
+        .filter(|&(x, z)| (-2..=2).all(|dx| (-2..=2).all(|dz| on_roof(x + dx, z + dz))))
         .collect();
     if spots.is_empty() {
         return;
