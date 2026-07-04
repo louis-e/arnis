@@ -192,6 +192,15 @@ const ROAD_PROTECTED_SURFACES: &[Block] = &[
     GRAY_CONCRETE_POWDER,
     CYAN_TERRACOTTA,
     WHITE_CONCRETE,
+    // Bridge module furniture must survive parallel side-deck ways.
+    WARPED_STAIRS,
+    WARPED_TRAPDOOR,
+    WARPED_SLAB,
+    STRIPPED_WARPED_STEM,
+    STRIPPED_WARPED_HYPHAE,
+    SEA_LANTERN,
+    ANDESITE_WALL,
+    SMOOTH_SANDSTONE_STAIRS,
 ];
 
 /// True when the way should render as a pedestrian walkway
@@ -572,6 +581,10 @@ fn generate_highways_internal(
 
             let bridge_member = bridge_structures.lookup_member(way.id);
             let bridge_ramp = bridge_structures.lookup_ramp(way.id);
+            // Redundant side deck under a wider module bridge: render nothing.
+            if bridge_member.is_some_and(|m| m.covered_by_wider) {
+                return;
+            }
             let is_bridge_member = bridge_member.is_some();
             let is_bridge_ramp = bridge_ramp.is_some();
             let bridge_style = bridge_member.map(|m| m.style).unwrap_or(BridgeStyle::Beam);
@@ -657,6 +670,14 @@ fn generate_highways_internal(
                 let cap = (total_bresenham_length / 2).max(1);
                 raw.clamp(1, cap)
             };
+
+            // Plain beam bridges get a swept segment-schematic deck instead.
+            let bridge_module = bridge_member
+                .and_then(|m| m.module_idx)
+                .and_then(crate::element_processing::bridge_modules::module_at);
+            let bridge_structure_moduled = bridge_member
+                .map(|m| m.structure_has_module)
+                .unwrap_or(false);
 
             let is_short_isolated_elevated = !is_bridge_member
                 && !is_bridge_ramp
@@ -987,8 +1008,10 @@ fn generate_highways_internal(
                                 // (Regular wide roads now flow through `use_absolute_y == true`
                                 // too, but they aren't floating decks; they get embankments
                                 // from the registered ground-surface override instead.)
-                                let is_elevated_deck =
-                                    is_bridge_member || is_bridge_ramp || effective_elevation > 0;
+                                let is_elevated_deck = (is_bridge_member
+                                    && !bridge_structure_moduled)
+                                    || is_bridge_ramp
+                                    || effective_elevation > 0;
                                 if is_elevated_deck && cell_y > 0 {
                                     // Foundation: stone bricks for everything except wooden boardwalks.
                                     let foundation = if is_bridge_member {
@@ -1085,9 +1108,10 @@ fn generate_highways_internal(
                                     Some(prev) => stair_fill_cells(prev, rail_cell),
                                     None => vec![rail_cell],
                                 };
-                                // Styles like boardwalk skip the side railing entirely.
-                                let skip_side_railing =
-                                    is_bridge_member && !bridge_style.has_side_railing();
+                                // Boardwalks and module decks bring their own railings.
+                                let skip_side_railing = is_bridge_member
+                                    && (!bridge_style.has_side_railing()
+                                        || bridge_structure_moduled);
                                 if !skip_side_railing {
                                     for (rx, rz) in cells_to_fill {
                                         if bridge_surface.contains(rx, rz) {
@@ -1228,14 +1252,22 @@ fn generate_highways_internal(
             }
 
             if is_bridge_member {
-                decorate_bridge_above_deck(
-                    editor,
-                    bridge_style,
-                    &bridge_path,
-                    block_range,
-                    bridge_start_is_boundary,
-                    bridge_end_is_boundary,
-                );
+                if let Some(module) = bridge_module {
+                    crate::element_processing::bridge_modules::sweep_module(
+                        editor,
+                        &bridge_path,
+                        module,
+                    );
+                } else if !bridge_structure_moduled {
+                    decorate_bridge_above_deck(
+                        editor,
+                        bridge_style,
+                        &bridge_path,
+                        block_range,
+                        bridge_start_is_boundary,
+                        bridge_end_is_boundary,
+                    );
+                }
             }
         }
     }

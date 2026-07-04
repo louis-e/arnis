@@ -1,6 +1,7 @@
 pub mod advertising;
 pub mod amenities;
 pub mod barriers;
+pub mod bridge_modules;
 pub mod bridge_styles;
 pub mod bridges;
 pub mod buildings;
