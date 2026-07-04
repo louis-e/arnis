@@ -1094,15 +1094,17 @@ $(document).ready(function () {
 
     drawControl = new L.Control.Draw({
         edit: {
-            featureGroup: drawnItems
+            featureGroup: drawnItems,
+            // No edit mode: the bbox rectangle has always-on drag handles instead
+            edit: false
         },
         draw: {
             rectangle: {
                 shapeOptions: {
-                    color: '#fe57a1',
-                    opacity: 0.6,
+                    color: '#fecc44',
+                    opacity: 0.8,
                     weight: 3,
-                    fillColor: '#fe57a1',
+                    fillColor: '#fecc44',
                     fillOpacity: 0.1,
                     dashArray: '10, 10',
                     lineCap: 'round',
@@ -1248,7 +1250,7 @@ $(document).ready(function () {
     // Add hint overlay at bottom-center of map when no bbox is selected
     var hintDiv = document.createElement('div');
     hintDiv.className = 'bbox-hint-overlay';
-    hintDiv.innerHTML = 'Use the <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: -2px; opacity: 0.85;"><rect x="3" y="3" width="18" height="18"></rect></svg> tool to draw a custom area';
+    hintDiv.innerHTML = 'Use the <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" style="vertical-align: -2px; opacity: 0.85;"><rect x="4" y="4" width="16" height="16" stroke-width="2.4"></rect><g fill="currentColor" stroke="none"><rect x="1" y="1" width="6" height="6"></rect><rect x="17" y="1" width="6" height="6"></rect><rect x="1" y="17" width="6" height="6"></rect><rect x="17" y="17" width="6" height="6"></rect><rect x="9" y="9" width="6" height="6"></rect></g></svg> tool to draw a custom area';
     map.getContainer().appendChild(hintDiv);
 
     // Add world preview button to the edit toolbar after drawControl is added
@@ -1263,10 +1265,10 @@ $(document).ready(function () {
     */
     startBounds = new L.LatLngBounds([0.0, 0.0], [0.0, 0.0]);
     var bounds = new L.Rectangle(startBounds, {
-        color: '#3778d4',
+        color: '#fecc44',
         opacity: 1.0,
         weight: 3,
-        fill: '#3778d4',
+        fill: '#fecc44',
         lineCap: 'round',
         lineJoin: 'round'
     });
@@ -1288,6 +1290,95 @@ $(document).ready(function () {
         location.hash = ymin + ',' + xmin + ',' + ymax + ',' + xmax;
     });
     map.addLayer(bounds);
+
+    // ========== Always-on bbox handles (corner resize + centre move) ==========
+    var _bboxHandles = [];
+    var _bboxHandlesHidden = false;
+
+    function _getBboxRect() {
+        var rect = null;
+        drawnItems.eachLayer(function (layer) {
+            if (layer instanceof L.Rectangle) rect = layer;
+        });
+        return rect;
+    }
+
+    function _syncFromRect(rect) {
+        bounds.setBounds(rect.getBounds());
+        $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
+        $('#boxboundsmerc').text(formatBounds(bounds.getBounds(), currentproj));
+        notifyBboxUpdate();
+    }
+
+    function clearBboxHandles() {
+        _bboxHandles.forEach(function (h) { map.removeLayer(h); });
+        _bboxHandles = [];
+    }
+
+    function refreshBboxHandles() {
+        clearBboxHandles();
+        if (_bboxHandlesHidden) return;
+        var rect = _getBboxRect();
+        if (!rect) return;
+        var b = rect.getBounds();
+
+        var corners = [
+            { get: 'getNorthWest', opp: 'getSouthEast', cls: 'nwse' },
+            { get: 'getNorthEast', opp: 'getSouthWest', cls: 'nesw' },
+            { get: 'getSouthEast', opp: 'getNorthWest', cls: 'nwse' },
+            { get: 'getSouthWest', opp: 'getNorthEast', cls: 'nesw' }
+        ];
+
+        corners.forEach(function (c) {
+            var icon = L.divIcon({
+                className: 'bbox-handle bbox-handle-' + c.cls,
+                iconSize: [12, 12],
+                iconAnchor: [6, 6]
+            });
+            var marker = L.marker(b[c.get](), { icon: icon, draggable: true, zIndexOffset: 2000 });
+            var fixedCorner = null;
+            marker.on('dragstart', function () {
+                fixedCorner = rect.getBounds()[c.opp]();
+            });
+            marker.on('drag', function (ev) {
+                rect.setBounds(new L.LatLngBounds(fixedCorner, ev.target.getLatLng()));
+            });
+            marker.on('dragend', function () {
+                _syncFromRect(rect);
+                refreshBboxHandles();
+            });
+            marker.addTo(map);
+            _bboxHandles.push(marker);
+        });
+
+        var moveIcon = L.divIcon({
+            className: 'bbox-handle bbox-handle-move',
+            iconSize: [16, 16],
+            iconAnchor: [8, 8]
+        });
+        var mover = L.marker(b.getCenter(), { icon: moveIcon, draggable: true, zIndexOffset: 2000 });
+        var startCenter = null;
+        var startB = null;
+        mover.on('dragstart', function (ev) {
+            startCenter = ev.target.getLatLng();
+            startB = rect.getBounds();
+        });
+        mover.on('drag', function (ev) {
+            var cur = ev.target.getLatLng();
+            var dLat = cur.lat - startCenter.lat;
+            var dLng = cur.lng - startCenter.lng;
+            rect.setBounds(new L.LatLngBounds(
+                [startB.getSouth() + dLat, startB.getWest() + dLng],
+                [startB.getNorth() + dLat, startB.getEast() + dLng]
+            ));
+        });
+        mover.on('dragend', function () {
+            _syncFromRect(rect);
+            refreshBboxHandles();
+        });
+        mover.addTo(map);
+        _bboxHandles.push(mover);
+    }
 
     // Show a brief toast notification on the map
     function showRotationToast(message) {
@@ -1335,10 +1426,11 @@ $(document).ready(function () {
         // Check if it's a rectangle and set proper styles before adding it to the layer
         if (e.layerType === 'rectangle') {
             e.layer.setStyle({
-                color: '#3778d4',
+                color: '#fecc44',
                 opacity: 1.0,
                 weight: 3,
-                fill: '#3778d4',
+                fill: '#fecc44',
+                fillOpacity: 0.08,
                 lineCap: 'round',
                 lineJoin: 'round'
             });
@@ -1376,6 +1468,8 @@ $(document).ready(function () {
                 map.panTo(drawnItems.getLayers()[0].getLatLng());
             }
         }
+
+        refreshBboxHandles();
     });
 
     map.on('draw:deleted', function (e) {
@@ -1409,6 +1503,8 @@ $(document).ready(function () {
                 map.panTo(drawnItems.getLayers()[0].getLatLng());
             }
         }
+
+        refreshBboxHandles();
     });
 
     map.on('draw:edited', function (e) {
@@ -1441,6 +1537,8 @@ $(document).ready(function () {
 
     map.on('draw:deletestart', function() {
         hideWorldOverlayTemporarily();
+        _bboxHandlesHidden = true;
+        clearBboxHandles();
     });
 
     // Restore world preview overlay when exiting edit or delete mode
@@ -1450,6 +1548,8 @@ $(document).ready(function () {
 
     map.on('draw:deletestop', function() {
         restoreWorldOverlay();
+        _bboxHandlesHidden = false;
+        refreshBboxHandles();
     });
     function display() {
         $('#boxbounds').text(formatBounds(bounds.getBounds(), '4326'));
