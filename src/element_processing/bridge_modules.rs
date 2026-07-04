@@ -72,8 +72,7 @@ fn build_module(bytes: &'static [u8], street_y: i32, has_pillars: bool) -> Optio
         for (l, slice) in slices.iter().enumerate() {
             let mut lowest: HashMap<i32, (i32, BlockWithProperties)> = HashMap::new();
             for (w, dy, block) in slice {
-                // Only solid shaft material extends to the ground; buttons and
-                // other attachments would otherwise dangle as columns.
+                // Only solid shaft material may extend down; attachments would dangle.
                 if !is_pillar_material(block.block) {
                     continue;
                 }

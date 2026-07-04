@@ -1408,7 +1408,7 @@ pub fn get_wall_piece_for_material(material: Block) -> Block {
 }
 
 // Window variations for different building types
-pub static WINDOW_VARIATIONS: [Block; 9] = [
+pub static WINDOW_VARIATIONS: [Block; 11] = [
     GLASS,
     GRAY_STAINED_GLASS,
     LIGHT_GRAY_STAINED_GLASS,
@@ -1418,6 +1418,8 @@ pub static WINDOW_VARIATIONS: [Block; 9] = [
     TINTED_GLASS,
     LIGHT_BLUE_STAINED_GLASS,
     CYAN_STAINED_GLASS,
+    BLACK_STAINED_GLASS,
+    BROWN_STAINED_GLASS,
 ];
 
 // Residential window options

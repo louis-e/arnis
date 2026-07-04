@@ -671,8 +671,7 @@ fn generate_highways_internal(
                 raw.clamp(1, cap)
             };
 
-            // Plain beam bridges get a swept segment-schematic deck instead;
-            // only the structure's widest member carries it.
+            // Plain beam bridges get a swept segment-schematic deck instead.
             let bridge_module = bridge_member
                 .and_then(|m| m.module_idx)
                 .and_then(crate::element_processing::bridge_modules::module_at);

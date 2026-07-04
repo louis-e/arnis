@@ -29,8 +29,7 @@ pub struct BridgeMemberInfo {
     pub module_idx: Option<usize>,
     // True for every member of a structure whose deck comes from a module.
     pub structure_has_module: bool,
-    // True when a wider parallel member's module deck fully covers this way;
-    // the way is skipped entirely so bridges don't render twice.
+    // True when a wider parallel member's module deck covers this way; skip it.
     pub covered_by_wider: bool,
 }
 
@@ -347,10 +346,7 @@ impl BridgeStructureMap {
                     .is_some()
                 });
 
-            // A member whose centerline lies inside a wider parallel member's module
-            // deck is redundant; render only the best bridge. The covers relation is
-            // a strict order (range, length, id) so coverage never cycles, and the
-            // widest-first pass keeps covered members from covering others.
+            // Redundant when fully inside a wider parallel member's module deck.
             let covers = |j: usize, idx: usize, covered_ids: &HashSet<u64>| -> bool {
                 let way = bridge_ways[idx];
                 let other = bridge_ways[j];
@@ -386,8 +382,7 @@ impl BridgeStructureMap {
                 if rj == ri {
                     threshold = threshold.min(DUAL_CARRIAGEWAY_MAX_DISTANCE_BLOCKS);
                 }
-                // The whole way must sit inside the deck, endpoints included, so
-                // spurs and overhangs past the carrier keep rendering normally.
+                // Every sample must sit inside the deck so spurs and overhangs still render.
                 coverage_samples(way)
                     .iter()
                     .all(|&(px, pz)| lateral_offset_to_way(px, pz, other) <= threshold)
@@ -396,6 +391,7 @@ impl BridgeStructureMap {
             // Survivors that absorbed an equal-width sibling sweep one size wider.
             let mut widened_ids: HashSet<u64> = HashSet::new();
             if structure_has_module && group_indices.len() > 1 {
+                // Widest-first pass so covered members never cover others.
                 let mut order: Vec<usize> = group_indices.clone();
                 order.sort_by(|&a, &b| {
                     member_range(b)
@@ -843,6 +839,10 @@ fn are_dual_carriageway_pair(a: &ProcessedWay, b: &ProcessedWay) -> bool {
 
 /// Points at even arc-length fractions along the way, endpoints included.
 fn coverage_samples(way: &ProcessedWay) -> Vec<(f32, f32)> {
+    // Degenerate ways: test the lone point, never an empty (vacuously covered) set.
+    if way.nodes.len() < 2 {
+        return way.nodes.iter().map(|n| (n.x as f32, n.z as f32)).collect();
+    }
     let mut cum: Vec<f32> = Vec::with_capacity(way.nodes.len());
     cum.push(0.0);
     let mut total = 0.0f32;
