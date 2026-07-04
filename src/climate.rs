@@ -60,13 +60,6 @@ impl Climate {
         Climate::from_class(koppen_class(lat, lon))
     }
 
-    fn is_arid(self) -> bool {
-        matches!(
-            self,
-            Climate::HotDesert | Climate::HotSteppe | Climate::ColdDesert | Climate::ColdSteppe
-        )
-    }
-
     /// Surface palette (surface, under) for veg/bare cover, or None to keep the baseline.
     pub fn surface_palette(self, cover: u8, x: i32, z: i32) -> Option<(Block, Block)> {
         // DryContinental (Grand Canyon) keeps baseline blocks; only its biome is adapted.
@@ -148,20 +141,6 @@ impl Climate {
         };
         Some(pal)
     }
-
-    /// Arid steep-terrain palette (tan canyon walls); None for non-arid.
-    pub fn slope_palette(self, x: i32, z: i32) -> Option<(Block, Block)> {
-        if !self.is_arid() {
-            return None;
-        }
-        let pal = match coord_hash(x, z) % 12 {
-            0..=4 => (SANDSTONE, SANDSTONE),
-            5..=7 => (SMOOTH_SANDSTONE, SANDSTONE),
-            8..=9 => (ORANGE_TERRACOTTA, TERRACOTTA),
-            _ => (TERRACOTTA, TERRACOTTA),
-        };
-        Some(pal)
-    }
 }
 
 #[cfg(test)]
@@ -180,7 +159,6 @@ mod tests {
     #[test]
     fn temperate_never_overrides() {
         assert!(Climate::Temperate.surface_palette(LC_BARE, 1, 2).is_none());
-        assert!(Climate::Temperate.slope_palette(1, 2).is_none());
     }
 
     #[test]
@@ -189,7 +167,6 @@ mod tests {
             .surface_palette(LC_GRASSLAND, 7, 7)
             .unwrap();
         assert!(matches!(s, SAND | SANDSTONE | SMOOTH_SANDSTONE));
-        assert!(Climate::HotDesert.slope_palette(3, 4).is_some());
     }
 
     #[test]

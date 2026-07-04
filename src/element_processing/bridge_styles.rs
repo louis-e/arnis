@@ -96,8 +96,7 @@ impl BridgeOutlineIndex {
                 || bridge.as_deref().is_some_and(|v| {
                     matches!(
                         v,
-                        "viaduct"
-                            | "covered"
+                        "covered"
                             | "boardwalk"
                             | "cable-stayed"
                             | "cable_stayed"
@@ -230,7 +229,7 @@ fn resolve_bridge_style_from_pair(structure: Option<&str>, bridge: Option<&str>)
     }
     if let Some(b) = bridge {
         match b {
-            "viaduct" => return BridgeStyle::Arch,
+            // Plain viaducts fall through to Beam so they get pillar deck modules.
             "covered" => return BridgeStyle::Covered,
             "boardwalk" => return BridgeStyle::Boardwalk,
             // Discouraged but still mapped in the wild.

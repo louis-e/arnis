@@ -264,7 +264,6 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "polished_blackstone_wall" => BLACKSTONE_WALL,
         "reinforced_deepslate" => CHISELED_DEEPSLATE,
         "netherite_block" => NETHERITE_BLOCK,
-        "dark_oak_wall_sign" => SPRUCE_WALL_SIGN,
         "bedrock" => POLISHED_BLACKSTONE,
         // Car blocks. Substitutions keep the shape class (slab/stairs/pane) over exact color.
         "black_concrete" | "black_concrete_powder" => BLACK_CONCRETE,
@@ -288,10 +287,20 @@ fn map_structure_block(name: &str) -> Option<BlockWithProperties> {
         "polished_diorite_stairs" => POLISHED_DIORITE_STAIRS,
         "acacia_stairs" => GRANITE_STAIRS,
         "acacia_button" | "bamboo_button" | "mangrove_button" | "warped_button" => STONE_BUTTON,
-        "acacia_wall_sign" | "bamboo_wall_sign" | "crimson_wall_sign" | "oak_wall_sign"
-        | "warped_wall_sign" => SPRUCE_WALL_SIGN,
         "light_gray_candle" | "gray_candle" => END_ROD,
         "polished_blackstone_brick_wall" => BLACKSTONE_WALL,
+        "black_wool" => BLACK_WOOL,
+        "blue_carpet" => LIGHT_BLUE_CARPET,
+        "nether_brick_slab" => RED_NETHER_BRICK_SLAB,
+        "mossy_cobblestone_wall" => MOSSY_STONE_BRICK_WALL,
+        // Bridge segment blocks. Wall signs are block entities and stay dropped.
+        "sandstone_stairs" => SMOOTH_SANDSTONE_STAIRS,
+        "sandstone_slab" => CUT_SANDSTONE_SLAB,
+        "cut_sandstone" => SMOOTH_SANDSTONE,
+        "sea_lantern" | "beacon" => SEA_LANTERN,
+        "stripped_warped_stem" => STRIPPED_WARPED_STEM,
+        "stripped_warped_hyphae" => STRIPPED_WARPED_HYPHAE,
+        "warped_fence_gate" => SPRUCE_FENCE_GATE,
         // Wind-turbine blocks.
         "quartz_block" => QUARTZ_BLOCK,
         "quartz_pillar" => QUARTZ_PILLAR,
@@ -494,7 +503,7 @@ fn rotate_rail_shape(s: &str, k: u8) -> String {
 }
 
 /// Rotate a block-state compound by `k` quarter-turns: facing, connection sides, rail shape, axis.
-fn rotate_props(props: &Value, k: u8) -> Value {
+pub(crate) fn rotate_props(props: &Value, k: u8) -> Value {
     let Value::Compound(c) = props else {
         return props.clone();
     };

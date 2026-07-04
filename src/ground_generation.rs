@@ -428,10 +428,7 @@ pub fn generate_ground_region(
                                 // any more — that's a normal hiking incline where
                                 // grass and trees belong.
                                 if slope > 4 {
-                                    if let Some(p) = climate.slope_palette(x, z) {
-                                        // Arid canyon/mesa walls: tan/orange rock, not grey.
-                                        p
-                                    } else if slope > 8 {
+                                    if slope > 8 {
                                         // Sheer cliff: each column is 100% one material
                                         // so the downward under-fill matches the surface,
                                         // producing vertical stripes of cobbled/deepslate.

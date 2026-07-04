@@ -25,6 +25,13 @@ pub struct BridgeMemberInfo {
     // True when the endpoint is not shared with another member of the group.
     pub start_is_group_boundary: bool,
     pub end_is_group_boundary: bool,
+    // Deck module this member sweeps; None when covered or the structure is procedural.
+    pub module_idx: Option<usize>,
+    // True for every member of a structure whose deck comes from a module.
+    pub structure_has_module: bool,
+    // True when a wider parallel member's module deck fully covers this way;
+    // the way is skipped entirely so bridges don't render twice.
+    pub covered_by_wider: bool,
 }
 
 impl BridgeMemberInfo {
@@ -216,6 +223,21 @@ impl BridgeStructureMap {
             }
         }
 
+        // Step 4: union parallel side decks (foot/cycle ways running along a road bridge).
+        for a in 0..bridge_ways.len() {
+            for b in (a + 1)..bridge_ways.len() {
+                if uf.find(a) == uf.find(b) {
+                    continue;
+                }
+                if effective_layer(bridge_ways[a]) != effective_layer(bridge_ways[b]) {
+                    continue;
+                }
+                if are_dual_carriageway_pair(bridge_ways[a], bridge_ways[b]) {
+                    uf.union(a, b);
+                }
+            }
+        }
+
         // Group bridge ways by root.
         let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
         for i in 0..bridge_ways.len() {
@@ -288,12 +310,16 @@ impl BridgeStructureMap {
             // Style first so arches can force flat-terrain clearance for the curve to show.
             let group_style = majority_style(group_indices, &bridge_ways, outlines);
 
-            let mut clearance =
-                if dip < FLAT_TERRAIN_DIP_THRESHOLD && total_length >= SHORT_BRIDGE_LENGTH_BLOCKS {
-                    max_layer * LAYER_HEIGHT_STEP
-                } else {
-                    0
-                };
+            // A group without boundary endpoints can never get ramps; keep it grounded.
+            let has_boundary_endpoint = endpoint_counts.values().any(|&c| c == 1);
+            let mut clearance = if has_boundary_endpoint
+                && dip < FLAT_TERRAIN_DIP_THRESHOLD
+                && total_length >= SHORT_BRIDGE_LENGTH_BLOCKS
+            {
+                max_layer * LAYER_HEIGHT_STEP
+            } else {
+                0
+            };
             if group_style == BridgeStyle::Arch
                 && dip < FLAT_TERRAIN_DIP_THRESHOLD
                 && total_length >= SHORT_BRIDGE_LENGTH_BLOCKS
@@ -303,9 +329,122 @@ impl BridgeStructureMap {
             }
             let deck_y = terrain_max + clearance;
 
+            // One module deck per structure: the widest member sweeps it.
+            let member_range = |idx: usize| {
+                let w = bridge_ways[idx];
+                highway_block_range(
+                    w.tags.get("highway").map(String::as_str).unwrap_or(""),
+                    &w.tags,
+                    1.0,
+                )
+            };
+            let structure_has_module = group_style == BridgeStyle::Beam
+                && group_indices.iter().any(|&i| {
+                    crate::element_processing::bridge_modules::pick_module_index(
+                        member_range(i),
+                        total_length,
+                    )
+                    .is_some()
+                });
+
+            // A member whose centerline lies inside a wider parallel member's module
+            // deck is redundant; render only the best bridge. The covers relation is
+            // a strict order (range, length, id) so coverage never cycles, and the
+            // widest-first pass keeps covered members from covering others.
+            let covers = |j: usize, idx: usize, covered_ids: &HashSet<u64>| -> bool {
+                let way = bridge_ways[idx];
+                let other = bridge_ways[j];
+                if other.id == way.id || covered_ids.contains(&other.id) {
+                    return false;
+                }
+                let (rj, ri) = (member_range(j), member_range(idx));
+                let (lj, li) = (way_length_blocks(other), way_length_blocks(way));
+                let wider = rj > ri || (rj == ri && (lj > li || (lj == li && other.id < way.id)));
+                if !wider || li > lj + 30 {
+                    return false;
+                }
+                let parallel = match (heading_deg(way), heading_deg(other)) {
+                    (Some(ha), Some(hb)) => {
+                        let mut diff = (ha - hb).abs() % 360.0;
+                        if diff > 180.0 {
+                            diff = 360.0 - diff;
+                        }
+                        diff <= DUAL_CARRIAGEWAY_HEADING_TOLERANCE_DEG
+                            || (180.0 - diff).abs() <= DUAL_CARRIAGEWAY_HEADING_TOLERANCE_DEG
+                    }
+                    _ => false,
+                };
+                if !parallel {
+                    return false;
+                }
+                let deck_half =
+                    crate::element_processing::bridge_modules::pick_module_index(rj, total_length)
+                        .and_then(crate::element_processing::bridge_modules::module_half_width)
+                        .unwrap_or(0);
+                let mut threshold = (deck_half - 2).max(0) as f32;
+                // Equal decks are only redundant at dual-carriageway distance.
+                if rj == ri {
+                    threshold = threshold.min(DUAL_CARRIAGEWAY_MAX_DISTANCE_BLOCKS);
+                }
+                // The whole way must sit inside the deck, endpoints included, so
+                // spurs and overhangs past the carrier keep rendering normally.
+                coverage_samples(way)
+                    .iter()
+                    .all(|&(px, pz)| lateral_offset_to_way(px, pz, other) <= threshold)
+            };
+            let mut covered_ids: HashSet<u64> = HashSet::new();
+            // Survivors that absorbed an equal-width sibling sweep one size wider.
+            let mut widened_ids: HashSet<u64> = HashSet::new();
+            if structure_has_module && group_indices.len() > 1 {
+                let mut order: Vec<usize> = group_indices.clone();
+                order.sort_by(|&a, &b| {
+                    member_range(b)
+                        .cmp(&member_range(a))
+                        .then(
+                            way_length_blocks(bridge_ways[b])
+                                .cmp(&way_length_blocks(bridge_ways[a])),
+                        )
+                        .then(bridge_ways[a].id.cmp(&bridge_ways[b].id))
+                });
+                for &idx in &order {
+                    let mut is_covered = false;
+                    for &j in &order {
+                        if covers(j, idx, &covered_ids) {
+                            is_covered = true;
+                            if member_range(j) == member_range(idx) {
+                                widened_ids.insert(bridge_ways[j].id);
+                            }
+                        }
+                    }
+                    if is_covered {
+                        covered_ids.insert(bridge_ways[idx].id);
+                    }
+                }
+            }
+
+            // Boundary endpoints of covered ways render nothing; no ramps there.
+            let mut covered_boundaries: HashSet<(i32, i32)> = HashSet::new();
+            for &idx in group_indices {
+                let way = bridge_ways[idx];
+                if !covered_ids.contains(&way.id) {
+                    continue;
+                }
+                let s = &way.nodes[0];
+                let e = &way.nodes[way.nodes.len() - 1];
+                for xz in [(s.x, s.z), (e.x, e.z)] {
+                    if endpoint_counts.get(&xz).copied().unwrap_or(0) == 1 {
+                        covered_boundaries.insert(xz);
+                    }
+                }
+            }
+
             let mut boundary_with_external_ramp: HashMap<(i32, i32), bool> = HashMap::new();
             for (&xz, &count) in &endpoint_counts {
                 if count > 1 {
+                    continue;
+                }
+                if covered_boundaries.contains(&xz) {
+                    boundary_with_external_ramp.insert(xz, false);
                     continue;
                 }
                 let other_indices = match node_to_other_highways.get(&xz) {
@@ -373,6 +512,7 @@ impl BridgeStructureMap {
                 let start_is_group_boundary =
                     endpoint_counts.get(&start_xz).copied().unwrap_or(0) <= 1;
                 let end_is_group_boundary = endpoint_counts.get(&end_xz).copied().unwrap_or(0) <= 1;
+                let covered_by_wider = covered_ids.contains(&way.id);
                 members.insert(
                     way.id,
                     BridgeMemberInfo {
@@ -382,6 +522,17 @@ impl BridgeStructureMap {
                         style: group_style,
                         start_is_group_boundary,
                         end_is_group_boundary,
+                        module_idx: (structure_has_module && !covered_by_wider)
+                            .then(|| {
+                                let bump = widened_ids.contains(&way.id) as i32;
+                                crate::element_processing::bridge_modules::pick_module_index(
+                                    member_range(idx) + bump,
+                                    total_length,
+                                )
+                            })
+                            .flatten(),
+                        structure_has_module,
+                        covered_by_wider,
                     },
                 );
             }
@@ -502,12 +653,20 @@ impl BridgeSurfaceMap {
             };
 
             let member = structures.lookup_member(way.id).copied();
+            // Covered ways render nothing; keep phantom decks out of this map.
+            if member.is_some_and(|m| m.covered_by_wider) {
+                continue;
+            }
             let ramp = structures.lookup_ramp(way.id).copied();
             if member.is_none() && ramp.is_none() {
                 continue;
             }
 
-            let block_range = highway_block_range(highway_type, &way.tags, scale);
+            // Module decks are wider than the road; register their real footprint.
+            let block_range = member
+                .and_then(|m| m.module_idx)
+                .and_then(crate::element_processing::bridge_modules::module_half_width)
+                .unwrap_or_else(|| highway_block_range(highway_type, &way.tags, scale));
 
             let total_bresenham: usize = way
                 .nodes
@@ -680,6 +839,55 @@ fn are_dual_carriageway_pair(a: &ProcessedWay, b: &ProcessedWay) -> bool {
     let dz = (mid_a.1 - mid_b.1) as f32;
     let dist = (dx * dx + dz * dz).sqrt();
     dist <= DUAL_CARRIAGEWAY_MAX_DISTANCE_BLOCKS
+}
+
+/// Points at even arc-length fractions along the way, endpoints included.
+fn coverage_samples(way: &ProcessedWay) -> Vec<(f32, f32)> {
+    let mut cum: Vec<f32> = Vec::with_capacity(way.nodes.len());
+    cum.push(0.0);
+    let mut total = 0.0f32;
+    for pair in way.nodes.windows(2) {
+        let dx = (pair[1].x - pair[0].x) as f32;
+        let dz = (pair[1].z - pair[0].z) as f32;
+        total += (dx * dx + dz * dz).sqrt();
+        cum.push(total);
+    }
+    [0.0f32, 0.25, 0.5, 0.75, 1.0]
+        .iter()
+        .map(|f| {
+            let target = total * f;
+            let mut seg = 0;
+            while seg + 1 < cum.len() - 1 && cum[seg + 1] < target {
+                seg += 1;
+            }
+            let seg_len = (cum[seg + 1] - cum[seg]).max(1e-6);
+            let t = ((target - cum[seg]) / seg_len).clamp(0.0, 1.0);
+            let (a, b) = (&way.nodes[seg], &way.nodes[seg + 1]);
+            (
+                a.x as f32 + t * (b.x - a.x) as f32,
+                a.z as f32 + t * (b.z - a.z) as f32,
+            )
+        })
+        .collect()
+}
+
+/// Minimum distance from a point to any centerline segment of the way.
+fn lateral_offset_to_way(px: f32, pz: f32, way: &ProcessedWay) -> f32 {
+    let mut best = f32::MAX;
+    for pair in way.nodes.windows(2) {
+        let (ax, az) = (pair[0].x as f32, pair[0].z as f32);
+        let (bx, bz) = (pair[1].x as f32, pair[1].z as f32);
+        let (dx, dz) = (bx - ax, bz - az);
+        let len_sq = dx * dx + dz * dz;
+        let t = if len_sq > 0.0 {
+            (((px - ax) * dx + (pz - az) * dz) / len_sq).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let (cx, cz) = (ax + t * dx, az + t * dz);
+        best = best.min(((px - cx).powi(2) + (pz - cz).powi(2)).sqrt());
+    }
+    best
 }
 
 fn heading_deg(way: &ProcessedWay) -> Option<f32> {

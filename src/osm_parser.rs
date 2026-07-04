@@ -274,6 +274,10 @@ pub fn parse_osm_data(
 
     // First pass: store all nodes with Minecraft coordinates and process nodes with tags
     for element in data.nodes {
+        // Overpass emits elements again per matching relation; keep the first copy only.
+        if nodes_map.contains_key(&element.id) {
+            continue;
+        }
         if let (Some(lat), Some(lon)) = (element.lat, element.lon) {
             let llpoint = LLPoint::new(lat, lon).unwrap_or_else(|e| {
                 eprintln!("Encountered invalid node element:\n{e}");
@@ -301,6 +305,9 @@ pub fn parse_osm_data(
 
     // Second pass: process ways and clip them to bbox
     for element in data.ways {
+        if ways_map.contains_key(&element.id) {
+            continue;
+        }
         let mut nodes: Vec<ProcessedNode> = vec![];
         if let Some(node_ids) = &element.nodes {
             for &node_id in node_ids {
@@ -339,7 +346,11 @@ pub fn parse_osm_data(
     }
 
     // Third pass: process relations and clip member ways
+    let mut seen_relations: HashSet<u64> = HashSet::new();
     for element in data.relations {
+        if !seen_relations.insert(element.id) {
+            continue;
+        }
         let Some(tags) = &element.tags else {
             continue;
         };
