@@ -91,6 +91,20 @@ impl BigWaterField {
             None => 0,
         }
     }
+
+    /// Max depth in the 7x7 around (x, z); proxy for body width. Edge-safe via depth_at.
+    pub fn body_max_7x7(&self, x: i32, z: i32) -> i32 {
+        let mut m = 0;
+        for dz in -3..=3 {
+            for dx in -3..=3 {
+                m = m.max(self.depth_at(x + dx, z + dz));
+                if m >= MAX_WATER_DEPTH {
+                    return m;
+                }
+            }
+        }
+        m
+    }
 }
 
 /// Map a grid-cell span to the block span that samples into it (a safe superset).
@@ -273,23 +287,25 @@ fn polygon_local_max(component_max_units: u16) -> i32 {
     }
 }
 
-/// Depth from an effective DT and component max: ramp past the shoal, tier-clamped.
+/// Depth from an effective DT: local_max * sqrt(dist/span), tier-clamped.
 fn depth_from_dt(dt_eff: f64, component_max_units: u16) -> i32 {
     if dt_eff < f64::from(SHOAL_DT_UNITS) {
         return 0;
     }
     let local_max = polygon_local_max(component_max_units);
-    let slope = if component_max_units < 21 {
-        1.0 / 3.0
-    } else if component_max_units < 45 {
-        1.0 / 4.0
-    } else if component_max_units < 75 {
-        1.0 / 6.0
-    } else {
-        1.0 / 8.0
-    };
     let dist_blocks = (dt_eff - f64::from(SHOAL_DT_UNITS)) / 3.0;
-    ((dist_blocks * slope).floor() as i32).clamp(0, local_max)
+    // Sqrt curve: steep near shore, smooth plateau; kills the linear-band terracing.
+    let span: f64 = if component_max_units < 21 {
+        6.0
+    } else if component_max_units < 45 {
+        12.0
+    } else if component_max_units < 75 {
+        20.0
+    } else {
+        35.0
+    };
+    let t = (dist_blocks / span).clamp(0.0, 1.0);
+    ((f64::from(local_max) * t.sqrt()).floor() as i32).clamp(0, local_max)
 }
 
 /// Per-cell carve depth, with deterministic contour wobble on the bank lines.
@@ -343,6 +359,7 @@ pub fn carve_water_column(
     water_y: i32,
     depth: i32,
     road_mask: &RoadMaskBitmap,
+    bwf: &BigWaterField,
 ) {
     debug_assert!(
         depth <= MAX_WATER_DEPTH,
@@ -371,20 +388,27 @@ pub fn carve_water_column(
             }
         }
         2..=6 => {
-            // Jitter the depth tier so patches don't ring the shore.
-            let h = crate::land_cover::coord_hash(x + 7, z + 13);
-            let d = (depth + (h % 3) as i32 - 1).max(1);
+            // Coherent jitter breaks concentric depth rings as patches, not speckle.
+            let jn = crate::ground_generation::value_noise_01(x + 7, z + 13, 22);
+            let jitter = if jn < 0.34 {
+                -1
+            } else if jn > 0.66 {
+                1
+            } else {
+                0
+            };
+            let d = (depth + jitter).max(1);
             // Domain-warp the sample coords so patches read organic, not circular.
-            let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 40);
-            let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 40);
-            let wx = x + ((warp_x - 0.5) * 24.0) as i32;
-            let wz = z + ((warp_z - 0.5) * 24.0) as i32;
+            let warp_x = crate::ground_generation::value_noise_01(x + 901, z + 33, 52);
+            let warp_z = crate::ground_generation::value_noise_01(x + 17, z + 811, 52);
+            let wx = x + ((warp_x - 0.5) * 28.0) as i32;
+            let wz = z + ((warp_z - 0.5) * 28.0) as i32;
             // Per-block noise, sampled lazily so most cells skip the rare tiers.
             let vn = |dx, dz, s| crate::ground_generation::value_noise_01(wx + dx, wz + dz, s);
             let top = if d <= 1 {
                 SAND
             } else if d == 2 {
-                if vn(53, 97, 36) > 0.50 {
+                if vn(53, 97, 56) > 0.50 {
                     SAND
                 } else {
                     GRAVEL
@@ -393,13 +417,13 @@ pub fn carve_water_column(
                 MAGMA_BLOCK
             } else if d >= 5 && vn(727, 911, 8) > 0.96 {
                 SOUL_SAND
-            } else if vn(73, 109, 42) > 0.74 {
+            } else if vn(73, 109, 64) > 0.74 {
                 CLAY
-            } else if vn(53, 97, 36) > 0.81 {
+            } else if vn(53, 97, 56) > 0.81 {
                 SAND
-            } else if vn(211, 41, 26) > 0.88 {
+            } else if vn(211, 41, 44) > 0.88 {
                 DIRT
-            } else if vn(311, 17, 30) > 0.90 {
+            } else if vn(311, 17, 50) > 0.90 {
                 COARSE_DIRT
             } else {
                 GRAVEL
@@ -424,8 +448,10 @@ pub fn carve_water_column(
     }
 
     // Dunes return their crest so veg plants on top instead of inside them.
-    let bump = if depth >= 1 && !near_bridge {
-        place_underwater_dunes(editor, x, z, water_y, bed_y, depth, top_block)
+    // 7x7 body max is sampled lazily; depth 1 always yields amp 0, skip it too.
+    let bump = if depth >= 2 && !near_bridge {
+        let amp = dune_amp(bwf.body_max_7x7(x, z), depth);
+        place_underwater_dunes(editor, x, z, water_y, bed_y, amp, top_block)
     } else {
         0
     };
@@ -446,15 +472,15 @@ fn bridge_adjacent(road_mask: &RoadMaskBitmap, x: i32, z: i32) -> bool {
     false
 }
 
-/// Dune amplitude for a cell, capped so the crest stays below the surface.
-/// Depth stands in for body width: deeper cells only occur in wider water.
-fn dune_amp(depth: i32) -> i32 {
-    let target = match depth {
+/// Dune amplitude: target keyed off body width (7x7 BWF max), capped below the surface.
+fn dune_amp(body_max: i32, depth: i32) -> i32 {
+    // BWF depth caps at MAX_WATER_DEPTH=6, so 6 must map to the top tier.
+    let target = match body_max {
         ..=3 => 2,
-        4 => 3,
+        4..=5 => 3,
         _ => 4,
     };
-    target.min(depth - 1)
+    target.min((depth - 1).max(0))
 }
 
 /// Width-aware multi-octave dunes 1-4 blocks tall on the bed. Returns the
@@ -465,10 +491,9 @@ fn place_underwater_dunes(
     z: i32,
     water_y: i32,
     bed_y: i32,
-    depth: i32,
+    amp: i32,
     bed_block: Block,
 ) -> i32 {
-    let amp = dune_amp(depth);
     if amp <= 0 {
         return 0;
     }
@@ -617,7 +642,7 @@ pub fn carve_lc_water_region(
             if editor.get_ground_level(x, z) > water_y {
                 continue;
             }
-            carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask);
+            carve_water_column(editor, x, z, water_y, bwf.depth_at(x, z), road_mask, bwf);
         }
     }
 }
@@ -656,6 +681,43 @@ mod tests {
     }
 
     #[test]
+    fn sqrt_depth_monotonic_capped_no_cliffs() {
+        for cm in [10u16, 30, 60, 200] {
+            let lm = polygon_local_max(cm);
+            let mut prev = 0;
+            for dt in 0..=300u32 {
+                let d = depth_from_dt(f64::from(dt), cm);
+                assert!(d >= prev, "non-monotonic at dt={dt} cm={cm}");
+                assert!(d - prev <= 1, "step >1 at dt={dt} cm={cm}");
+                assert!(d <= lm);
+                prev = d;
+            }
+            assert_eq!(prev, lm, "far water reaches tier max for cm={cm}");
+        }
+    }
+
+    #[test]
+    fn body_max_7x7_edge_safe() {
+        let mut depth = vec![0u8; 8];
+        nibble_set(&mut depth, 5, 6); // cell (1,1) in a 4x4 field
+        let bwf = BigWaterField {
+            depth,
+            width: 4,
+            height: 4,
+            min_x: 0,
+            min_z: 0,
+        };
+        assert_eq!(
+            bwf.body_max_7x7(0, 0),
+            6,
+            "corner window clips but finds (1,1)"
+        );
+        assert_eq!(bwf.body_max_7x7(-3, -3), 0, "mostly-outside window");
+        assert_eq!(bwf.body_max_7x7(10, 10), 0, "fully outside");
+        assert_eq!(BigWaterField::empty().body_max_7x7(5, 5), 0);
+    }
+
+    #[test]
     fn estimate_no_water_is_zero() {
         let grid = vec![vec![0u8; 16]; 16];
         assert_eq!(estimate_max_carve_depth(&grid, 16, 16), 0);
@@ -686,13 +748,13 @@ mod tests {
     }
 
     #[test]
-    fn dune_amp_capped_by_depth() {
-        assert_eq!(dune_amp(1), 0);
-        assert_eq!(dune_amp(2), 1);
-        assert_eq!(dune_amp(3), 2);
-        assert_eq!(dune_amp(4), 3);
-        assert_eq!(dune_amp(5), 4);
-        assert_eq!(dune_amp(6), 4);
+    fn dune_amp_keys_off_body_max_capped_by_depth() {
+        assert_eq!(dune_amp(2, 1), 0);
+        assert_eq!(dune_amp(3, 6), 2);
+        assert_eq!(dune_amp(5, 6), 3);
+        assert_eq!(dune_amp(6, 2), 1);
+        assert_eq!(dune_amp(6, 6), 4);
+        assert_eq!(dune_amp(0, 0), 0);
     }
 
     #[test]

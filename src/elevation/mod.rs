@@ -280,9 +280,9 @@ pub fn fetch_elevation_data(
     })
 }
 
-/// Clean up old cached elevation tiles/files from all providers.
+/// Clean up old cached elevation tiles in the background, at most once per day.
 pub fn cleanup_old_cached_tiles() {
-    cache::cleanup_old_cached_files();
+    cache::spawn_throttled_cleanup();
 }
 
 /// Compute the fraction of NaN/non-finite values in a height grid (0.0 to 1.0).

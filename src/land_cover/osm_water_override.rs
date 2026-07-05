@@ -3,6 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 
 use crate::bresenham::bresenham_line;
+use crate::clipping::clip_water_ring_to_bbox;
 use crate::coordinate_system::cartesian::XZBBox;
 use crate::land_cover::{compute_water_distance, LandCoverData, LC_WATER};
 use crate::osm_parser::{
@@ -59,7 +60,12 @@ pub fn apply_osm_water_override(
                     if !is_ring_closed(&way.nodes) {
                         continue;
                     }
-                    let outer: Vec<(i32, i32)> = way.nodes.iter().map(|n| (n.x, n.z)).collect();
+                    // Clip to the cell bbox first; a ring spilling past the cell would clamp-flood a wedge.
+                    let clipped = match clip_water_ring_to_bbox(&way.nodes, xzbbox) {
+                        Some(r) => r,
+                        None => continue,
+                    };
+                    let outer: Vec<(i32, i32)> = clipped.iter().map(|n| (n.x, n.z)).collect();
                     changed += fill_polygon_scanline(
                         &mut land_cover.grid,
                         &[outer.as_slice()],
@@ -116,6 +122,15 @@ pub fn apply_osm_water_override(
                 crate::element_processing::merge_way_segments(&mut inner_nodes);
                 outer_nodes.retain(|ring| is_ring_closed(ring));
                 inner_nodes.retain(|ring| is_ring_closed(ring));
+                // Clip assembled rings before filling; unclipped crossings past the edge clamp-flood a corner wedge.
+                outer_nodes = outer_nodes
+                    .into_iter()
+                    .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
+                    .collect();
+                inner_nodes = inner_nodes
+                    .into_iter()
+                    .filter_map(|ring| clip_water_ring_to_bbox(&ring, xzbbox))
+                    .collect();
                 if outer_nodes.is_empty() {
                     continue;
                 }
@@ -297,42 +312,72 @@ fn fill_polygon_scanline(
             inner_x_world.sort_by(|a, b| a.partial_cmp(b).unwrap());
         }
 
-        let row = &mut grid[gz];
-        let mut i = 0;
-        while i + 1 < outer_x_world.len() {
-            let wx_start = outer_x_world[i];
-            let wx_end = outer_x_world[i + 1];
-            i += 2;
+        count += fill_row_spans(
+            &mut grid[gz],
+            &outer_x_world,
+            &inner_x_world,
+            heights,
+            context,
+            gz,
+            min_x_world,
+            max_x_world,
+            width,
+            scale_to_grid_x,
+            scale_inv_x,
+        );
+    }
+    count
+}
 
-            let wx_start_clipped = wx_start.max(min_x_world as f64);
-            let wx_end_clipped = wx_end.min(max_x_world as f64);
-            if wx_start_clipped > wx_end_clipped {
-                continue;
-            }
+#[allow(clippy::too_many_arguments, clippy::needless_range_loop)]
+fn fill_row_spans(
+    row: &mut [u8],
+    outer_x: &[f64],
+    inner_x: &[f64],
+    heights: &[Vec<f32>],
+    context: Option<&WaterContext>,
+    gz: usize,
+    min_x_world: i32,
+    max_x_world: i32,
+    width: usize,
+    scale_to_grid_x: f64,
+    scale_inv_x: f64,
+) -> usize {
+    // Cyclic rings always yield an even crossing count; pairing ignores any trailing odd one.
+    let mut count = 0;
+    let mut i = 0;
+    while i + 1 < outer_x.len() {
+        let wx_start = outer_x[i];
+        let wx_end = outer_x[i + 1];
+        i += 2;
 
-            let gx_start =
-                ((wx_start_clipped - min_x_world as f64) * scale_to_grid_x).ceil() as i32;
-            let gx_end = ((wx_end_clipped - min_x_world as f64) * scale_to_grid_x).floor() as i32;
-            let gx_start = gx_start.max(0) as usize;
-            let gx_end = (gx_end.min(width as i32 - 1)).max(0) as usize;
-            if gx_start > gx_end {
-                continue;
-            }
+        let wx_start_clipped = wx_start.max(min_x_world as f64);
+        let wx_end_clipped = wx_end.min(max_x_world as f64);
+        if wx_start_clipped > wx_end_clipped {
+            continue;
+        }
 
-            for gx in gx_start..=gx_end {
-                if !inner_x_world.is_empty() {
-                    let wx = gx as f64 * scale_inv_x + min_x_world as f64;
-                    if point_in_sorted_ranges(wx, &inner_x_world) {
-                        continue;
-                    }
-                }
-                if !passes_water_guard(heights, context, gx, gz) {
+        let gx_start = ((wx_start_clipped - min_x_world as f64) * scale_to_grid_x).ceil() as i32;
+        let gx_end = ((wx_end_clipped - min_x_world as f64) * scale_to_grid_x).floor() as i32;
+        let gx_start = gx_start.max(0) as usize;
+        let gx_end = (gx_end.min(width as i32 - 1)).max(0) as usize;
+        if gx_start > gx_end {
+            continue;
+        }
+
+        for gx in gx_start..=gx_end {
+            if !inner_x.is_empty() {
+                let wx = gx as f64 * scale_inv_x + min_x_world as f64;
+                if point_in_sorted_ranges(wx, inner_x) {
                     continue;
                 }
-                if row[gx] != LC_WATER {
-                    row[gx] = LC_WATER;
-                    count += 1;
-                }
+            }
+            if !passes_water_guard(heights, context, gx, gz) {
+                continue;
+            }
+            if row[gx] != LC_WATER {
+                row[gx] = LC_WATER;
+                count += 1;
             }
         }
     }
@@ -693,4 +738,81 @@ fn get_bit(mask: &[u64], idx: usize) -> bool {
 #[inline(always)]
 fn set_bit(mask: &mut [u64], idx: usize) {
     mask[idx >> 6] |= 1u64 << (idx & 63);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(id: u64, x: i32, z: i32) -> ProcessedNode {
+        ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        }
+    }
+
+    #[test]
+    fn straddling_ring_fills_only_bbox_intersection() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        // 16x16 grid over 16x16 world: scale factors are exactly 1.
+        let mut grid = vec![vec![0u8; 16]; 16];
+        let heights = vec![vec![0.0f32; 16]; 16];
+        let ring = vec![
+            node(1, 8, 4),
+            node(2, 30, 4),
+            node(3, 30, 11),
+            node(4, 8, 11),
+            node(1, 8, 4),
+        ];
+        let clipped = clip_water_ring_to_bbox(&ring, &bbox).unwrap();
+        let outer: Vec<(i32, i32)> = clipped.iter().map(|n| (n.x, n.z)).collect();
+        let n = fill_polygon_scanline(
+            &mut grid,
+            &[outer.as_slice()],
+            &[],
+            &heights,
+            None,
+            0,
+            0,
+            15,
+            15,
+            16,
+            16,
+            1.0,
+            1.0,
+        );
+        assert!(n > 0);
+        assert_eq!(grid[7][10], LC_WATER);
+        for (gz, row) in grid.iter().enumerate() {
+            for (gx, &cell) in row.iter().enumerate() {
+                if cell == LC_WATER {
+                    assert!((8..=15).contains(&gx) && (4..=11).contains(&gz));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn crossing_pair_fills_span() {
+        let heights = vec![vec![0.0f32; 16]];
+        let mut row = vec![0u8; 16];
+        let n = fill_row_spans(
+            &mut row,
+            &[2.0, 5.0],
+            &[],
+            &heights,
+            None,
+            0,
+            0,
+            15,
+            16,
+            1.0,
+            1.0,
+        );
+        assert!(n > 0);
+        assert_eq!(row[3], LC_WATER);
+        assert_ne!(row[8], LC_WATER);
+    }
 }

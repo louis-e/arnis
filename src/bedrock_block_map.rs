@@ -94,6 +94,9 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             )],
         ),
 
+        // Bedrock block id is "reeds" pre-1.21.40; newer clients auto-upgrade it
+        "sugar_cane" => BedrockBlock::simple("reeds"),
+
         // Oak leaves with persistence
         "oak_leaves" => BedrockBlock::with_states(
             "leaves",

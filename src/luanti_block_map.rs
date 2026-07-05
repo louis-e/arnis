@@ -290,9 +290,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         170 => "mcl_core:glass_silver",
         171 => "mcl_core:glass_brown",
         172 => "mcl_core:glass",
-        173 | 236 | 237 => {
-            return conv_trapdoor(props, "mcl_doors:trapdoor", "mcl_doors:trapdoor_open")
-        }
+        173 | 236 => return conv_trapdoor(props, "mcl_doors:trapdoor", "mcl_doors:trapdoor_open"),
+        237 => "mcl_core:reeds",     // SUGAR_CANE
         238 => "mcl_ocean:seagrass", // SEAGRASS
         239 => "mcl_ocean:kelp",     // KELP_PLANT
         174 => "mcl_colorblocks:concrete_brown",
