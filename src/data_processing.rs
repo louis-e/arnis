@@ -341,6 +341,8 @@ pub fn generate_world_with_options(
     }
 
     let ground = Arc::new(ground);
+    // Materialize the lazy water-blend mask now, before world memory peaks.
+    ground.warm_water_blend();
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     let tree_pack =
         crate::trees::tree_pack::load(args, args.scale, args.ground_level).map(Arc::new);

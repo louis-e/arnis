@@ -587,6 +587,13 @@ impl Ground {
         }
     }
 
+    /// Computes the lazy water-blend mask now; all grid mutations must be done.
+    pub fn warm_water_blend(&self) {
+        if let Some(ref lc) = self.land_cover {
+            let _ = lc.water_blend_grid();
+        }
+    }
+
     /// Update the stored world size after a rotation resizes the bbox, so flat-mode land-cover lookups stay aligned.
     pub fn set_world_dims(&mut self, world_width: usize, world_height: usize) {
         self.world_width = world_width;
