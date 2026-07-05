@@ -350,6 +350,7 @@ pub fn generate_world_with_options(
     let big_water_field = crate::water_depth::compute_big_water_field(&ground, &xzbbox);
 
     println!("{} Processing data...", "[4/7]".bold());
+    emit_gui_progress_update(19.5, "Processing data...");
 
     // Build highway connectivity map once before processing
     let highway_connectivity = highways::build_highway_connectivity_map(&elements);
@@ -362,9 +363,6 @@ pub fn generate_world_with_options(
     if let Some(ref tp) = tree_pack {
         editor.set_tree_pack(Arc::clone(tp));
     }
-
-    println!("{} Generating area...", "[5/7]".bold());
-    emit_gui_progress_update(20.0, "Generating area...");
 
     // Pre-compute all flood fills in parallel for better CPU utilization
     let mut flood_fill_cache = FloodFillCache::precompute(&elements, args.timeout.as_ref());
@@ -406,6 +404,9 @@ pub fn generate_world_with_options(
         .unwrap_or(&empty_suppressed);
 
     bench.mark("precompute");
+
+    println!("{} Generating area...", "[5/7]".bold());
+    emit_gui_progress_update(20.0, "Generating area...");
 
     // Stream-to-disk eviction state (populated in the parallel branch below).
     let mut eviction_active = false;
@@ -515,6 +516,8 @@ pub fn generate_world_with_options(
         let total_tiles = indexed_tiles.len().max(1);
         let mut tiles_merged = 0usize;
         let mut last_emitted_pct = 20.0_f64;
+        // Placement-side ticks so the bar moves before the first batch merges.
+        let tiles_placed = std::sync::atomic::AtomicUsize::new(0);
         for batch in indexed_tiles.chunks(tile_batch_size) {
             // Phase 1: process this batch of tiles in parallel
             let place_start = std::time::Instant::now();
@@ -619,6 +622,16 @@ pub fn generate_world_with_options(
                     }
 
                     let tile_road_overrides = tile_editor.take_road_surface_overrides();
+
+                    // Emit on whole-percent steps only; the monotonic clamp
+                    // reconciles these with the merge-side emits.
+                    let placed =
+                        tiles_placed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    if (placed * 50 / total_tiles) != ((placed - 1) * 50 / total_tiles) {
+                        let pct = 20.0 + (placed as f64 / total_tiles as f64) * 50.0;
+                        emit_gui_progress_update_ex(pct, "Generating area...", eviction_active);
+                    }
+
                     (
                         tile_idx,
                         tile_editor.into_world(),
@@ -706,6 +719,8 @@ pub fn generate_world_with_options(
         }
 
         emit_gui_progress_update_ex(70.0, "", eviction_active);
+        // Elements were only borrowed by the tile loop; free them before save.
+        drop(elements);
     } else {
         // Small area: sequential processing along the original code path.
         let elements_count: usize = elements.len();
@@ -824,7 +839,15 @@ pub fn generate_world_with_options(
         );
     }
 
+    // Free everything the save phase doesn't need; it often sits at the process peak.
     drop(road_mask);
+    drop(big_water_field);
+    drop(building_footprints);
+    drop(building_passages);
+    drop(bridge_structures);
+    drop(bridge_surface);
+    drop(bridge_outlines);
+    drop(rail_bridge_internal_endpoints);
 
     // Carve subway tunnel interiors now that underground is filled with stone.
     // Under eviction this already ran in-tile (regions get freed before here).

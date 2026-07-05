@@ -16,6 +16,7 @@ pub mod osm_water_override;
 use crate::telemetry::{send_log, LogLevel};
 use crate::{coordinate_system::geographic::LLBBox, progress::emit_gui_progress_update};
 use flate2::read::DeflateDecoder;
+use once_cell::sync::OnceCell;
 use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::io::Read;
@@ -66,19 +67,8 @@ pub struct LandCoverData {
     /// Distance from each water cell to nearest shore, indexed as [z][x].
     /// 0 = non-water, 1 = shore water, 2+ = progressively deeper water.
     pub water_distance: Vec<Vec<u8>>,
-    /// Pre-smoothed water-ness field in [0, 1] — a Gaussian-blurred version
-    /// of the binary `grid == LC_WATER` mask. Sampled via `ground.water_blend()`
-    /// and compared against a hard 0.5 threshold inside `ground_generation`
-    /// (water classification path) so the shoreline follows the smoothed
-    /// contour's 0.5 isoline instead of the raw ESA 10 m rectangular grid
-    /// edge.
-    ///
-    /// Stored as `f32` on purpose — the grid can be tens of millions of cells
-    /// on large bboxes, and the values are bounded to `[0, 1]` and only ever
-    /// compared against a 0.5 threshold, so f32's ~7 decimal digits are
-    /// overkill. Halving the storage saves ~46 MB peak on a Munich-sized
-    /// area.
-    pub water_blend_grid: Vec<Vec<f32>>,
+    /// Lazily computed smoothed water mask, so the blur runs once instead of after every mutation.
+    pub water_blend_cache: OnceCell<Vec<Vec<f32>>>,
     /// Grid width (matches elevation grid width)
     pub width: usize,
     /// Grid height (matches elevation grid height)
@@ -86,11 +76,15 @@ pub struct LandCoverData {
 }
 
 impl LandCoverData {
-    /// Recompute `water_blend_grid` from the current classification grid.
-    /// Call this after any mutation to `grid` (reclassification in
-    /// `apply_land_cover_repair`, or grid rotation in the rotator).
-    pub(crate) fn refresh_water_blend_grid(&mut self) {
-        self.water_blend_grid = compute_water_blend_smooth(&self.grid, self.width, self.height);
+    /// Smoothed water mask, computed on first use after the last grid mutation.
+    pub(crate) fn water_blend_grid(&self) -> &[Vec<f32>] {
+        self.water_blend_cache
+            .get_or_init(|| compute_water_blend_smooth(&self.grid, self.width, self.height))
+    }
+
+    /// Call after any mutation to `grid` so the mask is recomputed on next use.
+    pub(crate) fn invalidate_water_blend_grid(&mut self) {
+        self.water_blend_cache = OnceCell::new();
     }
 }
 
@@ -152,7 +146,7 @@ pub fn fetch_land_cover_data(
     grid_height: usize,
 ) -> Option<LandCoverData> {
     println!("Fetching land cover data (ESA WorldCover 2021)...");
-    emit_gui_progress_update(9.0, "Detecting surface types...");
+    emit_gui_progress_update(9.0, "Downloading data...");
 
     let cache_dir = get_cache_dir();
     if !cache_dir.exists() {
@@ -221,17 +215,10 @@ pub fn fetch_land_cover_data(
     // Used for shoreline blending (land cells adjacent to water get sand surface).
     let water_distance = compute_water_distance(&grid, grid_width, grid_height);
 
-    // Pre-smooth the water mask so `ground.water_blend()` returns continuous
-    // values around the shoreline even when grid-to-world mapping is 1-to-1
-    // (otherwise bilinear sampling of a binary grid at integer block
-    // positions just returns the cell's binary value and the renderer's
-    // noise-threshold organic-edge pass never fires).
-    let water_blend_grid = compute_water_blend_smooth(&grid, grid_width, grid_height);
-
     Some(LandCoverData {
         grid,
         water_distance,
-        water_blend_grid,
+        water_blend_cache: OnceCell::new(),
         width: grid_width,
         height: grid_height,
     })

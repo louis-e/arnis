@@ -110,56 +110,59 @@ impl ElevationProvider for AwsTerrain {
         );
 
         let n = 2.0_f64.powi(zoom as i32);
-        let mut height_grid: Vec<Vec<f64>> = vec![vec![f64::NAN; grid_width]; grid_height];
 
-        // Iterate over target grid and bilinearly sample from tiles
-        #[allow(clippy::needless_range_loop)]
-        for gy in 0..grid_height {
-            for gx in 0..grid_width {
-                // Map grid cell to geographic coordinates
-                let lat = bbox.max().lat()
-                    - (gy as f64 / (grid_height - 1).max(1) as f64)
-                        * (bbox.max().lat() - bbox.min().lat());
-                let lng = bbox.min().lng()
-                    + (gx as f64 / (grid_width - 1).max(1) as f64)
-                        * (bbox.max().lng() - bbox.min().lng());
+        // Rows are independent; sample them in parallel
+        let height_grid: Vec<Vec<f64>> = (0..grid_height)
+            .into_par_iter()
+            .map(|gy| {
+                let mut row = vec![f64::NAN; grid_width];
+                for (gx, cell) in row.iter_mut().enumerate() {
+                    // Map grid cell to geographic coordinates
+                    let lat = bbox.max().lat()
+                        - (gy as f64 / (grid_height - 1).max(1) as f64)
+                            * (bbox.max().lat() - bbox.min().lat());
+                    let lng = bbox.min().lng()
+                        + (gx as f64 / (grid_width - 1).max(1) as f64)
+                            * (bbox.max().lng() - bbox.min().lng());
 
-                // Convert lat/lng to fractional tile pixel coordinates
-                let lat_rad = lat.to_radians();
-                let fx_global = (lng + 180.0) / 360.0 * n * 256.0;
-                let fy_global =
-                    (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n * 256.0;
+                    // Convert lat/lng to fractional tile pixel coordinates
+                    let lat_rad = lat.to_radians();
+                    let fx_global = (lng + 180.0) / 360.0 * n * 256.0;
+                    let fy_global =
+                        (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n * 256.0;
 
-                // Determine tile and fractional pixel within tile.
-                // Clamp via i64 so ±180° lng (which LLPoint permits at
-                // the upper bound) and ±90° lat (where f64 `tan` is
-                // huge-but-finite, driving fy_global extremely negative)
-                // can't wrap a bare `as u32` cast to a wrong tile index;
-                // missing tiles at the bbox edge fall back to NaN-fill.
-                let n_tiles = n as i64;
-                let tile_x = ((fx_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
-                let tile_y = ((fy_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
-                let px = fx_global - tile_x as f64 * 256.0;
-                let py = fy_global - tile_y as f64 * 256.0;
+                    // Determine tile and fractional pixel within tile.
+                    // Clamp via i64 so ±180° lng (which LLPoint permits at
+                    // the upper bound) and ±90° lat (where f64 `tan` is
+                    // huge-but-finite, driving fy_global extremely negative)
+                    // can't wrap a bare `as u32` cast to a wrong tile index;
+                    // missing tiles at the bbox edge fall back to NaN-fill.
+                    let n_tiles = n as i64;
+                    let tile_x = ((fx_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
+                    let tile_y = ((fy_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
+                    let px = fx_global - tile_x as f64 * 256.0;
+                    let py = fy_global - tile_y as f64 * 256.0;
 
-                // Bilinear interpolation from the 4 surrounding pixels
-                let x0 = px.floor() as i32;
-                let y0 = py.floor() as i32;
-                let dx = px - x0 as f64;
-                let dy = py - y0 as f64;
+                    // Bilinear interpolation from the 4 surrounding pixels
+                    let x0 = px.floor() as i32;
+                    let y0 = py.floor() as i32;
+                    let dx = px - x0 as f64;
+                    let dy = py - y0 as f64;
 
-                let v00 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0, y0);
-                let v10 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0);
-                let v01 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0, y0 + 1);
-                let v11 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0 + 1);
+                    let v00 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0, y0);
+                    let v10 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0);
+                    let v01 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0, y0 + 1);
+                    let v11 = sample_tile_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0 + 1);
 
-                if let (Some(v00), Some(v10), Some(v01), Some(v11)) = (v00, v10, v01, v11) {
-                    let lerp_top = v00 + (v10 - v00) * dx;
-                    let lerp_bot = v01 + (v11 - v01) * dx;
-                    height_grid[gy][gx] = lerp_top + (lerp_bot - lerp_top) * dy;
+                    if let (Some(v00), Some(v10), Some(v01), Some(v11)) = (v00, v10, v01, v11) {
+                        let lerp_top = v00 + (v10 - v00) * dx;
+                        let lerp_bot = v01 + (v11 - v01) * dx;
+                        *cell = lerp_top + (lerp_bot - lerp_top) * dy;
+                    }
                 }
-            }
-        }
+                row
+            })
+            .collect();
 
         Ok(RawElevationGrid {
             heights_meters: height_grid,

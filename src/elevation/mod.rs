@@ -127,7 +127,7 @@ pub fn fetch_elevation_data(
     let provider_name = provider.name();
     let is_fallback = provider_name == "aws";
 
-    emit_gui_progress_update(10.0, "Fetching elevation...");
+    emit_gui_progress_update(10.0, "Downloading data...");
 
     // Fetch raw elevation data in meters, falling back to AWS on regional provider failure
     let raw = match provider.fetch_raw(bbox, grid_width, grid_height) {
@@ -170,7 +170,7 @@ pub fn fetch_elevation_data(
                 ),
             );
             let fallback = providers::aws_terrain::AwsTerrain;
-            emit_gui_progress_update(10.0, "Regional provider failed, fetching from AWS...");
+            emit_gui_progress_update(10.0, "Downloading data...");
             fallback.fetch_raw(bbox, grid_width, grid_height)?
         }
         Err(e) => return Err(e),

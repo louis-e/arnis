@@ -391,10 +391,11 @@ impl Ground {
             // doesn't recover the ~10⁻⁷ precision lost at storage, but it
             // prevents extra rounding from accumulating in the four
             // multiply-adds + the threshold comparison downstream.
-            let w00 = lc.water_blend_grid[z0][x0] as f64;
-            let w10 = lc.water_blend_grid[z0][x1] as f64;
-            let w01 = lc.water_blend_grid[z1][x0] as f64;
-            let w11 = lc.water_blend_grid[z1][x1] as f64;
+            let wb = lc.water_blend_grid();
+            let w00 = wb[z0][x0] as f64;
+            let w10 = wb[z0][x1] as f64;
+            let w01 = wb[z1][x0] as f64;
+            let w11 = wb[z1][x1] as f64;
 
             // Bilinear interpolation
             let top = w00 * (1.0 - tx) + w10 * tx;
@@ -582,7 +583,7 @@ impl Ground {
             // The water-blend mask was derived from the pre-rotation grid —
             // refresh it from the rotated grid so the shoreline softening
             // stays aligned with the new classification.
-            lc.refresh_water_blend_grid();
+            lc.invalidate_water_blend_grid();
         }
     }
 
@@ -786,7 +787,10 @@ mod tests {
         let lc = LandCoverData {
             grid: vec![vec![LC_WATER, 10], vec![10, 10]],
             water_distance: vec![vec![1, 0], vec![0, 0]],
-            water_blend_grid: vec![vec![1.0, 0.0], vec![0.0, 0.0]],
+            water_blend_cache: once_cell::sync::OnceCell::with_value(vec![
+                vec![1.0, 0.0],
+                vec![0.0, 0.0],
+            ]),
             width: 2,
             height: 2,
         };

@@ -80,6 +80,9 @@ impl FixedTileProvider for Usgs3dep {
 
     const CACHE_NAME: &'static str = "usgs_3dep";
 
+    // The 1m dataset needs hundreds of exportImage requests per city, batch pacing still applies.
+    const MAX_CONCURRENT_DOWNLOADS: usize = 8;
+
     fn resolution_levels(&self) -> &'static [Self::Level] {
         LEVELS
     }

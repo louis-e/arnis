@@ -196,7 +196,7 @@ pub fn apply_land_cover_repair(
         // The water-blend smoothing was derived from the pre-reclassify
         // grid — refresh it so the softened shoreline reflects the updated
         // classification.
-        land_cover.refresh_water_blend_grid();
+        land_cover.invalidate_water_blend_grid();
     }
 
     // Smooth before pull; otherwise the Gaussian raises pulled cells back up.
