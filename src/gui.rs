@@ -804,15 +804,23 @@ struct WorldMapData {
 }
 
 /// Reveals a file or folder in the system file explorer.
-/// On Windows, tries to open files with the default application first (e.g. .mcworld with
-/// Minecraft Bedrock), falling back to Explorer. Directories always open in Explorer.
+/// On Windows, opens files with the default application (e.g. .mcworld with Minecraft
+/// Bedrock), except OneDrive paths which are revealed in Explorer to avoid the shell's
+/// "cannot find" error on unsynced/placeholder files. Directories always open in Explorer.
 #[tauri::command]
 fn gui_show_in_folder(path: String) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        // On Windows, try to open with default application (e.g. .mcworld with Minecraft Bedrock)
-        // For directories, `start ""` opens Explorer directly. Falls back to explorer /select.
-        if std::process::Command::new("cmd")
+        // OneDrive files can be cloud placeholders / mid-sync that `start` can't launch
+        // ("Windows cannot find <path>"), so reveal-and-highlight instead of opening.
+        if path.to_lowercase().contains("onedrive") {
+            std::process::Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        } else if std::process::Command::new("cmd")
+            // Otherwise open with the default app (e.g. .mcworld with Minecraft Bedrock);
+            // for directories `start ""` opens Explorer. Falls back to explorer /select.
             .args(["/C", "start", "", &path])
             .spawn()
             .is_err()
