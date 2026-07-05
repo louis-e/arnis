@@ -96,6 +96,16 @@ pub fn clip_water_ring_to_bbox(
         return None;
     }
 
+    // Refuse open fragments; chord-closing them here would fabricate a closed
+    // wedge whose synthetic ids defeat the callers' post-clip closure checks.
+    let first = &ring[0];
+    let last = ring.last().unwrap();
+    let closed =
+        first.id == last.id || ((first.x - last.x).abs() <= 1 && (first.z - last.z).abs() <= 1);
+    if !closed {
+        return None;
+    }
+
     // Convert to f64 coordinates and ensure closed
     let mut polygon: Vec<(f64, f64)> = ring.iter().map(|n| (n.x as f64, n.z as f64)).collect();
     if !polygon.is_empty() && polygon.first() != polygon.last() {
@@ -590,4 +600,55 @@ fn assign_node_ids_preserving_endpoints(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coordinate_system::cartesian::XZBBox;
+
+    fn node(id: u64, x: i32, z: i32) -> ProcessedNode {
+        ProcessedNode {
+            id,
+            tags: HashMap::new(),
+            x,
+            z,
+        }
+    }
+
+    #[test]
+    fn open_fragment_crossing_bbox_is_rejected() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let fragment = vec![node(1, -5, 3), node(2, 8, 3), node(3, 30, 12)];
+        assert!(clip_water_ring_to_bbox(&fragment, &bbox).is_none());
+    }
+
+    #[test]
+    fn nearly_closed_ring_crossing_bbox_is_clipped() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let ring = vec![
+            node(1, 4, 4),
+            node(2, 30, 4),
+            node(3, 30, 11),
+            node(4, 4, 11),
+            node(5, 4, 5),
+        ];
+        let clipped = clip_water_ring_to_bbox(&ring, &bbox).unwrap();
+        assert!(clipped
+            .iter()
+            .all(|n| (0..=15).contains(&n.x) && (0..=15).contains(&n.z)));
+    }
+
+    #[test]
+    fn closed_ring_crossing_bbox_is_clipped() {
+        let bbox = XZBBox::rect_from_min_max(0, 0, 15, 15).unwrap();
+        let ring = vec![
+            node(1, 4, 4),
+            node(2, 30, 4),
+            node(3, 30, 11),
+            node(4, 4, 11),
+            node(1, 4, 4),
+        ];
+        assert!(clip_water_ring_to_bbox(&ring, &bbox).is_some());
+    }
 }

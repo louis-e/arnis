@@ -344,7 +344,7 @@ impl Block {
             234 => "azalea_leaves",
             235 => "potted_poppy",
             236 => "oak_trapdoor",
-            237 => "oak_trapdoor",
+            237 => "sugar_cane",
             238 => "seagrass",
             239 => "kelp_plant",
             240 => "quartz_slab",
@@ -796,14 +796,6 @@ impl Block {
             236 => Some(Value::Compound({
                 let mut map = HashMap::new();
                 map.insert("facing".to_string(), Value::String("north".to_string()));
-                map.insert("open".to_string(), Value::String("true".to_string()));
-                map.insert("half".to_string(), Value::String("top".to_string()));
-                map
-            })),
-            // Open oak trapdoor facing south
-            237 => Some(Value::Compound({
-                let mut map = HashMap::new();
-                map.insert("facing".to_string(), Value::String("south".to_string()));
                 map.insert("open".to_string(), Value::String("true".to_string()));
                 map.insert("half".to_string(), Value::String("top".to_string()));
                 map
@@ -1274,6 +1266,8 @@ pub const WARPED_TRAPDOOR: Block = Block::new(362);
 pub const STRIPPED_WARPED_STEM: Block = Block::new(364);
 pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(365);
 pub const ORANGE_CONCRETE: Block = Block::new(363);
+// Reuses the retired open-trapdoor slot; sub-256 ids keep sections one byte per cell.
+pub const SUGAR_CANE: Block = Block::new(237);
 
 /// Maps a block to a stair variant in the same colour family.
 #[inline]

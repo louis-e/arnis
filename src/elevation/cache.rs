@@ -161,6 +161,52 @@ pub fn clear_all_cached_tiles() -> CacheClearStats {
     clear_cache_dir(&get_base_cache_dir())
 }
 
+/// Stamp file marking the last completed sweep; throttles startup sweeps.
+const CLEANUP_STAMP_FILE: &str = ".last-cleanup";
+
+/// Minimum interval between age-based sweeps.
+const CLEANUP_INTERVAL_SECS: u64 = 24 * 60 * 60;
+
+/// True when no sweep ran within the throttle interval. Touches the stamp
+/// when due so concurrent launches don't double-sweep.
+fn sweep_due(base_dir: &std::path::Path, now: std::time::SystemTime) -> bool {
+    let stamp = base_dir.join(CLEANUP_STAMP_FILE);
+    match std::fs::symlink_metadata(&stamp) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            // Never write through a symlinked stamp; replace it.
+            let _ = std::fs::remove_file(&stamp);
+        }
+        Ok(meta) if meta.is_file() => {
+            if let Ok(modified) = meta.modified() {
+                if let Ok(age) = now.duration_since(modified) {
+                    if age.as_secs() < CLEANUP_INTERVAL_SECS {
+                        return false;
+                    }
+                }
+                // Future-dated stamp (clock rollback) falls through and is rewritten.
+            }
+        }
+        _ => {}
+    }
+    let _ = std::fs::write(&stamp, b"");
+    true
+}
+
+/// Runs the age-based sweep on a detached background thread, at most once
+/// per day. Startup must not block on the cache walk (large warm caches
+/// took seconds before the window appeared).
+pub fn spawn_throttled_cleanup() {
+    let base_dir = get_base_cache_dir();
+    match std::fs::symlink_metadata(&base_dir) {
+        Ok(m) if m.is_dir() && !m.file_type().is_symlink() => {}
+        _ => return,
+    }
+    if !sweep_due(&base_dir, std::time::SystemTime::now()) {
+        return;
+    }
+    std::thread::spawn(cleanup_old_cached_files);
+}
+
 /// Cleans up old cached files from all provider cache directories.
 /// Only deletes files older than TILE_CACHE_MAX_AGE_DAYS.
 pub fn cleanup_old_cached_files() {
@@ -286,6 +332,39 @@ fn cleanup_dir_recursive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sweep_due_without_stamp_then_throttled() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now();
+        assert!(sweep_due(tmp.path(), now));
+        assert!(tmp.path().join(CLEANUP_STAMP_FILE).is_file());
+        let shortly_after = now + std::time::Duration::from_secs(60);
+        assert!(!sweep_due(tmp.path(), shortly_after));
+    }
+
+    #[test]
+    fn sweep_due_again_after_interval() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = std::time::SystemTime::now();
+        assert!(sweep_due(tmp.path(), now));
+        let later = now + std::time::Duration::from_secs(CLEANUP_INTERVAL_SECS + 60);
+        assert!(sweep_due(tmp.path(), later));
+    }
+
+    #[test]
+    fn sweep_due_replaces_symlinked_stamp() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("target");
+        std::fs::write(&target, b"x").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, tmp.path().join(CLEANUP_STAMP_FILE)).unwrap();
+        let now = std::time::SystemTime::now();
+        assert!(sweep_due(tmp.path(), now));
+        let meta = std::fs::symlink_metadata(tmp.path().join(CLEANUP_STAMP_FILE)).unwrap();
+        assert!(meta.is_file());
+        assert!(!meta.file_type().is_symlink());
+    }
 
     #[test]
     fn clear_missing_dir_is_noop() {
