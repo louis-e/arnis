@@ -129,7 +129,7 @@ pub fn fetch_data_from_overpass(
     save_file: Option<&str>,
 ) -> Result<OsmData, Box<dyn std::error::Error>> {
     println!("{} Fetching data...", "[1/7]".bold());
-    emit_gui_progress_update(1.0, "Downloading map data...");
+    emit_gui_progress_update(1.0, "Downloading data...");
 
     // List of Overpass API servers
     let arnis_api_server = "https://api.arnismc.com/overpass/api/interpreter";

@@ -2553,39 +2553,52 @@ const POTTED_PLANT_OPTIONS: [Block; 4] = [
     POTTED_BLUE_ORCHID,
 ];
 
+// Share one Arc per distinct facade property compound instead of allocating per placement.
+type FacadePropsCache = std::sync::Mutex<fnv::FnvHashMap<(u16, String), std::sync::Arc<Value>>>;
+static FACADE_PROPS: once_cell::sync::Lazy<FacadePropsCache> =
+    once_cell::sync::Lazy::new(Default::default);
+
+fn cached_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
+    let key: String = props.iter().flat_map(|(k, v)| [*k, "=", *v, ";"]).collect();
+    let mut cache = FACADE_PROPS.lock().unwrap();
+    let arc = cache
+        .entry((base.id(), key))
+        .or_insert_with(|| {
+            let mut map: HashMap<String, Value> = HashMap::new();
+            for (k, v) in props {
+                map.insert((*k).to_string(), Value::String((*v).to_string()));
+            }
+            std::sync::Arc::new(Value::Compound(map))
+        })
+        .clone();
+    BlockWithProperties::from_arc(base, Some(arc))
+}
+
 /// Creates a `BlockWithProperties` for an open trapdoor with the given
 /// base block and facing direction string.
 fn make_open_trapdoor(base: Block, facing: &str) -> BlockWithProperties {
-    let mut map: HashMap<String, Value> = HashMap::new();
-    map.insert("facing".to_string(), Value::String(facing.to_string()));
-    map.insert("open".to_string(), Value::String("true".to_string()));
-    map.insert("half".to_string(), Value::String("top".to_string()));
-    BlockWithProperties::new(base, Some(Value::Compound(map)))
+    cached_prop_block(
+        base,
+        &[("facing", facing), ("open", "true"), ("half", "top")],
+    )
 }
 
 /// Creates a `BlockWithProperties` for a top-half slab.
 fn make_top_slab(base: Block) -> BlockWithProperties {
-    let mut map: HashMap<String, Value> = HashMap::new();
-    map.insert("type".to_string(), Value::String("top".to_string()));
-    BlockWithProperties::new(base, Some(Value::Compound(map)))
+    cached_prop_block(base, &[("type", "top")])
 }
 
 /// Closed trapdoor pinned flat against the wall face, top or bottom half.
 fn make_closed_trapdoor(base: Block, facing: &str, half: &str) -> BlockWithProperties {
-    let mut map: HashMap<String, Value> = HashMap::new();
-    map.insert("facing".to_string(), Value::String(facing.to_string()));
-    map.insert("open".to_string(), Value::String("false".to_string()));
-    map.insert("half".to_string(), Value::String(half.to_string()));
-    BlockWithProperties::new(base, Some(Value::Compound(map)))
+    cached_prop_block(
+        base,
+        &[("facing", facing), ("open", "false"), ("half", half)],
+    )
 }
 
-/// Block with arbitrary string properties, for one-off decorated placements.
+/// Block with arbitrary string properties, for repeated decorated placements.
 fn make_prop_block(base: Block, props: &[(&str, &str)]) -> BlockWithProperties {
-    let mut map: HashMap<String, Value> = HashMap::new();
-    for (k, v) in props {
-        map.insert((*k).to_string(), Value::String((*v).to_string()));
-    }
-    BlockWithProperties::new(base, Some(Value::Compound(map)))
+    cached_prop_block(base, props)
 }
 
 /// Computes the centroid (average position) of the building outline nodes.

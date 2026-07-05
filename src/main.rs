@@ -206,27 +206,44 @@ fn run_cli() {
     // its own internal Bench for the block-placement phases.
     let mut bench = bench::Bench::new(args.benchmark);
 
-    // Fetch data
-    let raw_data = match &args.file {
-        Some(file) => retrieve_data::fetch_data_from_file(file),
-        None => retrieve_data::fetch_data_from_overpass(
-            args.bbox,
-            args.debug,
-            args.downloader.as_str(),
-            args.save_json_file.as_deref(),
-        ),
-    }
-    .expect("Failed to fetch data");
-    bench.mark("osm_fetch");
-
-    // Fetch supplementary Overture Maps buildings right after the OSM download
-    // (it only needs the bbox); the dedup against OSM runs after parsing below.
+    // OSM, Overture and elevation/land-cover fetches only need the bbox, so run them in parallel.
     println!("{} Fetching Overture Maps data...", "  [+]".bold());
-    let overture_elements = overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
-    bench.mark("overture_fetch");
+    let fetch_start = std::time::Instant::now();
+    let (raw_data, overture_elements, mut ground) = std::thread::scope(|s| {
+        let overture_handle = s.spawn(|| {
+            let t = std::time::Instant::now();
+            let elements = overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
+            (elements, t.elapsed())
+        });
+        let ground_handle = s.spawn(|| {
+            let t = std::time::Instant::now();
+            let ground = ground::generate_ground_data(&args);
+            (ground, t.elapsed())
+        });
 
-    let mut ground = ground::generate_ground_data(&args);
-    bench.mark("terrain_total");
+        let t = std::time::Instant::now();
+        let raw_data = match &args.file {
+            Some(file) => retrieve_data::fetch_data_from_file(file),
+            None => retrieve_data::fetch_data_from_overpass(
+                args.bbox,
+                args.debug,
+                args.downloader.as_str(),
+                args.save_json_file.as_deref(),
+            ),
+        }
+        .expect("Failed to fetch data");
+        bench.report("osm_fetch", t.elapsed());
+
+        let (overture_elements, overture_dur) =
+            overture_handle.join().expect("Overture fetch panicked");
+        bench.report("overture_fetch", overture_dur);
+        let (ground, ground_dur) = ground_handle.join().expect("Terrain fetch panicked");
+        bench.report("terrain_total", ground_dur);
+
+        (raw_data, overture_elements, ground)
+    });
+    bench.report("fetch_total", fetch_start.elapsed());
+    bench.reset();
 
     // Parse raw data
     let (mut parsed_elements, mut xzbbox, outline_suppression) =

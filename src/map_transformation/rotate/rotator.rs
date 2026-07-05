@@ -395,13 +395,7 @@ mod tests {
         let lc = LandCoverData {
             grid: (0..h).map(|_| row(LC_WATER, 10)).collect(),
             water_distance: (0..h).map(|_| row(1, 0)).collect(),
-            water_blend_grid: (0..h)
-                .map(|_| {
-                    (0..w)
-                        .map(|x| if x < w / 2 { 1.0f32 } else { 0.0 })
-                        .collect()
-                })
-                .collect(),
+            water_blend_cache: once_cell::sync::OnceCell::new(),
             width: w,
             height: h,
         };

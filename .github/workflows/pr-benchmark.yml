@@ -97,7 +97,7 @@ jobs:
             verdict="🚨 This PR **drastically worsens generation time**."
           fi
 
-          baseline_mem=1005
+          baseline_mem=1160
           mem_diff=$((peak_mem - baseline_mem))
           mem_abs_diff=${mem_diff#-}
           mem_annotation=""

@@ -892,6 +892,8 @@ fn gui_start_generation(
     use progress::emit_gui_error;
     use LLBBox;
 
+    progress::reset_progress_floor();
+
     // Store telemetry consent for crash reporting
     telemetry::set_telemetry_consent(telemetry_consent);
 
@@ -1193,8 +1195,24 @@ fn gui_start_generation(
                 return Ok(());
             }
 
-            // Run data fetch and world generation (standard mode: objects + terrain, or objects only)
-            match retrieve_data::fetch_data_from_overpass(args.bbox, args.debug, "requests", None) {
+            // OSM, Overture and elevation/land-cover fetches only need the bbox, run them in parallel
+            let (fetch_result, overture_elements, ground) = std::thread::scope(|s| {
+                let overture_handle = s.spawn(|| {
+                    overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug)
+                });
+                let ground_handle = s.spawn(|| ground::generate_ground_data(&args));
+                let fetch_result = retrieve_data::fetch_data_from_overpass(
+                    args.bbox, args.debug, "requests", None,
+                );
+                (
+                    fetch_result,
+                    overture_handle.join().expect("Overture fetch panicked"),
+                    ground_handle.join().expect("Terrain fetch panicked"),
+                )
+            });
+
+            // Run world generation
+            match fetch_result {
                 Ok(raw_data) => {
                     let (mut parsed_elements, mut xzbbox, outline_suppression) =
                         osm_parser::parse_osm_data(
@@ -1205,17 +1223,11 @@ fn gui_start_generation(
                             crate::projection::ProjectionKind::Local,
                         );
 
-                    // Fetch supplementary building data from Overture Maps
-                    {
-                        let overture_elements =
-                            overture::fetch_overture_buildings(&args.bbox, args.scale, args.debug);
-                        if !overture_elements.is_empty() {
-                            let unique_overture = overture::deduplicate_against_osm(
-                                overture_elements,
-                                &parsed_elements,
-                            );
-                            parsed_elements.extend(unique_overture);
-                        }
+                    // Merge supplementary Overture buildings against parsed OSM
+                    if !overture_elements.is_empty() {
+                        let unique_overture =
+                            overture::deduplicate_against_osm(overture_elements, &parsed_elements);
+                        parsed_elements.extend(unique_overture);
                     }
 
                     parsed_elements.sort_by(|el1, el2| {
@@ -1231,7 +1243,7 @@ fn gui_start_generation(
                         }
                     });
 
-                    let mut ground = ground::generate_ground_data(&args);
+                    let mut ground = ground;
 
                     // OSM water override first, then bridge repair.
                     ground.apply_osm_water_override(&parsed_elements, &xzbbox);

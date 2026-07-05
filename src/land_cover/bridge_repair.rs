@@ -203,7 +203,7 @@ pub fn apply_bridge_land_cover_repair(
 
     if water_changed {
         land_cover.water_distance = compute_water_distance(&land_cover.grid, width, height);
-        land_cover.refresh_water_blend_grid();
+        land_cover.invalidate_water_blend_grid();
     }
 }
 
