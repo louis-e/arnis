@@ -191,6 +191,7 @@ impl<'a> WorldEditor<'a> {
             &self.llbbox,
             self.ground.as_deref(),
             self.bake_lighting,
+            self.preview.as_deref(),
             region_x,
             region_z,
             region_to_modify,
@@ -221,15 +222,21 @@ fn create_region_file(
 
 /// Serialize one region's chunks to its `.mca`. Shared by the synchronous save
 /// path and the background flush worker (hence free-standing, not `&self`).
+/// Every in-bbox region passes here exactly once, so the map preview is fed here.
+#[allow(clippy::too_many_arguments)]
 fn write_region_to_disk(
     world_dir: &std::path::Path,
     llbbox: &crate::coordinate_system::geographic::LLBBox,
     ground: Option<&crate::ground::Ground>,
     bake_lighting: bool,
+    preview: Option<&crate::map_renderer::PreviewAccumulator>,
     region_x: i32,
     region_z: i32,
     region_to_modify: &super::common::RegionToModify,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(preview) = preview {
+        preview.ingest_region(region_x, region_z, region_to_modify);
+    }
     let mut region = create_region_file(world_dir, region_x, region_z)?;
     let mut ser_buffer = Vec::with_capacity(8192);
 
@@ -295,6 +302,7 @@ pub(crate) struct RegionWriteCtx {
     llbbox: crate::coordinate_system::geographic::LLBBox,
     ground: Option<std::sync::Arc<crate::ground::Ground>>,
     bake_lighting: bool,
+    preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
 }
 
 impl RegionWriteCtx {
@@ -303,12 +311,14 @@ impl RegionWriteCtx {
         llbbox: crate::coordinate_system::geographic::LLBBox,
         ground: Option<std::sync::Arc<crate::ground::Ground>>,
         bake_lighting: bool,
+        preview: Option<std::sync::Arc<crate::map_renderer::PreviewAccumulator>>,
     ) -> Self {
         Self {
             world_dir,
             llbbox,
             ground,
             bake_lighting,
+            preview,
         }
     }
 
@@ -323,6 +333,7 @@ impl RegionWriteCtx {
             &self.llbbox,
             self.ground.as_deref(),
             self.bake_lighting,
+            self.preview.as_deref(),
             region_x,
             region_z,
             region_to_modify,

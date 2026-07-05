@@ -118,6 +118,10 @@ pub struct Args {
     /// (Voxy/Chunky) without visiting them. Slower; off by default.
     #[arg(long, default_value_t = false)]
     pub bake_lighting: bool,
+
+    /// Render a top-down PNG map preview of the generated world (Java and Bedrock)
+    #[arg(long, default_value_t = false)]
+    pub map_preview: bool,
 }
 
 /// Validates CLI arguments after parsing.
@@ -126,6 +130,10 @@ pub struct Args {
 pub fn validate_args(args: &Args) -> Result<(), String> {
     if args.bedrock && args.luanti {
         return Err("Cannot use --bedrock and --luanti together.".to_string());
+    }
+
+    if args.map_preview && args.luanti {
+        return Err("--map-preview is not supported for Luanti worlds.".to_string());
     }
 
     if args.bedrock {
@@ -235,6 +243,7 @@ mod tests {
         assert!(!args.bedrock);
         assert!(!args.disable_height_limit);
         assert!(!args.bake_lighting);
+        assert!(!args.map_preview);
         // interior, roof, land_cover default to true
         assert!(args.interior);
         assert!(args.roof);

@@ -5,8 +5,13 @@ use crate::element_processing::*;
 use crate::floodfill_cache::{CoordinateBitmap, FloodFillCache};
 use crate::ground::Ground;
 use crate::ground_generation;
+use crate::map_preview;
+use crate::map_renderer::PreviewAccumulator;
 use crate::osm_parser::{OutlineSuppression, ProcessedElement};
-use crate::progress::{emit_gui_progress_update, emit_gui_progress_update_ex, emit_show_in_folder};
+use crate::progress::{
+    emit_gui_progress_update, emit_gui_progress_update_ex, emit_map_preview_ready,
+    emit_show_in_folder,
+};
 #[cfg(feature = "gui")]
 use crate::telemetry::{send_log, LogLevel};
 use crate::tile;
@@ -326,6 +331,15 @@ pub fn generate_world_with_options(
     editor.set_bake_lighting(args.bake_lighting);
     editor.set_place_schematics(args.use_3d);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
+
+    // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
+    let preview_epoch = map_preview::begin_preview_epoch();
+    let preview = (args.map_preview && world_format != WorldFormat::LuantiWorld)
+        .then(|| Arc::new(PreviewAccumulator::new(&xzbbox)));
+    if let Some(p) = &preview {
+        editor.set_preview(Arc::clone(p));
+    }
+
     let ground = Arc::new(ground);
     // Load the schematic tree pack once (None keeps procedural trees); shared with tile editors.
     let tree_pack =
@@ -864,6 +878,43 @@ pub fn generate_world_with_options(
         return Err(e.to_string());
     }
     bench.mark("save");
+
+    // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.
+    if let Some(p) = preview {
+        let png_path = map_preview::preview_output_path(&output_path, world_format);
+        let result = map_preview::PreviewResult {
+            png_path: png_path.clone(),
+            min_lat: args.bbox.min().lat(),
+            max_lat: args.bbox.max().lat(),
+            min_lon: args.bbox.min().lng(),
+            max_lon: args.bbox.max().lng(),
+            min_mc_x: xzbbox.min_x(),
+            max_mc_x: xzbbox.max_x(),
+            min_mc_z: xzbbox.min_z(),
+            max_mc_z: xzbbox.max_z(),
+        };
+        let finalize = move || {
+            // Skip if a newer generation already started.
+            if !map_preview::epoch_is_current(preview_epoch) {
+                return;
+            }
+            match p.finalize(&png_path) {
+                Ok(path) => {
+                    if map_preview::record_preview_result(preview_epoch, result) {
+                        println!("Map preview saved to: {}", path.display());
+                        emit_map_preview_ready();
+                    }
+                }
+                Err(e) => eprintln!("Warning: Failed to generate map preview: {e}"),
+            }
+        };
+        if crate::progress::is_running_with_gui() {
+            std::thread::spawn(finalize);
+        } else {
+            finalize();
+        }
+    }
+    bench.mark("map_preview");
 
     if let Some(start) = generation_start {
         let gen_ms = start.elapsed().as_millis();

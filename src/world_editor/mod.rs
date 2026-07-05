@@ -16,6 +16,7 @@ mod luanti;
 pub mod bedrock;
 
 pub(crate) use common::WorldToModify;
+pub(crate) use common::{BlockStorage, RegionToModify, SectionToModify, MAX_BLOCK_ID};
 pub use common::{MIN_SECTION_Y, MIN_Y};
 
 pub(crate) use bedrock::{BedrockSaveError, BedrockWriter};
@@ -168,6 +169,8 @@ pub struct WorldEditor<'a> {
     /// Place bundled schematic props (cars, boats, cranes, ...); off drops them all.
     /// Driven by the same toggle as external 3D models (`args.use_3d`).
     place_schematics: bool,
+    /// Map preview accumulator, fed as regions are saved/flushed.
+    preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -199,6 +202,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             place_schematics: true,
+            preview: None,
         }
     }
 
@@ -236,6 +240,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: LuantiGame::Mineclonia,
             bake_lighting: false,
             place_schematics: true,
+            preview: None,
         }
     }
 
@@ -273,6 +278,7 @@ impl<'a> WorldEditor<'a> {
             luanti_game: game,
             bake_lighting: false,
             place_schematics: true,
+            preview: None,
         }
     }
 
@@ -371,6 +377,11 @@ impl<'a> WorldEditor<'a> {
         self.world.regions.keys().copied().collect()
     }
 
+    /// Attach a map preview accumulator, fed as regions are saved/flushed.
+    pub fn set_preview(&mut self, preview: Arc<crate::map_renderer::PreviewAccumulator>) {
+        self.preview = Some(preview);
+    }
+
     /// Owned, `Send` context for writing regions off the merge thread.
     pub(crate) fn region_write_ctx(&self) -> java::RegionWriteCtx {
         java::RegionWriteCtx::new(
@@ -378,6 +389,7 @@ impl<'a> WorldEditor<'a> {
             self.llbbox,
             self.ground.clone(),
             self.bake_lighting,
+            self.preview.clone(),
         )
     }
 
@@ -1342,6 +1354,17 @@ impl<'a> WorldEditor<'a> {
         // (e.g. all-STONE from --fillground) back to Uniform, freeing ~4 KiB each.
         self.world.compact_sections();
 
+        // Non-Java formats have no per-region write hook, so feed the preview here.
+        if self.format != WorldFormat::JavaAnvil {
+            if let Some(preview) = &self.preview {
+                use rayon::prelude::*;
+                self.world
+                    .regions
+                    .par_iter()
+                    .for_each(|(&(rx, rz), region)| preview.ingest_region(rx, rz, region));
+            }
+        }
+
         match self.format {
             WorldFormat::JavaAnvil => {
                 if let Err(e) = self.save_java() {
@@ -1359,7 +1382,7 @@ impl<'a> WorldEditor<'a> {
                     return Err(e);
                 }
             }
-            WorldFormat::BedrockMcWorld => self.save_bedrock(),
+            WorldFormat::BedrockMcWorld => self.save_bedrock()?,
             WorldFormat::LuantiWorld => {
                 if let Err(e) = luanti::save_luanti_world(
                     &self.world,
@@ -1386,18 +1409,21 @@ impl<'a> WorldEditor<'a> {
         Ok(())
     }
 
-    fn save_bedrock(&mut self) {
+    fn save_bedrock(&mut self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         println!("{} Saving Bedrock world...", "[7/7]".bold());
         emit_gui_progress_update(90.0, "Saving Bedrock world...");
 
         if let Err(error) = self.save_bedrock_internal() {
-            eprintln!("Failed to save Bedrock world: {error}");
+            let user_msg = format!("Failed to save Bedrock world: {error}");
+            eprintln!("{user_msg}");
             #[cfg(feature = "gui")]
-            send_log(
-                LogLevel::Error,
-                &format!("Failed to save Bedrock world: {error}"),
-            );
+            {
+                send_log(LogLevel::Error, &user_msg);
+                emit_gui_error(&user_msg);
+            }
+            return Err(user_msg.into());
         }
+        Ok(())
     }
 
     fn save_bedrock_internal(&mut self) -> Result<(), BedrockSaveError> {
