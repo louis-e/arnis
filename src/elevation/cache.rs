@@ -161,7 +161,7 @@ pub fn clear_all_cached_tiles() -> CacheClearStats {
     clear_cache_dir(&get_base_cache_dir())
 }
 
-/// Stamp file marking the last completed sweep; throttles startup sweeps.
+/// Stamp file marking the last started sweep; throttles startup sweeps.
 const CLEANUP_STAMP_FILE: &str = ".last-cleanup";
 
 /// Minimum interval between age-based sweeps.
@@ -188,8 +188,9 @@ fn sweep_due(base_dir: &std::path::Path, now: std::time::SystemTime) -> bool {
         }
         _ => {}
     }
-    let _ = std::fs::write(&stamp, b"");
-    true
+    // Unwritable stamp means the sweep could not delete anything either;
+    // skip instead of walking the cache on every launch.
+    std::fs::write(&stamp, b"").is_ok()
 }
 
 /// Runs the age-based sweep on a detached background thread, at most once

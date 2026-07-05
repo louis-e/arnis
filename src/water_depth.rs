@@ -448,8 +448,8 @@ pub fn carve_water_column(
     }
 
     // Dunes return their crest so veg plants on top instead of inside them.
-    // 7x7 body max is sampled lazily; most skipped columns never pay for it.
-    let bump = if depth >= 1 && !near_bridge {
+    // 7x7 body max is sampled lazily; depth 1 always yields amp 0, skip it too.
+    let bump = if depth >= 2 && !near_bridge {
         let amp = dune_amp(bwf.body_max_7x7(x, z), depth);
         place_underwater_dunes(editor, x, z, water_y, bed_y, amp, top_block)
     } else {
