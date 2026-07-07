@@ -114,11 +114,11 @@ pub fn generate_ores_region(
                 // Fill the whole stone column down to the floor at the ore's usual density.
                 let y_min = MIN_Y + 1;
                 let y_max = (ground_y - ore.depth_min).max(y_min);
-                if y_min >= y_max {
+                if y_min > y_max {
                     continue;
                 }
-                let span = (y_max - y_min) as u32;
-                let orig_span = (ore.depth_max - ore.depth_min).max(1) as u32;
+                let span = (y_max - y_min + 1) as u32;
+                let orig_span = (ore.depth_max - ore.depth_min + 1) as u32;
                 let max_veins = ore
                     .avg_veins_per_chunk
                     .saturating_mul(span)

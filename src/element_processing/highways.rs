@@ -426,7 +426,9 @@ pub fn generate_highway_tunnel_shell(
         .get("layer")
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(0);
-    let layer_extra = (-layer - 1).max(0) * TUNNEL_LAYER_DROP;
+    // Saturating: `layer` is an untrusted tag and could be i32::MIN.
+    let below = (-(layer.saturating_add(1))).max(0);
+    let layer_extra = below.saturating_mul(TUNNEL_LAYER_DROP);
 
     let half_width = highway_block_range(highway_type, &way.tags, args.scale);
     let wall_off = half_width + 1;
@@ -439,7 +441,7 @@ pub fn generate_highway_tunnel_shell(
         let grade = (start_ground as f32 + (end_ground - start_ground) as f32 * t).round() as i32;
         let cover_tgt = terrain_ys[i] - TUNNEL_COVER_DROP;
         // Deepen the target, not the portal, so the ramp still reaches ground.
-        let desired = grade.min(cover_tgt) - layer_extra;
+        let desired = grade.min(cover_tgt).saturating_sub(layer_extra);
         let ramp_s = if start_internal {
             i32::MIN
         } else {
