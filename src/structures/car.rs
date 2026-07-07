@@ -15,6 +15,7 @@ static WORKVAN: &[u8] = include_bytes!("../../assets/structures/car_workvan.sche
 static CAMPER: &[u8] = include_bytes!("../../assets/structures/car_camper.schem");
 static PICKUP: &[u8] = include_bytes!("../../assets/structures/car_pickup.schem");
 static SUV: &[u8] = include_bytes!("../../assets/structures/car_suv.schem");
+static SEDAN: &[u8] = include_bytes!("../../assets/structures/car_sedan.schem");
 
 /// Chance (percent) that a parking space holds a car.
 const OCCUPANCY_PERCENT: u64 = 50;
@@ -33,6 +34,7 @@ fn cars() -> &'static [(StructureSchematic, u8)] {
             CAMPER,
             PICKUP,
             SUV,
+            SEDAN,
         ]
         .iter()
         .filter_map(|bytes| match load_structure(bytes) {
@@ -75,7 +77,7 @@ mod tests {
 
     #[test]
     fn all_car_assets_parse() {
-        assert_eq!(cars().len(), 9);
+        assert_eq!(cars().len(), 10);
         for (car, _) in cars() {
             assert!(!car.voxels.is_empty());
             assert!(car.max_extent < 16);

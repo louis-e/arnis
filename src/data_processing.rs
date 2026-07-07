@@ -54,6 +54,7 @@ fn process_element(
     building_footprints: &CoordinateBitmap,
     building_passages: &CoordinateBitmap,
     road_mask: &CoordinateBitmap,
+    rail_mask: &CoordinateBitmap,
     xzbbox: &XZBBox,
     big_water_field: &crate::water_depth::BigWaterField,
     bridge_structures: &bridges::BridgeStructureMap,
@@ -145,6 +146,9 @@ fn process_element(
                     subway_points,
                     rail_bridge_internal_endpoints,
                     bridge_outlines,
+                    road_mask,
+                    building_footprints,
+                    rail_mask,
                 );
             } else if way.tags.contains_key("roller_coaster") {
                 railways::generate_roller_coaster(editor, way);
@@ -394,6 +398,9 @@ pub fn generate_world_with_options(
     let rail_bridge_internal_endpoints =
         railways::collect_rail_bridge_internal_endpoints(&elements);
 
+    // Rail centerlines, used to keep catenary masts off neighbouring tracks.
+    let rail_mask = railways::collect_at_grade_rail_mask(&elements, &xzbbox);
+
     // 3D model pipeline pre-scan: elements rendered as 3D models instead of
     // voxels are recorded here and skipped by the element loop below.
     let models_3d_pipeline = args
@@ -564,6 +571,7 @@ pub fn generate_world_with_options(
                             &building_footprints,
                             &building_passages,
                             &road_mask,
+                            &rail_mask,
                             // World bbox (not tile) for relation/area ring clipping: clipping to
                             // the tile can drop a relation whose ring fails to close. The tile
                             // editor still bounds the actual writes.
@@ -778,6 +786,7 @@ pub fn generate_world_with_options(
                 &building_footprints,
                 &building_passages,
                 &road_mask,
+                &rail_mask,
                 &xzbbox,
                 &big_water_field,
                 &bridge_structures,
@@ -843,6 +852,7 @@ pub fn generate_world_with_options(
 
     // Free everything the save phase doesn't need; it often sits at the process peak.
     drop(road_mask);
+    drop(rail_mask);
     drop(big_water_field);
     drop(building_footprints);
     drop(building_passages);
