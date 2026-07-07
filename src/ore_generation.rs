@@ -111,12 +111,19 @@ pub fn generate_ores_region(
             let mut rng = coord_rng(chunk_x, chunk_z, 0xC0DE);
 
             for ore in ORES {
-                let y_min = (ground_y - ore.depth_max).max(MIN_Y + 1);
-                let y_max = (ground_y - ore.depth_min).max(MIN_Y + 1);
+                // Fill the whole stone column down to the floor at the ore's usual density.
+                let y_min = MIN_Y + 1;
+                let y_max = (ground_y - ore.depth_min).max(y_min);
                 if y_min > y_max {
                     continue;
                 }
-                let max_veins = ore.avg_veins_per_chunk * 2;
+                let span = (y_max - y_min + 1) as u32;
+                let orig_span = (ore.depth_max - ore.depth_min + 1) as u32;
+                let max_veins = ore
+                    .avg_veins_per_chunk
+                    .saturating_mul(span)
+                    .saturating_mul(2)
+                    / orig_span;
                 let n = rng.random_range(0..=max_veins);
                 for _ in 0..n {
                     let cx = (chunk_x << 4) + rng.random_range(0..16);

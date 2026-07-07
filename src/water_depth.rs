@@ -597,11 +597,21 @@ pub fn carve_lc_water_pass(
     xzbbox: &XZBBox,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
 ) {
     let x1 = bwf.min_x + bwf.width as i32 - 1;
     let z1 = bwf.min_z + bwf.height as i32 - 1;
     carve_lc_water_region(
-        editor, ground, xzbbox, bwf, road_mask, bwf.min_x, x1, bwf.min_z, z1,
+        editor,
+        ground,
+        xzbbox,
+        bwf,
+        road_mask,
+        tunnel_footprint,
+        bwf.min_x,
+        x1,
+        bwf.min_z,
+        z1,
     );
 }
 
@@ -615,6 +625,7 @@ pub fn carve_lc_water_region(
     xzbbox: &XZBBox,
     bwf: &BigWaterField,
     road_mask: &RoadMaskBitmap,
+    tunnel_footprint: &RoadMaskBitmap,
     iter_min_x: i32,
     iter_max_x: i32,
     iter_min_z: i32,
@@ -629,8 +640,8 @@ pub fn carve_lc_water_region(
     let z1 = (bwf.min_z + bwf.height as i32 - 1).min(iter_max_z);
     for z in z0..=z1 {
         for x in x0..=x1 {
-            // Keep road/bridge surfaces (causeways, decks).
-            if road_mask.contains(x, z) {
+            // Keep road/bridge surfaces (causeways, decks); never carve into a tunnel bore.
+            if road_mask.contains(x, z) || tunnel_footprint.contains(x, z) {
                 continue;
             }
             let coord = XZPoint::new(x - off_x, z - off_z);
