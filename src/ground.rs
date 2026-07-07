@@ -130,6 +130,47 @@ impl Ground {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_elevation_test(
+        heights: Vec<Vec<f32>>,
+        world_width: usize,
+        world_height: usize,
+    ) -> Self {
+        let grid_height = heights.len();
+        let grid_width = heights.first().map(Vec::len).unwrap_or(0);
+        assert!(
+            grid_height > 0 && grid_width > 0,
+            "heights must be non-empty"
+        );
+        assert!(
+            world_width > 0 && world_height > 0,
+            "world dims must be > 0"
+        );
+        assert!(
+            heights.iter().all(|r| r.len() == grid_width),
+            "heights must be rectangular"
+        );
+        Self {
+            elevation_enabled: true,
+            ground_level: 0,
+            elevation_data: Some(crate::elevation::ElevationData {
+                heights,
+                width: grid_width,
+                height: grid_height,
+                world_width,
+                world_height,
+                min_height_m: 0.0,
+                blocks_per_meter: 1.0,
+            }),
+            land_cover: None,
+            world_width,
+            world_height,
+            rotation_mask: None,
+            snow_threshold_y: i32::MAX,
+            climate: crate::climate::Climate::Temperate,
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new_enabled(
         bbox: &LLBBox,

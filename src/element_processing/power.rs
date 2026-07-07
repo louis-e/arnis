@@ -425,58 +425,52 @@ fn generate_power_line(editor: &mut WorldEditor, way: &ProcessedWay) {
         })
         .unwrap_or(15);
 
-    // Process consecutive node pairs
     for i in 1..way.nodes.len() {
         let start = &way.nodes[i - 1];
         let end = &way.nodes[i];
 
-        // Calculate distance between nodes
         let dx = (end.x - start.x) as f64;
         let dz = (end.z - start.z) as f64;
         let distance = (dx * dx + dz * dz).sqrt();
-
-        // Calculate sag based on span length (longer spans = more sag)
         let max_sag = (distance / 15.0).clamp(1.0, 6.0) as i32;
-
-        // Determine chain orientation based on line direction
-        // If the line runs more along X-axis, use CHAIN_X; if more along Z-axis, use CHAIN_Z
         let chain_block = if dx.abs() >= dz.abs() {
-            CHAIN_X // Line runs primarily along X-axis
+            CHAIN_X
         } else {
-            CHAIN_Z // Line runs primarily along Z-axis
+            CHAIN_Z
         };
 
-        // Generate points along the line using Bresenham
+        // Absolute wire height at each pole, so the span hangs straight between
+        // them instead of following the ground under it.
+        let start_y = editor.get_ground_level(start.x, start.z) + base_height;
+        let end_y = editor.get_ground_level(end.x, end.z) + base_height;
+
+        // Perpendicular offsets of the 3-phase bundle (high voltage only).
+        let three_phase = base_height >= 18;
+        let offsets: [(i32, i32); 2] = if dx.abs() >= dz.abs() {
+            [(0, 1), (0, -1)]
+        } else {
+            [(1, 0), (-1, 0)]
+        };
+
         let line_points = bresenham_line(start.x, 0, start.z, end.x, 0, end.z);
-
+        let denom = (line_points.len().saturating_sub(1)).max(1) as f64;
         for (idx, (lx, _, lz)) in line_points.iter().enumerate() {
-            // Calculate position along the span (0.0 to 1.0)
-            // Use len-1 as denominator so last point reaches t=1.0
-            let denom = (line_points.len().saturating_sub(1)).max(1) as f64;
             let t = idx as f64 / denom;
-
-            // Catenary approximation: sag is maximum at center, zero at ends
-            // Using parabola: sag = 4 * max_sag * t * (1 - t)
+            // Parabolic sag off the straight line between the two poles.
             let sag = (4.0 * max_sag as f64 * t * (1.0 - t)) as i32;
-
-            // Ensure wire doesn't go underground (minimum height of 3 blocks above ground)
-            let wire_y = (base_height - sag).max(3);
-
-            // Place the wire block (chain aligned with line direction)
-            editor.set_block(chain_block, *lx, wire_y, *lz, None, None);
-
-            // For high voltage lines, add parallel wires offset to sides
-            if base_height >= 18 {
-                // Three-phase power: 3 parallel lines
-                // Offset perpendicular to the line direction
-                if dx.abs() >= dz.abs() {
-                    // Line runs along X, offset in Z
-                    editor.set_block(chain_block, *lx, wire_y, *lz + 1, None, None);
-                    editor.set_block(chain_block, *lx, wire_y, *lz - 1, None, None);
-                } else {
-                    // Line runs along Z, offset in X
-                    editor.set_block(chain_block, *lx + 1, wire_y, *lz, None, None);
-                    editor.set_block(chain_block, *lx - 1, wire_y, *lz, None, None);
+            let line_y = (start_y as f64 + (end_y - start_y) as f64 * t).round() as i32;
+            // Clear the highest ground under the whole coplanar bundle.
+            let mut floor = editor.get_ground_level(*lx, *lz) + 3;
+            if three_phase {
+                for (ox, oz) in offsets {
+                    floor = floor.max(editor.get_ground_level(*lx + ox, *lz + oz) + 3);
+                }
+            }
+            let wire_y = (line_y - sag).max(floor);
+            editor.set_block_absolute(chain_block, *lx, wire_y, *lz, None, None);
+            if three_phase {
+                for (ox, oz) in offsets {
+                    editor.set_block_absolute(chain_block, *lx + ox, wire_y, *lz + oz, None, None);
                 }
             }
         }

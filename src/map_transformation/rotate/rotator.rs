@@ -448,4 +448,32 @@ mod tests {
         // 45° rotation of a square produces a larger bounding rect
         assert!(new_area > orig_area);
     }
+
+    // Elevation on, no land cover: the height grid must be rotated, not dropped.
+    #[test]
+    fn elevation_only_rotation_keeps_a_varied_height_grid() {
+        let n = 5usize;
+        let heights: Vec<Vec<f32>> = (0..n)
+            .map(|_| (0..n).map(|x| (x * 4) as f32).collect())
+            .collect();
+        let mut ground = Ground::new_elevation_test(heights, n, n);
+        let mut xzbbox = XZBBox::rect_from_xz_lengths((n - 1) as f64, (n - 1) as f64).unwrap();
+        let mut elements = Vec::new();
+
+        rotate_world(90.0, &mut elements, &mut xzbbox, &mut ground).unwrap();
+
+        assert!(
+            ground.elevation_enabled,
+            "elevation stays enabled through rotation"
+        );
+        let (mut lo, mut hi) = (i32::MAX, i32::MIN);
+        for x in xzbbox.min_x()..=xzbbox.max_x() {
+            for z in xzbbox.min_z()..=xzbbox.max_z() {
+                let h = ground.level(XZPoint::new(x - xzbbox.min_x(), z - xzbbox.min_z()));
+                lo = lo.min(h);
+                hi = hi.max(h);
+            }
+        }
+        assert!(hi - lo >= 4, "rotated elevation still varies: {lo}..{hi}");
+    }
 }
