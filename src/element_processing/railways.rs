@@ -433,7 +433,6 @@ pub fn collect_at_grade_rail_mask(
     bitmap
 }
 
-
 fn generate_rail_bridge(
     editor: &mut WorldEditor,
     way: &ProcessedWay,
@@ -970,7 +969,6 @@ pub fn carve_subway_interior(editor: &mut WorldEditor, subway_points: &[(i32, i3
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
