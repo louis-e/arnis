@@ -462,7 +462,10 @@ mod tests {
 
         rotate_world(90.0, &mut elements, &mut xzbbox, &mut ground).unwrap();
 
-        assert!(ground.elevation_enabled, "elevation stays enabled through rotation");
+        assert!(
+            ground.elevation_enabled,
+            "elevation stays enabled through rotation"
+        );
         let (mut lo, mut hi) = (i32::MAX, i32::MIN);
         for x in xzbbox.min_x()..=xzbbox.max_x() {
             for z in xzbbox.min_z()..=xzbbox.max_z() {

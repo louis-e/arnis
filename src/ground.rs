@@ -138,6 +138,18 @@ impl Ground {
     ) -> Self {
         let grid_height = heights.len();
         let grid_width = heights.first().map(Vec::len).unwrap_or(0);
+        assert!(
+            grid_height > 0 && grid_width > 0,
+            "heights must be non-empty"
+        );
+        assert!(
+            world_width > 0 && world_height > 0,
+            "world dims must be > 0"
+        );
+        assert!(
+            heights.iter().all(|r| r.len() == grid_width),
+            "heights must be rectangular"
+        );
         Self {
             elevation_enabled: true,
             ground_level: 0,

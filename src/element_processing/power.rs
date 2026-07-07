@@ -444,6 +444,14 @@ fn generate_power_line(editor: &mut WorldEditor, way: &ProcessedWay) {
         let start_y = editor.get_ground_level(start.x, start.z) + base_height;
         let end_y = editor.get_ground_level(end.x, end.z) + base_height;
 
+        // Perpendicular offsets of the 3-phase bundle (high voltage only).
+        let three_phase = base_height >= 18;
+        let offsets: [(i32, i32); 2] = if dx.abs() >= dz.abs() {
+            [(0, 1), (0, -1)]
+        } else {
+            [(1, 0), (-1, 0)]
+        };
+
         let line_points = bresenham_line(start.x, 0, start.z, end.x, 0, end.z);
         let denom = (line_points.len().saturating_sub(1)).max(1) as f64;
         for (idx, (lx, _, lz)) in line_points.iter().enumerate() {
@@ -451,16 +459,18 @@ fn generate_power_line(editor: &mut WorldEditor, way: &ProcessedWay) {
             // Parabolic sag off the straight line between the two poles.
             let sag = (4.0 * max_sag as f64 * t * (1.0 - t)) as i32;
             let line_y = (start_y as f64 + (end_y - start_y) as f64 * t).round() as i32;
-            let wire_y = (line_y - sag).max(editor.get_ground_level(*lx, *lz) + 3);
+            // Clear the highest ground under the whole coplanar bundle.
+            let mut floor = editor.get_ground_level(*lx, *lz) + 3;
+            if three_phase {
+                for (ox, oz) in offsets {
+                    floor = floor.max(editor.get_ground_level(*lx + ox, *lz + oz) + 3);
+                }
+            }
+            let wire_y = (line_y - sag).max(floor);
             editor.set_block_absolute(chain_block, *lx, wire_y, *lz, None, None);
-
-            if base_height >= 18 {
-                if dx.abs() >= dz.abs() {
-                    editor.set_block_absolute(chain_block, *lx, wire_y, *lz + 1, None, None);
-                    editor.set_block_absolute(chain_block, *lx, wire_y, *lz - 1, None, None);
-                } else {
-                    editor.set_block_absolute(chain_block, *lx + 1, wire_y, *lz, None, None);
-                    editor.set_block_absolute(chain_block, *lx - 1, wire_y, *lz, None, None);
+            if three_phase {
+                for (ox, oz) in offsets {
+                    editor.set_block_absolute(chain_block, *lx + ox, wire_y, *lz + oz, None, None);
                 }
             }
         }
