@@ -117,6 +117,7 @@ pub fn generate_ground_layer(
     args: &Args,
     xzbbox: &XZBBox,
     building_footprints: &BuildingFootprintBitmap,
+    tunnel_footprint: &BuildingFootprintBitmap,
 ) -> Result<(), String> {
     generate_ground_region(
         editor,
@@ -124,6 +125,7 @@ pub fn generate_ground_layer(
         args,
         xzbbox,
         building_footprints,
+        tunnel_footprint,
         xzbbox.min_x(),
         xzbbox.max_x(),
         xzbbox.min_z(),
@@ -142,6 +144,7 @@ pub fn generate_ground_region(
     args: &Args,
     xzbbox: &XZBBox,
     building_footprints: &BuildingFootprintBitmap,
+    tunnel_footprint: &BuildingFootprintBitmap,
     iter_min_x: i32,
     iter_max_x: i32,
     iter_min_z: i32,
@@ -821,7 +824,9 @@ pub fn generate_ground_region(
 
                                 match cover {
                                     land_cover::LC_TREE_COVER
-                                        if slope <= 4 && ground_allows_trees =>
+                                        if slope <= 4
+                                            && ground_allows_trees
+                                            && !tunnel_footprint.contains(x, z) =>
                                     {
                                         let choice = rng.random_range(0..30);
                                         if choice == 0 {
