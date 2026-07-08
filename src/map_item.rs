@@ -11,7 +11,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 const MAP_SIZE: i32 = 128;
-const DATA_VERSION: i32 = 4189;
+// Match the chunk writer so all world data files carry the same version.
+const DATA_VERSION: i32 = crate::world_editor::java::DATA_VERSION;
 
 fn read_gzip_nbt(path: &Path) -> Result<Value, String> {
     let raw = std::fs::read(path).map_err(|e| format!("read {path:?}: {e}"))?;
@@ -173,7 +174,19 @@ fn is_filled_map(entry: &Value) -> bool {
         if matches!(m.get("id"), Some(Value::String(s)) if s == "minecraft:filled_map"))
 }
 
-// Puts the map into the player's inventory, replacing any filled map from a previous run.
+fn item_slot(entry: &Value) -> Option<i8> {
+    match entry {
+        Value::Compound(m) => match m.get("Slot") {
+            Some(Value::Byte(s)) => Some(*s),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// Puts the map into slot 0, only ever replacing a filled map there; other items
+// (including the player's own maps in other slots) are left untouched. If slot 0
+// holds something else, the map goes into the first free slot instead.
 fn insert_into_inventory(world_path: &Path, map_id: i32) -> Result<(), String> {
     let level_path = world_path.join("level.dat");
     let mut root = read_gzip_nbt(&level_path)?;
@@ -193,9 +206,15 @@ fn insert_into_inventory(world_path: &Path, map_id: i32) -> Result<(), String> {
         let Value::List(ref mut items) = inventory else {
             return Err("Player.Inventory is not a list".to_string());
         };
-        items.retain(|e| !is_filled_map(e));
-        // Slot 0: first hotbar slot.
-        items.push(map_item_entry(map_id, 0));
+        items.retain(|e| !(is_filled_map(e) && item_slot(e) == Some(0)));
+        let slot = if items.iter().any(|e| item_slot(e) == Some(0)) {
+            (0..36i8)
+                .find(|s| !items.iter().any(|e| item_slot(e) == Some(*s)))
+                .ok_or("player inventory is full")?
+        } else {
+            0
+        };
+        items.push(map_item_entry(map_id, slot));
     }
     write_gzip_nbt(&level_path, &root)
 }
@@ -322,6 +341,61 @@ mod tests {
         };
         assert_eq!(data.get("trackingPosition"), Some(&Value::Byte(0)));
         assert_eq!(data.get("scale"), Some(&Value::Byte(4)));
+    }
+
+    #[test]
+    fn preserves_user_items_and_dodges_occupied_slot_zero() {
+        let tmp = tempfile::tempdir().unwrap();
+        let world =
+            std::path::PathBuf::from(crate::world_utils::create_new_world(tmp.path()).unwrap());
+
+        // Seed: a sword in slot 0 and the user's own map in slot 5.
+        let mut root = read_gzip_nbt(&world.join("level.dat")).unwrap();
+        if let Value::Compound(ref mut r) = root {
+            if let Some(Value::Compound(ref mut data)) = r.get_mut("Data") {
+                if let Some(Value::Compound(ref mut player)) = data.get_mut("Player") {
+                    let mut sword = HashMap::new();
+                    sword.insert("Slot".to_string(), Value::Byte(0));
+                    sword.insert(
+                        "id".to_string(),
+                        Value::String("minecraft:iron_sword".to_string()),
+                    );
+                    player.insert(
+                        "Inventory".to_string(),
+                        Value::List(vec![Value::Compound(sword), map_item_entry(99, 5)]),
+                    );
+                }
+            }
+        }
+        write_gzip_nbt(&world.join("level.dat"), &root).unwrap();
+
+        let xzbbox = XZBBox::rect_from_xz_lengths(100.0, 100.0).unwrap();
+        let preview = PreviewAccumulator::new(&xzbbox);
+        write_map_item(&world, &preview, &xzbbox).unwrap();
+
+        let Value::Compound(level) = read_gzip_nbt(&world.join("level.dat")).unwrap() else {
+            panic!("level root");
+        };
+        let Some(Value::Compound(ldata)) = level.get("Data") else {
+            panic!("level data");
+        };
+        let Some(Value::Compound(player)) = ldata.get("Player") else {
+            panic!("player");
+        };
+        let Some(Value::List(items)) = player.get("Inventory") else {
+            panic!("inventory");
+        };
+        // Sword untouched, user map untouched, our map in the first free slot.
+        assert!(items
+            .iter()
+            .any(|e| item_slot(e) == Some(0) && !is_filled_map(e)));
+        assert!(items
+            .iter()
+            .any(|e| item_slot(e) == Some(5) && is_filled_map(e)));
+        assert!(items
+            .iter()
+            .any(|e| item_slot(e) == Some(1) && is_filled_map(e)));
+        assert_eq!(items.len(), 3);
     }
 
     #[test]
