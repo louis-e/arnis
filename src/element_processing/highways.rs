@@ -626,6 +626,62 @@ pub fn collect_tunnel_footprint(
     bitmap
 }
 
+fn place_street_lamp(editor: &mut WorldEditor, x: i32, z: i32, base: i32) {
+    editor.set_block_absolute(SMOOTH_STONE, x, base + 1, z, None, None);
+    for dy in 2..=4 {
+        editor.set_block_absolute(STONE_BRICK_WALL, x, base + dy, z, None, None);
+    }
+    editor.set_block_with_properties_absolute(
+        BlockWithProperties::new(REDSTONE_LAMP, Some(fastnbt::nbt!({ "lit": "true" }))),
+        x,
+        base + 5,
+        z,
+        None,
+        None,
+    );
+    editor.set_block_absolute(IRON_TRAPDOOR, x, base + 6, z, None, None);
+}
+
+const WAY_LAMP_INTERVAL: usize = 25;
+
+// Periodic lamps beside lit=yes ways, alternating sides, kept off other roads and water.
+fn place_way_lamps(
+    editor: &mut WorldEditor,
+    way: &ProcessedWay,
+    block_range: i32,
+    road_mask: &RoadMaskBitmap,
+) {
+    let offset = block_range + 2;
+    let mut tds: usize = 0;
+    let mut side = 1i32;
+    for w in way.nodes.windows(2) {
+        let (dx, dz) = (w[1].x - w[0].x, w[1].z - w[0].z);
+        let len = dx.abs().max(dz.abs());
+        if len == 0 {
+            continue;
+        }
+        let mag = ((dx * dx + dz * dz) as f64).sqrt();
+        let (px, pz) = (
+            (-dz as f64 / mag).round() as i32,
+            (dx as f64 / mag).round() as i32,
+        );
+        for (bx, _, bz) in bresenham_line(w[0].x, 0, w[0].z, w[1].x, 0, w[1].z) {
+            if tds > 0 && tds.is_multiple_of(WAY_LAMP_INTERVAL) {
+                for s in [side, -side] {
+                    let (lx, lz) = (bx + px * offset * s, bz + pz * offset * s);
+                    if !road_mask.contains(lx, lz) && !editor.is_lc_water(lx, lz) {
+                        let base = editor.get_absolute_y(lx, 0, lz);
+                        place_street_lamp(editor, lx, lz, base);
+                        side = -side;
+                        break;
+                    }
+                }
+            }
+            tds += 1;
+        }
+    }
+}
+
 /// Build a connectivity map for highway endpoints to determine where slopes are needed.
 pub fn build_highway_connectivity_map(elements: &[ProcessedElement]) -> HighwayConnectivityMap {
     let mut connectivity_map: HashMap<(i32, i32), Vec<i32>> = HashMap::new();
@@ -704,11 +760,7 @@ fn generate_highways_internal(
                 let x: i32 = first_node.x;
                 let z: i32 = first_node.z;
                 let base = node_feature_base_y(editor, bridge_surface, x, z, layer_boost, 0);
-                editor.set_block_absolute(COBBLESTONE_WALL, x, base + 1, z, None, None);
-                for dy in 2..=4 {
-                    editor.set_block_absolute(OAK_FENCE, x, base + dy, z, None, None);
-                }
-                editor.set_block_absolute(GLOWSTONE, x, base + 5, z, None, None);
+                place_street_lamp(editor, x, z, base);
             }
         } else if highway_type == "crossing" {
             // Handle traffic signals for crossings
@@ -969,6 +1021,17 @@ fn generate_highways_internal(
 
             // Canonical width (shared with prescan/bridge consumers).
             let block_range = highway_block_range(highway_type, &way.tags, scale_factor);
+
+            // At-grade lit ways get periodic street lamps alongside.
+            if way.tags.get("lit").map(String::as_str) == Some("yes")
+                && !is_bridge_member
+                && !is_bridge_ramp
+                && !is_indoor
+                && layer_value_effective == 0
+                && highway_type != "steps"
+            {
+                place_way_lamps(editor, way, block_range, road_mask);
+            }
 
             // Lane-marking count; lane_markings=no drops the dividers, not the width.
             const MAX_LANES: i32 = 16;

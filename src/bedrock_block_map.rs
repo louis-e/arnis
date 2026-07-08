@@ -675,6 +675,7 @@ pub fn to_bedrock_block(block: Block) -> BedrockBlock {
             )],
         ),
         "daylight_detector" => BedrockBlock::simple("daylight_detector"),
+        "redstone_lamp" => BedrockBlock::simple("redstone_lamp"),
 
         // Planks - Bedrock uses single "planks" block with wood_type state
         "oak_planks" => BedrockBlock::with_states(
@@ -855,6 +856,25 @@ pub fn to_bedrock_block_with_properties(
     // Handle barrel facing direction
     if java_name == "barrel" {
         return convert_barrel(java_name, props_map);
+    }
+
+    // Inverted daylight sensors and lit redstone lamps are separate blocks on Bedrock.
+    if java_name == "daylight_detector"
+        && props_map
+            .and_then(|m| m.get("inverted"))
+            .is_some_and(|v| matches!(v, fastnbt::Value::String(s) if s == "true"))
+    {
+        return BedrockBlock::with_states(
+            "daylight_detector_inverted",
+            vec![("redstone_signal", BedrockBlockStateValue::Int(11))],
+        );
+    }
+    if java_name == "redstone_lamp"
+        && props_map
+            .and_then(|m| m.get("lit"))
+            .is_some_and(|v| matches!(v, fastnbt::Value::String(s) if s == "true"))
+    {
+        return BedrockBlock::simple("lit_redstone_lamp");
     }
 
     // Handle slabs with type property (top/bottom/double)
