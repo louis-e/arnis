@@ -162,6 +162,7 @@ fn map_item_entry(map_id: i32, slot: i8) -> Value {
         "id".to_string(),
         Value::String("minecraft:filled_map".to_string()),
     );
+    // 1.20.5+ item format: lowercase count (Int) with components, not Count (Byte) + tag.
     item.insert("count".to_string(), Value::Int(1));
     item.insert("components".to_string(), Value::Compound(components));
     Value::Compound(item)

@@ -60,9 +60,14 @@ pub struct PreviewAccumulator {
 
 impl PreviewAccumulator {
     pub fn new(xzbbox: &XZBBox) -> Self {
+        Self::new_capped(xzbbox, MAX_OUTPUT_SIDE)
+    }
+
+    // Smaller caps keep the frame cheap when only a low-res consumer (map item) needs it.
+    pub fn new_capped(xzbbox: &XZBBox, max_side: u32) -> Self {
         let width = (xzbbox.max_x() - xzbbox.min_x() + 1) as u32;
         let height = (xzbbox.max_z() - xzbbox.min_z() + 1) as u32;
-        let step = width.max(height).div_ceil(MAX_OUTPUT_SIDE).max(1);
+        let step = width.max(height).div_ceil(max_side.max(1)).max(1);
         let out_w = width.div_ceil(step);
         let out_h = height.div_ceil(step);
         Self {

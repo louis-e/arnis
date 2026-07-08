@@ -660,7 +660,7 @@ fn place_way_lamps(
         if len == 0 {
             continue;
         }
-        let mag = ((dx * dx + dz * dz) as f64).sqrt();
+        let mag = (dx as f64).hypot(dz as f64);
         let (px, pz) = (
             (-dz as f64 / mag).round() as i32,
             (dx as f64 / mag).round() as i32,

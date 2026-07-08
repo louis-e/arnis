@@ -346,10 +346,17 @@ pub fn generate_world_with_options(
     // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
     let preview_epoch = map_preview::begin_preview_epoch();
     // The map item consumes the same accumulator, so either feature enables it.
+    // Without the PNG the map item only needs 128px, so a small frame suffices
+    // (512 = 4x supersampling) instead of the full-resolution preview buffer.
     let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil;
-    let preview = ((args.map_preview && world_format != WorldFormat::LuantiWorld)
-        || wants_map_item)
-        .then(|| Arc::new(PreviewAccumulator::new(&xzbbox)));
+    let wants_png = args.map_preview && world_format != WorldFormat::LuantiWorld;
+    let preview = (wants_png || wants_map_item).then(|| {
+        Arc::new(if wants_png {
+            PreviewAccumulator::new(&xzbbox)
+        } else {
+            PreviewAccumulator::new_capped(&xzbbox, 512)
+        })
+    });
     if let Some(p) = &preview {
         editor.set_preview(Arc::clone(p));
     }
