@@ -24,6 +24,32 @@ const NODATA: f32 = -9999.0;
 // The service allows 20 tile requests per minute; larger areas fall back to AWS.
 const MAX_TILES: usize = 20;
 
+// accepts() and fetch_dgm() probe the same bbox center; cache the zone so the
+// selection probe isn't repeated as a second network round-trip.
+type ZoneCacheEntry = Option<((i64, i64), u8)>;
+static ZONE_CACHE: once_cell::sync::Lazy<std::sync::Mutex<ZoneCacheEntry>> =
+    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(None));
+
+fn zone_cache_key(lng: f64, lat: f64) -> (i64, i64) {
+    ((lng * 1e6).round() as i64, (lat * 1e6).round() as i64)
+}
+
+fn resolve_zone_cached(
+    client: &reqwest::blocking::Client,
+    lng: f64,
+    lat: f64,
+) -> Result<u8, Box<dyn std::error::Error>> {
+    let key = zone_cache_key(lng, lat);
+    if let Some((k, z)) = *ZONE_CACHE.lock().unwrap() {
+        if k == key {
+            return Ok(z);
+        }
+    }
+    let zone = resolve_zone(client, lng, lat)?;
+    *ZONE_CACHE.lock().unwrap() = Some((key, zone));
+    Ok(zone)
+}
+
 pub struct GermanyDgm1;
 
 impl ElevationProvider for GermanyDgm1 {
@@ -51,7 +77,7 @@ impl ElevationProvider for GermanyDgm1 {
         // point probe confirms the service actually has data here.
         let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
         let center_lng = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-        match build_client().and_then(|c| resolve_zone(&c, center_lng, center_lat)) {
+        match build_client().and_then(|c| resolve_zone_cached(&c, center_lng, center_lat)) {
             Ok(_) => true,
             Err(_) => {
                 println!("Germany DGM1: no coverage at bbox center, using next provider");
@@ -83,7 +109,7 @@ impl GermanyDgm1 {
         // The publication zone can't be derived from longitude; ask the service.
         let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
         let center_lng = (bbox.min().lng() + bbox.max().lng()) / 2.0;
-        let zone = resolve_zone(&client, center_lng, center_lat)?;
+        let zone = resolve_zone_cached(&client, center_lng, center_lat)?;
 
         let tiles = covering_tiles(bbox, zone);
         if tiles.is_empty() {

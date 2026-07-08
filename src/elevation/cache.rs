@@ -3,8 +3,11 @@ use std::path::PathBuf;
 /// Subdirectory name for tile cache within the OS cache directory
 const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
 
-/// Maximum age for cached tiles in days before they are cleaned up
-const TILE_CACHE_MAX_AGE_DAYS: u64 = 7;
+/// Maximum age for cached tiles in days before they are cleaned up.
+/// Elevation sources update on multi-year cycles, so a month of caching is
+/// still conservative; it cuts refetch traffic for repeatedly generated areas
+/// and spares the rate-limited community providers (hoehendaten.de).
+const TILE_CACHE_MAX_AGE_DAYS: u64 = 30;
 
 /// Returns the tile cache directory path for a specific provider.
 /// Uses the OS-standard cache directory (e.g. AppData/Local on Windows, ~/.cache on Linux).
