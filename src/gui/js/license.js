@@ -39,6 +39,10 @@ Elevation data &copy; <a href="https://geoservices.ign.fr/" style="color: inheri
 Elevation data &copy; <a href="https://www.ign.es/" style="color: inherit;" target="_blank">Instituto Geogr&aacute;fico Nacional de Espa&ntilde;a</a>. Licensed under <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a>.
 <br><br>
 
+<b>Germany DGM1 (hoehendaten.de):</b><br>
+Elevation data &copy; GeoBasis-DE / state surveying offices of the German federal states (Digitale Gel&auml;ndemodelle, DGM1), provided via <a href="https://hoehendaten.de/" style="color: inherit;" target="_blank">hoehendaten.de</a>. Licensed under <a href="https://www.govdata.de/dl-de/by-2-0" style="color: inherit;" target="_blank">dl-de/by-2-0</a> and <a href="https://creativecommons.org/licenses/by/4.0/" style="color: inherit;" target="_blank">CC BY 4.0</a> (per state).
+<br><br>
+
 <b>GSI Japan Elevation Tiles:</b><br>
 Elevation data provided by the <a href="https://maps.gsi.go.jp/" style="color: inherit;" target="_blank">Geospatial Information Authority of Japan</a>.
 <br><br>

@@ -25,6 +25,13 @@ pub trait ElevationProvider: Send + Sync {
     /// Used to rank providers (lower = better resolution).
     fn native_resolution_m(&self) -> f64;
 
+    /// Whether this provider is willing to serve the given bbox.
+    /// Lets rate-limited providers decline oversized areas so the
+    /// selector falls through to the next candidate.
+    fn accepts(&self, _bbox: &LLBBox) -> bool {
+        true
+    }
+
     /// Fetch raw elevation data for the given EPSG:4326 bbox,
     /// sampled onto a grid of the given dimensions.
     fn fetch_raw(
