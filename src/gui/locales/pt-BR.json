@@ -56,5 +56,18 @@
   "settings_section_application": "Aplicação",
   "clear_tile_cache": "Limpar cache de tiles",
   "clear_tile_cache_button": "Limpar",
-  "anonymous_crash_reports": "Relatórios anônimos de falhas"
+  "anonymous_crash_reports": "Relatórios anônimos de falhas",
+  "update_modal_title": "Novidades no Arnis",
+  "update_modal_download_note": "O download será aberto no navegador. Feche o Arnis antes de executar a nova versão.",
+  "update_view_on_github": "Ver no GitHub",
+  "update_download": "Baixar",
+  "loading": "Carregando...",
+  "version_info": "Informações da versão",
+  "update_fetch_failed": "Não foi possível obter as informações da versão mais recente. Verifique sua conexão com a internet ou acesse o GitHub diretamente.",
+  "gamemode": "Modo de jogo",
+  "gamemode_survival": "Sobrevivência",
+  "gamemode_creative": "Criativo",
+  "gamemode_spectator": "Espectador",
+  "world_time": "Hora do mundo",
+  "map_item": "Item do mapa do mundo"
 }

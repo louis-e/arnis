@@ -56,5 +56,18 @@
   "settings_section_application": "Applikation",
   "clear_tile_cache": "Rensa plattcache",
   "clear_tile_cache_button": "Rensa",
-  "anonymous_crash_reports": "Anonyma kraschrapporter"
+  "anonymous_crash_reports": "Anonyma kraschrapporter",
+  "update_modal_title": "Nyheter i Arnis",
+  "update_modal_download_note": "Nedladdningen öppnas i din webbläsare. Stäng Arnis innan du kör den nya versionen.",
+  "update_view_on_github": "Visa på GitHub",
+  "update_download": "Ladda ner",
+  "loading": "Laddar...",
+  "version_info": "Versionsinformation",
+  "update_fetch_failed": "Kunde inte hämta information om den senaste versionen. Kontrollera din internetanslutning eller besök GitHub direkt.",
+  "gamemode": "Spelläge",
+  "gamemode_survival": "Överlevnad",
+  "gamemode_creative": "Kreativ",
+  "gamemode_spectator": "Åskådare",
+  "world_time": "Världstid",
+  "map_item": "Världskartsföremål"
 }

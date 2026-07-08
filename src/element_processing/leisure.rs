@@ -127,6 +127,28 @@ pub fn generate_leisure(
             if matches!(leisure_type.as_str(), "playground" | "recreation_ground") {
                 crate::structures::playground::scatter_playgrounds(editor, filled_area.as_slice());
             }
+
+            if leisure_type == "pitch" {
+                // Clear park/ground vegetation scattered onto the pitch before marking.
+                let vegetation: &[Block] = &[
+                    GRASS,
+                    FERN,
+                    RED_FLOWER,
+                    YELLOW_FLOWER,
+                    BLUE_FLOWER,
+                    WHITE_FLOWER,
+                    OAK_LEAVES,
+                ];
+                for &(x, z) in filled_area.iter() {
+                    editor.set_block(AIR, x, 1, z, Some(vegetation), None);
+                }
+                crate::element_processing::sport_pitches::draw_pitch_markings(
+                    editor,
+                    element,
+                    filled_area.as_slice(),
+                    block_type,
+                );
+            }
         }
     }
 }

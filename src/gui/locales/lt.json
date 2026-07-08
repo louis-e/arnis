@@ -56,5 +56,18 @@
   "settings_section_application": "Programa",
   "clear_tile_cache": "Išvalyti plytelių talpyklą",
   "clear_tile_cache_button": "Išvalyti",
-  "anonymous_crash_reports": "Anoniminės avarijų ataskaitos"
+  "anonymous_crash_reports": "Anoniminės avarijų ataskaitos",
+  "update_modal_title": "Kas naujo „Arnis“",
+  "update_modal_download_note": "Atsisiuntimas atsidarys naršyklėje. Prieš paleisdami naują versiją uždarykite „Arnis“.",
+  "update_view_on_github": "Peržiūrėti „GitHub“",
+  "update_download": "Atsisiųsti",
+  "loading": "Kraunama...",
+  "version_info": "Versijos informacija",
+  "update_fetch_failed": "Nepavyko gauti naujausios versijos informacijos. Patikrinkite interneto ryšį arba apsilankykite „GitHub“ tiesiogiai.",
+  "gamemode": "Žaidimo režimas",
+  "gamemode_survival": "Išgyvenimas",
+  "gamemode_creative": "Kūrybinis",
+  "gamemode_spectator": "Stebėtojas",
+  "world_time": "Pasaulio laikas",
+  "map_item": "Pasaulio žemėlapio daiktas"
 }

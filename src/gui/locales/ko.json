@@ -56,5 +56,18 @@
   "settings_section_application": "애플리케이션",
   "clear_tile_cache": "타일 캐시 지우기",
   "clear_tile_cache_button": "지우기",
-  "anonymous_crash_reports": "익명 크래시 보고"
+  "anonymous_crash_reports": "익명 크래시 보고",
+  "update_modal_title": "Arnis의 새로운 기능",
+  "update_modal_download_note": "다운로드는 브라우저에서 열립니다. 새 버전을 실행하기 전에 Arnis를 종료하세요.",
+  "update_view_on_github": "GitHub에서 보기",
+  "update_download": "다운로드",
+  "loading": "불러오는 중...",
+  "version_info": "버전 정보",
+  "update_fetch_failed": "최신 릴리스 정보를 가져올 수 없습니다. 인터넷 연결을 확인하거나 GitHub를 직접 방문하세요.",
+  "gamemode": "게임 모드",
+  "gamemode_survival": "서바이벌",
+  "gamemode_creative": "크리에이티브",
+  "gamemode_spectator": "관전자",
+  "world_time": "월드 시간",
+  "map_item": "월드 지도 아이템"
 }

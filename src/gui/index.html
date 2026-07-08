@@ -166,6 +166,44 @@
         <!-- Section: World -->
         <div class="settings-section-header" data-localize="settings_section_world">World</div>
 
+        <!-- Game Mode -->
+        <div class="settings-row">
+          <label>
+            <span data-localize="gamemode">Game Mode</span>
+            <span class="tooltip-icon" data-tooltip="Player game mode for the generated world. Spectator maps to Creative on Luanti.">?</span>
+          </label>
+          <div class="settings-control">
+            <div class="segmented-control" id="gamemode-group">
+              <button type="button" class="segment" data-gamemode="survival" data-localize="gamemode_survival">Survival</button>
+              <button type="button" class="segment active" data-gamemode="creative" data-localize="gamemode_creative">Creative</button>
+              <button type="button" class="segment" data-gamemode="spectator" data-localize="gamemode_spectator">Spectator</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- World Time Slider -->
+        <div class="settings-row">
+          <label for="world-time-slider">
+            <span data-localize="world_time">World Time</span>
+            <span class="tooltip-icon" data-tooltip="Initial time of day in the generated world (0 = dawn, 6000 = noon, 18000 = midnight)">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="range" id="world-time-slider" name="world-time-slider" min="0" max="1440" step="10" value="720">
+            <span id="world-time-value">12:00</span>
+          </div>
+        </div>
+
+        <!-- World Map Item Toggle -->
+        <div class="settings-row">
+          <label for="map-item-toggle">
+            <span data-localize="map_item">World Map Item</span>
+            <span class="tooltip-icon" data-tooltip="Give the player a locked map item showing the entire generated world (Java only)">?</span>
+          </label>
+          <div class="settings-control">
+            <input type="checkbox" id="map-item-toggle" name="map-item-toggle" checked>
+          </div>
+        </div>
+
         <!-- Extend Build Height Toggle -->
         <div class="settings-row">
           <label for="disable-height-limit-toggle">

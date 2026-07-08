@@ -56,5 +56,18 @@
   "settings_section_application": "Sovellus",
   "clear_tile_cache": "Tyhjennä laattojen välimuisti",
   "clear_tile_cache_button": "Tyhjennä",
-  "anonymous_crash_reports": "Anonyymit kaatumisraportit"
+  "anonymous_crash_reports": "Anonyymit kaatumisraportit",
+  "update_modal_title": "Uutta Arnisissa",
+  "update_modal_download_note": "Lataus avautuu selaimessasi. Sulje Arnis ennen uuden version käynnistämistä.",
+  "update_view_on_github": "Näytä GitHubissa",
+  "update_download": "Lataa",
+  "loading": "Ladataan...",
+  "version_info": "Versiotiedot",
+  "update_fetch_failed": "Uusimman julkaisun tietoja ei voitu hakea. Tarkista internetyhteytesi tai vieraile suoraan GitHubissa.",
+  "gamemode": "Pelitila",
+  "gamemode_survival": "Selviytyminen",
+  "gamemode_creative": "Luova",
+  "gamemode_spectator": "Katselija",
+  "world_time": "Maailman aika",
+  "map_item": "Maailmankarttaesine"
 }

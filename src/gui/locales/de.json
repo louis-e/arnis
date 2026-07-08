@@ -56,5 +56,18 @@
   "settings_section_application": "Anwendung",
   "clear_tile_cache": "Tile-Cache leeren",
   "clear_tile_cache_button": "Leeren",
-  "anonymous_crash_reports": "Anonyme Absturzberichte"
+  "anonymous_crash_reports": "Anonyme Absturzberichte",
+  "update_modal_title": "Neuerungen in Arnis",
+  "update_modal_download_note": "Der Download öffnet sich in deinem Browser. Schließe Arnis, bevor du die neue Version startest.",
+  "update_view_on_github": "Auf GitHub ansehen",
+  "update_download": "Herunterladen",
+  "loading": "Lädt...",
+  "version_info": "Versionsinfo",
+  "update_fetch_failed": "Die neuesten Versionsinformationen konnten nicht abgerufen werden. Bitte überprüfe deine Internetverbindung oder besuche GitHub direkt.",
+  "gamemode": "Spielmodus",
+  "gamemode_survival": "Überleben",
+  "gamemode_creative": "Kreativ",
+  "gamemode_spectator": "Zuschauer",
+  "world_time": "Weltzeit",
+  "map_item": "Weltkarte im Inventar"
 }

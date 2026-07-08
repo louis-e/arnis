@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 /// Minecraft 1.21.1 data version for chunk format identification.
-const DATA_VERSION: i32 = 3955;
+pub(crate) const DATA_VERSION: i32 = 3955;
 
 /// Cached base chunk sections (grass at Y=-62)
 /// Computed once on first use and reused for all empty chunks

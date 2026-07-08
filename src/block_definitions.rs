@@ -469,6 +469,7 @@ impl Block {
             363 => "orange_concrete",
             364 => "stripped_warped_stem",
             365 => "stripped_warped_hyphae",
+            366 => "redstone_lamp",
             _ => return None,
         })
         // Note: ids are u16. Prefer a free slot below 256 for commonly placed
@@ -1266,6 +1267,7 @@ pub const WARPED_TRAPDOOR: Block = Block::new(362);
 pub const STRIPPED_WARPED_STEM: Block = Block::new(364);
 pub const STRIPPED_WARPED_HYPHAE: Block = Block::new(365);
 pub const ORANGE_CONCRETE: Block = Block::new(363);
+pub const REDSTONE_LAMP: Block = Block::new(366);
 // Reuses the retired open-trapdoor slot; sub-256 ids keep sections one byte per cell.
 pub const SUGAR_CANE: Block = Block::new(237);
 

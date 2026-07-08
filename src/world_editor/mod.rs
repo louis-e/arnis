@@ -171,6 +171,8 @@ pub struct WorldEditor<'a> {
     place_schematics: bool,
     /// Map preview accumulator, fed as regions are saved/flushed.
     preview: Option<Arc<crate::map_renderer::PreviewAccumulator>>,
+    game_mode: crate::args::GameMode,
+    world_time: i64,
 }
 
 impl<'a> WorldEditor<'a> {
@@ -203,6 +205,8 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            game_mode: crate::args::GameMode::Creative,
+            world_time: 6000,
         }
     }
 
@@ -241,6 +245,8 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            game_mode: crate::args::GameMode::Creative,
+            world_time: 6000,
         }
     }
 
@@ -279,6 +285,8 @@ impl<'a> WorldEditor<'a> {
             bake_lighting: false,
             place_schematics: true,
             preview: None,
+            game_mode: crate::args::GameMode::Creative,
+            world_time: 6000,
         }
     }
 
@@ -338,6 +346,11 @@ impl<'a> WorldEditor<'a> {
     /// Enables baking per-chunk lighting into Java chunks.
     pub fn set_bake_lighting(&mut self, enabled: bool) {
         self.bake_lighting = enabled;
+    }
+
+    pub fn set_game_settings(&mut self, mode: crate::args::GameMode, world_time: i64) {
+        self.game_mode = mode;
+        self.world_time = world_time;
     }
 
     /// Toggle placement of bundled schematic props (cars, boats, cranes, ...).
@@ -1393,6 +1406,8 @@ impl<'a> WorldEditor<'a> {
                     self.luanti_level_name.as_deref(),
                     self.luanti_spawn_point,
                     self.luanti_ground_level,
+                    self.game_mode,
+                    self.world_time,
                 ) {
                     let user_msg = format!("Failed to save Luanti world: {}", e);
                     eprintln!("{}", user_msg);
@@ -1444,6 +1459,8 @@ impl<'a> WorldEditor<'a> {
             self.bedrock_extend_height,
             self.projection.clone(),
             self.scale,
+            self.game_mode,
+            self.world_time,
         )
         .write_world(&self.world, self.xzbbox, &self.llbbox)
     }

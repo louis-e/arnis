@@ -388,6 +388,8 @@ fn to_mineclonia_node(block: Block, props: Option<&Value>) -> LuantiNode {
         260 => "mcl_ocean:tall_seagrass",              // TALL_SEAGRASS_TOP
         261 => "mcl_ocean:sea_pickle",                 // SEA_PICKLE
         265 => "mcl_nether:soul_sand",                 // SOUL_SAND
+        273 => "mcl_doors:iron_trapdoor",              // IRON_TRAPDOOR
+        366 => "mcl_redstone_lamps:lamp_on",           // REDSTONE_LAMP (only placed lit)
         _ => "mcl_core:stone",
     };
     LuantiNode { name, param2: 0 }

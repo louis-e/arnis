@@ -56,5 +56,18 @@
   "settings_section_application": "应用",
   "clear_tile_cache": "清除瓦片缓存",
   "clear_tile_cache_button": "清除",
-  "anonymous_crash_reports": "匿名崩溃报告"
+  "anonymous_crash_reports": "匿名崩溃报告",
+  "update_modal_title": "Arnis 更新内容",
+  "update_modal_download_note": "下载将在浏览器中打开。运行新版本前请先关闭 Arnis。",
+  "update_view_on_github": "在 GitHub 上查看",
+  "update_download": "下载",
+  "loading": "加载中...",
+  "version_info": "版本信息",
+  "update_fetch_failed": "无法获取最新版本信息。请检查网络连接或直接访问 GitHub。",
+  "gamemode": "游戏模式",
+  "gamemode_survival": "生存",
+  "gamemode_creative": "创造",
+  "gamemode_spectator": "旁观",
+  "world_time": "世界时间",
+  "map_item": "世界地图物品"
 }

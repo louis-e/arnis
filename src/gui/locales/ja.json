@@ -56,5 +56,18 @@
   "settings_section_application": "アプリケーション",
   "clear_tile_cache": "タイルキャッシュをクリア",
   "clear_tile_cache_button": "クリア",
-  "anonymous_crash_reports": "匿名クラッシュレポート"
+  "anonymous_crash_reports": "匿名クラッシュレポート",
+  "update_modal_title": "Arnis の新機能",
+  "update_modal_download_note": "ダウンロードはブラウザで開きます。新しいバージョンを実行する前に Arnis を終了してください。",
+  "update_view_on_github": "GitHub で見る",
+  "update_download": "ダウンロード",
+  "loading": "読み込み中...",
+  "version_info": "バージョン情報",
+  "update_fetch_failed": "最新リリース情報を取得できませんでした。インターネット接続を確認するか、GitHub を直接ご覧ください。",
+  "gamemode": "ゲームモード",
+  "gamemode_survival": "サバイバル",
+  "gamemode_creative": "クリエイティブ",
+  "gamemode_spectator": "スペクテイター",
+  "world_time": "ワールド時間",
+  "map_item": "ワールド地図アイテム"
 }

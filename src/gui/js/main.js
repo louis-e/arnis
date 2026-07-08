@@ -125,6 +125,12 @@ async function applyLocalization(localization) {
     "span[data-localize='map_theme']": "map_theme",
     "span[data-localize='save_path']": "save_path",
     "span[data-localize='rotation_angle']": "rotation_angle",
+    "span[data-localize='gamemode']": "gamemode",
+    "button[data-localize='gamemode_survival']": "gamemode_survival",
+    "button[data-localize='gamemode_creative']": "gamemode_creative",
+    "button[data-localize='gamemode_spectator']": "gamemode_spectator",
+    "span[data-localize='world_time']": "world_time",
+    "span[data-localize='map_item']": "map_item",
     "div[data-localize='settings_section_generation']": "settings_section_generation",
     "div[data-localize='settings_section_world']": "settings_section_world",
     "div[data-localize='settings_section_map']": "settings_section_map",
@@ -714,6 +720,32 @@ function initSettings() {
   slider.addEventListener("dblclick", () => {
     slider.value = 1;
     sliderValue.textContent = "1.00";
+  });
+
+  // Game mode segmented control
+  const gamemodeGroup = document.getElementById("gamemode-group");
+  gamemodeGroup.querySelectorAll(".segment").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      gamemodeGroup.querySelectorAll(".segment").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+    });
+  });
+
+  // World time slider (clock minutes 00:00-23:50; converted to ticks on submit)
+  const timeSlider = document.getElementById("world-time-slider");
+  const timeValue = document.getElementById("world-time-value");
+  function formatClock(minutes) {
+    if (minutes >= 1440) return "24:00";
+    const h = String(Math.floor(minutes / 60)).padStart(2, "0");
+    const m = String(minutes % 60).padStart(2, "0");
+    return `${h}:${m}`;
+  }
+  timeSlider.addEventListener("input", () => {
+    timeValue.textContent = formatClock(parseInt(timeSlider.value, 10));
+  });
+  timeSlider.addEventListener("dblclick", () => {
+    timeSlider.value = 720;
+    timeValue.textContent = formatClock(720);
   });
 
   // Rotation angle input
@@ -1591,6 +1623,13 @@ async function startGeneration() {
     // Get rotation angle
     var rotationAngle = parseFloat(document.getElementById("rotation-angle-input").value) || 0;
 
+    var gamemodeBtn = document.querySelector("#gamemode-group .segment.active");
+    var gamemode = gamemodeBtn ? gamemodeBtn.dataset.gamemode : "creative";
+    var mapItem = document.getElementById("map-item-toggle").checked;
+    // Clock minutes -> Minecraft ticks (tick 0 = 06:00; 24:00 wraps to 00:00)
+    var clockMinutes = (parseInt(document.getElementById("world-time-slider").value, 10) || 0) % 1440;
+    var worldTime = Math.round(((clockMinutes + 1440 - 360) % 1440) * (24000 / 1440));
+
     // Pass the selected options to the Rust backend
     await invoke("gui_start_generation", {
         bboxText: selectedBBox,
@@ -1612,7 +1651,10 @@ async function startGeneration() {
         spawnPoint: spawnPoint,
         telemetryConsent: telemetryConsent || false,
         worldFormat: getEffectiveWorldFormat(),
-        rotationAngle: rotationAngle
+        rotationAngle: rotationAngle,
+        gamemode: gamemode,
+        worldTime: worldTime,
+        mapItem: mapItem
     });
 
     console.log("Generation process started.");
