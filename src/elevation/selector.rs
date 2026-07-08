@@ -55,10 +55,13 @@ pub fn select_provider(bbox: &LLBBox, force_aws: bool) -> Box<dyn ElevationProvi
 fn build_provider_list() -> Vec<Box<dyn ElevationProvider>> {
     // Ordered by resolution (finest first). First match wins.
     // Only providers verified to return raw elevation data are enabled.
+    // GermanyDgm1 sits before IgnFrance: the France coverage rectangle spills
+    // over western Germany, and Germany's accepts() probe hands non-German
+    // bboxes back to the next candidate.
     vec![
         Box::new(Usgs3dep),    // 1.0m — ArcGIS REST, verified float32
-        Box::new(IgnFrance),   // 1.0m — WMS GeoTIFF, verified float32
         Box::new(GermanyDgm1), // 1.0m — hoehendaten.de UTM tiles, small areas only
+        Box::new(IgnFrance),   // 1.0m — WMS GeoTIFF, verified float32
         Box::new(IgnSpain),    // 5.0m — WCS, verified int16
         Box::new(JapanGsi),    // 5.0m — XYZ PNG tiles, custom encoding
     ]

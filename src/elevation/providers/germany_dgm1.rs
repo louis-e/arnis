@@ -47,7 +47,17 @@ impl ElevationProvider for GermanyDgm1 {
             );
             return false;
         }
-        true
+        // The coverage rectangle spills into neighbouring countries; a cheap
+        // point probe confirms the service actually has data here.
+        let center_lat = (bbox.min().lat() + bbox.max().lat()) / 2.0;
+        let center_lng = (bbox.min().lng() + bbox.max().lng()) / 2.0;
+        match build_client().and_then(|c| resolve_zone(&c, center_lng, center_lat)) {
+            Ok(_) => true,
+            Err(_) => {
+                println!("Germany DGM1: no coverage at bbox center, using next provider");
+                false
+            }
+        }
     }
 
     fn fetch_raw(
@@ -431,12 +441,44 @@ mod tests {
         assert!((5385..=5393).contains(&n_km), "northing {n_km}km");
     }
 
+    // Offline: the size gate rejects before any network probe runs.
     #[test]
-    fn small_bbox_accepted_large_declined() {
+    fn small_bbox_within_budget_large_declined() {
         let small = LLBBox::new(48.13, 11.56, 48.15, 11.59).unwrap();
-        assert!(GermanyDgm1.accepts(&small));
+        assert!(estimate_tile_count(&small) <= MAX_TILES);
         let large = LLBBox::new(48.0, 11.3, 48.2, 11.8).unwrap();
         assert!(!GermanyDgm1.accepts(&large));
+    }
+
+    // Live check: grid values must match the API's own point elevations.
+    // Run explicitly: cargo test --bin arnis dgm1_grid_matches -- --ignored
+    #[test]
+    #[ignore]
+    fn dgm1_grid_matches_point_ground_truth() {
+        let bbox = LLBBox::new(48.118, 11.588, 48.128, 11.602).unwrap();
+        let (w, h) = (200usize, 150usize);
+        let grid = GermanyDgm1.fetch_dgm(&bbox, w, h).unwrap();
+        let client = build_client().unwrap();
+
+        for (gy, gx) in [(20usize, 30usize), (75, 100), (130, 170)] {
+            let lat = bbox.max().lat()
+                - (gy as f64 / (h - 1) as f64) * (bbox.max().lat() - bbox.min().lat());
+            let lng = bbox.min().lng()
+                + (gx as f64 / (w - 1) as f64) * (bbox.max().lng() - bbox.min().lng());
+            let body = serde_json::json!({
+                "Type": "PointRequest", "ID": "arnis-test",
+                "Attributes": { "Longitude": lng, "Latitude": lat }
+            });
+            let json = post_json(&client, "/v1/point", &body).unwrap();
+            let truth = json
+                .pointer("/Attributes/Elevation")
+                .and_then(|v| v.as_f64())
+                .unwrap();
+            let ours = grid.heights_meters[gy][gx];
+            let diff = (ours - truth).abs();
+            println!("({lat:.5},{lng:.5}): grid {ours:.2}m vs api {truth:.2}m (diff {diff:.2}m)");
+            assert!(diff < 1.5, "misaligned: {ours} vs {truth}");
+        }
     }
 
     #[test]
