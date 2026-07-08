@@ -893,6 +893,47 @@ input[type="range"] {
   font-weight: bold;
 }
 
+/* Segmented control (game mode) */
+.segmented-control {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid #5a5a5a;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.segmented-control .segment {
+  all: unset;
+  box-sizing: border-box;
+  padding: 5px 10px;
+  color: #ececec;
+  font-size: 0.85em;
+  font-family: inherit;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.segmented-control .segment:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.segmented-control .segment + .segment {
+  border-left: 1px solid #5a5a5a;
+}
+
+.segmented-control .segment.active {
+  background: #fecc44;
+  color: #1e1e1e;
+  font-weight: 600;
+}
+
+#world-time-value {
+  min-width: 42px;
+  text-align: right;
+  font-weight: bold;
+}
+
 .rotation-unit {
   font-weight: bold;
   color: #ececec;

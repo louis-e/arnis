@@ -888,6 +888,9 @@ fn gui_start_generation(
     telemetry_consent: bool,
     world_format: String,
     rotation_angle: f64,
+    gamemode: String,
+    world_time: i64,
+    map_item: bool,
 ) -> Result<(), String> {
     use progress::emit_gui_error;
     use LLBBox;
@@ -1158,6 +1161,9 @@ fn gui_start_generation(
                 aws_only_elevation,
                 benchmark: false,
                 bake_lighting: bake_lighting_enabled,
+                gamemode: crate::args::GameMode::from_str_lossy(&gamemode),
+                world_time: world_time.clamp(0, 23999),
+                map_item,
                 // Frontend refuses previews for rotated worlds, skip the work there.
                 map_preview: world_format != WorldFormat::LuantiWorld
                     && rotation_angle.abs() <= f64::EPSILON,
@@ -1305,4 +1311,71 @@ fn gui_start_generation(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod locale_tests {
+    use std::collections::BTreeSet;
+
+    // en-US is the source of truth, every other locale must match its key set
+    const LOCALES: &[(&str, &str)] = &[
+        ("en-US", include_str!("gui/locales/en-US.json")),
+        ("en", include_str!("gui/locales/en.json")),
+        ("ar", include_str!("gui/locales/ar.json")),
+        ("de", include_str!("gui/locales/de.json")),
+        ("es", include_str!("gui/locales/es.json")),
+        ("fi", include_str!("gui/locales/fi.json")),
+        ("fr-FR", include_str!("gui/locales/fr-FR.json")),
+        ("hu", include_str!("gui/locales/hu.json")),
+        ("ja", include_str!("gui/locales/ja.json")),
+        ("ko", include_str!("gui/locales/ko.json")),
+        ("lt", include_str!("gui/locales/lt.json")),
+        ("lv", include_str!("gui/locales/lv.json")),
+        ("pl", include_str!("gui/locales/pl.json")),
+        ("pt-BR", include_str!("gui/locales/pt-BR.json")),
+        ("ru", include_str!("gui/locales/ru.json")),
+        ("sl", include_str!("gui/locales/sl.json")),
+        ("sv", include_str!("gui/locales/sv.json")),
+        ("ua", include_str!("gui/locales/ua.json")),
+        ("zh-CN", include_str!("gui/locales/zh-CN.json")),
+    ];
+
+    fn locale_keys(name: &str, raw: &str) -> BTreeSet<String> {
+        let value: serde_json::Value = serde_json::from_str(raw)
+            .unwrap_or_else(|e| panic!("{name}.json is invalid JSON: {e}"));
+        value
+            .as_object()
+            .unwrap_or_else(|| panic!("{name}.json is not a JSON object"))
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    #[test]
+    fn locales_match_en_us_keys() {
+        let reference = locale_keys(LOCALES[0].0, LOCALES[0].1);
+        let mut errors = Vec::new();
+        for (name, raw) in &LOCALES[1..] {
+            let keys = locale_keys(name, raw);
+            let missing: Vec<_> = reference.difference(&keys).cloned().collect();
+            let extra: Vec<_> = keys.difference(&reference).cloned().collect();
+            if !missing.is_empty() {
+                errors.push(format!(
+                    "{name}.json is missing keys: {}",
+                    missing.join(", ")
+                ));
+            }
+            if !extra.is_empty() {
+                errors.push(format!(
+                    "{name}.json has keys not in en-US.json: {}",
+                    extra.join(", ")
+                ));
+            }
+        }
+        assert!(
+            errors.is_empty(),
+            "Locale key mismatches:\n{}",
+            errors.join("\n")
+        );
+    }
 }
