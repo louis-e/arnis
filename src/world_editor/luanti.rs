@@ -271,6 +271,8 @@ pub fn save_luanti_world(
     level_name: Option<&str>,
     spawn_point: Option<(i32, i32)>,
     ground_level: i32,
+    game_mode: crate::args::GameMode,
+    world_time: i64,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("{} Saving Luanti world...", "[7/7]".bold());
     emit_gui_progress_update(90.0, "Saving Luanti world...");
@@ -291,13 +293,15 @@ pub fn save_luanti_world(
     let spawn_z = -spawn_z - 1;
 
     // Write world.mt
-    write_world_mt(world_dir, game, level_name, spawn_x, spawn_y, spawn_z)?;
+    write_world_mt(
+        world_dir, game, level_name, spawn_x, spawn_y, spawn_z, game_mode,
+    )?;
 
     // Write map_meta.txt
     write_map_meta(world_dir, game)?;
 
     // Write env_meta.txt
-    write_env_meta(world_dir)?;
+    write_env_meta(world_dir, world_time)?;
 
     // Write worldmod for singlenode mapgen + spawn
     write_worldmod(world_dir, spawn_x, spawn_y, spawn_z, game)?;
@@ -325,6 +329,7 @@ pub fn save_luanti_world(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_world_mt(
     world_dir: &Path,
     game: LuantiGame,
@@ -332,6 +337,7 @@ fn write_world_mt(
     spawn_x: i32,
     spawn_y: i32,
     spawn_z: i32,
+    game_mode: crate::args::GameMode,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut f = fs::File::create(world_dir.join("world.mt"))?;
     writeln!(f, "backend = sqlite3")?;
@@ -342,8 +348,10 @@ fn write_world_mt(
     if let Some(name) = level_name {
         writeln!(f, "world_name = {}", name)?;
     }
-    writeln!(f, "creative_mode = true")?;
-    writeln!(f, "enable_damage = false")?;
+    // Luanti has no spectator mode; anything but survival maps to creative.
+    let survival = game_mode == crate::args::GameMode::Survival;
+    writeln!(f, "creative_mode = {}", !survival)?;
+    writeln!(f, "enable_damage = {}", survival)?;
     writeln!(f, "server_announce = false")?;
     writeln!(
         f,
@@ -369,10 +377,14 @@ fn write_map_meta(
     Ok(())
 }
 
-fn write_env_meta(world_dir: &Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+fn write_env_meta(
+    world_dir: &Path,
+    world_time: i64,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut f = fs::File::create(world_dir.join("env_meta.txt"))?;
     writeln!(f, "game_time = 0")?;
-    writeln!(f, "time_of_day = 6000")?;
+    // Luanti's day starts at midnight vs Minecraft's at dawn, hence +6000.
+    writeln!(f, "time_of_day = {}", (world_time + 6000) % 24000)?;
     writeln!(f, "EnvArgsEnd")?;
     Ok(())
 }

@@ -122,6 +122,51 @@ pub struct Args {
     /// Render a top-down PNG map preview of the generated world (Java and Bedrock)
     #[arg(long, default_value_t = false)]
     pub map_preview: bool,
+
+    /// Give the player a locked map item showing the whole world (Java only)
+    #[arg(long = "map-item", default_value_t = true, action = ArgAction::Set, num_args = 0..=1, default_missing_value = "true")]
+    pub map_item: bool,
+
+    /// Player game mode for the generated world
+    #[arg(long, value_enum, default_value_t = GameMode::Creative)]
+    pub gamemode: GameMode,
+
+    /// Initial time of day in ticks (0 = dawn, 6000 = noon, 18000 = midnight)
+    #[arg(long, default_value_t = 6000, value_parser = clap::value_parser!(i64).range(0..24000))]
+    pub world_time: i64,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, clap::ValueEnum)]
+pub enum GameMode {
+    Survival,
+    Creative,
+    Spectator,
+}
+
+impl GameMode {
+    pub fn from_str_lossy(s: &str) -> Self {
+        match s {
+            "survival" => GameMode::Survival,
+            "spectator" => GameMode::Spectator,
+            _ => GameMode::Creative,
+        }
+    }
+
+    pub fn java_game_type(self) -> i32 {
+        match self {
+            GameMode::Survival => 0,
+            GameMode::Creative => 1,
+            GameMode::Spectator => 3,
+        }
+    }
+
+    pub fn bedrock_game_type(self) -> i32 {
+        match self {
+            GameMode::Survival => 0,
+            GameMode::Creative => 1,
+            GameMode::Spectator => 6,
+        }
+    }
 }
 
 /// Validates CLI arguments after parsing.
