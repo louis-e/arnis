@@ -1,6 +1,7 @@
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::provider::ElevationProvider;
 use crate::elevation::providers::aws_terrain::AwsTerrain;
+use crate::elevation::providers::germany_dgm1::GermanyDgm1;
 use crate::elevation::providers::ign_france::IgnFrance;
 use crate::elevation::providers::ign_spain::IgnSpain;
 use crate::elevation::providers::regional::JapanGsi;
@@ -17,7 +18,9 @@ pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
 /// Select the best elevation provider for the given bounding box.
 ///
 /// Iterates providers ordered by resolution (finest first), returns the first
-/// whose coverage overlaps the user's bbox. Falls back to AWS Terrain Tiles.
+/// whose coverage overlaps the user's bbox and whose `accepts()` check passes
+/// (rate-limited providers use it to decline oversized or uncovered areas).
+/// Falls back to AWS Terrain Tiles.
 ///
 /// When `force_aws` is true the regional providers are skipped entirely and
 /// AWS Terrain Tiles is used regardless of coverage. Surfaced as the
@@ -33,7 +36,7 @@ pub fn select_provider(bbox: &LLBBox, force_aws: bool) -> Box<dyn ElevationProvi
 
     for provider in candidates {
         if let Some(coverages) = provider.coverage_bboxes() {
-            if coverages.iter().any(|c| bboxes_overlap(c, bbox)) {
+            if coverages.iter().any(|c| bboxes_overlap(c, bbox)) && provider.accepts(bbox) {
                 println!(
                     "Selected elevation provider: {} ({:.0}m resolution)",
                     provider.name(),
@@ -54,11 +57,15 @@ pub fn select_provider(bbox: &LLBBox, force_aws: bool) -> Box<dyn ElevationProvi
 fn build_provider_list() -> Vec<Box<dyn ElevationProvider>> {
     // Ordered by resolution (finest first). First match wins.
     // Only providers verified to return raw elevation data are enabled.
+    // GermanyDgm1 sits before IgnFrance: the France coverage rectangle spills
+    // over western Germany, and Germany's accepts() probe hands non-German
+    // bboxes back to the next candidate.
     vec![
-        Box::new(Usgs3dep),  // 1.0m — ArcGIS REST, verified float32
-        Box::new(IgnFrance), // 1.0m — WMS GeoTIFF, verified float32
-        Box::new(IgnSpain),  // 5.0m — WCS, verified int16
-        Box::new(JapanGsi),  // 5.0m — XYZ PNG tiles, custom encoding
+        Box::new(Usgs3dep),    // 1.0m — ArcGIS REST, verified float32
+        Box::new(GermanyDgm1), // 1.0m — hoehendaten.de UTM tiles, small areas only
+        Box::new(IgnFrance),   // 1.0m — WMS GeoTIFF, verified float32
+        Box::new(IgnSpain),    // 5.0m — WCS, verified int16
+        Box::new(JapanGsi),    // 5.0m — XYZ PNG tiles, custom encoding
     ]
 }
 

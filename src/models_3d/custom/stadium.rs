@@ -79,7 +79,7 @@ pub fn prescan(
     already_suppressed: &HashSet<(&'static str, u64)>,
     args_scale: f64,
 ) -> PrescanResult {
-    let (placements, mut suppressed, footprints) =
+    let (placements, mut suppressed, _footprints) =
         collect_stadium_placements(elements, already_suppressed, args_scale);
 
     if placements.is_empty() {
@@ -106,8 +106,13 @@ pub fn prescan(
         }
     };
 
-    let interior =
-        collect_interior_suppression(elements, already_suppressed, &suppressed, &footprints);
+    let interior = collect_interior_suppression(
+        elements,
+        already_suppressed,
+        &suppressed,
+        &placements,
+        args_scale,
+    );
     suppressed.extend(interior);
 
     PrescanResult {
@@ -197,14 +202,17 @@ fn leisure_stadium_qualifies(p: &Placement, building_anchors: &[(i32, i32)]) -> 
         .any(|&(x, z)| p.footprint.contains(x, z))
 }
 
+// Suppresses features under the rotated model rectangle, not just the
+// axis-aligned footprint bbox: the model's corners can reach past the bbox.
 fn collect_interior_suppression(
     elements: &[ProcessedElement],
     already_suppressed: &HashSet<(&'static str, u64)>,
     claimed: &HashSet<(&'static str, u64)>,
-    footprints: &[Bbox],
+    placements: &[Placement],
+    args_scale: f64,
 ) -> HashSet<(&'static str, u64)> {
     let mut interior: HashSet<(&'static str, u64)> = HashSet::new();
-    if footprints.is_empty() {
+    if placements.is_empty() {
         return interior;
     }
     for element in elements {
@@ -218,7 +226,10 @@ fn collect_interior_suppression(
         let Some((cx, cz)) = anchor_xz(element) else {
             continue;
         };
-        if footprints.iter().any(|b| b.contains(cx, cz)) {
+        if placements
+            .iter()
+            .any(|p| p.footprint.contains(cx, cz) || in_model_rect(p, args_scale, cx, cz, 2.0))
+        {
             interior.insert(key);
         }
     }
@@ -243,14 +254,13 @@ fn build_placement(element: &ProcessedElement, args_scale: f64) -> Option<Placem
     }
     let footprint = bbox_of(&points)?;
 
-    let (long_blocks, short_blocks, theta) = principal_axis(&points)?;
+    let (cx, cz, long_blocks, short_blocks, theta) = min_area_rect(&points)?;
     let long_m = (long_blocks / args_scale) as f32;
     let short_m = (short_blocks / args_scale) as f32;
     if short_m < MIN_SHORT_EXTENT_M || long_m > MAX_LONG_EXTENT_M || short_m > MAX_SHORT_EXTENT_M {
         return None;
     }
 
-    let (cx, cz) = centroid(&points)?;
     let osm_height_m = element
         .tags()
         .get("height")
@@ -259,14 +269,25 @@ fn build_placement(element: &ProcessedElement, args_scale: f64) -> Option<Placem
 
     Some(Placement {
         osm_id: element.id(),
-        anchor_x: cx,
-        anchor_z: cz,
+        anchor_x: cx.round() as i32,
+        anchor_z: cz.round() as i32,
         footprint,
         long_m,
         short_m,
         yaw_degrees: theta.to_degrees(),
         osm_height_m,
     })
+}
+
+// True if (x, z) lies inside the placement's rotated model rectangle (+margin).
+fn in_model_rect(p: &Placement, args_scale: f64, x: i32, z: i32, margin: f64) -> bool {
+    let (sin_t, cos_t) = p.yaw_degrees.to_radians().sin_cos();
+    let dx = (x - p.anchor_x) as f64;
+    let dz = (z - p.anchor_z) as f64;
+    let a = dx * cos_t + dz * sin_t;
+    let b = -dx * sin_t + dz * cos_t;
+    a.abs() <= p.long_m as f64 * args_scale / 2.0 + margin
+        && b.abs() <= p.short_m as f64 * args_scale / 2.0 + margin
 }
 
 pub fn place_stadium_models(editor: &mut WorldEditor, args: &Args, prescan: &PrescanResult) {
@@ -422,10 +443,6 @@ fn anchor_xz(element: &ProcessedElement) -> Option<(i32, i32)> {
     }
 }
 
-fn centroid(points: &[(i32, i32)]) -> Option<(i32, i32)> {
-    centroid_iter(points.iter().copied())
-}
-
 fn centroid_iter<I: Iterator<Item = (i32, i32)>>(coords: I) -> Option<(i32, i32)> {
     let mut sx: i64 = 0;
     let mut sz: i64 = 0;
@@ -462,56 +479,81 @@ fn bbox_of(points: &[(i32, i32)]) -> Option<Bbox> {
     })
 }
 
-/// PCA on (x, z): returns (long_extent, short_extent, theta_rad CCW from +X).
-fn principal_axis(points: &[(i32, i32)]) -> Option<(f64, f64, f64)> {
-    let n = points.len() as f64;
-    if n < 3.0 {
+// Andrew monotone chain; returns the hull CCW without the closing point.
+fn convex_hull(points: &[(i32, i32)]) -> Vec<(f64, f64)> {
+    let mut pts: Vec<(f64, f64)> = points.iter().map(|&(x, z)| (x as f64, z as f64)).collect();
+    pts.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    pts.dedup();
+    if pts.len() < 3 {
+        return pts;
+    }
+    let cross = |o: (f64, f64), a: (f64, f64), b: (f64, f64)| {
+        (a.0 - o.0) * (b.1 - o.1) - (a.1 - o.1) * (b.0 - o.0)
+    };
+    let mut hull: Vec<(f64, f64)> = Vec::with_capacity(pts.len() * 2);
+    for &p in pts.iter().chain(pts.iter().rev()) {
+        while hull.len() >= 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+            hull.pop();
+        }
+        hull.push(p);
+    }
+    hull.pop();
+    hull
+}
+
+/// Minimum-area enclosing rotated rectangle via rotating calipers.
+/// Returns (center_x, center_z, long_extent, short_extent, theta_rad CCW from +X).
+/// Unlike a node PCA this is independent of node density, so unevenly
+/// mapped stadium ovals get the true long axis instead of a skewed one.
+fn min_area_rect(points: &[(i32, i32)]) -> Option<(f64, f64, f64, f64, f64)> {
+    let hull = convex_hull(points);
+    if hull.len() < 3 {
         return None;
     }
-    let cx = points.iter().map(|p| p.0 as f64).sum::<f64>() / n;
-    let cz = points.iter().map(|p| p.1 as f64).sum::<f64>() / n;
-    let mut cxx = 0.0_f64;
-    let mut cxz = 0.0_f64;
-    let mut czz = 0.0_f64;
-    for &(x, z) in points {
-        let dx = x as f64 - cx;
-        let dz = z as f64 - cz;
-        cxx += dx * dx;
-        cxz += dx * dz;
-        czz += dz * dz;
+    let mut best: Option<(f64, f64, f64, f64, f64, f64)> = None;
+    for i in 0..hull.len() {
+        let (x0, z0) = hull[i];
+        let (x1, z1) = hull[(i + 1) % hull.len()];
+        let (ex, ez) = (x1 - x0, z1 - z0);
+        let len = (ex * ex + ez * ez).sqrt();
+        if len < 1e-9 {
+            continue;
+        }
+        let (ux, uz) = (ex / len, ez / len);
+        let (vx, vz) = (-uz, ux);
+        let (mut a0, mut a1, mut b0, mut b1) = (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        );
+        for &(px, pz) in &hull {
+            let a = px * ux + pz * uz;
+            let b = px * vx + pz * vz;
+            a0 = a0.min(a);
+            a1 = a1.max(a);
+            b0 = b0.min(b);
+            b1 = b1.max(b);
+        }
+        let area = (a1 - a0) * (b1 - b0);
+        if best.map(|(ba, ..)| area < ba).unwrap_or(true) {
+            let ca = (a0 + a1) / 2.0;
+            let cb = (b0 + b1) / 2.0;
+            best = Some((
+                area,
+                ca * ux + cb * vx,
+                ca * uz + cb * vz,
+                a1 - a0,
+                b1 - b0,
+                uz.atan2(ux),
+            ));
+        }
     }
-
-    let theta = 0.5_f64 * (2.0 * cxz).atan2(cxx - czz);
-    let (sin_t, cos_t) = theta.sin_cos();
-
-    let mut min_a = f64::INFINITY;
-    let mut max_a = f64::NEG_INFINITY;
-    let mut min_p = f64::INFINITY;
-    let mut max_p = f64::NEG_INFINITY;
-    for &(x, z) in points {
-        let dx = x as f64 - cx;
-        let dz = z as f64 - cz;
-        let a = dx * cos_t + dz * sin_t;
-        let p = -dx * sin_t + dz * cos_t;
-        if a < min_a {
-            min_a = a;
-        }
-        if a > max_a {
-            max_a = a;
-        }
-        if p < min_p {
-            min_p = p;
-        }
-        if p > max_p {
-            max_p = p;
-        }
-    }
-    let ext_a = max_a - min_a;
-    let ext_p = max_p - min_p;
-    if ext_a >= ext_p {
-        Some((ext_a, ext_p, theta))
+    let (_, cx, cz, ea, eb, theta) = best?;
+    if ea >= eb {
+        Some((cx, cz, ea, eb, theta))
     } else {
-        Some((ext_p, ext_a, theta + std::f64::consts::FRAC_PI_2))
+        Some((cx, cz, eb, ea, theta + std::f64::consts::FRAC_PI_2))
     }
 }
 
@@ -540,18 +582,23 @@ mod tests {
     }
 
     #[test]
-    fn principal_axis_of_axis_aligned_rect() {
+    fn min_rect_of_axis_aligned_rect() {
         let pts = vec![(-100, -50), (100, -50), (100, 50), (-100, 50)];
-        let (long, short, theta) = principal_axis(&pts).unwrap();
+        let (cx, cz, long, short, theta) = min_area_rect(&pts).unwrap();
         assert!((long - 200.0).abs() < 1e-6);
         assert!((short - 100.0).abs() < 1e-6);
-        assert!(theta.abs() < 1e-6, "theta = {theta}");
+        assert!(cx.abs() < 1e-6 && cz.abs() < 1e-6);
+        let t = theta.rem_euclid(std::f64::consts::PI);
+        assert!(
+            t < 1e-6 || (t - std::f64::consts::PI).abs() < 1e-6,
+            "theta = {theta}"
+        );
     }
 
     #[test]
-    fn principal_axis_of_z_aligned_rect_returns_long_first() {
+    fn min_rect_of_z_aligned_rect_returns_long_first() {
         let pts = vec![(-50, -100), (50, -100), (50, 100), (-50, 100)];
-        let (long, short, theta) = principal_axis(&pts).unwrap();
+        let (_, _, long, short, theta) = min_area_rect(&pts).unwrap();
         assert!((long - 200.0).abs() < 1e-6);
         assert!((short - 100.0).abs() < 1e-6);
         let t = theta.rem_euclid(std::f64::consts::PI);
@@ -562,7 +609,7 @@ mod tests {
     }
 
     #[test]
-    fn principal_axis_of_45deg_rect() {
+    fn min_rect_of_45deg_rect() {
         let s2 = std::f64::consts::FRAC_1_SQRT_2;
         let pts: Vec<(i32, i32)> = [
             (-100.0, -50.0),
@@ -577,7 +624,7 @@ mod tests {
             (rx.round() as i32, rz.round() as i32)
         })
         .collect();
-        let (long, short, theta) = principal_axis(&pts).unwrap();
+        let (_, _, long, short, theta) = min_area_rect(&pts).unwrap();
         assert!((long - 200.0).abs() < 2.0, "long = {long}");
         assert!((short - 100.0).abs() < 2.0, "short = {short}");
         let t = theta.rem_euclid(std::f64::consts::PI);
@@ -587,13 +634,55 @@ mod tests {
         );
     }
 
+    // Regression: a node PCA skews toward densely-noded curves; the min-area
+    // rect must stay axis-true no matter how unevenly the outline is mapped.
+    #[test]
+    fn min_rect_ignores_uneven_node_density() {
+        // Sparse straight sides, densely sampled curved east end (stadium-style).
+        let mut pts: Vec<(i32, i32)> = vec![(-100, -50), (100, -50), (-100, 50), (100, 50)];
+        for i in 0..60 {
+            let ang = -std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * (i as f64 / 59.0);
+            pts.push(((100.0 + 20.0 * ang.cos()) as i32, (50.0 * ang.sin()) as i32));
+        }
+        let (_, _, long, short, theta) = min_area_rect(&pts).unwrap();
+        let t = theta.rem_euclid(std::f64::consts::PI);
+        let axis_err = t.min((t - std::f64::consts::PI).abs());
+        assert!(axis_err < 0.03, "axis skewed by {axis_err} rad");
+        assert!((long - 220.0).abs() < 3.0, "long = {long}");
+        assert!((short - 100.0).abs() < 3.0, "short = {short}");
+    }
+
+    #[test]
+    fn rotated_model_rect_suppression_reaches_past_bbox() {
+        let p = Placement {
+            osm_id: 1,
+            anchor_x: 0,
+            anchor_z: 0,
+            footprint: Bbox {
+                min_x: -80,
+                min_z: -80,
+                max_x: 80,
+                max_z: 80,
+            },
+            long_m: 200.0,
+            short_m: 100.0,
+            yaw_degrees: 45.0,
+            osm_height_m: None,
+        };
+        // Near the rotated corner: outside the +/-80 bbox but under the model.
+        assert!(in_model_rect(&p, 1.0, 35, 103, 2.0));
+        // Perpendicular to the long axis, clearly outside the model.
+        assert!(!in_model_rect(&p, 1.0, 90, -90, 2.0));
+    }
+
     fn prescan_offline(
         elements: &[ProcessedElement],
         already: &HashSet<(&'static str, u64)>,
     ) -> (Vec<Placement>, HashSet<(&'static str, u64)>) {
-        let (placements, mut suppressed, footprints) =
+        let (placements, mut suppressed, _footprints) =
             collect_stadium_placements(elements, already, 1.0);
-        let interior = collect_interior_suppression(elements, already, &suppressed, &footprints);
+        let interior =
+            collect_interior_suppression(elements, already, &suppressed, &placements, 1.0);
         suppressed.extend(interior);
         (placements, suppressed)
     }
