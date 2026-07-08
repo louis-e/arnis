@@ -18,7 +18,9 @@ pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
 /// Select the best elevation provider for the given bounding box.
 ///
 /// Iterates providers ordered by resolution (finest first), returns the first
-/// whose coverage overlaps the user's bbox. Falls back to AWS Terrain Tiles.
+/// whose coverage overlaps the user's bbox and whose `accepts()` check passes
+/// (rate-limited providers use it to decline oversized or uncovered areas).
+/// Falls back to AWS Terrain Tiles.
 ///
 /// When `force_aws` is true the regional providers are skipped entirely and
 /// AWS Terrain Tiles is used regardless of coverage. Surfaced as the

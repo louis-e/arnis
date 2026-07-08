@@ -66,13 +66,8 @@ impl ElevationProvider for GermanyDgm1 {
         grid_width: usize,
         grid_height: usize,
     ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
-        match self.fetch_dgm(bbox, grid_width, grid_height) {
-            Ok(grid) => Ok(grid),
-            Err(e) => {
-                eprintln!("Germany DGM1 unavailable ({e}), falling back to AWS Terrain Tiles");
-                AwsTerrain.fetch_raw(bbox, grid_width, grid_height)
-            }
-        }
+        // Total failure propagates; fetch_elevation_data owns the AWS fallback.
+        self.fetch_dgm(bbox, grid_width, grid_height)
     }
 }
 
@@ -225,7 +220,7 @@ fn resolve_zone(
     Ok(zone)
 }
 
-// 1 km tile keys covering the bbox in the given zone, with a half-tile margin.
+// 1 km tile keys covering the bbox in the given zone.
 fn covering_tiles(bbox: &LLBBox, zone: u8) -> Vec<(i64, i64)> {
     let corners = [
         (bbox.min().lat(), bbox.min().lng()),
@@ -241,6 +236,12 @@ fn covering_tiles(bbox: &LLBBox, zone: u8) -> Vec<(i64, i64)> {
         n_min = n_min.min(n);
         n_max = n_max.max(n);
     }
+    // Small margin so edge samples can read bilinear neighbours and grid
+    // convergence between the corners can't drop a boundary tile.
+    e_min -= 2.0;
+    e_max += 2.0;
+    n_min -= 2.0;
+    n_max += 2.0;
     let mut tiles = Vec::new();
     for e_km in (e_min / TILE_METERS).floor() as i64..=(e_max / TILE_METERS).floor() as i64 {
         for n_km in (n_min / TILE_METERS).floor() as i64..=(n_max / TILE_METERS).floor() as i64 {
@@ -250,14 +251,12 @@ fn covering_tiles(bbox: &LLBBox, zone: u8) -> Vec<(i64, i64)> {
     tiles
 }
 
-// Upper bound on the tile count without a network call, using the nominal zone.
+// Conservative tile-count estimate without a network call: the publication
+// zone is unknown here, so take the larger count of both nominal zones.
 fn estimate_tile_count(bbox: &LLBBox) -> usize {
-    let zone = if (bbox.min().lng() + bbox.max().lng()) / 2.0 < 12.0 {
-        32
-    } else {
-        33
-    };
-    covering_tiles(bbox, zone).len()
+    covering_tiles(bbox, 32)
+        .len()
+        .max(covering_tiles(bbox, 33).len())
 }
 
 // Fetch one 1km tile as a 1000x1000 f32 grid (row 0 = north); NaN for nodata.
