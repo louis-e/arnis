@@ -56,5 +56,18 @@
   "settings_section_application": "Застосунок",
   "clear_tile_cache": "Очистити кеш плиток",
   "clear_tile_cache_button": "Очистити",
-  "anonymous_crash_reports": "Анонімні звіти про збої"
+  "anonymous_crash_reports": "Анонімні звіти про збої",
+  "update_modal_title": "Що нового в Arnis",
+  "update_modal_download_note": "Завантаження відкриється у браузері. Закрийте Arnis перед запуском нової версії.",
+  "update_view_on_github": "Переглянути на GitHub",
+  "update_download": "Завантажити",
+  "loading": "Завантаження...",
+  "version_info": "Інформація про версію",
+  "update_fetch_failed": "Не вдалося отримати інформацію про останню версію. Перевірте підключення до інтернету або відвідайте GitHub напряму.",
+  "gamemode": "Режим гри",
+  "gamemode_survival": "Виживання",
+  "gamemode_creative": "Творчість",
+  "gamemode_spectator": "Спостерігач",
+  "world_time": "Час світу",
+  "map_item": "Предмет карти світу"
 }

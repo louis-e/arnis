@@ -56,5 +56,18 @@
   "settings_section_application": "Aplikacja",
   "clear_tile_cache": "Wyczyść pamięć kafelków",
   "clear_tile_cache_button": "Wyczyść",
-  "anonymous_crash_reports": "Anonimowe raporty o awariach"
+  "anonymous_crash_reports": "Anonimowe raporty o awariach",
+  "update_modal_title": "Co nowego w Arnis",
+  "update_modal_download_note": "Pobieranie otworzy się w przeglądarce. Zamknij Arnis przed uruchomieniem nowej wersji.",
+  "update_view_on_github": "Zobacz na GitHubie",
+  "update_download": "Pobierz",
+  "loading": "Ładowanie...",
+  "version_info": "Informacje o wersji",
+  "update_fetch_failed": "Nie udało się pobrać informacji o najnowszej wersji. Sprawdź połączenie z internetem lub odwiedź GitHub bezpośrednio.",
+  "gamemode": "Tryb gry",
+  "gamemode_survival": "Przetrwanie",
+  "gamemode_creative": "Kreatywny",
+  "gamemode_spectator": "Obserwator",
+  "world_time": "Czas świata",
+  "map_item": "Przedmiot mapy świata"
 }

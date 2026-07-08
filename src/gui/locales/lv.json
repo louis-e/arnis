@@ -56,5 +56,18 @@
   "settings_section_application": "Lietotne",
   "clear_tile_cache": "Notīrīt flīžu kešatmiņu",
   "clear_tile_cache_button": "Notīrīt",
-  "anonymous_crash_reports": "Anonīmi avāriju ziņojumi"
+  "anonymous_crash_reports": "Anonīmi avāriju ziņojumi",
+  "update_modal_title": "Kas jauns programmā Arnis",
+  "update_modal_download_note": "Lejupielāde tiks atvērta pārlūkprogrammā. Pirms jaunās versijas palaišanas aizveriet Arnis.",
+  "update_view_on_github": "Skatīt GitHub",
+  "update_download": "Lejupielādēt",
+  "loading": "Ielādē...",
+  "version_info": "Versijas informācija",
+  "update_fetch_failed": "Neizdevās iegūt jaunākās versijas informāciju. Pārbaudiet interneta savienojumu vai apmeklējiet GitHub tieši.",
+  "gamemode": "Spēles režīms",
+  "gamemode_survival": "Izdzīvošana",
+  "gamemode_creative": "Radošais",
+  "gamemode_spectator": "Skatītājs",
+  "world_time": "Pasaules laiks",
+  "map_item": "Pasaules kartes priekšmets"
 }

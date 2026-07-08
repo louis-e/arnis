@@ -63,5 +63,11 @@
   "settings_section_application": "Application",
   "clear_tile_cache": "Clear Tile Cache",
   "clear_tile_cache_button": "Clear",
-  "anonymous_crash_reports": "Anonymous Crash Reports"
+  "anonymous_crash_reports": "Anonymous Crash Reports",
+  "gamemode": "Game Mode",
+  "gamemode_survival": "Survival",
+  "gamemode_creative": "Creative",
+  "gamemode_spectator": "Spectator",
+  "world_time": "World Time",
+  "map_item": "World Map Item"
 }

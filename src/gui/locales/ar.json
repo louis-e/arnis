@@ -56,5 +56,18 @@
   "settings_section_application": "التطبيق",
   "clear_tile_cache": "مسح ذاكرة البلاطات",
   "clear_tile_cache_button": "مسح",
-  "anonymous_crash_reports": "تقارير الأعطال المجهولة"
+  "anonymous_crash_reports": "تقارير الأعطال المجهولة",
+  "update_modal_title": "ما الجديد في Arnis",
+  "update_modal_download_note": "سيتم فتح التنزيل في المتصفح. أغلق Arnis قبل تشغيل الإصدار الجديد.",
+  "update_view_on_github": "عرض على GitHub",
+  "update_download": "تنزيل",
+  "loading": "جارٍ التحميل...",
+  "version_info": "معلومات الإصدار",
+  "update_fetch_failed": "تعذر جلب معلومات أحدث إصدار. يرجى التحقق من اتصالك بالإنترنت أو زيارة GitHub مباشرة.",
+  "gamemode": "نمط اللعب",
+  "gamemode_survival": "البقاء",
+  "gamemode_creative": "الإبداع",
+  "gamemode_spectator": "المتفرج",
+  "world_time": "وقت العالم",
+  "map_item": "عنصر خريطة العالم"
 }

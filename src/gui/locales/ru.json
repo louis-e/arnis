@@ -56,5 +56,18 @@
   "settings_section_application": "Приложение",
   "clear_tile_cache": "Очистить кэш тайлов",
   "clear_tile_cache_button": "Очистить",
-  "anonymous_crash_reports": "Анонимные отчёты о сбоях"
+  "anonymous_crash_reports": "Анонимные отчёты о сбоях",
+  "update_modal_title": "Что нового в Arnis",
+  "update_modal_download_note": "Загрузка откроется в браузере. Закройте Arnis перед запуском новой версии.",
+  "update_view_on_github": "Открыть на GitHub",
+  "update_download": "Скачать",
+  "loading": "Загрузка...",
+  "version_info": "Информация о версии",
+  "update_fetch_failed": "Не удалось получить информацию о последней версии. Проверьте подключение к интернету или посетите GitHub напрямую.",
+  "gamemode": "Режим игры",
+  "gamemode_survival": "Выживание",
+  "gamemode_creative": "Творческий",
+  "gamemode_spectator": "Наблюдатель",
+  "world_time": "Время мира",
+  "map_item": "Предмет карты мира"
 }

@@ -56,5 +56,18 @@
   "settings_section_application": "Alkalmazás",
   "clear_tile_cache": "Csempe-gyorsítótár törlése",
   "clear_tile_cache_button": "Törlés",
-  "anonymous_crash_reports": "Névtelen összeomlási jelentések"
+  "anonymous_crash_reports": "Névtelen összeomlási jelentések",
+  "update_modal_title": "Újdonságok az Arnisban",
+  "update_modal_download_note": "A letöltés a böngészőben nyílik meg. Zárd be az Arnist, mielőtt elindítod az új verziót.",
+  "update_view_on_github": "Megtekintés GitHubon",
+  "update_download": "Letöltés",
+  "loading": "Betöltés...",
+  "version_info": "Verzióinformáció",
+  "update_fetch_failed": "Nem sikerült lekérni a legújabb kiadás adatait. Ellenőrizd az internetkapcsolatot, vagy látogass el közvetlenül a GitHubra.",
+  "gamemode": "Játékmód",
+  "gamemode_survival": "Túlélés",
+  "gamemode_creative": "Kreatív",
+  "gamemode_spectator": "Néző",
+  "world_time": "Világidő",
+  "map_item": "Világtérkép-tárgy"
 }

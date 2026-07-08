@@ -56,5 +56,18 @@
   "settings_section_application": "Aplikacija",
   "clear_tile_cache": "Počisti predpomnilnik ploščic",
   "clear_tile_cache_button": "Počisti",
-  "anonymous_crash_reports": "Anonimna poročila o napakah"
+  "anonymous_crash_reports": "Anonimna poročila o napakah",
+  "update_modal_title": "Novosti v Arnisu",
+  "update_modal_download_note": "Prenos se odpre v brskalniku. Pred zagonom nove različice zaprite Arnis.",
+  "update_view_on_github": "Ogled na GitHubu",
+  "update_download": "Prenesi",
+  "loading": "Nalaganje...",
+  "version_info": "Podatki o različici",
+  "update_fetch_failed": "Informacij o najnovejši različici ni bilo mogoče pridobiti. Preverite internetno povezavo ali obiščite GitHub neposredno.",
+  "gamemode": "Način igre",
+  "gamemode_survival": "Preživetje",
+  "gamemode_creative": "Ustvarjalni",
+  "gamemode_spectator": "Gledalec",
+  "world_time": "Čas sveta",
+  "map_item": "Predmet zemljevida sveta"
 }
