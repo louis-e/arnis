@@ -21,6 +21,8 @@ mod ground;
 mod ground_generation;
 mod land_cover;
 mod luanti_block_map;
+mod map_item;
+mod map_item_palette;
 mod map_preview;
 mod map_renderer;
 mod map_transformation;

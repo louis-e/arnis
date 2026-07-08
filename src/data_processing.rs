@@ -340,11 +340,15 @@ pub fn generate_world_with_options(
     };
     editor.set_bake_lighting(args.bake_lighting);
     editor.set_place_schematics(args.use_3d);
+    editor.set_game_settings(args.gamemode, args.world_time);
     editor.set_projection_info(&args.projection.to_string(), args.scale);
 
     // Map preview accumulator, fed as regions are saved/flushed (Java/Bedrock).
     let preview_epoch = map_preview::begin_preview_epoch();
-    let preview = (args.map_preview && world_format != WorldFormat::LuantiWorld)
+    // The map item consumes the same accumulator, so either feature enables it.
+    let wants_map_item = args.map_item && world_format == WorldFormat::JavaAnvil;
+    let preview = ((args.map_preview && world_format != WorldFormat::LuantiWorld)
+        || wants_map_item)
         .then(|| Arc::new(PreviewAccumulator::new(&xzbbox)));
     if let Some(p) = &preview {
         editor.set_preview(Arc::clone(p));
@@ -950,8 +954,17 @@ pub fn generate_world_with_options(
     }
     bench.mark("save");
 
+    if wants_map_item {
+        if let Some(p) = preview.as_ref() {
+            match crate::map_item::write_map_item(&output_path, p, &xzbbox) {
+                Ok(()) => println!("World map item added to the player inventory."),
+                Err(e) => eprintln!("Warning: Failed to create world map item: {e}"),
+            }
+        }
+    }
+
     // Write the preview PNG; off-thread in GUI mode so "Done" isn't delayed.
-    if let Some(p) = preview {
+    if let Some(p) = preview.filter(|_| args.map_preview) {
         let png_path = map_preview::preview_output_path(&output_path, world_format);
         let result = map_preview::PreviewResult {
             png_path: png_path.clone(),
@@ -993,6 +1006,16 @@ pub fn generate_world_with_options(
     }
 
     emit_gui_progress_update(99.0, "Finalizing world...");
+
+    if world_format == WorldFormat::JavaAnvil {
+        if let Err(e) = crate::world_utils::apply_java_world_settings(
+            &output_path,
+            args.gamemode,
+            args.world_time,
+        ) {
+            eprintln!("Warning: Failed to apply world settings: {e}");
+        }
+    }
 
     // Update player spawn Y coordinate based on terrain height after generation
     #[cfg(feature = "gui")]

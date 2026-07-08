@@ -154,9 +154,22 @@ impl PreviewAccumulator {
         }
     }
 
-    /// Averages the samples and writes the PNG; unsampled pixels stay white.
-    pub fn finalize(&self, output_path: &Path) -> Result<PathBuf, String> {
-        let frame = std::mem::take(&mut *self.frame.lock().unwrap());
+    pub fn min_x(&self) -> i32 {
+        self.min_x
+    }
+
+    pub fn min_z(&self) -> i32 {
+        self.min_z
+    }
+
+    /// Blocks per preview pixel.
+    pub fn step(&self) -> u32 {
+        self.step
+    }
+
+    /// Averages the samples into an image without consuming the frame.
+    pub fn render_image(&self) -> RgbImage {
+        let frame = self.frame.lock().unwrap();
         let mut img = RgbImage::from_pixel(self.out_w, self.out_h, Rgb([255, 255, 255]));
         for (i, cell) in frame.iter().enumerate() {
             let n = cell[3];
@@ -170,7 +183,14 @@ impl PreviewAccumulator {
             ]);
             img.put_pixel(i as u32 % self.out_w, i as u32 / self.out_w, px);
         }
-        drop(frame);
+        img
+    }
+
+    /// Averages the samples and writes the PNG; unsampled pixels stay white.
+    pub fn finalize(&self, output_path: &Path) -> Result<PathBuf, String> {
+        let img = self.render_image();
+        // Free the accumulator; the preview is only written once.
+        drop(std::mem::take(&mut *self.frame.lock().unwrap()));
 
         let file = std::fs::File::create(output_path)
             .map_err(|e| format!("Failed to create map image: {e}"))?;
