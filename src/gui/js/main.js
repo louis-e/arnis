@@ -369,7 +369,9 @@ function registerMessageEvent() {
   window.addEventListener('message', function (event) {
     const bboxText = event.data.bboxText;
 
-    if (bboxText) {
+    // Typed messages are handled below; only untyped bboxText messages are
+    // selection updates (typed ones carrying coordinates must not be).
+    if (bboxText && !event.data.type) {
       console.log("Updated BBOX Coordinates:", bboxText);
       displayBboxInfoText(bboxText);
     }
@@ -608,11 +610,13 @@ function setupProgressListener() {
       if (message.startsWith("Error!")) {
         progressInfo.style.color = "#fa7878";
         generationButtonEnabled = true;
+        window.arnisPreview3D?.setGenerationRunning(false);
         setWorldNameLabel("");
         resetEta();
       } else if (message.startsWith("Done!")) {
         progressInfo.style.color = "#7bd864";
         generationButtonEnabled = true;
+        window.arnisPreview3D?.setGenerationRunning(false);
         resetEta();
       } else {
         progressInfo.style.color = "#ececec";
@@ -1492,6 +1496,7 @@ function displayBboxInfoText(bboxText) {
     if (!customBBoxValid) {
       selectedBBox = "";
     }
+    window.arnisPreview3D?.onBboxCleared();
     return;
   }
 
@@ -1502,6 +1507,9 @@ function displayBboxInfoText(bboxText) {
   const selectedSize = calculateBBoxSize(lng1, lat1, lng2, lat2);
 
   displayBboxSizeStatus(bboxSelectionInfo, selectedSize);
+
+  // Hide any rendered mini 3D preview if the selection actually changed
+  window.arnisPreview3D?.onBboxChanged(selectedBBox);
 }
 
 let worldPath = "";
@@ -1545,6 +1553,7 @@ function handleWorldSelectionError(errorCode) {
 }
 
 let generationButtonEnabled = true;
+
 /**
  * Initiates the world generation process
  * Validates required inputs and sends generation parameters to the backend
@@ -1660,9 +1669,11 @@ async function startGeneration() {
     console.log("Generation process started.");
     resetEta();
     generationButtonEnabled = false;
+    window.arnisPreview3D?.setGenerationRunning(true);
   } catch (error) {
     console.error("Error starting generation:", error);
     generationButtonEnabled = true;
+    window.arnisPreview3D?.setGenerationRunning(false);
   }
 }
 

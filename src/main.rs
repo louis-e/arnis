@@ -31,6 +31,8 @@ mod ore_generation;
 mod osm_parser;
 mod overture;
 #[cfg(feature = "gui")]
+mod preview_3d;
+#[cfg(feature = "gui")]
 mod progress;
 mod projection;
 mod retrieve_data;

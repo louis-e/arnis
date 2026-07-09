@@ -1,0 +1,176 @@
+/* 3D terrain preview: mini panel + expand modal */
+
+.preview3d-mini {
+  position: relative;
+  width: 100%;
+  /* 165px at the 650px minimum window height, absorbing extra vertical space
+     up to 420px when maximized. MapLibre auto-resizes with its container. */
+  height: clamp(165px, calc(100vh - 485px), 420px);
+  flex-shrink: 0;
+  margin-top: 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #575757;
+  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
+  opacity: 0;
+  transition: opacity 0.25s ease, box-shadow 0.15s ease;
+}
+
+.preview3d-mini:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+.preview3d-mini-visible {
+  opacity: 1;
+}
+
+#preview3d-mini-map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Loading state shown while the user-requested render is being prepared */
+.preview3d-mini-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: #575757;
+  color: #ececec;
+  font-size: 0.85em;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.preview3d-mini-loader-hidden {
+  opacity: 0;
+}
+
+.preview3d-mini-loader-error {
+  color: #fa7878;
+}
+
+.preview3d-mini-loader-error .preview3d-mini-loader-bar {
+  display: none;
+}
+
+/* Same sheen treatment as the generation progress bar, in the arnis accent */
+.preview3d-mini-loader-bar {
+  position: relative;
+  width: 55%;
+  max-width: 260px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: var(--primary-accent, #fecc44);
+  overflow: hidden;
+}
+
+.preview3d-mini-loader-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent 0,
+    transparent 6px,
+    rgba(255, 255, 255, 0.28) 8px,
+    rgba(255, 255, 255, 0.28) 11px,
+    transparent 13px,
+    transparent 16px
+  );
+  will-change: background-position;
+  animation: preview3d-loader-sheen 2s linear infinite;
+}
+
+@keyframes preview3d-loader-sheen {
+  from { background-position: 0 0; }
+  to { background-position: 22.627px 0; }
+}
+
+.preview3d-content {
+  display: flex;
+  flex-direction: column;
+  width: 92vw;
+  height: 88vh;
+  background-color: #717171;
+  border: 1px solid #797979;
+  border-radius: 10px;
+  padding: 14px 16px 12px 16px;
+  box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.preview3d-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+
+.preview3d-header h2 {
+  margin: 0;
+  font-size: 1.1em;
+  color: #ffffff;
+  white-space: nowrap;
+}
+
+.preview3d-controls {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 1;
+  justify-content: flex-end;
+  margin-right: 8px;
+}
+
+.preview3d-ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #ececec;
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+
+.preview3d-ctl input[type="range"] {
+  width: 110px;
+}
+
+#preview3d-map {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #717171;
+}
+
+.preview3d-status {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 20px;
+  color: #ececec;
+  font-size: 0.95em;
+  background: rgba(87, 87, 87, 0.9);
+}
+
+.preview3d-status-error {
+  color: #fa7878;
+}
+
+.preview3d-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  color: #d6d6d6;
+  font-size: 0.75em;
+}

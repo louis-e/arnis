@@ -347,8 +347,7 @@ body,
   background-position: -31px -2px;
 }
 
-.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled,
-.leaflet-draw-toolbar .leaflet-draw-edit-preview.editing-mode {
+.leaflet-draw-toolbar .leaflet-draw-edit-preview.disabled {
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
@@ -356,6 +355,19 @@ body,
 
 .leaflet-draw-toolbar .leaflet-draw-edit-preview.active {
   background-color: #a0d0ff;
+}
+
+/* Terrain preview button: mountain icon, enabled once a fitting bbox exists */
+.leaflet-draw-toolbar a.leaflet-draw-edit-terrain {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 18 L9 7 L12.5 13 L15.5 9 L21 18 Z' fill='none' stroke='%23555555' stroke-width='1.6' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-position: center !important;
+  background-size: 17px 17px !important;
+  background-repeat: no-repeat !important;
+}
+
+.leaflet-draw-toolbar .leaflet-draw-edit-terrain.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .world-preview-slider-container {
