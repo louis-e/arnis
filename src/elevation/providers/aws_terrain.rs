@@ -308,6 +308,13 @@ fn download_tile_once(
     std::fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
     if let Err(e) = std::fs::rename(&tmp_path, tile_path) {
         let _ = std::fs::remove_file(&tmp_path);
+        // Rust's rename replaces existing destinations even on Windows, but it
+        // can still fail transiently there (e.g. antivirus holding the file).
+        // The tile is already decoded in memory and a concurrent writer stores
+        // identical bytes, so a lost cache write is not a fetch failure.
+        if tile_path.exists() {
+            return Ok(img.to_rgb8());
+        }
         return Err(e.to_string());
     }
     Ok(img.to_rgb8())

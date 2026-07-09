@@ -258,6 +258,10 @@ pub(crate) fn collect_overture_buildings(
         }
     }
 
+    // The loop only checks the cap between partitions; a single dense
+    // partition can overshoot it, so enforce the exact cap here.
+    all_buildings.truncate(max_buildings);
+
     Ok(all_buildings)
 }
 
