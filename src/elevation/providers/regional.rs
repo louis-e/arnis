@@ -1,19 +1,4 @@
-//! Shared HTTP / TIFF helpers for the elevation providers.
-//!
-//! Historically this file hosted every non-AWS provider (USGS, IGN FR,
-//! IGN ES, Japan GSI). Those either moved to their own modules backed
-//! by [`super::fixed_tile`] (USGS 3DEP) or were superseded by the
-//! global Mapterhorn provider, which ingests the same upstream datasets
-//! (state DGM1s, RGE ALTI, MDT02/05, GSI DEM) at equal or better
-//! resolution.
-//!
-//! What lives here now:
-//!
-//! - [`fetch_or_cache`] and [`decode_geotiff_f32`] — the shared
-//!   HTTP-with-disk-cache + GeoTIFF decode used by `fixed_tile`'s
-//!   tile downloader.
-//! - [`is_valid_payload`] and `resample_nearest` — internals used by
-//!   the two above.
+//! Shared HTTP and GeoTIFF helpers used by fixed_tile's downloader.
 
 use crate::elevation::provider::RawElevationGrid;
 
@@ -52,9 +37,8 @@ pub(super) fn fetch_or_cache(
     let client = match client {
         Some(c) => c,
         None => {
-            // 180s: tiled single-request providers (USGS 3DEP ArcGIS)
-            // generate GeoTIFFs server-side; 120s was occasionally tight
-            // under load.
+            // 180s: USGS 3DEP renders GeoTIFFs server-side and 120s was
+            // occasionally tight under load.
             owned_client = reqwest::blocking::Client::builder()
                 .user_agent(concat!(
                     "Arnis/",

@@ -87,9 +87,7 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
 
     let _mute = ProgressMute::new();
 
-    // Previews skip the regional providers: Mapterhorn is global,
-    // CDN-fast, and adapts its zoom to the capped preview grid, so
-    // preview clicks never put load on rate-limited regional services.
+    // Previews skip the regional providers; Mapterhorn is global and fast.
     let source_mode = if aws_only {
         crate::elevation::SourceMode::AwsOnly
     } else {

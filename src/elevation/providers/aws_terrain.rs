@@ -205,10 +205,8 @@ fn sample_tile_pixel(
     Some(height)
 }
 
-/// Hard budget on tiles per fetch. Since Mapterhorn became the primary
-/// global provider, AWS also serves as the outage fallback for
-/// arbitrarily large bboxes — without a cap a ~1°×1° area at z15 would
-/// fan out into ~8000 tiles.
+/// Tile budget; as the outage fallback AWS can now serve arbitrarily
+/// large bboxes, and a 1x1 degree area at z15 would be ~8000 tiles.
 const MAX_TILES_PER_FETCH: usize = 2048;
 
 fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
@@ -217,7 +215,6 @@ fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
     let max_diff: f64 = lat_diff.max(lng_diff);
     let zoom: u8 = (-max_diff.log2() + 20.0) as u8;
     let mut zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
-    // Step the zoom down until the covering tile count fits the budget.
     while zoom > MIN_ZOOM && get_tile_coordinates(bbox, zoom).len() > MAX_TILES_PER_FETCH {
         zoom -= 1;
     }
@@ -311,10 +308,8 @@ fn download_tile_once(
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-    // Write-then-rename so a concurrent reader (a 3D preview fetch running
-    // alongside a generation) can never observe a half-written tile. The
-    // process id keeps two Arnis processes sharing the cache from
-    // clobbering each other's tmp file mid-write.
+    // Write-then-rename so a concurrent reader never sees a partial tile;
+    // the pid suffix keeps separate processes from clobbering tmp files.
     static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let unique = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp_path = tile_path.with_extension(format!("tmp{}-{}", std::process::id(), unique));

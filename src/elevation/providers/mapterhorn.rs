@@ -1,36 +1,8 @@
-//! Mapterhorn terrain tiles — the global primary elevation provider.
+//! Mapterhorn terrain tiles, the global elevation provider: terrarium 512px
+//! lossless WebP, GLO-30 to z12, national LiDAR at z13-z18 (mapterhorn.com).
 //!
-//! Mapterhorn (<https://mapterhorn.com>) publishes terrarium-encoded
-//! elevation tiles as 512×512 **lossless** WebP images on a standard
-//! Web-Mercator XYZ grid, built from open national DEMs:
-//!
-//! - Global base layer from Copernicus GLO-30 (30 m, TanDEM-X) up to z12.
-//!   Substantially more accurate than the SRTM/GMTED mix behind AWS
-//!   Terrain Tiles, especially above 60°N where SRTM has no data.
-//! - National LiDAR DTMs (0.25–10 m) at z13–z18 for ~60 regions:
-//!   most of Europe country-wide at 1 m, Japan, USA (10 m), and more.
-//!   Bare-earth terrain models, so buildings and tree canopy don't
-//!   inflate the ground level the way SRTM's surface model does.
-//!
-//! Tile availability rules this provider must handle:
-//!
-//! - Tiles above z12 exist only where a high-resolution source was
-//!   ingested; elsewhere the server returns 404.
-//! - Tiles that are **pure ocean return 404 at every zoom level** —
-//!   Mapterhorn ships no bathymetry. Sea pixels inside coastal tiles
-//!   are encoded as exactly 0 m.
-//!
-//! Both cases are served by the same mechanism: a per-tile pyramid
-//! fallback. Every requested tile that 404s is replaced by its parent
-//! tile (down to [`MIN_ZOOM`]); grid cells whose pyramid walk finds no
-//! tile at all are genuinely mid-ocean and filled with 0.0 (sea level).
-//! 404 responses are negative-cached on disk so repeated generations of
-//! coastal areas don't re-probe the same absent tiles (the elevation
-//! cache's 30-day age sweep bounds the staleness of those markers).
-//!
-//! Attribution: © Mapterhorn (<https://mapterhorn.com/attribution>),
-//! aggregating open data sources (Copernicus, national mapping
-//! agencies) under CC-BY-4.0-family licenses.
+//! Absent tiles 404 (including all pure-ocean tiles at every zoom) and fall
+//! back per-tile to their pyramid parent; 404s are negative-cached on disk.
 
 use crate::coordinate_system::geographic::LLBBox;
 use crate::elevation::cache::get_cache_dir;
@@ -41,78 +13,45 @@ use std::path::{Path, PathBuf};
 
 use super::fixed_tile::{bbox_dimensions_m, blend_finite_samples};
 
-/// Mapterhorn XYZ endpoint (no API key required; Cloudflare-served).
 const MAPTERHORN_URL: &str = "https://tiles.mapterhorn.com/{z}/{x}/{y}.webp";
-/// Pixels per tile edge (Mapterhorn serves 512 px tiles — twice the
-/// linear resolution of AWS Terrain Tiles' 256 px, so one zoom level
-/// lower fetches the same ground resolution).
+/// 512px tiles, so one zoom lower fetches the same ground resolution as AWS 256px.
 const TILE_PX: u32 = 512;
-/// Terrarium format offset for height decoding.
 const TERRARIUM_OFFSET: f64 = 32768.0;
-/// Finest zoom ever requested. z17 ≈ 0.4 m/px at mid latitudes — only
-/// reachable when the user upscales (`--scale` > 1) over a sub-meter
-/// source region (Switzerland, Denmark, ...). Regions without data at
-/// the chosen zoom cost one cheap round of 404s before the pyramid
-/// falls back a level.
+/// z17 (~0.4 m/px) is only reachable with --scale > 1 over sub-meter source regions.
 const MAX_ZOOM: u8 = 17;
-/// Pyramid-walk floor. Any tile containing land exists at every zoom
-/// level up to 12, so by z6 (≈ 5.6°/tile) only genuinely mid-ocean
-/// areas are still missing — walking further would waste requests.
+/// Pyramid floor; any land tile exists at z6, only mid-ocean is absent there.
 const MIN_ZOOM: u8 = 6;
-/// Maximum concurrent tile downloads (same courtesy cap as AWS).
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
-/// Hard budget on tiles per fetch; the zoom is lowered until the
-/// covering-tile count fits. Worst case (a ~16 km bbox over a 1 m
-/// source region): ~400 MB downloaded, and ~1.6 GB of DECODED 512×512
-/// RGB tiles (786 KB each) held transiently during sampling —
-/// proportionate to the up-to-2 GB f64 height grid they feed, and
-/// released before post-processing.
+/// Tile budget per fetch; zoom is lowered until the covering count fits.
+/// Worst case ~400 MB downloaded; decoding stays bounded by chunked sampling.
 const MAX_TILES_PER_FETCH: usize = 2048;
-/// Tiles per download chunk; the outage circuit breaker checks between
-/// chunks so a dead network is detected mid-run, not after burning the
-/// retry budget on every tile.
+/// Grid rows sampled per chunk; bounds decoded tiles to a few tile rows.
+const SAMPLE_CHUNK_ROWS: usize = 1024;
+/// Chunk size between outage-breaker checks during downloads.
 const DOWNLOAD_CHUNK_SIZE: usize = 64;
-/// Abort the fetch (falling back to AWS) after this many consecutive
-/// failures with no interleaved success or 404.
+/// Abort to the AWS fallback after this many consecutive failures.
 const OUTAGE_FAILURE_THRESHOLD: usize = 128;
-/// Levels larger than this get a spread-probe before full fan-out, so
-/// a zoom with no local data costs ~16 requests instead of hundreds
-/// of 404s.
+/// Levels larger than this get a spread probe before full fan-out.
 const PROBE_MIN_LEVEL_TILES: usize = 64;
-/// Number of spread tiles probed per level.
 const PROBE_TILE_COUNT: usize = 16;
-/// A tile guaranteed to contain land data at every pyramid level
-/// (Swiss Alps near Zermatt, z10). Used as a sanity check before
-/// trusting an all-404 "this is ocean" verdict.
+/// Accept tile pixels up to this factor coarser than a grid cell.
+/// Tight enough that 1m grid cells in Germany still pick z16 (0.73 m/px).
+const ZOOM_CELL_TOLERANCE: f64 = 1.2;
+const EARTH_CIRCUMFERENCE_M: f64 = 40_075_016.686;
+/// Re-probe negative-cache markers after this age; coverage grows over time.
+const MISSING_MARKER_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
+const TILE_DOWNLOAD_MAX_RETRIES: u32 = 3;
+const TILE_DOWNLOAD_RETRY_BASE_DELAY_MS: u64 = 500;
+/// Swiss Alps tile that exists at every level; sanity check for all-404 results.
 const KNOWN_LAND_TILE: TileKey = TileKey {
     z: 10,
     x: 534,
     y: 364,
 };
-/// Zoom selection tolerance: accept tile pixels up to this factor
-/// coarser than the output grid cell before stepping the zoom up.
-/// Mirrors the 1.5× rule in `fixed_tile::select_level_for_cell_size`
-/// but tighter, so 1 m grid cells in Germany (cell ≈ 1.0 m, z15 px
-/// ≈ 1.47 m) still select z16 (0.73 m) for parity with the national
-/// 1 m DTM this provider replaced.
-const ZOOM_CELL_TOLERANCE: f64 = 1.2;
-/// Equatorial circumference of the Web-Mercator world in meters.
-const EARTH_CIRCUMFERENCE_M: f64 = 40_075_016.686;
-/// Negative-cache markers older than this are re-probed — Mapterhorn
-/// actively adds coverage, so absent tiles may appear over time.
-const MISSING_MARKER_MAX_AGE_SECS: u64 = 30 * 24 * 60 * 60;
-/// Maximum number of attempts for tile downloads (transient failures).
-const TILE_DOWNLOAD_MAX_RETRIES: u32 = 3;
-/// Base delay in milliseconds for exponential backoff between retries.
-const TILE_DOWNLOAD_RETRY_BASE_DELAY_MS: u64 = 500;
 
-/// RGB image buffer type for elevation tiles.
 type TileImage = image::ImageBuffer<image::Rgb<u8>, Vec<u8>>;
 
-/// Mapterhorn terrain tiles provider — global coverage.
-///
-/// Effective resolution varies by region: 30 m (GLO-30) as the global
-/// floor, down to sub-meter where national LiDAR has been ingested.
+/// Global provider: 30m GLO-30 floor, sub-meter where national LiDAR exists.
 pub struct Mapterhorn;
 
 impl ElevationProvider for Mapterhorn {
@@ -121,11 +60,9 @@ impl ElevationProvider for Mapterhorn {
     }
 
     fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        None // Global coverage
+        None
     }
 
-    /// Worst-case (global floor) resolution. Regional LiDAR areas are
-    /// much finer; the actual fetch zoom adapts to the output grid.
     fn native_resolution_m(&self) -> f64 {
         30.0
     }
@@ -143,10 +80,7 @@ impl ElevationProvider for Mapterhorn {
 
         let outcome = fetch_tile_pyramid(bbox, zoom, &cache_dir)?;
 
-        if outcome.tiles.is_empty() && outcome.failed_downloads > 0 {
-            // Nothing usable and at least one genuine failure: the
-            // network/CDN is down, not an all-ocean bbox. Erroring out
-            // lets the caller fall back to AWS Terrain Tiles.
+        if outcome.available.is_empty() && outcome.failed_downloads > 0 {
             return Err(format!(
                 "All Mapterhorn tile downloads failed ({} errors)",
                 outcome.failed_downloads
@@ -155,58 +89,13 @@ impl ElevationProvider for Mapterhorn {
         }
 
         println!(
-            "Bilinear sampling {} Mapterhorn tiles into {}x{} grid...",
-            outcome.tiles.len(),
+            "Sampling {} Mapterhorn tiles into {}x{} grid...",
+            outcome.available.len(),
             grid_width,
             grid_height
         );
 
-        let tiles = &outcome.tiles;
-        let confirmed_missing = &outcome.confirmed_missing;
-        let floor = MIN_ZOOM.min(zoom);
-        let height_grid: Vec<Vec<f64>> = (0..grid_height)
-            .into_par_iter()
-            .map(|gy| {
-                let mut row = vec![f64::NAN; grid_width];
-                for (gx, cell) in row.iter_mut().enumerate() {
-                    let lat = bbox.max().lat()
-                        - (gy as f64 / (grid_height - 1).max(1) as f64)
-                            * (bbox.max().lat() - bbox.min().lat());
-                    let lng = bbox.min().lng()
-                        + (gx as f64 / (grid_width - 1).max(1) as f64)
-                            * (bbox.max().lng() - bbox.min().lng());
-
-                    // Zoom-independent normalized Web-Mercator coordinates
-                    // in [0, 1]; per-zoom pixel coords derive by scaling.
-                    let norm_x = (lng + 180.0) / 360.0;
-                    let norm_y =
-                        (1.0 - lat.to_radians().tan().asinh() / std::f64::consts::PI) / 2.0;
-
-                    *cell = match sample_height(tiles, zoom, norm_x, norm_y) {
-                        Some(v) => v,
-                        // No tile at any pyramid level covers this cell.
-                        // If the floor-level ancestor is a confirmed 404,
-                        // no data can exist anywhere below it (a tile at
-                        // zoom z always has ancestors at every coarser
-                        // zoom) — the cell is definitively mid-ocean, so
-                        // fill with 0.0 (sea level), matching Mapterhorn's
-                        // convention for sea pixels inside coastal tiles.
-                        // Otherwise the chain ended on a download failure:
-                        // keep NaN so the caller's empty-data check / NaN
-                        // fill can judge.
-                        None => {
-                            let key = tile_key_at(floor, norm_x, norm_y);
-                            if confirmed_missing.contains(&key) {
-                                0.0
-                            } else {
-                                f64::NAN
-                            }
-                        }
-                    };
-                }
-                row
-            })
-            .collect();
+        let height_grid = sample_grid(bbox, zoom, &outcome, &cache_dir, grid_width, grid_height);
 
         Ok(RawElevationGrid {
             heights_meters: height_grid,
@@ -216,23 +105,18 @@ impl ElevationProvider for Mapterhorn {
 
 // ─── Zoom selection ────────────────────────────────────────────────────
 
-/// Pick the tile zoom whose ground resolution matches the output grid
-/// cell size, within [`ZOOM_CELL_TOLERANCE`], bounded by the per-fetch
-/// tile budget.
+/// Smallest zoom whose pixels match the grid cell size, within budget.
 fn choose_zoom(bbox: &LLBBox, grid_width: usize, grid_height: usize) -> u8 {
     let (w_m, h_m) = bbox_dimensions_m(bbox);
-    // (grid - 1) matches the sampling convention (`gx / (grid_width-1)`).
     let cell_x = w_m / (grid_width.saturating_sub(1)).max(1) as f64;
     let cell_y = h_m / (grid_height.saturating_sub(1)).max(1) as f64;
-    // Use the finer axis so thin-strip bboxes don't get under-resolved.
+    // Finer axis wins so thin strips don't get under-resolved.
     let cell_m = cell_x.min(cell_y).max(0.05);
 
     let mid_lat = (bbox.min().lat() + bbox.max().lat()) * 0.5;
     let cos_lat = mid_lat.to_radians().cos().abs().max(1e-6);
 
-    // Ground meters per tile pixel at zoom z (Web Mercator):
-    //   px_m(z) = EARTH_CIRCUMFERENCE_M * cos(lat) / (TILE_PX * 2^z)
-    // Smallest z with px_m(z) <= cell_m * tolerance:
+    // Ground m/px at zoom z is EARTH_CIRCUMFERENCE_M * cos(lat) / (512 * 2^z).
     let need = EARTH_CIRCUMFERENCE_M * cos_lat / (TILE_PX as f64 * cell_m * ZOOM_CELL_TOLERANCE);
     let mut zoom: u8 = if need <= 1.0 {
         0
@@ -240,8 +124,6 @@ fn choose_zoom(bbox: &LLBBox, grid_width: usize, grid_height: usize) -> u8 {
         (need.log2().ceil() as i64).clamp(0, MAX_ZOOM as i64) as u8
     };
 
-    // Enforce the tile budget by stepping the zoom down; each step
-    // quarters the tile count.
     while zoom > 0 && covering_tile_count(bbox, zoom) > MAX_TILES_PER_FETCH {
         zoom -= 1;
     }
@@ -250,7 +132,6 @@ fn choose_zoom(bbox: &LLBBox, grid_width: usize, grid_height: usize) -> u8 {
 
 // ─── Tile keys and coordinates ─────────────────────────────────────────
 
-/// One tile in the Web-Mercator XYZ pyramid.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 struct TileKey {
     z: u8,
@@ -259,7 +140,6 @@ struct TileKey {
 }
 
 impl TileKey {
-    /// The tile one zoom level up that contains this tile.
     fn parent(&self) -> Option<TileKey> {
         if self.z == 0 {
             None
@@ -283,17 +163,14 @@ impl TileKey {
         cache_dir.join(format!("z{}_x{}_y{}.webp", self.z, self.x, self.y))
     }
 
-    /// Negative-cache marker recording a 404 for this tile.
     fn marker_path(&self, cache_dir: &Path) -> PathBuf {
         cache_dir.join(format!("z{}_x{}_y{}.missing", self.z, self.x, self.y))
     }
 }
 
-/// Inclusive tile-coordinate range covering the bbox at the given zoom.
+/// Inclusive tile range covering the bbox; i64 clamp so ±90°/±180° can't wrap.
 fn covering_tile_range(bbox: &LLBBox, zoom: u8) -> (u32, u32, u32, u32) {
     let n = 2.0_f64.powi(zoom as i32);
-    // Clamp via i64 so ±90° lat / +180° lng (legal LLBBox values) can't
-    // wrap the u32 cast — same rationale as aws_terrain::lat_lng_to_tile.
     let n_tiles = n as i64;
     let clamp_tile = |v: f64| (v.floor() as i64).clamp(0, n_tiles - 1) as u32;
     let x1 = clamp_tile((bbox.min().lng() + 180.0) / 360.0 * n);
@@ -323,53 +200,46 @@ fn covering_tile_keys(bbox: &LLBBox, zoom: u8) -> Vec<TileKey> {
     keys
 }
 
+/// Tile containing the given normalized mercator coords at a zoom level.
+fn tile_key_at(z: u8, norm_x: f64, norm_y: f64) -> TileKey {
+    let n = 2.0_f64.powi(z as i32);
+    let n_tiles = n as i64;
+    let x = (((norm_x * n).floor() as i64).clamp(0, n_tiles - 1)) as u32;
+    let y = (((norm_y * n).floor() as i64).clamp(0, n_tiles - 1)) as u32;
+    TileKey { z, x, y }
+}
+
 // ─── Fetching ──────────────────────────────────────────────────────────
 
-/// Result of resolving one tile.
 enum TileFetch {
-    /// Tile downloaded (or loaded from cache) and decoded.
-    Hit(TileImage),
-    /// Server says the tile does not exist (404) — expected for ocean
-    /// tiles and for zooms above the local source resolution. `cached`
-    /// is true when answered from a fresh negative-cache marker rather
-    /// than the network.
-    Missing { cached: bool },
-    /// Transient or permanent failure after retries.
+    /// Tile validated and present in the disk cache; sampling decodes it later.
+    Hit,
+    /// 404; `cached` when answered from a fresh negative-cache marker.
+    Missing {
+        cached: bool,
+    },
     Failed(String),
 }
 
 struct FetchOutcome {
-    tiles: FnvHashMap<TileKey, TileImage>,
-    /// Tiles the server confirmed absent (404). Distinguishes "no data
-    /// exists here" (ocean → sea-level fill) from "download failed"
-    /// (→ NaN) when a grid cell's pyramid walk finds no tile.
+    /// Tiles fetched and present in the disk cache, across zoom levels.
+    available: FnvHashSet<TileKey>,
+    /// Server-confirmed 404s; distinguishes ocean (0.0 fill) from failures (NaN).
     confirmed_missing: FnvHashSet<TileKey>,
-    /// Count of genuine download failures (network / 5xx after retries).
-    /// 404s are NOT failures — they mean "no tile here".
     failed_downloads: usize,
 }
 
-/// Mutable state threaded through every tile-fetch round.
 struct PyramidState {
-    tiles: FnvHashMap<TileKey, TileImage>,
+    available: FnvHashSet<TileKey>,
     confirmed_missing: FnvHashSet<TileKey>,
-    /// Network 404s observed this run. Persisted as `.missing` markers
-    /// only at the END of the run, and only if at least one request
-    /// returned 200 — a CDN that transiently 404s EXISTING tiles must
-    /// not poison the negative cache for a month.
+    /// Network 404s, persisted as markers only after a proven-healthy run.
     pending_markers: Vec<TileKey>,
-    /// Set when any network request returned a decodable 200.
     saw_network_success: std::sync::atomic::AtomicBool,
     failed_downloads: usize,
-    /// Failures with no interleaved success/404, across chunks. Used as
-    /// a circuit breaker for mid-run outages.
     consecutive_failures: usize,
 }
 
-/// Fetch one batch of keys (chunked, breaker-aware). Absent tiles are
-/// appended to `absent`. Errors out when [`OUTAGE_FAILURE_THRESHOLD`]
-/// consecutive requests failed — the service is down and every further
-/// tile would burn the full retry budget before the AWS fallback runs.
+/// Fetch a batch of keys in chunks; errors out when the breaker trips.
 fn fetch_level(
     keys: &[TileKey],
     client: &reqwest::blocking::Client,
@@ -394,8 +264,8 @@ fn fetch_level(
         let mut chunk_failed = 0usize;
         for (key, result) in results {
             match result {
-                TileFetch::Hit(img) => {
-                    state.tiles.insert(key, img);
+                TileFetch::Hit => {
+                    state.available.insert(key);
                 }
                 TileFetch::Missing { cached } => {
                     state.confirmed_missing.insert(key);
@@ -411,8 +281,7 @@ fn fetch_level(
                     );
                     state.failed_downloads += 1;
                     chunk_failed += 1;
-                    // Try the parent anyway — coarser data beats a hole,
-                    // and the parent may already be cached locally.
+                    // Parent may still succeed or be cached; coarse data beats a hole.
                     absent.push(key);
                 }
             }
@@ -434,10 +303,7 @@ fn fetch_level(
     Ok(())
 }
 
-/// Fetch all tiles covering `bbox` at `zoom`, then repeatedly re-request
-/// the parents of whatever is absent, down to [`MIN_ZOOM`]. The result
-/// map can therefore contain tiles at several zoom levels; sampling
-/// walks the same pyramid top-down.
+/// Fetch bbox coverage at `zoom`, then parents of whatever is absent, down to MIN_ZOOM.
 fn fetch_tile_pyramid(
     bbox: &LLBBox,
     zoom: u8,
@@ -459,7 +325,7 @@ fn fetch_tile_pyramid(
         .map_err(|e| format!("Failed to create tile-fetch thread pool: {e}"))?;
 
     let mut state = PyramidState {
-        tiles: FnvHashMap::default(),
+        available: FnvHashSet::default(),
         confirmed_missing: FnvHashSet::default(),
         pending_markers: Vec::new(),
         saw_network_success: std::sync::atomic::AtomicBool::new(false),
@@ -471,13 +337,7 @@ fn fetch_tile_pyramid(
     let mut z = zoom;
     let mut level_keys = covering_tile_keys(bbox, z);
 
-    // Reachability canary: probe one tile serially before unleashing
-    // the fleet. A total outage (DNS failure, CDN down) is detected
-    // within one request's worth of retries instead of burning the
-    // full retry budget on every tile; the caller then falls back to
-    // AWS. A 404 counts as proof of reachability — the server answered.
-    // The canary's result lands in the disk cache, so the parallel
-    // round below re-resolves it for free.
+    // Serial canary detects a total outage in one request instead of thousands.
     if let Some(first) = level_keys.first() {
         if let TileFetch::Failed(e) =
             fetch_tile(&client, first, cache_dir, &state.saw_network_success)
@@ -486,14 +346,9 @@ fn fetch_tile_pyramid(
         }
     }
 
-    // Zoom probe: before fanning a LARGE level out over a region that
-    // may have no data at this zoom (e.g. an upscaled world over a
-    // GLO-30-only area, where z16 would be ~2048 pointless 404s), test
-    // a spread of tiles first. If every probe 404s, assume the level is
-    // empty and step down a zoom — each step quarters the fan-out.
-    // Sampling walks the pyramid anyway, so a small high-res pocket the
-    // probes missed only costs one zoom level of detail, not a hole.
-    while state.tiles.is_empty() && z > floor && level_keys.len() > PROBE_MIN_LEVEL_TILES {
+    // Spread-probe large levels first so a zoom with no local data costs
+    // ~16 requests instead of hundreds of 404s.
+    while state.available.is_empty() && z > floor && level_keys.len() > PROBE_MIN_LEVEL_TILES {
         let stride = (level_keys.len() / PROBE_TILE_COUNT).max(1);
         let probe_keys: Vec<TileKey> = level_keys
             .iter()
@@ -511,9 +366,7 @@ fn fetch_tile_pyramid(
             &mut state,
             &mut probe_absent,
         )?;
-        if !state.tiles.is_empty() || state.failed_downloads > failed_before {
-            // Found data (fan out at this zoom) or hit errors (let the
-            // main loop's breaker logic see the full picture).
+        if !state.available.is_empty() || state.failed_downloads > failed_before {
             break;
         }
         println!(
@@ -551,14 +404,12 @@ fn fetch_tile_pyramid(
         let mut parents: Vec<TileKey> = absent.iter().filter_map(|k| k.parent()).collect();
         parents.sort_unstable_by_key(|k| (k.z, k.x, k.y));
         parents.dedup();
-        parents.retain(|k| !state.tiles.contains_key(k));
+        parents.retain(|k| !state.available.contains(k));
         if parents.is_empty() {
             break;
         }
 
         if !narrated {
-            // Only narrate the first fallback; ocean bboxes would
-            // otherwise print one line per pyramid level.
             narrated = true;
             println!(
                 "Mapterhorn: {} of {} tiles absent at z{} (coarser region or ocean); sampling parent tiles...",
@@ -572,34 +423,26 @@ fn fetch_tile_pyramid(
         z -= 1;
     }
 
-    // All-404 sanity check: nothing found, nothing failed — every tile
-    // 404'd. Before trusting the "this is all ocean" verdict, probe a
-    // tile guaranteed to exist (Swiss Alps at z10). If even that 404s,
-    // the CDN is misbehaving: error out so the caller falls back to
-    // AWS, and persist no negative-cache markers. Warm-cache ocean
-    // reruns resolve the sentinel from disk, so this usually costs
-    // zero extra requests.
-    if state.tiles.is_empty() && state.failed_downloads == 0 {
+    // Verify an all-404 result against a known-land tile so a misbehaving
+    // CDN falls back to AWS instead of producing a silent flat world.
+    if state.available.is_empty() && state.failed_downloads == 0 {
         match fetch_tile(
             &client,
             &KNOWN_LAND_TILE,
             cache_dir,
             &state.saw_network_success,
         ) {
-            TileFetch::Hit(_) => {}
+            TileFetch::Hit => {}
             TileFetch::Missing { .. } | TileFetch::Failed(_) => {
                 return Err(
-                    "Mapterhorn returned no tiles for this area and the known-land sanity \
-                     tile also failed; treating as a service problem"
+                    "Mapterhorn returned no tiles and the known-land sanity tile also failed"
                         .into(),
                 );
             }
         }
     }
 
-    // Persist negative-cache markers only when this run proved the
-    // service healthy (at least one decodable 200). Skipping persistence
-    // on cache-only runs just means the next run re-probes a few 404s.
+    // Persist 404 markers only when this run saw at least one good download.
     if state
         .saw_network_success
         .load(std::sync::atomic::Ordering::Relaxed)
@@ -610,22 +453,19 @@ fn fetch_tile_pyramid(
     }
 
     Ok(FetchOutcome {
-        tiles: state.tiles,
+        available: state.available,
         confirmed_missing: state.confirmed_missing,
         failed_downloads: state.failed_downloads,
     })
 }
 
-/// Resolve one tile: negative-cache marker → disk cache → download.
-/// Sets `net_ok` when a network request returned a decodable 200 —
-/// used to gate negative-cache persistence at the end of the run.
+/// Resolve one tile: negative-cache marker, disk cache, then download.
 fn fetch_tile(
     client: &reqwest::blocking::Client,
     key: &TileKey,
     cache_dir: &Path,
     net_ok: &std::sync::atomic::AtomicBool,
 ) -> TileFetch {
-    // Fresh negative-cache marker: known 404, skip the request.
     let marker = key.marker_path(cache_dir);
     if let Ok(meta) = std::fs::metadata(&marker) {
         let fresh = meta
@@ -639,14 +479,12 @@ fn fetch_tile(
         let _ = std::fs::remove_file(&marker);
     }
 
-    // Disk cache. Validation is decode-based, NOT size-based: a flat
-    // lossless-WebP tile (e.g. all-sea 0.0) is legitimately only a few
-    // hundred bytes, so aws_terrain's <1000-byte heuristic would loop
-    // on re-downloading perfectly valid tiles.
+    // Decode-based validation; flat lossless WebP tiles are legitimately tiny,
+    // so a size heuristic like aws_terrain's would re-download valid tiles.
     let tile_path = key.cache_path(cache_dir);
     if tile_path.exists() {
         match image::open(&tile_path) {
-            Ok(img) => return TileFetch::Hit(img.to_rgb8()),
+            Ok(_) => return TileFetch::Hit,
             Err(e) => {
                 eprintln!(
                     "Cached Mapterhorn tile at {} is corrupted: {e}. Re-downloading...",
@@ -685,20 +523,15 @@ fn download_tile(
 
         let status = response.status();
         if status.as_u16() == 404 {
-            // Legitimate absence (ocean, or zoom above local source
-            // resolution). The marker write is deferred to the end of
-            // the run so a misbehaving CDN can't poison the cache.
+            // Marker write deferred so a misbehaving CDN can't poison the cache.
             return TileFetch::Missing { cached: false };
         }
         if status.as_u16() == 429 || status.as_u16() == 403 {
-            // Rate limiting / edge blocks: back off and retry rather
-            // than escalating to the parent tile (which would send MORE
-            // traffic exactly when the server asks for less).
+            // Back off instead of escalating to the parent tile.
             last_error = format!("HTTP {status} from {url}");
             continue;
         }
         if status.is_client_error() {
-            // Other 4xx: malformed request, retrying won't help.
             return TileFetch::Failed(format!("HTTP {status} from {url}"));
         }
         if !status.is_success() {
@@ -713,37 +546,30 @@ fn download_tile(
                 continue;
             }
         };
-        let img = match image::load_from_memory(&bytes) {
-            Ok(i) => i,
-            Err(e) => {
-                // 200 with an undecodable body (CDN error page): transient.
-                last_error = format!("Invalid image payload: {e}");
-                continue;
-            }
-        };
+        if let Err(e) = image::load_from_memory(&bytes) {
+            last_error = format!("Invalid image payload: {e}");
+            continue;
+        }
         net_ok.store(true, std::sync::atomic::Ordering::Relaxed);
 
-        // Write-then-rename so a concurrent reader can never observe a
-        // half-written tile. The process id in the suffix keeps two
-        // Arnis processes sharing the cache from clobbering each
-        // other's tmp file mid-write.
+        // Sampling decodes from disk, so the write must land; write-then-rename
+        // with a pid suffix keeps readers and other processes safe.
         static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let unique = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp_path = tile_path.with_extension(format!("tmp{}-{}", std::process::id(), unique));
-        if std::fs::write(&tmp_path, &bytes).is_ok() {
-            if let Err(e) = std::fs::rename(&tmp_path, tile_path) {
-                let _ = std::fs::remove_file(&tmp_path);
-                // A concurrent writer stores identical bytes; a lost
-                // cache write is not a fetch failure (see aws_terrain).
-                if !tile_path.exists() {
-                    eprintln!(
-                        "Warning: failed to cache Mapterhorn tile {}: {e}",
-                        tile_path.display()
-                    );
-                }
+        let renamed = std::fs::write(&tmp_path, &bytes).is_ok()
+            && std::fs::rename(&tmp_path, tile_path).is_ok();
+        if !renamed {
+            let _ = std::fs::remove_file(&tmp_path);
+            // A concurrent writer may have stored identical bytes already.
+            if !tile_path.exists() {
+                return TileFetch::Failed(format!(
+                    "cannot write tile cache at {}",
+                    tile_path.display()
+                ));
             }
         }
-        return TileFetch::Hit(img.to_rgb8());
+        return TileFetch::Hit;
     }
 
     TileFetch::Failed(format!(
@@ -753,28 +579,135 @@ fn download_tile(
 
 // ─── Sampling ──────────────────────────────────────────────────────────
 
-/// Decode one Terrarium pixel to meters.
 #[inline]
 fn decode_terrarium(pixel: &image::Rgb<u8>) -> f64 {
     (pixel[0] as f64 * 256.0 + pixel[1] as f64 + pixel[2] as f64 / 256.0) - TERRARIUM_OFFSET
 }
 
-/// Tile key containing the given normalized Mercator coordinates at a
-/// zoom level. Clamps via i64 so ±90° lat / +180° lng (legal LLBBox
-/// values, mapping to norm coords at or beyond [0, 1]) can't wrap the
-/// u32 cast — same rationale as `covering_tile_range`.
-fn tile_key_at(z: u8, norm_x: f64, norm_y: f64) -> TileKey {
-    let n = 2.0_f64.powi(z as i32);
-    let n_tiles = n as i64;
-    let x = (((norm_x * n).floor() as i64).clamp(0, n_tiles - 1)) as u32;
-    let y = (((norm_y * n).floor() as i64).clamp(0, n_tiles - 1)) as u32;
-    TileKey { z, x, y }
+fn row_lat(bbox: &LLBBox, gy: usize, grid_height: usize) -> f64 {
+    bbox.max().lat()
+        - (gy as f64 / (grid_height - 1).max(1) as f64) * (bbox.max().lat() - bbox.min().lat())
 }
 
-/// Bilinear-sample the height at normalized Mercator coordinates,
-/// walking the pyramid from `top_zoom` down to [`MIN_ZOOM`] until a
-/// fetched tile covers the point. Returns `None` when no tile at any
-/// level covers it (mid-ocean).
+fn norm_y_for_lat(lat: f64) -> f64 {
+    (1.0 - lat.to_radians().tan().asinh() / std::f64::consts::PI) / 2.0
+}
+
+/// Sample the grid in row chunks, decoding only the tiles each chunk needs,
+/// so decoded-tile memory stays at a few tile rows instead of the whole fetch.
+fn sample_grid(
+    bbox: &LLBBox,
+    zoom: u8,
+    outcome: &FetchOutcome,
+    cache_dir: &Path,
+    grid_width: usize,
+    grid_height: usize,
+) -> Vec<Vec<f64>> {
+    let floor = MIN_ZOOM.min(zoom);
+    let mut height_grid: Vec<Vec<f64>> = Vec::with_capacity(grid_height);
+    let mut unreadable: FnvHashSet<TileKey> = FnvHashSet::default();
+
+    for chunk_start in (0..grid_height).step_by(SAMPLE_CHUNK_ROWS) {
+        let chunk_end = (chunk_start + SAMPLE_CHUNK_ROWS).min(grid_height);
+        let tiles = load_chunk_tiles(
+            outcome,
+            cache_dir,
+            bbox,
+            zoom,
+            floor,
+            chunk_start,
+            chunk_end,
+            grid_height,
+            &mut unreadable,
+        );
+
+        let mut rows: Vec<Vec<f64>> = (chunk_start..chunk_end)
+            .into_par_iter()
+            .map(|gy| {
+                let lat = row_lat(bbox, gy, grid_height);
+                let norm_y = norm_y_for_lat(lat);
+                let mut row = vec![f64::NAN; grid_width];
+                for (gx, cell) in row.iter_mut().enumerate() {
+                    let lng = bbox.min().lng()
+                        + (gx as f64 / (grid_width - 1).max(1) as f64)
+                            * (bbox.max().lng() - bbox.min().lng());
+                    let norm_x = (lng + 180.0) / 360.0;
+
+                    *cell = match sample_height(&tiles, zoom, norm_x, norm_y) {
+                        Some(v) => v,
+                        // Confirmed-404 floor ancestor means ocean (0.0);
+                        // otherwise a download failed and NaN lets the caller judge.
+                        None => {
+                            let key = tile_key_at(floor, norm_x, norm_y);
+                            if outcome.confirmed_missing.contains(&key) {
+                                0.0
+                            } else {
+                                f64::NAN
+                            }
+                        }
+                    };
+                }
+                row
+            })
+            .collect();
+        height_grid.append(&mut rows);
+    }
+
+    height_grid
+}
+
+/// Decode the available tiles a row chunk can touch, across all pyramid levels.
+/// Bilinear crossings only ever go +1 tile, so only the max side needs margin.
+#[allow(clippy::too_many_arguments)]
+fn load_chunk_tiles(
+    outcome: &FetchOutcome,
+    cache_dir: &Path,
+    bbox: &LLBBox,
+    zoom: u8,
+    floor: u8,
+    chunk_start: usize,
+    chunk_end: usize,
+    grid_height: usize,
+    unreadable: &mut FnvHashSet<TileKey>,
+) -> FnvHashMap<TileKey, TileImage> {
+    let norm_y_top = norm_y_for_lat(row_lat(bbox, chunk_start, grid_height));
+    let norm_y_bot = norm_y_for_lat(row_lat(bbox, chunk_end.saturating_sub(1), grid_height));
+
+    let mut tiles: FnvHashMap<TileKey, TileImage> = FnvHashMap::default();
+    for z in floor..=zoom {
+        let n_tiles = (1i64 << z).max(1);
+        let ty_top = tile_key_at(z, 0.0, norm_y_top).y as i64;
+        let ty_bot = tile_key_at(z, 0.0, norm_y_bot).y as i64;
+        let ty_min = ty_top.min(ty_bot) as u32;
+        let ty_max = (ty_top.max(ty_bot) + 1).clamp(0, n_tiles - 1) as u32;
+        let (tx_min, x2, _, _) = covering_tile_range(bbox, z);
+        let tx_max = (x2 as i64 + 1).clamp(0, n_tiles - 1) as u32;
+
+        for ty in ty_min..=ty_max {
+            for tx in tx_min..=tx_max {
+                let key = TileKey { z, x: tx, y: ty };
+                if !outcome.available.contains(&key) || unreadable.contains(&key) {
+                    continue;
+                }
+                match image::open(key.cache_path(cache_dir)) {
+                    Ok(img) => {
+                        tiles.insert(key, img.to_rgb8());
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: cached Mapterhorn tile z{} x{} y{} unreadable during sampling: {e}",
+                            key.z, key.x, key.y
+                        );
+                        unreadable.insert(key);
+                    }
+                }
+            }
+        }
+    }
+    tiles
+}
+
+/// Bilinear sample walking the pyramid top-down; None means no tile covers it.
 fn sample_height(
     tiles: &FnvHashMap<TileKey, TileImage>,
     top_zoom: u8,
@@ -791,11 +724,8 @@ fn sample_height(
         let n = 2.0_f64.powi(z as i32);
         let fx = norm_x * n * TILE_PX as f64;
         let fy = norm_y * n * TILE_PX as f64;
-        // At the exact +180° east / south world edge the clamped tile
-        // key leaves px/py at or beyond TILE_PX (no tile exists further
-        // out); snap onto the last real pixel so the edge column/row
-        // samples data instead of NaN. In-range coordinates keep full
-        // cross-tile bilinear behavior.
+        // At the exact +180/south world edge the clamped key leaves px/py
+        // at TILE_PX; snap to the last real pixel instead of NaN.
         let mut px = fx - key.x as f64 * TILE_PX as f64;
         let mut py = fy - key.y as f64 * TILE_PX as f64;
         if px >= TILE_PX as f64 {
@@ -814,9 +744,7 @@ fn sample_height(
         let v01 = sample_tile_pixel(tiles, &key, x0, y0 + 1);
         let v11 = sample_tile_pixel(tiles, &key, x0 + 1, y0 + 1);
 
-        // NaN-aware blend: corners that fall into an absent neighbor
-        // tile (e.g. across a coastline where the neighbor is ocean)
-        // just drop out of the weighting instead of poisoning the cell.
+        // NaN corners (absent neighbor tiles) drop out of the blend weighting.
         let value = blend_finite_samples(v00, v10, v01, v11, dx, dy);
         if value.is_finite() {
             return Some(value);
@@ -825,9 +753,7 @@ fn sample_height(
     None
 }
 
-/// Read one pixel at the given zoom level, crossing into the adjacent
-/// tile when the coordinate falls outside `key`'s 512×512 extent.
-/// Returns NaN when the target tile isn't in the map.
+/// One pixel at a zoom level, crossing into the adjacent tile at edges.
 fn sample_tile_pixel(
     tiles: &FnvHashMap<TileKey, TileImage>,
     key: &TileKey,
@@ -869,7 +795,6 @@ fn sample_tile_pixel(
 mod tests {
     use super::*;
 
-    /// Build a 512×512 tile whose every pixel encodes `height_m`.
     fn flat_tile(height_m: f64) -> TileImage {
         let raw = (height_m + TERRARIUM_OFFSET).round() as u32;
         let (r, g, b) = ((raw / 256) as u8, (raw % 256) as u8, 0u8);
@@ -913,9 +838,6 @@ mod tests {
 
     #[test]
     fn test_choose_zoom_one_meter_cells_in_germany() {
-        // ~1.1 km × 0.7 km bbox at Berlin's latitude with a 1 block/m
-        // grid → 1 m cells → z16 (0.73 m/px), matching the 1 m national
-        // DTM quality this provider replaces.
         let bbox = LLBBox::new(52.50, 13.40, 52.51, 13.41).unwrap();
         let (w_m, h_m) = bbox_dimensions_m(&bbox);
         let zoom = choose_zoom(&bbox, w_m as usize + 1, h_m as usize + 1);
@@ -924,8 +846,6 @@ mod tests {
 
     #[test]
     fn test_choose_zoom_capped_grid_lowers_zoom() {
-        // ~55 km bbox with the grid capped at 16384 → ~3.4 m cells →
-        // z13–z14 territory, NOT z16.
         let bbox = LLBBox::new(52.0, 13.0, 52.5, 13.8).unwrap();
         let zoom = choose_zoom(&bbox, 16384, 16384);
         assert!(
@@ -936,8 +856,6 @@ mod tests {
 
     #[test]
     fn test_choose_zoom_respects_tile_budget() {
-        // Force a fine grid over a huge bbox: the budget cap must pull
-        // the zoom down until the covering tile count fits.
         let bbox = LLBBox::new(0.0, 0.0, 1.0, 1.0).unwrap();
         let zoom = choose_zoom(&bbox, 16384, 16384);
         assert!(covering_tile_count(&bbox, zoom) <= MAX_TILES_PER_FETCH);
@@ -945,9 +863,6 @@ mod tests {
 
     #[test]
     fn test_choose_zoom_high_latitude_needs_lower_zoom() {
-        // Mercator stretches at high latitude: ground m/px shrinks by
-        // cos(lat), so Tromsø needs a lower zoom than Berlin for the
-        // same cell size.
         let berlin = LLBBox::new(52.50, 13.40, 52.51, 13.41).unwrap();
         let tromso = LLBBox::new(69.64, 18.95, 69.65, 18.96).unwrap();
         let (bw, bh) = bbox_dimensions_m(&berlin);
@@ -968,7 +883,6 @@ mod tests {
             },
             flat_tile(1000.0),
         );
-        // Point in the middle of that tile.
         let norm_x = (2138.0 + 0.5) / 4096.0;
         let norm_y = (1430.0 + 0.5) / 4096.0;
         let v = sample_height(&tiles, 12, norm_x, norm_y).unwrap();
@@ -977,8 +891,6 @@ mod tests {
 
     #[test]
     fn test_sample_height_pyramid_fallback() {
-        // Only a z11 tile present; sampling at top_zoom 12 must fall
-        // through to it.
         let mut tiles: FnvHashMap<TileKey, TileImage> = FnvHashMap::default();
         tiles.insert(
             TileKey {
@@ -988,7 +900,6 @@ mod tests {
             },
             flat_tile(250.0),
         );
-        // A point inside z12 tile (2138, 1430), whose parent is (1069, 715).
         let norm_x = (2138.0 + 0.5) / 4096.0;
         let norm_y = (1430.0 + 0.5) / 4096.0;
         let v = sample_height(&tiles, 12, norm_x, norm_y).unwrap();
@@ -1003,9 +914,7 @@ mod tests {
 
     #[test]
     fn test_covering_tile_range_matches_aws_tile_math() {
-        // Same formula as aws_terrain::lat_lng_to_tile — verify a known
-        // fix point: Zermatt (46.0207° N, 7.7491° E) lies in z12 tile
-        // (2136, 1456).
+        // Zermatt (46.0207 N, 7.7491 E) lies in z12 tile (2136, 1456).
         let bbox = LLBBox::new(46.01, 7.74, 46.03, 7.76).unwrap();
         let (x1, x2, y1, y2) = covering_tile_range(&bbox, 12);
         assert!(x1 <= 2136 && 2136 <= x2);
@@ -1013,10 +922,98 @@ mod tests {
     }
 
     #[test]
+    fn test_sample_grid_chunked_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bbox = LLBBox::new(46.0, 7.7, 46.05, 7.75).unwrap();
+        // One z6 tile covers the whole bbox; z7/z8 stay absent so sampling walks down.
+        let key = TileKey { z: 6, x: 33, y: 22 };
+        flat_tile(300.0).save(key.cache_path(tmp.path())).unwrap();
+
+        let mut available = FnvHashSet::default();
+        available.insert(key);
+        let outcome = FetchOutcome {
+            available,
+            confirmed_missing: FnvHashSet::default(),
+            failed_downloads: 0,
+        };
+
+        // 2500 rows forces three sampling chunks.
+        let grid = sample_grid(&bbox, 8, &outcome, tmp.path(), 64, 2500);
+        assert_eq!(grid.len(), 2500);
+        for row in &grid {
+            for &v in row {
+                assert!((v - 300.0).abs() < 0.51, "got {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_sample_grid_across_tile_row_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        // The z6 tile rows 22/23 meet at lat 45.0879; this bbox straddles it.
+        let bbox = LLBBox::new(45.0, 7.7, 45.2, 7.72).unwrap();
+        let north = TileKey { z: 6, x: 33, y: 22 };
+        let south = TileKey { z: 6, x: 33, y: 23 };
+        flat_tile(300.0).save(north.cache_path(tmp.path())).unwrap();
+        flat_tile(100.0).save(south.cache_path(tmp.path())).unwrap();
+
+        let mut available = FnvHashSet::default();
+        available.insert(north);
+        available.insert(south);
+        let outcome = FetchOutcome {
+            available,
+            confirmed_missing: FnvHashSet::default(),
+            failed_downloads: 0,
+        };
+
+        let grid = sample_grid(&bbox, 6, &outcome, tmp.path(), 32, 2500);
+        assert!(
+            (grid[0][0] - 300.0).abs() < 0.51,
+            "north row got {}",
+            grid[0][0]
+        );
+        assert!(
+            (grid[2499][0] - 100.0).abs() < 0.51,
+            "south row got {}",
+            grid[2499][0]
+        );
+        for row in &grid {
+            for &v in row {
+                assert!(v.is_finite() && (99.0..=301.0).contains(&v), "got {v}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_sample_grid_ocean_fill_vs_failure_nan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bbox = LLBBox::new(46.0, 7.7, 46.01, 7.71).unwrap();
+        let floor_key = tile_key_at(6, (7.705 + 180.0) / 360.0, norm_y_for_lat(46.005));
+
+        let mut confirmed_missing = FnvHashSet::default();
+        confirmed_missing.insert(floor_key);
+        let ocean = FetchOutcome {
+            available: FnvHashSet::default(),
+            confirmed_missing,
+            failed_downloads: 0,
+        };
+        let grid = sample_grid(&bbox, 8, &ocean, tmp.path(), 8, 8);
+        assert!(grid.iter().flatten().all(|v| *v == 0.0));
+
+        let failed = FetchOutcome {
+            available: FnvHashSet::default(),
+            confirmed_missing: FnvHashSet::default(),
+            failed_downloads: 3,
+        };
+        let grid = sample_grid(&bbox, 8, &failed, tmp.path(), 8, 8);
+        assert!(grid.iter().flatten().all(|v| v.is_nan()));
+    }
+
+    #[test]
     #[ignore]
     fn test_live_tile_fetch_and_decode() {
         let client = reqwest::blocking::Client::new();
-        // z12 tile containing Zermatt (46.0207° N, 7.7491° E).
+        // z12 tile containing Zermatt.
         let key = TileKey {
             z: 12,
             x: 2136,
@@ -1028,11 +1025,39 @@ mod tests {
         let img = image::load_from_memory(&bytes).unwrap().to_rgb8();
         assert_eq!(img.width(), TILE_PX);
         assert_eq!(img.height(), TILE_PX);
-        // Zermatt area: Alpine heights, sane range.
         let heights: Vec<f64> = img.pixels().map(decode_terrarium).collect();
         let max = heights.iter().cloned().fold(f64::MIN, f64::max);
         let min = heights.iter().cloned().fold(f64::MAX, f64::min);
         assert!(max > 1500.0 && max < 5000.0, "max {max}");
         assert!(min > -100.0, "min {min}");
+    }
+
+    // Run manually: cargo test test_live_500km2 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn test_live_500km2_scale_fetch() {
+        // ~23x23 km around Munich at the 16384 grid cap, like a real 500 km2 run.
+        let bbox = LLBBox::new(48.03, 11.40, 48.24, 11.71).unwrap();
+        let raw = Mapterhorn.fetch_raw(&bbox, 16384, 16384).unwrap();
+        assert_eq!(raw.heights_meters.len(), 16384);
+
+        let mut finite = 0usize;
+        let mut total = 0usize;
+        let (mut min, mut max) = (f64::MAX, f64::MIN);
+        for row in &raw.heights_meters {
+            for &v in row {
+                total += 1;
+                if v.is_finite() {
+                    finite += 1;
+                    min = min.min(v);
+                    max = max.max(v);
+                }
+            }
+        }
+        assert!(
+            finite as f64 / total as f64 > 0.99,
+            "finite {finite}/{total}"
+        );
+        assert!(min > 300.0 && max < 1200.0, "range {min}..{max}");
     }
 }

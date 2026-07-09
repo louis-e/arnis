@@ -5,10 +5,8 @@
 //!
 //! - [`usgs_3dep`](super::usgs_3dep) — USGS 3D Elevation Program
 //!
-//! Mapterhorn and AWS Terrain Tiles follow the standard XYZ Slippy Map
-//! tile convention (the upstream serves pre-rendered tiles) and don't
-//! need this module — it exists for services that render a requested
-//! bbox server-side (WMS/WCS/ArcGIS ImageServer).
+//! Mapterhorn and AWS serve pre-rendered XYZ tiles and don't need this;
+//! it exists for services that render a requested bbox server-side.
 //!
 //! # Why fixed tiles (summarised from the USGS module)
 //!

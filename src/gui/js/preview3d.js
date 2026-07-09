@@ -10,8 +10,7 @@
   const TILE_SIZE = 256;
   const PROTOCOL = "arnisdem";
   // Mirrors TERRAIN_PREVIEW_MAX_AREA_M2 in bbox.js. Generous because previews
-  // fetch global tiles (Mapterhorn, or AWS in legacy mode) at a resolution-
-  // capped grid, so fetch cost stays roughly constant regardless of bbox size.
+  // fetch global tiles at a resolution-capped grid, so cost stays constant.
   const MINI_MAX_AREA_M2 = 500000000;
   // Mirrors BUILDINGS_MAX_AREA_M2 in preview_3d.rs.
   const BUILDINGS_MAX_AREA_M2 = 10000000;
@@ -307,10 +306,8 @@
   }
 
   async function fetchTerrain(bboxText) {
-    // Follow the "Legacy terrain" toggle so the preview matches what a
-    // generation run would fetch (Mapterhorn by default, AWS in legacy
-    // mode). The toggle state is part of the cache key — flipping it
-    // must refetch, not serve terrain from the previous source.
+    // Follow the Legacy terrain toggle so the preview matches generation;
+    // the toggle is part of the cache key so flipping it refetches.
     const legacyToggle = document.getElementById("aws-only-elevation-toggle");
     const awsOnly = !!(legacyToggle && legacyToggle.checked);
     const cacheKey = bboxText + "|" + awsOnly;

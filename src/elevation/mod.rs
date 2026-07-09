@@ -44,11 +44,8 @@ pub struct ElevationData {
 }
 
 /// Maximum elevation grid dimension requested from providers per axis.
-///
-/// Providers fetch at their own tile granularity (USGS 3DEP renders
-/// fixed 512 px Mercator tiles server-side; Mapterhorn and AWS fetch
-/// XYZ tiles at a zoom matched to the grid cell size) and resample onto
-/// the requested grid, so this cap only bounds the output grid itself.
+/// Providers fetch at their own tile granularity and resample onto the
+/// requested grid, so this cap only bounds the output grid itself.
 ///
 /// Chosen value 16384 covers bboxes up to ~256 km² at the default
 /// `--scale 1.0` without losing native resolution. The precision
@@ -86,9 +83,8 @@ pub fn compute_grid_dims(bbox: &LLBBox, scale: f64) -> (usize, usize, usize, usi
 
 /// Fetch elevation data for the given bounding box.
 ///
-/// Automatically selects the best available elevation provider for the
-/// region, with a fetch-time fallback chain: regional provider →
-/// Mapterhorn (global) → AWS Terrain Tiles (legacy global).
+/// Selects the best provider for the region, with a fetch-time fallback
+/// chain: regional provider, then Mapterhorn, then AWS Terrain Tiles.
 ///
 /// If `land_cover` is provided, applies land-cover-aware artifact repair
 /// (water leveling, built-up smoothing) before scaling. This fixes LiDAR
@@ -110,10 +106,7 @@ pub fn fetch_elevation_data(
     let mut bench = crate::bench::Bench::new(benchmark);
     let (world_width, world_height, grid_width, grid_height) = compute_grid_dims(bbox, scale);
 
-    // Build the fallback chain: the selected provider, then Mapterhorn
-    // (unless it IS the selection), then AWS Terrain Tiles as the last
-    // resort. Each link is tried when the previous one errors or returns
-    // mostly empty data.
+    // Fallback chain: selected provider, then Mapterhorn, then AWS.
     let provider = select_provider(bbox, source_mode);
     let mut chain: Vec<Box<dyn ElevationProvider>> = vec![provider];
     if chain[0].name() != "mapterhorn" && chain[0].name() != "aws" {
@@ -236,14 +229,8 @@ pub fn cleanup_old_cached_tiles() {
     cache::spawn_throttled_cleanup();
 }
 
-/// Try each provider in `chain` until one delivers usable data.
-///
-/// A non-final provider is skipped when it errors OR when it returns
-/// mostly empty data. The empty-data check catches rectangular coverage
-/// bboxes that over-claim (e.g. the USGS CONUS bbox includes strips of
-/// Canada and Mexico where 3DEP has no tiles). The final provider's
-/// result is returned as-is: its errors propagate and remaining NaN
-/// gaps are handled by post-processing.
+/// Try each provider in `chain` until one delivers usable data. Non-final
+/// providers are skipped on error or mostly empty data (over-claiming bboxes).
 fn fetch_raw_with_fallback(
     chain: &[Box<dyn ElevationProvider>],
     bbox: &LLBBox,

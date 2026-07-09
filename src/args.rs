@@ -106,8 +106,7 @@ pub struct Args {
     pub disable_height_limit: bool,
 
     /// Use only the legacy AWS Terrain Tiles source (~30m) instead of
-    /// Mapterhorn and the regional high-resolution providers. Escape
-    /// hatch if the primary elevation sources are unreachable.
+    /// Mapterhorn and the regional high-resolution providers.
     #[arg(long, default_value_t = false)]
     pub aws_only_elevation: bool,
 

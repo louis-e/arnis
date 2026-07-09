@@ -7,16 +7,11 @@ use crate::elevation::providers::usgs_3dep::Usgs3dep;
 /// How the caller wants the elevation source chosen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SourceMode {
-    /// Best available: regional high-res providers first, then the
-    /// global Mapterhorn tiles. Used for world generation.
+    /// Regional high-res providers first, then Mapterhorn. Used for generation.
     Auto,
-    /// Mapterhorn only, skipping the regional providers. Used by the 3D
-    /// preview: globally available, CDN-fast, and it doesn't put preview
-    /// load on the rate-limited regional services.
+    /// Mapterhorn only; used by the 3D preview to skip regional services.
     GlobalOnly,
-    /// Legacy AWS Terrain Tiles (~30 m) only. Surfaced as the
-    /// `--aws-only-elevation` CLI flag / "Legacy terrain" GUI toggle —
-    /// an escape hatch if the primary elevation sources are unreachable.
+    /// Legacy AWS tiles only (--aws-only-elevation / "Legacy terrain" toggle).
     AwsOnly,
 }
 
@@ -29,14 +24,7 @@ pub fn bboxes_overlap(a: &LLBBox, b: &LLBBox) -> bool {
 }
 
 /// Select the best elevation provider for the given bounding box.
-///
-/// In [`SourceMode::Auto`], iterates regional providers ordered by
-/// resolution (finest first) and returns the first whose coverage
-/// overlaps the user's bbox and whose `accepts()` check passes.
-/// Everything else falls through to Mapterhorn, which is global.
-///
-/// The caller (`fetch_elevation_data`) chains further fallbacks at
-/// fetch time: regional failure → Mapterhorn → AWS Terrain Tiles.
+/// The caller chains fetch-time fallbacks: regional, then Mapterhorn, then AWS.
 pub fn select_provider(bbox: &LLBBox, mode: SourceMode) -> Box<dyn ElevationProvider> {
     match mode {
         SourceMode::AwsOnly => {
@@ -63,23 +51,14 @@ pub fn select_provider(bbox: &LLBBox, mode: SourceMode) -> Box<dyn ElevationProv
         }
     }
 
-    // Global default: 30 m Copernicus worldwide, national LiDAR
-    // (0.25-10 m) where available.
     println!("Using Mapterhorn terrain tiles (global; high-res where available)");
     Box::new(Mapterhorn)
 }
 
-/// Regional providers that beat Mapterhorn in their coverage area,
-/// ordered by resolution (finest first). First match wins.
-///
-/// Mapterhorn itself is NOT in this list — it's the global default.
-/// Former entries for Germany (DGM1 via hoehendaten.de), IGN France,
-/// IGN Spain and Japan GSI were removed because Mapterhorn ingests the
-/// same upstream datasets (state DGM1s, RGE ALTI, MDT02/05, GSI DEM) at
-/// equal or better resolution without their rate limits.
+/// Regional providers that beat Mapterhorn in their coverage area, finest first.
 fn build_provider_list() -> Vec<Box<dyn ElevationProvider>> {
     vec![
-        Box::new(Usgs3dep), // 1.0m — ArcGIS REST; Mapterhorn only has 10m for most of the US
+        Box::new(Usgs3dep), // 1m 3DEP; Mapterhorn only has 10m for most of the US
     ]
 }
 
