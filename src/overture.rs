@@ -44,19 +44,19 @@ const HTTP_TIMEOUT_SECS: u64 = 120;
 // ─── Internal data types ─────────────────────────────────────────────────
 
 /// A building parsed from Overture Maps GeoParquet data.
-struct OvertureBuilding {
+pub(crate) struct OvertureBuilding {
     /// GERS ID (UUID string)
     id: String,
     /// Exterior ring coordinates as (longitude, latitude) pairs
-    exterior_ring: Vec<(f64, f64)>,
+    pub(crate) exterior_ring: Vec<(f64, f64)>,
     /// Whether the primary source is OpenStreetMap
     is_osm_sourced: bool,
     /// Building height in meters (if available)
-    height: Option<f64>,
+    pub(crate) height: Option<f64>,
     /// Minimum height in meters (bottom of building, for elevated parts)
-    min_height: Option<f64>,
+    pub(crate) min_height: Option<f64>,
     /// Number of above-ground floors (if available)
-    num_floors: Option<i32>,
+    pub(crate) num_floors: Option<i32>,
     /// Overture subtype (e.g., "residential", "commercial")
     subtype: Option<String>,
     /// Overture class (e.g., "house", "apartments")
@@ -183,25 +183,31 @@ pub fn deduplicate_against_osm(
 
 // ─── Inner implementation ────────────────────────────────────────────────
 
-fn fetch_overture_buildings_inner(
-    bbox: &LLBBox,
-    scale: f64,
-    debug: bool,
-) -> Result<Vec<ProcessedElement>, Box<dyn std::error::Error>> {
-    let client = Client::builder()
+/// Shared HTTP client for Overture fetches (generation and 3D preview paths).
+pub(crate) fn overture_client() -> Result<Client, Box<dyn std::error::Error>> {
+    Ok(Client::builder()
         .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
         .user_agent(concat!(
             "Arnis/",
             env!("CARGO_PKG_VERSION"),
             " (+https://github.com/louis-e/arnis)"
         ))
-        .build()?;
+        .build()?)
+}
 
-    emit_gui_progress_update(6.0, "Downloading data...");
-
+/// Collects raw Overture buildings overlapping the bbox. The generation path
+/// drops OSM-sourced entries (duplicates of the Overpass data); the 3D
+/// preview keeps them for full coverage.
+pub(crate) fn collect_overture_buildings(
+    client: &Client,
+    bbox: &LLBBox,
+    include_osm_sourced: bool,
+    max_buildings: usize,
+    debug: bool,
+) -> Result<Vec<OvertureBuilding>, Box<dyn std::error::Error>> {
     // List partition files whose geographic bounds overlap our bbox
     // (single ~230 KB STAC download instead of 512 HTTP requests)
-    let partition_urls = list_partition_files(&client, bbox, debug)?;
+    let partition_urls = list_partition_files(client, bbox, debug)?;
     if partition_urls.is_empty() {
         if debug {
             println!("No Overture partitions overlap the bbox");
@@ -218,12 +224,11 @@ fn fetch_overture_buildings_inner(
 
     // Process each partition file: read footer, check for bbox overlap, fetch matching rows
     let mut all_buildings: Vec<OvertureBuilding> = Vec::new();
-    let mut non_osm_count: usize = 0;
 
     for (i, url) in partition_urls.iter().enumerate() {
-        if non_osm_count >= MAX_OVERTURE_BUILDINGS {
+        if all_buildings.len() >= max_buildings {
             if debug {
-                println!("Reached building limit ({MAX_OVERTURE_BUILDINGS}), stopping");
+                println!("Reached building limit ({max_buildings}), stopping");
             }
             break;
         }
@@ -236,10 +241,13 @@ fn fetch_overture_buildings_inner(
             );
         }
 
-        match process_partition_file(&client, url, bbox, debug) {
+        match process_partition_file(client, url, bbox, debug) {
             Ok(buildings) => {
-                non_osm_count += buildings.iter().filter(|b| !b.is_osm_sourced).count();
-                all_buildings.extend(buildings.into_iter().filter(|b| !b.is_osm_sourced));
+                all_buildings.extend(
+                    buildings
+                        .into_iter()
+                        .filter(|b| include_osm_sourced || !b.is_osm_sourced),
+                );
             }
             Err(e) => {
                 if debug {
@@ -249,6 +257,21 @@ fn fetch_overture_buildings_inner(
             }
         }
     }
+
+    Ok(all_buildings)
+}
+
+fn fetch_overture_buildings_inner(
+    bbox: &LLBBox,
+    scale: f64,
+    debug: bool,
+) -> Result<Vec<ProcessedElement>, Box<dyn std::error::Error>> {
+    let client = overture_client()?;
+
+    emit_gui_progress_update(6.0, "Downloading data...");
+
+    let all_buildings =
+        collect_overture_buildings(&client, bbox, false, MAX_OVERTURE_BUILDINGS, debug)?;
 
     if debug {
         println!("Overture: {} non-OSM buildings found", all_buildings.len());

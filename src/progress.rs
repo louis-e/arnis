@@ -10,6 +10,30 @@ pub static MAIN_WINDOW: OnceCell<WebviewWindow> = OnceCell::new();
 // Highest progress emitted so far (percent * 100), keeps the bar monotonic.
 static PROGRESS_FLOOR: AtomicU32 = AtomicU32::new(0);
 
+// Held (>0) while 3D-preview fetches reuse the generation pipeline, whose
+// 9-18% emits would otherwise move the progress bar and pollute the monotonic
+// floor. A refcount, not a bool: terrain/land-cover/buildings previews can
+// overlap, and the first one finishing must not unmute the rest.
+static SUPPRESS_COUNT: AtomicU32 = AtomicU32::new(0);
+
+/// Mutes/unmutes progress emits; used by the 3D terrain preview fetches.
+pub fn set_progress_suppressed(suppressed: bool) {
+    if suppressed {
+        SUPPRESS_COUNT.fetch_add(1, Ordering::Relaxed);
+    } else {
+        let _ = SUPPRESS_COUNT.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+            Some(v.saturating_sub(1))
+        });
+    }
+}
+
+// Terminal messages always pass: a generation finishing or failing while a
+// preview fetch holds the mute must still reach the GUI, or the Generate
+// button stays locked forever (main.js re-enables it on "Error!"/"Done!").
+fn emits_suppressed(progress: f64, message: &str) -> bool {
+    SUPPRESS_COUNT.load(Ordering::Relaxed) > 0 && progress < 100.0 && !message.starts_with("Error!")
+}
+
 /// Resets the monotonic progress floor at the start of a generation.
 pub fn reset_progress_floor() {
     PROGRESS_FLOOR.store(0, Ordering::Relaxed);
@@ -54,6 +78,9 @@ pub fn is_running_with_gui() -> bool {
 ///
 /// The function `emit_gui_progress_update` is used to send real-time progress updates to the UI.
 pub fn emit_gui_progress_update(progress: f64, message: &str) {
+    if emits_suppressed(progress, message) {
+        return;
+    }
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),
@@ -74,6 +101,9 @@ pub fn emit_gui_progress_update(progress: f64, message: &str) {
 /// ~instant when streaming, a real save otherwise). Additive payload field;
 /// only the two terrain emits use it, all other sites stay on the plain fn.
 pub fn emit_gui_progress_update_ex(progress: f64, message: &str, streaming: bool) {
+    if emits_suppressed(progress, message) {
+        return;
+    }
     if let Some(window) = get_main_window() {
         let payload = json!({
             "progress": clamp_progress(progress),

@@ -300,7 +300,16 @@ fn download_tile_once(
     response.error_for_status_ref().map_err(|e| e.to_string())?;
     let bytes = response.bytes().map_err(|e| e.to_string())?;
     let img = image::load_from_memory(&bytes).map_err(|e| e.to_string())?;
-    std::fs::write(tile_path, &bytes).map_err(|e| e.to_string())?;
+    // Write-then-rename so a concurrent reader (a 3D preview fetch running
+    // alongside a generation) can never observe a half-written tile.
+    static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let unique = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = tile_path.with_extension(format!("tmp{unique}"));
+    std::fs::write(&tmp_path, &bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::rename(&tmp_path, tile_path) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e.to_string());
+    }
     Ok(img.to_rgb8())
 }
 

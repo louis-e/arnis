@@ -155,7 +155,10 @@ pub fn run_gui() {
             gui_clear_tile_caches,
             gui_get_world_map_data,
             gui_show_in_folder,
-            gui_get_3d_model_attributions
+            gui_get_3d_model_attributions,
+            gui_get_terrain_preview,
+            gui_get_preview_landcover,
+            gui_get_preview_buildings
         ])
         .setup(|app| {
             let app_handle = app.handle();
@@ -630,6 +633,45 @@ pub fn update_player_spawn_y_after_generation(
     }
 
     Ok(())
+}
+
+/// Fetches a reduced-resolution elevation + land-cover grid for the 3D
+/// terrain preview. Returns one raw binary blob (layout in preview_3d.rs)
+/// so megabytes of grid data skip JSON serialization.
+#[tauri::command]
+async fn gui_get_terrain_preview(
+    bbox_text: String,
+    aws_only: bool,
+) -> Result<tauri::ipc::Response, String> {
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        crate::preview_3d::build_preview_payload(&bbox_text, aws_only)
+    })
+    .await
+    .map_err(|e| format!("Preview task failed: {e}"))??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// ESA land-cover grid for the 3D preview, fetched lazily when the user
+/// enables the overlay toggle (layout in preview_3d.rs).
+#[tauri::command]
+async fn gui_get_preview_landcover(bbox_text: String) -> Result<tauri::ipc::Response, String> {
+    let bytes = tauri::async_runtime::spawn_blocking(move || {
+        crate::preview_3d::build_landcover_grid(&bbox_text)
+    })
+    .await
+    .map_err(|e| format!("Preview land cover task failed: {e}"))??;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Overture building footprints for the 3D preview as GeoJSON. Size-gated;
+/// the frontend ignores all errors (buildings are a best-effort overlay).
+#[tauri::command]
+async fn gui_get_preview_buildings(bbox_text: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::preview_3d::build_buildings_geojson(&bbox_text)
+    })
+    .await
+    .map_err(|e| format!("Preview buildings task failed: {e}"))?
 }
 
 #[tauri::command]

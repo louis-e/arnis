@@ -4,8 +4,10 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="stylesheet" href="./css/styles.css" />
+  <link rel="stylesheet" href="./css/preview3d.css" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Arnis</title>
+  <script src="./js/preview3d.js" defer></script>
   <script type="module" src="./js/main.js" defer></script>
   <script type="module" src="./js/license.js" defer></script>
   <script type="module" src="./js/language-selector.js" defer></script>
@@ -53,6 +55,15 @@
               </div>
             </div>
             <span id="bbox-selection-info" class="bbox-selection-text" data-localize="select_area_prompt">Select an area on the map using the tools.</span>
+
+            <!-- Mini 3D terrain preview (rendered via the map's terrain button, click to expand) -->
+            <div id="preview3d-mini" class="preview3d-mini" style="display: none;" title="Click to expand 3D preview">
+              <div id="preview3d-mini-map"></div>
+              <div id="preview3d-mini-loader" class="preview3d-mini-loader" style="display: none;">
+                <span id="preview3d-mini-loader-text">Rendering terrain preview…</span>
+                <div class="preview3d-mini-loader-bar"></div>
+              </div>
+            </div>
           </div>
 
           <div class="progress-section">
@@ -395,6 +406,38 @@
               <img src="./images/discord.png" alt="Discord" class="discord-logo">
             </a>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3D Terrain Preview Modal -->
+    <div id="preview3d-modal" class="modal" style="display: none;">
+      <div class="preview3d-content">
+        <div class="preview3d-header">
+          <h2>3D Terrain Preview</h2>
+          <div class="preview3d-controls">
+            <label class="preview3d-ctl">
+              Exaggeration
+              <input type="range" id="preview3d-exaggeration" min="0.2" max="3" step="0.1" value="1.2">
+              <span id="preview3d-exaggeration-value">1.2×</span>
+            </label>
+            <label class="preview3d-ctl">
+              <input type="checkbox" id="preview3d-landcover" checked>
+              Land cover
+            </label>
+            <label class="preview3d-ctl">
+              <input type="checkbox" id="preview3d-buildings" checked>
+              Buildings
+            </label>
+          </div>
+          <span class="close-button" onclick="closePreview3D()">&times;</span>
+        </div>
+        <div id="preview3d-map">
+          <div id="preview3d-status" class="preview3d-status" style="display: none;"></div>
+        </div>
+        <div class="preview3d-footer">
+          <span id="preview3d-meta"></span>
+          <span>Drag to pan · right-drag to rotate/tilt · Land cover © ESA WorldCover 2021</span>
         </div>
       </div>
     </div>
