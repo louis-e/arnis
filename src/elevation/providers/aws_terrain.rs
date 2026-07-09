@@ -215,10 +215,19 @@ fn calculate_zoom_level(bbox: &LLBBox) -> u8 {
     let max_diff: f64 = lat_diff.max(lng_diff);
     let zoom: u8 = (-max_diff.log2() + 20.0) as u8;
     let mut zoom = zoom.clamp(MIN_ZOOM, MAX_ZOOM);
-    while zoom > MIN_ZOOM && get_tile_coordinates(bbox, zoom).len() > MAX_TILES_PER_FETCH {
+    while zoom > MIN_ZOOM && count_tiles(bbox, zoom) > MAX_TILES_PER_FETCH {
         zoom -= 1;
     }
     zoom
+}
+
+// Tile count from the range only; avoids allocating the coordinate list.
+fn count_tiles(bbox: &LLBBox, zoom: u8) -> usize {
+    let (x1, y1) = lat_lng_to_tile(bbox.min().lat(), bbox.min().lng(), zoom);
+    let (x2, y2) = lat_lng_to_tile(bbox.max().lat(), bbox.max().lng(), zoom);
+    let cols = (x1.max(x2) - x1.min(x2) + 1) as usize;
+    let rows = (y1.max(y2) - y1.min(y2) + 1) as usize;
+    cols * rows
 }
 
 fn lat_lng_to_tile(lat: f64, lng: f64, zoom: u8) -> (u32, u32) {

@@ -306,8 +306,10 @@
   }
 
   async function fetchTerrain(bboxText) {
-    // Follow the Legacy terrain toggle so the preview matches generation;
-    // the toggle is part of the cache key so flipping it refetches.
+    // Follow the Legacy terrain toggle for the AWS-vs-global choice; the
+    // preview uses global-only tiles and skips regional providers, so it
+    // approximates rather than exactly matches generation. The toggle is
+    // part of the cache key so flipping it refetches.
     const legacyToggle = document.getElementById("aws-only-elevation-toggle");
     const awsOnly = !!(legacyToggle && legacyToggle.checked);
     const cacheKey = bboxText + "|" + awsOnly;

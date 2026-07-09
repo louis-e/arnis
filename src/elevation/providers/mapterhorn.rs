@@ -303,7 +303,8 @@ fn fetch_level(
     Ok(())
 }
 
-/// Fetch bbox coverage at `zoom`, then parents of whatever is absent, down to MIN_ZOOM.
+/// Fetch bbox coverage at `zoom`, then parents of whatever is absent, down to
+/// `min(MIN_ZOOM, zoom)` (tiny/budget-capped bboxes can start below the floor).
 fn fetch_tile_pyramid(
     bbox: &LLBBox,
     zoom: u8,
