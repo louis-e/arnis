@@ -1,202 +1,21 @@
-//! Shared HTTP / TIFF helpers + the Japan GSI provider.
+//! Shared HTTP / TIFF helpers for the elevation providers.
 //!
 //! Historically this file hosted every non-AWS provider (USGS, IGN FR,
-//! IGN ES, Japan GSI) and the `tiled_fetch` ad-hoc bbox-splitter they
-//! shared. USGS, IGN France and IGN Spain all moved to their own
-//! modules backed by [`super::fixed_tile`] because `tiled_fetch`'s
-//! user-bbox-relative sub-tile boundaries exposed inter-flight
-//! elevation offsets as visible seams in the rendered world.
+//! IGN ES, Japan GSI). Those either moved to their own modules backed
+//! by [`super::fixed_tile`] (USGS 3DEP) or were superseded by the
+//! global Mapterhorn provider, which ingests the same upstream datasets
+//! (state DGM1s, RGE ALTI, MDT02/05, GSI DEM) at equal or better
+//! resolution.
 //!
 //! What lives here now:
 //!
-//! - [`JapanGsi`] — already uses fixed Web-Mercator XYZ tiles at a
-//!   preset zoom level, so it doesn't have the seam issue. Left in
-//!   place because its pixel-decoding path is GSI-specific.
 //! - [`fetch_or_cache`] and [`decode_geotiff_f32`] — the shared
 //!   HTTP-with-disk-cache + GeoTIFF decode used by `fixed_tile`'s
-//!   tile downloader and by Japan GSI's own fetch loop.
+//!   tile downloader.
 //! - [`is_valid_payload`] and `resample_nearest` — internals used by
 //!   the two above.
 
-use crate::coordinate_system::geographic::LLBBox;
-use crate::elevation::cache::get_cache_dir;
-use crate::elevation::provider::{ElevationProvider, RawElevationGrid};
-use rayon::prelude::*;
-
-/// Japan GSI Elevation Tiles — Japan.
-/// Resolution: 5m (DEM5A/B/C), 10m fallback.
-/// License: GSI Terms of Use (attribution required).
-pub struct JapanGsi;
-
-impl ElevationProvider for JapanGsi {
-    fn name(&self) -> &'static str {
-        "japan_gsi"
-    }
-
-    fn coverage_bboxes(&self) -> Option<Vec<LLBBox>> {
-        Some(vec![
-            // Japan
-            LLBBox::new(24.0, 122.0, 46.0, 154.0).unwrap(),
-        ])
-    }
-
-    fn native_resolution_m(&self) -> f64 {
-        5.0
-    }
-
-    fn fetch_raw(
-        &self,
-        bbox: &LLBBox,
-        grid_width: usize,
-        grid_height: usize,
-    ) -> Result<RawElevationGrid, Box<dyn std::error::Error>> {
-        // Use DEM5A tiles (5m resolution, best available)
-        // These are XYZ PNG tiles with encoded elevation values
-        let zoom: u8 = 15; // Fixed zoom for highest DEM5A resolution
-
-        let tiles = get_xyz_tile_coordinates(bbox, zoom);
-
-        let cache_dir = get_cache_dir(self.name());
-        std::fs::create_dir_all(&cache_dir)?;
-
-        // Try DEM5A first, fall back through DEM5B, DEM5C, DEM10B
-        let dem_layers = ["dem5a_png", "dem5b_png", "dem5c_png", "dem_png"];
-
-        println!("Fetching {} elevation tiles from GSI Japan...", tiles.len());
-
-        // Build a shared HTTP client for all tile downloads
-        let client = reqwest::blocking::Client::builder()
-            .user_agent(concat!(
-                "Arnis/",
-                env!("CARGO_PKG_VERSION"),
-                " (+https://github.com/louis-e/arnis)"
-            ))
-            .timeout(std::time::Duration::from_secs(120))
-            .build()?;
-
-        // Download all tiles into a HashMap (8 concurrent connections)
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(8)
-            .build()
-            .map_err(|e| format!("Failed to create tile-fetch thread pool: {e}"))?;
-        let tile_map: std::collections::HashMap<(u32, u32), image::RgbaImage> =
-            pool.install(|| {
-                tiles
-                    .par_iter()
-                    .filter_map(|&(tile_x, tile_y)| {
-                        for layer in &dem_layers {
-                            let url = format!(
-                                "https://cyberjapandata.gsi.go.jp/xyz/{}/{}/{}/{}.png",
-                                layer, zoom, tile_x, tile_y
-                            );
-                            let cache_path =
-                                cache_dir.join(format!("{layer}_z{zoom}_x{tile_x}_y{tile_y}.png"));
-                            if let Ok(bytes) = fetch_or_cache(&url, &cache_path, Some(&client)) {
-                                if let Ok(img) = image::load_from_memory(&bytes) {
-                                    return Some(((tile_x, tile_y), img.to_rgba8()));
-                                }
-                            }
-                        }
-                        None
-                    })
-                    .collect()
-            });
-
-        let n = 2.0_f64.powi(zoom as i32);
-
-        // Rows are independent; sample them in parallel
-        let height_grid: Vec<Vec<f64>> = (0..grid_height)
-            .into_par_iter()
-            .map(|gy| {
-                let mut row = vec![f64::NAN; grid_width];
-                for (gx, cell) in row.iter_mut().enumerate() {
-                    let lat = bbox.max().lat()
-                        - (gy as f64 / (grid_height - 1).max(1) as f64)
-                            * (bbox.max().lat() - bbox.min().lat());
-                    let lng = bbox.min().lng()
-                        + (gx as f64 / (grid_width - 1).max(1) as f64)
-                            * (bbox.max().lng() - bbox.min().lng());
-
-                    let lat_rad = lat.to_radians();
-                    let fx_global = (lng + 180.0) / 360.0 * n * 256.0;
-                    let fy_global =
-                        (1.0 - lat_rad.tan().asinh() / std::f64::consts::PI) / 2.0 * n * 256.0;
-
-                    // Clamp via i64 so ±180° lng / ±90° lat can't wrap a bare
-                    // `as u32` cast; see aws_terrain.rs for the full rationale.
-                    let n_tiles = n as i64;
-                    let tile_x = ((fx_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
-                    let tile_y = ((fy_global / 256.0).floor() as i64).clamp(0, n_tiles - 1) as u32;
-                    let px = fx_global - tile_x as f64 * 256.0;
-                    let py = fy_global - tile_y as f64 * 256.0;
-
-                    let x0 = px.floor() as i32;
-                    let y0 = py.floor() as i32;
-                    let dx = px - x0 as f64;
-                    let dy = py - y0 as f64;
-
-                    let v00 = sample_gsi_pixel(&tile_map, tile_x, tile_y, x0, y0);
-                    let v10 = sample_gsi_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0);
-                    let v01 = sample_gsi_pixel(&tile_map, tile_x, tile_y, x0, y0 + 1);
-                    let v11 = sample_gsi_pixel(&tile_map, tile_x, tile_y, x0 + 1, y0 + 1);
-
-                    if let (Some(v00), Some(v10), Some(v01), Some(v11)) = (v00, v10, v01, v11) {
-                        let lerp_top = v00 + (v10 - v00) * dx;
-                        let lerp_bot = v01 + (v11 - v01) * dx;
-                        *cell = lerp_top + (lerp_bot - lerp_top) * dy;
-                    }
-                }
-                row
-            })
-            .collect();
-
-        Ok(RawElevationGrid {
-            heights_meters: height_grid,
-        })
-    }
-}
-
-/// Sample a single pixel from GSI tile map, handling tile boundary crossover.
-/// GSI PNG encoding: h = (R*65536 + G*256 + B) * 0.01, nodata = RGB(128,0,0).
-fn sample_gsi_pixel(
-    tile_map: &std::collections::HashMap<(u32, u32), image::RgbaImage>,
-    base_tile_x: u32,
-    base_tile_y: u32,
-    px: i32,
-    py: i32,
-) -> Option<f64> {
-    let (tx, x) = if px < 0 {
-        (base_tile_x.wrapping_sub(1), (px + 256) as u32)
-    } else if px >= 256 {
-        (base_tile_x + 1, (px - 256) as u32)
-    } else {
-        (base_tile_x, px as u32)
-    };
-    let (ty, y) = if py < 0 {
-        (base_tile_y.wrapping_sub(1), (py + 256) as u32)
-    } else if py >= 256 {
-        (base_tile_y + 1, (py - 256) as u32)
-    } else {
-        (base_tile_y, py as u32)
-    };
-
-    let tile = tile_map.get(&(tx, ty))?;
-    if x >= tile.width() || y >= tile.height() {
-        return None;
-    }
-    let pixel = tile.get_pixel(x, y);
-    let (r, g, b) = (pixel[0], pixel[1], pixel[2]);
-    if r == 128 && g == 0 && b == 0 {
-        return None; // nodata
-    }
-    let raw = r as f64 * 65536.0 + g as f64 * 256.0 + b as f64;
-    let height = if raw < 8388608.0 {
-        raw * 0.01
-    } else {
-        (raw - 16777216.0) * 0.01
-    };
-    Some(height)
-}
+use crate::elevation::provider::RawElevationGrid;
 
 /// Maximum total attempts per request, including the initial one.
 ///
@@ -233,10 +52,9 @@ pub(super) fn fetch_or_cache(
     let client = match client {
         Some(c) => c,
         None => {
-            // 180s: tiled single-request providers (USGS 3DEP, IGN WMS/WCS)
+            // 180s: tiled single-request providers (USGS 3DEP ArcGIS)
             // generate GeoTIFFs server-side; 120s was occasionally tight
-            // under load even at cap 4096. Japan GSI keeps its own 120s
-            // client since it fetches 256 px PNGs.
+            // under load.
             owned_client = reqwest::blocking::Client::builder()
                 .user_agent(concat!(
                     "Arnis/",
@@ -416,30 +234,4 @@ fn resample_nearest<T: Copy>(
     }
 
     height_grid
-}
-
-/// Get XYZ tile coordinates covering a bbox at the given zoom level.
-fn get_xyz_tile_coordinates(bbox: &LLBBox, zoom: u8) -> Vec<(u32, u32)> {
-    let n = 2.0_f64.powi(zoom as i32);
-
-    // Clamp via i64 so ±90° lat / +180° lng can't wrap the u32 cast —
-    // same rationale as in `aws_terrain::lat_lng_to_tile`.
-    let n_tiles = n as i64;
-    let clamp_tile = |v: f64| (v.floor() as i64).clamp(0, n_tiles - 1) as u32;
-    let x1 = clamp_tile((bbox.min().lng() + 180.0) / 360.0 * n);
-    let x2 = clamp_tile((bbox.max().lng() + 180.0) / 360.0 * n);
-    let y1 = clamp_tile(
-        (1.0 - bbox.max().lat().to_radians().tan().asinh() / std::f64::consts::PI) / 2.0 * n,
-    );
-    let y2 = clamp_tile(
-        (1.0 - bbox.min().lat().to_radians().tan().asinh() / std::f64::consts::PI) / 2.0 * n,
-    );
-
-    let mut tiles = Vec::new();
-    for x in x1.min(x2)..=x1.max(x2) {
-        for y in y1.min(y2)..=y1.max(y2) {
-            tiles.push((x, y));
-        }
-    }
-    tiles
 }

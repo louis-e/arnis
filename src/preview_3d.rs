@@ -87,9 +87,19 @@ pub fn build_preview_payload(bbox_text: &str, aws_only: bool) -> Result<Vec<u8>,
 
     let _mute = ProgressMute::new();
 
+    // Previews skip the regional providers: Mapterhorn is global,
+    // CDN-fast, and adapts its zoom to the capped preview grid, so
+    // preview clicks never put load on rate-limited regional services.
+    let source_mode = if aws_only {
+        crate::elevation::SourceMode::AwsOnly
+    } else {
+        crate::elevation::SourceMode::GlobalOnly
+    };
+
     // ground_level 0 keeps the meter->Y affine trivially invertible below.
-    let elevation = fetch_elevation_data(&bbox, preview_scale, 0, false, 0, None, aws_only, false)
-        .map_err(|e| format!("Elevation fetch failed: {e}"))?;
+    let elevation =
+        fetch_elevation_data(&bbox, preview_scale, 0, false, 0, None, source_mode, false)
+            .map_err(|e| format!("Elevation fetch failed: {e}"))?;
 
     let gw = elevation.width;
     let gh = elevation.height;

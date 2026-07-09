@@ -5,8 +5,9 @@ const TILE_CACHE_DIR_NAME: &str = "arnis-tile-cache";
 
 /// Maximum age for cached tiles in days before they are cleaned up.
 /// Elevation sources update on multi-year cycles, so a month of caching is
-/// still conservative; it cuts refetch traffic for repeatedly generated areas
-/// and spares the rate-limited community providers (hoehendaten.de).
+/// still conservative; it cuts refetch traffic for repeatedly generated
+/// areas. This sweep also bounds the staleness of Mapterhorn's negative
+/// 404 markers, so newly added coverage is picked up within a month.
 const TILE_CACHE_MAX_AGE_DAYS: u64 = 30;
 
 /// Returns the tile cache directory path for a specific provider.

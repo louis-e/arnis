@@ -10,8 +10,8 @@
   const TILE_SIZE = 256;
   const PROTOCOL = "arnisdem";
   // Mirrors TERRAIN_PREVIEW_MAX_AREA_M2 in bbox.js. Generous because previews
-  // always use AWS Terrain Tiles at a resolution-capped grid, so fetch cost
-  // stays roughly constant regardless of bbox size.
+  // fetch global tiles (Mapterhorn, or AWS in legacy mode) at a resolution-
+  // capped grid, so fetch cost stays roughly constant regardless of bbox size.
   const MINI_MAX_AREA_M2 = 500000000;
   // Mirrors BUILDINGS_MAX_AREA_M2 in preview_3d.rs.
   const BUILDINGS_MAX_AREA_M2 = 10000000;
@@ -308,9 +308,12 @@
 
   async function fetchTerrain(bboxText) {
     if (payloadCache.key === bboxText && payloadCache.data) return payloadCache.data;
+    // Follow the "Legacy terrain" toggle so the preview matches what a
+    // generation run would fetch (Mapterhorn by default, AWS in legacy mode).
+    const legacyToggle = document.getElementById("aws-only-elevation-toggle");
     const buffer = await window.__TAURI__.core.invoke("gui_get_terrain_preview", {
       bboxText: bboxText,
-      awsOnly: true,
+      awsOnly: !!(legacyToggle && legacyToggle.checked),
     });
     const d = parsePayload(buffer);
     d.gen = nextGen++;

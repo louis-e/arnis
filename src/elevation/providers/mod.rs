@@ -1,7 +1,5 @@
 pub mod aws_terrain;
 pub mod fixed_tile;
-pub mod germany_dgm1;
-pub mod ign_france;
-pub mod ign_spain;
+pub mod mapterhorn;
 pub mod regional;
 pub mod usgs_3dep;

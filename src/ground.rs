@@ -211,6 +211,11 @@ impl Ground {
             None => ground_level,
         };
 
+        let source_mode = if aws_only_elevation {
+            crate::elevation::SourceMode::AwsOnly
+        } else {
+            crate::elevation::SourceMode::Auto
+        };
         match fetch_elevation_data(
             bbox,
             scale,
@@ -218,7 +223,7 @@ impl Ground {
             disable_height_limit,
             extended_max_y,
             land_cover.as_mut(),
-            aws_only_elevation,
+            source_mode,
             benchmark,
         ) {
             Ok(elevation_data) => {

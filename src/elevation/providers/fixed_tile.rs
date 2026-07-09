@@ -1,15 +1,14 @@
 //! Shared infrastructure for elevation providers that fetch from a
 //! **fixed global Web Mercator tile grid**.
 //!
-//! Three providers currently use this pattern:
+//! One provider currently uses this pattern:
 //!
 //! - [`usgs_3dep`](super::usgs_3dep) — USGS 3D Elevation Program
-//! - [`ign_france`](super::ign_france) — IGN France RGE ALTI
-//! - [`ign_spain`](super::ign_spain)  — IGN España MDT
 //!
-//! AWS Terrain Tiles and Japan GSI already follow their own fixed-tile
-//! conventions (XYZ-style Slippy Map tiles at specific zoom levels) and
-//! don't need this module.
+//! Mapterhorn and AWS Terrain Tiles follow the standard XYZ Slippy Map
+//! tile convention (the upstream serves pre-rendered tiles) and don't
+//! need this module — it exists for services that render a requested
+//! bbox server-side (WMS/WCS/ArcGIS ImageServer).
 //!
 //! # Why fixed tiles (summarised from the USGS module)
 //!
@@ -493,7 +492,7 @@ pub(super) fn fetch_fixed_tile_grid<P: FixedTileProvider>(
 
     // AWS Terrarium fallback: for any tile the primary provider couldn't
     // deliver after all retries, synthesise a replacement from the global
-    // AWS Terrain XYZ service. Lower resolution than USGS/IGN LiDAR but
+    // AWS Terrain XYZ service. Lower resolution than USGS LiDAR but
     // far better than a NaN hole — and only runs for the small minority
     // of tiles that permanently failed upstream. Results stay in-memory
     // (no disk cache under the primary provider's path) so the next run
