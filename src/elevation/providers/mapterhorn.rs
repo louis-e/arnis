@@ -62,9 +62,33 @@ const MIN_ZOOM: u8 = 6;
 /// Maximum concurrent tile downloads (same courtesy cap as AWS).
 const MAX_CONCURRENT_DOWNLOADS: usize = 8;
 /// Hard budget on tiles per fetch; the zoom is lowered until the
-/// covering-tile count fits. 2048 × ~200 KB bounds the worst case
-/// (a ~16 km bbox over a 1 m source region) to a few hundred MB.
+/// covering-tile count fits. Worst case (a ~16 km bbox over a 1 m
+/// source region): ~400 MB downloaded, and ~1.6 GB of DECODED 512×512
+/// RGB tiles (786 KB each) held transiently during sampling —
+/// proportionate to the up-to-2 GB f64 height grid they feed, and
+/// released before post-processing.
 const MAX_TILES_PER_FETCH: usize = 2048;
+/// Tiles per download chunk; the outage circuit breaker checks between
+/// chunks so a dead network is detected mid-run, not after burning the
+/// retry budget on every tile.
+const DOWNLOAD_CHUNK_SIZE: usize = 64;
+/// Abort the fetch (falling back to AWS) after this many consecutive
+/// failures with no interleaved success or 404.
+const OUTAGE_FAILURE_THRESHOLD: usize = 128;
+/// Levels larger than this get a spread-probe before full fan-out, so
+/// a zoom with no local data costs ~16 requests instead of hundreds
+/// of 404s.
+const PROBE_MIN_LEVEL_TILES: usize = 64;
+/// Number of spread tiles probed per level.
+const PROBE_TILE_COUNT: usize = 16;
+/// A tile guaranteed to contain land data at every pyramid level
+/// (Swiss Alps near Zermatt, z10). Used as a sanity check before
+/// trusting an all-404 "this is ocean" verdict.
+const KNOWN_LAND_TILE: TileKey = TileKey {
+    z: 10,
+    x: 534,
+    y: 364,
+};
 /// Zoom selection tolerance: accept tile pixels up to this factor
 /// coarser than the output grid cell before stepping the zoom up.
 /// Mirrors the 1.5× rule in `fixed_tile::select_level_for_cell_size`
@@ -306,8 +330,10 @@ enum TileFetch {
     /// Tile downloaded (or loaded from cache) and decoded.
     Hit(TileImage),
     /// Server says the tile does not exist (404) — expected for ocean
-    /// tiles and for zooms above the local source resolution.
-    Missing,
+    /// tiles and for zooms above the local source resolution. `cached`
+    /// is true when answered from a fresh negative-cache marker rather
+    /// than the network.
+    Missing { cached: bool },
     /// Transient or permanent failure after retries.
     Failed(String),
 }
@@ -321,6 +347,91 @@ struct FetchOutcome {
     /// Count of genuine download failures (network / 5xx after retries).
     /// 404s are NOT failures — they mean "no tile here".
     failed_downloads: usize,
+}
+
+/// Mutable state threaded through every tile-fetch round.
+struct PyramidState {
+    tiles: FnvHashMap<TileKey, TileImage>,
+    confirmed_missing: FnvHashSet<TileKey>,
+    /// Network 404s observed this run. Persisted as `.missing` markers
+    /// only at the END of the run, and only if at least one request
+    /// returned 200 — a CDN that transiently 404s EXISTING tiles must
+    /// not poison the negative cache for a month.
+    pending_markers: Vec<TileKey>,
+    /// Set when any network request returned a decodable 200.
+    saw_network_success: std::sync::atomic::AtomicBool,
+    failed_downloads: usize,
+    /// Failures with no interleaved success/404, across chunks. Used as
+    /// a circuit breaker for mid-run outages.
+    consecutive_failures: usize,
+}
+
+/// Fetch one batch of keys (chunked, breaker-aware). Absent tiles are
+/// appended to `absent`. Errors out when [`OUTAGE_FAILURE_THRESHOLD`]
+/// consecutive requests failed — the service is down and every further
+/// tile would burn the full retry budget before the AWS fallback runs.
+fn fetch_level(
+    keys: &[TileKey],
+    client: &reqwest::blocking::Client,
+    pool: &rayon::ThreadPool,
+    cache_dir: &Path,
+    state: &mut PyramidState,
+    absent: &mut Vec<TileKey>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for chunk in keys.chunks(DOWNLOAD_CHUNK_SIZE) {
+        let results: Vec<(TileKey, TileFetch)> = pool.install(|| {
+            chunk
+                .par_iter()
+                .map(|key| {
+                    (
+                        *key,
+                        fetch_tile(client, key, cache_dir, &state.saw_network_success),
+                    )
+                })
+                .collect()
+        });
+
+        let mut chunk_failed = 0usize;
+        for (key, result) in results {
+            match result {
+                TileFetch::Hit(img) => {
+                    state.tiles.insert(key, img);
+                }
+                TileFetch::Missing { cached } => {
+                    state.confirmed_missing.insert(key);
+                    if !cached {
+                        state.pending_markers.push(key);
+                    }
+                    absent.push(key);
+                }
+                TileFetch::Failed(e) => {
+                    eprintln!(
+                        "Warning: Mapterhorn tile z{} x{} y{} failed: {e}",
+                        key.z, key.x, key.y
+                    );
+                    state.failed_downloads += 1;
+                    chunk_failed += 1;
+                    // Try the parent anyway — coarser data beats a hole,
+                    // and the parent may already be cached locally.
+                    absent.push(key);
+                }
+            }
+        }
+
+        if chunk_failed == chunk.len() {
+            state.consecutive_failures += chunk_failed;
+        } else {
+            state.consecutive_failures = 0;
+        }
+        if state.consecutive_failures >= OUTAGE_FAILURE_THRESHOLD {
+            return Err(format!(
+                "Mapterhorn tile service unreachable mid-fetch ({} consecutive failures)",
+                state.consecutive_failures
+            )
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Fetch all tiles covering `bbox` at `zoom`, then repeatedly re-request
@@ -347,13 +458,72 @@ fn fetch_tile_pyramid(
         .build()
         .map_err(|e| format!("Failed to create tile-fetch thread pool: {e}"))?;
 
-    let mut tiles: FnvHashMap<TileKey, TileImage> = FnvHashMap::default();
-    let mut confirmed_missing: FnvHashSet<TileKey> = FnvHashSet::default();
-    let mut failed_downloads = 0usize;
+    let mut state = PyramidState {
+        tiles: FnvHashMap::default(),
+        confirmed_missing: FnvHashSet::default(),
+        pending_markers: Vec::new(),
+        saw_network_success: std::sync::atomic::AtomicBool::new(false),
+        failed_downloads: 0,
+        consecutive_failures: 0,
+    };
 
     let floor = MIN_ZOOM.min(zoom);
-    let mut level_keys = covering_tile_keys(bbox, zoom);
     let mut z = zoom;
+    let mut level_keys = covering_tile_keys(bbox, z);
+
+    // Reachability canary: probe one tile serially before unleashing
+    // the fleet. A total outage (DNS failure, CDN down) is detected
+    // within one request's worth of retries instead of burning the
+    // full retry budget on every tile; the caller then falls back to
+    // AWS. A 404 counts as proof of reachability — the server answered.
+    // The canary's result lands in the disk cache, so the parallel
+    // round below re-resolves it for free.
+    if let Some(first) = level_keys.first() {
+        if let TileFetch::Failed(e) =
+            fetch_tile(&client, first, cache_dir, &state.saw_network_success)
+        {
+            return Err(format!("Mapterhorn tile service unreachable: {e}").into());
+        }
+    }
+
+    // Zoom probe: before fanning a LARGE level out over a region that
+    // may have no data at this zoom (e.g. an upscaled world over a
+    // GLO-30-only area, where z16 would be ~2048 pointless 404s), test
+    // a spread of tiles first. If every probe 404s, assume the level is
+    // empty and step down a zoom — each step quarters the fan-out.
+    // Sampling walks the pyramid anyway, so a small high-res pocket the
+    // probes missed only costs one zoom level of detail, not a hole.
+    while state.tiles.is_empty() && z > floor && level_keys.len() > PROBE_MIN_LEVEL_TILES {
+        let stride = (level_keys.len() / PROBE_TILE_COUNT).max(1);
+        let probe_keys: Vec<TileKey> = level_keys
+            .iter()
+            .copied()
+            .step_by(stride)
+            .take(PROBE_TILE_COUNT)
+            .collect();
+        let failed_before = state.failed_downloads;
+        let mut probe_absent = Vec::new();
+        fetch_level(
+            &probe_keys,
+            &client,
+            &pool,
+            cache_dir,
+            &mut state,
+            &mut probe_absent,
+        )?;
+        if !state.tiles.is_empty() || state.failed_downloads > failed_before {
+            // Found data (fan out at this zoom) or hit errors (let the
+            // main loop's breaker logic see the full picture).
+            break;
+        }
+        println!(
+            "Mapterhorn: no data at z{} in this area; trying z{}...",
+            z,
+            z - 1
+        );
+        z -= 1;
+        level_keys = covering_tile_keys(bbox, z);
+    }
 
     println!(
         "Downloading {} elevation tiles from Mapterhorn at z{} (up to {} concurrent)...",
@@ -362,36 +532,17 @@ fn fetch_tile_pyramid(
         MAX_CONCURRENT_DOWNLOADS
     );
 
+    let mut narrated = false;
     loop {
-        let results: Vec<(TileKey, TileFetch)> = pool.install(|| {
-            level_keys
-                .par_iter()
-                .map(|key| (*key, fetch_tile(&client, key, cache_dir)))
-                .collect()
-        });
-
         let mut absent: Vec<TileKey> = Vec::new();
-        for (key, result) in results {
-            match result {
-                TileFetch::Hit(img) => {
-                    tiles.insert(key, img);
-                }
-                TileFetch::Missing => {
-                    confirmed_missing.insert(key);
-                    absent.push(key);
-                }
-                TileFetch::Failed(e) => {
-                    eprintln!(
-                        "Warning: Mapterhorn tile z{} x{} y{} failed: {e}",
-                        key.z, key.x, key.y
-                    );
-                    failed_downloads += 1;
-                    // Try the parent anyway — coarser data beats a hole,
-                    // and the parent may already be cached locally.
-                    absent.push(key);
-                }
-            }
-        }
+        fetch_level(
+            &level_keys,
+            &client,
+            &pool,
+            cache_dir,
+            &mut state,
+            &mut absent,
+        )?;
 
         if absent.is_empty() || z <= floor {
             break;
@@ -400,14 +551,15 @@ fn fetch_tile_pyramid(
         let mut parents: Vec<TileKey> = absent.iter().filter_map(|k| k.parent()).collect();
         parents.sort_unstable_by_key(|k| (k.z, k.x, k.y));
         parents.dedup();
-        parents.retain(|k| !tiles.contains_key(k));
+        parents.retain(|k| !state.tiles.contains_key(k));
         if parents.is_empty() {
             break;
         }
 
-        if z == zoom {
+        if !narrated {
             // Only narrate the first fallback; ocean bboxes would
             // otherwise print one line per pyramid level.
+            narrated = true;
             println!(
                 "Mapterhorn: {} of {} tiles absent at z{} (coarser region or ocean); sampling parent tiles...",
                 absent.len(),
@@ -420,15 +572,59 @@ fn fetch_tile_pyramid(
         z -= 1;
     }
 
+    // All-404 sanity check: nothing found, nothing failed — every tile
+    // 404'd. Before trusting the "this is all ocean" verdict, probe a
+    // tile guaranteed to exist (Swiss Alps at z10). If even that 404s,
+    // the CDN is misbehaving: error out so the caller falls back to
+    // AWS, and persist no negative-cache markers. Warm-cache ocean
+    // reruns resolve the sentinel from disk, so this usually costs
+    // zero extra requests.
+    if state.tiles.is_empty() && state.failed_downloads == 0 {
+        match fetch_tile(
+            &client,
+            &KNOWN_LAND_TILE,
+            cache_dir,
+            &state.saw_network_success,
+        ) {
+            TileFetch::Hit(_) => {}
+            TileFetch::Missing { .. } | TileFetch::Failed(_) => {
+                return Err(
+                    "Mapterhorn returned no tiles for this area and the known-land sanity \
+                     tile also failed; treating as a service problem"
+                        .into(),
+                );
+            }
+        }
+    }
+
+    // Persist negative-cache markers only when this run proved the
+    // service healthy (at least one decodable 200). Skipping persistence
+    // on cache-only runs just means the next run re-probes a few 404s.
+    if state
+        .saw_network_success
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
+        for key in &state.pending_markers {
+            let _ = std::fs::write(key.marker_path(cache_dir), b"");
+        }
+    }
+
     Ok(FetchOutcome {
-        tiles,
-        confirmed_missing,
-        failed_downloads,
+        tiles: state.tiles,
+        confirmed_missing: state.confirmed_missing,
+        failed_downloads: state.failed_downloads,
     })
 }
 
 /// Resolve one tile: negative-cache marker → disk cache → download.
-fn fetch_tile(client: &reqwest::blocking::Client, key: &TileKey, cache_dir: &Path) -> TileFetch {
+/// Sets `net_ok` when a network request returned a decodable 200 —
+/// used to gate negative-cache persistence at the end of the run.
+fn fetch_tile(
+    client: &reqwest::blocking::Client,
+    key: &TileKey,
+    cache_dir: &Path,
+    net_ok: &std::sync::atomic::AtomicBool,
+) -> TileFetch {
     // Fresh negative-cache marker: known 404, skip the request.
     let marker = key.marker_path(cache_dir);
     if let Ok(meta) = std::fs::metadata(&marker) {
@@ -438,7 +634,7 @@ fn fetch_tile(client: &reqwest::blocking::Client, key: &TileKey, cache_dir: &Pat
             .and_then(|m| std::time::SystemTime::now().duration_since(m).ok())
             .is_some_and(|age| age.as_secs() < MISSING_MARKER_MAX_AGE_SECS);
         if fresh {
-            return TileFetch::Missing;
+            return TileFetch::Missing { cached: true };
         }
         let _ = std::fs::remove_file(&marker);
     }
@@ -461,14 +657,14 @@ fn fetch_tile(client: &reqwest::blocking::Client, key: &TileKey, cache_dir: &Pat
         }
     }
 
-    download_tile(client, key, &tile_path, &marker)
+    download_tile(client, key, &tile_path, net_ok)
 }
 
 fn download_tile(
     client: &reqwest::blocking::Client,
     key: &TileKey,
     tile_path: &Path,
-    marker_path: &Path,
+    net_ok: &std::sync::atomic::AtomicBool,
 ) -> TileFetch {
     let url = key.url();
     let mut last_error = String::new();
@@ -490,9 +686,16 @@ fn download_tile(
         let status = response.status();
         if status.as_u16() == 404 {
             // Legitimate absence (ocean, or zoom above local source
-            // resolution). Record it so future runs skip the request.
-            let _ = std::fs::write(marker_path, b"");
-            return TileFetch::Missing;
+            // resolution). The marker write is deferred to the end of
+            // the run so a misbehaving CDN can't poison the cache.
+            return TileFetch::Missing { cached: false };
+        }
+        if status.as_u16() == 429 || status.as_u16() == 403 {
+            // Rate limiting / edge blocks: back off and retry rather
+            // than escalating to the parent tile (which would send MORE
+            // traffic exactly when the server asks for less).
+            last_error = format!("HTTP {status} from {url}");
+            continue;
         }
         if status.is_client_error() {
             // Other 4xx: malformed request, retrying won't help.
@@ -518,12 +721,15 @@ fn download_tile(
                 continue;
             }
         };
+        net_ok.store(true, std::sync::atomic::Ordering::Relaxed);
 
         // Write-then-rename so a concurrent reader can never observe a
-        // half-written tile (same pattern as aws_terrain).
+        // half-written tile. The process id in the suffix keeps two
+        // Arnis processes sharing the cache from clobbering each
+        // other's tmp file mid-write.
         static TMP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let unique = TMP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let tmp_path = tile_path.with_extension(format!("tmp{unique}"));
+        let tmp_path = tile_path.with_extension(format!("tmp{}-{}", std::process::id(), unique));
         if std::fs::write(&tmp_path, &bytes).is_ok() {
             if let Err(e) = std::fs::rename(&tmp_path, tile_path) {
                 let _ = std::fs::remove_file(&tmp_path);
@@ -585,8 +791,19 @@ fn sample_height(
         let n = 2.0_f64.powi(z as i32);
         let fx = norm_x * n * TILE_PX as f64;
         let fy = norm_y * n * TILE_PX as f64;
-        let px = fx - key.x as f64 * TILE_PX as f64;
-        let py = fy - key.y as f64 * TILE_PX as f64;
+        // At the exact +180° east / south world edge the clamped tile
+        // key leaves px/py at or beyond TILE_PX (no tile exists further
+        // out); snap onto the last real pixel so the edge column/row
+        // samples data instead of NaN. In-range coordinates keep full
+        // cross-tile bilinear behavior.
+        let mut px = fx - key.x as f64 * TILE_PX as f64;
+        let mut py = fy - key.y as f64 * TILE_PX as f64;
+        if px >= TILE_PX as f64 {
+            px = TILE_PX as f64 - 1.0;
+        }
+        if py >= TILE_PX as f64 {
+            py = TILE_PX as f64 - 1.0;
+        }
         let x0 = px.floor() as i32;
         let y0 = py.floor() as i32;
         let dx = (px - x0 as f64).clamp(0.0, 1.0);

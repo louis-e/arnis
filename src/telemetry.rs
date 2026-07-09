@@ -163,9 +163,22 @@ pub fn redact_url_queries(mut input: &str) -> String {
             .unwrap_or(after_scheme.len());
         let url = &after_scheme[..url_end];
         let tail = &after_scheme[url_end..];
-        match url.find('?') {
-            Some(q) => out.push_str(&url[..q]),
-            None => out.push_str(url),
+        // XYZ tile URLs encode the user's location in the PATH
+        // (/{z}/{x}/{y}), not the query — truncate known tile services
+        // to their host so a tile-fetch error message can never ship
+        // coordinates. The host alone still identifies which provider
+        // failed, which is all telemetry needs.
+        const TILE_URL_PREFIXES: [&str; 2] = [
+            "tiles.mapterhorn.com",
+            "s3.amazonaws.com/elevation-tiles-prod",
+        ];
+        if let Some(prefix) = TILE_URL_PREFIXES.iter().find(|p| url.starts_with(*p)) {
+            out.push_str(prefix);
+        } else {
+            match url.find('?') {
+                Some(q) => out.push_str(&url[..q]),
+                None => out.push_str(url),
+            }
         }
         input = tail;
     }
@@ -318,5 +331,20 @@ mod tests {
             redact_url_queries(input),
             "error for url https://host.tld/path"
         );
+    }
+
+    #[test]
+    fn redact_truncates_tile_url_paths() {
+        // XYZ tile paths encode the user's location — must not survive.
+        let input = "HTTP 500 from https://tiles.mapterhorn.com/16/34178/23309.webp after retries";
+        let out = redact_url_queries(input);
+        assert!(!out.contains("34178"), "tile x leaked: {out}");
+        assert!(out.contains("tiles.mapterhorn.com"), "host lost: {out}");
+
+        let aws =
+            "failed https://s3.amazonaws.com/elevation-tiles-prod/terrarium/15/17436/11365.png now";
+        let out = redact_url_queries(aws);
+        assert!(!out.contains("17436"), "tile x leaked: {out}");
+        assert!(out.ends_with(" now"));
     }
 }

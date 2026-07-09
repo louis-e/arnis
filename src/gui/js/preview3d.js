@@ -307,19 +307,23 @@
   }
 
   async function fetchTerrain(bboxText) {
-    if (payloadCache.key === bboxText && payloadCache.data) return payloadCache.data;
     // Follow the "Legacy terrain" toggle so the preview matches what a
-    // generation run would fetch (Mapterhorn by default, AWS in legacy mode).
+    // generation run would fetch (Mapterhorn by default, AWS in legacy
+    // mode). The toggle state is part of the cache key — flipping it
+    // must refetch, not serve terrain from the previous source.
     const legacyToggle = document.getElementById("aws-only-elevation-toggle");
+    const awsOnly = !!(legacyToggle && legacyToggle.checked);
+    const cacheKey = bboxText + "|" + awsOnly;
+    if (payloadCache.key === cacheKey && payloadCache.data) return payloadCache.data;
     const buffer = await window.__TAURI__.core.invoke("gui_get_terrain_preview", {
       bboxText: bboxText,
-      awsOnly: !!(legacyToggle && legacyToggle.checked),
+      awsOnly: awsOnly,
     });
     const d = parsePayload(buffer);
     d.gen = nextGen++;
     d.bboxText = bboxText;
     datasets.set(d.gen, d);
-    payloadCache = { key: bboxText, data: d };
+    payloadCache = { key: cacheKey, data: d };
     gcDatasets();
     return d;
   }
