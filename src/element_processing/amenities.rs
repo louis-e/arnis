@@ -97,7 +97,13 @@ pub fn generate_amenities(
                 }
             }
             "bicycle_parking" => {
-                let ground_block: Block = OAK_PLANKS;
+                // Honor an explicit surface=* tag; default to a wooden deck.
+                let ground_block: Block = element
+                    .tags()
+                    .get("surface")
+                    .and_then(|s| get_blocks_for_surface(s))
+                    .map(|blocks| blocks[0])
+                    .unwrap_or(OAK_PLANKS);
                 let roof_block: Block = STONE_BLOCK_SLAB;
 
                 // Use pre-computed flood fill from cache
