@@ -970,6 +970,14 @@ pub fn generate_world_with_options(
         eprintln!("[BENCHMARK] block_hash={:016x}", h);
     }
 
+    // Fresh worlds always use map id 0; place the display frame before the regions flush.
+    if wants_map_item {
+        let (sx, sz) = options
+            .spawn_point
+            .unwrap_or((xzbbox.min_x() + 1, xzbbox.min_z() + 1));
+        editor.place_map_item_frame(sx, sz, 0);
+    }
+
     // Save world
     if let Err(e) = editor.save() {
         return Err(e.to_string());

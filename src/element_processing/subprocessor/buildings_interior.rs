@@ -1,8 +1,18 @@
 use crate::block_definitions::*;
 use crate::element_processing::buildings::BUILDING_PASSAGE_HEIGHT;
+use crate::element_processing::subprocessor::buildings_loot::chest_loot;
 use crate::floodfill_cache::CoordinateBitmap;
 use crate::world_editor::WorldEditor;
 use std::collections::HashSet;
+
+// Deterministic gate so chests stay occasional and reproducible across region streaming.
+fn chest_gate(x: i32, z: i32, floor_y: i32, salt: u32, modulus: u32) -> bool {
+    let h = (x as u32).wrapping_mul(0x9E37_79B1)
+        ^ (z as u32).wrapping_mul(0x85EB_CA77)
+        ^ (floor_y as u32).wrapping_mul(0xC2B2_AE35)
+        ^ salt;
+    h.is_multiple_of(modulus)
+}
 
 /// Interior layout for building ground floors (1st layer above floor)
 #[rustfmt::skip]
@@ -312,6 +322,10 @@ pub fn generate_building_interior(
     let interior_max_x = max_x - buffer;
     let interior_max_z = max_z - buffer;
 
+    // Per-building seed so chest gates decorrelate between neighbours.
+    let building_salt = (min_x as u32).wrapping_mul(0x9E37_79B1) ^ (min_z as u32);
+    let chest_modulus = if is_abandoned_building { 160 } else { 128 };
+
     // Generate interiors for each floor
     for (floor_index, &floor_y) in floor_levels.iter().enumerate() {
         // Store wall and door positions for this floor to extend them to the ceiling
@@ -381,8 +395,32 @@ pub fn generate_building_interior(
                     % pattern_height;
 
                 // Access the pattern arrays safely
-                let cell1 = layer1[pattern_z as usize][pattern_x as usize];
-                let cell2 = layer2[pattern_z as usize][pattern_x as usize];
+                let pxu = pattern_x as usize;
+                let pzu = pattern_z as usize;
+                let pw = pattern_width as usize;
+                let ph = pattern_height as usize;
+                let cell1 = layer1[pzu][pxu];
+                let cell2 = layer2[pzu][pxu];
+
+                // Occasional loot chests on empty floor cells that back onto an interior wall.
+                if cell1 == ' ' && cell2 == ' ' {
+                    let wall_adjacent = layer1[(pzu + ph - 1) % ph][pxu] == 'W'
+                        || layer1[(pzu + 1) % ph][pxu] == 'W'
+                        || layer1[pzu][(pxu + pw - 1) % pw] == 'W'
+                        || layer1[pzu][(pxu + 1) % pw] == 'W';
+                    if wall_adjacent && chest_gate(x, z, floor_y, building_salt, chest_modulus) {
+                        let chest_y = floor_y + y_offset + abs_terrain_offset;
+                        if editor.get_block_absolute(x, chest_y, z).is_none() {
+                            editor.set_chest_with_items_absolute(
+                                x,
+                                chest_y,
+                                z,
+                                chest_loot(x, z, building_salt),
+                            );
+                        }
+                        continue;
+                    }
+                }
 
                 // Place first layer blocks
                 if let Some(block) = get_interior_block(cell1, false, wall_block) {
@@ -395,6 +433,16 @@ pub fn generate_building_interior(
                         None,
                     );
 
+                    // Beds have no baked model; each half needs its own block entity to render.
+                    // Only when the bed actually landed (edge cells can lose to existing structure).
+                    if matches!(cell1, '1'..='8') {
+                        let bed_y = floor_y + y_offset + abs_terrain_offset;
+                        if editor.get_block_absolute(x, bed_y, z).map(|b| b.id())
+                            == Some(block.id())
+                        {
+                            editor.set_bed_block_entity_absolute(x, bed_y, z);
+                        }
+                    }
                     // If this is a wall in layer 1, add to wall positions to extend later
                     if cell1 == 'W' {
                         wall_positions.push((x, z));
