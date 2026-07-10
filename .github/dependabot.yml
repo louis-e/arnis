@@ -4,6 +4,13 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    ignore:
+      # rusty-leveldb must match the version required by the git-pinned bedrockrs_level
+      # (currently v3). A v4 bump resolves two copies of the crate, splitting the
+      # Options/DB type identity and breaking the Bedrock build. Only move it in lockstep
+      # with the bedrockrs_level rev in Cargo.toml.
+      - dependency-name: "rusty-leveldb"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
