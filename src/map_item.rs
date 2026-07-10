@@ -133,16 +133,17 @@ fn build_colors(
 // Next free map id; respects existing counter files so user maps are never clobbered.
 // 26.1 renamed idcounts.dat to last_id.dat, so check both.
 fn next_map_id(data_dir: &Path) -> i32 {
+    let mut highest: Option<i32> = None;
     for name in ["idcounts.dat", "last_id.dat"] {
         if let Ok(Value::Compound(root)) = read_gzip_nbt(&data_dir.join(name)) {
             if let Some(Value::Compound(data)) = root.get("data") {
                 if let Some(Value::Int(n)) = data.get("map") {
-                    return n + 1;
+                    highest = Some(highest.map_or(*n, |h| h.max(*n)));
                 }
             }
         }
     }
-    0
+    highest.map_or(0, |h| h + 1)
 }
 
 fn build_map_dat(

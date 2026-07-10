@@ -427,7 +427,7 @@ pub fn chest_loot(x: i32, z: i32, salt: u32) -> Vec<HashMap<String, Value>> {
         }
 
         let item = pick_item(chosen, &mut rng);
-        let count = rng.random_range(item.min..=item.max) as i8;
+        let count = rng.random_range(item.min..=item.max);
 
         let mut slot = None;
         for _ in 0..4 {
@@ -440,10 +440,11 @@ pub fn chest_loot(x: i32, z: i32, salt: u32) -> Vec<HashMap<String, Value>> {
         let Some(slot) = slot else { continue };
         used[slot] = true;
 
+        // 1.20.5+ container item format: lowercase count (Int), matching the map chest.
         let mut item_nbt = HashMap::new();
         item_nbt.insert("id".to_string(), Value::String(item.id.to_string()));
         item_nbt.insert("Slot".to_string(), Value::Byte(slot as i8));
-        item_nbt.insert("Count".to_string(), Value::Byte(count));
+        item_nbt.insert("count".to_string(), Value::Int(count));
         out.push(item_nbt);
     }
 
