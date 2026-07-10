@@ -48,7 +48,7 @@ impl CoordTransformer {
         let err_header = "Construct LLBBox to XZBBox transformation failed".to_string();
 
         if scale <= 0.0 {
-            return Err(format!("{}: scale <= 0.0", &err_header));
+            return Err(format!("{}: scale <= 0.0", err_header));
         }
 
         let (scale_factor_z, scale_factor_x) = geo_distance(llbbox.min(), llbbox.max());
@@ -56,7 +56,7 @@ impl CoordTransformer {
         let scale_factor_x: f64 = scale_factor_x.floor() * scale;
 
         let xzbbox = XZBBox::rect_from_xz_lengths(scale_factor_x, scale_factor_z)
-            .map_err(|e| format!("{}:\n{}", &err_header, e))?;
+            .map_err(|e| format!("{}:\n{}", err_header, e))?;
 
         Ok((
             Self {
